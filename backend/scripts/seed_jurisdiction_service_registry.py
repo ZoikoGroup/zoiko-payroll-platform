@@ -57,6 +57,19 @@ for _code, (_name, _classification, _status) in CARIBBEAN_JURISDICTIONS.items():
         "remittance_responsibility": "CUSTOMER" if _status == STATUS_ACTIVE else "NOT_OFFERED",
     })
 
+# Singapore (ZP-SG-ENG-001) — PLANNED, not AVAILABLE: the engine and
+# configuration foundation exist, but the spec's production gates G1–G8
+# (CPF content certification, CPF operations, IRAS, IR21, foreign
+# workforce, labour pay, security/privacy, parallel payroll) are not yet
+# evidenced, so the existing onboarding-block gate must keep refusing it.
+ROWS.append({
+    "country": "SG",
+    "availability": "PLANNED",
+    "payment_execution_responsibility": "NOT_OFFERED",
+    "filing_responsibility": "NOT_OFFERED",
+    "remittance_responsibility": "NOT_OFFERED",
+})
+
 
 def main() -> None:
     assert_local_database("seed_jurisdiction_service_registry")

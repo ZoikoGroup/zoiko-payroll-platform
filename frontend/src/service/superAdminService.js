@@ -91,6 +91,40 @@ export const getRtiFormsSummary = (params) =>
 // Golden-test certification (Part 10's harness, generalized to Canada
 // gap-closure Phase 8) — trigger a run for a jurisdiction, and read run
 // history. jurisdictionCountry defaults to "UK" for back-compat.
+// Singapore — read-only calculation preview against one SG pack's rows,
+// computed by the backend's production engine (the frontend never does
+// statutory payroll maths itself). Writes nothing server-side.
+export const previewSingaporeCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/singapore/calculation-preview", { method: "POST", body: payload });
+
+// Singapore — read-only statutory configuration summary (point-in-time,
+// from persisted pack rows only) and the paginated PWM overtime gross
+// schedule (global statutory reference data). Both tenant-independent.
+export const getSingaporeStatutorySummary = (params) =>
+  apiFetch("/api/super-admin/compliance/singapore/statutory-summary", { params });
+
+export const getSingaporePwmSchedules = (params) =>
+  apiFetch("/api/super-admin/compliance/singapore/pwm-schedules", { params });
+
+// Sweden (ZP-SE-ENG-001) — release-gate readiness checklist and a read-only
+// calculation preview computed by the backend's production engine (the
+// frontend never does statutory payroll maths itself).
+export const getSwedenReadiness = (packId) =>
+  apiFetch("/api/super-admin/compliance/sweden/readiness", { params: packId ? { packId } : {} });
+
+export const previewSwedenCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/sweden/calculation-preview", { method: "POST", body: payload });
+
+// Governed collective-agreement registry (spec §9) — no national default.
+export const listCollectiveAgreements = (params) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { params });
+
+export const upsertCollectiveAgreement = (payload) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { method: "POST", body: payload });
+
+export const setCollectiveAgreementStatus = (id, status, reason) =>
+  apiFetch(`/api/super-admin/compliance/collective-agreements/${id}/status`, { method: "POST", body: { status, reason } });
+
 export const runTestCertification = (jurisdictionCountry = "UK") =>
   apiFetch("/api/super-admin/compliance/test-certification/run", {
     method: "POST", body: { jurisdiction_country: jurisdictionCountry },
@@ -263,6 +297,24 @@ export const downloadSourceArtifactFile = async (id, filenameHint) => {
 
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
+// Singapore gate / decision evidence: keep the old artifact, mark it superseded by a same-tag replacement.
+export const supersedeSourceArtifact = (id, replacementId) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/supersede`, { method: "PUT", body: { replacementId } });
+
+// Singapore gate / decision evidence review outcome: ACCEPTED (optional validUntil) or REJECTED (notes required).
+export const reviewSgEvidence = (id, { outcome, notes, validUntil }) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/sg-review`, {
+    method: "PUT", body: { outcome, notes: notes || null, validUntil: validUntil || null },
+  });
+
+// Singapore owner decision D1 / D2 / D3 — selected option + reason (counts after memo upload + second-admin review).
+export const recordSgDecision = ({ key, selectedValue, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/decisions", { method: "POST", body: { key, selectedValue, reason } });
+
+// Singapore registry step (Phase 6.10): AVAILABLE (gated server-side) or PLANNED; reason required, audited.
+export const transitionSgServiceRegistry = ({ availability, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/service-registry", { method: "POST", body: { availability, reason } });
 
 // ── India: state/local statutory readiness registry (§16) ─────────────────
 // One row per (state/UT, optional local authority, program) — informational
@@ -617,3 +669,117 @@ export const upsertFilingCalendarEntry = (payload) =>
 
 export const setFilingCalendarEntryStatus = (id, status) =>
   apiFetch(`/api/super-admin/report-templates/filing-calendar/${id}/status`, { method: "PUT", body: { status } });
+
+// ── Hong Kong (ZP-HK-ENG-001) — Super Admin, tenant-independent ────────
+export const getHongKongStatutorySummary = () => apiFetch("/api/super-admin/compliance/hong-kong/statutory-summary");
+export const previewHongKongCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/calculation-preview", { method: "POST", body: payload });
+// Hong Kong statutory configuration administration (governed; Super Admin only)
+const HK_CFG = "/api/super-admin/compliance/hong-kong/configuration";
+export const getHkConfigVersions = () => apiFetch(`${HK_CFG}/versions`);
+export const getHkConfigPack = (packRowId) => apiFetch(`${HK_CFG}/packs/${packRowId}`);
+export const getHkConfigResolution = (on) => apiFetch(`${HK_CFG}/resolution`, { params: { on } });
+export const compareHkConfig = (fromId, toId) => apiFetch(`${HK_CFG}/compare`, { params: { from: fromId, to: toId } });
+export const updateHkConfigRow = (kind, rowId, payload) =>
+  apiFetch(`${HK_CFG}/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const createHkConfigVersion = (packRowId, version, reason) =>
+  apiFetch(`${HK_CFG}/packs/${packRowId}/new-version`, { method: "POST", body: { version, reason } });
+// Hong Kong platform control records (Super Admin only)
+const HK_SA = "/api/super-admin/compliance/hong-kong";
+export const getHkSoftwareApproval = () => apiFetch(`${HK_SA}/ird-software-approval`);
+export const transitionHkSoftwareApproval = (payload) =>
+  apiFetch(`${HK_SA}/ird-software-approval/transition`, { method: "POST", body: payload });
+export const getHkEmpfConfiguration = () => apiFetch(`${HK_SA}/empf-configuration`);
+export const createHkEmpfConfiguration = (payload) => apiFetch(`${HK_SA}/empf-configuration`, { method: "POST", body: payload });
+export const activateHkEmpfConfiguration = (id, reason) =>
+  apiFetch(`${HK_SA}/empf-configuration/${id}/activate`, { method: "POST", body: { reason } });
+export const getHkRetentionPolicies = () => apiFetch(`${HK_SA}/retention-policies`);
+export const proposeHkRetentionPolicy = (payload) => apiFetch(`${HK_SA}/retention-policies`, { method: "POST", body: payload });
+export const approveHkRetentionPolicy = (id) => apiFetch(`${HK_SA}/retention-policies/${id}/approve`, { method: "POST" });
+export const getHkReadinessCenter = () => apiFetch(`${HK_SA}/readiness-center`);
+export const getHkMonitoring = () => apiFetch(`${HK_SA}/monitoring`);
+export const transitionHongKongServiceRegistry = (availability, reason) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/service-registry", { method: "POST", body: { availability, reason } });
+export const compareHongKongReportTemplates = (fromId, toId) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/report-templates/compare", { params: { from: fromId, to: toId } });
+export const getHongKongPackGoldenCheck = (packRowId) =>
+  apiFetch(`/api/super-admin/compliance/hong-kong/packs/${packRowId}/golden-check`);
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Super-Admin-owned authority data for the France Compliance workspace:
+// SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate
+// packs, DGFiP PAS rates, governed effectif, plus the read-only DSN/outbox
+// transport diagnostics and the launch-gate H readiness dry-run.
+//
+// Everything below is organization-scoped (organizationId travels as a
+// query param, the body stays the authority payload) — the org itself only
+// opens DSN filings via /payroll/france/* (see payrollService).
+export const getFranceReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/france/readiness", { params });
+
+export const getFranceEmployerProfile = async (params) => {
+  // 404 is a legitimate empty state — the org has no France profile
+  // configured yet ("SIREN identity missing" / "Not configured" in the
+  // overview) — never a hard failure that should blank the whole dashboard.
+  try {
+    return await apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
+  } catch (err) {
+    if (err && err.status === 404) return null;
+    throw err;
+  }
+};
+
+export const upsertFranceEmployerProfile = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/employer-profile", { method: "PUT", body: payload, params });
+
+export const recordFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif", { method: "POST", body: payload, params });
+
+export const upsertFranceEstablishmentRatePack = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { method: "PUT", body: payload, params });
+
+export const listFranceEstablishmentRatePacks = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { params });
+
+export const ingestFrancePASRate = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { method: "POST", body: payload, params });
+
+export const listFrancePASRates = (params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { params });
+
+export const listFranceDsnSubmissions = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-submissions", { params });
+
+export const listFranceDsnOutboxItems = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-outbox", { params });
+
+// France organizations only (the org's country resolves to FR) — the France
+// endpoints reject any other organization.
+export const listFranceOrganizations = () =>
+  apiFetch("/api/organizations", { params: { limit: 200, country_code: "FR" } }).then((data) => data.organizations || []);
+
+export const correctFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif/corrections", { method: "POST", body: payload, params });
+
+export const listFranceEstablishments = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { params });
+
+export const createFranceEstablishment = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { method: "POST", body: payload, params });
+
+export const updateFranceEstablishment = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishments/${id}`, { method: "PUT", body: payload, params });
+
+export const updateFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}`, { method: "PATCH", body: payload, params });
+
+export const closeFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}/close`, { method: "POST", body: payload, params });
+
+// Fill a France tax pack's missing statutory rows from the 2026 catalog
+// (insert-only; editable packs only).
+export const loadFranceStatutoryDefaults = (packId) =>
+  apiFetch(`/api/super-admin/compliance/france/packs/${packId}/load-statutory-defaults`, { method: "POST" });
+
+export const setFranceLive = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/go-live", { method: "POST", body: payload, params });

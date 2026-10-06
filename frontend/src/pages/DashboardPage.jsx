@@ -140,7 +140,7 @@ export default function DashboardPage() {
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+        <p className="mb-4 rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
           {error}
         </p>
       )}
@@ -253,13 +253,13 @@ export default function DashboardPage() {
           ) : (
             <div className="flex h-full flex-col justify-between">
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5">
-                  <div className="text-xl font-bold text-amber-600 dark:text-amber-400">{charts.complianceOverview.expiringSoon}</div>
-                  <div className="text-xs text-amber-700/80 dark:text-amber-400/70">Expiring within 60 days</div>
+                <div className="rounded-lg bg-warning-light px-3 py-2.5">
+                  <div className="text-xl font-bold text-warning">{charts.complianceOverview.expiringSoon}</div>
+                  <div className="text-xs text-warning/80">Expiring within 60 days</div>
                 </div>
-                <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 px-3 py-2.5">
-                  <div className="text-xl font-bold text-rose-600 dark:text-rose-400">{charts.complianceOverview.pendingReview}</div>
-                  <div className="text-xs text-rose-700/80 dark:text-rose-400/70">Pending review</div>
+                <div className="rounded-lg bg-error-light px-3 py-2.5">
+                  <div className="text-xl font-bold text-error">{charts.complianceOverview.pendingReview}</div>
+                  <div className="text-xs text-error/80">Pending review</div>
                 </div>
               </div>
               {complianceByStatus.length > 0 && (

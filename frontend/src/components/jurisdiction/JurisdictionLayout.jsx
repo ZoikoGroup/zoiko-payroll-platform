@@ -77,6 +77,11 @@ export default function JurisdictionLayout({
   // field and uses a wider layout); every other country is unaffected
   // since this prop is never passed for them.
   newPackFormComponent: NewPackFormComponent = NewPackModal,
+  // Opt-in (Singapore final closure): (packs) => pack | null — opens the page
+  // on a pack instead of "Select a pack", so the country's tabs are visible
+  // straight away. Applied only while nothing is selected; every other
+  // country leaves it unset and is unchanged.
+  autoSelectPack = null,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -145,6 +150,13 @@ export default function JurisdictionLayout({
       .then(setPacks)
       .finally(() => setLoadingPacks(false));
   }, [country, state, packType]);
+  // autoSelectPack: picked once, when the packs first arrive and nothing is
+  // selected (React's "adjust state while rendering" pattern — no effect).
+  const [autoPicked, setAutoPicked] = useState(false);
+  if (autoSelectPack && !autoPicked && !selectedPack && packs.length > 0) {
+    setAutoPicked(true);
+    setSelectedPack(autoSelectPack(packs) || null);
+  }
 
   useEffect(() => { loadPacks(); setSelectedPack(null); }, [loadPacks]);
 

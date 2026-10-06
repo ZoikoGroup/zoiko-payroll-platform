@@ -3105,3 +3105,87 @@ def test_validate_uk_nmw_compliance_unknown_employee_raises(db, organization):
         service.validate_uk_nmw_compliance(
             db, organization.id, 999999, date_cls(2026, 6, 1), date_cls(2026, 6, 30), Decimal("1000"),
         )
+
+
+# ── Shared historical-replay fix: TaxSlab.assessment_basis (2026-09-23) ──
+# The frozen tax_rule_snapshot previously dropped assessment_basis, so a
+# correction replayed India's Chennai HALF_YEAR_INCOME PT rows (and
+# Singapore's CPF formula rows) as if the column were NULL. Now captured
+# in BOTH snapshot slab lists (country taxSlabs + overlay stateTaxSlabs)
+# and restored via .get() — older snapshots replay unchanged.
+
+def test_india_chennai_half_year_pt_correction_replays_half_year_basis(db, organization, monkeypatch):
+    _stub_business_code_generation(monkeypatch)
+    db.add(_make_pt_bracket("IN", "Tamil Nadu", Decimal("0"), Decimal("21000"), Decimal("0"),
+                            locality="Chennai", assessment_basis="HALF_YEAR_INCOME"))
+    db.add(_make_pt_bracket("IN", "Tamil Nadu", Decimal("21001"), None, Decimal("1250"),
+                            locality="Chennai", assessment_basis="HALF_YEAR_INCOME"))
+    db.add(_make_rate("IN", "pt_half_year_deduct_month_1", state="Tamil Nadu", locality="Chennai", flat_amount=Decimal("4")))
+    db.commit()
+    employee = _make_employee_with_monthly_gross(db, organization.id, "IN-CHN-REPLAY", Decimal("5000"),
+                                                 work_state="Tamil Nadu")
+    employee.work_locality = "Chennai"
+    db.commit()
+    run = _make_run(db, organization.id, date(2026, 4, 1), date(2026, 4, 30), date(2026, 4, 30))
+    service.generate_payslips_for_run(db, run, organization.id)
+    item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id).first()
+
+    # Original: 5,000/month → 30,000 half-year income → top band ₹1,250
+    # (a monthly-wage reading would land in the ₹0 band).
+    assert item.professional_tax == Decimal("1250")
+    frozen = item.tax_rule_snapshot["stateTaxSlabs"]
+    assert {s["assessmentBasis"] for s in frozen} == {"HALF_YEAR_INCOME"}
+
+    # Statutory update after generation: the live Chennai rows are removed.
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_locality == "Chennai").delete()
+    db.commit()
+    service.regenerate_employee_payslip(db, run.id, employee.id, organization.id)
+    redone = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id).first()
+    assert redone.professional_tax == Decimal("1250")        # half-year rule reproduced from the snapshot
+    _, state_slabs, _, _, _ = service._reconstruct_overlay_from_snapshot(redone.tax_rule_snapshot)
+    assert {s.assessment_basis for s in state_slabs} == {"HALF_YEAR_INCOME"}
+
+
+def test_replay_backward_compatible_with_snapshots_without_assessment_basis():
+    legacy = {
+        "packId": "IN-OLD", "version": "1.0", "contributionRates": [],
+        "taxSlabs": [{"minAmount": "0", "maxAmount": None, "ratePct": "5", "rateLabel": "5%", "ruleType": "MARGINAL_RATE"}],
+        "stateTaxSlabs": [{"minAmount": "0", "maxAmount": None, "ratePct": "0", "rateLabel": "PT", "ruleType": "PT_FLAT",
+                           "flatAmount": "200"}],
+    }
+    _rates, slabs = service._reconstruct_rate_map_and_slabs_from_snapshot(legacy)
+    _, state_slabs, _, _, _ = service._reconstruct_overlay_from_snapshot(legacy)
+    assert slabs[0].assessment_basis is None and slabs[0].rate_pct == Decimal("5")
+    assert state_slabs[0].assessment_basis is None and state_slabs[0].flat_amount == Decimal("200")
+
+
+def _slab_roundtrip(slabs):
+    from types import SimpleNamespace
+
+    snapshot = service._pack_to_tax_snapshot([], slabs, SimpleNamespace(id=1, pack_id="X", version="1.0"))["tax_rule_snapshot"]
+    _, replayed = service._reconstruct_rate_map_and_slabs_from_snapshot(snapshot)
+    return replayed
+
+
+_REPLAYED_SLAB_ATTRS = ("min_amount", "max_amount", "rate_pct", "rule_type", "filing_status", "tax_regime",
+                        "ni_category", "employer_rate_pct", "flat_amount", "adjustment_amount", "assessment_basis")
+
+
+def test_uk_ni_band_replay_regression_unchanged():
+    live = [
+        TaxSlab(jurisdiction_country="UK", min_amount=Decimal("1048"), max_amount=Decimal("4189"), rate_pct=Decimal("8"),
+                rate_label="Main", tax_formula="", rule_type="NI_BAND", ni_category="A", employer_rate_pct=Decimal("15")),
+        TaxSlab(jurisdiction_country="UK", min_amount=Decimal("0"), max_amount=Decimal("37700"), rate_pct=Decimal("20"),
+                rate_label="Basic", tax_formula="", rule_type="MARGINAL_RATE"),
+    ]
+    for original, replayed in zip(live, _slab_roundtrip(live)):
+        for attr in _REPLAYED_SLAB_ATTRS:
+            assert getattr(replayed, attr) == getattr(original, attr), attr
+
+
+def test_us_filing_status_bracket_replay_regression_unchanged():
+    live = [TaxSlab(jurisdiction_country="US", min_amount=Decimal("0"), max_amount=Decimal("11925"), rate_pct=Decimal("10"),
+                    rate_label="10%", tax_formula="", rule_type="MARGINAL_RATE", filing_status="SINGLE")]
+    (replayed,) = _slab_roundtrip(live)
+    for attr in _REPLAYED_SLAB_ATTRS:
+        assert getattr(replayed, attr) == getattr(live[0], attr), attr

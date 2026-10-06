@@ -4,19 +4,27 @@
 # Deploy-time schema migration for the backend. Alembic is the source of
 # truth for schema changes.
 #
-#  1. Runs `alembic upgrade head` (applies any pending migrations).
-#  2. Runs `python -m migrations.sync_schema` afterwards as a non-destructive
-#     safety-net for columns that used to be managed via create_all during the
-#     early dev days and may still lag the models.
-#  3. Self-heals one specific historical failure mode: the database's
+#  1. Runs `alembic upgrade head` (applies any pending migrations), then a
+#     READ-ONLY model/schema drift check (scripts.check_schema_drift) and a
+#     head verification. Drift fails the deploy; it is never "repaired".
+#  2. Self-heals one specific historical failure mode: the database's
 #     `alembic_version` row referencing a revision that no longer exists in
 #     alembic/versions (an orphan revision authored on another branch and
 #     never merged, which makes `alembic upgrade head` abort with
 #     "Can't locate revision identified by '<id>'"). It only repairs that by
-#     re-stamping to the current head AFTER proving the live schema already
-#     matches the models (sync_schema reports no drift). If the schema still
-#     lags, it aborts with instructions instead of silently skipping
-#     migrations.
+#     re-stamping AFTER proving, read-only, that the live schema already
+#     matches the models. If it does not, it aborts with instructions and the
+#     schema is left exactly as it was.
+#
+# Safety fix (2026-09-29, Singapore closure - deploy-owner review required):
+# this script previously called migrations.sync_schema, which issues
+# `ALTER TABLE ... ADD COLUMN` for every model column missing from the DB.
+#   - In the orphan path it ran BEFORE the "refuse to stamp" decision, so a
+#     refused deploy still mutated the schema, and the NEXT run then saw no
+#     drift and stamped over migrations that never ran.
+#   - After a successful upgrade it ran as a "safety-net", which can only hide
+#     a missing migration (schema changed outside Alembic).
+# Both calls are replaced by the read-only drift check. Nothing else changed.
 #
 # Expected invocation: from the deployment host, inside the repo (the script
 # resolves its own location and cd's into backend/ automatically).
@@ -62,13 +70,10 @@ print(" ".join(sorted(revisions)))
 PY
 }
 
+# Read-only: prints every model table/column missing from the DB and exits
+# non-zero when there is drift. Never alters the schema.
 schema_drift() {
-  python - <<'PY'
-from migrations.sync_schema import sync_schema
-
-for column in sync_schema():
-    print(column)
-PY
+  python -m scripts.check_schema_drift
 }
 
 check_model_drift() {
@@ -115,8 +120,6 @@ echo "==> alembic upgrade head"
 if upgrade_output="$(alembic upgrade head 2>&1)"; then
   printf '%s\n' "$upgrade_output"
   check_model_drift
-  echo "==> Up to date. Running sync_schema drift safety-net..."
-  python -m migrations.sync_schema
   verify_at_head
   exit 0
 fi
@@ -145,14 +148,12 @@ if printf '%s\n' "$(known_revisions)" | grep -q -x "$ORPHAN"; then
   exit 1
 fi
 
-echo "==> '${ORPHAN}' absent from alembic/versions - orphan version row confirmed. Checking schema matches models before re-stamping..."
-DRIFT="$(schema_drift)"
-
-if [ -n "$DRIFT" ]; then
+echo "==> '${ORPHAN}' absent from alembic/versions - orphan version row confirmed. Checking (read-only) that the schema matches the models before re-stamping..."
+if ! DRIFT="$(schema_drift 2>&1)"; then
   echo "!! Schema is NOT in sync with the models. Refusing to stamp over pending migrations."
-  echo "    sync_schema reconciled these (manual review required):"
-  printf '%s\n' "$DRIFT" | sed 's/^/      - /'
-  echo "    Re-run this script after the DB is brought to head; it will auto-resolve once drift is gone."
+  echo "    The schema was NOT modified. Drift found (manual review required):"
+  printf '%s\n' "$DRIFT" | sed 's/^/      /'
+  echo "    Bring the DB to the models through Alembic (restore / reconcile), then re-run this script."
   print_diagnostics
   exit 1
 fi
@@ -257,7 +258,5 @@ alembic stamp --purge "$STAMP_REV"
 echo "==> Running upgrade head from '${STAMP_REV}' to apply all pending migrations..."
 alembic upgrade head
 check_model_drift
-echo "==> Running sync_schema drift safety-net..."
-python -m migrations.sync_schema
 verify_at_head
 echo "==> Migration step complete."

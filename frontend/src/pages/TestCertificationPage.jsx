@@ -14,6 +14,14 @@ const JURISDICTIONS = [
   { value: "CA", label: "Canada (CRA/Revenu Quebec)", fixturesPath: "backend/tests/fixtures/cra_golden/README.md" },
   { value: "IN", label: "India (CBDT/EPFO/ESIC)", fixturesPath: "backend/tests/fixtures/in_golden/README.md" },
   { value: "US", label: "United States (IRS/SSA/State DOR)", fixturesPath: "backend/tests/fixtures/us_golden/README.md" },
+  { value: "HK", label: "Hong Kong (MPFA / IRD / Labour Department)", fixturesPath: "backend/tests/fixtures/hk_golden/README.md" },
+  // Ireland (ZP-IE-ENG-001). Listed deliberately even though it currently
+  // certifies nothing: ie_golden/README.md documents why a real Irish PAYE
+  // case cannot be authored without an approval-cleared Revenue RPN, and
+  // that the two G1 rounding divergences are still open. Hiding it here would
+  // make "0 real cases" look like a missing feature rather than a real
+  // constraint.
+  { value: "IE", label: "Ireland (Revenue)", fixturesPath: "backend/tests/fixtures/ie_golden/README.md" },
 ];
 
 export default function TestCertificationPage() {

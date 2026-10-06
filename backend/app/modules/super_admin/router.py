@@ -32,7 +32,18 @@ from app.modules.super_admin.schemas import (
     FinanceSummaryResponse,
     FinanceByOrganizationResponse,
     PolicyStatusUpdate,
+    SgDecisionCreate,
+    HkConfigRowUpdate,
+    HkNewVersionRequest, HkSoftwareApprovalTransition, HkEmpfConfigurationCreate, HkRetentionProposal, HkReasonBody,
+    HkServiceRegistryTransition,
+    ServiceRegistryTransition,
+    SgServiceRegistryResponse,
+    SgServiceRegistryTransition,
+    SgEvidenceReview,
+    SourceArtifactSupersede,
     ReportsListResponse,
+    SgpPwmSchedulePageResponse,
+    SgpStatutoryAdminSummaryResponse,
     UpdateCurrencyRequest,
     SettingCreate,
     SettingResponse,
@@ -41,6 +52,8 @@ from app.modules.super_admin.schemas import (
     SuperAdminUserResponse,
 )
 from app.modules.payroll.schemas import (
+    CollectiveAgreementResponse, CollectiveAgreementStatusUpdate, CollectiveAgreementUpsert,
+    SwedenCalculationPreviewRequest, SwedenReadinessResponse,
     JurisdictionPackResponse, JurisdictionPackUpsert,
     CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
     CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
@@ -51,6 +64,7 @@ from app.modules.payroll.schemas import (
     StateLocalProgramReadinessResponse, StateLocalProgramReadinessUpsert,
     TaxabilityRuleResponse, TaxabilityRuleUpsert,
     PapAlgorithmAssetResponse,
+    SingaporeCalculationPreviewRequest,
     GermanyPapReleaseResponse, GermanyPapReleaseGateStatusResponse,
     GermanyPapReleaseSourceFinalityUpdate, GermanyPapReleaseLicensingUpdate,
     GermanyPapReleaseGoldenVectorUpdate, GermanyPapReleaseNotesUpdate,
@@ -77,6 +91,14 @@ from app.modules.payroll.schemas import (
     PackHotfixActivateRequest, PackHotfixReviewRequest, PackHotfixActivationResponse,
     RtiFormsSummaryEntry, TestCertificationRunResponse, TestCertificationRunRequest,
     SalaryTdsDeclarationResponse, SalaryTdsClaimResponse, GeneratedReportResponse,
+    EmployerFranceProfileUpsert, EmployerFranceProfileResponse,
+    FranceEstablishmentRatePackUpsert, FranceEstablishmentRatePackResponse,
+    FrancePASRateUpsert, FrancePASRateResponse, FranceEffectifRecord,
+    FranceDsnSubmissionResponse, FranceDsnOutboxItemResponse,
+    FranceEstablishmentUpsert, FranceEstablishmentResponse,
+    FranceEstablishmentRatePackUpdate, FranceRatePackClose,
+    FranceEffectifCorrection, FranceGoLiveRequest,
+    IrelandRpnSnapshotUpsert, IrelandRpnSnapshotResponse,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -311,6 +333,171 @@ def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin),
     return sa_service.list_known_jurisdictions(db)
 
 
+@router.post(
+    "/compliance/singapore/calculation-preview",
+    summary="Read-only: preview a Singapore CPF/SDL/SHG/FWL calculation against one Singapore pack's rows — writes nothing",
+)
+def preview_singapore_calculation(
+    data: SingaporeCalculationPreviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Same production engine as a payroll run (calculate_payroll →
+    engine/countries/singapore.py); the frontend never computes statutory
+    figures itself. Creates/changes no run, payslip, employee, YTD
+    accumulator or pack (see service.preview_singapore_calculation)."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.preview_singapore_calculation(db, data)
+
+
+@router.get(
+    "/compliance/sweden/readiness", response_model=SwedenReadinessResponse, response_model_by_alias=True,
+    summary="Read-only: Sweden release-gate / activation-readiness checklist for one SE tax pack (ZP-SE-ENG-001 §16/§37)",
+)
+def get_sweden_readiness(
+    pack_id: Optional[int] = Query(None, alias="packId", description="SE tax pack id (default: the latest)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_se_readiness(db, pack_id)
+
+
+@router.post(
+    "/compliance/sweden/calculation-preview",
+    summary="Read-only: simulate a Sweden calculation against one SE pack's rows — writes nothing",
+)
+def preview_sweden_calculation(
+    data: SwedenCalculationPreviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Same production engine as a payroll run (engine/countries/sweden.py);
+    the frontend never computes statutory figures itself (spec §13
+    "simulation before activation")."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.preview_sweden_calculation(db, data)
+
+
+@router.get(
+    "/compliance/collective-agreements", response_model=List[CollectiveAgreementResponse], response_model_by_alias=True,
+    summary="List governed collective-agreement definitions/assignments (ZP-SE-ENG-001 §9)",
+)
+def list_collective_agreements(
+    country: str = Query("SE"),
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_collective_agreements(db, country, organization_id)
+
+
+@router.post(
+    "/compliance/collective-agreements", response_model=CollectiveAgreementResponse, response_model_by_alias=True,
+    summary="Create or edit a Draft collective-agreement version (no national default type exists)",
+)
+def upsert_collective_agreement(
+    data: CollectiveAgreementUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_collective_agreement(db, data, actor_id=current_user.id)
+
+
+@router.post(
+    "/compliance/collective-agreements/{agreement_id}/status", response_model=CollectiveAgreementResponse,
+    response_model_by_alias=True,
+    summary="Move a collective agreement through Draft → In Review → Approved → Active (four-eyes)",
+)
+def set_collective_agreement_status(
+    agreement_id: int,
+    data: CollectiveAgreementStatusUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_collective_agreement_status(db, agreement_id, data.status,
+                                                           actor_id=current_user.id, reason=data.reason)
+
+
+@router.get(
+    "/compliance/singapore/statutory-summary", response_model=SgpStatutoryAdminSummaryResponse,
+    summary="Read-only: point-in-time Singapore statutory configuration summary (CPF/SDL/SHG/FWL/LQS/PWM/IRAS/IR21/"
+            "EZPay/report templates/readiness) — tenant-independent, writes nothing",
+)
+def get_singapore_statutory_summary(
+    as_of: Optional[date] = Query(None, description="Point-in-time date (default: today)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Only canonical (organization_id IS NULL) configuration and global
+    reference data — never an organization's payroll records. Values missing
+    from the persisted pack are NOT_CONFIGURED, never defaulted."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_sg_statutory_summary(db, as_of)
+
+
+@router.get(
+    "/compliance/jurisdictions/{country}/statutory-summary",
+    summary="Read-only: a jurisdiction's statutory configuration / readiness summary (SG, HK) — the per-country URLs "
+            "are aliases; each country's document keeps its own shape",
+)
+def get_jurisdiction_statutory_summary(
+    country: str,
+    as_of: Optional[date] = Query(None, description="Point-in-time date (Singapore; default: today)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.core.exceptions import NotFoundException
+    from app.modules.payroll import jurisdiction_hooks, service as payroll_service
+
+    code = (country or "").upper()
+    if code == "SG":
+        return SgpStatutoryAdminSummaryResponse.model_validate(payroll_service.get_sg_statutory_summary(db, as_of))
+    if jurisdiction_hooks.has_module(code):
+        return jurisdiction_hooks.call(code, "statutory_summary", db)
+    raise NotFoundException("statutory summary", country)
+
+
+@router.get(
+    "/compliance/singapore/pwm-schedules", response_model=SgpPwmSchedulePageResponse,
+    summary="Read-only, paginated: Singapore PWM overtime gross requirement schedule (statutory reference data)",
+)
+def list_singapore_pwm_schedules(
+    sector: Optional[str] = Query(None),
+    occupation_group: Optional[str] = Query(None),
+    job_level: Optional[str] = Query(None),
+    role_label: Optional[str] = Query(None, max_length=120, description="Exact MOM table heading"),
+    effective_on: Optional[date] = Query(None, description="Rows in force on this date"),
+    effective_from: Optional[date] = Query(None, description="Windows starting on or after this date"),
+    effective_to: Optional[date] = Query(None, description="Windows ending on or before this date"),
+    overtime_hours: Optional[int] = Query(None, ge=0, le=72),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, max_length=100),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_sg_pwm_schedules(
+        db, sector=sector, occupation_group=occupation_group, job_level=job_level, role_label=role_label,
+        effective_on=effective_on,
+        effective_from=effective_from, effective_to=effective_to, overtime_hours=overtime_hours, status=status,
+        search=search, skip=skip, limit=limit,
+    )
+
+
 @router.get(
     "/compliance/caribbean-jurisdictions",
     summary="Full Caribbean jurisdiction master (region-grouped), including Coming Soon entries — read-only, gates nothing",
@@ -442,7 +629,8 @@ def set_compliance_policy_status(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.set_jurisdiction_pack_status(db, id, payload.status, actor_id=current_user.id)
+    return payroll_service.set_jurisdiction_pack_status(db, id, payload.status, actor_id=current_user.id,
+                                                         reason=payload.reason)
 
 
 @router.put(
@@ -817,7 +1005,8 @@ def set_report_template_status(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.set_report_template_status(db, id, payload.status, actor_id=current_user.id)
+    return payroll_service.set_report_template_status(db, id, payload.status, actor_id=current_user.id,
+                                                      reason=payload.reason)
 
 
 @router.put(
@@ -859,7 +1048,7 @@ def hard_delete_report_template(
 ):
     from app.modules.payroll import service as payroll_service
 
-    result = payroll_service.hard_delete_report_template(db, id)
+    result = payroll_service.hard_delete_report_template(db, id, actor_id=current_user.id)
     return {"message": f"{result['templateKey']} v{result['version']} permanently deleted."}
 
 
@@ -1200,6 +1389,418 @@ def upsert_employer_tax_profile(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.upsert_employer_tax_profile(db, payload, actor_id=current_user.id)
+
+
+# ── France: employer identity / PAS / establishment rate packs ───────────
+# Authority-supplied data (SIREN identity, DGFiP PAS rates, Urssaf AT/MP
+# decisions, governed effectif) — Super Admin / connector-managed exactly
+# as §11's panels C/D; the org itself only opens DSN filings (payroll
+# router /payroll/france/*).
+
+
+def _france_organization_id(organizationId: int = Query(...), db: Session = Depends(get_db)) -> int:
+    """Validates the France endpoints' organizationId: must exist and be a
+    France (FR) organization — see payroll_service.require_france_organization."""
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.require_france_organization(db, organizationId)
+    return organizationId
+
+
+@router.get(
+    "/compliance/france/employer-profile", response_model=EmployerFranceProfileResponse, response_model_by_alias=True,
+    summary="Read a France employer profile (Super Admin only)",
+)
+def get_employer_france_profile(
+    organizationId: int = Depends(_france_organization_id),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_employer_france_profile(db, organizationId)
+
+
+@router.put(
+    "/compliance/france/employer-profile", response_model=EmployerFranceProfileResponse, response_model_by_alias=True,
+    summary="Create or update a France employer profile (FR §11 panels C/D; authority-held write-once facts are not payload-editable)",
+)
+def upsert_employer_france_profile(
+    organizationId: int = Depends(_france_organization_id),
+    payload: EmployerFranceProfileUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_employer_france_profile(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.post(
+    "/compliance/france/effectif", response_model=EmployerFranceProfileResponse, response_model_by_alias=True,
+    summary="Record a governed annual France effectif with threshold history (FR-015/FR-036)",
+)
+def record_france_effectif(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEffectifRecord = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_france_effectif(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/france/establishment-rate-packs",
+    response_model=FranceEstablishmentRatePackResponse, response_model_by_alias=True,
+    summary="Append a France establishment (SIRET) rate pack period row (FR-002/FR-013); Jan/Jul history is never rewritten",
+)
+def upsert_france_establishment_rate_pack(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentRatePackUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_france_establishment_rate_pack(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/france/establishment-rate-packs",
+    response_model=List[FranceEstablishmentRatePackResponse], response_model_by_alias=True,
+    summary="List France establishment rate packs, optionally by SIRET",
+)
+def list_france_establishment_rate_packs(
+    organizationId: int = Depends(_france_organization_id),
+    siret: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_france_establishment_rate_packs(db, organizationId, siret=siret)
+
+
+@router.post(
+    "/compliance/france/pas-rates", response_model=FrancePASRateResponse, response_model_by_alias=True,
+    summary="Ingest a France PAS rate (FR-008/FR-010): PERSONALIZED is DGFiP CRM supply with provenance; NEUTRAL carries no percentage",
+)
+def ingest_france_pas_rate(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FrancePASRateUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.ingest_france_pas_rate(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/france/pas-rates", response_model=List[FrancePASRateResponse], response_model_by_alias=True,
+    summary="List France PAS rates (read-only; corrections keep lineage, never overwrite)",
+)
+def list_france_pas_rates(
+    organizationId: int = Depends(_france_organization_id),
+    employeeId: Optional[int] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_france_pas_rates(db, organizationId, employee_id=employeeId)
+
+
+@router.get(
+    "/compliance/france/dsn-submissions", response_model=List[FranceDsnSubmissionResponse], response_model_by_alias=True,
+    summary="Inspect an organization's France DSN submissions (transport/CRM diagnostics view)",
+)
+def list_france_dsn_submissions(
+    organizationId: int = Depends(_france_organization_id),
+    status: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_france_dsn_submissions(db, organizationId, status)
+
+
+@router.get(
+    "/compliance/france/dsn-outbox", response_model=List[FranceDsnOutboxItemResponse], response_model_by_alias=True,
+    summary="Inspect an organization's France DSN outbox items (transport diagnostics view)",
+)
+def list_france_dsn_outbox_items(
+    organizationId: int = Depends(_france_organization_id),
+    submissionId: Optional[int] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_france_dsn_outbox_items(db, organizationId, submission_id=submissionId)
+
+
+@router.get(
+    "/compliance/france/readiness",
+    summary="France launch readiness for an organization (FR §11 gate H + FR-031 dry-run)",
+)
+def get_france_readiness(
+    organizationId: int = Depends(_france_organization_id),
+    for_period: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_france_readiness(db, organizationId, for_period=for_period)
+
+
+@router.post(
+    "/compliance/france/effectif/corrections", response_model=EmployerFranceProfileResponse, response_model_by_alias=True,
+    summary="Correct an already-recorded France effectif year (prior value kept in that year's history)",
+)
+def correct_france_effectif(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEffectifCorrection = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.correct_france_effectif(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/france/establishments", response_model=List[FranceEstablishmentResponse], response_model_by_alias=True,
+    summary="List an organization's France establishments (SIRET registry, FR §11 panel B)",
+)
+def list_france_establishments(
+    organizationId: int = Depends(_france_organization_id),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_france_establishments(db, organizationId)
+
+
+@router.post(
+    "/compliance/france/establishments", response_model=FranceEstablishmentResponse, response_model_by_alias=True,
+    summary="Register a France establishment (SIRET)",
+)
+def create_france_establishment(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_france_establishment(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/france/establishments/{establishment_id}", response_model=FranceEstablishmentResponse,
+    response_model_by_alias=True,
+    summary="Update or deactivate a France establishment (its SIRET is immutable)",
+)
+def update_france_establishment(
+    establishment_id: int,
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_france_establishment(
+        db, organizationId, payload, establishment_id=establishment_id, actor_id=current_user.id,
+    )
+
+
+@router.patch(
+    "/compliance/france/establishment-rate-packs/{pack_id}",
+    response_model=FranceEstablishmentRatePackResponse, response_model_by_alias=True,
+    summary="Edit a France rate-pack period that has not started yet (in-force periods are append-only)",
+)
+def update_france_establishment_rate_pack(
+    pack_id: int,
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentRatePackUpdate = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.update_france_establishment_rate_pack(
+        db, organizationId, pack_id, payload, actor_id=current_user.id,
+    )
+
+
+@router.post(
+    "/compliance/france/establishment-rate-packs/{pack_id}/close",
+    response_model=FranceEstablishmentRatePackResponse, response_model_by_alias=True,
+    summary="Close an open France rate-pack period",
+)
+def close_france_establishment_rate_pack(
+    pack_id: int,
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceRatePackClose = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.close_france_establishment_rate_pack(
+        db, organizationId, pack_id, payload, actor_id=current_user.id,
+    )
+
+
+@router.post(
+    "/compliance/france/packs/{pack_id}/load-statutory-defaults",
+    summary="Fill a France tax pack's missing statutory rows from the 2026 content catalog (insert-only, editable packs only)",
+)
+def load_france_statutory_defaults(
+    pack_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.load_france_statutory_defaults(db, pack_id, actor_id=current_user.id)
+
+
+@router.post(
+    "/compliance/france/go-live",
+    summary="Mark France payroll LIVE for an organization (only when every computed readiness check passes)",
+)
+def set_france_live(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceGoLiveRequest = Body(default_factory=FranceGoLiveRequest),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_france_live(db, organizationId, payload, actor_id=current_user.id)
+
+
+# ── Ireland: RPN (Revenue Payroll Notification) ingestion (ZP-IE-ENG-001) ──────
+# The RPN is the frozen authority instruction for Irish PAYE/USC/PRSI/LPT.
+# Content-addressed by raw_hash so historical payrolls are reproducible from
+# the exact snapshot in force (IE-022/IE-033/IE-045).
+
+
+def _ireland_organization_id(organizationId: int = Query(...), db: Session = Depends(get_db)) -> int:
+    """Validates the Ireland endpoints' organizationId: must exist and be an
+    Ireland (IE) organization - see payroll_service.require_ireland_organization."""
+    from app.modules.payroll import service as payroll_service
+    payroll_service.require_ireland_organization(db, organizationId)
+    return organizationId
+
+
+@router.post(
+    "/compliance/ireland/rpn-snapshots",
+    response_model=IrelandRpnSnapshotResponse,
+    response_model_by_alias=True,
+    summary="Ingest a frozen Revenue Payroll Notification for an Irish employee (Super Admin only)",
+)
+def upsert_ireland_rpn_snapshot(
+    organizationId: int = Depends(_ireland_organization_id),
+    payload: IrelandRpnSnapshotUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.upsert_ie_rpn_snapshot(
+        db=db,
+        organization_id=organizationId,
+        employee_id=payload.employeeId,
+        rpn_number=payload.rpnNumber,
+        issued_at=payload.issuedAt,
+        tax_year=payload.taxYear,
+        calculation_basis=payload.calculationBasis,
+        ppsn_supplied=payload.ppsnSupplied,
+        standard_rate_band=payload.standardRateBand,
+        tax_credit=payload.taxCredit,
+        standard_rate_band_period=payload.standardRateBandPeriod,
+        tax_credit_period=payload.taxCreditPeriod,
+        previous_taxable_pay_ytd=payload.previousTaxablePayYtd,
+        previous_pay_ytd=payload.previousPayYtd,
+        periods_elapsed=payload.periodsElapsed,
+        lpt_instructed=payload.lptInstructed,
+        lpt_rate_pct=payload.lptRatePct,
+        emergency_tax_credit_weekly=payload.emergencyTaxCreditWeekly,
+        raw_hash=payload.rawHash,
+        raw_payload=payload.rawPayload,
+        statutory_profile_id=payload.statutoryProfileId,
+    )
+
+
+@router.get(
+    "/compliance/ireland/rpn-snapshots",
+    response_model=List[IrelandRpnSnapshotResponse],
+    response_model_by_alias=True,
+    summary="List RPN snapshots for an Irish organization/employee (Super Admin only)",
+)
+def list_ireland_rpn_snapshots(
+    organizationId: int = Depends(_ireland_organization_id),
+    employeeId: Optional[int] = Query(None, alias="employeeId"),
+    taxYear: Optional[str] = Query(None, alias="taxYear"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    query = db.query(payroll_service.IrelandRpnSnapshot).filter(
+        payroll_service.IrelandRpnSnapshot.organization_id == organizationId
+    )
+    if employeeId is not None:
+        query = query.filter(payroll_service.IrelandRpnSnapshot.employee_id == employeeId)
+    if taxYear is not None:
+        query = query.filter(payroll_service.IrelandRpnSnapshot.tax_year == taxYear)
+    return query.order_by(payroll_service.IrelandRpnSnapshot.issued_at.desc()).all()
+
+
+@router.delete(
+    "/compliance/ireland/rpn-snapshots/{snapshot_id}",
+    response_model=SuccessResponse,
+    summary="Delete an RPN snapshot (Super Admin only) — use with extreme caution; only for test data cleanup",
+)
+def delete_ireland_rpn_snapshot(
+    snapshot_id: int,
+    organizationId: int = Depends(_ireland_organization_id),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    row = db.query(payroll_service.IrelandRpnSnapshot).filter(
+        payroll_service.IrelandRpnSnapshot.id == snapshot_id,
+        payroll_service.IrelandRpnSnapshot.organization_id == organizationId,
+    ).first()
+    if not row:
+        from app.core.exceptions import NotFoundException
+        raise NotFoundException(f"RPN snapshot {snapshot_id} not found.")
+    db.delete(row)
+    db.commit()
+    return {"message": "RPN snapshot deleted."}
+
+
+# ── Ireland Revenue Integration (ZP-IE-ENG-001 WP2) — NOT EXPOSED ─────────
+# Real-time payroll submission, monthly return reconciliation and payment
+# tracking (IE-022/IE-026/IE-027) have no endpoints, because they have no
+# implementation to call: the service layer lost these functions on 2026-09-28
+# along with the payroll_ie_revenue_submissions /
+# payroll_ie_revenue_monthly_returns tables they depended on, and there is no
+# ROS transport behind them. See the matching note in
+# app/modules/payroll/service.py.
+#
+# These routes are deliberately absent rather than stubbed. A submit endpoint
+# that returns 200 without Revenue having received anything is worse than a
+# 404: an operator would believe a filing obligation had been met. The RPN
+# snapshot routes above are unaffected and remain live.
 
 
 @router.delete(
@@ -1575,6 +2176,89 @@ def review_source_artifact(
     from app.modules.payroll import service as payroll_service
 
     row = payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.put(
+    "/compliance/source-artifacts/{id}/sg-review", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Singapore gate / decision evidence: record the review outcome (ACCEPTED with optional validity, or REJECTED with notes)",
+)
+def review_sg_gate_evidence(
+    id: int,
+    payload: SgEvidenceReview,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.review_sg_gate_evidence(db, id, payload.outcome, payload.notes, payload.validUntil,
+                                                  actor_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.post(
+    "/compliance/singapore/decisions", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Record Singapore owner decision D1 / D2 / D3 (selected option + reason); counts after memo upload + second-admin review",
+)
+def record_sg_decision(
+    payload: SgDecisionCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.record_sg_decision(db, payload.key, payload.selectedValue, payload.reason,
+                                             actor_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.post(
+    "/compliance/singapore/service-registry", response_model=SgServiceRegistryResponse,
+    summary="Singapore registry step: AVAILABLE (opens onboarding; refused unless every readiness requirement is met, "
+            "re-checked server-side) or PLANNED (closes it). Audited, reason required",
+)
+def transition_sg_service_registry(
+    payload: SgServiceRegistryTransition,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return _jurisdiction_registry_step(db, "SG", payload.availability, payload.reason, current_user.id)
+
+
+def _jurisdiction_registry_step(db: Session, country: str, availability: str, reason: str, actor_id: int):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.transition_jurisdiction_service_registry(db, country, availability, reason, actor_id=actor_id)
+    return SgServiceRegistryResponse(country=row.country, availability=row.availability, updatedAt=row.updated_at)
+
+
+@router.post(
+    "/compliance/jurisdictions/{country}/service-registry", response_model=SgServiceRegistryResponse,
+    summary="Governed registry step for a jurisdiction (SG, HK): AVAILABLE (refused unless every readiness requirement "
+            "is met, re-checked server-side) or PLANNED. Audited, reason required. The per-country URLs are aliases.",
+)
+def transition_jurisdiction_service_registry(
+    country: str,
+    payload: ServiceRegistryTransition,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return _jurisdiction_registry_step(db, country, payload.availability, payload.reason, current_user.id)
+
+
+@router.put(
+    "/compliance/source-artifacts/{id}/supersede", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Singapore / Hong Kong governed evidence: mark this artifact superseded by its replacement (kept, audited)",
+)
+def supersede_source_artifact(
+    id: int,
+    payload: SourceArtifactSupersede,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.supersede_governed_evidence(db, id, payload.replacementId, actor_id=current_user.id)
     return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
 
 
@@ -3165,3 +3849,208 @@ def dashboard_charts(
     from app.modules.super_admin import service as sa_service
 
     return sa_service.dashboard_charts(db, start_date=start_date, end_date=end_date)
+
+
+# ── Hong Kong (ZP-HK-ENG-001) — Super Admin compliance ──────────────────
+# Tenant-independent: canonical packs, evidence and gates only. Pack
+# lifecycle, rates, slabs, source artifacts and test certification use the
+# shared /compliance/* endpoints above (HK gates are wired into them).
+from app.modules.payroll.schemas import HKCalculationPreviewRequest  # noqa: E402
+
+
+@router.get("/compliance/hong-kong/statutory-summary",
+            summary="Read-only: Hong Kong packs, sources, release gates G1–G7, certification items and blockers")
+def get_hong_kong_statutory_summary(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.statutory_summary(db)
+
+
+@router.post(
+    "/compliance/hong-kong/service-registry", response_model=SgServiceRegistryResponse,
+    summary="Hong Kong registry step: AVAILABLE (refused unless G1–G7, the in-force pack, golden vectors and sourced "
+            "Active templates are all in place — re-checked server-side) or PLANNED (suspension). Audited, reason required",
+)
+def transition_hk_service_registry(
+    payload: HkServiceRegistryTransition,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return _jurisdiction_registry_step(db, "HK", payload.availability, payload.reason, current_user.id)
+
+
+@router.get("/compliance/hong-kong/report-templates/compare",
+            summary="Read-only: field / component / metadata diff of two Hong Kong report templates")
+def compare_hong_kong_report_templates(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.compare_report_templates(db, from_id, to_id)
+
+
+@router.get("/compliance/hong-kong/configuration/versions",
+            summary="HK statutory versions with their state (current active / next published / future draft / past / superseded / retired)")
+def hong_kong_configuration_versions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.versions(db)
+
+
+@router.get("/compliance/hong-kong/configuration/packs/{pack_row_id}",
+            summary="HK statutory configuration of one pack, grouped by domain (value, unit, effective dates, source, hash, consumer)")
+def hong_kong_configuration_domains(pack_row_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.domains(db, pack_row_id)
+
+
+@router.get("/compliance/hong-kong/configuration/resolution",
+            summary="Why is this version selected? The pack and exact-year templates HK payroll uses on a date")
+def hong_kong_configuration_resolution(on: date = Query(...), current_user=Depends(get_current_super_admin),
+                                       db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.explain_resolution(db, on)
+
+
+@router.get("/compliance/hong-kong/configuration/compare",
+            summary="Row-level diff of two HK statutory versions (rates and slabs)")
+def hong_kong_configuration_compare(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.compare(db, from_id, to_id)
+
+
+@router.put("/compliance/hong-kong/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit of one HK statutory row (editable packs only; source document + reason required; audited)")
+def hong_kong_configuration_update_row(kind: str, row_id: int, payload: HkConfigRowUpdate,
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.update_row(db, kind, row_id, payload.model_dump(exclude_none=True), current_user.id)
+
+
+@router.post("/compliance/hong-kong/configuration/packs/{pack_row_id}/new-version",
+             summary="Create a Draft copy of an HK statutory pack (the change / rollback path — never an in-place edit)")
+def hong_kong_configuration_new_version(pack_row_id: int, payload: HkNewVersionRequest,
+                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    pack = hong_kong_service.new_version(db, pack_row_id, payload.version, payload.reason, current_user.id)
+    return {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status}
+
+
+# ── HK platform control records (IRD software approval / eMPF / retention / readiness) ──
+
+@router.get("/compliance/hong-kong/ird-software-approval",
+            summary="The IRD software-approval register (internal validation is never IRD approval)")
+def hong_kong_ird_software_approval(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.software_approval(db)
+
+
+@router.post("/compliance/hong-kong/ird-software-approval/transition",
+             summary="Record an IRD software-approval step from the IRD's own documents (audited)")
+def hong_kong_ird_software_approval_transition(payload: HkSoftwareApprovalTransition,
+                                               current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    data = payload.model_dump(exclude_none=True)
+    return hong_kong_service.transition_software_approval(db, data.pop("target"), data, current_user.id)
+
+
+@router.get("/compliance/hong-kong/empf-configuration",
+            summary="eMPF integration configuration versions (statuses only — never secrets)")
+def hong_kong_empf_configuration(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.empf_configurations(db)
+
+
+@router.post("/compliance/hong-kong/empf-configuration",
+             summary="Create a DRAFT eMPF configuration version")
+def hong_kong_empf_configuration_create(payload: HkEmpfConfigurationCreate,
+                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.create_empf_configuration(db, payload.model_dump(exclude_none=True), current_user.id)
+
+
+@router.post("/compliance/hong-kong/empf-configuration/{config_id}/activate",
+             summary="Activate a DRAFT eMPF configuration (a Super Admin other than its maker)")
+def hong_kong_empf_configuration_activate(config_id: int, payload: HkReasonBody,
+                                          current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.activate_empf_configuration(db, config_id, current_user.id, payload.reason)
+
+
+@router.get("/compliance/hong-kong/retention-policies",
+            summary="HK retention policy per record category (BLOCKED_UNDECIDED until D-2 / D-3)")
+def hong_kong_retention_policies(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import retention_service
+    from app.modules.payroll import hong_kong_service
+
+    return retention_service.retention_policies(db, "HK")
+
+
+@router.post("/compliance/hong-kong/retention-policies",
+             summary="Propose a retention period for a category (refused until the owner decisions are recorded)")
+def hong_kong_retention_policy_propose(payload: HkRetentionProposal,
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import retention_service
+    from app.modules.payroll import hong_kong_service
+
+    return retention_service.propose_retention_policy(db, "HK", payload.model_dump(), current_user.id)
+
+
+@router.post("/compliance/hong-kong/retention-policies/{policy_id}/approve",
+             summary="Approve a proposed retention period (a Super Admin other than its maker)")
+def hong_kong_retention_policy_approve(policy_id: int, current_user=Depends(get_current_super_admin),
+                                       db: Session = Depends(get_db)):
+    from app.modules.payroll import retention_service
+    from app.modules.payroll import hong_kong_service
+
+    return retention_service.approve_retention_policy(db, "HK", policy_id, current_user.id)
+
+
+@router.get("/compliance/hong-kong/monitoring",
+            summary="HK operational monitoring signals (platform-wide counts only — no employee data)")
+def hong_kong_monitoring(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.monitoring_signals(db)
+
+
+@router.get("/compliance/hong-kong/readiness-center",
+            summary="HK production readiness center — every launch requirement, re-derived from the database")
+def hong_kong_readiness_center(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.readiness_center(db)
+
+
+@router.post("/compliance/hong-kong/calculation-preview",
+             summary="Read-only: run the production Hong Kong engine against a pack's rows (any status) — writes nothing")
+def preview_hong_kong_calculation(data: HKCalculationPreviewRequest, current_user=Depends(get_current_super_admin),
+                                  db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.preview_calculation(db, data)
+
+
+@router.get("/compliance/hong-kong/packs/{pack_row_id}/golden-check",
+            summary="Read-only: re-run the HK golden vectors against this pack's own rows (activation evidence)")
+def hong_kong_pack_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                db: Session = Depends(get_db)):
+    from app.core.exceptions import NotFoundException
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id,
+                                             JurisdictionPack.jurisdiction_country == "HK").first()
+    if pack is None:
+        raise NotFoundException("Hong Kong pack", pack_row_id)
+    return {"packId": pack.pack_id, "version": pack.version, **hong_kong_service.pack_golden_check(db, pack)}

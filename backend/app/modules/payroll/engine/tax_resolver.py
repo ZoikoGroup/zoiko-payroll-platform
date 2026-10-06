@@ -182,8 +182,53 @@ def resolve_tax_configuration(
     both fields NULL is unaffected by this filter and is governed
     entirely by the pack's own window (already checked above) —
     completely additive to every rate/slab that exists today.
+
+    Results are served from Redis when configured (see engine/tax_cache).
+    The cache is a pure performance layer: it stores what this function
+    would have returned for the same (country, state, regime, date) and is
+    invalidated on every canonical write. With no REDIS_URL set — the
+    default, and the case in every test — it is a no-op and this function
+    always reads live rows, so cache bugs cannot silently become wrong
+    payroll numbers in an environment that has not opted in.
     """
+    from app.modules.payroll.engine.tax_cache import (
+        current_tax_cache_version, load_cached_tax_config, store_cached_tax_config,
+    )
+
     as_of = payroll_date or date_cls.today()
+    # Captured before the DB read and reused for the store: see
+    # current_tax_cache_version for the stale-write race this closes.
+    version = current_tax_cache_version()
+    cached = load_cached_tax_config(
+        country, state, tax_regime, as_of, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    if cached is not None:
+        return cached
+
+    rates, slabs, pack = _resolve_uncached(
+        db, country, state=state, tax_regime=tax_regime, as_of=as_of,
+    )
+    store_cached_tax_config(
+        country, state, tax_regime, as_of, rates, slabs, pack, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    return rates, slabs, pack
+
+
+def _resolve_uncached(
+    db: Session,
+    country: str,
+    state: Optional[str],
+    tax_regime: Optional[str],
+    as_of: date_cls,
+) -> Tuple[List[ContributionRate], List[TaxSlab], Optional[JurisdictionPack]]:
+    """The authoritative resolution, always reading live rows.
+
+    Split out from resolve_tax_configuration so the cache wrapper above
+    has exactly one place to fall back to, and so the bypass is callable
+    for tests that need to prove cached and uncached resolution agree.
+    """
     pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
     if not pack:
         return [], [], None
@@ -270,6 +315,24 @@ def find_active_tax_pack(
     return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
 
 
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK")
+
+
+def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str]) -> Optional[str]:
+    """Phase 6.10: moving an EXISTING organization into a registry-gated
+    country (_REGISTRY_ROW_REQUIRED_COUNTRIES) is onboarding into it, so it
+    passes the same gate as registration. Before this, PUT /organizations/me
+    (and the Super Admin organization update) set `country` directly — any
+    organization could move itself into a PLANNED Singapore. Changes that do
+    not enter such a country are untouched (None)."""
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    new_code = get_jurisdiction_code(new_country)
+    if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):
+        return None
+    return get_jurisdiction_onboarding_block_reason(db, new_country)
+
+
 def get_jurisdiction_onboarding_block_reason(
     db: Session,
     country: Optional[str],
@@ -326,6 +389,17 @@ def get_jurisdiction_onboarding_block_reason(
 
     registry_row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == code).first()
     if registry_row is not None and registry_row.availability in ("NOT_AVAILABLE", "PLANNED"):
+        return (
+            f"'{country}' is not yet available for onboarding — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+    # Singapore closure (fail-closed, per-country opt-in): for these countries
+    # the registry row is REQUIRED. Without one, the gate below would open
+    # onboarding as soon as a canonical pack went Active — activating the
+    # statutory pack must never be what makes a jurisdiction commercially
+    # available (the owner's PLANNED -> AVAILABLE step is). Other countries keep
+    # the existing fall-through unchanged.
+    if registry_row is None and code in _REGISTRY_ROW_REQUIRED_COUNTRIES:
         return (
             f"'{country}' is not yet available for onboarding — "
             "please contact your administrator or select a supported jurisdiction."

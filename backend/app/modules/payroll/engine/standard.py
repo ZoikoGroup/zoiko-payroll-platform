@@ -66,6 +66,13 @@ from app.modules.payroll.engine.countries import guyana as _guyana
 from app.modules.payroll.engine.countries import jamaica as _jamaica
 from app.modules.payroll.engine.countries import bahamas as _bahamas
 from app.modules.payroll.engine.countries import trinidad_and_tobago as _trinidad_and_tobago
+from app.modules.payroll.engine.countries import puerto_rico as _puerto_rico
+from app.modules.payroll.engine.countries import france as _france
+from app.modules.payroll.engine.countries import ireland as _ireland
+from app.modules.payroll.engine.countries import singapore as _singapore
+from app.modules.payroll.engine.countries import hong_kong as _hong_kong
+from app.modules.payroll.engine.countries import sweden as _sweden
+from app.modules.payroll.engine.countries import italy as _italy
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -131,6 +138,13 @@ _calc_guyana = _guyana.calculate
 _calc_jamaica = _jamaica.calculate
 _calc_bahamas = _bahamas.calculate
 _calc_trinidad_and_tobago = _trinidad_and_tobago.calculate
+_calc_puerto_rico = _puerto_rico.calculate
+_calc_france = _france.calculate
+_calc_ireland = _ireland.calculate
+_calc_singapore = _singapore.calculate
+_calc_hong_kong = _hong_kong.calculate
+_calc_sweden = _sweden.calculate
+_calc_italy = _italy.calculate
 
 
 _COUNTRY_CALC = {
@@ -153,6 +167,32 @@ _COUNTRY_CALC = {
     "JM": _calc_jamaica,
     "BS": _calc_bahamas,
     "TT": _calc_trinidad_and_tobago,
+    # Puerto Rico (2026-09-23) — dual-jurisdiction (local Hacienda +
+    # independently-computed federal-equivalent layer), but architecturally
+    # a sibling of the Caribbean entries above, not a US-dependent variant —
+    # see engine/countries/puerto_rico.py's own module docstring.
+    "PR": _calc_puerto_rico,
+    # France (2026-09-24, ZP-FR-ENG-001) — European expansion, metropolitan
+    # private-sector wedge. Engine/countries/france.py; calculation is
+    # establishment-aware and returns separate net_social/net_imposable.
+    "FR": _calc_france,
+    "IE": _calc_ireland,
+    # Singapore (ZP-SG-ENG-001) — CPF/SDL/SHG only, never `tds` (not a
+    # monthly-PAYE jurisdiction). Fail-closed: see countries/singapore.py.
+    "SG": _calc_singapore,
+    # Hong Kong (ZP-HK-ENG-001) — MPF + SMW assessment + IRD reportable
+    # income, never `tds` (employee-assessed Salaries Tax, not monthly PAYE).
+    # Fail-closed: see countries/hong_kong.py.
+    "HK": _calc_hong_kong,
+    # Sweden (ZP-SE-ENG-001) — table-lookup preliminary tax (never a
+    # national %), component-summed employer contributions with cohorts,
+    # SLP from its own pension-cost ledger. Fail-closed: countries/sweden.py.
+    "SE": _calc_sweden,
+    # Italy (ZP-IT-ENG-001) - INPS classification-matrix contributions (never a
+    # national average), progressive IRPEF with the solidarity wedge, regional/
+    # municipal additions on the TAX DOMICILE. Fail-closed:
+    # countries/italy.py.
+    "IT": _calc_italy,
 }
 
 
@@ -177,6 +217,14 @@ class StandardStrategy(PayrollStrategy):
         # Country-specific compliance deductions (computed on full gross)
         calc_fn = _COUNTRY_CALC.get(ctx.country.upper(), _calc_generic)
         deductions = calc_fn(ctx)
+        # Singapore only (the key is returned by countries/singapore.py alone):
+        # MOM's incomplete-month salary replaces the generic per-day
+        # attendance deduction, with MOM working days / days worked.
+        if "sgp_incomplete_month_deduction" in deductions:
+            attendance_deduction = deductions["sgp_incomplete_month_deduction"]
+            per_day_salary = deductions.get("sgp_per_day_gross_rate", per_day_salary)
+            payable_days = deductions.get("sgp_days_worked", calendar_days)
+            calendar_days = deductions.get("sgp_working_days", calendar_days)
 
         total_employee_deductions = (
             attendance_deduction
@@ -196,9 +244,36 @@ class StandardStrategy(PayrollStrategy):
             + deductions.get("state_disability_insurance", Decimal("0"))
             + deductions.get("state_program_deductions", Decimal("0"))
             + deductions.get("au_statutory_deductions_total", Decimal("0"))
+            # France: combined employee-side total (all France employee
+            # contributions incl. PAS withholding). Same additive mechanism
+            # as au_statutory_deductions_total above — every other country's
+            # .get() returns the 0 default, so no other calculation changes.
+            + deductions.get("fr_employee_total", Decimal("0"))
+            + deductions.get("ie_employee_total", Decimal("0"))
+            # Singapore Employment Act authorised salary deductions (absent → 0 for every other country).
+            + deductions.get("sgp_salary_deductions_total", Decimal("0"))
+            # Sweden employee-side statutory total (preliminary tax +
+            # occupational-pension employee share) — absent → 0 everywhere
+            # else, same additive mechanism as ie_/fr_/sgp_ above.
+            + deductions.get("se_employee_total", Decimal("0"))
+            # Italy employee-side statutory total: INPS contributions + IRPEF
+            # + the §5 local-surtax instalments withheld this period (regional
+            # balance, municipal balance, municipal advance). It excludes the
+            # surtaxes' annual LIABILITY, which is settled at the next
+            # conguaglio, and the §4 wedge non-taxable sum, which is a BENEFIT
+            # added below, never a negative deduction (IT-009). Absent -> 0
+            # everywhere else, same additive mechanism as ie_/fr_/sgp_/se_ above.
+            + deductions.get("it_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
+        # §4 / IT-009: the structural tax-wedge non-taxable sum is money the
+        # employee keeps — a separate statutory object with its own YTD state,
+        # never netted inside IRPEF. It is added to net pay here, and is 0 for
+        # every country whose calculation does not return the key.
+        it_wedge_tax_free_sum = deductions.get("it_wedge_tax_free_sum", Decimal("0"))
+        if it_wedge_tax_free_sum:
+            net_pay = max(_round2(net_pay + it_wedge_tax_free_sum), Decimal("0"))
         # Phase 8BU: a PARTIAL Germany result (wage_tax/soli/church_tax
         # genuinely unavailable, RV/ALV/GKV/PV genuinely computed) must
         # NEVER present a net_pay computed as if the missing tax were
@@ -298,6 +373,143 @@ class StandardStrategy(PayrollStrategy):
             au_statutory_deductions_detail=deductions.get("au_statutory_deductions_detail", []),
             au_workers_compensation_premium=deductions.get("au_workers_compensation_premium", Decimal("0")),
             au_calculation_trace=deductions.get("au_calculation_trace"),
+            # France (ZP-FR-ENG-001, 2026-09-24) — fields returned by
+            # engine/countries/france.calculate() and propagated to the result
+            fr_net_social=deductions.get("fr_net_social"),
+            fr_net_imposable=deductions.get("fr_net_imposable"),
+            fr_employee_total=deductions.get("fr_employee_total", Decimal("0")),
+            fr_employer_total=deductions.get("fr_employer_total", Decimal("0")),
+            fr_contributions=deductions.get("fr_contributions"),
+            fr_bases=deductions.get("fr_bases"),
+            fr_pas_withheld=deductions.get("fr_pas_withheld", Decimal("0")),
+            fr_pas_rate_type=deductions.get("fr_pas_rate_type"),
+            fr_pas_rate_pct=deductions.get("fr_pas_rate_pct"),
+            fr_pas_rate_id=deductions.get("fr_pas_rate_id"),
+            fr_calculation_snapshot=deductions.get("fr_calculation_snapshot"),
+            fr_ytd_after=deductions.get("fr_ytd_after"),
+            fr_not_configured=deductions.get("fr_not_configured"),
+            ie_paye=deductions.get("ie_paye", Decimal("0")),
+            ie_employee_total=deductions.get("ie_employee_total", Decimal("0")),
+            ie_paye_basis=deductions.get("ie_paye_basis"),
+            ie_paye_unrounded=deductions.get("ie_paye_unrounded"),
+            ie_standard_rate_pay=deductions.get("ie_standard_rate_pay", Decimal("0")),
+            ie_higher_rate_pay=deductions.get("ie_higher_rate_pay", Decimal("0")),
+            ie_tax_credit_applied=deductions.get("ie_tax_credit_applied", Decimal("0")),
+            ie_rpn_number=deductions.get("ie_rpn_number"),
+            ie_rpn_snapshot_id=deductions.get("ie_rpn_snapshot_id"),
+            ie_rpn_hash=deductions.get("ie_rpn_hash"),
+            ie_rpn_issued_at=deductions.get("ie_rpn_issued_at"),
+            ie_usc=deductions.get("ie_usc", Decimal("0")),
+            ie_usc_unrounded=deductions.get("ie_usc_unrounded"),
+            ie_usc_payable_ytd_after=deductions.get("ie_usc_payable_ytd_after"),
+            ie_employee_prsi=deductions.get("ie_employee_prsi", Decimal("0")),
+            ie_employer_prsi=deductions.get("ie_employer_prsi", Decimal("0")),
+            ie_employer_prsi_total=deductions.get("ie_employer_prsi_total", Decimal("0")),
+            ie_prsi_class=deductions.get("ie_prsi_class"),
+            ie_prsi_declaration=deductions.get("ie_prsi_declaration"),
+            ie_prsi_ax_credit=deductions.get("ie_prsi_ax_credit", Decimal("0")),
+            ie_prsi_contribution_weeks=deductions.get("ie_prsi_contribution_weeks"),
+            ie_prsi_weekly_reckonable=deductions.get("ie_prsi_weekly_reckonable"),
+            ie_prsi_reckonable_ytd_after=deductions.get("ie_prsi_reckonable_ytd_after"),
+            ie_mff_employee=deductions.get("ie_mff_employee", Decimal("0")),
+            ie_mff_employer=deductions.get("ie_mff_employer", Decimal("0")),
+            ie_mff_state_topup=deductions.get("ie_mff_state_topup", Decimal("0")),
+            ie_mff_status=deductions.get("ie_mff_status"),
+            ie_mff_contributory=deductions.get("ie_mff_contributory", False),
+            ie_mff_ceased_reason=deductions.get("ie_mff_ceased_reason"),
+            ie_mff_earnings_ytd_after=deductions.get("ie_mff_earnings_ytd_after"),
+            ie_lpt=deductions.get("ie_lpt", Decimal("0")),
+            ie_lpt_instructed=deductions.get("ie_lpt_instructed", False),
+            ie_lpt_rate_pct=deductions.get("ie_lpt_rate_pct"),
+            ie_employee_pension=deductions.get("ie_employee_pension", Decimal("0")),
+            ie_employer_pension=deductions.get("ie_employer_pension", Decimal("0")),
+            ie_nmw_rate=deductions.get("ie_nmw_rate"),
+            ie_nmw_band=deductions.get("ie_nmw_band"),
+            ie_effective_hourly=deductions.get("ie_effective_hourly"),
+            ie_tax_year=deductions.get("ie_tax_year"),
+            ie_calculation_trace=deductions.get("ie_calculation_trace"),
+            ie_ytd_after=deductions.get("ie_ytd_after"),
+            # Sweden (ZP-SE-ENG-001) — everything countries/sweden.py
+            # returns; .get with the PayrollResult default keeps every
+            # other country's result unchanged.
+            se_employer_contribution=deductions.get("se_employer_contribution", Decimal("0")),
+            se_employer_contribution_rate=deductions.get("se_employer_contribution_rate"),
+            se_employer_contribution_cohort=deductions.get("se_employer_contribution_cohort"),
+            se_employer_contribution_components=deductions.get("se_employer_contribution_components", []),
+            se_employer_contribution_base=deductions.get("se_employer_contribution_base", Decimal("0")),
+            se_youth_applied=deductions.get("se_youth_applied", False),
+            se_month_compensation=deductions.get("se_month_compensation"),
+            se_preliminary_tax=deductions.get("se_preliminary_tax", Decimal("0")),
+            se_tax_strategy=deductions.get("se_tax_strategy"),
+            se_withholding_unrounded=deductions.get("se_withholding_unrounded"),
+            se_tax_table=deductions.get("se_tax_table"),
+            se_tax_column=deductions.get("se_tax_column"),
+            se_income_role=deductions.get("se_income_role"),
+            se_tax_status=deductions.get("se_tax_status"),
+            se_occupational_pension_employee=deductions.get("se_occupational_pension_employee", Decimal("0")),
+            se_occupational_pension_employer=deductions.get("se_occupational_pension_employer", Decimal("0")),
+            se_pension_plan=deductions.get("se_pension_plan"),
+            se_slp=deductions.get("se_slp", Decimal("0")),
+            se_employer_total=deductions.get("se_employer_total", Decimal("0")),
+            se_employee_total=deductions.get("se_employee_total", Decimal("0")),
+            se_calculation_trace=deductions.get("se_calculation_trace"),
+            # Italy (ZP-IT-ENG-001) — everything countries/italy.py returns.
+            # .get with the PayrollResult default keeps every other country's
+            # result unchanged.
+            it_employer_social_security=deductions.get("it_employer_social_security", Decimal("0")),
+            it_employer_contributions=deductions.get("it_employer_contributions", Decimal("0")),
+            it_employee_contributions=deductions.get("it_employee_contributions", Decimal("0")),
+            it_contributory_base=deductions.get("it_contributory_base", Decimal("0")),
+            it_contributory_capped=deductions.get("it_contributory_capped", False),
+            it_contributory_cap_cohort=deductions.get("it_contributory_cap_cohort"),
+            it_contributory_cap_amount=deductions.get("it_contributory_cap_amount", Decimal("0")),
+            it_contributory_cap_note=deductions.get("it_contributory_cap_note"),
+            it_inps_scope=deductions.get("it_inps_scope"),
+            it_inps_components=deductions.get("it_inps_components", []),
+            it_ivs_additional=deductions.get("it_ivs_additional", Decimal("0")),
+            it_fis_employee=deductions.get("it_fis_employee", Decimal("0")),
+            it_tfr_amount=deductions.get("it_tfr_amount", Decimal("0")),
+            it_tfr_gross_accrual=deductions.get("it_tfr_gross_accrual", Decimal("0")),
+            it_tfr_inps_offset=deductions.get("it_tfr_inps_offset", Decimal("0")),
+            it_tfr_destination=deductions.get("it_tfr_destination"),
+            it_tfr_routing_complete=deductions.get("it_tfr_routing_complete", False),
+            it_taxable_income=deductions.get("it_taxable_income", Decimal("0")),
+            it_irpef=deductions.get("it_irpef", Decimal("0")),
+            it_irpef_annual=deductions.get("it_irpef_annual", Decimal("0")),
+            it_irpef_gross_annual=deductions.get("it_irpef_gross_annual", Decimal("0")),
+            it_detrazione_lavoro=deductions.get("it_detrazione_lavoro", Decimal("0")),
+            it_wedge_additional_deduction=deductions.get(
+                "it_wedge_additional_deduction", Decimal("0")),
+            it_wedge_tax_free_sum=deductions.get("it_wedge_tax_free_sum", Decimal("0")),
+            it_wedge_band_pct=deductions.get("it_wedge_band_pct", Decimal("0")),
+            it_regional_tax_annual=deductions.get("it_regional_tax_annual", Decimal("0")),
+            it_municipal_tax_annual=deductions.get("it_municipal_tax_annual", Decimal("0")),
+            it_local_tax_withheld=deductions.get("it_local_tax_withheld", False),
+            it_addreg_saldo_withheld=deductions.get("it_addreg_saldo_withheld", Decimal("0")),
+            it_addcom_saldo_withheld=deductions.get("it_addcom_saldo_withheld", Decimal("0")),
+            it_addcom_acconto_withheld=deductions.get("it_addcom_acconto_withheld", Decimal("0")),
+            it_local_tax_withheld_amount=deductions.get("it_local_tax_withheld_amount", Decimal("0")),
+            it_contributory_minimum_applied=deductions.get("it_contributory_minimum_applied", False),
+            it_tax_domicile_comune=deductions.get("it_tax_domicile_comune"),
+            it_tax_domicile_region=deductions.get("it_tax_domicile_region"),
+            it_fringe_amount=deductions.get("it_fringe_amount", Decimal("0")),
+            it_fringe_child_declared=deductions.get("it_fringe_child_declared", False),
+            it_fringe_taxable=deductions.get("it_fringe_taxable", Decimal("0")),
+            it_fringe_ytd_after=deductions.get("it_fringe_ytd_after", Decimal("0")),
+            it_meal_voucher_taxable=deductions.get("it_meal_voucher_taxable", Decimal("0")),
+            it_conguaglio=deductions.get("it_conguaglio", False),
+            it_irpef_refund=deductions.get("it_irpef_refund", Decimal("0")),
+            it_wedge_recovery_now=deductions.get("it_wedge_recovery_now", Decimal("0")),
+            it_wedge_recovery_new=deductions.get("it_wedge_recovery_new", Decimal("0")),
+            it_wedge_recovery_outstanding_after=deductions.get("it_wedge_recovery_outstanding_after", Decimal("0")),
+            it_wedge_recovery_instalment_after=deductions.get("it_wedge_recovery_instalment_after", Decimal("0")),
+            it_addreg_saldo_determined=deductions.get("it_addreg_saldo_determined", Decimal("0")),
+            it_addcom_saldo_determined=deductions.get("it_addcom_saldo_determined", Decimal("0")),
+            it_addcom_credit_determined=deductions.get("it_addcom_credit_determined", Decimal("0")),
+            it_termination_surtax_withheld=deductions.get("it_termination_surtax_withheld", Decimal("0")),
+            it_ytd_after=deductions.get("it_ytd_after"),
+            it_employee_total=deductions.get("it_employee_total", Decimal("0")),
+            it_calculation_trace=deductions.get("it_calculation_trace"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),
@@ -312,7 +524,20 @@ class StandardStrategy(PayrollStrategy):
             ytd_sg_qualifying_earnings_after=deductions.get("ytd_sg_qualifying_earnings_after"),
             ytd_whm_earnings_after=deductions.get("ytd_whm_earnings_after"),
             ytd_ky_mandatory_pensionable_earnings_after=deductions.get("ytd_ky_mandatory_pensionable_earnings_after"),
+            ytd_cpf_ow_subject_after=deductions.get("ytd_cpf_ow_subject_after"),
+            ytd_cpf_aw_subject_after=deductions.get("ytd_cpf_aw_subject_after"),
+            ytd_cpf_aw_paid_after=deductions.get("ytd_cpf_aw_paid_after"),
+            sgp_calculation_trace=deductions.get("sgp_calculation_trace"),
+            hk_calculation_trace=deductions.get("hk_calculation_trace"),
+            hk_statutory_profile_id=deductions.get("_hk_statutory_profile_id"),
             ytd_gy_paye_credit_after=deductions.get("ytd_gy_paye_credit_after"),
+            ytd_pr_ss_wages_after=deductions.get("ytd_pr_ss_wages_after"),
+            ytd_pr_medicare_wages_after=deductions.get("ytd_pr_medicare_wages_after"),
+            ytd_pr_futa_wages_after=deductions.get("ytd_pr_futa_wages_after"),
+            ytd_pr_unemployment_wages_after=deductions.get("ytd_pr_unemployment_wages_after"),
+            ytd_pr_sinot_wages_after=deductions.get("ytd_pr_sinot_wages_after"),
+            pr_unemployment_rate_configured=deductions.get("pr_unemployment_rate_configured", True),
+            pr_cfse_rate_configured=deductions.get("pr_cfse_rate_configured", True),
             au_whm_cap_exceeded=deductions.get("au_whm_cap_exceeded", False),
             sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),
             sg_rate_pct=deductions.get("sg_rate_pct"),

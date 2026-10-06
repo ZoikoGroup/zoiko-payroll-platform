@@ -1,0 +1,39 @@
+# Zoiko Payroll Platform — backend systemd unit
+# ---------------------------------------------------------------------------
+# Production topology (see GCP_DEPLOYMENT.md §0): the FastAPI backend runs
+# directly under a Python venv on a GCE VM, not in a container. The GitHub
+# Action workflow (.github/workflows/backend-deploy.yml) restarts this exact
+# service after every deploy:
+#
+#   sudo systemctl restart zoiko-payroll-backend
+#
+# Install:
+#   sudo cp deploy/systemd/zoiko-payroll-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now zoiko-payroll-backend
+#
+# Adjust User/Group, WorkingDirectory, EnvironmentFile and ExecStart paths if
+# your VM layout differs from /var/www/zoiko-payroll.
+
+[Unit]
+Description=Zoiko Payroll Platform Backend (FastAPI)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/zoiko-payroll/backend/backend
+EnvironmentFile=/var/www/zoiko-payroll/backend/backend/.env
+ExecStart=/var/www/zoiko-payroll/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+# Light hardening -- the app writes only to the DB and GCS, so its own tree
+# can be read-only.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

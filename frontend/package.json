@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "lint": "eslint .",
-    "test": "node scripts/phase8cg-minijob-validation.mjs"
+    "test": "node scripts/phase8cg-minijob-validation.mjs && node scripts/attendance-passthrough-validation.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",

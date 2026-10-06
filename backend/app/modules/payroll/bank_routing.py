@@ -7,6 +7,7 @@ Each jurisdiction's salary payment uses one canonical routing code:
 
     IN -> IFSC               UK -> Sort Code      US -> ABA routing number
     CA -> Transit + Institution Number   DE -> IBAN + BIC   AU -> BSB
+    HK -> HKICL bank (clearing) code + branch code (3 digits each)
 
 This module is the single source of truth for:
 
@@ -35,7 +36,15 @@ from typing import List, Optional
 # ── Jurisdiction registry ────────────────────────────────────────────────
 
 # Countries with a canonical salary-payment routing code in scope.
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU")
+# Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24):
+# Barbados/Cayman/Dominican Republic/Guyana/Jamaica/Trinidad have no
+# confirmed national bank-clearing standard, so they route through a
+# generic `bank_branch_code` field; Bahamas and Puerto Rico both ride a
+# NACHA-style 9-digit ACH rail (Puerto Rico via the US banking system
+# directly) and route through `ach_routing_number`.
+# France (ZP-FR-ENG-001, 2026-09-24) joins DE on the SEPA rail: IBAN + BIC
+# read from compliance_fields, exactly like every non-India country.
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -52,7 +61,30 @@ ROUTING_FIELDS = {
         {"key": "iban", "label": "IBAN"},
         {"key": "bic", "label": "BIC"},
     ],
+    "FR": [
+        {"key": "iban", "label": "IBAN"},
+        {"key": "bic", "label": "BIC"},
+    ],
     "AU": [{"key": "bsb_code", "label": "BSB code"}],
+    # Hong Kong: HKICL "Clearing Code and Branch Code" list — a 3-digit bank
+    # (clearing) code and a 3-digit branch code; the account number format is
+    # bank-specific and is not validated beyond presence.
+    "HK": [
+        {"key": "bank_code", "label": "Bank code"},
+        {"key": "branch_code", "label": "Branch code"},
+    ],
+    "BB": [{"key": "bank_branch_code", "label": "Bank/Branch Code"}],
+    "KY": [{"key": "bank_branch_code", "label": "Bank/Branch Code"}],
+    "DO": [{"key": "bank_branch_code", "label": "Bank/Branch Code"}],
+    "GY": [{"key": "bank_branch_code", "label": "Bank/Branch Code"}],
+    "JM": [{"key": "bank_branch_code", "label": "Bank/Branch Code"}],
+    "TT": [{"key": "bank_branch_code", "label": "Bank/Branch Code"}],
+    "BS": [{"key": "ach_routing_number", "label": "ACH Routing #"}],
+    "PR": [{"key": "ach_routing_number", "label": "ACH Routing #"}],
+    "IE": [
+        {"key": "iban", "label": "IBAN"},
+        {"key": "bic", "label": "BIC"},
+    ],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -65,6 +97,17 @@ BTF_ROUTING_LABEL = {
     "CA": "Transit No.",
     "DE": "IBAN",
     "AU": "BSB",
+    "HK": "Bank-Branch Code",
+    "FR": "IBAN",
+    "IE": "IBAN",
+    "BB": "Bank/Branch Code",
+    "KY": "Bank/Branch Code",
+    "DO": "Bank/Branch Code",
+    "GY": "Bank/Branch Code",
+    "JM": "Bank/Branch Code",
+    "TT": "Bank/Branch Code",
+    "BS": "ACH Routing #",
+    "PR": "ACH Routing #",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -75,6 +118,16 @@ PAYMENT_MODE_LABEL = {
     "CA": "EFT",
     "DE": "SEPA",
     "AU": "Direct Entry",
+    "FR": "SEPA",
+    "IE": "SEPA",
+    "BB": "EFT",
+    "KY": "EFT",
+    "DO": "EFT",
+    "GY": "EFT",
+    "JM": "EFT",
+    "TT": "EFT",
+    "BS": "ACH",
+    "PR": "ACH",
 }
 
 
@@ -154,6 +207,10 @@ def btf_routing_value(obj, country: Optional[str] = None) -> str:
         if transit and institution:
             return f"{transit}-{institution}"
         return transit or institution
+    if effective == "HK":
+        bank = _field_value(obj, "bank_code")
+        branch = _field_value(obj, "branch_code")
+        return f"{bank}-{branch}" if bank and branch else (bank or branch)
     if effective == "DE":
         iban = _field_value(obj, "iban")
         bic = _field_value(obj, "bic")

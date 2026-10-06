@@ -41,6 +41,10 @@ export const COMPLIANCE_COUNTRIES = [
   { code: "JM", name: "Jamaica" },
   { code: "BS", name: "Bahamas" },
   { code: "TT", name: "Trinidad and Tobago" },
+  // France (2026-09-24, ZP-FR-ENG-001) — Europe expansion.
+  { code: "FR", name: "France" },
+  // Ireland (2026-09-25, ZP-IE-ENG-001) — Europe expansion.
+  { code: "IE", name: "Ireland" },
 ];
 
 export const DEFAULT_COUNTRY = "IN";
@@ -1163,7 +1167,7 @@ export const applyExtractedRate = async ({ documentId, kind, row, countryCode = 
 // For real saved records, use getAttendanceRecords() or getAttendanceHistory().
 export const getEmployeeRoster = async (params = {}) => {
   try {
-    const employees = await getEmployees(params);
+    const employees = await api.get("/api/payroll/employees/roster", { params });
     const records = Array.isArray(employees) ? employees : [];
     // Add default attendance + compensation fields
     return records.map((emp) => ({
@@ -1220,6 +1224,64 @@ export const getAttendanceRecords = async (params = {}) => {
     return Array.isArray(res) ? res : res?.data || res?.items || [];
   } catch {
     return [];
+  }
+};
+
+// Paged attendance fetch. Hits /attendance/page, which returns an exact total
+// plus a server-computed hasMore — the plain list endpoint cannot express
+// either, which is why a client paging it has to keep re-fetching blindly.
+export const getAttendanceRecordsPaginated = async (params = {}, limit = 100, offset = 0) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/page", {
+      params: { ...params, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      // Span of the whole filtered set, not of this page. The History tab
+      // derives its working-days count from these, so dropping them made the
+      // span read zero no matter what range was selected.
+      firstDate: res?.firstDate ?? null,
+      lastDate: res?.lastDate ?? null,
+    };
+  } catch {
+    // A failed page must not look like "the end of the data", or the UI will
+    // silently stop loading. Report it as an error and let the caller decide.
+    return { items: [], total: 0, limit, offset, hasMore: false, firstDate: null, lastDate: null, error: true };
+  }
+};
+
+// Per-employee attendance aggregates for a range, paged server-side. The
+// Summary tab used to download every attendance row in range and count days
+// in the browser; this does the counting in the database.
+//
+// `search` is forwarded so the server matches every employee in the
+// organization, not only the ones on the page currently loaded in the browser.
+// `totals` is the org-wide sum across the whole filtered set: the stat cards
+// must not total just the loaded page, which under-reports as soon as there
+// is a second page.
+export const getAttendanceSummaryByEmployee = async (
+  { startDate, endDate, search, limit = 100, offset = 0 } = {}
+) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/summary/by-employee", {
+      params: { startDate, endDate, search, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      totals: res?.totals ?? null,
+    };
+  } catch {
+    return { items: [], total: 0, limit, offset, hasMore: false, totals: null, error: true };
   }
 };
 
@@ -1442,6 +1504,7 @@ export const ENTERPRISE_JURISDICTIONS = [
   { code: "AU", name: "Australia", flag: "🇦🇺", currency: "AUD", financialYear: "Jul 1 – Jun 30" },
   { code: "DE", name: "Germany", flag: "🇩🇪", currency: "EUR", financialYear: "Jan 1 – Dec 31" },
   { code: "CA", name: "Canada", flag: "🇨🇦", currency: "CAD", financialYear: "Jan 1 – Dec 31" },
+{ code: "FR", name: "France", flag: "FR", currency: "EUR", financialYear: "Jan 1 - Dec 31" },
 ];
 
 export const ENTERPRISE_STATUS_LABELS = {
@@ -2145,4 +2208,289 @@ export const calculateCaWsdrf = async (payload) => {
     period_end: payload.periodEnd,
     training_expenditure_override: payload.trainingExpenditureOverride || null,
   });
+};
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Org-facing surface: the employer opens its France DSN, follows the four
+// lifecycle signals (FR-032) and drives its own idempotent outbox
+// (FR-033). Authority data — PAS rates, establishment AT/MP rate packs,
+// governed effectif, employer profile — is Super Admin-owned and lives in
+// superAdminService (compliance/france/*), exactly as the backend splits
+// them.
+export const createFranceDsnSubmission = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-submissions", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listFranceDsnSubmissionsForOrg = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/france/dsn-submissions", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnSubmission = async (submissionId, payload) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-submissions/${submissionId}/status`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createFranceDsnOutboxItem = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-outbox", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
+      params: { status, last_error: lastError || null },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getFranceReadinessForOrg = async (forPeriod) => {
+  try {
+    return await api.get("/api/payroll/france/readiness", {
+      params: { for_period: forPeriod || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+// ── Singapore IR21 tax clearance (hold / clearance / release) ──────────
+// Tenant-scoped on the server (the caller's own organization only);
+// lifting a hold needs a distinct approver, enforced server-side.
+export const listSgIr21Cases = async (params = {}) => {
+  const res = await api.get("/api/payroll/singapore/ir21-cases", { params });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const createSgIr21Case = async (payload) =>
+  // { employeeId, triggerType, triggerDate, awareDate }
+  api.post("/api/payroll/singapore/ir21-cases", payload);
+
+export const transitionSgIr21Case = async (caseId, payload) =>
+  // { status, filedDate?, filingReference?, directiveDate?, directiveReference?, directiveTaxAmount?, exemptionCategory?, reason? }
+  api.post(`/api/payroll/singapore/ir21-cases/${caseId}/transition`, payload);
+
+// ── Singapore Phase 5 — readiness, preflight, CPF EZPay, Compliance Centre ──
+// Every figure and status is computed by the server; these calls only fetch
+// or submit an operator's decision.
+export const getSgEmployerReadiness = async () => api.get("/api/payroll/singapore/readiness");
+
+export const getSgComplianceCentre = async () => api.get("/api/payroll/singapore/compliance-centre");
+
+export const getSgRunPreflight = async (runId) => api.get(`/api/payroll/singapore/runs/${runId}/preflight`);
+
+export const getSgAisReadiness = async (year) => api.get("/api/payroll/singapore/ais-readiness", { params: { year } });
+
+export const listSgPwmClassifications = async () => {
+  const res = await api.get("/api/payroll/singapore/pwm-classifications");
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const recordSgCessation = async (employeeId, dateOfLeaving) =>
+  api.post(`/api/payroll/singapore/employees/${employeeId}/cessation`, { dateOfLeaving });
+
+export const listSgCpfEzpay = async () => {
+  const res = await api.get("/api/payroll/generated-reports", { params: { reportType: "SG_CPF_EZPAY" } });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const prepareSgCpfEzpay = async ({ year, month, adviceCode = "01" }) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_CPF_EZPAY" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error("No Active CPF EZPay template for this year.");
+  return api.post("/api/payroll/singapore/reports/cpf-ezpay", { reportTemplateId: templateId, year, month, adviceCode });
+};
+
+// Singapore Phase 5.7 — internal compliance reports (PWM / LQS per CPF wage
+// month, IR21 register per year) generated server-side from the existing
+// evaluators. Resolves the Active template like prepareSgCpfEzpay; these
+// routes take snake_case bodies (GY/JM monthly/annual request schemas).
+const SG_COMPLIANCE_REPORTS = {
+  SG_PWM_COMPLIANCE: "pwm-compliance",
+  SG_LQS_COMPLIANCE: "lqs-compliance",
+  SG_IR21_REGISTER: "ir21-register",
+};
+
+export const generateSgComplianceReport = async (reportType, { year, month }) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active ${reportType} template for ${year}.`);
+  const body = reportType === "SG_IR21_REGISTER"
+    ? { report_template_id: templateId, year }
+    : { report_template_id: templateId, year, month };
+  return api.post(`/api/payroll/singapore/reports/${SG_COMPLIANCE_REPORTS[reportType]}`, body);
+};
+
+export const transitionSgCpfEzpay = async (reportId, payload) =>
+  // { status: APPROVED | SUBMITTED | ACCEPTED | REJECTED | UNKNOWN, reference?, note? }
+  api.post(`/api/payroll/singapore/reports/cpf-ezpay/${reportId}/transition`, payload);
+
+export const downloadSgCpfEzpayFile = async (reportId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}/api/payroll/singapore/reports/cpf-ezpay/${reportId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let detail = "The CPF EZPay file could not be downloaded.";
+    try { detail = (await res.json())?.detail || detail; } catch { /* non-JSON error body */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const match = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `cpf-ezpay-${reportId}.DTL`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return { filename };
+};
+
+// ── Singapore Phase 5.1 — corrections, salary deductions, DR freeze ─────
+export const correctSgPayslip = async (payslipId, reason) =>
+  api.post(`/api/payroll/singapore/payslips/${payslipId}/corrections`, { reason });
+
+export const listSgPayslipCorrections = async (payslipId) =>
+  api.get(`/api/payroll/singapore/payslips/${payslipId}/corrections`);
+
+export const createSgSalaryDeduction = async (employeeId, payload) =>
+  // { category, startDate, endDate?, evidenceRef, evidenceDate, amount? | ratePct?, totalToCollect?, priority? }
+  api.post(`/api/payroll/singapore/employees/${employeeId}/deductions`, payload);
+
+export const listSgSalaryDeductions = async (employeeId) =>
+  api.get(`/api/payroll/singapore/employees/${employeeId}/deductions`);
+
+export const freezeSgAfterRestore = async (restorePoint, restoreDate) =>
+  api.post("/api/payroll/singapore/disaster-recovery/freeze", { restorePoint, restoreDate: restoreDate || null });
+
+// Singapore SG-047 — release a post-restore bank-export hold after the bank reconciliation.
+export const releaseSgBankExportHold = async (runId, reference) =>
+  api.post(`/api/payroll/singapore/disaster-recovery/bank-hold/${runId}/release`, { reference });
+
+// Singapore SG-023 — IR8A extracts and their controlled manual-submission record (API DIRECT SUBMISSION: NOT READY).
+export const listSgIr8a = async () => {
+  const res = await api.get("/api/payroll/singapore/reports/ir8a");
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const transitionSgIr8a = async (reportId, { status, reference, note }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/transition`, { status, reference, note });
+// Prepare an EXPORT_READY IR8A extract for one income year from the Active SG_IR8A template.
+export const generateSgIr8a = async (year) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_IR8A" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active IR8A template for ${year}.`);
+  return api.post("/api/payroll/singapore/reports/ir8a", { report_template_id: templateId, year });
+};
+// Phase 6.8 (G3) — Revision (full values) / Amendment (differences) of an IRAS-acknowledged extract.
+export const createSgIr8aModification = async (reportId, { method, reason }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/modifications`, { method, reason });
+
+// ── Hong Kong (ZP-HK-ENG-001) — tenant workflows ───────────────────────
+// Every rule (MPF, IR56G hold, IRD, eMPF, entitlements, SP/LSP, four-eyes)
+// is enforced server-side; these calls only fetch or submit operator input.
+const HK = "/api/payroll/hong-kong";
+export const recordHkWorkHours = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/work-hours`, payload);
+export const getHkContinuousContract = (employeeId, asOf) =>
+  api.get(`${HK}/employees/${employeeId}/continuous-contract`, { params: { as_of: asOf } });
+export const listHkTaxClearanceCases = async () => {
+  const res = await api.get(`${HK}/tax-clearance`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const identifyHkDeparture = (payload) => api.post(`${HK}/tax-clearance`, payload);
+export const recordHkIr56gFiled = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/filed`, payload);
+export const requestHkHoldRelease = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/release-request`, payload);
+export const approveHkHoldRelease = (holdId) => api.post(`${HK}/tax-clearance/${holdId}/release-approve`, {});
+export const changeHkDeparture = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/change`, payload);
+export const closeHkHold = (holdId) => api.post(`${HK}/tax-clearance/${holdId}/close`, {});
+export const listHkIrdCases = async (yearOfAssessment) => {
+  const res = await api.get(`${HK}/ird/cases`, { params: yearOfAssessment ? { year_of_assessment: yearOfAssessment } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const createHkIrdEventCases = (employeeId) => api.post(`${HK}/ird/employees/${employeeId}/event-cases`, {});
+export const generateHkAnnualReturn = (yearOfAssessment) => api.post(`${HK}/ird/annual-return`, { yearOfAssessment });
+export const transitionHkIrdCase = (caseId, payload) => api.post(`${HK}/ird/cases/${caseId}/transition`, payload);
+export const amendHkIrdCase = (caseId, reason) => api.post(`${HK}/ird/cases/${caseId}/amend`, { reason });
+export const getHkIrdCaseHistory = async (caseId) => {
+  const res = await api.get(`${HK}/ird/cases/${caseId}/history`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const calculateHkAverageWage = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/average-wage`, payload);
+export const calculateHkEntitlement = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/entitlements`, payload);
+export const calculateHkTermination = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/termination`, payload);
+export const approveHkTermination = (resultId) => api.post(`${HK}/termination/${resultId}/approve`, {});
+export const listHkEmpfSubmissions = async () => {
+  const res = await api.get(`${HK}/empf/submissions`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const prepareHkEmpfSubmission = (contributionPeriod) => api.post(`${HK}/empf/submissions`, { contributionPeriod });
+export const transitionHkEmpfSubmission = (id, payload) => api.post(`${HK}/empf/submissions/${id}/transition`, payload);
+export const estimateHkSalariesTax = (payload) => api.post(`${HK}/salaries-tax/estimate`, payload);
+export const getHkRunPreflight = (runId) => api.get(`${HK}/runs/${runId}/preflight`);
+export const getHkEmployerReadiness = () => api.get(`${HK}/readiness`);
+export const recordHkEmployeeCopy = (caseId, evidenceRef) => api.post(`${HK}/ird/cases/${caseId}/employee-copy`, { evidenceRef });
+// HK statutory reports (GeneratedReport from an Active template). Bodies are
+// snake_case exactly as the server's request schemas declare them.
+export const generateHkBir56a = (reportTemplateId, yearOfAssessment) =>
+  api.post(`${HK}/reports/bir56a`, { report_template_id: reportTemplateId, year_of_assessment: yearOfAssessment });
+export const generateHkIr56b = (reportTemplateId, employeeId, yearOfAssessment) =>
+  api.post(`${HK}/reports/ir56b`, { report_template_id: reportTemplateId, employee_id: employeeId, year_of_assessment: yearOfAssessment });
+export const generateHkIr56Notification = (reportTemplateId, caseId) =>
+  api.post(`${HK}/reports/ir56-notification`, { report_template_id: reportTemplateId, case_id: caseId });
+export const generateHkEmpfRemittance = (reportTemplateId, submissionId) =>
+  api.post(`${HK}/reports/empf-remittance`, { report_template_id: reportTemplateId, submission_id: submissionId });
+export const generateHkMpfContributionRecord = (reportTemplateId, employeeId, contributionPeriod) =>
+  api.post(`${HK}/reports/mpf-contribution-record`, { report_template_id: reportTemplateId, employee_id: employeeId, contribution_period: contributionPeriod });
+export const generateHkTerminationStatement = (reportTemplateId, terminationResultId) =>
+  api.post(`${HK}/reports/termination-statement`, { report_template_id: reportTemplateId, termination_result_id: terminationResultId });
+// D-14 linked corrections of committed HK payroll (maker requests, a different checker approves).
+export const requestHkCorrection = (payslipId, reason) => api.post(`${HK}/payslips/${payslipId}/corrections`, { reason });
+export const listHkCorrections = async (employeeId) => {
+  const res = await api.get(`${HK}/corrections`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listHkTerminationResults = async (employeeId) => {
+  const res = await api.get(`${HK}/termination-results`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listHkAverageWageSnapshots = async (employeeId) => {
+  const res = await api.get(`${HK}/employees/${employeeId}/average-wage-snapshots`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const requestHkAverageWageOverride = (snapshotId, payload) => api.post(`${HK}/average-wage/${snapshotId}/override-request`, payload);
+export const approveHkAverageWageOverride = (snapshotId) => api.post(`${HK}/average-wage/${snapshotId}/override-approve`, {});
+export const approveHkCorrection = (correctionId) => api.post(`${HK}/corrections/${correctionId}/approve`, {});
+export const rejectHkCorrection = (correctionId, reason) => api.post(`${HK}/corrections/${correctionId}/reject`, { reason });
+// D-19 legal holds and the HK statutory-data access log.
+export const listHkLegalHolds = async () => {
+  const res = await api.get(`${HK}/legal-holds`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const placeHkLegalHold = (payload) => api.post(`${HK}/legal-holds`, payload);
+export const releaseHkLegalHold = (holdId, reason) => api.post(`${HK}/legal-holds/${holdId}/release`, { reason });
+export const listHkAccessEvents = async (employeeId) => {
+  const res = await api.get(`${HK}/access-events`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
 };

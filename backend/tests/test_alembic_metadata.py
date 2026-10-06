@@ -3,7 +3,35 @@
 The graph must have one head, no duplicate revision IDs, and retain the
 known Germany migration chain wiring. These tests inspect the files directly
 and also load the real Alembic ScriptDirectory without touching a database.
-The current graph has head ``998877665544`` and 146 revisions.
+The current graph has head ``c4d5e6f7a8b9`` (drop the Ireland Revenue
+submission + monthly return tables, undoing ``9f8e7d6c5b4a``) on top of
+``7c3e1a9d5f20`` (merge of main's
+``998877665544`` orphan IE/FR column drop with venu's chain, re-adding those
+columns if missing) on top of ``998877665544`` (itself on ``f0b1c2d3e4f5``,
+making that a branchpoint) and ``a1b2c3d4e5f7`` (add composite index on
+payroll_attendance_records for attendance queries, Phase 1.1) on top of
+``9f8e7d6c5b4a`` (recreate Ireland Revenue
+submission + monthly return tables, ZP-IE-ENG-001 WP2, since dropped again by
+``c4d5e6f7a8b9``) on top of
+``2c7d9e0f3a5b`` (merge
+payroll_ie_ytd_accumulators into payroll_ytd_accumulators, ZP-IE-ENG-001,
+7 IE tables -> 3) on top of ``f6b2c4d8e1a3`` (drop the three dead Ireland
+tables, same task) on top of ``e5a1c7b9d204`` (add
+payroll_ie_statutory_sick_leave_records, ZP-IE-ENG-001 §11/IE-037) on top of
+``c7d4e9f1a2b3`` (add ie_calculation_snapshot to payslip_items, also
+ZP-IE-ENG-001) on top of ``4b13831d574b`` (ensure
+communication_events, itself on top of merge ``5ae06cfda828``), and 160
+revisions — the
+merge of venu's branch (PR withholding certificates -> France compliance
+tables -> France establishments/editable fields -> Ireland) with main's
+(communication_events -> drop orphan SGP columns), which forked at
+``d4e5f6a7c8b9`` (Rugvedh's auth_email_events table).
+
+Note ``c4d5e6f7a8b9``, ``a1b2c3d4e5f7``, ``9f8e7d6c5b4a``, ``2c7d9e0f3a5b``,
+``f6b2c4d8e1a3``, ``e5a1c7b9d204`` and ``c7d4e9f1a2b3`` are plain
+single-parent revisions, so they
+add no branchpoint: ``test_alembic_branchpoints_are_only_the_known_existing_ones``
+is unchanged by them and keeps its own hardcoded list.
 """
 
 import re
@@ -64,7 +92,44 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["998877665544"]
+    # R2 (2026-09-29): origin/main's d4e5f6a7c8b9 -> e7f1a2b3c4d5 ->
+    # f0b1c2d3e4f5 -> 998877665544 are carried byte-identically, and the
+    # Singapore chain's first revision c3d9e1f4a7b2 now sits on 998877665544,
+    # so the graph is linear and identical to the merged main + Singapore one.
+    # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001): hk_* statutory
+    # profile columns, payslip_items.hk_calculation_trace and the seven hk_
+    # registries, down_revision 917a54ed2347 (re-parented from 445abd6a9083 at the
+    # main integrations — linear, no new branchpoint).
+    # 445abd6a9083 (2026-09-29, SG G3 IR8A Revision/Amendment): the
+    # sgp_ir8a_modifications table models.SgpIr8aModification declares,
+    # down_revision b8e3d5f2a9c7 (was parked on a release-line merge that
+    # no longer exists; see the migration docstring).
+    # b8e3d5f2a9c7 (2026-09-25, Phase 5.5 SG-018): sgp_pwm_overtime_schedules,
+    # down_revision a7c2e9f4b1d6.
+    # a7c2e9f4b1d6 (2026-09-24, Phase 5 S1): payroll_employees.sgp_wp_sector /
+    # sgp_wp_skill_level / sgp_wp_levy_tier, down_revision f6a1b4c8d3e5
+    # f6a1b4c8d3e5 (2026-09-24): sgp_ir21_cases, down_revision e5f9a3b7c2d4
+    # (payroll_employees.sgp_work_pass_issue/end_date, on d4e8f2a6b9c1 —
+    # payslip_items.sgp_calculation_trace, on c3d9e1f4a7b2 — which added the
+    # Singapore CPF employee columns on a5f6e7d8c9b0).
+    # 66072e2d80a9 (2026-09-29): merge of that Singapore head with venu's
+    # c4d5e6f7a8b9 (Ireland Revenue tables, on 7c3e1a9d5f20 -> 998877665544).
+    # e8f1a2b3c4d5 (2026-09-30, ZP-SE-ENG-001): Sweden jurisdiction support
+    # (collective agreements, sick episodes, leave ledgers, se_* profile
+    # columns), down_revision 66072e2d80a9 — idempotency-guarded.
+    # 7a1b2c3d4e5f (ZP-IT-ENG-001): Italy jurisdiction support — Italy
+    # employer profile + filing outbox tables, fifteen it_* profile columns,
+    # payslip_items.it_calculation_snapshot; down_revision e8f1a2b3c4d5 —
+    # idempotency-guarded, and it adds NO new branchpoint (single child of
+    # e8f1a2b3c4d5, so the branchpoint list below is unchanged).
+    # 917a54ed2347 (ZP-IT-ENG-001 P2): Italy ledgers — CCNL level terms, TFR
+    # ledger, F24 lines, LUL entries + it_contractual_weekly_hours; single child
+    # of 7a1b2c3d4e5f, so no new branchpoint.
+    # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001), re-parented onto
+    # 917a54ed2347 (Italy ledgers) when nikhil integrated main — linear, single head.
+    # 2d0cdeeeecc4 (2026-10-05, Hong Kong remediation gap 6): partial unique
+    # indexes on the hk_ tenant workflows, single child of cd62503afe26.
+    assert heads == ["2d0cdeeeecc4"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -76,7 +141,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["998877665544"]
+    assert list(script.get_heads()) == ["2d0cdeeeecc4"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -84,22 +149,30 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
     adds exactly one new branchpoint (`2b3c4d5e6f70`, where Germany's
     post-fork history diverges from `main`'s own); every other branchpoint
     here is pre-existing on `main`'s own independently-evolved graph, plus
-    the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`."""
+    the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`,
+    and `d4e5f6a7c8b9` where venu's France/Ireland chain and main's
+    communications chain fork (rejoined by merge `5ae06cfda828`), and
+    `f0b1c2d3e4f5` where main's `998877665544` and venu's chain fork
+    (rejoined by merge `7c3e1a9d5f20`)."""
     revs = _parse_revisions()
     children = _children_map(revs)
     branchpoints = sorted(k for k, v in children.items() if len(v) > 1)
     assert branchpoints == [
         "1dc04f15a9b7", "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181",
-        "737e7bfa2d77", "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
-        "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf", "f1b78410d568",
-        "fbfe6d7eeb2e",
+        "737e7bfa2d77",
+        # 998877665544: main's Singapore chain (c3d9e1f4a7b2) and venu's
+        # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
+        "998877665544",
+        "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
+        "f0b1c2d3e4f5", "f1b78410d568", "fbfe6d7eeb2e",
     ]
 
 
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 146
+    assert len(revs) == 173   # + 917a54ed2347 (Italy P2 ledgers) + cd62503afe26 (Hong Kong) + 2d0cdeeeecc4 (HK uniqueness)
 
 
 def test_germany_head_chain_wiring_is_intact():

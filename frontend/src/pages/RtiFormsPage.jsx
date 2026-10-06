@@ -42,17 +42,17 @@ export default function RtiFormsPage() {
         <FileText size={20} className="text-primary" />
         <div>
           <h1 className="text-2xl font-bold text-foreground">RTI & Statutory Forms</h1>
-          <p className="text-sm text-foreground-muted mt-0.5">Every UK FPS/EPS/P45/P60 and India Form 130/138/123 generated, across all organizations, with submission tracking status where it applies.</p>
+          <p className="text-sm text-foreground-muted mt-0.5">Every UK FPS/EPS/P45/P60, India Form 130/138/123 and Hong Kong BIR56A/IR56 form generated, across all organizations, with submission tracking status where it applies.</p>
         </div>
       </div>
 
       <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-surface-muted p-1 w-fit flex-wrap">
-        {["", "FPS", "EPS", "P45", "P60", "FORM_130", "FORM_138", "FORM_123"].map((t) => (
+        {["", "FPS", "EPS", "P45", "P60", "FORM_130", "FORM_138", "FORM_123", "HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G"].map((t) => (
           <button
             key={t || "all"} onClick={() => setReportTypeFilter(t)}
             className={`rounded-md px-3 py-1.5 text-xs font-semibold ${reportTypeFilter === t ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"}`}
           >
-            {t ? (t.startsWith("FORM_") ? `Form ${t.replace("FORM_", "")}` : t) : "All"}
+            {t ? (t.startsWith("FORM_") ? `Form ${t.replace("FORM_", "")}` : t.startsWith("HK_") ? `HK ${t.slice(3)}` : t) : "All"}
           </button>
         ))}
       </div>

@@ -96,6 +96,13 @@ class GoldenRate:
     # None (every existing UK/CA/India case) is unaffected; only a case
     # that explicitly sets it activates a state program.
     jurisdiction_state: Optional[str] = None
+    # Singapore `cpf_age_band_semantics` (ContributionRate.text_value).
+    # None for every existing case, unaffected.
+    text_value: Optional[str] = None
+    # Row-level dating (Sweden's temporary youth reduction is windowed on the
+    # row's own dates, SE-005). None for every existing case, unaffected.
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
 
 
 @dataclass
@@ -117,6 +124,14 @@ class GoldenSlab:
     # Optional/None for every existing UK/CA case, unaffected.
     adjustment_amount: Optional[Decimal] = None
     assessment_basis: Optional[str] = None
+    # Singapore CPF_RATE_BAND rows: age band (tax_regime) and rule id
+    # (rate_label) — see engine/countries/singapore.py. None/"" for every
+    # existing case, unaffected.
+    tax_regime: Optional[str] = None
+    rate_label: str = ""
+    # Sweden SE_TAX_TABLE / SE_ONE_TIME_PAYMENT bands. None elsewhere.
+    tax_table_number: Optional[str] = None
+    tax_column: Optional[str] = None
 
 
 def _to_decimal(value):
@@ -142,6 +157,9 @@ def _build_rate_map(raw: Optional[dict]) -> dict:
             employer_rate_pct=_to_decimal(spec.get("employer_rate_pct")),
             flat_amount=_to_decimal(spec.get("flat_amount")),
             jurisdiction_state=spec.get("jurisdiction_state"),
+            text_value=spec.get("text_value"),
+            effective_from=_to_date(spec.get("effective_from")),
+            effective_to=_to_date(spec.get("effective_to")),
         )
     return rate_map
 
@@ -162,6 +180,10 @@ def _build_slabs(raw: Optional[list]) -> list:
             jurisdiction_state=s.get("jurisdiction_state"),
             adjustment_amount=_to_decimal(s.get("adjustment_amount")),
             assessment_basis=s.get("assessment_basis"),
+            tax_regime=s.get("tax_regime"),
+            rate_label=s.get("rate_label", ""),
+            tax_table_number=s.get("tax_table_number"),
+            tax_column=s.get("tax_column"),
         )
         for s in raw
     ]
@@ -171,7 +193,14 @@ def build_context(case_context: dict) -> PayrollContext:
     gross = _to_decimal(case_context["gross"])
     return PayrollContext(
         gross=gross,
-        basic=gross,
+        # Singapore mixed-earning fixtures (Phase 5.1) may state the basic and
+        # the other components; every other fixture keeps basic = gross.
+        basic=_to_decimal(case_context["basic"]) if case_context.get("basic") is not None else gross,
+        hra=_to_decimal(case_context.get("hra")) or Decimal("0"),
+        special_allowance=_to_decimal(case_context.get("special_allowance")) or Decimal("0"),
+        overtime=_to_decimal(case_context.get("overtime")) or Decimal("0"),
+        unpaid_leave_days=int(case_context.get("unpaid_leave_days") or 0),
+        calendar_days=int(case_context["calendar_days"]) if case_context.get("calendar_days") else None,
         country=case_context.get("country", "UK"),
         pay_frequency=case_context.get("pay_frequency", "Monthly"),
         pay_date=_to_date(case_context.get("pay_date")),
@@ -217,7 +246,67 @@ def build_context(case_context: dict) -> PayrollContext:
         au_state_payroll_tax_ytd_remuneration_before=_to_decimal(case_context.get("au_state_payroll_tax_ytd_remuneration_before")),
         au_payroll_tax_regional_status=case_context.get("au_payroll_tax_regional_status"),
         au_payroll_tax_charity_exempt=case_context.get("au_payroll_tax_charity_exempt"),
+        # Singapore (ZP-SG-ENG-001 §17 fixtures): CPF cohort facts, the
+        # Additional Wages split and the YTD CPF accumulators singapore.py
+        # reads. Optional/None for every existing UK/CA/IN/US/AU case.
+        additional_compensation=_to_decimal(case_context.get("additional_compensation")) or Decimal("0"),
+        sgp_cpf_residency_status=case_context.get("sgp_cpf_residency_status"),
+        sgp_spr_effective_date=_to_date(case_context.get("sgp_spr_effective_date")),
+        sgp_cpf_contribution_arrangement=case_context.get("sgp_cpf_contribution_arrangement"),
+        sgp_work_pass_type=case_context.get("sgp_work_pass_type"),
+        sgp_work_pass_issue_date=_to_date(case_context.get("sgp_work_pass_issue_date")),
+        sgp_work_pass_end_date=_to_date(case_context.get("sgp_work_pass_end_date")),
+        sgp_work_pass_end_reason=case_context.get("sgp_work_pass_end_reason"),
+        sgp_shg_funds=case_context.get("sgp_shg_funds"),
+        sgp_wp_sector=case_context.get("sgp_wp_sector"),
+        sgp_wp_skill_level=case_context.get("sgp_wp_skill_level"),
+        sgp_wp_levy_tier=case_context.get("sgp_wp_levy_tier"),
+        sgp_named_allowance_items=case_context.get("sgp_named_allowance_items"),
+        sgp_cpf_wage_classification=case_context.get("sgp_cpf_wage_classification"),
+        sgp_iras_classification=case_context.get("sgp_iras_classification"),
+        ytd_cpf_ow_subject_before=_to_decimal(case_context.get("ytd_cpf_ow_subject_before")),
+        ytd_cpf_aw_subject_before=_to_decimal(case_context.get("ytd_cpf_aw_subject_before")),
+        ytd_cpf_aw_paid_before=_to_decimal(case_context.get("ytd_cpf_aw_paid_before")),
+        sgp_aw_ledger=case_context.get("sgp_aw_ledger"),
+        sgp_employer_hires_foreign_workers=case_context.get("sgp_employer_hires_foreign_workers"),
+        date_of_joining=_to_date(case_context.get("date_of_joining")),
+        date_of_leaving=_to_date(case_context.get("date_of_leaving")),
+        employment_type=case_context.get("employment_type"),
+        period_start=_to_date(case_context.get("period_start")),
+        period_end=_to_date(case_context.get("period_end")),
+        sgp_employment_facts=case_context.get("sgp_employment_facts"),
+        # Hong Kong (ZP-HK-ENG-001 §16 fixtures): worker facts, verified hours
+        # and the period-overlapping SMW segments countries/hong_kong.py reads.
+        hk_worker_facts=case_context.get("hk_worker_facts"),
+        hk_hours=case_context.get("hk_hours"),
+        hk_rule_segments=case_context.get("hk_rule_segments"),
+        # Sweden (ZP-SE-ENG-001 §15 golden payroll): the worker tax/social-
+        # insurance profile sweden.py resolves, the youth-threshold month
+        # accumulator and the SLP pension-cost base. None elsewhere.
+        **_sweden_context(case_context),
     )
+
+
+def _sweden_context(case_context: dict) -> dict:
+    profile = case_context.get("sweden_statutory_profile")
+    if profile is None and case_context.get("country") != "SE":
+        return {}
+    from types import SimpleNamespace
+
+    facts = dict(profile or {})
+    for key in ("se_decision_effective_from", "se_decision_effective_to"):
+        if facts.get(key):
+            facts[key] = _to_date(facts[key])
+    for key in ("se_decision_monthly_withholding", "se_decision_rate_pct", "se_annual_income",
+                "se_employee_pension_share", "se_employer_pension_share"):
+        if facts.get(key) is not None:
+            facts[key] = _to_decimal(facts[key])
+    return {
+        "sweden_statutory_profile": SimpleNamespace(**facts) if profile is not None else None,
+        "se_month_to_date_prior": _to_decimal(case_context.get("se_month_to_date_prior")),
+        "se_pension_cost_base": _to_decimal(case_context.get("se_pension_cost_base")),
+        "se_cash_pay": _to_decimal(case_context.get("se_cash_pay")),
+    }
 
 
 class GoldenCaseMismatch(AssertionError):

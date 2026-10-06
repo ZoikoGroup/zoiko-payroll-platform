@@ -15,6 +15,17 @@ export { default as JMReportTemplatesPage } from "./JMReportTemplatesPage";
 export { default as BSReportTemplatesPage } from "./BSReportTemplatesPage";
 export { default as TTReportTemplatesPage } from "./TTReportTemplatesPage";
 export { default as DEReportTemplatesPage } from "./DEReportTemplatesPage";
+export { default as PRReportTemplatesPage } from "./PRReportTemplatesPage";
+// Ireland (ZP-IE-ENG-001) — ROS (Revenue Online System) per-employee
+// certificate plus the three ROS report types Revenue's ROS requires for a
+// period. Same thin wrapper pattern as every other jurisdiction above.
+export { default as IEReportTemplatesPage } from "./IEReportTemplatesPage";
+// Singapore (final closure) — the 11 SG templates in the shared lifecycle module.
+export { default as SGReportTemplatesPage } from "./SGReportTemplatesPage";
+// Hong Kong (ZP-HK-ENG-001) — same thin wrapper; no authority file layout seeded (G2).
+export { default as HKReportTemplatesPage } from "./HKReportTemplatesPage";
+// Sweden (ZP-SE-ENG-001) — AGI individual-statement data extract.
+export { default as SEReportTemplatesPage } from "./SEReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -40,4 +51,9 @@ export const COUNTRY_CODE_TO_ROUTE = {
   BS: "bahamas",
   TT: "trinidad-and-tobago",
   DE: "germany",
+  PR: "puerto-rico",
+  IE: "ireland",
+  SG: "singapore",
+  HK: "hong-kong",
+  SE: "sweden",
 };

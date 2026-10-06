@@ -64,7 +64,30 @@ class MissingComplianceConfigurationError(Exception):
 #   US — same unresolved risk applies (never actually attempted).
 #   UK — also blocked by its tax pack still being Draft (see history above
 #        this rewrite) — _find_active_tax_pack only matches status=="Active".
-_VALIDATION_ENABLED_COUNTRIES: set[str] = set()
+# SG — enabled from day one, 2026-09-23 (ZP-SG-ENG-001 SG-001/SG-003:
+#      "never a default rate"). Singapore is a brand-new jurisdiction
+#      with zero existing orgs/employees/synced rows, so none of the
+#      IN-style re-sync risk above applies — and singapore.py defines no
+#      hardcoded fallback at all, so there is nothing to fall back to.
+# HK — enabled from day one, 2026-09-30 (ZP-HK-ENG-001: "never invent a
+#      statutory value"). Same reasoning as SG: a brand-new jurisdiction
+#      with no orgs and no hardcoded fallback in countries/hong_kong.py.
+#   IE — enabled on venu (ZP-IE-ENG-001); kept alongside SG at the merge.
+#   SE — enabled with the Sweden build (ZP-SE-ENG-001): a brand-new
+#        jurisdiction with zero existing orgs/employees/synced rows, and
+#        sweden.py defines no hardcoded statutory fallback — same
+#        day-one rationale as SG above.
+# Countries whose statutory parameters have NO engine fallback: a missing
+# configured row raises MissingComplianceConfigurationError instead of silently
+# warning and substituting a hardcoded default (see the resolver below).
+# Each was added on the SAME day its jurisdiction landed, with zero
+# pre-existing organizations in that country — Sweden's entry notes this is
+# "exactly Singapore's situation", i.e. the gate is safe to enable from day one
+# and doing so later would only leave a window where a default was honoured.
+# Italy is the same case (ZP-IT-ENG-001 §30): no Italian packs, rates, registry
+# row or payroll runs exist, so flipping IT on at landing makes readiness — not
+# a default — the thing that keeps payroll honest.
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
@@ -132,7 +155,46 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 # credit_before > 0 — so every employee is byte-for-byte unaffected
 # until a real credit balance is manually entered (which, per this
 # feature's own disclosed scope, no UI/API path exists to do yet).
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY"}
+# PR added 2026-09-23 for Puerto Rico's five independent wage-base caps/
+# thresholds (SS $184,500, Additional Medicare $200,000, FUTA-equivalent
+# $7,000, DTRH unemployment $7,000, SINOT $9,000 — ZP-PR-ENG-001 §13/§14).
+# Puerto Rico is a brand-new country with zero existing payroll history to
+# create a partial-year gap (same "0 real employees exist for this country
+# in the live DB at enable time" safety reasoning as every other brand-new
+# country's own addition above), so enabling it from day one is the
+# correct default. Entirely independent of "US" above — service.py's
+# _load_pr_ytd/_upsert_pr_ytd_accumulator use their own PR-scoped
+# PayrollYtdAccumulator component keys, never the US ones.
+# IE — added 2026-09-28 for ZP-IE-ENG-001. This switch gates service.py's
+# _load_<cc>_ytd/_upsert_<cc>_ytd_accumulator pair, all of which read and
+# write the generic PayrollYtdAccumulator. Ireland originally sat OUTSIDE this
+# set behind its own dedicated payroll_ie_ytd_accumulators table, justified on
+# the grounds that USC needs a payable base AND a paid figure, PRSI has no
+# employee tax at all, and MyFutureFund needed a threshold-crossing DATE.
+#
+# That justification did not survive contact with the UK's and Australia's
+# equivalents, which already ride this shared table. The real answer is that
+# the component key carries the meaning, so no reader has to guess which half
+# of the (ytd_taxable_wages, ytd_tax_withheld) pair is live:
+#   ie_usc_payable     -> ytd_taxable_wages = USC's own payable base
+#   ie_usc_paid        -> ytd_tax_withheld  = USC charged to date
+#   ie_prsi_reckonable -> ytd_taxable_wages = reckonable pay (no employee tax)
+#   ie_prsi_weeks      -> ytd_tax_withheld  = contribution weeks to date
+#   ie_mff_earnings    -> ytd_taxable_wages = MyFutureFund earnings
+# The one genuinely non-numeric value, the MyFutureFund threshold-crossing
+# date, needed no column at all: the crossing payroll is already derivable
+# from the payslip's own ie_calculation_snapshot (threshold /
+# earnings_ytd_before / earnings_ytd_after are snapshotted verbatim), and the
+# column it lived in was never read back by anything.
+#
+# So the dedicated table was the last piece of duplicated YTD schema in the
+# Ireland build, and it is gone. See
+# tests/test_ireland_statutory_catalog.py::test_ie_uses_the_generic_ytd_accumulator
+# and its sibling, which fail if anyone reintroduces a dedicated Ireland table.
+# SG added 2026-09-23 for the CPF annual wage ceiling (SG-007/SG-010) —
+# same brand-new-jurisdiction reasoning as KY above (zero existing SG
+# payroll history, so no partial-year gap).
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY", "PR", "IE", "SG"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -702,6 +764,31 @@ _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES: set[str] = {"UK"}
 # into that pay period's gross — see tests/test_uk_statutory_leave_
 # wiring.py for the already-proven enabled-path behavior.
 
+# Per-country rollout switch for assessing IRISH statutory sick pay (ZP-IE-ENG-001
+# §11, IE-037) when a `sick` leave request is approved.
+#
+# Deliberately EMPTY, unlike the UK switch above. The Irish entitlement itself
+# is implemented and unit-tested (countries/ireland.py
+# calculate_statutory_sick_pay) — 5 days per CALENDAR year, 13 weeks' service,
+# medical certification, 70% of usual daily earnings capped at EUR 110/day — but
+# flipping this on changes what Irish employees are actually PAID, and the spec
+# gates that behind G5 (labour pay: "NMW, sick leave, annual/public holiday and
+# sector-rule gating validated for launch cohort").
+#
+# The unresolved part is the payroll MECHANIC, not the entitlement: Irish
+# statutory sick pay normally operates by REDUCING the pay the employee would
+# otherwise have received and replacing it with the 70%-capped credit, which
+# behaves very differently for a salaried employee whose pay is unaffected by
+# absence than for an hourly one. Until a specialist rules on that treatment
+# (and on how the 5-day calendar-year counter resets mid-employment), this stays
+# off. Enabling it is a one-line change with an evidence trail, deliberately
+# NOT a silent side effect of shipping the calculation.
+#
+# While OFF, approving an Irish `sick` leave request behaves exactly as it always
+# has: attendance is still synced, leave balances still decrement, the day is
+# still not treated as unpaid, and no sick-pay amount is computed or frozen.
+_IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES: set[str] = set()
+
 # Per-STATE (not per-country, unlike every switch above — the US isn't one
 # jurisdiction) rollout switch for a state's real income-tax withholding
 # (ZP-TAX-US-2026-001 §4). While a state is absent from this set, us.py
@@ -1174,6 +1261,9 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
         if getattr(s, "rule_type", None) not in (
             "SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY",
             "CA_RETIRING_ALLOWANCE_BAND", "AU_PAYG_COEFFICIENT", "AU_STSL_COEFFICIENT", "TT_NIS_CLASS",
+            # Singapore CPF/SHG band tables — read directly by
+            # engine/countries/singapore.py, never a marginal-bracket sum.
+            "CPF_RATE_BAND", "SHG_FUND_BAND",
         )
     ]
 

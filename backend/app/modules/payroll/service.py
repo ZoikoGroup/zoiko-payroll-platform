@@ -28,13 +28,13 @@ import copy
 import json
 import hashlib
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func as sa_func, tuple_, or_
+from sqlalchemy import func as sa_func, tuple_, or_, and_, case as sa_case, and_ as sa_and_
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
@@ -47,10 +47,11 @@ from app.modules.payroll.models import (
     PAYROLL_STATUS_ORDER,
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate, NewHireReport,
     ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
-    StatutoryFilingCalendar, StatutoryFiling, PayrollYtdAccumulator, OrganizationYtdAccumulator,
+    StatutoryFilingCalendar, StatutoryFiling, SgpIr21Case, PayrollYtdAccumulator, OrganizationYtdAccumulator,
     EmployeeEstablishment, PayrollNiReliefFact, CourtOrderedDeduction, RtiSubmission, SuperGuaranteeLiability,
     PackHotfixActivation, TestCertificationRun, TaxabilityRule, StateLocalProgramReadiness,
     SalaryTdsDeclaration, SalaryTdsClaim, EmployeeBenefitValuation,
+    PRWithholdingCertificate,
     EmployeeStatutoryProfile, PapAlgorithmAsset, GermanyHealthFund,
     GermanyContributionCeiling, GermanyPvConfiguration, GermanyPapRelease, GermanyMinijobMidijobParameter,
     GermanyElstamChangeListBatch, GermanyElstamImportAttempt, GermanyEarningTaxabilityRule,
@@ -60,10 +61,22 @@ from app.modules.payroll.models import (
     GermanyOvertimeWageTaxResult, GermanyOvertimeSocialInsuranceResult,
     GermanyOvertimePremiumComponent, GermanyAccidentInsuranceProfile,
     GermanyChurchTaxException,
+    EmployerFranceProfile, FranceEstablishment, FranceEstablishmentRatePack, FrancePASRate,
+    FranceDsnSubmission, FranceDsnOutboxItem,
+    IrelandRpnSnapshot, IrelandMyFutureFundStatus,
+    IrelandStatutorySickLeaveRecord,
+    CollectiveAgreement, SwedenSickEpisode, SwedenLeaveLedger,
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
-from app.modules.payroll.employee_validation import get_employee_validation_strategy, _STRATEGIES
+from app.modules.payroll.employee_validation import (
+    get_employee_validation_strategy, _STRATEGIES, mask_identifier, restore_masked_compliance_fields,
+    restore_masked_employee_columns,
+    mask_nric_fin,
+)
 from app.modules.payroll import bank_routing
+# Italy (ZP-IT-ENG-001) service layer — input resolver, YTD posting, snapshot.
+from app.modules.payroll import italy_service as _italy_service
+from app.modules.payroll import jurisdiction_hooks, retention_service
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
     EmployeeCreate, EmployeeUpdate, BulkEmployeeItem, BulkEmployeeRequest,
@@ -77,8 +90,13 @@ from app.modules.payroll.schemas import (
     GermanyElstamChangeListBatchCreate, GermanyElstamChangeListBatchStatusUpdate,
     GermanyEarningTaxabilityRuleCreate, GermanyHealthFundU1TariffCreate,
     GermanyOvertimeWorkRecordCreate,
+    EmployerFranceProfileUpsert, FranceEstablishmentRatePackUpsert,
+    FrancePASRateUpsert, FranceDsnSubmissionCreate, FranceDsnStatusUpdate,
+    FranceDsnOutboxCreate,
 )
-from app.core.exceptions import NotFoundException, BadRequestException, GermanyPapGateBlockedException
+from app.core.exceptions import (
+    NotFoundException, BadRequestException, GermanyPapGateBlockedException, FranceCalculationBlockedException,
+)
 from fastapi import HTTPException, status as http_status
 
 # Sourced from engine/standard.py — the real calculation engine — instead of
@@ -92,6 +110,7 @@ from app.modules.payroll.engine.countries.shared import (
     _YTD_ACCUMULATOR_ENABLED_COUNTRIES, _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES,
     _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES, _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES,
     _UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES, _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
+    _IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
 )
 
 
@@ -106,6 +125,11 @@ _COUNTRY_NAME_TO_CODE = {
     "australia": "AU", "au": "AU",
     "germany": "DE", "de": "DE",
     "canada": "CA", "ca": "CA",
+    # Without this, "Singapore" would fall through to the 2-letter
+    # truncation below and resolve to "SI".
+    "singapore": "SG", "sg": "SG",
+    # Without this, "Hong Kong" would truncate to "HO".
+    "hong kong": "HK", "hong kong sar": "HK", "hk": "HK", "hkg": "HK",
 }
 
 
@@ -115,7 +139,20 @@ def _normalize_country(country: str) -> str:
     if not country:
         return "IN"
     key = country.strip().lower()
-    return _COUNTRY_NAME_TO_CODE.get(key, country.strip().upper()[:2])
+    if key in _COUNTRY_NAME_TO_CODE:
+        return _COUNTRY_NAME_TO_CODE[key]
+    # Countries not in the small dict above (e.g. the Caribbean/Puerto Rico
+    # jurisdictions) still need a real full-name lookup before falling back
+    # to a blind [:2] truncation, which mis-resolves multi-word names (e.g.
+    # "Cayman Islands" -> "CA", colliding with Canada's real code).
+    # app.core.jurisdiction is the complete/authoritative registry for
+    # these; imported locally to avoid a module-load-time import cycle,
+    # matching this file's existing pattern (see get_company_details below).
+    from app.core.jurisdiction import get_jurisdiction_code
+    code = get_jurisdiction_code(country)
+    if code:
+        return code
+    return country.strip().upper()[:2]
 
 
 def _round2(value: Decimal) -> Decimal:
@@ -457,6 +494,14 @@ def apply_extracted_rate(db: Session, organization_id: int, kind: str, row: dict
     without both of these is invisible to real payroll runs even though
     it appears "applied" in the UI — this was a real bug (rates vanishing
     from payroll runs after being applied) fixed here."""
+    # Phase 6.10: a canonical-pack-only country's statutory rows are never
+    # org-level, and never written from an extracted document preview.
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    if (get_jurisdiction_code(country_code) or (country_code or "").upper()) in _CANONICAL_PACK_ONLY_COUNTRIES:
+        raise BadRequestException(
+            f"{country_code} statutory rates come only from the Super Admin's Active statutory pack (maker-checker) — "
+            "they cannot be applied from an extracted document to an organisation.")
     if kind == "contributionRate":
         label = row.get("label", "")
         component_key = _component_key_for_label(label)
@@ -572,6 +617,22 @@ def list_jurisdiction_packs(db: Session, country: str, state: str = None) -> Lis
     return query.order_by(JurisdictionPack.version.desc()).all()
 
 
+def find_jurisdiction_pack_upsert_target(db: Session, data: "JurisdictionPackUpsert") -> Optional[JurisdictionPack]:
+    """The existing row an upsert would edit: by primary key when `data.id`
+    is given, else by (packId, version). Shared by upsert_jurisdiction_pack
+    and the org-facing route's tax-pack guard so both resolve the same row."""
+    existing = None
+    if data.id:
+        existing = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.id).first()
+    if not existing:
+        existing = (
+            db.query(JurisdictionPack)
+            .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
+            .first()
+        )
+    return existing
+
+
 def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_id: Optional[int] = None) -> JurisdictionPack:
     """Create or update a pack. When `data.id` is provided (editing an
     existing pack in place), the lookup is by primary key — the only way
@@ -592,14 +653,16 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
     Compliance its version chain (1.0 -> 1.1 -> 2.0) without ever mutating
     or deleting an earlier row.
     """
-    existing = None
-    if data.id:
-        existing = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.id).first()
-    if not existing:
-        existing = (
-            db.query(JurisdictionPack)
-            .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
-            .first()
+    existing = find_jurisdiction_pack_upsert_target(db, data)
+    # Completion programme (all countries — security): an existing pack's type
+    # never changes. A "policy" payload aimed at a tax pack's id previously
+    # rewrote that tax pack's metadata AND its pack_type, and the org-facing
+    # route only checked the payload's packType. No legitimate flow converts
+    # a pack between tax and policy.
+    if existing is not None and existing.pack_type != data.packType:
+        raise BadRequestException(
+            f"Pack {existing.pack_id} v{existing.version} is a {existing.pack_type} pack — its type cannot be "
+            f"changed to {data.packType!r}."
         )
     fields = dict(
         pack_id=data.packId,
@@ -762,6 +825,11 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         old_value=None, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
         reason=data.reason,
     )
+    if fields.get("pack_type") == "tax":
+        # Covers the new version's own effective window and, via
+        # _clone_pack_rates above, the rows it was pre-populated with —
+        # both can make this the pack that resolves for a given date.
+        _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -877,6 +945,30 @@ def _require_editable_policy_pack(pack: "JurisdictionPack") -> None:
         )
 
 
+def _invalidate_tax_config_cache_on_canonical_write() -> None:
+    """Drop every cached canonical tax resolution after a write that could
+    change what one would resolve to.
+
+    A single indirection point for the Redis tax cache
+    (engine/tax_cache.py) so the invalidation list is reviewable in one
+    place rather than being an import plus a call repeated at each site.
+    Every caller's reason for needing it is specific and documented
+    there; what they share is that each mutates either a canonical
+    ContributionRate/TaxSlab row or the pack metadata that decides whether
+    those rows are resolvable at all.
+
+    A no-op when Redis is unconfigured, which is the default — so this
+    cannot change behavior for any deployment that has not opted into
+    caching. Deliberately called AFTER the write's own db.commit(): the
+    version bump must never be observable before the data it invalidates
+    is durable, or a concurrent payroll run could repopulate the cache
+    from the pre-write state and then serve it for a full TTL.
+    """
+    from app.modules.payroll.engine.tax_cache import invalidate_tax_config_cache
+
+    invalidate_tax_config_cache()
+
+
 def _invalidate_pack_approval_on_edit(pack: "JurisdictionPack") -> None:
     """A pack's approval (approved_by_id + "Approved" status) attests that
     a DISTINCT Super Admin reviewed exactly this pack's CURRENT substance —
@@ -898,6 +990,9 @@ def _invalidate_pack_approval_on_edit(pack: "JurisdictionPack") -> None:
             pack.status = "Draft"
 
 
+_PACK_ROW_CLONE_SKIP = {"id", "jurisdiction_pack_id", "created_at", "updated_at"}
+
+
 def _clone_pack_rates(db: Session, source_pack_id: int, target_pack_id: int) -> None:
     """Copies every canonical ContributionRate/TaxSlab row from
     source_pack_id onto target_pack_id as brand-new rows (fresh ids). Used
@@ -906,39 +1001,21 @@ def _clone_pack_rates(db: Session, source_pack_id: int, target_pack_id: int) -> 
     instead of an empty pack — without this, the immutability guard above
     would make "create a new version" prohibitively tedious (retyping
     every rate/slab from scratch) and Super Admins would be pushed back
-    toward editing Active packs in place."""
-    for row in db.query(ContributionRate).filter(
-        ContributionRate.jurisdiction_pack_id == source_pack_id,
-        ContributionRate.organization_id.is_(None),
-    ).all():
-        clone = ContributionRate(
-            organization_id=None, jurisdiction_pack_id=target_pack_id,
-            jurisdiction_country=row.jurisdiction_country, jurisdiction_state=row.jurisdiction_state,
-            jurisdiction_locality=row.jurisdiction_locality, tax_regime=row.tax_regime,
-            filing_status=row.filing_status,
-            component_key=row.component_key, label=row.label,
-            employee_share=row.employee_share, employer_share=row.employer_share, total=row.total,
-            employee_rate_pct=row.employee_rate_pct, employer_rate_pct=row.employer_rate_pct,
-            flat_amount=row.flat_amount, text_value=row.text_value, sort_order=row.sort_order,
-        )
-        db.add(clone)
-    for row in db.query(TaxSlab).filter(
-        TaxSlab.jurisdiction_pack_id == source_pack_id,
-        TaxSlab.organization_id.is_(None),
-    ).all():
-        clone = TaxSlab(
-            organization_id=None, jurisdiction_pack_id=target_pack_id,
-            jurisdiction_country=row.jurisdiction_country, jurisdiction_state=row.jurisdiction_state,
-            jurisdiction_locality=row.jurisdiction_locality, tax_regime=row.tax_regime,
-            filing_status=row.filing_status,
-            min_amount=row.min_amount, max_amount=row.max_amount,
-            rate_pct=row.rate_pct, rate_label=row.rate_label, tax_formula=row.tax_formula,
-            rule_type=row.rule_type, formula_expression=row.formula_expression,
-            flat_amount=row.flat_amount, adjustment_amount=row.adjustment_amount,
-            ni_category=row.ni_category, employer_rate_pct=row.employer_rate_pct,
-            sort_order=row.sort_order,
-        )
-        db.add(clone)
+    toward editing Active packs in place.
+
+    Singapore final closure (found by the real-organization validation): the
+    copy is now of EVERY value column. The previous hand-written field lists
+    dropped effective_from / effective_to, source_document_id and (slabs)
+    assessment_basis — a new version's effective-dated rows became open-ended
+    (e.g. both LQS windows in force at once), lost their source, and every
+    Singapore CPF band lost its FULL / PHASE_IN basis (all payroll under the
+    new version BLOCKED). Only the identity, the pack link and the
+    bookkeeping timestamps differ from the source row."""
+    for model in (ContributionRate, TaxSlab):
+        columns = [c.name for c in model.__table__.columns if c.name not in _PACK_ROW_CLONE_SKIP]
+        for row in db.query(model).filter(model.jurisdiction_pack_id == source_pack_id,
+                                          model.organization_id.is_(None)).all():
+            db.add(model(jurisdiction_pack_id=target_pack_id, **{c: getattr(row, c) for c in columns}))
     db.commit()
 
 def _org_uses_canonical_tax_pack(db: Session, organization_id: int) -> bool:
@@ -1031,6 +1108,11 @@ def _pack_to_tax_snapshot(rates, slabs, pack) -> dict:
                 "filingStatus": s.filing_status, "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
                 "flatAmount": _dec(s.flat_amount), "adjustmentAmount": _dec(s.adjustment_amount),
                 "niCategory": s.ni_category, "employerRatePct": _dec(s.employer_rate_pct),
+                # Additive (2026-09-23): the row's formula/assessment basis —
+                # India PT_FLAT "HALF_YEAR_INCOME", Singapore CPF_RATE_BAND
+                # NIL/ER_ONLY/PHASE_IN/FULL — so a replay reproduces the
+                # original calculation. Absent on older snapshots.
+                "assessmentBasis": getattr(s, "assessment_basis", None),
             }
             for s in slabs
         ],
@@ -1094,6 +1176,11 @@ def _build_overlay_tax_snapshot(state_rate_map, state_slabs, employer_tax_profil
                 "filingStatus": s.filing_status, "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
                 "flatAmount": _dec(s.flat_amount), "adjustmentAmount": _dec(s.adjustment_amount),
                 "niCategory": s.ni_category, "employerRatePct": _dec(s.employer_rate_pct),
+                # Additive (2026-09-23): the row's formula/assessment basis —
+                # India PT_FLAT "HALF_YEAR_INCOME", Singapore CPF_RATE_BAND
+                # NIL/ER_ONLY/PHASE_IN/FULL — so a replay reproduces the
+                # original calculation. Absent on older snapshots.
+                "assessmentBasis": getattr(s, "assessment_basis", None),
             }
             for s in (slab_list or [])
         ]
@@ -1173,6 +1260,7 @@ class _ReplayTaxSlab:
         "sort_order", "jurisdiction_country", "jurisdiction_state", "jurisdiction_locality",
         "tax_regime", "filing_status", "rule_type", "formula_expression",
         "flat_amount", "adjustment_amount", "ni_category", "employer_rate_pct",
+        "assessment_basis",
     )
 
     def __init__(self, **kwargs):
@@ -1227,6 +1315,9 @@ def _reconstruct_rate_map_and_slabs_from_snapshot(snapshot: Optional[dict]) -> t
             filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
             flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
             ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
+            # .get(): None for snapshots taken before assessmentBasis was
+            # captured — replayed exactly as before, never guessed.
+            assessment_basis=s.get("assessmentBasis"),
         )
         for s in (snapshot.get("taxSlabs") or [])
     ]
@@ -1275,6 +1366,9 @@ def _reconstruct_overlay_from_snapshot(snapshot: Optional[dict]):
                 filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
                 flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
                 ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
+                # .get(): None for snapshots taken before assessmentBasis was
+                # captured — replayed exactly as before, never guessed.
+                assessment_basis=s.get("assessmentBasis"),
             )
             for s in (rows or [])
         ]
@@ -1389,6 +1483,32 @@ def check_jurisdiction_readiness(
     }
 
 
+# Countries whose statutory rows come ONLY from the Active canonical pack
+# (never an org's cached copy) — see _resolve_effective_rate_inputs.
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK")
+# Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
+# canonical tax pack covering the payroll date (activation already forbids the
+# overlap; this keeps a corrupted / manually edited database from silently
+# taking the most recent one). Per-country opt-in; elsewhere the shared
+# resolver's "most recently effective" ranking is unchanged.
+_AMBIGUOUS_ACTIVE_PACK_REFUSED_COUNTRIES = ("HK",)
+
+
+def _assert_single_active_pack(db: Session, country: str, payroll_date, organization_id) -> None:
+    from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+
+    on = payroll_date or date.today()
+    count = (db.query(JurisdictionPack.id)
+             .filter(JurisdictionPack.jurisdiction_country == country, JurisdictionPack.pack_type == "tax",
+                     JurisdictionPack.status == "Active", JurisdictionPack.jurisdiction_state.is_(None),
+                     (JurisdictionPack.effective_from.is_(None)) | (JurisdictionPack.effective_from <= on),
+                     (JurisdictionPack.effective_to.is_(None)) | (JurisdictionPack.effective_to >= on))
+             .count())
+    if count > 1:
+        raise MissingComplianceConfigurationError(
+            f"a single active statutory pack — {count} Active packs overlap {on.isoformat()}", country, organization_id)
+
+
 def _resolve_effective_rate_inputs(
     db: Session, organization_id: int, country: str, payroll_date,
     org_opted_in: bool, state: Optional[str] = None, tax_regime: Optional[str] = None,
@@ -1425,7 +1545,29 @@ def _resolve_effective_rate_inputs(
     canonical_rates is the raw list (not the dict) so a caller can build a
     tax snapshot via _pack_to_tax_snapshot without a second query; pack is
     None whenever canonical resolution wasn't used, signalling the caller
-    to fall back to its own existing tax-snapshot logic unchanged."""
+    to fall back to its own existing tax-snapshot logic unchanged.
+
+    Phase 6.10 (per-country opt-in, _CANONICAL_PACK_ONLY_COUNTRIES): a
+    Singapore calculation ALWAYS resolves the Active canonical pack for the
+    date — whether or not the org is opted in — and never falls through to
+    the org's own cached ContributionRate / TaxSlab rows (stale syncs, or
+    rows written by apply_extracted_rate). No Active pack with rows ->
+    MissingComplianceConfigurationError (fail closed). The numbers and the
+    pinned pack therefore always name the same, governed version."""
+    if country in _CANONICAL_PACK_ONLY_COUNTRIES:
+        from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+        from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+        if country in _AMBIGUOUS_ACTIVE_PACK_REFUSED_COUNTRIES:
+            _assert_single_active_pack(db, country, payroll_date, organization_id)
+        canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
+            db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date,
+        )
+        if pack is None or not (canonical_rates or canonical_slabs):
+            raise MissingComplianceConfigurationError("active statutory pack", country, organization_id)
+        canonical_rate_map = {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}
+        _assert_jurisdiction_ready(canonical_rate_map, canonical_slabs, country, organization_id)
+        return canonical_rate_map, canonical_slabs, canonical_rates, pack
     if org_opted_in:
         from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
         canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
@@ -1438,6 +1580,10 @@ def _resolve_effective_rate_inputs(
             # existed can still carry a wrong-cased key on disk; this
             # guarantees the live calculation path never misses it even so.
             canonical_rate_map = {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}
+            if country == "IT":
+                # The §7 INPS matrix has many rows per family; keying by
+                # family alone would keep one class's rates for everyone.
+                canonical_rate_map = _italy_service.italy_rate_map(canonical_rates)
             _assert_jurisdiction_ready(canonical_rate_map, canonical_slabs, country, organization_id)
             return canonical_rate_map, canonical_slabs, canonical_rates, pack
     # India's Old and New regime bracket tables are two complete,
@@ -1505,6 +1651,59 @@ def _resolve_pack_scoped_rows(db: Session, rows: list, as_of) -> list:
     return [r for r in rows if getattr(r, "jurisdiction_pack_id", None) == winning_pack_id]
 
 
+# Canonical state/province-scoped TaxSlab/ContributionRate rows (seeded via
+# Super Admin) are keyed by the 2-letter code for the two countries whose
+# own statutory convention uses one (US/CA) — confirmed live: Canada's
+# CA-SK-2026-V1 pack's brackets are stored with jurisdiction_state="SK".
+# An org's own CompanyComplianceDetails.jurisdiction_state, however, can
+# hold the FULL region name captured at registration (frontend's
+# registrationRegions.js dropdown lists "Saskatchewan", "California", ...,
+# not codes) — found 2026-09-24 when a real Canada org's Compliance >
+# Tax Configuration page showed "no provincial tax slabs configured" for
+# Saskatchewan despite an Active, populated SK pack existing. An exact
+# string match between the two never matches. UK/India/Australia are
+# deliberately NOT included here: their canonical data already uses full
+# region names ("England"/"Telangana"/...) as the real convention, so
+# normalizing those would break a currently-correct match, not fix one.
+_CA_PROVINCE_NAME_TO_CODE = {
+    "ontario": "ON", "quebec": "QC", "british columbia": "BC", "alberta": "AB",
+    "manitoba": "MB", "saskatchewan": "SK", "nova scotia": "NS",
+    "new brunswick": "NB", "newfoundland and labrador": "NL",
+    "prince edward island": "PE", "northwest territories": "NT",
+    "yukon": "YT", "nunavut": "NU",
+}
+_US_STATE_NAME_TO_CODE = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
+
+
+def _normalize_jurisdiction_state(country: Optional[str], state: Optional[str]) -> Optional[str]:
+    """Map a full state/province name to its 2-letter code for the
+    countries where that's the real canonical convention (US/CA). Passes
+    an already-correct code (or any value from a country not in scope)
+    through unchanged — a dict-lookup miss is a safe no-op, so this never
+    breaks an already-working exact match."""
+    if not state or not country:
+        return state
+    if country == "CA":
+        return _CA_PROVINCE_NAME_TO_CODE.get(state.strip().lower(), state)
+    if country == "US":
+        return _US_STATE_NAME_TO_CODE.get(state.strip().lower(), state)
+    return state
+
+
 def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_of=None, filing_status: str = None, locality: Optional[str] = None) -> Tuple[dict, list]:
     """Region-specific rates/slabs for a country+state combination — a
     DELIBERATELY SEPARATE, simpler lookup from _resolve_effective_rate_inputs
@@ -1566,6 +1765,7 @@ def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_
     at all."""
     if not state:
         return {}, []
+    state = _normalize_jurisdiction_state(country, state)
     rate_locality_clause = (
         or_(ContributionRate.jurisdiction_locality.is_(None), ContributionRate.jurisdiction_locality == locality)
         if locality else ContributionRate.jurisdiction_locality.is_(None)
@@ -2754,6 +2954,399 @@ def create_source_artifact(db: Session, data: SourceArtifactCreate, actor_id: Op
     return row
 
 
+def governed_evidence_country(row) -> Optional[str]:
+    """The jurisdiction whose governed gate / decision evidence this artifact
+    is (by its evidence tag), or None for an ordinary source document."""
+    tag = (row.form_number or "").upper()
+    return next((c for c, prefixes in _GOVERNED_EVIDENCE_PREFIXES.items() if tag.startswith(prefixes)), None)
+
+
+def _is_sg_gate_evidence(row) -> bool:
+    return governed_evidence_country(row) == "SG"
+
+
+# Hong Kong gate / owner-decision / production-verification evidence
+# (hong_kong_service.gate_state, hong_kong_service._evidence) — governed the same way as
+# Singapore's: reviewed only once a document is uploaded, never replaced in
+# place after review, changed only by supersession.
+_HK_EVIDENCE_PREFIXES = ("HK-GATE-G", "HK-DECISION-D", "HK-PRODUCTION-VERIFICATION")
+# Governed evidence tags per jurisdiction (form_number prefixes). Phase 6.10:
+# Singapore's deploy owner's sign-off (SG-OPS-DEPLOYMENT) is reviewed,
+# superseded and summarised exactly like gate / decision evidence.
+_GOVERNED_EVIDENCE_PREFIXES = {
+    "SG": ("SG-GATE-G", "SG-DECISION-D", "SG-OPS-DEPLOYMENT"),
+    "HK": _HK_EVIDENCE_PREFIXES,
+}
+# Countries whose canonical statutory sources are hash-pinned: a source the
+# country's canonical pack / rate / slab rows cite, registered with the
+# official document's SHA-256, accepts an upload only of exactly that
+# document, its stored file is re-verified on download, and it is not
+# replaced once reviewed. Per-country opt-in (same pattern as
+# _SELF_APPROVAL_REFUSED_COUNTRIES); other countries keep the original
+# "the upload's own hash replaces the registered one" behaviour.
+_HASH_PINNED_SOURCE_COUNTRIES = ("HK",)
+
+
+def _is_hk_evidence(row) -> bool:
+    return governed_evidence_country(row) == "HK"
+
+
+def _hash_pinned_source(db: Session, row) -> bool:
+    """True when a canonical pack / rate / slab of a hash-pinned country cites this artifact."""
+    if row.id is None:
+        return False
+    pinned = _HASH_PINNED_SOURCE_COUNTRIES
+    if (db.query(JurisdictionPack.id).filter(JurisdictionPack.source_document_id == row.id,
+                                             JurisdictionPack.jurisdiction_country.in_(pinned)).first()):
+        return True
+    for model in (ContributionRate, TaxSlab):
+        if (db.query(model.id).filter(model.source_document_id == row.id, model.organization_id.is_(None),
+                                      model.jurisdiction_country.in_(pinned)).first()):
+            return True
+    return False
+
+
+def supersede_governed_evidence(db: Session, artifact_id: int, replacement_id: int,
+                                actor_id: Optional[int] = None) -> SourceArtifact:
+    """The supersede route's dispatcher: Singapore evidence keeps
+    supersede_sg_gate_evidence exactly; Hong Kong evidence (and a reviewed,
+    hash-pinned HK source) follows the same rules — the old artifact is kept
+    with its file and review, points at its replacement, and the replacement
+    counts only once a different Super Admin reviews it."""
+    old = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
+    if old is not None and not _is_sg_gate_evidence(old) and (_is_hk_evidence(old) or _hash_pinned_source(db, old)):
+        return _supersede_hk_evidence(db, old, replacement_id, actor_id)
+    return supersede_sg_gate_evidence(db, artifact_id, replacement_id, actor_id=actor_id)
+
+
+def _supersede_hk_evidence(db: Session, old, replacement_id: int, actor_id: Optional[int]) -> SourceArtifact:
+    new = db.query(SourceArtifact).filter(SourceArtifact.id == replacement_id).first()
+    if new is None:
+        raise NotFoundException("SourceArtifact", replacement_id)
+    if old.id == new.id:
+        raise BadRequestException("An artifact cannot supersede itself.")
+    if _is_hk_evidence(old):
+        if (new.form_number or "").upper() != (old.form_number or "").upper():
+            raise BadRequestException(f"The replacement must carry the same evidence tag ({old.form_number}).")
+    elif (new.source_url or "") != (old.source_url or "") and (new.agency or "") != (old.agency or ""):
+        raise BadRequestException("The replacement of a statutory source must be the same publication "
+                                  "(same agency or source URL) — register the new edition as a new artifact.")
+    if old.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{old.id} is already superseded by #{old.superseded_by_id}.")
+    if new.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{new.id} is itself superseded and cannot be the replacement.")
+    old.superseded_by_id = new.id
+    db.commit()
+    db.refresh(old)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="source_artifact", entity_id=old.id,
+        old_value={"supersededById": None, "formNumber": old.form_number, "checksumSha256": old.checksum_sha256},
+        new_value={"supersededById": new.id, "formNumber": old.form_number},
+        reason=f"{old.form_number or 'source'} evidence #{old.id} superseded by #{new.id}",
+    )
+    return old
+
+
+def supersede_sg_gate_evidence(db: Session, artifact_id: int, replacement_id: int,
+                               actor_id: Optional[int] = None) -> SourceArtifact:
+    """Singapore gate / decision evidence (final closure): the only way to
+    change accepted evidence. The old artifact is KEPT (its file and review
+    stay on record) and points at its replacement; the replacement must be a
+    different, not-yet-superseded artifact with the same SG-GATE / SG-DECISION
+    tag, and it counts only once a different Super Admin reviews it — so
+    superseding can only ever withdraw acceptance, never grant it. Audited."""
+    old = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
+    new = db.query(SourceArtifact).filter(SourceArtifact.id == replacement_id).first()
+    if old is None:
+        raise NotFoundException("SourceArtifact", artifact_id)
+    if new is None:
+        raise NotFoundException("SourceArtifact", replacement_id)
+    if not _is_sg_gate_evidence(old):
+        raise BadRequestException("Only Singapore gate / decision evidence (SG-GATE-G<n> / SG-DECISION-D<n>) is "
+                                  "superseded here.")
+    if old.id == new.id:
+        raise BadRequestException("An artifact cannot supersede itself.")
+    if (new.form_number or "").upper() != (old.form_number or "").upper():
+        raise BadRequestException(f"The replacement must carry the same form number ({old.form_number}).")
+    if old.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{old.id} is already superseded by #{old.superseded_by_id}.")
+    if new.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{new.id} is itself superseded and cannot be the replacement.")
+    old.superseded_by_id = new.id
+    db.commit()
+    db.refresh(old)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="source_artifact", entity_id=old.id,
+        old_value={"supersededById": None, "formNumber": old.form_number},
+        new_value={"supersededById": new.id, "formNumber": old.form_number},
+        reason=f"{old.form_number} evidence #{old.id} superseded by #{new.id}",
+    )
+    return old
+
+
+# ── Singapore evidence review outcome + structured decisions (final
+# completion programme). No new table or column: each outcome / decision is
+# an immutable TaxConfigurationAudit row on the SourceArtifact
+# (entity_type "source_artifact"), keyed by "sgEvidenceOutcome" /
+# "sgDecision" in new_value; get_sg_statutory_summary derives the lifecycle
+# EVIDENCE_REQUIRED -> SUBMITTED -> UNDER_REVIEW -> PASS | REJECTED | EXPIRED.
+
+SG_EVIDENCE_OUTCOMES = ("ACCEPTED", "REJECTED")
+
+
+def sg_decision_options() -> dict:
+    """D1–D3 options. D2's are SG_HOTFIX_POLICIES (defined further down this module), read at call time."""
+    return {"D1": ("EXPORT_ONLY", "API_SUBMISSION", "BOTH"), "D2": tuple(SG_HOTFIX_POLICIES),
+            "D3": ("SG_ONLY", "ALL_COUNTRIES")}
+
+
+def _sg_evidence_audits(db: Session, artifact_ids) -> dict:
+    """{artifact id: [audit new_value dicts carrying an SG outcome / decision]}, oldest first."""
+    ids = list(artifact_ids)
+    if not ids:
+        return {}
+    out = {}
+    for a in (db.query(TaxConfigurationAudit)
+              .filter(TaxConfigurationAudit.entity_type == "source_artifact", TaxConfigurationAudit.entity_id.in_(ids))
+              .order_by(TaxConfigurationAudit.id).all()):
+        value = a.new_value if isinstance(a.new_value, dict) else {}
+        if "sgEvidenceOutcome" in value or "sgDecision" in value:
+            out.setdefault(a.entity_id, []).append({**value, "actorId": a.actor_id,
+                                                    "at": a.created_at.isoformat() if a.created_at else None})
+    return out
+
+
+def _sg_evidence_refused(db: Session, row: SourceArtifact, attempted: str, actor_id: Optional[int], message: str):
+    """Final closure: a refused governance action on Singapore gate / decision
+    evidence (maker-checker, a final rejection, a completed review) leaves one
+    "refused" audit row and nothing else — the same rule as the pack /
+    template refusal audit (_audit_refusal)."""
+    artifact_id, form_number = row.id, row.form_number
+    db.rollback()
+    record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="source_artifact", entity_id=artifact_id,
+                     old_value={"formNumber": form_number}, new_value={"attempted": attempted, "result": "REFUSED"},
+                     reason=message)
+    raise BadRequestException(message)
+
+
+def _sg_refuse_if_rejected(db: Session, row: SourceArtifact, attempted: str = "review",
+                           actor_id: Optional[int] = None) -> None:
+    rejected = [v for v in _sg_evidence_audits(db, [row.id]).get(row.id, []) if v.get("sgEvidenceOutcome") == "REJECTED"]
+    if rejected:
+        _sg_evidence_refused(db, row, attempted, actor_id,
+                             f"{row.form_number} evidence #{row.id} was REJECTED — the rejection is retained evidence. "
+                             "Register a new artifact with the same form number, upload the corrected document and "
+                             "supersede this one.")
+
+
+def review_sg_gate_evidence(db: Session, artifact_id: int, outcome: str, notes: Optional[str] = None,
+                            valid_until: Optional[date] = None, actor_id: Optional[int] = None,
+                            today: Optional[date] = None) -> SourceArtifact:
+    """Record the review OUTCOME of Singapore gate / decision evidence —
+    ACCEPTED (optionally valid until a date: the gate turns EXPIRED after
+    it) or REJECTED (notes required). Maker-checker: never the creator;
+    only an uploaded, current (not superseded), not-yet-reviewed artifact.
+    ACCEPTED goes through mark_source_artifact_reviewed (its own checks and
+    audit row). The outcome itself is an immutable audit row — it can never
+    be replaced; a correction is a new artifact + supersession."""
+    outcome = (outcome or "").upper()
+    if outcome not in SG_EVIDENCE_OUTCOMES:
+        raise BadRequestException(f"Outcome must be one of {list(SG_EVIDENCE_OUTCOMES)}.")
+    row = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
+    if row is None:
+        raise NotFoundException("SourceArtifact", artifact_id)
+    if not _is_sg_gate_evidence(row):
+        raise BadRequestException("Only Singapore gate / decision evidence (SG-GATE-G<n> / SG-DECISION-D<n>) is reviewed here.")
+    if row.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{row.id} is superseded by #{row.superseded_by_id} — review the replacement.")
+    if actor_id is None or row.created_by_id is None or row.created_by_id == actor_id:
+        _sg_evidence_refused(db, row, f"review:{outcome}", actor_id,
+                             "This evidence needs a reviewer different from whoever registered it (maker-checker).")
+    if not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it.")
+    _sg_refuse_if_rejected(db, row, f"review:{outcome}", actor_id)
+    if row.reviewer_id is not None:
+        _sg_evidence_refused(db, row, f"review:{outcome}", actor_id,
+                             f"{row.form_number} evidence #{row.id} is already reviewed — its review is retained "
+                             "evidence and cannot be replaced; register a replacement and supersede this one.")
+    notes = (notes or "").strip() or None
+    if outcome == "REJECTED":
+        if not notes:
+            raise BadRequestException("A rejection needs notes saying what is wrong with the evidence.")
+        if valid_until is not None:
+            raise BadRequestException("A validity date applies only to ACCEPTED evidence.")
+    if valid_until is not None and valid_until <= (today or date.today()):
+        raise BadRequestException("The validity date must be in the future.")
+    if outcome == "ACCEPTED":
+        row = mark_source_artifact_reviewed(db, row.id, reviewer_id=actor_id)
+    record_tax_audit(
+        db, actor_id=actor_id, action="review", entity_type="source_artifact", entity_id=row.id,
+        old_value={"formNumber": row.form_number},
+        new_value={"sgEvidenceOutcome": outcome, "notes": notes,
+                   "validUntil": valid_until.isoformat() if valid_until else None, "formNumber": row.form_number},
+        reason=f"{row.form_number} evidence #{row.id} {outcome}" + (f": {notes}" if notes else ""),
+    )
+    return row
+
+
+def record_sg_decision(db: Session, key: str, selected_value: str, reason: str,
+                       actor_id: Optional[int] = None) -> SourceArtifact:
+    """Formally record owner decision D1 / D2 / D3: the selected option, the
+    decision maker (actor) and the reason, as a new SG-DECISION-D<n>
+    artifact plus an immutable audit row. It counts (DECISION_RECORDED) only
+    after the signed memo is uploaded and a DIFFERENT Super Admin accepts
+    it. Recording never changes behaviour in force: SG_HOTFIX_POLICY, the
+    SG-only control scope and the AIS route are code / integration changes
+    the readiness view flags when the recorded value differs."""
+    options = sg_decision_options()
+    key = (key or "").upper()
+    if key not in options:
+        raise BadRequestException(f"Unknown Singapore decision {key!r} — expected one of {sorted(options)}.")
+    value = (selected_value or "").upper()
+    if value not in options[key]:
+        raise BadRequestException(f"{key} must be one of {list(options[key])}.")
+    reason = (reason or "").strip()
+    if not reason:
+        raise BadRequestException("A decision needs the owner's reason.")
+    if actor_id is None:
+        raise BadRequestException("A decision needs an identified decision maker.")
+    from app.modules.payroll.schemas import SourceArtifactCreate
+
+    row = create_source_artifact(db, SourceArtifactCreate(
+        agency="Zoiko business owner decision", title=f"{key} decision: {value}", formNumber=f"SG-DECISION-{key}"),
+        actor_id=actor_id)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="source_artifact", entity_id=row.id,
+        old_value=None, new_value={"sgDecision": key, "selectedValue": value, "reason": reason},
+        reason=f"Singapore decision {key} recorded as {value} (pending signed memo + second-admin review): {reason}",
+    )
+    return row
+
+
+SERVICE_REGISTRY_OPEN, SERVICE_REGISTRY_CLOSED = "AVAILABLE", "PLANNED"
+
+
+def _registry_refused(db: Session, country: str, row, attempted: str, actor_id: Optional[int], message: str,
+                      unmet: Optional[list] = None):
+    """A refused registry transition leaves one "refused" audit row and
+    changes nothing (same rule as _audit_refusal / _sg_evidence_refused)."""
+    row_id, current = (row.id if row is not None else 0), (row.availability if row is not None else None)
+    db.rollback()
+    record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="jurisdiction_service_registry",
+                     entity_id=row_id, old_value={"country": country, "availability": current},
+                     new_value={"attempted": attempted, "result": "REFUSED", "unmet": unmet or []}, reason=message)
+    raise BadRequestException(message)
+
+
+def _sg_registry_refused(db: Session, row, attempted: str, actor_id: Optional[int], message: str,
+                         unmet: Optional[list] = None):
+    return _registry_refused(db, "SG", row, attempted, actor_id, message, unmet)
+
+
+def transition_service_registry(db: Session, country: str, target: str, reason: str, actor_id: Optional[int], *,
+                                label: str, readiness, invalid_target_message, missing_row_message: str,
+                                open_from_message, close_from_message=None):
+    """The owner's governed PLANNED <-> AVAILABLE step for one jurisdiction —
+    the only thing that opens (or closes) its onboarding. Shared by every
+    jurisdiction with a governed registry (Singapore, Hong Kong).
+
+    AVAILABLE is refused unless every requirement ``readiness()`` re-derives at
+    this moment is met (never taken from the caller); it returns
+    (unmet requirements [{key, label, detail}], evidence snapshot). PLANNED is
+    allowed from AVAILABLE — and, when ``close_from_message`` is None, from any
+    other state. Both need an identified Super Admin and a reason; a refusal is
+    audited and changes nothing; a transition is audited with the evidence
+    snapshot it rested on. Only these two values are governed."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    target = (target or "").strip().upper()
+    reason = (reason or "").strip()
+    query = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == country)
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    row = query.first()
+    attempted = f"availability:{target or '?'}"
+    if actor_id is None:
+        raise BadRequestException("A registry change needs an identified Super Admin.")
+    if target not in (SERVICE_REGISTRY_OPEN, SERVICE_REGISTRY_CLOSED):
+        _registry_refused(db, country, row, attempted, actor_id, invalid_target_message(target))
+    if not reason:
+        raise BadRequestException("A registry change needs the owner's reason (it is the change record).")
+    if row is None:
+        _registry_refused(db, country, row, attempted, actor_id, missing_row_message)
+    if row.availability == target:
+        _registry_refused(db, country, row, attempted, actor_id, f"{label} is already {target}.")
+    snapshot = None
+    if target == SERVICE_REGISTRY_CLOSED:
+        if close_from_message is not None and row.availability != SERVICE_REGISTRY_OPEN:
+            _registry_refused(db, country, row, attempted, actor_id, close_from_message(row.availability))
+    else:
+        if row.availability != SERVICE_REGISTRY_CLOSED:
+            _registry_refused(db, country, row, attempted, actor_id, open_from_message(row.availability))
+        unmet, snapshot = readiness()
+        if unmet:
+            _registry_refused(
+                db, country, row, attempted, actor_id,
+                f"{label} cannot be made AVAILABLE — {len(unmet)} requirement(s) unmet: "
+                + "; ".join(f"{r['label']} ({r['detail']})" for r in unmet),
+                unmet=[r["key"] for r in unmet])
+    old = row.availability
+    row.availability = target
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="jurisdiction_service_registry",
+                     entity_id=row.id, old_value={"country": country, "availability": old},
+                     new_value={"country": country, "availability": target, "evidence": snapshot}, reason=reason)
+    return row
+
+
+def transition_jurisdiction_service_registry(db: Session, country: str, target: str, reason: str,
+                                            actor_id: Optional[int] = None, as_of: Optional[date] = None):
+    """Country-parameterised entry point of the governed registry step (the
+    shared /compliance/jurisdictions/{country}/service-registry route)."""
+    country = (country or "").upper()
+    if country == "SG":
+        return transition_sg_service_registry(db, target, reason, actor_id=actor_id, as_of=as_of)
+    if jurisdiction_hooks.has_module(country):
+        return jurisdiction_hooks.call(country, "service_registry_transition", db, target, reason,
+                                       actor_id=actor_id, as_of=as_of)
+    raise NotFoundException("governed service registry", country)
+
+
+def transition_sg_service_registry(db: Session, target: str, reason: str, actor_id: Optional[int] = None,
+                                   as_of: Optional[date] = None):
+    """Phase 6.10 — the owner's Singapore PLANNED <-> AVAILABLE step (shared
+    transition_service_registry). AVAILABLE needs every registry-transition
+    requirement of the Singapore readiness summary: Active pack, golden-vector
+    PASS, every SG template Active, configuration / database / migration PASS,
+    G1–G8 evidence accepted, D1–D3 recorded and in force, the deploy owner's
+    sign-off accepted, no unreviewed hotfix. Only an AVAILABLE Singapore is
+    closed back to PLANNED (the runbook's rollback)."""
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import (
+        SG_REGISTRY_CLOSED, SG_REGISTRY_OPEN)
+
+    assert (SG_REGISTRY_OPEN, SG_REGISTRY_CLOSED) == (SERVICE_REGISTRY_OPEN, SERVICE_REGISTRY_CLOSED)
+
+    def readiness():
+        activation = get_sg_statutory_summary(db, as_of)["activationReadiness"]
+        unmet = [r for r in activation["registryTransition"]["requirements"] if not r["met"]]
+        pack = activation["statutoryPack"]
+        return unmet, {"pack": {"packId": pack.get("packId"), "version": pack.get("version")},
+                       "gates": {g["key"]: g.get("submittedArtifactId") for g in activation["productionGates"]},
+                       "decisions": {d["key"]: d.get("recordedValue") for d in activation["pendingDecisions"]},
+                       "deploymentSignoff": activation["deploymentSignoff"].get("submittedArtifactId")}
+
+    return transition_service_registry(
+        db, "SG", target, reason, actor_id, label="Singapore", readiness=readiness,
+        invalid_target_message=lambda t: (f"Singapore availability can only be {SG_REGISTRY_OPEN} or {SG_REGISTRY_CLOSED} — "
+                                          f"{t or 'an empty value'} is not a governed Singapore state."),
+        missing_row_message=("There is no Singapore registry row — seed it (python -m scripts.seed_singapore_canonical_pack "
+                             "creates it as PLANNED); it is never created here."),
+        open_from_message=lambda a: f"Singapore is {a}; only PLANNED moves to AVAILABLE here.",
+        close_from_message=lambda a: f"Singapore is {a}; only an AVAILABLE Singapore is closed back to PLANNED here.")
+
+
 def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: int) -> SourceArtifact:
     """A distinct, lightweight action — same "I, this specific person,
     reviewed this" pattern as set_jurisdiction_pack_approver — rather than
@@ -2770,9 +3363,24 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
     if not row:
         raise NotFoundException("SourceArtifact", artifact_id)
     if row.created_by_id is not None and row.created_by_id == reviewer_id:
+        if _is_sg_gate_evidence(row):
+            _sg_evidence_refused(db, row, "review", reviewer_id,
+                                 "This source artifact needs a reviewer different from whoever created it.")
         raise BadRequestException(
             "This source artifact needs a reviewer different from whoever created it."
         )
+    # Singapore gate / decision evidence: the reviewer reviews an uploaded
+    # document (server-computed SHA-256), never a URL or a hand-typed hash.
+    if _is_hk_evidence(row) and not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
+        )
+    if _is_sg_gate_evidence(row) and not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
+        )
+    if _is_sg_gate_evidence(row):
+        _sg_refuse_if_rejected(db, row, "review", reviewer_id)
     row.reviewer_id = reviewer_id
     row.reviewer_approved_at = datetime.utcnow()
     db.commit()
@@ -2808,12 +3416,39 @@ def upload_source_artifact_file(
     row = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
     if not row:
         raise NotFoundException("SourceArtifact", artifact_id)
+    # Singapore gate / decision evidence (production closure): once a second
+    # Super Admin has reviewed it, its document is the accepted evidence —
+    # replacing it (and deleting the reviewed file) would change what was
+    # accepted. Register a new artifact and supersede this one instead.
+    if row.reviewer_approved_at is not None and _is_sg_gate_evidence(row):
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has been reviewed — its file cannot be replaced. Register a new "
+            "artifact with the same form number and supersede this one."
+        )
+    if _is_sg_gate_evidence(row):
+        _sg_refuse_if_rejected(db, row, "upload", actor_id)
+    # Hong Kong evidence and hash-pinned sources: the reviewed document is what
+    # was accepted, so it is never replaced in place (that kept the review on a
+    # file the reviewer never saw) — register a new artifact and supersede.
+    hash_pinned = not _is_sg_gate_evidence(row) and _hash_pinned_source(db, row)
+    if row.reviewer_approved_at is not None and (_is_hk_evidence(row) or hash_pinned):
+        raise BadRequestException(
+            f"Source artifact #{row.id} has been reviewed — its file cannot be replaced. Register a new artifact "
+            "and supersede this one.")
     if not data:
         raise BadRequestException("Uploaded file is empty.")
     if len(data) > _SOURCE_ARTIFACT_MAX_BYTES:
         raise BadRequestException(f"File must be smaller than {_SOURCE_ARTIFACT_MAX_BYTES // (1024 * 1024)} MB.")
 
     checksum = _hashlib.sha256(data).hexdigest()
+    if hash_pinned and row.checksum_sha256 and checksum != row.checksum_sha256.strip().lower():
+        message = (f"The uploaded file's SHA-256 ({checksum}) does not match the hash registered for source artifact "
+                   f"#{row.id} ({row.checksum_sha256}) — upload exactly the official document that was hashed, or "
+                   "register a new artifact for a different edition.")
+        record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="source_artifact", entity_id=row.id,
+                         old_value={"checksumSha256": row.checksum_sha256}, new_value={"uploadedSha256": checksum},
+                         reason=message)
+        raise BadRequestException(message)
     ext = os.path.splitext(filename or "")[1][:20]
     old_ref = row.file_path
     new_ref = object_storage.save_upload(
@@ -2852,6 +3487,11 @@ def download_source_artifact_file(db: Session, artifact_id: int) -> tuple[bytes,
     if not row.file_path:
         raise NotFoundException("SourceArtifact file", artifact_id)
     data = object_storage.read_bytes(row.file_path)
+    if row.checksum_sha256 and (_is_hk_evidence(row) or _hash_pinned_source(db, row)):
+        import hashlib as _hashlib
+        if _hashlib.sha256(data).hexdigest() != row.checksum_sha256.strip().lower():
+            raise BadRequestException(f"The stored file of source artifact #{row.id} no longer matches its recorded "
+                                      "SHA-256 — it cannot be served as verified evidence.")
     return data, row.content_type or "application/octet-stream", row.original_filename or f"source_artifact_{artifact_id}"
 
 
@@ -6404,6 +7044,259 @@ def assess_germany_pack_completeness(db: Session, jurisdiction_pack_id: int, as_
     }
 
 
+# ── France: engine input resolution (ZP-FR-ENG-001 Phase 5 wiring) ────
+# engine/countries/france.py is a pure function of PayrollContext's
+# france_* fields; this is the ONE place those fields are resolved from the
+# France authority tables, for every calculation entry point (preview,
+# batch generation, manual payslip). Nothing here guesses: anything
+# unresolvable is passed through empty, and the engine blocks with the
+# precise reason (FR-027) — surfaced as FranceCalculationBlockedException.
+
+def _load_fr_ytd(db: Session, employee_id: int, payroll_date, exclude_run_id: Optional[int] = None) -> dict:
+    """The RGDU/CSG accumulator state after the employee's latest earlier
+    France payslip in the same calendar year (read from its frozen
+    fr_calculation_snapshot["ytd_after"]) — empty for the first period."""
+    if payroll_date is None:
+        return {}
+    query = (db.query(PayslipItem)
+             .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+             .filter(PayslipItem.employee_id == employee_id,
+                     PayslipItem.fr_calculation_snapshot.isnot(None),
+                     PayslipItem.status != PayslipStatus.FAILED,
+                     PayrollRun.pay_date < payroll_date,
+                     PayrollRun.pay_date >= date(payroll_date.year, 1, 1)))
+    if exclude_run_id is not None:
+        query = query.filter(PayrollRun.id != exclude_run_id)
+    previous = query.order_by(PayrollRun.pay_date.desc(), PayslipItem.id.desc()).first()
+    if previous is None:
+        return {}
+    return dict((previous.fr_calculation_snapshot or {}).get("ytd_after") or {})
+
+
+def _resolve_france_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
+                                exclude_run_id: Optional[int] = None) -> dict:
+    """Build build_context_from_employee(france_inputs=...) for one France
+    employee on payroll_date: the SIRET rate pack in force (the employee's
+    compliance_fields["siret"], or the org's only establishment), the PAS
+    rate governing that date, prior-period YTD, and contract facts."""
+    compliance = getattr(employee, "compliance_fields", None) or {}
+    siret = (compliance.get("siret") or "").strip() or None
+
+    packs = [p for p in list_france_establishment_rate_packs(db, organization_id)
+             if p.effective_from <= payroll_date and (p.effective_to is None or p.effective_to >= payroll_date)]
+    if siret:
+        packs = [p for p in packs if p.siret == siret]
+    elif len({p.siret for p in packs}) > 1:
+        packs = []   # several establishments and no SIRET on the employee → engine blocks, never guesses
+    pack = packs[0] if packs else None
+
+    establishment = {}
+    if pack is not None:
+        profile = db.query(EmployerFranceProfile).filter(
+            EmployerFranceProfile.organization_id == organization_id).first()
+        effectif = pack.effectif
+        if effectif is None and profile is not None and profile.effectif_state:
+            years = [int(k) for k in profile.effectif_state if str(k).isdigit() and int(k) < payroll_date.year]
+            if years:
+                effectif = (profile.effectif_state.get(str(max(years))) or {}).get("value")
+        establishment = {
+            "siret": pack.siret,
+            "commune_insee": pack.commune_insee,
+            "at_mp_rate_pct": pack.at_mp_rate_pct,
+            "vm_rate_pct": pack.vm_rate_pct,
+            "vm_threshold_applies": pack.vm_threshold_applies,
+            "fnal_class": pack.fnal_class,
+            "cfp_class": pack.cfp_class,
+            "effectif": effectif,
+        }
+
+    pas_row = get_active_france_pas_rate(db, organization_id, employee.id, as_of=payroll_date)
+    pas = {}
+    if pas_row is not None:
+        pas = {
+            "rate_type": pas_row.rate_type,
+            "rate_pct": pas_row.rate_pct,
+            "rate_id": pas_row.dgfip_rate_id,
+            "short_contract": bool(compliance.get("short_contract")),
+            "apprentice": bool(compliance.get("apprentice")),
+        }
+
+    idcc_minimum = compliance.get("idcc_minimum")
+    return {
+        "france_payroll_date": payroll_date,
+        "france_pas": pas,
+        "france_establishment": establishment,
+        "france_ytd": _load_fr_ytd(db, employee.id, payroll_date, exclude_run_id=exclude_run_id),
+        "france_cadre": str(compliance.get("cadre", "")).lower() in ("1", "true", "yes", "cadre"),
+        "france_idcc_minimum": Decimal(str(idcc_minimum)) if idcc_minimum not in (None, "") else None,
+        "france_social_coverage": compliance.get("social_coverage") or "GENERAL",
+        "france_employee_id": employee.id,
+        "france_organization_id": organization_id,
+    }
+
+
+def _jsonable_decimal(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _jsonable_decimal(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_decimal(v) for v in value]
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _fr_payslip_snapshot(result) -> Optional[dict]:
+    """PayslipItem.fr_calculation_snapshot for a France result (None for
+    every other country) — the three nets, PAS provenance, trace, RGDU and
+    ytd_after, JSON-safe."""
+    if getattr(result, "fr_net_social", None) is None:
+        return None
+    return _jsonable_decimal({
+        "net_social": result.fr_net_social,
+        "net_imposable": result.fr_net_imposable,
+        "net_a_payer": (result.fr_bases or {}).get("net_a_payer"),
+        "employee_total": result.fr_employee_total,
+        "employer_total": result.fr_employer_total,
+        "pas": {"withheld": result.fr_pas_withheld, "rate_type": result.fr_pas_rate_type,
+                "rate_pct": result.fr_pas_rate_pct, "rate_id": result.fr_pas_rate_id},
+        "bases": result.fr_bases,
+        "contributions": result.fr_contributions,
+        "calculation": result.fr_calculation_snapshot,
+        "ytd_after": result.fr_ytd_after,
+    })
+
+
+def _se_payslip_snapshot(result) -> "dict | None":
+    """PayslipItem.se_calculation_snapshot for a Sweden result (None for
+    every other country) — the withholding strategy + table/column actually
+    applied, the employer-contribution cohort and component breakdown, SLP,
+    plan premiums and se_calculation_trace verbatim, JSON-safe. Gated on
+    se_employee_total, the one key the Sweden engine always sets. A snapshot,
+    never a re-derivation: spec §29 requires historical payroll to replay the
+    rule pack of the ORIGINAL payment date, and this is that evidence."""
+    if getattr(result, "se_employee_total", None) is None:
+        return None
+    return _jsonable_decimal({
+        "withholding": {
+            "amount": result.se_preliminary_tax,
+            "strategy": result.se_tax_strategy,
+            "unrounded": result.se_withholding_unrounded,
+            "table": result.se_tax_table,
+            "column": result.se_tax_column,
+            "tax_status": result.se_tax_status,
+            "income_role": result.se_income_role,
+        },
+        "employer": {
+            "amount": result.se_employer_contribution,
+            "rate": result.se_employer_contribution_rate,
+            "cohort": result.se_employer_contribution_cohort,
+            "base": result.se_employer_contribution_base,
+            "components": result.se_employer_contribution_components,
+            "youth_applied": result.se_youth_applied,
+            "month_compensation": result.se_month_compensation,
+        },
+        "slp": result.se_slp,
+        "pension": {
+            "plan": result.se_pension_plan,
+            "employee": result.se_occupational_pension_employee,
+            "employer": result.se_occupational_pension_employer,
+        },
+        "employee_total": result.se_employee_total,
+        "employer_total": result.se_employer_total,
+        "trace": result.se_calculation_trace,
+    })
+
+
+def _france_blocked(exc) -> "FranceCalculationBlockedException":
+    return FranceCalculationBlockedException(exc.code, exc.message, trace={"code": exc.code, "message": exc.message})
+
+
+def _ie_payslip_snapshot(result) -> "dict | None":
+    """PayslipItem.ie_calculation_snapshot for an Ireland result (None for
+    every other country) — the applied RPN, each tax head's own figure, the
+    MyFutureFund state, the LPT instruction, and ie_calculation_trace
+    verbatim, JSON-safe.
+
+    Gated on ie_employee_total (not ie_paye) because that is the one key
+    the Ireland engine always sets alongside the others: it is the total of
+    employee deductions, so its presence means an Irish calculation really
+    ran, rather than merely that a field happened to be non-None.
+
+    Deliberately a snapshot, never a re-derivation (IE-045): ie_rpn_hash and
+    the RPN's own values are what make a finalized payslip reproducible after
+    Revenue later reissues or supersedes that RPN.
+    """
+    if getattr(result, "ie_employee_total", None) is None:
+        return None
+    return _jsonable_decimal({
+        # The Revenue instruction actually applied. ie_paye_basis is the
+        # important one: it is the only way to tell a real RPN-derived PAYE
+        # from the Emergency treatment (or the blocked state) after the fact.
+        "rpn": {
+            "rpn_number": result.ie_rpn_number,
+            "snapshot_id": result.ie_rpn_snapshot_id,
+            "raw_hash": result.ie_rpn_hash,
+            "issued_at": result.ie_rpn_issued_at,
+        },
+        "paye": {
+            "basis": result.ie_paye_basis,
+            "amount": result.ie_paye,
+            "unrounded": result.ie_paye_unrounded,
+            "standard_rate_pay": result.ie_standard_rate_pay,
+            "higher_rate_pay": result.ie_higher_rate_pay,
+            "tax_credit_applied": result.ie_tax_credit_applied,
+        },
+        "usc": {
+            "amount": result.ie_usc,
+            "unrounded": result.ie_usc_unrounded,
+        },
+        "prsi": {
+            "subclass": result.ie_prsi_class,
+            "declared_subclass": result.ie_prsi_declaration,
+            "employee": result.ie_employee_prsi,
+            "employer": result.ie_employer_prsi,
+            "ax_credit": result.ie_prsi_ax_credit,
+            "contribution_weeks": result.ie_prsi_contribution_weeks,
+            "weekly_reckonable": result.ie_prsi_weekly_reckonable,
+        },
+        "myfuturefund": {
+            "employee": result.ie_mff_employee,
+            "employer": result.ie_mff_employer,
+            # Informational only — the State top-up is administered by
+            # NAERSA and is never deducted from pay (IE-018).
+            "state_topup": result.ie_mff_state_topup,
+            "status": result.ie_mff_status,
+            "contributory": result.ie_mff_contributory,
+            "ceased_reason": result.ie_mff_ceased_reason,
+        },
+        "lpt": {
+            "amount": result.ie_lpt,
+            "instructed": result.ie_lpt_instructed,
+            "rate_pct": result.ie_lpt_rate_pct,
+        },
+        "pension": {
+            "employee_prsc": result.ie_employee_pension,
+            "employer_prsc": result.ie_employer_pension,
+        },
+        "labour": {
+            # The NMW band and the effective hourly rate the block was
+            # evaluated on — the evidence an inspector asks for (IE-035).
+            "nmw_rate": result.ie_nmw_rate,
+            "nmw_band": result.ie_nmw_band,
+            "effective_hourly": result.ie_effective_hourly,
+        },
+        "employee_total": result.ie_employee_total,
+        "tax_year": result.ie_tax_year,
+        # ie_calculation_trace already carries inputs/bases/rates/band
+        # selection/rounding for every head; ytd_after is the accumulator
+        # state the NEXT period reads back (IE-023/IE-024/IE-025).
+        "calculation": result.ie_calculation_trace,
+        "ytd_after": result.ie_ytd_after,
+    })
+
+
 def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, payroll_date) -> dict:
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         GermanyCalculationError, resolve_pv_child_category,
@@ -6518,6 +7411,7 @@ def preview_germany_calculation(db: Session, organization_id: int, employee_id: 
     real payroll run for this employee."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
 
     employee = get_employee_by_id(db, employee_id, organization_id)
     payroll_date = payroll_date or date.today()
@@ -7011,6 +7905,14 @@ def sync_org_rates_from_canonical(
             # configured for.
             filing_status=cr.filing_status, tax_regime=cr.tax_regime,
         )
+        if country == "SE":
+            # Sweden's temporary youth reduction is defined by the ROW's own
+            # payment-date window (SE-005) and sweden.py re-checks it from
+            # these fields — dropping them here would turn a windowed rate
+            # into an open-ended one on every synced org row. Scoped to SE so
+            # no other country's synced rows change shape.
+            fields.update(effective_from=cr.effective_from, effective_to=cr.effective_to,
+                          text_value=cr.text_value)
         if existing:
             for k, v in fields.items():
                 setattr(existing, k, v)
@@ -7094,6 +7996,16 @@ def sync_org_rates_from_canonical(
                 # future country overloading TaxSlab.filing_status the
                 # same way AU does would have hit this identically.
                 filing_status=ts.filing_status,
+                # Sweden (ZP-SE-ENG-001 §5): which authority table/column a
+                # band belongs to — NULL on every other country's rows, so
+                # copying it is inert elsewhere.
+                tax_table_number=ts.tax_table_number, tax_column=ts.tax_column,
+                # AMOUNT/PERCENT band basis + row dating, Sweden only: the SE
+                # engine refuses a band with no declared basis, so dropping it
+                # would block every synced org; scoped so SG/UK bands (which
+                # also use assessment_basis) keep today's exact sync shape.
+                **(dict(assessment_basis=ts.assessment_basis, effective_from=ts.effective_from,
+                        effective_to=ts.effective_to) if country == "SE" else {}),
                 # Each slab keeps its OWN originating pack id (a state
                 # layer row folded in above came from a different pack
                 # than `pack` itself) rather than being force-tagged with
@@ -7121,12 +8033,25 @@ def list_canonical_tax_slabs(
     return query.order_by(TaxSlab.sort_order, TaxSlab.min_amount).all()
 
 
+def _refuse_hk_generic_statutory_edit(pack) -> None:
+    """Hong Kong only (statutory configuration administration): HK statutory
+    rows are edited through the governed HK editor (source document + reason
+    required, hong_kong_service.update_row) — never through the generic
+    canonical-row editor, which carries no source. Other countries unchanged."""
+    if pack is not None and pack.jurisdiction_country == "HK":
+        raise BadRequestException(
+            "Hong Kong statutory rows are edited in Compliance → Hong Kong → Statutory Configuration "
+            "(a source document and a change reason are required)."
+        )
+
+
 def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_id: Optional[int] = None) -> TaxSlab:
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
     if not pack:
         raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
     if pack.pack_type != "tax":
         raise BadRequestException("Canonical tax slabs can only be attached to a pack_type='tax' JurisdictionPack.")
+    _refuse_hk_generic_statutory_edit(pack)
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -7144,6 +8069,19 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         ni_category=data.niCategory, employer_rate_pct=data.employerRatePct,
         sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
     )
+    # Sweden table/column discriminators — only when explicitly sent, so a
+    # form that doesn't know about them never wipes a band's table/column.
+    if "taxTableNumber" in data.model_fields_set:
+        fields["tax_table_number"] = data.taxTableNumber
+    if "taxColumn" in data.model_fields_set:
+        fields["tax_column"] = data.taxColumn
+    # Row dating only when explicitly sent (see CanonicalTaxSlabUpsert).
+    if "effectiveFrom" in data.model_fields_set:
+        fields["effective_from"] = data.effectiveFrom
+    if "effectiveTo" in data.model_fields_set:
+        fields["effective_to"] = data.effectiveTo
+    if fields.get("effective_from") and fields.get("effective_to") and fields["effective_to"] < fields["effective_from"]:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
     action = "update" if data.id else "create"
     old_value = None
     if data.id:
@@ -7167,6 +8105,7 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
         reason=data.reason,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -7189,6 +8128,7 @@ def upsert_canonical_contribution_rate(
         raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
     if pack.pack_type != "tax":
         raise BadRequestException("Canonical contribution rates can only be attached to a pack_type='tax' JurisdictionPack.")
+    _refuse_hk_generic_statutory_edit(pack)
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -7247,11 +8187,12 @@ def upsert_canonical_contribution_rate(
     db.commit()
     db.refresh(row)
     record_tax_audit(
-        db, actor_id=actor_id, action=action, entity_type="contribution_rate", entity_id=row.id,
+        db, actor_id=actor_id, action=action,         entity_type="contribution_rate", entity_id=row.id,
         jurisdiction_pack_id=pack.id, tax_version=pack.version,
         old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
         reason=data.reason,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -7282,6 +8223,7 @@ def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Opti
     # immutability contract upsert_canonical_contribution_rate already
     # enforces for edits, applied here for deletes too.
     if pack:
+        _refuse_hk_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -7291,6 +8233,7 @@ def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Opti
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=pack.version if pack else None,
         old_value=old_value, new_value=None,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
 
 
 # ── US: bulk "New State Import" (Production-Readiness Plan Phase 3) ──────
@@ -7382,6 +8325,7 @@ def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int]
     # Same real gap/fix as delete_canonical_contribution_rate above — no
     # status check previously existed here at all.
     if pack:
+        _refuse_hk_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -7391,6 +8335,7 @@ def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int]
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=pack.version if pack else None,
         old_value=old_value, new_value=None,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
 
 
 def get_active_tax_configuration_for_display(db: Session, country: str, state: Optional[str] = None) -> dict:
@@ -7477,9 +8422,112 @@ def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[Jurisdicti
     )
 
 
+def se_activation_blockers(db: Session, pack) -> list:
+    """ZP-SE-ENG-001 §37/§16 — why a Sweden tax pack may NOT go Active yet
+    (empty list = complete). Checks the pack's OWN canonical rows, not an
+    org's cache: every parameter the engine requires (fallback_registry) is
+    configured, and every SE_TAX_TABLE / SE_ONE_TIME_PAYMENT row declares an
+    AMOUNT/PERCENT basis (an unfilled Draft scaffold never activates)."""
+    from app.modules.payroll.engine.countries.sweden import SE_ONE_TIME_PAYMENT_RULE, SE_TAX_TABLE_RULE
+    from app.modules.payroll.engine.fallback_registry import get_required_parameter_keys
+
+    blockers = []
+    rates = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in db.query(ContributionRate).filter(
+            ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))
+    }
+    for req in get_required_parameter_keys("SE"):
+        row = rates.get(req["key"])
+        configured = row is not None and (
+            getattr(row, f"{req['side']}_rate_pct", None) is not None if req["side"] else row.flat_amount is not None)
+        if not configured:
+            blockers.append(f"missing {req['key']} ({req['label']})")
+    slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None)).all()
+    tables = [s for s in slabs if s.rule_type == SE_TAX_TABLE_RULE]
+    if not tables:
+        blockers.append("no SE_TAX_TABLE bands configured")
+    unfilled = [s for s in slabs if s.rule_type in (SE_TAX_TABLE_RULE, SE_ONE_TIME_PAYMENT_RULE)
+                and (s.assessment_basis or "").upper() not in ("AMOUNT", "PERCENT")]
+    if unfilled:
+        blockers.append(f"{len(unfilled)} tax-table/one-time row(s) are unfilled Draft scaffolds "
+                        f"(e.g. {unfilled[0].rate_label})")
+    return blockers
+
+
+# Display names for the per-country opt-in activation gates below.
+_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong"}
+# Phase 6.0 F2: countries whose pack approver may never be its activator.
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+# Phase 6.5: countries whose pack approver may never be the Super Admin who
+# last edited / submitted the pack (refused at the Approve step itself).
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+# Phase 6.5: countries whose REFUSED pack / report-template governance
+# actions are themselves audited (action "refused"). Same per-country opt-in
+# pattern as F2; other countries keep their existing, unaudited refusals.
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+# Singapore completion programme (2026-09-29): countries whose TAX packs follow
+# an explicit transition graph. Before this, only the Active-downgrade guard
+# applied, so a Superseded / Retired Singapore pack could be moved back to
+# Draft, edited through upsert and re-activated, and any string was accepted
+# as a status. Same per-country opt-in pattern as the constants above; other
+# countries keep their existing free lifecycle (DE keeps its downgrade guard).
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+TAX_PACK_TRANSITIONS = {
+    "Draft": ("In Review", "QA", "Approved", "Active"),
+    "In Review": ("Draft", "QA", "Approved", "Active"),
+    "QA": ("Draft", "In Review", "Approved", "Active"),
+    "Approved": ("Draft", "In Review", "QA", "Active"),
+    # Active -> Active is the idempotent re-activation the hotfix path uses.
+    "Active": ("Active", "Deprecated", "Retired", "Superseded"),
+    "Deprecated": ("Retired", "Superseded"),
+    "Retired": (),
+    "Superseded": (),
+}
+
+
+def _audit_refusal(db: Session, model, entity_type: str, entity_id: int, attempted: str, actor_id: Optional[int],
+                   message: str, path: Optional[str] = None) -> None:
+    """Record one "refused" TaxConfigurationAudit row for an opted-in
+    country's pack / report template. Rolls back first, so the refused call
+    leaves nothing pending behind it (the Phase 6.3 phantom-approval class of
+    defect) and the audit row is its only trace. Actor, time (created_at),
+    attempted action, current status and the refusal reason are kept; the
+    reason is the governance message itself, never payroll or personal data."""
+    row = db.query(model).filter(model.id == entity_id).first()
+    if row is None or row.jurisdiction_country not in _REFUSAL_AUDIT_COUNTRIES:
+        return
+    db.rollback()
+    row = db.query(model).filter(model.id == entity_id).first()
+    record_tax_audit(
+        db, actor_id=actor_id, action="refused", entity_type=entity_type, entity_id=entity_id,
+        jurisdiction_pack_id=entity_id if model is JurisdictionPack else None, tax_version=row.version,
+        old_value={"status": row.status},
+        new_value={"attempted": attempted, "result": "REFUSED", **({"path": path} if path else {})},
+        reason=message,
+    )
+
+
 def set_jurisdiction_pack_status(
     db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None,
-    bypass_approver_check: bool = False,
+    bypass_approver_check: bool = False, reason: Optional[str] = None,
+) -> JurisdictionPack:
+    """Phase 6.5 wrapper: every refusal (BadRequestException) of an opted-in
+    country's pack is audited before it propagates — see
+    _set_jurisdiction_pack_status for the gates themselves. `reason` (optional,
+    every country) is kept on the tax pack's status_change audit row."""
+    try:
+        return _set_jurisdiction_pack_status(db, pack_row_id, status, actor_id=actor_id,
+                                             bypass_approver_check=bypass_approver_check, reason=reason)
+    except BadRequestException as exc:
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, status, actor_id, exc.message,
+                       path="hotfix" if bypass_approver_check else None)
+        raise
+
+
+def _set_jurisdiction_pack_status(
+    db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None,
+    bypass_approver_check: bool = False, reason: Optional[str] = None,
 ) -> JurisdictionPack:
     """`bypass_approver_check`: ONLY set by activate_jurisdiction_pack_hotfix
     (never by the ordinary Approve/Publish/Activate path) — see that
@@ -7521,14 +8569,31 @@ def set_jurisdiction_pack_status(
     # for corrections) is left completely untouched, exactly as the
     # existing US gate was scoped to avoid a bigger, unreviewed
     # cross-jurisdiction change.
+    # SG opted in 2026-09-23 (ZP-SG-ENG-001 §2: "never edit 2026 rows in
+    # place") — a brand-new jurisdiction with no existing Active->Draft
+    # correction workflow to disturb.
     if (
-        row.pack_type == "tax" and row.jurisdiction_country == "DE"
+        row.pack_type == "tax" and row.jurisdiction_country in ("DE", "SG", "HK")
         and row.status == "Active" and status not in ("Active", "Deprecated", "Retired", "Superseded")
     ):
         raise BadRequestException(
-            f"This Germany tax pack is Active and cannot move directly to {status!r} — "
+            f"This {_GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]} tax pack is Active and cannot move directly to {status!r} — "
             "supersede it with a new version instead of downgrading it back to a pre-Active status."
         )
+    # Completion programme graph (after the downgrade guard above, whose
+    # established message still answers Active -> pre-Active).
+    if row.pack_type == "tax" and row.jurisdiction_country in _PACK_TRANSITION_GRAPH_COUNTRIES:
+        if status not in TAX_PACK_TRANSITIONS:
+            raise BadRequestException(
+                f"{status!r} is not a tax pack lifecycle status — use one of {', '.join(TAX_PACK_TRANSITIONS)}."
+            )
+        allowed = TAX_PACK_TRANSITIONS.get(row.status, ())
+        if status not in allowed:
+            raise BadRequestException(
+                f"Pack {row.pack_id} v{row.version} cannot move from {row.status} to {status} — "
+                + (f"allowed: {', '.join(allowed)}." if allowed else
+                   f"{row.status} is final; create a new pack version instead.")
+            )
 
     if status == "Active" and row.pack_type == "tax":
         # No source artifact / no effective date -> cannot publish
@@ -7543,11 +8608,18 @@ def set_jurisdiction_pack_status(
         # what this plan's own document asked for. A future pass can
         # extend this per-country once each one's own existing Draft
         # packs are individually reviewed/backfilled.
-        if row.jurisdiction_country == "US":
+        # SG opted in 2026-09-23 (ZP-SG-ENG-001 SG-003: only APPROVED,
+        # evidenced, certified content may activate) — same gate as US,
+        # plus the stricter "a real PASS run must exist" check below.
+        # HK opted in 2026-09-30 (ZP-HK-ENG-001 §16: live Hong Kong payroll
+        # stays disabled until the release gates are evidenced).
+        # SE opted in 2026-09-30 (ZP-SE-ENG-001 §16: primary-source statutory
+        # pack approved before activation) — the SG gate, verbatim.
+        if row.jurisdiction_country in ("US", "SG", "SE", "HK"):
             if not row.source_document_id:
                 raise BadRequestException(
                     "This pack needs a linked Source Evidence artifact before it can go Active — "
-                    "see Super Admin > Compliance > United States > Source Evidence."
+                    f"see Super Admin > Compliance > {_GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]} > Source Evidence."
                 )
             if not row.effective_from:
                 raise BadRequestException(
@@ -7567,18 +8639,40 @@ def set_jurisdiction_pack_status(
             # yet" both deliberately do NOT block — blocking on the mere
             # absence of test coverage would be a much bigger, unreviewed
             # change than this gate is meant to make.
+            # Phase 6.4: id breaks a run_at tie (server-side now() — whole
+            # seconds on SQLite), so a PASS right after a FAIL is never read
+            # as the older of the two, nor the reverse.
             latest_run = (
                 db.query(TestCertificationRun)
-                .filter(TestCertificationRun.jurisdiction_country == "US")
-                .order_by(TestCertificationRun.run_at.desc())
+                .filter(TestCertificationRun.jurisdiction_country == row.jurisdiction_country)
+                .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc())
                 .first()
             )
             if latest_run is not None and latest_run.status == "FAIL":
                 raise BadRequestException(
-                    f"The most recent US golden-test certification run (#{latest_run.id}) has "
+                    f"The most recent {row.jurisdiction_country} golden-test certification run (#{latest_run.id}) has "
                     f"{latest_run.failed_cases} unresolved failure(s) — resolve and re-run "
-                    f"Test Certification before activating any US pack."
+                    f"Test Certification before activating any {row.jurisdiction_country} pack."
                 )
+            # Singapore only: absence of a run, or NO_REAL_CASES, is not a
+            # pass — the spec requires golden vectors passing before
+            # activation (SG-003/SG-049). US keeps its existing, more
+            # lenient behavior above unchanged.
+            if row.jurisdiction_country in ("SG", "SE", "HK") and (latest_run is None or latest_run.status != "PASS"):
+                name = _GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]
+                raise BadRequestException(
+                    f"{name} packs need a passing golden-vector certification run before they can go Active — "
+                    f"run Test Certification for {row.jurisdiction_country} first."
+                )
+            # Sweden §37 completeness gate: every engine-required parameter
+            # present in THIS pack and no inert tax-table scaffold left.
+            if row.jurisdiction_country == "SE":
+                blockers = se_activation_blockers(db, row)
+                if blockers:
+                    raise BadRequestException(
+                        "This Sweden pack is not complete enough to go Active: " + "; ".join(blockers[:5])
+                        + (f" (+{len(blockers) - 5} more)" if len(blockers) > 5 else "")
+                    )
         # Prevent two simultaneously-Active tax versions for the same
         # country+state+regime whose EFFECTIVE DATE RANGES actually overlap
         # (Phase 22 duplicate/overlap guard). Originally compared tax_year
@@ -7592,6 +8686,14 @@ def set_jurisdiction_pack_status(
         far_past = date(1, 1, 1)
         target_from = row.effective_from or far_past
         target_to = row.effective_to or far_future
+        if row.jurisdiction_country == "HK":
+            # Serialize concurrent Hong Kong activations: lock the jurisdiction's
+            # tax packs (row locks on PostgreSQL, in id order) so a second
+            # activation waits, then sees the first one's Active row below and is
+            # refused — never two overlapping Active versions.
+            db.query(JurisdictionPack).filter(
+                JurisdictionPack.jurisdiction_country == "HK", JurisdictionPack.pack_type == "tax",
+            ).order_by(JurisdictionPack.id).with_for_update().all()
         conflict = (
             db.query(JurisdictionPack)
             .filter(
@@ -7620,6 +8722,22 @@ def set_jurisdiction_pack_status(
                 "This pack's Effective To date is before its Effective From date — "
                 "fix the date range before activating it; it would never resolve for any calculation."
             )
+        # Phase 6.10 (Singapore): G1 accepted, the golden vectors re-run
+        # against THIS pack's own rows, and a wage-month-aligned start. After
+        # the structural guards above (their refusals keep their messages),
+        # before the approver checks, and on the hotfix path too — none of it
+        # is an approver check.
+        if row.jurisdiction_country == "SG":
+            refusal = _sg_activation_evidence_refusal(db, row)
+            if refusal:
+                raise BadRequestException(refusal)
+        # Hong Kong (ZP-HK-ENG-001 §16): G1 statutory-content evidence
+        # accepted by a second Super Admin, and the golden vectors re-run
+        # against THIS pack's own rows — on the hotfix path too.
+        if row.jurisdiction_country == "HK":
+            refusal = jurisdiction_hooks.call("HK", "pack_activation_refusal", db, row)
+            if refusal:
+                raise BadRequestException(refusal)
         # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
         # 19.2: "author cannot self-approve a production statutory
         # version"). `row.updated_by_id` here is whoever last edited the
@@ -7655,6 +8773,29 @@ def set_jurisdiction_pack_status(
                 "This pack needs a distinct approver before it can go Active — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
             )
+    # Singapore hotfix policy FOLLOW_UP_REQUIRED: no normal-path activation
+    # while a Singapore hotfix awaits its review (the hotfix path checks it
+    # itself, before recording its own activation row).
+    if (status == "Active" and row.pack_type == "tax" and row.jurisdiction_country == "SG" and not bypass_approver_check
+            and SG_HOTFIX_POLICY == "FOLLOW_UP_REQUIRED" and _sg_unreviewed_hotfixes(db)):
+        raise BadRequestException(
+            "A Singapore hotfix is still awaiting its retrospective review — the Singapore hotfix policy "
+            "(FOLLOW_UP_REQUIRED) blocks further activations until it is reviewed."
+        )
+    # Phase 6.0 F2 — approver != activator (Singapore opt-in, same per-country
+    # pattern as the DE/SG downgrade guard and the US/SG evidence gate). The
+    # gates above compare the approver with the LAST EDITOR; a seeded pack has
+    # no editor (updated_by_id NULL), so one Super Admin could approve it and
+    # then activate it alone. For opted-in countries the approver can never be
+    # the activator. Other countries keep their existing "checker approves and
+    # activates" workflow unchanged (owner decision, 2026-09-28). Hotfix
+    # activation keeps its own documented bypass_approver_check path.
+    if (status == "Active" and not bypass_approver_check and row.jurisdiction_country in _APPROVER_NOT_ACTIVATOR_COUNTRIES
+            and row.approved_by_id is not None and row.approved_by_id == actor_id):
+        raise BadRequestException(
+            "The Super Admin who approved this pack cannot also activate it — "
+            "a different Super Admin must activate an approved pack (maker-checker)."
+        )
     old_status = row.status
     row.status = status
     row.updated_by_id = actor_id
@@ -7665,7 +8806,16 @@ def set_jurisdiction_pack_status(
             db, actor_id=actor_id, action="status_change", entity_type="jurisdiction_pack", entity_id=row.id,
             jurisdiction_pack_id=row.id, tax_version=row.version,
             old_value={"status": old_status}, new_value={"status": status},
+            reason=(reason or "").strip() or None,
         )
+        # A pack's status alone decides whether it is resolvable at all
+        # (tax_resolver._find_active_tax_pack filters status == "Active"),
+        # so this transition changes what every future payroll for this
+        # jurisdiction resolves to even though no rate or slab row was
+        # touched. Omitting the invalidation here was the one gap that
+        # would let a just-Activated pack keep serving the "no canonical
+        # pack configured" answer until the TTL expired.
+        _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -7697,6 +8847,37 @@ def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Opti
     # own status docstring — Draft stays Draft until Active), it only
     # records who reviewed it, which set_jurisdiction_pack_status now
     # requires before allowing Draft -> Active for a policy pack too.
+    # Phase 6.5 (Singapore opt-in): refuse the self-approval HERE instead of
+    # recording it and leaving activation to refuse it later. updated_by_id is
+    # whoever last edited or submitted the pack (upserts and status changes
+    # both set it); a seeded, never-edited pack has none, and F2 then keeps its
+    # approver from also activating it.
+    if (row.jurisdiction_country in _SELF_APPROVAL_REFUSED_COUNTRIES and actor_id is not None
+            and row.updated_by_id is not None and row.updated_by_id == actor_id):
+        message = ("The Super Admin who last edited or submitted this pack cannot approve it — "
+                   "a different Super Admin must approve (maker-checker).")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
+        raise BadRequestException(message)
+    # Hong Kong statutory rows are edited one by one through the governed
+    # editor (hong_kong_service.update_row): the approver must have made NONE of
+    # this version's edits — not only the last one.
+    if row.jurisdiction_country == "HK" and row.pack_type == "tax" and actor_id is not None:
+        if actor_id in jurisdiction_hooks.call("HK", "statutory_editors", db, row):
+            message = ("You edited statutory rows of this pack version — a Super Admin who made none of its edits "
+                       "must approve it (maker-checker).")
+            _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
+            raise BadRequestException(message)
+    # Completion programme (Singapore opt-in, same list as above): only a
+    # pre-release version can be approved. The approval on an Active /
+    # Deprecated / Retired / Superseded pack is its release evidence — it was
+    # previously overwritable, replacing who attested the in-force content.
+    # Same rule report templates already follow (set_report_template_approver).
+    if (row.pack_type == "tax" and row.jurisdiction_country in _SELF_APPROVAL_REFUSED_COUNTRIES
+            and row.status not in _EDITABLE_PACK_STATUSES):
+        message = (f"Pack {row.pack_id} v{row.version} is {row.status} — its approval is release evidence and "
+                   "cannot be replaced; create a new pack version to approve changed content.")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
+        raise BadRequestException(message)
     old_approver = row.approved_by_id
     old_status = row.status
     row.approved_by_id = actor_id
@@ -7765,7 +8946,7 @@ def get_organizations_eligible_for_pack(db: Session, pack_row_id: int) -> List[d
         country_code = details.jurisdiction_country if details and details.jurisdiction_country else None
         state = details.jurisdiction_state if details and details.jurisdiction_state else None
         if not country_code:
-            country_code = org.country and _COUNTRY_NAME_TO_JURISDICTION_CODE.get(org.country.strip().lower())
+            country_code = _jurisdiction_code_for_org_country(org.country)
             state = org.state or None
         if country_code != pack.jurisdiction_country:
             continue
@@ -7936,10 +9117,14 @@ def activate_jurisdiction_pack_hotfix(
     mode's "self-approval allowed" promise silently failed for any real
     single-Super-Admin session, which is the ONLY scenario hotfix mode
     exists for in the first place."""
-    if not incident_id or not incident_id.strip():
-        raise BadRequestException("An incident_id is required to activate a pack via hotfix mode.")
-    if not justification or not justification.strip():
-        raise BadRequestException("A justification is required to activate a pack via hotfix mode.")
+    for missing, message in ((not incident_id or not incident_id.strip(),
+                              "An incident_id is required to activate a pack via hotfix mode."),
+                             (not justification or not justification.strip(),
+                              "A justification is required to activate a pack via hotfix mode.")):
+        if missing:
+            _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, message,
+                           path="hotfix")
+            raise BadRequestException(message)
 
     row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not row:
@@ -7953,22 +9138,62 @@ def activate_jurisdiction_pack_hotfix(
             "Policy packs have no approval gate, so hotfix activation is not applicable — "
             "set the pack's status directly to 'Active' instead."
         )
+    if row.jurisdiction_country == "HK":
+        # No Hong Kong hotfix: a first activation must be the full
+        # maker-checker path (ZP-HK-ENG-001 §16 G7 launch authority).
+        refusal = ("Hong Kong hotfix activation is not permitted — activate through the normal maker-checker path "
+                   "after the release gates are evidenced.")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, refusal, path="hotfix")
+        raise BadRequestException(refusal)
+    if row.jurisdiction_country == "SE":
+        # ZP-SE-ENG-001 §14: four-eyes is REQUIRED for country-content
+        # activation, and hotfix mode exists to self-approve — so Sweden has
+        # no hotfix path at all (the SG "PROHIBITED" policy, fixed).
+        refusal = ("Sweden hotfix activation is not permitted — Swedish statutory content must be activated "
+                   "through the normal four-eyes path (ZP-SE-ENG-001 §14).")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, refusal,
+                       path="hotfix")
+        raise BadRequestException(refusal)
+    if row.jurisdiction_country == "SG":
+        policy_refusal = None
+        if SG_HOTFIX_POLICY == "PROHIBITED":
+            policy_refusal = ("Singapore hotfix activation is PROHIBITED by the Singapore hotfix policy — activate "
+                              "through the normal maker-checker path.")
+        elif SG_HOTFIX_POLICY == "FOLLOW_UP_REQUIRED" and _sg_unreviewed_hotfixes(db):
+            policy_refusal = ("A Singapore hotfix is still awaiting its retrospective review — the Singapore hotfix "
+                              "policy (FOLLOW_UP_REQUIRED) blocks further activations until it is reviewed.")
+        if policy_refusal:
+            _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, policy_refusal,
+                           path="hotfix")
+            raise BadRequestException(policy_refusal)
 
     # Self-approve, if not already approved by someone else — this is
-    # the ONE gate hotfix mode is allowed to bypass.
+    # the ONE gate hotfix mode is allowed to bypass. Phase 6.3: the
+    # self-approval is held uncommitted until the activation succeeds (the
+    # same session object is what set_jurisdiction_pack_status re-reads and
+    # commits). Committing it first left a REFUSED hotfix (e.g. no SG
+    # golden PASS, no source evidence) with a phantom approval and no
+    # approval audit row, which a second Super Admin could then activate
+    # through the normal path as if the first had approved it.
     if not row.approved_by_id:
         row.approved_by_id = actor_id
-        db.commit()
-        db.refresh(row)
 
-    updated = set_jurisdiction_pack_status(db, pack_row_id, "Active", actor_id=actor_id, bypass_approver_check=True)
-
+    # Phase 6.6: the hotfix record is added BEFORE the activation, so the one
+    # commit inside set_jurisdiction_pack_status persists the Active status
+    # and its PackHotfixActivation together — previously a second, separate
+    # commit, so a failure between the two left an Active pack with no hotfix
+    # evidence. A refused or failed activation rolls both back.
     activation = PackHotfixActivation(
         jurisdiction_pack_id=pack_row_id, incident_id=incident_id.strip(), justification=justification.strip(),
         activated_by_id=actor_id,
     )
     db.add(activation)
-    db.commit()
+    try:
+        updated = set_jurisdiction_pack_status(db, pack_row_id, "Active", actor_id=actor_id, bypass_approver_check=True,
+                                               reason=f"Hotfix {incident_id.strip()}: {justification.strip()}")
+    except Exception:
+        db.rollback()
+        raise
 
     # No log_activity() call here — PayrollActivityLog is org-scoped
     # (organization_id NOT NULL) and this is a cross-org, Super-Admin-
@@ -7985,16 +9210,70 @@ def list_pack_hotfix_activations(db: Session, reviewed: Optional[bool] = None) -
     return query.order_by(PackHotfixActivation.activated_at.desc()).all()
 
 
+# Phase 6.6: countries whose hotfix retrospective review is the deferred
+# maker-checker in full — the reviewer must differ from the Super Admin who
+# ran the hotfix, and a completed review is final (never replaced). Same
+# per-country opt-in pattern as F2; other countries keep their existing
+# review behaviour (hotfix mode exists for single-Super-Admin sessions).
+_HOTFIX_DISTINCT_REVIEWER_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+
+# Singapore hotfix policy — OWNER DECISION D2 (docs/SINGAPORE_FINAL_
+# IMPLEMENTATION_STATUS.md §20). The default reproduces the behaviour in force
+# before the switch existed, so no business decision is made here; choosing
+# another value IS the decision and is a reviewed one-line change.
+#   RESTRICTED          hotfix allowed; every activation gate except the
+#                       approver checks still applies; a DISTINCT Super Admin's
+#                       retrospective review is required and is final.
+#   PROHIBITED          no Singapore hotfix activation at all.
+#   FOLLOW_UP_REQUIRED  RESTRICTED, plus: while any Singapore hotfix awaits its
+#                       review, no further Singapore pack may be activated
+#                       (hotfix or normal path).
+SG_HOTFIX_POLICIES = ("RESTRICTED", "PROHIBITED", "FOLLOW_UP_REQUIRED")
+SG_HOTFIX_POLICY = "RESTRICTED"
+
+
+def _sg_unreviewed_hotfixes(db: Session) -> list:
+    return (db.query(PackHotfixActivation.id)
+            .join(JurisdictionPack, JurisdictionPack.id == PackHotfixActivation.jurisdiction_pack_id)
+            .filter(JurisdictionPack.jurisdiction_country == "SG", PackHotfixActivation.reviewed.is_(False))
+            .order_by(PackHotfixActivation.id).all())
+
+
 def review_pack_hotfix_activation(db: Session, activation_id: int, review_notes: str, actor_id: Optional[int] = None) -> PackHotfixActivation:
     activation = db.query(PackHotfixActivation).filter(PackHotfixActivation.id == activation_id).first()
     if not activation:
         raise NotFoundException("PackHotfixActivation", activation_id)
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == activation.jurisdiction_pack_id).first()
+    if pack is not None and pack.jurisdiction_country in _HOTFIX_DISTINCT_REVIEWER_COUNTRIES:
+        message = None
+        if activation.reviewed:
+            message = ("This hotfix activation has already been reviewed — its review is retained evidence and "
+                       "cannot be replaced.")
+        elif actor_id is None or actor_id == activation.activated_by_id:
+            message = ("The Super Admin who ran this hotfix cannot review it — a different Super Admin must perform "
+                       "the retrospective review (maker-checker).")
+        if message:
+            _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack.id, "hotfix_review", actor_id, message,
+                           path="hotfix")
+            raise BadRequestException(message)
     activation.reviewed = True
     activation.reviewed_by_id = actor_id
     activation.reviewed_at = datetime.utcnow()
     activation.review_notes = review_notes
     db.commit()
     db.refresh(activation)
+    # Completion programme: the retrospective review — the deferred half of
+    # the hotfix maker-checker — is itself audit evidence on the pack's trail
+    # (it was only a field change on the activation row). Opted-in countries.
+    if pack is not None and pack.jurisdiction_country in _HOTFIX_DISTINCT_REVIEWER_COUNTRIES:
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=pack.id,
+            jurisdiction_pack_id=pack.id, tax_version=pack.version,
+            old_value={"hotfixActivationId": activation.id, "reviewed": False},
+            new_value={"hotfixActivationId": activation.id, "reviewed": True, "incidentId": activation.incident_id,
+                       "activatedById": activation.activated_by_id},
+            reason=f"Hotfix review: {review_notes}" if review_notes else "Hotfix review",
+        )
     return activation
 
 
@@ -8163,6 +9442,77 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "employer_payroll_tax": ("State/Territory Payroll Tax (Employer)", "currency", True),
     "au_statutory_deductions_total": ("Child Support / Garnishee Deductions", "currency", True),
     "au_workers_compensation_premium": ("Workers Compensation Premium (Employer)", "currency", True),
+    # A real PayslipItem column already offered in the SG picker below
+    # (Singapore FWL) but missing here, so upsert_report_field rejected it.
+    "employer_eht": ("Employer Health Tax / Levy (Employer)", "currency", True),
+}
+
+# Dotted paths INTO the per-country JSON snapshot columns, keyed by the
+# snapshot column then the path, in the same (label, field_type,
+# aggregatable) shape as _PAYSLIP_ITEM_FIELD_CATALOG. Read via the generic
+# "PAYSLIP_ITEM_JSON" data-source kind (see _resolve_report_field_value),
+# whose `source_column` is "<column>.<path...>".
+#
+# Ireland (ZP-IE-ENG-001) is the first user. These are the per-employee
+# figures Revenue's ROS submissions need and which have no scalar
+# PayslipItem column — the ones the engine computed but that were being
+# discarded before ie_calculation_snapshot existed.
+# ie_mff_state_topup is offered for INFORMATION only and must never be
+# placed in a deduction component: the State contribution is administered by
+# NAERSA, not deducted from pay (IE-018).
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG = {
+    "IE": {
+        "ie_calculation_snapshot.rpn.rpn_number": ("RPN Number (Revenue Instruction Applied)", "text", False),
+        "ie_calculation_snapshot.rpn.snapshot_id": ("RPN Snapshot ID", "text", False),
+        "ie_calculation_snapshot.rpn.raw_hash": ("RPN Raw Hash", "text", False),
+        "ie_calculation_snapshot.paye.basis": ("PAYE Basis (RPN / Emergency)", "text", False),
+        "ie_calculation_snapshot.paye.amount": ("PAYE (Pay As You Earn)", "currency", True),
+        "ie_calculation_snapshot.paye.standard_rate_pay": ("PAYE Standard-Rate Pay", "currency", True),
+        "ie_calculation_snapshot.paye.higher_rate_pay": ("PAYE Higher-Rate Pay", "currency", True),
+        "ie_calculation_snapshot.paye.tax_credit_applied": ("PAYE Tax Credit Applied", "currency", True),
+        "ie_calculation_snapshot.usc.amount": ("Universal Social Charge", "currency", True),
+        "ie_calculation_snapshot.prsi.subclass": ("PRSI Sub-Class", "text", False),
+        "ie_calculation_snapshot.prsi.employee": ("PRSI (Employee)", "currency", True),
+        "ie_calculation_snapshot.prsi.employer": ("PRSI (Employer)", "currency", True),
+        "ie_calculation_snapshot.prsi.ax_credit": ("PRSI AX Tapered Credit", "currency", True),
+        "ie_calculation_snapshot.prsi.contribution_weeks": ("PRSI Contribution Weeks", "text", False),
+        "ie_calculation_snapshot.prsi.weekly_reckonable": ("PRSI Weekly Reckonable Pay", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.employee": ("MyFutureFund (Employee)", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.employer": ("MyFutureFund (Employer)", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.state_topup": ("MyFutureFund State Top-Up (NOT a deduction)", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.status": ("MyFutureFund Status (NAERSA-notified)", "text", False),
+        "ie_calculation_snapshot.myfuturefund.contributory": ("MyFutureFund Contributory", "text", False),
+        "ie_calculation_snapshot.lpt.amount": ("Local Property Tax", "currency", True),
+        "ie_calculation_snapshot.lpt.instructed": ("LPT Instructed on RPN", "text", False),
+        "ie_calculation_snapshot.lpt.rate_pct": ("LPT Instructed Rate %", "text", False),
+        "ie_calculation_snapshot.pension.employee_prsc": ("PRSC Additional Pension (Employee)", "currency", True),
+        "ie_calculation_snapshot.pension.employer_prsc": ("PRSC Additional Pension (Employer)", "currency", True),
+        "ie_calculation_snapshot.employee_total": ("Total Employee Statutory Deductions", "currency", True),
+        "ie_calculation_snapshot.tax_year": ("Irish Tax Year", "text", False),
+        "ie_calculation_snapshot.labour.nmw_band": ("NMW Age Band Applied", "text", False),
+        "ie_calculation_snapshot.labour.nmw_rate": ("NMW Hourly Rate Applied", "currency", True),
+        "ie_calculation_snapshot.labour.effective_hourly": ("Effective Hourly Pay (NMW check)", "currency", True),
+    },
+}
+
+# Sweden (ZP-SE-ENG-001 §10) — the per-payee AGI figures, read from the
+# frozen se_calculation_snapshot (no scalar PayslipItem column exists for them).
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"] = {
+    "se_calculation_snapshot.withholding.amount": ("Preliminary Tax Deducted", "currency", True),
+    "se_calculation_snapshot.withholding.strategy": ("Withholding Strategy", "text", False),
+    "se_calculation_snapshot.withholding.table": ("Tax Table", "text", False),
+    "se_calculation_snapshot.withholding.column": ("Tax Column", "text", False),
+    "se_calculation_snapshot.withholding.tax_status": ("Worker Tax Status", "text", False),
+    "se_calculation_snapshot.withholding.income_role": ("Income Role", "text", False),
+    "se_calculation_snapshot.employer.amount": ("Employer Contributions", "currency", True),
+    "se_calculation_snapshot.employer.base": ("Employer-Contribution Base", "currency", True),
+    "se_calculation_snapshot.employer.cohort": ("Employer-Contribution Cohort", "text", False),
+    "se_calculation_snapshot.employer.rate": ("Employer-Contribution Rate %", "text", False),
+    "se_calculation_snapshot.slp": ("Special Payroll Tax on Pension Costs (SLP)", "currency", True),
+    "se_calculation_snapshot.pension.employee": ("Occupational Pension (Employee)", "currency", True),
+    "se_calculation_snapshot.pension.employer": ("Occupational Pension (Employer)", "currency", True),
+    "se_calculation_snapshot.employee_total": ("Total Employee Statutory Deductions", "currency", True),
+    "se_calculation_snapshot.employer_total": ("Total Employer Statutory Cost", "currency", True),
 }
 
 _PAYROLL_RUN_FIELD_CATALOG = {
@@ -8191,6 +9541,14 @@ _EMPLOYER_PROFILE_FIELD_CATALOG = {
     # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09).
     "paye_reference": ("PAYE Reference", "text", False),
     "accounts_office_reference": ("Accounts Office Reference", "text", False),
+    # Hong Kong's two employer statutory identifiers (ZP-HK-ENG-001 §7,
+    # HK-022): the IRD employer file number every IR56 form quotes, and the
+    # eMPF employer account every remittance quotes. Neither is the same as
+    # tax_no/employer_id above, and both live in the
+    # CompanyComplianceDetails.tax_identifiers JSON (special-cased in
+    # _resolve_field_value) rather than as dedicated columns.
+    "ird_employer_file_number": ("IRD Employer File Number", "text", False),
+    "empf_employer_account": ("eMPF Employer Account", "text", False),
 }
 
 # Real, already-computed columns on the linked PayrollEmployee a report
@@ -8234,11 +9592,22 @@ _PAYROLL_EMPLOYEE_FIELD_CATALOG = {
     # location).
     "steuer_id": ("Tax ID (Steuer-ID)", "text", False),
     "iban": ("IBAN", "text", False),
+    # Hong Kong's own identity fields (ZP-HK-ENG-001 §7, HK-022) — same
+    # compliance_fields-backed special case as "nino"/"steuer_id" above, and
+    # for the same reason: HKID and passport are SENSITIVE fields stored
+    # masked-at-the-edge in PayrollEmployee.compliance_fields, never as
+    # dedicated columns, and never copied into a payroll trace.
+    "hkid": ("HKID", "text", False),
+    "passport_number": ("Passport Number", "text", False),
 }
 _PAYROLL_EMPLOYEE_FIELDS_BY_COUNTRY = {
     "UK": list(_PAYROLL_EMPLOYEE_FIELD_CATALOG.keys()),
     "CA": ["name", "date_of_birth", "date_of_joining"],
     "DE": ["name", "date_of_birth", "date_of_joining", "steuer_id", "iban"],
+    # Hong Kong's IR56 identity block needs both employment dates (IR56B
+    # reports the period inside the year of assessment) and the identity
+    # document (an IR56B cannot be prepared without one).
+    "HK": ["name", "date_of_birth", "date_of_joining", "date_of_leaving", "hkid", "passport_number"],
 }
 
 _REPORT_FIELD_ALLOWED_COLUMNS = {
@@ -8246,6 +9615,16 @@ _REPORT_FIELD_ALLOWED_COLUMNS = {
     "PAYROLL_RUN": _PAYROLL_RUN_FIELD_CATALOG,
     "EMPLOYER_PROFILE": _EMPLOYER_PROFILE_FIELD_CATALOG,
     "PAYROLL_EMPLOYEE": _PAYROLL_EMPLOYEE_FIELD_CATALOG,
+    # Every dotted snapshot path any country offers, flattened: a path is
+    # accepted because it is a real catalogued path, same rule as the flat
+    # catalogs above. Without this entry upsert_report_field rejected every
+    # PAYSLIP_ITEM_JSON field, so the seed script could not create the
+    # Ireland ROS templates at all.
+    "PAYSLIP_ITEM_JSON": {
+        path: spec
+        for country_paths in _PAYSLIP_ITEM_JSON_FIELD_CATALOG.values()
+        for path, spec in country_paths.items()
+    },
 }
 
 # Which PAYSLIP_ITEM fields are actually relevant per country — narrows the
@@ -8328,6 +9707,44 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "TT": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "tds", "professional_tax", "social_security", "total_deductions",
            "employer_social_security", "net_pay"],
+    # Puerto Rico (2026-09-23, ZP-PR-ENG-001) — exactly the PayslipItem
+    # columns engine/countries/puerto_rico.py's calculate() actually
+    # returns (see that module's own "Reused fields" docstring): local
+    # Hacienda withholding (tds), Social Security, Medicare (incl.
+    # Additional Medicare), FUTA-equivalent (employer_futa), DTRH
+    # Unemployment (employer_sui), SINOT (state_disability_insurance /
+    # employer_state_program_contributions).
+    "PR": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "medicare", "state_disability_insurance", "total_deductions",
+           "employer_social_security", "employer_medicare", "employer_futa", "employer_sui",
+           "employer_state_program_contributions", "net_pay"],
+    # Ireland (ZP-IE-ENG-001) — only the PayslipItem columns
+    # engine/countries/ireland.py's calculate() ACTUALLY populates today:
+    # tds -> PAYE, employer_social_security -> PRSI (employer),
+    # employee_pension/employer_pension -> PRSC Additional Pension.
+    # The engine also returns ie_paye/ie_usc/ie_employee_prsi/ie_mff_*/
+    # ie_lpt/ie_employee_total, but PayslipItem has NO ie_* columns, so
+    # offering them in the field picker would let a Super Admin bind a
+    # template to a column that does not exist and silently render blank.
+    # Only columns that are really there are listed; see the
+    # ie_calculation_snapshot follow-up noted in models.py for the
+    # JSON-snapshot route that exposes the per-head USC/PRSI/MFF/LPT
+    # breakdown Revenue's ROS submissions actually need.
+    "IE": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "tds", "employee_pension", "total_deductions",
+           "employer_social_security", "employer_pension", "net_pay"],
+    # Singapore — no `tds` (not a monthly-PAYE jurisdiction). CPF reuses the
+    # employee/employer pension slots, SHG the flat-fee professional_tax
+    # slot (Trinidad Health Surcharge precedent), SDL the employer-only
+    # employer_payroll_tax slot — see engine/countries/singapore.py.
+    "SG": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "employee_pension", "professional_tax", "total_deductions",
+           "employer_pension", "employer_payroll_tax", "employer_eht", "net_pay"],
+    # Hong Kong — no `tds` (Salaries Tax is employee-assessed; ZP-HK-ENG-001
+    # architecture lock). MPF reuses the employee/employer pension slots.
+    "HK": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "employee_pension", "total_deductions", "employer_pension", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -8392,6 +9809,25 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "tds": "PAYE", "professional_tax": "Health Surcharge",
         "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
     },
+    # Ireland — the generic columns Ireland reuses, shown under their real
+    # Irish names. The catalog's originals belong to other countries
+    # ("TDS" is India's, "Workplace Pension" is the UK auto-enrolment one),
+    # so without these the picker would misname Irish figures.
+    "IE": {
+        "tds": "PAYE",
+        "employer_social_security": "PRSI (Employer)",
+        "employee_pension": "PRSC Additional Pension (Employee)",
+        "employer_pension": "PRSC Additional Pension (Employer)",
+    },
+    "SG": {
+        "employee_pension": "CPF (Employee)", "employer_pension": "CPF (Employer)",
+        "professional_tax": "SHG Contribution", "employer_payroll_tax": "SDL (Employer)",
+        "employer_eht": "Foreign Worker Levy (Employer)",
+    },
+    "HK": {
+        "employee_pension": "MPF Mandatory Contribution (Employee)",
+        "employer_pension": "MPF Mandatory Contribution (Employer)",
+    },
 }
 
 
@@ -8420,6 +9856,12 @@ def get_available_report_data_fields(country: str) -> List[dict]:
         label, field_type, aggregatable = _PAYROLL_EMPLOYEE_FIELD_CATALOG[key]
         items.append({"key": key, "label": label, "dataSourceKind": "PAYROLL_EMPLOYEE", "sourceColumn": key,
                       "fieldType": field_type, "aggregatable": aggregatable})
+    # Dotted paths into this country's per-country JSON snapshot column(s) —
+    # the figures that are real and computed but have no scalar column (see
+    # _PAYSLIP_ITEM_JSON_FIELD_CATALOG). Ireland first.
+    for key, (label, field_type, aggregatable) in _PAYSLIP_ITEM_JSON_FIELD_CATALOG.get(country, {}).items():
+        items.append({"key": key, "label": label, "dataSourceKind": "PAYSLIP_ITEM_JSON", "sourceColumn": key,
+                      "fieldType": field_type, "aggregatable": aggregatable})
     return items
 
 
@@ -8428,6 +9870,13 @@ def get_available_report_data_fields(country: str) -> List[dict]:
 # above, just for components instead of fields. Keyed by report_type;
 # falls back to a generic set for an unrecognized type.
 _REPORT_COMPONENTS_BY_TYPE = {
+    # Sweden AGI individual statement (ZP-SE-ENG-001 §10) — per payee per
+    # payment month. Data extract only; XML generation is a gated phase.
+    "AGI": [
+        ("payee", "Payee"), ("remuneration", "Remuneration"),
+        ("tax", "Deducted tax"), ("employer", "Employer contributions"),
+        ("absence", "Parental / VAB absence"),
+    ],
     "TDS": [
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("earnings", "Earnings"), ("deductions", "Deductions"), ("tax", "Tax"),
@@ -8454,6 +9903,46 @@ _REPORT_COMPONENTS_BY_TYPE = {
     "940": [
         ("employer_info", "Employer Information"),
         ("futa", "FUTA Wages & Tax"),
+    ],
+    # Puerto Rico Form 499 R-1B — per QUARTER, employer-level only,
+    # cross-run aggregation via generate_pr_499r1b (bespoke, independent
+    # from every US report_type above — see that function's own docstring).
+    "PR_499R1B": [
+        ("employer_info", "Employer Information"),
+        ("withholding", "Wages & Withholding"),
+    ],
+    # Federal Form 941 for a Puerto Rico employer — same box structure as
+    # "941" above (FICA is the same federal law), but its own report_type
+    # so it is never confused with a mainland US 941 template, and
+    # generate_pr_941 (never generate_us_941) is what fills it.
+    "PR_941": [
+        ("employer_info", "Employer Information (Line 1 area)"),
+        ("wages_tax", "Wages & Federal Tax (Line 2-3)"),
+        ("ss_medicare", "Social Security & Medicare (Line 5a/5c)"),
+        ("totals", "Totals (Line 6/12)"),
+    ],
+    # Federal Form 940 (FUTA-equivalent) for a Puerto Rico employer — same
+    # reasoning as PR_941 above.
+    "PR_940": [
+        ("employer_info", "Employer Information"),
+        ("futa", "FUTA-equivalent Wages & Tax"),
+    ],
+    # Puerto Rico Form 499R-2/W-2PR — per EMPLOYEE per YEAR, the annual
+    # year-end withholding statement (generate_pr_w2pr, independent from
+    # generate_us_w2/report_type "W2").
+    "PR_W2PR": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("box_wages", "Wages & PR Tax Withheld"), ("box_ss_medicare", "Social Security & Medicare"),
+        ("box_sinot", "SINOT"),
+    ],
+    # DTRH quarterly wage/contribution return (PR-020) — per QUARTER,
+    # employer-level only, cross-run aggregation via
+    # generate_pr_dtrh_quarterly (bespoke, independent from every US
+    # report_type above).
+    "PR_DTRH_QUARTERLY": [
+        ("employer_info", "Employer Information"),
+        ("unemployment", "Unemployment Wages & Tax"),
+        ("sinot", "SINOT Wages & Contributions"),
     ],
     # Distinct report_type keys for named forms that would otherwise share
     # the generic "TDS" category — report_type is the disambiguating key
@@ -8648,6 +10137,58 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"),
         ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART, Annual)"),
     ],
+    # Singapore — employer-level components only; the real per-employee
+    # rows are computed by generate_sg_ir8a / generate_sg_sdl_monthly
+    # (same reasoning as JM_S01/JM_S02 above). Both EXPORT_READY only.
+    "SG_IR8A": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Income Year, reported for YA = year + 1)"),
+    ],
+    "SG_SDL_MONTHLY": [
+        ("employer_info", "Employer Information"),
+        ("totals", "SDL for the calendar month (employer total, rounded down)"),
+    ],
+    "SG_CPF_EZPAY": [
+        ("employer_info", "Employer Information"),
+        ("totals", "CPF EZPay contribution file totals (wage month)"),
+    ],
+    # Singapore Phase 5.6 — classification per engine/jurisdictions/
+    # singapore/statutory_summary.SG_REPORT_TEMPLATES. The first five read
+    # real PayslipItem columns via generate_report_from_template; the last
+    # three have dedicated generators (Phase 5.7) that generator refuses.
+    "SG_PAYROLL_REGISTER": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("contributions", "CPF / SHG (Employee)"),
+        ("deductions", "Deductions and Net Pay"), ("employer_contributions", "CPF / SDL / FWL (Employer)"),
+    ],
+    "SG_PAYROLL_SUMMARY": [
+        ("employer_info", "Employer Information"), ("earnings", "Earnings"),
+        ("contributions", "CPF / SHG (Employee)"), ("employer_contributions", "CPF / SDL / FWL (Employer)"),
+    ],
+    "SG_CPF_CONTRIBUTION": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("contributions", "CPF (Employee)"),
+        ("employer_contributions", "CPF (Employer)"),
+    ],
+    "SG_SHG_MONTHLY": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("contributions", "SHG (Employee)"),
+    ],
+    "SG_FWL_MONTHLY": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("employer_contributions", "Foreign Worker Levy (Employer cost)"),
+    ],
+    "SG_PWM_COMPLIANCE": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Wages (PWM required gross evaluated by the Compliance Centre, not stored here)"),
+    ],
+    "SG_IR21_REGISTER": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee and Employment Dates"),
+    ],
+    "SG_LQS_COMPLIANCE": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Wages (LQS threshold evaluated by the Compliance Centre, not stored here)"),
+    ],
     # Barbados real named forms (Caribbean forms gap-closure, country #4,
     # 2026-09-23). Both per MONTH, employer-level components only (Super
     # Admin sees the box structure) — the real per-employee rows are
@@ -8735,6 +10276,135 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)"), ("contributions", "Social Insurance"),
         ("employer_contributions", "Employer Contributions"),
     ],
+    # ── Hong Kong (ZP-HK-ENG-001 §7, HK-011 / HK-010) ──────────────────────
+    # Hong Kong has no payroll income tax (Salaries Tax is employee-assessed
+    # and reported to IRD after the year of assessment, never withheld), so
+    # there is deliberately NO "tax" component on any HK report type — the
+    # same reasoning that gives Cayman ("KY_PENSION") and The Bahamas
+    # ("BS_NIB_STATEMENT") a contributions-only shape. MPF goes in the shared
+    # employee/employer pension slots. Every HK layout is Zoiko's own internal
+    # field map: the IRD XML and eMPF prescribed formats are not archived
+    # (release gate G2), so no official layout is invented or claimed.
+    # HK_BIR56A — the annual employer's return cover (AGGREGATE, per year of
+    # assessment ending 31 March).
+    "HK_BIR56A": [
+        ("employer_info", "Employer Information"),
+        ("employee_summary", "Employee Summary"),
+        ("totals", "Totals"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_IR56B — the per-employee annual employee return (PER_EMPLOYEE; also
+    # the employee-copy document, so it must be PER_EMPLOYEE for the shared
+    # certificate PDF to accept it).
+    "HK_IR56B": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("employment", "Employment Period"),
+        ("remuneration", "Remuneration Details"),
+        ("contributions", "MPF (Employee)"),
+        ("employer_contributions", "MPF (Employer)"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_IR56E / IR56F / IR56G — the three employee notifications. They share
+    # one component shape (identity, event, income-to-event, MPF) because the
+    # IRD notification layout is one form with different event blocks; the
+    # event itself is a per-employee field, not a separate component.
+    "HK_IR56E": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("event", "Commencement Details"),
+        ("remuneration", "Remuneration Details"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    "HK_IR56F": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("event", "Cessation Details"),
+        ("remuneration", "Remuneration Details"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    "HK_IR56G": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("event", "Departure Details"),
+        ("remuneration", "Remuneration Details"),
+        ("tax_clearance_hold", "Tax Clearance Hold (amount withheld)"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_EMPF_REMITTANCE — the employer's contribution-period remittance
+    # statement (AGGREGATE; computed by generate_hong_kong_empf_remittance
+    # from the real committed payslips, the W-2/941 bespoke pattern).
+    "HK_EMPF_REMITTANCE": [
+        ("employer_info", "Employer Information"),
+        ("contributions", "MPF Contributions"),
+        ("members", "Contributing Members"),
+        ("totals", "Period Totals"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_MPF_CONTRIBUTION_RECORD — the employee's own MPF contribution /
+    # pay record (HK-010: "provide employee MPF contribution / pay records").
+    # A pure employee document, not a filing — hence no filing_metadata.
+    "HK_MPF_CONTRIBUTION_RECORD": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("contributions", "MPF Contributions"),
+        ("ytd", "Year-to-Date"),
+        ("coverage", "MPF Coverage"),
+    ],
+    # HK_TERMINATION_STATEMENT — the employee's termination statement (spec
+    # document service: "leave / termination statements"), from an APPROVED
+    # four-eyes termination calculation. An employee document, not a filing.
+    "HK_TERMINATION_STATEMENT": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("termination", "Termination"),
+        ("entitlement", "Severance / Long Service Payment"),
+        ("final_payment", "Final Payment"),
+    ],
+    # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) report types.
+    #
+    # Each Irish tax head is a SEPARATE component rather than one folded
+    # "tax" bucket, because Revenue administers and reconciles them
+    # separately: PAYE is instructed per-employee by RPN, USC has its own
+    # payable/paid base, PRSI has a sub-class and a weekly band, LPT is
+    # deducted only on instruction, and MyFutureFund is a separate scheme
+    # with an NAERSA-notified status.
+    #
+    # The employee per-head figures read through the "PAYSLIP_ITEM_JSON"
+    # data source (ie_calculation_snapshot.*) rather than scalar columns,
+    # because they have none. The MyFutureFund State top-up is exposed as
+    # its own component and must never be presented as a deduction —
+    # NAERSA/the State administers it, not the employer (IE-018).
+    "IE_ROS_EMPLOYEE_CERT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("usc", "Universal Social Charge"),
+        ("prsi", "PRSI"), ("pension", "PRSC Additional Pension"),
+        ("deductions", "Total Deductions"), ("ytd", "Year-to-Date"),
+    ],
+    "IE_ROS_PAYROLL": [
+        ("employer_info", "Employer Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("usc", "Universal Social Charge"),
+        ("prsi", "PRSI"), ("pension", "PRSC Additional Pension"), ("totals", "Period Totals"),
+    ],
+    "IE_PRSI_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("prsi", "PRSI by Sub-Class and Band"), ("totals", "PRSI Totals"),
+    ],
+    "IE_USC_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("usc", "Universal Social Charge"), ("totals", "USC Totals"),
+    ],
+    "IE_MFF_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("myfuturefund", "MyFutureFund Contributions and Status"),
+        ("myfuturefund_state", "MyFutureFund State Top-Up (informational — not a deduction)"),
+        ("totals", "MyFutureFund Totals"),
+    ],
+    "IE_LPT_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("lpt", "Local Property Tax (deducted only where instructed on the RPN)"),
+        ("totals", "LPT Totals"),
+    ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -8755,13 +10425,17 @@ def get_available_report_components(report_type: str) -> List[dict]:
 _EDITABLE_TEMPLATE_STATUSES = ("Draft", "Review", "Approved")
 
 
-def _require_editable_report_template(template: "ReportTemplate") -> None:
+def _require_editable_report_template(template: "ReportTemplate", db: Optional[Session] = None,
+                                      actor_id: Optional[int] = None) -> None:
     if template.status not in _EDITABLE_TEMPLATE_STATUSES:
-        raise BadRequestException(
+        message = (
             f"Template {template.template_key} v{template.version} is {template.status} — it is no "
             "longer editable. Create a new version (\"New Version\") to make changes; "
             "published report templates must not be edited in place."
         )
+        if db is not None:          # Phase 6.5: an edit of released content is audited (opt-in countries)
+            _audit_refusal(db, ReportTemplate, "report_template", template.id, "edit", actor_id, message)
+        raise BadRequestException(message)
 
 
 def list_report_templates(
@@ -8789,7 +10463,9 @@ def list_report_templates(
     if search:
         like = f"%{search}%"
         query = query.filter(or_(ReportTemplate.name.ilike(like), ReportTemplate.template_key.ilike(like)))
-    rows = query.order_by(ReportTemplate.template_key, ReportTemplate.created_at.desc()).all()
+    # id breaks a created_at tie (whole seconds on SQLite), so two versions
+    # saved in the same second never swap which one is "latest".
+    rows = query.order_by(ReportTemplate.template_key, ReportTemplate.created_at.desc(), ReportTemplate.id.desc()).all()
 
     latest_by_key = {}
     for row in rows:
@@ -8909,18 +10585,23 @@ def upsert_report_template(db: Session, data: "ReportTemplateUpsert", actor_id: 
         template_key=data.templateKey, name=data.name, report_type=data.reportType,
         jurisdiction_country=data.jurisdictionCountry, jurisdiction_state=data.jurisdictionState,
         jurisdiction_locality=data.jurisdictionLocality, reporting_year=data.reportingYear,
-        version=data.version, status=data.status, description=data.description,
+        version=data.version, description=data.description,
         regulatory_authority=data.regulatoryAuthority, effective_from=data.effectiveFrom,
         effective_to=data.effectiveTo, change_summary=data.changeSummary,
         source_references=data.sourceReferences, document_scope=data.documentScope,
         source_document_id=data.sourceDocumentId, reconciliation_tolerance=data.reconciliationTolerance,
-        approved_by_id=data.approvedById,
     )
+    # Lifecycle fields are never taken from the payload (Phase 5.8): status
+    # moves only through set_report_template_status and the approver only
+    # through set_report_template_approver, so an upsert can neither create
+    # an already-Active template nor name its own approver. data.status /
+    # data.approvedById are accepted for payload compatibility and ignored.
     if existing:
-        _require_editable_report_template(existing)
+        _require_editable_report_template(existing, db=db, actor_id=actor_id)
         old_value = {k: (str(getattr(existing, k)) if getattr(existing, k) is not None else None) for k in fields}
         for k, v in fields.items():
             setattr(existing, k, v)
+        _invalidate_report_template_approval_on_edit(existing)
         existing.updated_by_id = actor_id
         row = existing
         db.commit()
@@ -8941,7 +10622,7 @@ def upsert_report_template(db: Session, data: "ReportTemplateUpsert", actor_id: 
     )
     row = ReportTemplate(
         previous_version_id=previous.id if previous else None,
-        created_by_id=actor_id, updated_by_id=actor_id,
+        created_by_id=actor_id, updated_by_id=actor_id, status="Draft", approved_by_id=None,
         **fields,
     )
     db.add(row)
@@ -8958,11 +10639,36 @@ def upsert_report_template(db: Session, data: "ReportTemplateUpsert", actor_id: 
     return row
 
 
+_REPORT_STRUCTURE_AUDIT_TYPES = ("report_template_component", "report_template_field")
+_COMPONENT_AUDIT_COLUMNS = ("component_key", "label", "component_category", "sort_order")
+_FIELD_AUDIT_COLUMNS = ("field_key", "label", "field_type", "data_source_kind", "source_column", "aggregation",
+                        "enum_values", "format_hint", "is_required", "sort_order")
+
+
+def _report_structure_values(row, columns) -> dict:
+    return {c: (str(getattr(row, c)) if getattr(row, c) is not None else None) for c in columns}
+
+
+def _record_report_structure_edit(db: Session, template, actor_id: Optional[int], entity_type: str, action: str,
+                                  old: Optional[dict], new: Optional[dict]) -> None:
+    """A component / field change is a change to the template's content: the
+    actor becomes the template's last editor (the approve / publish / activate
+    maker-checker checks read updated_by_id) and the change is audited against
+    the TEMPLATE id (entity types _REPORT_STRUCTURE_AUDIT_TYPES, listed by
+    get_report_template_audit). Uncommitted: the caller's commit writes the
+    edit and its audit row together."""
+    if actor_id is not None:
+        template.updated_by_id = actor_id
+    record_tax_audit(db, actor_id=actor_id, action=action, entity_type=entity_type, entity_id=template.id,
+                     old_value=old, new_value=new, auto_commit=False)
+
+
 def upsert_report_component(
     db: Session, report_template_id: int, data: "ReportTemplateComponentUpsert", actor_id: Optional[int] = None,
 ) -> ReportTemplateComponent:
     template = get_report_template(db, report_template_id)
-    _require_editable_report_template(template)
+    _require_editable_report_template(template, db=db, actor_id=actor_id)
+    _invalidate_report_template_approval_on_edit(template)
 
     allowed = {item["key"] for item in get_available_report_components(template.report_type)}
     if data.componentKey not in allowed:
@@ -8987,13 +10693,21 @@ def upsert_report_component(
     fields = dict(component_key=data.componentKey, label=data.label,
                   component_category=data.componentCategory, sort_order=data.sortOrder)
     if existing:
+        old = _report_structure_values(existing, _COMPONENT_AUDIT_COLUMNS)
         for k, v in fields.items():
             setattr(existing, k, v)
+        _record_report_structure_edit(db, template, actor_id, "report_template_component", "update",
+                                      {"componentId": existing.id, **old},
+                                      {"componentId": existing.id,
+                                       **_report_structure_values(existing, _COMPONENT_AUDIT_COLUMNS)})
         db.commit()
         db.refresh(existing)
         return existing
     row = ReportTemplateComponent(report_template_id=report_template_id, **fields)
     db.add(row)
+    db.flush()
+    _record_report_structure_edit(db, template, actor_id, "report_template_component", "create", None,
+                                  {"componentId": row.id, **_report_structure_values(row, _COMPONENT_AUDIT_COLUMNS)})
     db.commit()
     db.refresh(row)
     return row
@@ -9004,7 +10718,13 @@ def delete_report_component(db: Session, component_id: int, actor_id: Optional[i
     if not component:
         raise NotFoundException("ReportTemplateComponent", component_id)
     template = get_report_template(db, component.report_template_id)
-    _require_editable_report_template(template)
+    _require_editable_report_template(template, db=db, actor_id=actor_id)
+    _invalidate_report_template_approval_on_edit(template)
+    removed_fields = [f.field_key for f in db.query(ReportTemplateComponentField)
+                      .filter(ReportTemplateComponentField.component_id == component_id)]
+    _record_report_structure_edit(db, template, actor_id, "report_template_component", "delete",
+                                  {"componentId": component.id, "removedFieldKeys": removed_fields,
+                                   **_report_structure_values(component, _COMPONENT_AUDIT_COLUMNS)}, None)
     db.query(ReportTemplateComponentField).filter(ReportTemplateComponentField.component_id == component_id).delete()
     db.delete(component)
     db.commit()
@@ -9021,7 +10741,8 @@ def upsert_report_field(
     if not component:
         raise NotFoundException("ReportTemplateComponent", component_id)
     template = get_report_template(db, component.report_template_id)
-    _require_editable_report_template(template)
+    _require_editable_report_template(template, db=db, actor_id=actor_id)
+    _invalidate_report_template_approval_on_edit(template)
 
     catalog = _REPORT_FIELD_ALLOWED_COLUMNS.get(data.dataSourceKind)
     if not catalog:
@@ -9055,13 +10776,22 @@ def upsert_report_field(
         sort_order=data.sortOrder,
     )
     if existing:
+        old = _report_structure_values(existing, _FIELD_AUDIT_COLUMNS)
         for k, v in fields.items():
             setattr(existing, k, v)
+        _record_report_structure_edit(db, template, actor_id, "report_template_field", "update",
+                                      {"componentKey": component.component_key, "fieldId": existing.id, **old},
+                                      {"componentKey": component.component_key, "fieldId": existing.id,
+                                       **_report_structure_values(existing, _FIELD_AUDIT_COLUMNS)})
         db.commit()
         db.refresh(existing)
         return existing
     row = ReportTemplateComponentField(component_id=component_id, **fields)
     db.add(row)
+    db.flush()
+    _record_report_structure_edit(db, template, actor_id, "report_template_field", "create", None,
+                                  {"componentKey": component.component_key, "fieldId": row.id,
+                                   **_report_structure_values(row, _FIELD_AUDIT_COLUMNS)})
     db.commit()
     db.refresh(row)
     return row
@@ -9074,13 +10804,75 @@ def delete_report_field(db: Session, field_id: int, actor_id: Optional[int] = No
     component = db.query(ReportTemplateComponent).filter(ReportTemplateComponent.id == field.component_id).first()
     if component:
         template = get_report_template(db, component.report_template_id)
-        _require_editable_report_template(template)
+        _require_editable_report_template(template, db=db, actor_id=actor_id)
+        _invalidate_report_template_approval_on_edit(template)
+        _record_report_structure_edit(db, template, actor_id, "report_template_field", "delete",
+                                      {"componentKey": component.component_key, "fieldId": field.id,
+                                       **_report_structure_values(field, _FIELD_AUDIT_COLUMNS)}, None)
     db.delete(field)
     db.commit()
 
 
-def set_report_template_status(db: Session, template_id: int, status: str, actor_id: Optional[int] = None) -> ReportTemplate:
+# Report-template lifecycle (Singapore Phase 5.8, shared by every
+# jurisdiction). Pre-release states can move among themselves; Published /
+# Active / Superseded are released and never return to an editable state —
+# a correction after release is a NEW version (upsert_report_template with
+# a new version string clones the structure and links previous_version_id),
+# so a released version's content can never change under its own number.
+# Superseded is terminal. The maker-checker gate below is unchanged.
+# Phase 6.3: Published is reachable ONLY from Approved (Draft/Review ->
+# Published was a maker-checker shortcut), so every release passes through
+# the approval state that set_report_template_approver records.
+REPORT_TEMPLATE_TRANSITIONS = {
+    "Draft": ("Review", "Approved"),
+    "Review": ("Draft", "Approved"),
+    "Approved": ("Draft", "Review", "Published"),
+    "Published": ("Active", "Superseded"),
+    "Active": ("Superseded",),
+    "Superseded": (),
+}
+
+
+def _invalidate_report_template_approval_on_edit(template: "ReportTemplate") -> None:
+    """Same rule as _invalidate_pack_approval_on_edit: an approval attests to
+    the template's CURRENT structure, so editing a component or field after
+    approval clears it (Approved -> Draft) instead of letting a stale
+    approval carry over onto content nobody re-reviewed."""
+    if template.approved_by_id is not None:
+        template.approved_by_id = None
+        if template.status == "Approved":
+            template.status = "Draft"
+
+
+def set_report_template_status(
+    db: Session, template_id: int, status: str, actor_id: Optional[int] = None, reason: Optional[str] = None,
+) -> ReportTemplate:
+    """Phase 6.5 wrapper: a refused transition of an opted-in country's
+    template is audited before it propagates (see _audit_refusal)."""
+    try:
+        return _set_report_template_status(db, template_id, status, actor_id=actor_id, reason=reason)
+    except BadRequestException as exc:
+        _audit_refusal(db, ReportTemplate, "report_template", template_id, status, actor_id, exc.message)
+        raise
+
+
+def _set_report_template_status(
+    db: Session, template_id: int, status: str, actor_id: Optional[int] = None, reason: Optional[str] = None,
+) -> ReportTemplate:
     row = get_report_template(db, template_id)
+    if status not in REPORT_TEMPLATE_TRANSITIONS:
+        raise BadRequestException(f"Unknown report template status {status!r} — one of "
+                                  f"{', '.join(REPORT_TEMPLATE_TRANSITIONS)}.")
+    allowed = REPORT_TEMPLATE_TRANSITIONS.get(row.status, ())
+    if status not in allowed:
+        raise BadRequestException(
+            f"{row.template_key} v{row.version} cannot move from {row.status} to {status}"
+            + (f" (allowed: {', '.join(allowed)})." if allowed else " — Superseded is final.")
+            + (" A released version is never edited in place — create a new version instead."
+               if row.status in ("Published", "Active", "Superseded") and status in _EDITABLE_TEMPLATE_STATUSES else "")
+            + (" Publishing requires an Approved template — use \"Approve\" (a distinct Super Admin) first."
+               if status == "Published" and row.status in ("Draft", "Review") else "")
+        )
     if status in ("Published", "Active"):
         # Minimum viable maker-checker gate, same contract as
         # set_jurisdiction_pack_status: author cannot self-approve.
@@ -9089,7 +10881,20 @@ def set_report_template_status(db: Session, template_id: int, status: str, actor
                 "This template needs a distinct approver before it can be Published/Activated — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
             )
+    if status == "Active" and row.jurisdiction_country == "HK":
+        # Hong Kong only (final completion program): reviewed source evidence
+        # and an activator other than the approver. Other countries unchanged.
+        refusal = jurisdiction_hooks.call("HK", "template_activation_refusal", db, row, actor_id)
+        if refusal:
+            raise BadRequestException(refusal)
     if status == "Active":
+        if row.jurisdiction_country == "HK":
+            # Same serialization as HK pack activation: one Active template per
+            # report type and year, even under concurrent activations.
+            db.query(ReportTemplate).filter(
+                ReportTemplate.jurisdiction_country == "HK", ReportTemplate.report_type == row.report_type,
+                ReportTemplate.reporting_year == row.reporting_year,
+            ).order_by(ReportTemplate.id).with_for_update().all()
         conflict = (
             db.query(ReportTemplate)
             .filter(
@@ -9114,16 +10919,64 @@ def set_report_template_status(db: Session, template_id: int, status: str, actor
     db.refresh(row)
     record_tax_audit(
         db, actor_id=actor_id, action="status_change", entity_type="report_template", entity_id=row.id,
-        tax_version=row.version, old_value={"status": old_status}, new_value={"status": status},
+        tax_version=row.version, old_value={"status": old_status},
+        new_value={"status": status, "templateKey": row.template_key, "approvedById": row.approved_by_id},
+        reason=reason,
     )
     return row
+
+
+# Countries where NO editor of a report-template version (metadata, component
+# or field — from the audit trail) may approve it; elsewhere only the LAST
+# editor is refused (_SELF_APPROVAL_REFUSED_COUNTRIES) or, at Publish, the
+# approver must differ from updated_by_id. Per-country opt-in.
+_ANY_EDITOR_APPROVAL_REFUSED_COUNTRIES = ("HK",)
+
+
+def report_template_editors(db: Session, template) -> set:
+    """Every actor who changed this template version's content: its metadata
+    upserts (create / update audit rows other than the approver record) and
+    every component / field change."""
+    rows = (db.query(TaxConfigurationAudit.actor_id, TaxConfigurationAudit.entity_type, TaxConfigurationAudit.action,
+                     TaxConfigurationAudit.reason)
+            .filter(TaxConfigurationAudit.entity_id == template.id,
+                    TaxConfigurationAudit.entity_type.in_(("report_template",) + _REPORT_STRUCTURE_AUDIT_TYPES),
+                    TaxConfigurationAudit.actor_id.isnot(None)).all())
+    return {actor for actor, etype, action, reason in rows
+            if etype in _REPORT_STRUCTURE_AUDIT_TYPES or (action in ("create", "update") and reason != "Approver set")}
 
 
 def set_report_template_approver(db: Session, template_id: int, actor_id: Optional[int] = None) -> ReportTemplate:
     """Sets approved_by_id to the calling Super Admin — a distinct action
     from general editing, same semantics as set_jurisdiction_pack_approver.
-    Auto-advances Draft -> Approved only; leaves any later status alone."""
+    Auto-advances Draft -> Approved only; leaves any later status alone.
+    Only a pre-release (editable) version can be approved: the approval on
+    a Published / Active / Superseded version is its release evidence and
+    is never replaced (Phase 5.8)."""
     row = get_report_template(db, template_id)
+    if row.status not in _EDITABLE_TEMPLATE_STATUSES:
+        message = (f"{row.template_key} v{row.version} is {row.status} — its approval is release evidence and cannot be "
+                   "replaced; create a new version to approve changed content.")
+        _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)   # Phase 6.5
+        raise BadRequestException(message)
+    # Completion programme (Singapore opt-in, the pack rule of Phase 6.5 B):
+    # the last editor's self-approval is refused HERE — previously it was
+    # recorded (with an audit row calling it an approval) and only refused
+    # later, at Publish.
+    if (row.jurisdiction_country in _SELF_APPROVAL_REFUSED_COUNTRIES and actor_id is not None
+            and row.updated_by_id is not None and row.updated_by_id == actor_id):
+        message = (f"The Super Admin who last edited {row.template_key} v{row.version} cannot approve it — "
+                   "a different Super Admin must approve (maker-checker).")
+        _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)
+        raise BadRequestException(message)
+    # Hong Kong opt-in: the approver must have made NONE of this version's edits
+    # (template metadata, components or fields) — not only the last one.
+    if (row.jurisdiction_country in _ANY_EDITOR_APPROVAL_REFUSED_COUNTRIES and actor_id is not None
+            and actor_id in report_template_editors(db, row)):
+        message = (f"You edited {row.template_key} v{row.version} — a Super Admin who made none of its edits must "
+                   "approve it (maker-checker).")
+        _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)
+        raise BadRequestException(message)
     old_approver = row.approved_by_id
     old_status = row.status
     row.approved_by_id = actor_id
@@ -9142,14 +10995,25 @@ def set_report_template_approver(db: Session, template_id: int, actor_id: Option
 def get_report_template_audit(db: Session, template_id: int) -> List[TaxConfigurationAudit]:
     return (
         db.query(TaxConfigurationAudit)
-        .filter(TaxConfigurationAudit.entity_type == "report_template", TaxConfigurationAudit.entity_id == template_id)
-        .order_by(TaxConfigurationAudit.created_at.desc())
+        .filter(TaxConfigurationAudit.entity_type.in_(("report_template",) + _REPORT_STRUCTURE_AUDIT_TYPES),
+                TaxConfigurationAudit.entity_id == template_id)
+        .order_by(TaxConfigurationAudit.created_at.desc(), TaxConfigurationAudit.id.desc())
         .all()
     )
 
 
-def hard_delete_report_template(db: Session, template_id: int) -> dict:
+def hard_delete_report_template(db: Session, template_id: int, actor_id: Optional[int] = None) -> dict:
     row = get_report_template(db, template_id)
+    # Completion programme (Singapore opt-in): a Superseded version is part of
+    # the template's version chain (a successor's previous_version_id points
+    # at it), so it is never deleted; a deletable pre-release version leaves
+    # an audit row behind.
+    audited = row.jurisdiction_country in _REFUSAL_AUDIT_COUNTRIES
+    if audited and row.status == "Superseded":
+        message = (f"{row.template_key} v{row.version} is Superseded — it is retained version history and cannot "
+                   "be deleted.")
+        _audit_refusal(db, ReportTemplate, "report_template", row.id, "delete", actor_id, message)
+        raise BadRequestException(message)
     has_generated_history = (
         db.query(GeneratedReport.id).filter(GeneratedReport.report_template_id == row.id).first() is not None
     )
@@ -9175,8 +11039,15 @@ def hard_delete_report_template(db: Session, template_id: int) -> dict:
         ).delete(synchronize_session=False)
     db.query(ReportTemplateComponent).filter(ReportTemplateComponent.report_template_id == row.id).delete(synchronize_session=False)
     template_key_label, version_label = row.template_key, row.version
+    deleted_id, deleted_status = row.id, row.status
     db.delete(row)
     db.commit()
+    if audited:
+        record_tax_audit(
+            db, actor_id=actor_id, action="delete", entity_type="report_template", entity_id=deleted_id,
+            tax_version=version_label, old_value={"status": deleted_status, "templateKey": template_key_label},
+            new_value=None, reason="Hard delete of a pre-release version",
+        )
     return {"templateKey": template_key_label, "version": version_label}
 
 
@@ -9617,14 +11488,18 @@ def _report_ytd_period_start(period_end, jurisdiction_country: Optional[str]) ->
     Form 130's own "tds_ytd" field would otherwise silently sum Jan-Dec
     instead of the real fiscal year. Every other jurisdiction still keeps
     the calendar-year approximation, a disclosed simplification for them
-    (not fixed this pass)."""
+    (not fixed this pass).
+
+    Hong Kong (ZP-HK-ENG-001 §7, HK-011) is fixed for the same reason: the
+    year of assessment runs 1 April - 31 March, so an IR56B or an MPF
+    contribution record must sum the assessment year and never Jan-Dec."""
     if not period_end:
         return None
     normalized = _normalize_country(jurisdiction_country or "")
     if normalized == "UK":
         start_year = period_end.year if (period_end.month, period_end.day) >= (4, 6) else period_end.year - 1
         return date(start_year, 4, 6)
-    if normalized == "IN":
+    if normalized in ("IN", "HK"):
         start_year = period_end.year if period_end.month >= 4 else period_end.year - 1
         return date(start_year, 4, 1)
     return date(period_end.year, 1, 1)
@@ -9651,7 +11526,18 @@ def _resolve_field_value(
     if field.data_source_kind == "PAYROLL_RUN":
         value = getattr(run, field.source_column, None) if run else None
     elif field.data_source_kind == "EMPLOYER_PROFILE":
-        value = getattr(company, field.source_column, None) if company else None
+        if company is None:
+            value = None
+        elif field.source_column in ("ird_employer_file_number", "empf_employer_account"):
+            # compliance_fields-style special case, same as the HK employee
+            # identity keys above: these two live in
+            # CompanyComplianceDetails.tax_identifiers (the jurisdiction-
+            # agnostic {"<key>": "<value>"} JSON synced from
+            # Organization.tax_identifiers at registration — see that
+            # column's own docstring), NOT as dedicated columns.
+            value = (company.tax_identifiers or {}).get(field.source_column)
+        else:
+            value = getattr(company, field.source_column, None)
     elif field.data_source_kind == "PAYROLL_EMPLOYEE":
         if employee is None:
             value = None
@@ -9659,6 +11545,13 @@ def _resolve_field_value(
             value = (employee.compliance_fields or {}).get("nino")
         elif field.source_column in ("steuer_id", "iban"):
             value = (employee.compliance_fields or {}).get(field.source_column)
+        elif field.source_column in ("hkid", "passport_number"):
+            # Hong Kong identity is MASKED in ordinary output (HK-022 / PCPD HR
+            # Code — the same rule the HK payslip identity rows apply), so a
+            # report can never become a way around that. The unmasked value
+            # stays in the employee record and reaches IRD through the filing
+            # channel, not through a downloadable report.
+            value = mask_identifier((employee.compliance_fields or {}).get(field.source_column))
         else:
             value = getattr(employee, field.source_column, None)
     elif field.data_source_kind == "PAYSLIP_ITEM":
@@ -9692,6 +11585,65 @@ def _resolve_field_value(
             value = float(total)
         else:
             value = getattr(item, field.source_column, None) if item else None
+    elif field.data_source_kind == "PAYSLIP_ITEM_JSON":
+        # A dotted path into one of PayslipItem's per-country JSON snapshot
+        # columns, e.g. "ie_calculation_snapshot.usc.amount". Introduced with
+        # ZP-IE-ENG-001 and deliberately GENERIC: `source_column`'s first
+        # segment is resolved with getattr against the real column, so
+        # germany_calculation_snapshot / fr_calculation_snapshot /
+        # au_calculation_trace can all be read the same way without a new
+        # data-source kind per country.
+        #
+        # This exists because those snapshots hold figures that genuinely
+        # have no scalar column — Ireland's per-head USC/PRSI/MyFutureFund/LPT
+        # breakdown is the first case where a report genuinely needed one.
+        # It is a real read of a real stored value: a missing column, a NULL
+        # snapshot (every non-Irish payslip, and Irish payslips predating
+        # the column), or a path that does not exist yields None rather than
+        # a fabricated 0.
+        def _json_path_value(target):
+            column_name, _, path = field.source_column.partition(".")
+            blob = getattr(target, column_name, None)
+            if blob is None:
+                return None
+            for segment in filter(None, path.split(".")):
+                if not isinstance(blob, dict) or segment not in blob:
+                    return None
+                blob = blob[segment]
+            return blob
+
+        if field.aggregation == "SUM_RUN":
+            # Same contract as the PAYSLIP_ITEM SUM_RUN branch above: a real
+            # sum over real rows, and a non-numeric path (a text field such
+            # as the RPN number or the PRSI sub-class) contributes 0 rather
+            # than raising. Summing text is never what a totals row wants.
+            total = Decimal("0")
+            for row in ((run.payslip_items if run else None) or []):
+                cell = _json_path_value(row)
+                if isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool):
+                    total += Decimal(str(cell))
+            value = float(total)
+        elif field.aggregation == "SUM_YTD" and target_employee_id is not None and period_end is not None:
+            year_start = _report_ytd_period_start(period_end, jurisdiction_country)
+            ytd_query = (
+                db.query(PayslipItem)
+                .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+                .filter(
+                    PayslipItem.organization_id == organization_id,
+                    PayslipItem.employee_id == target_employee_id,
+                    PayrollRun.period_end <= period_end,
+                )
+            )
+            if year_start:
+                ytd_query = ytd_query.filter(PayrollRun.period_end >= year_start)
+            total = Decimal("0")
+            for row in ytd_query.all():
+                cell = _json_path_value(row)
+                if isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool):
+                    total += Decimal(str(cell))
+            value = float(total)
+        else:
+            value = _json_path_value(item) if item is not None else None
     else:
         value = None
     if isinstance(value, Decimal):
@@ -9744,6 +11696,43 @@ def generate_report_from_template(
     reporting_period: Optional[str] = None, actor_id: Optional[int] = None,
 ) -> GeneratedReport:
     template = get_report_template(db, report_template_id)
+    if template.jurisdiction_country == "SG":
+        from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import (
+            SG_DEDICATED_GENERATOR_REPORT_TYPES,
+        )
+
+        if template.report_type in SG_DEDICATED_GENERATOR_REPORT_TYPES:
+            # Singapore STATUTORY_WORKSPACE templates (PWM / IR21 / LQS): their
+            # subject (required gross, case status, LQS result) is not a
+            # payslip column, so a generic render would be a plain wage list
+            # under a compliance title — only their own generator renders them.
+            raise BadRequestException(
+                f"{template.template_key} has a dedicated Singapore generator "
+                "(/api/payroll/singapore/reports/...); the generic payslip-column generator cannot render it."
+            )
+        # Completion programme: every Singapore generator renders only an
+        # Active template (the dedicated ones already did); a Published but
+        # not yet Active version is not in force.
+        if template.status != "Active":
+            raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
+                                      "a Singapore report is generated only from the Active version.")
+    if template.jurisdiction_country == "HK" and template.report_type in _HK_DEDICATED_GENERATOR_REPORT_TYPES:
+        # Same restraint as the Singapore block above, and for the same reason:
+        # every HK report's subject is a STATUTORY RESULT, not a payslip column —
+        # a year-of-assessment reconciliation, an IR56 reporting case, a
+        # prepared eMPF submission, or a month's committed HK payslips. A generic
+        # payslip-column render would be a plain wage list under a compliance
+        # title, so the dedicated Hong Kong generators are the only way in.
+        raise BadRequestException(
+            f"{template.template_key} has a dedicated Hong Kong generator "
+            "(/api/payroll/hong-kong/reports/...); the generic payslip-column generator cannot render it."
+        )
+    if template.jurisdiction_country == "HK" and template.status != "Active":
+        # The same "Active version is the one in force" rule Singapore applies:
+        # a seeded HK template stays inert until a distinct Super Admin approves,
+        # publishes and activates it.
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
+                                  "a Hong Kong report is generated only from the Active version.")
     run = (
         db.query(PayrollRun)
         .filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id)
@@ -9843,19 +11832,23 @@ def generate_report_from_template(
         pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == applicable_pack_id).first()
         applicable_pack_version = pack.version if pack else None
     if len(distinct_pack_ids) > 1:
-        rendered_data["metadata"] = {"taxPacksUsed": list(distinct_pack_ids)}
+        rendered_data["metadata"] = {"taxPacksUsed": sorted(distinct_pack_ids)}   # deterministic (a set's order is not)
 
-    existing = (
-        db.query(GeneratedReport)
-        .filter(
-            GeneratedReport.organization_id == organization_id, GeneratedReport.payroll_run_id == payroll_run_id,
-            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+    superseded = []
+    if template.jurisdiction_country == "SG":
+        superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, payroll_run_id=payroll_run_id)
+    else:
+        existing = (
+            db.query(GeneratedReport)
+            .filter(
+                GeneratedReport.organization_id == organization_id, GeneratedReport.payroll_run_id == payroll_run_id,
+                GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+            )
+            .first()
         )
-        .first()
-    )
-    if existing:
-        existing.status = "Superseded"
-        db.add(existing)
+        if existing:
+            existing.status = "Superseded"
+            db.add(existing)
 
     row = GeneratedReport(
         organization_id=organization_id, report_template_id=template.id, template_version=template.version,
@@ -9867,6 +11860,9 @@ def generate_report_from_template(
         rendered_data=rendered_data, reconciliation=reconciliation,
     )
     db.add(row)
+    if template.jurisdiction_country == "SG":
+        db.flush()
+        _sg_audit_generated_report(db, row, template, superseded)
     db.commit()
     db.refresh(row)
     row.document_scope = template.document_scope
@@ -10369,6 +12365,17 @@ def generate_india_form_123(
 # authoritative legal one.
 
 _US_NEW_HIRE_REPORT_DEFAULT_DAYS = 20
+
+# ASUME (Puerto Rico's own new/rehired-employee reporting registry,
+# PR-007/PR-023 — ZP-PR-ENG-001) — a DIFFERENT legal authority from the US
+# state new-hire registries above (ASUME is Puerto Rico's child-support
+# enforcement agency, not a state workforce agency), reusing the SAME
+# NewHireReport model/table (organization_id/employee_id/work_state/
+# hire_date/due_date/status are all generic, not US-specific) but with its
+# own named constant so the 20-day figure's provenance is never confused
+# between the two. PR-023: "no later than 20 days after hire" per current
+# official ASUME new-hire guidance.
+_PR_ASUME_NEW_HIRE_REPORT_DEFAULT_DAYS = 20
 
 
 def create_new_hire_report(
@@ -10953,6 +12960,573 @@ def generate_us_940(
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
         jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
         reporting_year=str(year), reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Puerto Rico: Form 499 R-1B (quarterly local withholding return) +
+# federal-equivalent 941/940 (ZP-PR-ENG-001 §10) ────────────────────────
+# All three filter on PayslipItem.country_code == "PR" ONLY — deliberately
+# NEVER extending generate_us_941/generate_us_940's own "US" filter or
+# calling into them, per engine/countries/puerto_rico.py's "never share
+# state with us.py" doctrine (Venu's explicit instruction: PR is a
+# sibling of the Caribbean countries, not a US-dependent variant). Reuses
+# genuinely country-agnostic shared infrastructure only — _US_REPORT_
+# FINALIZED_STATUSES (a plain PayrollStatus tuple despite its name),
+# _us_federal_quarter_date_range (ordinary IRS calendar quarters, not
+# US-specific math), and _walk_us_aggregate_report_components (a generic
+# template-field walker) — the same kind of shared-infrastructure reuse
+# every country's report generator already does via ReportTemplate/
+# GeneratedReport themselves.
+
+_PR_499R1B_QUARTER_DUE_DATES = {1: (4, 30), 2: (7, 31), 3: (10, 31), 4: (1, 31)}  # Q4 due date is in the FOLLOWING year
+
+
+def generate_pr_499r1b(
+    db: Session, organization_id: int, report_template_id: int, year: int, quarter: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Puerto Rico Hacienda Form 499 R-1B — quarterly local income-tax
+    withholding return (PR-012). Aggregate, employer-level, from real
+    committed PR payslips only."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_499R1B":
+        raise BadRequestException(f"generate_pr_499r1b is only for PR_499R1B templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _us_federal_quarter_date_range(year, quarter)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in period_items), z)
+    total_withholding = sum((i.tds or z for i in period_items), z)
+    employee_count = len({i.employee_id for i in period_items})
+    due_month, due_day = _PR_499R1B_QUARTER_DUE_DATES[quarter]
+    due_year = year + 1 if quarter == 4 else year
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_hacienda_ein": company.tax_no if company else None,
+        "employee_count": employee_count,
+        "total_wages": float(total_wages),
+        "total_pr_withholding": float(total_withholding),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "quarter": quarter, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "dueDate": date(due_year, due_month, due_day).isoformat(),
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "Deposit-category classification (monthly/semiweekly/quarterly-exception/$100k-next-business-day — "
+            "PR-011) is NOT computed here — no deposits-made ledger exists anywhere in this platform.",
+            "Prior-period corrections (append-only deltas by original statutory period, PR-039) are not yet "
+            "reflected — this reads only currently-committed payslips as of generation time.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"Q{quarter}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_pr_941(
+    db: Session, organization_id: int, report_template_id: int, year: int, quarter: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Federal Form 941 for a Puerto Rico employer (PR-013/PR-017 — the
+    same real IRS quarterly employment-tax return US employers file,
+    reporting FICA on PR wages; Form 941-PR is discontinued for 2024+
+    periods). Computed entirely from PR's own independently-tracked FICA
+    figures — never reads a US PayslipItem or calls generate_us_941."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_941":
+        raise BadRequestException(f"generate_pr_941 is only for PR_941 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _us_federal_quarter_date_range(year, quarter)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in period_items), z)
+    total_ss_tax_employee = sum((i.social_security or z for i in period_items), z)
+    total_ss_tax_employer = sum((i.employer_social_security or z for i in period_items), z)
+    total_medicare_tax_employee = sum((i.medicare or z for i in period_items), z)
+    total_medicare_tax_employer = sum((i.employer_medicare or z for i in period_items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_SS_RATE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    ss_rate_employee = resolve_jurisdiction_parameter(rate_map, "pr_ss", _PR_SS_RATE, side="employee", country="PR")
+    ss_wages = (total_ss_tax_employee / ss_rate_employee) if ss_rate_employee else z
+    medicare_wages = total_wages  # Medicare has no wage cap.
+
+    total_ss_tax = total_ss_tax_employee + total_ss_tax_employer
+    total_medicare_tax = total_medicare_tax_employee + total_medicare_tax_employer
+    total_taxes_before_adjustments = total_ss_tax + total_medicare_tax
+    employee_count = len({i.employee_id for i in period_items})
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_ein": company.tax_no if company else None,
+        "line1_employee_count": employee_count,
+        "line2_wages": float(total_wages),
+        "line3_federal_tax_withheld": 0.0,  # PR-010/PR-014: Federal FIT is a separate, employee-level obligation, never populated from PR withholding
+        "line5a_ss_wages": float(ss_wages),
+        "line5a_ss_tax": float(total_ss_tax),
+        "line5c_medicare_wages": float(medicare_wages),
+        "line5c_medicare_tax": float(total_medicare_tax),
+        "line6_total_taxes_before_adjustments": float(total_taxes_before_adjustments),
+        "line12_total_taxes_after_adjustments_and_credits": float(total_taxes_before_adjustments),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "quarter": quarter, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "Line 3 (federal income tax withheld) is always $0 — Puerto Rico federal FIT applicability is a "
+            "separate, employee-level determination not yet modeled anywhere in this engine (PR-006's MSRRA/FIT "
+            "applicability routing is disclosed as deferred).",
+            "Lines 5c/5d (regular Medicare vs. Additional Medicare) are combined — same disclosed gap as "
+            "generate_us_941.",
+            "Line 13 (total deposits)/balance due are NOT computed — no deposits-made ledger exists.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"Q{quarter}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_pr_940(
+    db: Session, organization_id: int, report_template_id: int, year: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Federal Form 940 (FUTA) for a Puerto Rico employer (PR-016/PR-017).
+    Computed entirely from PR's own independently-tracked FUTA-equivalent
+    figures — never reads a US PayslipItem or calls generate_us_940."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_940":
+        raise BadRequestException(f"generate_pr_940 is only for PR_940 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    year_start, year_end = date(year, 1, 1), date(year, 12, 31)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    year_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= year_start, PayrollRun.pay_date <= year_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_payments = sum((i.gross_pay or z for i in year_items), z)
+    total_futa_tax = sum((i.employer_futa or z for i in year_items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_FUTA_WAGE_BASE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    futa_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_futa_wage_base", _PR_FUTA_WAGE_BASE, country="PR")
+    per_employee_gross: dict = {}
+    for i in year_items:
+        per_employee_gross[i.employee_id] = per_employee_gross.get(i.employee_id, z) + (i.gross_pay or z)
+    futa_taxable_wages = sum((min(g, futa_wage_base) for g in per_employee_gross.values()), z)
+    employee_count = len(per_employee_gross)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_ein": company.tax_no if company else None,
+        "total_payments": float(total_payments),
+        "futa_taxable_wages": float(futa_taxable_wages),
+        "futa_tax_due": float(total_futa_tax),
+        "employee_count": employee_count,
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year},
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "\"Payments exempt from FUTA tax\" is not modeled — same disclosed gap as generate_us_940.",
+            "Credit-reduction states are not flagged or auto-detected — whatever effective FUTA-equivalent rate "
+            "was actually configured (or the 6.0% gross default) is what futa_tax_due already reflects.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{year_start.isoformat()}:{year_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Puerto Rico: Form 499R-2/W-2PR (employee year-end withholding
+# statement) + DTRH quarterly wage/contribution return (§10, PR-020) ────
+# Same "independent from every US report_type, never touches
+# generate_us_w2/country_code=='US'" doctrine as the PR forms above.
+
+def generate_pr_w2pr(
+    db: Session, organization_id: int, report_template_id: int, employee_id: int, tax_year: str,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Puerto Rico Form 499R-2/W-2PR — the annual employee year-end
+    withholding statement (§10 table), Puerto Rico's own analog to the US
+    W-2. Per-employee, PAY-DATE-attributed (a run whose period straddles
+    Dec 31 is attributed to the year it was actually paid, same
+    constructive-receipt convention as generate_us_w2). Computed entirely
+    from PR's own independently-tracked figures — never reads a US
+    PayslipItem or calls generate_us_w2."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_W2PR":
+        raise BadRequestException(f"generate_pr_w2pr is only for PR_W2PR templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    try:
+        year_int = int(tax_year)
+    except (TypeError, ValueError):
+        raise BadRequestException('tax_year must be a 4-digit year, e.g. "2026".')
+    year_start, year_end = date(year_int, 1, 1), date(year_int, 12, 31)
+
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= year_start, PayrollRun.pay_date <= year_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in items), z)
+    total_pr_tax = sum((i.tds or z for i in items), z)
+    total_ss_tax = sum((i.social_security or z for i in items), z)
+    total_medicare_tax = sum((i.medicare or z for i in items), z)
+    total_sinot = sum((i.state_disability_insurance or z for i in items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_SS_WAGE_BASE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    ss_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_ss_wage_base", _PR_SS_WAGE_BASE, country="PR")
+    ss_wages = min(total_wages, ss_wage_base)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_hacienda_ein": company.tax_no if company else None,
+        "employee_name": employee.name,
+        "employee_ssn": (employee.compliance_fields or {}).get("ssn"),
+        "box_wages": float(total_wages),
+        "box_pr_tax_withheld": float(total_pr_tax),
+        "box_ss_wages": float(ss_wages),
+        "box_ss_tax": float(total_ss_tax),
+        "box_medicare_wages": float(total_wages),
+        "box_medicare_tax": float(total_medicare_tax),
+        "box_sinot": float(total_sinot),
+    }
+
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == template.id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    component_snapshots = []
+    values: dict = {}
+    for component in components:
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        field_snapshots = []
+        for field in fields:
+            field_snapshots.append({
+                "fieldKey": field.field_key, "label": field.label, "type": field.field_type,
+                "dataSourceKind": field.data_source_kind, "sourceColumn": field.source_column,
+                "aggregation": field.aggregation,
+            })
+            values[field.field_key] = box_values.get(field.field_key)
+        component_snapshots.append({"componentKey": component.component_key, "label": component.label, "fields": field_snapshots})
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": {
+            "name": company.name if company else None, "hacienda_ein": company.tax_no if company else None,
+        },
+        "employees": [{"employeeId": employee.id, "employeeName": employee.name, "values": values}],
+        "taxYear": tax_year,
+        "knownGaps": [
+            "No Act 60/other PR tax-exempt-income boxes are populated — no such classification exists on a "
+            "PR PayslipItem today.",
+            "Dependents/deduction-allowance detail from the employee's own PRWithholdingCertificate is not "
+            "broken out on this statement — only the resulting withheld tax total (box_pr_tax_withheld) is shown.",
+            "Additional Medicare is combined into box_medicare_tax, same disclosed gap as generate_us_w2's Box 6.",
+        ],
+    }
+
+    scope_key = f"EMPLOYEE:{employee.id}:{tax_year}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=employee.id, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=tax_year, reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_pr_dtrh_quarterly(
+    db: Session, organization_id: int, report_template_id: int, year: int, quarter: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """DTRH quarterly wage/contribution return (PR-020) — unemployment
+    (employer_sui) and SINOT wage/contribution data, generated from
+    committed PR payroll only. The portal's own calculation is an
+    external reference per PR-020, never a substitute for this
+    deterministic ledger."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_DTRH_QUARTERLY":
+        raise BadRequestException(f"generate_pr_dtrh_quarterly is only for PR_DTRH_QUARTERLY templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _us_federal_quarter_date_range(year, quarter)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in period_items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_UNEMPLOYMENT_WAGE_BASE, _PR_SINOT_WAGE_BASE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    unemployment_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_unemployment_wage_base", _PR_UNEMPLOYMENT_WAGE_BASE, country="PR")
+    sinot_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_sinot_wage_base", _PR_SINOT_WAGE_BASE, country="PR")
+
+    # Per-employee, THIS-QUARTER-ONLY wage-base capping — a documented
+    # simplification (see knownGaps): the real annual cap is enforced by
+    # the engine's own real-time YTD accumulator at calculation time
+    # (see puerto_rico.py's _capped_wage_base), so employer_sui/SINOT
+    # amounts already reflect the correct capped contribution. The
+    # "taxable wages" figures below are independently recomputed
+    # (same reasoning as generate_pr_940's own FUTA-taxable-wages
+    # recompute) but ONLY within this quarter's own wages, not full
+    # year-to-date — an employee whose annual cap was already reached in
+    # an earlier quarter would show an overstated taxable-wages figure
+    # here even though the actual contribution amounts (summed directly
+    # from committed payslips) remain correct.
+    per_employee_gross: dict = {}
+    for i in period_items:
+        per_employee_gross[i.employee_id] = per_employee_gross.get(i.employee_id, z) + (i.gross_pay or z)
+    unemployment_taxable_wages = sum((min(g, unemployment_wage_base) for g in per_employee_gross.values()), z)
+    sinot_taxable_wages = sum((min(g, sinot_wage_base) for g in per_employee_gross.values()), z)
+
+    total_unemployment_tax = sum((i.employer_sui or z for i in period_items), z)
+    total_sinot_employee = sum((i.state_disability_insurance or z for i in period_items), z)
+    total_sinot_employer = sum((i.employer_state_program_contributions or z for i in period_items), z)
+    employee_count = len(per_employee_gross)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_dtrh_account": company.tax_no if company else None,
+        "employee_count": employee_count,
+        "total_wages": float(total_wages),
+        "unemployment_taxable_wages": float(unemployment_taxable_wages),
+        "unemployment_tax_due": float(total_unemployment_tax),
+        "sinot_taxable_wages": float(sinot_taxable_wages),
+        "sinot_employee_contribution": float(total_sinot_employee),
+        "sinot_employer_contribution": float(total_sinot_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "quarter": quarter, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "Taxable-wages figures are capped within THIS QUARTER's own wages only, not full year-to-date — "
+            "see this function's own docstring for the exact scenario this understates/overstates.",
+            "The employer-specific DTRH unemployment rate and any special DTRH contribution component "
+            "(PR-018/DTRH component in §5) are not separately broken out here beyond the already-computed "
+            "unemployment_tax_due total.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"Q{quarter}",
         status="Generated", generated_by_id=actor_id,
         rendered_data=rendered_data, reconciliation=None,
     )
@@ -11833,6 +14407,3724 @@ def generate_jm_s02(
     return row
 
 
+# ── Singapore: IR8A annual employment-income data extract (ZP-SG-ENG-001
+# §7; IRAS AIS, YA = income year + 1). EXPORT_READY only — Zoiko is not
+# AIS-API 2.0 onboarded, so nothing is ever submitted from here (SG-023).
+_SG_IR8A_SUBMISSION_STATUS = "EXPORT_READY"
+_SG_MYTAX_MAX_RECORDS = 200   # IRAS: "You can enter up to 200 records per submission"
+SG_IR8A_REPORT_TYPE = "SG_IR8A"
+# SG-023 controlled manual submission: the stored status of an EXPORT_READY
+# extract stays "Generated" (superseded on regeneration, as before); the
+# employer's manual filing on myTax Portal and IRAS's outcome are recorded
+# on the same GeneratedReport row. API DIRECT SUBMISSION stays NOT READY.
+_SG_IR8A_TRANSITIONS = {
+    "Generated": ("SUBMITTED_MANUALLY",),
+    "SUBMITTED_MANUALLY": ("ACKNOWLEDGED", "REJECTED", "UNKNOWN"),
+    "UNKNOWN": ("ACKNOWLEDGED", "REJECTED"),
+}
+_SG_IR8A_OPEN_SUBMISSION = ("SUBMITTED_MANUALLY", "UNKNOWN")
+_SG_IR8A_KNOWN_GAPS = [
+    "Internal IR8A data extract of engine-computed payroll figures for the IRAS myTax Portal \"Submit Employment "
+    "Income Records\" digital service (IRAS's non-API route; myTaxPortalEntry applies IRAS's whole-dollar rounding). "
+    "It is NOT an AIS-API 2.0 submission — onboarding (APEX / Corppass) is not done, API DIRECT SUBMISSION is NOT "
+    "READY; IRAS no longer offers a TXT / XML file route.",
+    "Form IR8A items are summed from each payslip's per-earning IRAS classification (TaxabilityRule "
+    "iras_* rows, default mapping per the IRAS YA2027 explanatory notes); payslips calculated before that "
+    "classification existed are derived as gross − AW / AW and flagged legacyDerived.",
+    "Appendix 8A: item d8 is the organization's own issued benefit valuations (EmployeeBenefitValuation) — "
+    "Zoiko does not value benefits-in-kind. Appendix 8B share-plan detail (grant / exercise / vesting data) "
+    "is not captured: STOCK_BENEFIT values are shown under d7 and Appendix 8B stays BLOCKED.",
+    "Form IR8S is not produced — IRAS discontinued it from YA2026 (excess/voluntary CPF is item d6, not "
+    "computed: this payroll only computes compulsory CPF).",
+    "Employees whose Form IR21 is recorded as filed (sgp_ir21_cases) in the income year are excluded and listed "
+    "under excludedIr21Employees; a case not yet filed is flagged (ir21PendingCaseId) — review before submission.",
+]
+
+
+def _sg_ir8a_view(row: GeneratedReport) -> dict:
+    data = row.rendered_data or {}
+    return {"id": row.id, "reportingYear": row.reporting_year,
+            "submissionStatus": "EXPORT_READY" if row.status == "Generated" else row.status,
+            "storedStatus": row.status, "generatedById": row.generated_by_id,
+            "generatedAt": row.generated_at.isoformat() if getattr(row, "generated_at", None) else None,
+            "readiness": data.get("readiness"), "employees": len(data.get("employeeRows") or []),
+            "history": (row.reconciliation or {}).get("history", []),
+            "acknowledgement": (row.reconciliation or {}).get("acknowledgement"),
+            "submissionKind": (data.get("modification") or {}).get("method", "ORIGINAL"),     # Phase 6.8
+            "apiDirectSubmission": "NOT READY"}
+
+
+def list_sg_ir8a(db: Session, organization_id: int) -> list:
+    rows = (db.query(GeneratedReport)
+            .filter(GeneratedReport.organization_id == organization_id, GeneratedReport.report_type == SG_IR8A_REPORT_TYPE)
+            .order_by(GeneratedReport.id.desc()).all())
+    return [_sg_ir8a_view(r) for r in rows]
+
+
+def transition_sg_ir8a(db: Session, organization_id: int, report_id: int, status: str, actor_id: Optional[int] = None,
+                       reference: Optional[str] = None, note: Optional[str] = None,
+                       errors: Optional[list] = None) -> dict:
+    """EXPORT_READY → SUBMITTED_MANUALLY (the employer filed on myTax Portal;
+    a different operator from whoever prepared the extract — maker-checker)
+    → ACKNOWLEDGED / REJECTED / UNKNOWN (IRAS's outcome, with its reference).
+    SG-021: never labelled accepted until IRAS's acknowledgement is stored."""
+    row = (db.query(GeneratedReport)
+           .filter(GeneratedReport.id == report_id, GeneratedReport.organization_id == organization_id,
+                   GeneratedReport.report_type == SG_IR8A_REPORT_TYPE)
+           .with_for_update().first())
+    if row is None:
+        raise HTTPException(status_code=404, detail="IR8A extract not found.")
+    allowed = _SG_IR8A_TRANSITIONS.get(row.status, ())
+    shown = "EXPORT_READY" if row.status == "Generated" else row.status
+    if status not in allowed:
+        raise BadRequestException(f"IR8A extract is {shown}; allowed next: {list(allowed) or 'none'}.")
+    if status == "SUBMITTED_MANUALLY" and (actor_id is None or actor_id == row.generated_by_id):
+        refuse_with_audit(db, "sg_ir8a", row.id, actor_id, shown, status,
+                                 "Recording the manual IR8A submission needs a distinct operator — the preparer cannot "
+                                 "record it (maker-checker).")
+    from app.modules.payroll.models import SgpIr8aModification
+
+    modification = db.query(SgpIr8aModification).filter(SgpIr8aModification.report_id == row.id).first()
+    if status == "SUBMITTED_MANUALLY":
+        # Phase 6.7 (G3): once IRAS has ACKNOWLEDGED this organization's IR8A
+        # for the year, any further filing is a myTax Portal "Modify
+        # previously submitted data" REVISION (full values, overwrites the
+        # previous records) or AMENDMENT (differences only) — IRAS Quick Guide
+        # on the Submit Employment Income Records digital service (15 Sep 2025).
+        # Zoiko has no revision/amendment workflow yet, so it must never record
+        # this extract as another (original) submission. Preparing the extract
+        # for reference stays allowed; a REJECTED filing can still be resubmitted.
+        acknowledged = (db.query(GeneratedReport.id)
+                        .filter(GeneratedReport.organization_id == organization_id,
+                                GeneratedReport.report_type == SG_IR8A_REPORT_TYPE,
+                                GeneratedReport.reporting_year == row.reporting_year,
+                                GeneratedReport.id != row.id, GeneratedReport.status == "ACKNOWLEDGED")
+                        .first())
+        # Phase 6.8: a registered Revision / Amendment IS the permitted route.
+        if acknowledged is not None and modification is None:
+            message = (f"IRAS has already acknowledged IR8A extract {acknowledged.id} for income year {row.reporting_year}. "
+                       "Changes must be filed with IRAS as a Revision or Amendment (myTax Portal: 'Modify previously "
+                       "submitted data') — prepare a Revision or Amendment of the acknowledged extract "
+                       f"{acknowledged.id} (Compliance → IR8A); this extract cannot be recorded as a new original "
+                       "submission.")
+            db.rollback()
+            record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="sg_ir8a", entity_id=report_id,
+                             old_value={"status": shown},
+                             new_value={"attempted": status, "result": "REFUSED", "acknowledgedReportId": acknowledged.id},
+                             reason=message)
+            raise BadRequestException(message)
+        if modification is not None:
+            # Phase 6.8: filed only against the position it was computed from —
+            # a delta is never applied to a position IRAS no longer holds.
+            base = db.query(GeneratedReport).filter(GeneratedReport.id == modification.base_report_id).first()
+            if _sg_ir8a_cumulative_position(db, base) != modification.previous_position:
+                _sg_refuse_audited(
+                    db, "sg_ir8a", row.id, actor_id, shown, status,
+                    f"IR8A {modification.method.lower()} {modification.sequence} was prepared from an acknowledged "
+                    "position that has since changed — prepare a new modification.",
+                    {"modificationId": modification.id})
+    if not (reference or "").strip() and status in ("SUBMITTED_MANUALLY", "ACKNOWLEDGED", "REJECTED"):
+        raise BadRequestException(f"{status} needs the IRAS reference (myTax Portal submission / acknowledgement) — "
+                                  "never recorded without evidence.")
+    if row.status == "UNKNOWN" and not (note or "").strip():
+        raise BadRequestException("Reconciling an UNKNOWN IR8A submission needs a note describing how IRAS's outcome was confirmed.")
+    captured = _sg_authority_errors(status, errors)
+    reconciliation = copy.deepcopy(row.reconciliation or {})
+    reconciliation.setdefault("history", []).append({
+        "status": status, "actorId": actor_id, "at": datetime.utcnow().replace(microsecond=0).isoformat(),
+        "reference": (reference or None), "note": (note or None), **({"errors": captured} if captured else {})})
+    if status in ("ACKNOWLEDGED", "REJECTED", "UNKNOWN"):
+        reconciliation["acknowledgement"] = {"outcome": status, "reference": reference or None,
+                                             **({"errors": captured} if captured else {})}
+    before = shown
+    row.reconciliation = reconciliation
+    if status == "SUBMITTED_MANUALLY" and modification is not None:
+        modification.recorded_by_id = actor_id                     # Phase 6.8: who filed it with IRAS
+    row.status = status
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="sg_ir8a", entity_id=row.id,
+                     legal_reference="ZP-SG-ENG-001 SG-021 / SG-023", old_value={"status": before},
+                     new_value={"status": status}, reason=note or f"IR8A {before} → {status}" + (f" (ref {reference})" if reference else ""),
+                     auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return _sg_ir8a_view(row)
+
+
+def _mask_identifier(value) -> Optional[str]:
+    """NRIC/FIN masked for reports/UI — first letter and last 4 characters
+    only (the shared employee_validation.mask_identifier)."""
+    return mask_identifier(value)
+
+
+# IR8A item per IRAS category (singapore.IRAS_CATEGORIES) — the row keys
+# of the extract. "iras_exempt" and UNCLASSIFIED are never reported income.
+_SG_IR8A_ITEM_KEYS = (
+    ("iras_gross_salary", "grossSalary"), ("iras_bonus", "bonusAdditionalWages"),
+    ("iras_director_fees", "directorFees"), ("iras_allowances", "allowances"),
+    ("iras_gross_commission", "grossCommission"), ("iras_lump_sum", "lumpSumPayment"),
+)
+_SG_A8A_BENEFIT_ITEMS = {"ACCOMMODATION": "placeOfResidence", "CAR": "car",
+                         "EMPLOYER_PAID_OBLIGATION": "others", "OTHER": "others"}
+
+
+# ── Singapore IR8A Revision / Amendment (Phase 6.8, G3) ────────────────
+# IRAS myTax Portal "Modify previously submitted data" (Quick Guide on the
+# Submit Employment Income Records digital service, 15 Sep 2025):
+# REVISION — "the full and correct values … will overwrite the previous
+# record(s)"; AMENDMENT — "only the difference in values … leave unaffected
+# field blank". Only an ACKNOWLEDGED original is modified; the modification's
+# own extract follows the existing manual-submission lifecycle.
+_SG_IR8A_MODIFICATION_METHODS = ("REVISION", "AMENDMENT")
+_SG_IR8A_IRAS_MODIFICATION_SOURCE = (
+    "IRAS — Quick Guide on using Submit Employment Income Records Digital Service (Revision and Amendment "
+    "submission methods), 15 Sep 2025")
+
+
+def _sg_refuse_audited(db: Session, entity_type: str, entity_id: int, actor_id: Optional[int], current_status: str,
+                       attempted: str, message: str, extra: Optional[dict] = None) -> None:
+    """Roll back, audit one "refused" row, refuse (Phase 6.5 behaviour)."""
+    db.rollback()
+    record_tax_audit(db, actor_id=actor_id, action="refused", entity_type=entity_type, entity_id=entity_id,
+                     old_value={"status": current_status},
+                     new_value={"attempted": attempted, "result": "REFUSED", **(extra or {})}, reason=message)
+    raise BadRequestException(message)
+
+
+def _sg_ir8a_position_fields() -> tuple:
+    return tuple(key for _, key in _SG_IR8A_ITEM_KEYS) + ("employeeCpf", "shgDonations")
+
+
+def _sg_ir8a_position(rendered_data) -> dict:
+    """{employee id: {field: whole dollars}} over each row's myTaxPortalEntry —
+    the values actually keyed into IRAS (income rounded down, deductions up)."""
+    fields = _sg_ir8a_position_fields()
+    return {str(r["employeeId"]): {f: int((r.get("myTaxPortalEntry") or {}).get(f) or 0) for f in fields}
+            for r in (rendered_data or {}).get("employeeRows") or []}
+
+
+def _sg_ir8a_modification_rows(db: Session, base_report_id: int) -> list:
+    from app.modules.payroll.models import SgpIr8aModification
+
+    return (db.query(SgpIr8aModification).filter(SgpIr8aModification.base_report_id == base_report_id)
+            .order_by(SgpIr8aModification.sequence).all())
+
+
+def _sg_ir8a_cumulative_position(db: Session, base: GeneratedReport) -> dict:
+    """What IRAS holds for the base's income year: the original, then each
+    ACKNOWLEDGED modification in sequence (a revision overwrites; an
+    amendment's resulting position is its previous position plus its delta,
+    and it can only be filed against the position it was computed from).
+    REJECTED / UNKNOWN / open / superseded modifications never count."""
+    position = _sg_ir8a_position(base.rendered_data)
+    for m in _sg_ir8a_modification_rows(db, base.id):
+        report = db.query(GeneratedReport).filter(GeneratedReport.id == m.report_id).first()
+        if report is not None and report.status == "ACKNOWLEDGED":
+            position = copy.deepcopy(m.resulting_position)
+    return position
+
+
+def _sg_ir8a_delta(previous: dict, current: dict) -> dict:
+    fields = _sg_ir8a_position_fields()
+    delta = {}
+    for emp in sorted(set(previous) | set(current), key=int):
+        before, after = previous.get(emp, {}), current.get(emp, {})
+        changed = {f: after.get(f, 0) - before.get(f, 0) for f in fields if after.get(f, 0) != before.get(f, 0)}
+        if changed:
+            delta[emp] = changed
+    return delta
+
+
+def _sg_ir8a_apply_delta(previous: dict, delta: dict) -> dict:
+    fields = _sg_ir8a_position_fields()
+    out = copy.deepcopy(previous)
+    for emp, changed in delta.items():
+        row = out.setdefault(emp, {f: 0 for f in fields})
+        for f, v in changed.items():
+            row[f] = row.get(f, 0) + v
+    return out
+
+
+def _sg_ir8a_modification_view(db: Session, mod) -> dict:
+    report = db.query(GeneratedReport).filter(GeneratedReport.id == mod.report_id).first()
+    return {"id": mod.id, "baseReportId": mod.base_report_id, "reportId": mod.report_id, "method": mod.method,
+            "sequence": mod.sequence, "reportingYear": mod.reporting_year, "reason": mod.reason,
+            "submissionStatus": "EXPORT_READY" if report.status == "Generated" else report.status,
+            "previousPosition": mod.previous_position, "resultingPosition": mod.resulting_position,
+            "delta": mod.delta, "preparedById": mod.prepared_by_id, "recordedById": mod.recorded_by_id,
+            "templateVersion": report.template_version, "applicableTaxPackVersion": report.applicable_tax_pack_version,
+            "acknowledgement": (report.reconciliation or {}).get("acknowledgement"),
+            "createdAt": mod.created_at.isoformat() if mod.created_at else None,
+            "irasMethod": _SG_IR8A_IRAS_MODIFICATION_SOURCE}
+
+
+def create_sg_ir8a_modification(db: Session, organization_id: int, base_report_id: int, method: str,
+                                reason: Optional[str] = None, actor_id: Optional[int] = None) -> dict:
+    """Prepare an IR8A REVISION (full current values) or AMENDMENT (per-field
+    differences against the cumulative acknowledged position) of an
+    ACKNOWLEDGED original. The new extract is an EXPORT_READY SG_IR8A
+    GeneratedReport — filed through the existing manual-submission lifecycle
+    (distinct operator, IRAS reference). The original is never modified.
+    An earlier modification not yet filed is superseded (never filed twice);
+    one still SUBMITTED_MANUALLY / UNKNOWN blocks a new one. Refusals are
+    audited (Phase 6.5). Tenant: the caller's organization only."""
+    from app.modules.payroll.models import SgpIr8aModification
+
+    base = (db.query(GeneratedReport)
+            .filter(GeneratedReport.id == base_report_id, GeneratedReport.organization_id == organization_id,
+                    GeneratedReport.report_type == SG_IR8A_REPORT_TYPE)
+            .first())
+    if base is None:
+        raise HTTPException(status_code=404, detail="IR8A extract not found.")
+    method = (method or "").strip().upper()
+    shown = "EXPORT_READY" if base.status == "Generated" else base.status
+    attempted = f"ir8a_{method.lower() or 'modification'}"
+
+    def refuse(message, **extra):
+        _sg_refuse_audited(db, "sg_ir8a", base.id, actor_id, shown, attempted, message, extra)
+
+    if method not in _SG_IR8A_MODIFICATION_METHODS:
+        refuse(f"Unknown IR8A modification method {method!r} — one of {', '.join(_SG_IR8A_MODIFICATION_METHODS)}.")
+    if db.query(SgpIr8aModification).filter(SgpIr8aModification.report_id == base.id).first() is not None:
+        refuse(f"IR8A extract {base.id} is itself a modification — revise or amend the original extract.")
+    if base.status != "ACKNOWLEDGED":
+        refuse(f"Only an IRAS-acknowledged IR8A extract can be revised or amended; extract {base.id} is {shown} "
+               "(a REJECTED filing is resubmitted as a new original extract).")
+    mods = _sg_ir8a_modification_rows(db, base.id)
+    reports = {r.id: r for r in db.query(GeneratedReport).filter(
+        GeneratedReport.id.in_([m.report_id for m in mods] or [-1]))}
+    open_mod = next((m for m in mods if reports[m.report_id].status in _SG_IR8A_OPEN_SUBMISSION), None)
+    if open_mod is not None:
+        refuse(f"IR8A {open_mod.method.lower()} {open_mod.sequence} is {reports[open_mod.report_id].status} — record "
+               "IRAS's outcome before preparing another modification.", openModificationId=open_mod.id)
+    # Completion programme: rendered from the Active version of the original's
+    # template key — not the original's own template row, which a template
+    # correction supersedes (that made every later modification impossible).
+    base_template = get_report_template(db, base.report_template_id)
+    template = (db.query(ReportTemplate)
+                .filter(ReportTemplate.template_key == base_template.template_key,
+                        ReportTemplate.jurisdiction_country == base_template.jurisdiction_country,
+                        ReportTemplate.report_type == SG_IR8A_REPORT_TYPE, ReportTemplate.status == "Active")
+                .order_by(ReportTemplate.id.desc()).first())
+    if template is None:
+        refuse(f"No Active version of template {base_template.template_key} — a modification is rendered from the "
+               "Active template.")
+    rendered, items = _sg_ir8a_extract(db, organization_id, template, int(base.reporting_year))
+    current = _sg_ir8a_position(rendered)
+    previous = _sg_ir8a_cumulative_position(db, base)
+    if method == "REVISION":
+        delta, resulting = None, current
+        if current == previous:
+            refuse("The revision would submit exactly the position IRAS already holds — nothing to revise.")
+    else:
+        delta = _sg_ir8a_delta(previous, current)
+        if not delta:
+            refuse("No differences from the position IRAS already holds — nothing to amend.")
+        resulting = _sg_ir8a_apply_delta(previous, delta)
+    for m in mods:                                              # never filed twice
+        if reports[m.report_id].status == "Generated":
+            reports[m.report_id].status = "Superseded"
+    sequence = max((m.sequence for m in mods), default=0) + 1
+    pinned_pack, pinned_ids = _sg_pinned_pack(db, items)
+    rendered["modification"] = {
+        "method": method, "baseReportId": base.id, "sequence": sequence, "reason": reason,
+        "previousPosition": previous, "resultingPosition": resulting, "delta": delta,
+        "irasEntry": ("myTax Portal 'Modify previously submitted data' — Revision: enter the full and correct values; "
+                      "they overwrite the previous records" if method == "REVISION" else
+                      "myTax Portal 'Modify previously submitted data' — Amendment: enter only the differences "
+                      "(amendmentEntries); leave unaffected fields blank"),
+        "source": _SG_IR8A_IRAS_MODIFICATION_SOURCE,
+    }
+    if method == "AMENDMENT":
+        rows = {str(r["employeeId"]): r for r in rendered.get("employeeRows") or []}
+        rendered["amendmentEntries"] = [
+            {"employeeId": int(emp), "employeeName": rows.get(emp, {}).get("employeeName"),
+             "employeeCode": rows.get(emp, {}).get("employeeCode"), "nricFinMasked": rows.get(emp, {}).get("nricFinMasked"),
+             "myTaxPortalAmendment": changed}
+            for emp, changed in delta.items()]
+    if len(pinned_ids) > 1:
+        rendered["metadata"] = {"taxPacksUsed": pinned_ids}
+    report = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None,
+        scope_key=f"IR8A_MOD:{base.id}:{sequence}", jurisdiction_country=template.jurisdiction_country,
+        jurisdiction_state=template.jurisdiction_state, reporting_year=base.reporting_year, reporting_period=None,
+        applicable_tax_pack_id=pinned_pack.id if pinned_pack else None,
+        applicable_tax_pack_version=pinned_pack.version if pinned_pack else None,
+        status="Generated", generated_by_id=actor_id, rendered_data=rendered, reconciliation=None,
+    )
+    db.add(report)
+    db.flush()
+    mod = SgpIr8aModification(
+        organization_id=organization_id, reporting_year=base.reporting_year, base_report_id=base.id, report_id=report.id,
+        method=method, sequence=sequence, reason=reason, previous_position=previous, resulting_position=resulting,
+        delta=delta, prepared_by_id=actor_id,
+    )
+    db.add(mod)
+    db.flush()
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="sg_ir8a_modification", entity_id=mod.id,
+        legal_reference=_SG_IR8A_IRAS_MODIFICATION_SOURCE, old_value={"position": previous},
+        new_value={"method": method, "baseReportId": base.id, "reportId": report.id, "sequence": sequence,
+                   "resultingPosition": resulting, "delta": delta, "templateVersion": report.template_version,
+                   "applicableTaxPackVersion": report.applicable_tax_pack_version},
+        reason=reason or f"IR8A {method.lower()} of extract {base.id}", auto_commit=False,
+    )
+    db.commit()
+    db.refresh(mod)
+    return _sg_ir8a_modification_view(db, mod)
+
+
+def list_sg_ir8a_modifications(db: Session, organization_id: int, base_report_id: int) -> list:
+    base = (db.query(GeneratedReport)
+            .filter(GeneratedReport.id == base_report_id, GeneratedReport.organization_id == organization_id,
+                    GeneratedReport.report_type == SG_IR8A_REPORT_TYPE)
+            .first())
+    if base is None:
+        raise HTTPException(status_code=404, detail="IR8A extract not found.")
+    return [_sg_ir8a_modification_view(db, m) for m in _sg_ir8a_modification_rows(db, base.id)]
+
+
+def _sg_ir8a_payslip_items(db: Session, organization_id: int, year: int) -> list:
+    """Finalized SG payslips whose CPF wage month (SG-011; IRAS: "report the
+    amount due for the year regardless of whether it was paid") falls in the
+    income year — a January payslip paying December's OW belongs to December."""
+    items = (
+        db.query(PayslipItem, PayrollRun.pay_date)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id, PayslipItem.country_code == "SG",
+            PayslipItem.status != PayslipStatus.FAILED,
+            PayrollRun.pay_date >= date(year, 1, 1), PayrollRun.pay_date <= date(year + 1, 1, 31),
+            PayrollRun.status.in_(_JM_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+    return [i for i, pay_date in items if _sg_trace_wage_month(i.sgp_calculation_trace, pay_date)[:4] == str(year)]
+
+
+def sg_iras_annual_accumulator(emp_items: list) -> dict:
+    """Per-employee annual IRAS item totals rebuilt from the payslips' traces
+    (no accumulator table — same approach as the CPF AW ledger)."""
+    from app.modules.payroll.engine.countries.singapore import IRAS_UNCLASSIFIED
+
+    z = Decimal("0")
+    totals = {c: z for c, _ in _SG_IR8A_ITEM_KEYS}
+    totals.update({"iras_exempt": z, IRAS_UNCLASSIFIED: z})
+    legacy = []
+    for i in emp_items:
+        iras = ((i.sgp_calculation_trace or {}).get("iras") or {}).get("totals")
+        if iras is None:
+            aw = i.additional_compensation or z
+            totals["iras_gross_salary"] += (i.gross_pay or z) - aw
+            totals["iras_bonus"] += aw
+            legacy.append(i.id)
+            continue
+        for category, amount in iras.items():
+            totals[category] = totals.get(category, z) + Decimal(str(amount))
+    return {"totals": totals, "legacyPayslipIds": legacy}
+
+
+def _sg_ir8a_extract(db: Session, organization_id: int, template, year: int) -> tuple:
+    """Singapore IR8A data extract for one income year (reported for YA
+    year+1): per employee the Form IR8A items (a salary, b bonus, c
+    director's fees, d1 allowances, gross commission, d3 lump sum) summed
+    from every finalized SG payslip of the year's wage months by each
+    earning's IRAS classification, d7/d8 from the organization's issued
+    benefit valuations (Appendix 8A), employee CPF and SHG donations, and a
+    per-employee readiness verdict. Same finalized-run filter as Jamaica's S02.
+
+    Phase 6.8: the builder shared by generate_sg_ir8a (originals) and
+    create_sg_ir8a_modification (Revision / Amendment) — returns
+    (rendered_data, payslip items); persists nothing."""
+    from decimal import ROUND_CEILING, ROUND_FLOOR
+
+    from app.modules.payroll.engine.countries.singapore import IRAS_UNCLASSIFIED
+
+    period_start, period_end = date(year, 1, 1), date(year, 12, 31)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    items = _sg_ir8a_payslip_items(db, organization_id, year)
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+    # IRAS (IR21): "You do not have to submit your employee's employment
+    # income via the Form IR8A or AIS if the Form IR21 has already been
+    # filed" — filed cases of this income year are excluded and listed; a
+    # case not yet filed (DRAFT) stays in the extract, flagged for review.
+    ir21_cases = _sg_ir21_query(db, organization_id).filter(
+        SgpIr21Case.trigger_date >= period_start, SgpIr21Case.trigger_date <= period_end,
+        SgpIr21Case.status.notin_(("EXEMPT", "CANCELLED")),
+    ).all()
+    ir21_filed = {c.employee_id: c for c in ir21_cases if c.status != "DRAFT"}
+    ir21_pending = {c.employee_id: c for c in ir21_cases if c.status == "DRAFT"}
+    excluded_ir21 = [
+        {"employeeId": eid, "ir21CaseId": c.id, "ir21Status": c.status, "filedDate": _sg_iso(c.filed_date)}
+        for eid, c in ir21_filed.items() if eid in by_employee
+    ]
+    valuations = (
+        db.query(EmployeeBenefitValuation)
+        .filter(EmployeeBenefitValuation.organization_id == organization_id,
+                EmployeeBenefitValuation.tax_year == str(year),
+                EmployeeBenefitValuation.employee_id.in_(list(by_employee) or [-1]))
+        .all()
+    )
+    employee_rows = []
+    for employee_id, emp_items in by_employee.items():
+        if employee_id in ir21_filed:
+            continue
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        acc = sg_iras_annual_accumulator(emp_items)
+        t = acc["totals"]
+        a8a = {"placeOfResidence": z, "car": z, "others": z}
+        stock, draft_valuations = z, 0
+        for v in valuations:
+            if v.employee_id != employee_id:
+                continue
+            if v.status != "Issued":
+                draft_valuations += 1
+                continue
+            if v.benefit_type == "STOCK_BENEFIT":
+                stock += v.taxable_value or z
+            else:
+                a8a[_SG_A8A_BENEFIT_ITEMS.get(v.benefit_type, "others")] += v.taxable_value or z
+        benefits_in_kind = sum(a8a.values(), z)
+        row = {
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "nricFinMasked": mask_nric_fin(cf.get("nric_fin")),
+            **{key: float(t.get(category, z)) for category, key in _SG_IR8A_ITEM_KEYS},
+            "shareGainsD7": float(stock),
+            "benefitsInKindD8": float(benefits_in_kind),
+            "appendix8A": {k: float(v) for k, v in a8a.items()},
+            "exemptNotReported": float(t.get("iras_exempt", z)),
+            "unclassified": float(t.get(IRAS_UNCLASSIFIED, z)),
+            "employeeCpf": float(sum((i.employee_pension or z for i in emp_items), z)),
+            "shgDonations": float(sum((i.professional_tax or z for i in emp_items), z)),
+            "payslipCount": len(emp_items),
+            "legacyDerived": bool(acc["legacyPayslipIds"]),
+            "ir21PendingCaseId": ir21_pending[employee_id].id if employee_id in ir21_pending else None,
+        }
+        row["totalEmploymentIncome"] = float(
+            sum((t.get(c, z) for c, _ in _SG_IR8A_ITEM_KEYS), z) + stock + benefits_in_kind)
+        # IRAS "Submit employment income records" FAQ: myTax Portal fields take
+        # no decimals — "Round down to the nearest dollar for income fields …
+        # Round up to the nearest dollar for deduction fields".
+        row["myTaxPortalEntry"] = {
+            **{key: int(t.get(category, z).quantize(Decimal("1"), rounding=ROUND_FLOOR)) for category, key in _SG_IR8A_ITEM_KEYS},
+            "employeeCpf": int(sum((i.employee_pension or z for i in emp_items), z).quantize(Decimal("1"), rounding=ROUND_CEILING)),
+            "shgDonations": int(sum((i.professional_tax or z for i in emp_items), z).quantize(Decimal("1"), rounding=ROUND_CEILING)),
+        }
+        issues = []
+        if not cf.get("nric_fin"):
+            issues.append("NRIC/FIN missing")
+        if t.get(IRAS_UNCLASSIFIED, z) > z:
+            issues.append("earnings with no IRAS item (TaxabilityRule iras_* excluded the default, none chosen)")
+        if acc["legacyPayslipIds"]:
+            issues.append("legacy payslips derived as gross − AW / AW — confirm the IR8A items")
+        if draft_valuations:
+            issues.append(f"{draft_valuations} benefit valuation(s) not yet issued — excluded from d7/d8")
+        if stock > z:
+            issues.append("share-plan gains present — Appendix 8B detail is not captured (BLOCKED)")
+        if row["ir21PendingCaseId"]:
+            issues.append("IR21 case not yet filed — confirm whether this employee belongs in the IR8A")
+        row["readiness"] = {"status": "READY" if not issues else "REVIEW_REQUIRED", "issues": issues}
+        employee_rows.append(row)
+    employee_rows.sort(key=lambda r: (r["employeeName"] or "", r["employeeId"]))
+    # IRAS myTax Portal: up to 200 records per submission — each row carries
+    # the (deterministic, 1-based) submission batch it is keyed in.
+    for index, r in enumerate(employee_rows):
+        r["submissionBatch"] = index // _SG_MYTAX_MAX_RECORDS + 1
+    box_values = {
+        "employer_name": company.name if company else None,
+        "year_of_assessment": year + 1,
+        "income_year": year,
+        "total_employee_count": len(employee_rows),
+        "total_gross_salary": sum(r["grossSalary"] for r in employee_rows),
+        "total_bonus_additional_wages": sum(r["bonusAdditionalWages"] for r in employee_rows),
+        "total_employment_income": sum(r["totalEmploymentIncome"] for r in employee_rows),
+        "total_employee_cpf": sum(r["employeeCpf"] for r in employee_rows),
+        "total_shg_donations": sum(r["shgDonations"] for r in employee_rows),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "yearOfAssessment": year + 1, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "submissionStatus": _SG_IR8A_SUBMISSION_STATUS,
+        "readiness": {
+            "ready": sum(1 for r in employee_rows if r["readiness"]["status"] == "READY"),
+            "reviewRequired": sum(1 for r in employee_rows if r["readiness"]["status"] != "READY"),
+            "appendix8B": "BLOCKED — share-plan grant/exercise data is not captured",
+            "officialFileFormat": "NOT APPLICABLE — IRAS routes are AIS-API 2.0 (NOT READY) or the myTax Portal "
+                                  "digital service (manual entry from myTaxPortalEntry)",
+        },
+        "excludedIr21Employees": excluded_ir21,
+        "knownGaps": _SG_IR8A_KNOWN_GAPS,
+        # IRAS: the non-API route is the myTax Portal "Submit Employment Income
+        # Records" digital service (up to 200 records per submission); AIS-API
+        # 2.0 is the only API route. There is no TXT / XML file route.
+        "myTaxPortalSubmission": {
+            "maxRecordsPerSubmission": _SG_MYTAX_MAX_RECORDS,
+            "submissions": max(1, -(-len(employee_rows) // _SG_MYTAX_MAX_RECORDS)) if employee_rows else 0,
+            "batches": [{"batch": b, "records": sum(1 for r in employee_rows if r["submissionBatch"] == b)}
+                        for b in sorted({r["submissionBatch"] for r in employee_rows})],
+            "rounding": "income fields rounded down, deduction fields rounded up, to the dollar (IRAS FAQ)",
+            "source": "IRAS — Submit employment income records (last updated 14 Sep 2026)",
+        },
+    }
+    return rendered_data, items
+
+
+def generate_sg_ir8a(
+    db: Session, organization_id: int, report_template_id: int, year: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Singapore IR8A data extract for one income year — built by
+    _sg_ir8a_extract, persisted here as an EXPORT_READY original."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "SG_IR8A":
+        raise BadRequestException(f"generate_sg_ir8a is only for SG_IR8A templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    rendered_data, items = _sg_ir8a_extract(db, organization_id, template, year)
+    period_start, period_end = date(year, 1, 1), date(year, 12, 31)
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    pinned_pack, pinned_ids = _sg_pinned_pack(db, items)          # Phase 6.5: the payslips' own pack
+    if len(pinned_ids) > 1:
+        rendered_data["metadata"] = {"taxPacksUsed": pinned_ids}
+    open_submission = (
+        db.query(GeneratedReport.id, GeneratedReport.status)
+        .filter(GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+                GeneratedReport.report_type == SG_IR8A_REPORT_TYPE, GeneratedReport.status.in_(_SG_IR8A_OPEN_SUBMISSION))
+        .first()
+    )
+    if open_submission:
+        raise HTTPException(status_code=409, detail=(
+            f"IR8A extract {open_submission.id} for {year} is {open_submission.status} — record IRAS's outcome "
+            "(acknowledgement / rejection) before a new extract is prepared (SG-021 / SG-023)."))
+    superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, scope_key=scope_key)
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=None,
+        applicable_tax_pack_id=pinned_pack.id if pinned_pack else None,
+        applicable_tax_pack_version=pinned_pack.version if pinned_pack else None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.flush()
+    _sg_audit_generated_report(db, row, template, superseded)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Singapore: monthly SDL payable — employer aggregate ─────────────────
+# CPF Board "Skills Development Levy" (SourceArtifact cpf_sdl): step 1,
+# SDL for each employee (the engine: 0.25% of the month's total wages,
+# $2–$11.25, once per calendar month across that employee's payslips);
+# step 2, "Add up the SDL calculated for each employee and then round the
+# total amount down to the nearest dollar." Step 2 is employer-level, so it
+# lives in this statutory output (same generator/GeneratedReport shape as
+# Barbados' monthly TAMIS return), never in a payslip.
+
+def _sg_wage_month_payslips(db: Session, organization_id: int, year: int, month: int) -> list:
+    """Finalized SG payslips of one CPF WAGE month (SG-011): a payslip whose
+    OW belongs to this month may be paid up to the 14th of the next month,
+    so the pay-date window is widened and the persisted trace decides the
+    month (a payslip without a trace falls back to its pay-date month)."""
+    import calendar
+
+    period_start = date(year, month, 1)
+    period_end = date(year, month, calendar.monthrange(year, month)[1])
+    wage_month = f"{year}-{month:02d}"
+    candidates = (
+        db.query(PayslipItem, PayrollRun.pay_date)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id, PayslipItem.country_code == "SG",
+            PayslipItem.status != PayslipStatus.FAILED,
+            PayrollRun.pay_date >= period_start - timedelta(days=31), PayrollRun.pay_date <= period_end + timedelta(days=15),
+            PayrollRun.status.in_(_JM_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+    return [i for i, run_pay_date in candidates if _sg_trace_wage_month(i.sgp_calculation_trace, run_pay_date) == wage_month]
+
+
+def generate_sg_sdl_monthly(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    import calendar
+    from decimal import ROUND_FLOOR
+
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "SG_SDL_MONTHLY":
+        raise BadRequestException(f"generate_sg_sdl_monthly is only for SG_SDL_MONTHLY templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    if not 1 <= int(month) <= 12:
+        raise BadRequestException("month must be 1–12.")
+    period_start = date(year, month, 1)
+    period_end = date(year, month, calendar.monthrange(year, month)[1])
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    # SDL is payable with the CPF of the WAGE month (SG-011): a payslip whose
+    # OW belongs to this month may be paid up to the 14th of the next month,
+    # so the pay-date window is widened and the persisted trace decides the
+    # month (payslips without a trace fall back to their pay-date month).
+    items = _sg_wage_month_payslips(db, organization_id, year, month)
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+    employee_rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        employee_rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            # Several payslips in one month already book only their share
+            # of the one monthly SDL (engine month_to_date), so the sum is
+            # the employee's monthly SDL.
+            "sdl": str(sum((Decimal(str(i.employer_payroll_tax or 0)) for i in emp_items), z)),
+            "payslipCount": len(emp_items),
+        })
+    employee_rows.sort(key=lambda r: (r["employeeName"] or ""))
+    total = sum((Decimal(r["sdl"]) for r in employee_rows), z)
+    payable = total.quantize(Decimal("1"), rounding=ROUND_FLOOR)
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_sdl_before_rounding": float(total),
+        "total_sdl_payable": float(payable),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": {**box_values, "total_sdl_before_rounding": str(total), "total_sdl_payable": str(payable)},
+        "rounding": "CPF Board SDL page, step 2: the employer's total SDL for the month is rounded DOWN to the nearest dollar",
+        "submissionStatus": "EXPORT_READY",
+        "knownGaps": [
+            "Internal SDL total — the payable SDL is carried as payment code 11 of the month's CPF EZPay file "
+            "(generate_sg_cpf_ezpay), which the employer submits through CPF EZPay (Corppass).",
+        ],
+    }
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    pinned_pack, pinned_ids = _sg_pinned_pack(db, items)          # Phase 6.5: the payslips' own pack
+    if len(pinned_ids) > 1:
+        rendered_data["metadata"] = {"taxPacksUsed": pinned_ids}
+    superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, scope_key=scope_key)
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        applicable_tax_pack_id=pinned_pack.id if pinned_pack else None,
+        applicable_tax_pack_version=pinned_pack.version if pinned_pack else None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.flush()
+    _sg_audit_generated_report(db, row, template, superseded)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Singapore: PWM / IR21 / LQS operational reports (Phase 5.7) ─────────
+# Bespoke generators on the existing ReportTemplate / GeneratedReport
+# architecture (same shape as generate_sg_sdl_monthly). None evaluates
+# anything new: PWM rows come from labour.pwm_check on the same inputs the
+# run preflight uses (_sg_pwm_inputs); LQS rows are the engine's own
+# persisted trace["lqs"]; the IR21 register is the sgp_ir21_cases lifecycle
+# (serialize_sg_ir21_case). Anything that cannot be evaluated is reported
+# NOT_EVALUATED with its reason — never assumed. Own organization only;
+# NRIC/FIN only ever as the PDPC partial form; no bank or payment details.
+# Internal reports — not MOM / IRAS submissions or certifications.
+
+_SG_REPORT_NOT_CERTIFIED = "Internal Zoiko report — not approved or certified by CPF Board, IRAS, MOM or PDPC."
+
+
+def require_active_report_template(db: Session, report_template_id: int, *, country: str, report_types,
+                                   wrong_country_message, wrong_type_message) -> "ReportTemplate":
+    """The gates every bespoke jurisdiction generator applies before rendering:
+    the template belongs to ``country``, is one of ``report_types`` and is
+    Active (a seeded template stays inert until it is approved, published and
+    activated). Messages are the jurisdiction's own (callables of the template)."""
+    template = get_report_template(db, report_template_id)
+    types = (report_types,) if isinstance(report_types, str) else tuple(report_types)
+    if template.jurisdiction_country != country:
+        raise BadRequestException(wrong_country_message(template))
+    if template.report_type not in types:
+        raise BadRequestException(wrong_type_message(template))
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    return template
+
+
+def _sg_require_active_template(db: Session, report_template_id: int, report_type: str) -> "ReportTemplate":
+    def wrong(template):
+        return (f"This generator is only for Singapore {report_type} templates, not "
+                f"{template.jurisdiction_country} {template.report_type!r}.")
+
+    return require_active_report_template(db, report_template_id, country="SG", report_types=report_type,
+                                          wrong_country_message=wrong, wrong_type_message=wrong)
+
+
+def _sg_authority_errors(status: str, errors: Optional[list]) -> list:
+    """The authority's own validation / rejection messages (IRAS for IR8A,
+    CPF Board for EZPay), recorded verbatim on a REJECTED or UNKNOWN outcome.
+    Never interpreted; refused on any other step (nothing to capture there)."""
+    cleaned = [str(e).strip() for e in (errors or []) if str(e).strip()]
+    if cleaned and status not in ("REJECTED", "UNKNOWN"):
+        raise BadRequestException("Authority error messages are recorded only with a REJECTED or UNKNOWN outcome.")
+    if len(cleaned) > 200 or any(len(e) > 500 for e in cleaned):
+        raise BadRequestException("At most 200 authority error messages of up to 500 characters each.")
+    return cleaned
+
+
+def require_four_eyes(preparer: Optional[int], approver: Optional[int], what: str) -> None:
+    """Shared maker-checker check: ``what`` needs an identified approver who is
+    not its preparer. Raises BadRequestException; the caller decides whether
+    the refusal is also audited (refuse_with_audit)."""
+    if approver is None:
+        raise BadRequestException(f"{what} needs an approver.")
+    if preparer is not None and approver == preparer:
+        raise BadRequestException(f"{what}: the approver must be a different person from the preparer (four-eyes).")
+
+
+def refuse_with_audit(db: Session, entity_type: str, entity_id: int, actor_id: Optional[int],
+                             current_status: str, attempted: str, message: str) -> None:
+    """Shared maker-checker refusal (Phase 6.5, Singapore IR8A / IR21 / CPF
+    EZPay first): the refused attempt is audited ("refused") and then refused.
+    Rolls back first so nothing the refused call touched is left pending."""
+    db.rollback()
+    record_tax_audit(db, actor_id=actor_id, action="refused", entity_type=entity_type, entity_id=entity_id,
+                     old_value={"status": current_status}, new_value={"attempted": attempted, "result": "REFUSED"},
+                     reason=message)
+    raise BadRequestException(message)
+
+
+_sg_refuse_self_approval = refuse_with_audit            # compatibility alias
+
+
+_UNSET = object()
+
+
+def supersede_live_reports(db: Session, organization_id: int, report_type: str, *, scope_key: Optional[str] = None,
+                           payroll_run_id: Optional[int] = None, jurisdiction_country: Optional[str] = None,
+                           reporting_year: Optional[str] = None, reporting_period=_UNSET) -> list:
+    """Supersede EVERY live ("Generated") report of the same LOGICAL report —
+    organisation + report type + scope (or run), optionally narrowed by
+    jurisdiction, reporting year and reporting period — whichever template
+    VERSION produced it (a template correction is a new ReportTemplate row, so
+    keying on report_template_id left the previous version's report live
+    beside the new one). Shared by Singapore and Hong Kong. Returns the ids."""
+    q = db.query(GeneratedReport).filter(
+        GeneratedReport.organization_id == organization_id, GeneratedReport.report_type == report_type,
+        GeneratedReport.status == "Generated")
+    q = q.filter(GeneratedReport.scope_key == scope_key) if scope_key is not None else q.filter(
+        GeneratedReport.payroll_run_id == payroll_run_id)
+    if jurisdiction_country is not None:
+        q = q.filter(GeneratedReport.jurisdiction_country == jurisdiction_country)
+    if reporting_year is not None:
+        q = q.filter(GeneratedReport.reporting_year == reporting_year)
+    if reporting_period is not _UNSET:
+        q = q.filter(GeneratedReport.reporting_period.is_(None) if reporting_period is None
+                     else GeneratedReport.reporting_period == reporting_period)
+    superseded = []
+    for existing in q.order_by(GeneratedReport.id).all():
+        existing.status = "Superseded"
+        db.add(existing)
+        superseded.append(existing.id)
+    return superseded
+
+
+_sg_supersede_live_reports = supersede_live_reports      # compatibility alias
+
+
+def _sg_audit_generated_report(db: Session, row: GeneratedReport, template, superseded_ids: list) -> None:
+    """Completion programme: one "create" audit row per generated Singapore
+    report — template version, pinned pack and the reports it superseded —
+    folded into the caller's own commit (row must be flushed). Report
+    generation was previously unaudited except for CPF EZPay."""
+    record_tax_audit(
+        db, actor_id=row.generated_by_id, action="create", entity_type="generated_report", entity_id=row.id,
+        tax_version=row.template_version,
+        old_value={"supersededReportIds": superseded_ids} if superseded_ids else None,
+        new_value={"reportType": row.report_type, "templateKey": template.template_key,
+                   "templateVersion": row.template_version, "scopeKey": row.scope_key,
+                   "payrollRunId": row.payroll_run_id, "packId": row.applicable_tax_pack_id,
+                   "packVersion": row.applicable_tax_pack_version, "status": row.status},
+        reason=f"Generated {template.template_key} v{template.version}", auto_commit=False,
+    )
+
+
+def _sg_pinned_pack(db: Session, payslips) -> tuple:
+    """(pack, pack ids) for a report built from `payslips`: the pack each one
+    was calculated under (PayslipItem.tax_policy_pack_id, pinned at
+    generation) — the same rule generate_report_from_template uses. Exactly
+    one distinct pack -> that pack; several -> None (the caller lists them
+    in rendered_data["metadata"]["taxPacksUsed"]); none -> None. Never the
+    currently Active pack, so a later pack never changes a historical
+    report's version and regeneration stays deterministic."""
+    ids = sorted({i.tax_policy_pack_id for i in payslips if getattr(i, "tax_policy_pack_id", None)})
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == ids[0]).first() if len(ids) == 1 else None
+    return pack, ids
+
+
+def _sg_persist_report(db: Session, organization_id: int, template, scope_key: str, reporting_year: str,
+                       reporting_period: str, rendered_data: dict, actor_id: Optional[int], pack=None) -> GeneratedReport:
+    """Supersede the live report(s) of the same type for the (org, scope) and
+    add the new one — history is kept, never overwritten; audited."""
+    superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, scope_key=scope_key)
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country="SG", jurisdiction_state=None, reporting_year=reporting_year,
+        reporting_period=reporting_period, applicable_tax_pack_id=pack.id if pack else None,
+        applicable_tax_pack_version=pack.version if pack else None,
+        status="Generated", generated_by_id=actor_id, rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.flush()
+    _sg_audit_generated_report(db, row, template, superseded)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def _sg_report_header(db: Session, organization_id: int, template, pack) -> tuple:
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import template_catalog_entry
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    box_values = {"employer_name": company.name if company else None,
+                  "employer_uen": ((company.tax_identifiers or {}).get("uen") if company else None) or (company.tax_no if company else None)}
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+    entry = template_catalog_entry(template.template_key) or {}
+    header = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "classification": entry.get("classification"), "officialCertification": False,
+        "certification": _SG_REPORT_NOT_CERTIFIED,
+        "pack": ({"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status} if pack else None),
+    }
+    return header
+
+
+def _sg_month_bounds(year: int, month: int) -> tuple:
+    import calendar
+
+    if not 1 <= int(month) <= 12:
+        raise BadRequestException("month must be 1–12.")
+    return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
+
+
+def _sg_payslips_by_employee(db: Session, organization_id: int, year: int, month: int) -> dict:
+    """employee_id -> finalized payslips of the CPF wage month, oldest first."""
+    by_employee: dict = {}
+    for i in sorted(_sg_wage_month_payslips(db, organization_id, year, month), key=lambda i: (i.payroll_run_id, i.id)):
+        by_employee.setdefault(i.employee_id, []).append(i)
+    return by_employee
+
+
+def _sg_pack_rates(db: Session, pack_id: int, as_of: date) -> dict:
+    """component_key -> ContributionRate of ONE given pack on `as_of` — the
+    same row filter as tax_resolver.resolve_tax_configuration, without the
+    "currently Active" pack lookup (a released pack's rows are immutable)."""
+    rows = (
+        db.query(ContributionRate)
+        .filter(
+            ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack_id,
+            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
+            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of),
+        )
+        .order_by(ContributionRate.sort_order)
+        .all()
+    )
+    return {r.component_key: r for r in rows}
+
+
+def _sg_report_packs(db: Session, by_employee: dict, month_end: date) -> dict:
+    """Completion programme: the statutory pack(s) a wage-month workspace
+    report (PWM / LQS) is evaluated under — each payslip's PINNED pack
+    (PayslipItem.tax_policy_pack_id), exactly as _sg_pinned_pack does for
+    IR8A / SDL / EZPay / IR21, so a later pack (or the period's pack being
+    Superseded) never changes a regenerated report. Only when no payslip of
+    the month carries a pinned pack (legacy rows) nothing is evaluated:
+    Phase 6.10 removed the fallback to the pack in force today — a report
+    never silently substitutes a pack the payroll was not calculated under
+    (basis UNPINNED)."""
+    items = [i for payslips in by_employee.values() for i in payslips]
+    pinned, pinned_ids = _sg_pinned_pack(db, items)
+    if pinned_ids:
+        return {"basis": "PINNED" if pinned is not None else "PINNED_MULTIPLE", "pack": pinned, "packIds": pinned_ids,
+                "rates": {pid: _sg_pack_rates(db, pid, month_end) for pid in pinned_ids}, "fallback": None}
+    return {"basis": "UNPINNED" if items else "NONE", "pack": None, "packIds": [], "rates": {}, "fallback": None}
+
+
+def _sg_employee_pack_rates(packs: dict, payslips: list) -> tuple:
+    """(rates, reason-if-not-evaluable) for one employee's payslips."""
+    ids = {p.tax_policy_pack_id for p in payslips if getattr(p, "tax_policy_pack_id", None)}
+    if len(ids) == 1:
+        return packs["rates"][next(iter(ids))], None
+    if len(ids) > 1:
+        return {}, "The wage month's payslips were calculated under different statutory packs — not evaluated"
+    if packs["fallback"] is not None and packs["fallback"][0] is not None:
+        return packs["fallback"][1], None
+    if packs["packIds"]:
+        return {}, "payslip carries no pinned statutory pack while others in the month do — not evaluated"
+    return {}, ("The payslip carries no pinned statutory pack — not evaluated (a report never substitutes the "
+                "pack in force today for the one payroll was calculated under)")
+
+
+def _sg_report_pack_metadata(rendered: dict, packs: dict) -> None:
+    rendered["packBasis"] = packs["basis"]
+    if len(packs["packIds"]) > 1:
+        rendered["metadata"] = {"taxPacksUsed": packs["packIds"]}
+
+
+_SG_PWM_FLOOR_RESULT = {"PWM_MET": "MET", "PWM_SHORTFALL": "SHORTFALL"}
+_SG_PWM_OT_RESULT = {"PWM_OVERTIME_GROSS_MET": "MET", "PWM_OVERTIME_GROSS_SHORTFALL": "SHORTFALL",
+                     "PWM_OVERTIME_GROSS_NOT_EVALUATED": "NOT_EVALUATED",
+                     "PWM_OVERTIME_RATE_MET": "MET", "PWM_OVERTIME_RATE_SHORTFALL": "SHORTFALL"}
+
+
+def _sg_pwm_report_row(db: Session, employee, payslips: list, rates: dict, month_start: date, month_end: date,
+                       pack_reason: Optional[str] = None) -> dict:
+    from app.modules.payroll.engine.jurisdictions.singapore import labour
+
+    cf = employee.compliance_fields or {}
+    row = {
+        "employeeId": employee.id, "employeeCode": employee.employee_code, "employeeName": employee.name,
+        "nricFinMasked": mask_nric_fin(cf.get("nric_fin")),
+        "sector": cf.get("pwm_sector"), "occupationGroup": cf.get("pwm_group"), "jobLevel": cf.get("pwm_job_level"),
+        "role": employee.designation, "wageMonth": month_start.strftime("%Y-%m"),
+        "payslipIds": [p.id for p in payslips],
+        "floor": None, "floorBasis": None, "testedWage": None, "floorVariance": None, "floorResult": "NOT_EVALUATED",
+        "overtimeHours": None, "overtimeHoursRounded": None, "requiredGross": None,
+        "grossExcludingOvertime": None, "overtimePay": None, "grossIncludingOvertime": None,
+        "overtimeVariance": None, "overtimeResult": None, "schedule": None,
+        "averagingWarning": False, "result": "NOT_EVALUATED", "reasons": [], "checks": [],
+    }
+    if pack_reason:
+        row["reasons"].append(pack_reason)
+        return row
+    if len(payslips) > 1:
+        row["reasons"].append(f"{len(payslips)} payslips in the wage month — the PWM monthly requirement is not "
+                              "evaluated per payslip")
+        return row
+    trace = payslips[0].sgp_calculation_trace or {}
+    if not trace:
+        row["reasons"].append("payslip has no Singapore calculation trace")
+        return row
+    facts, _cf, wages, _p4, pwm_facts = _sg_pwm_inputs(db, employee, trace, rates, month_start, month_end)
+    checks = labour.pwm_check(facts, pwm_facts, wages, rates)
+    row["checks"] = [{k: c.get(k) for k in ("code", "severity", "message", "source")} for c in checks]
+    row["overtimeHours"] = _sg_str_or_none((trace.get("overtime") or {}).get("hours"))
+    row["grossExcludingOvertime"] = str(wages["gross_ex_ot"])
+    row["overtimePay"] = str(wages["overtime"])
+    row["grossIncludingOvertime"] = str(wages["gross_ex_ot"] + wages["overtime"])
+    req = pwm_facts.get("overtime_gross_requirement") or {}
+    row["overtimeHoursRounded"] = req.get("hours")
+    codes = [c["code"] for c in checks]
+    if "PWM_NOT_APPLICABLE_FOREIGN" in codes:
+        row.update(result="NOT_APPLICABLE", floorResult="NOT_APPLICABLE")
+        row["reasons"].append("PWM wage requirements cover Singapore citizens and PRs only")
+        return row
+    for c in checks:
+        d = c.get("details") or {}
+        if c["code"] in _SG_PWM_FLOOR_RESULT:
+            row.update(floor=d.get("floor"), floorBasis=d.get("basis"), testedWage=d.get("testedWage"),
+                       floorResult=_SG_PWM_FLOOR_RESULT[c["code"]])
+            row["floorVariance"] = str(Decimal(d["testedWage"]) - Decimal(d["floor"]))
+            row["averagingWarning"] = row["averagingWarning"] or (c["code"] == "PWM_SHORTFALL" and d.get("averagingPermitted"))
+        elif c["code"] in _SG_PWM_OT_RESULT:
+            row["overtimeResult"] = _SG_PWM_OT_RESULT[c["code"]]
+            if "required" in d:
+                row.update(requiredGross=d["required"], grossIncludingOvertime=d["grossIncludingOvertime"])
+                row["overtimeVariance"] = str(Decimal(d["grossIncludingOvertime"]) - Decimal(d["required"]))
+                row["averagingWarning"] = row["averagingWarning"] or (
+                    c["code"] == "PWM_OVERTIME_GROSS_SHORTFALL" and d.get("averagingPermitted"))
+        if c["severity"] != "INFO" and c["code"] not in ("PWM_SHORTFALL", "PWM_OVERTIME_GROSS_SHORTFALL",
+                                                         "PWM_OVERTIME_RATE_SHORTFALL"):
+            row["reasons"].append(c["message"])
+    if req.get("status") == "FOUND":
+        row["schedule"] = {"scheduleId": req["scheduleId"], "roleLabel": req["roleLabel"],
+                           "effectiveFrom": req["effectiveFrom"], "sourceDocumentId": req["sourceDocumentId"],
+                           "sha256": req["sha256"]}
+    results = [row["floorResult"]] + ([row["overtimeResult"]] if row["overtimeResult"] else [])
+    row["result"] = ("SHORTFALL" if "SHORTFALL" in results else
+                     "NOT_EVALUATED" if "NOT_EVALUATED" in results else "MET")
+    return row
+
+
+def generate_sg_pwm_compliance(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """SG-PWM-COMPLIANCE for one CPF wage month: every PWM-classified
+    employee with a finalized payslip in the month, evaluated by
+    labour.pwm_check exactly as the run preflight does."""
+    from app.modules.payroll.models import SgpPwmOvertimeSchedule
+
+    template = _sg_require_active_template(db, report_template_id, "SG_PWM_COMPLIANCE")
+    month_start, month_end = _sg_month_bounds(year, month)
+    by_employee = _sg_payslips_by_employee(db, organization_id, year, month)
+    packs = _sg_report_packs(db, by_employee, month_end)
+    pack = packs["pack"]
+    employees = {e.id: e for e in db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id, PayrollEmployee.id.in_(list(by_employee) or [-1]))}
+    rows = []
+    averaging_window = None
+    for employee_id, payslips in by_employee.items():
+        employee = employees.get(employee_id)
+        own = _sg_trace_pwm_fields(payslips[0].sgp_calculation_trace) if len(payslips) == 1 else {}
+        sector = own["pwm_sector"] if own else (employee.compliance_fields or {}).get("pwm_sector") if employee else None
+        if employee is None or sector in (None, "", "NONE"):
+            continue                                                  # not PWM-classified — outside the report
+        rates, pack_reason = _sg_employee_pack_rates(packs, payslips)
+        row = _sg_pwm_report_row(db, employee, payslips, rates, month_start, month_end, pack_reason)
+        if own:
+            row.update(sector=own["pwm_sector"], occupationGroup=own["pwm_group"], jobLevel=own["pwm_job_level"])
+        if sector == "RETAIL" and row["result"] == "SHORTFALL":
+            if averaging_window is None:                              # the two preceding wage months, fetched once
+                averaging_window = [(y, m, _sg_payslips_by_employee(db, organization_id, y, m))
+                                    for y, m in (_sg_month_back(year, month, 2), _sg_month_back(year, month, 1))]
+            window = [(y, m, prior.get(employee_id, [])) for y, m, prior in averaging_window] + [(year, month, payslips)]
+            row["averaging"] = _sg_pwm_retail_averaging(db, employee, window)
+            if row["averaging"]["status"] == "MET":
+                row["result"] = "MET_BY_AVERAGING"
+            row["averagingWarning"] = row["averaging"]["status"] == "NOT_EVALUATED"
+        rows.append(row)
+    schedule_ids = {r["schedule"]["scheduleId"] for r in rows if r["schedule"]}
+    if schedule_ids:
+        windows = {s.id: s for s in db.query(SgpPwmOvertimeSchedule).filter(SgpPwmOvertimeSchedule.id.in_(schedule_ids))}
+        sources = {a.id: a for a in db.query(SourceArtifact).filter(
+            SourceArtifact.id.in_({w.source_document_id for w in windows.values()}))}
+        for r in rows:
+            if r["schedule"]:
+                w = windows[r["schedule"]["scheduleId"]]
+                src = sources.get(w.source_document_id)
+                r["schedule"].update(effectiveTo=_sg_iso(w.effective_to), sourceTitle=src.title if src else None,
+                                     sourceUrl=src.source_url if src else None)
+    rows.sort(key=lambda r: (r["employeeName"] or "", r["employeeId"]))
+    counts = {k: sum(1 for r in rows if r["result"] == k)
+              for k in ("MET", "MET_BY_AVERAGING", "SHORTFALL", "NOT_EVALUATED", "NOT_APPLICABLE")}
+    rendered = {
+        **_sg_report_header(db, organization_id, template, pack),
+        "period": {"wageMonth": month_start.strftime("%Y-%m"), "periodStart": month_start.isoformat(),
+                   "periodEnd": month_end.isoformat()},
+        "employeeRows": rows, "counts": counts,
+        "evaluator": "engine/jurisdictions/singapore/labour.pwm_check (same inputs as the run preflight)",
+        "knownGaps": [
+            "Overtime hours come from the payroll overtime facts recorded on the payslip; MOM rounds them down to "
+            "the nearest whole hour before the overtime gross schedule is read.",
+            "Retail 3-month averaging (" + _SG_PWM_AVERAGING_SOURCE + ") is evaluated for a retail shortfall from each "
+            "month's own payslip (its recorded job level, gross wages and overtime hours); a month it cannot evaluate — "
+            "part-time, an incomplete month other than the first, a payslip calculated before the per-month "
+            "classification was recorded — leaves the shortfall flagged (averagingWarning), never assumed met.",
+            "Not an MOM submission. " + _SG_REPORT_NOT_CERTIFIED,
+        ],
+    }
+    _sg_report_pack_metadata(rendered, packs)
+    return _sg_persist_report(db, organization_id, template, f"PERIOD:{month_start.isoformat()}:{month_end.isoformat()}",
+                              str(year), f"{year}-{month:02d}", rendered, actor_id, pack)
+
+
+_SG_LQS_RESULT = {"MEETS_LQS": "MET", "BELOW_LQS": "BELOW", "NOT_APPLICABLE": "NOT_APPLICABLE",
+                  "NOT_EVALUATED": "NOT_EVALUATED", "BLOCKED": "NOT_EVALUATED"}
+
+
+def generate_sg_lqs_compliance(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """SG-LQS-COMPLIANCE for one CPF wage month — the engine's own LQS
+    evaluation (engine/countries/singapore._lqs, persisted in each payslip's
+    trace["lqs"]) for every employee paid in the month. The last payslip of
+    the month is read because the engine evaluates LQS on month-to-date OW."""
+    template = _sg_require_active_template(db, report_template_id, "SG_LQS_COMPLIANCE")
+    month_start, month_end = _sg_month_bounds(year, month)
+    by_employee = _sg_payslips_by_employee(db, organization_id, year, month)
+    packs = _sg_report_packs(db, by_employee, month_end)
+    pack = packs["pack"]
+    employees = {e.id: e for e in db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id, PayrollEmployee.id.in_(list(by_employee) or [-1]))}
+    rows = []
+    for employee_id, payslips in by_employee.items():
+        employee = employees.get(employee_id)
+        last = payslips[-1]
+        trace = last.sgp_calculation_trace or {}
+        lqs = trace.get("lqs")
+        cf = (employee.compliance_fields or {}) if employee else {}
+        status = (lqs or {}).get("status")
+        row = {
+            "employeeId": employee_id, "employeeCode": employee.employee_code if employee else None,
+            "employeeName": employee.name if employee else last.employee_name,
+            "nricFinMasked": mask_nric_fin(cf.get("nric_fin")),
+            "residency": employee.sgp_cpf_residency_status if employee else None,
+            "employmentType": employee.employment_type if employee else None,
+            "headcountBasis": ("PART_TIME" if (employee and employee.employment_type == "Part-time") else "FULL_TIME"),
+            "wageMonth": month_start.strftime("%Y-%m"), "payslipId": last.id,
+            "threshold": (lqs or {}).get("threshold"), "wagesConsidered": (lqs or {}).get("wagesTested"),
+            "hoursWorked": (lqs or {}).get("hoursWorked"), "hourlyGross": (lqs or {}).get("hourlyGross"),
+            "basis": (lqs or {}).get("basis"), "reference": (lqs or {}).get("ref"),
+            "incompleteMonth": (trace.get("incompleteMonth") or {}).get("status") == "INCOMPLETE_MONTH",
+            "proRating": "NOT_EVALUATED — the engine applies no LQS pro-rating; MOM publishes none for an incomplete month",
+            "engineStatus": status,
+            "result": _SG_LQS_RESULT.get(status, "NOT_EVALUATED"),
+            "reason": (lqs or {}).get("detail") or (lqs or {}).get("note") or (
+                None if lqs else "payslip has no LQS evaluation in its calculation trace"),
+        }
+        rows.append(row)
+    rows.sort(key=lambda r: (r["employeeName"] or "", r["employeeId"]))
+    counts = {k: sum(1 for r in rows if r["result"] == k) for k in ("MET", "BELOW", "NOT_EVALUATED", "NOT_APPLICABLE")}
+    threshold_rows = {r["threshold"] for r in rows if r["threshold"]}
+    rendered = {
+        **_sg_report_header(db, organization_id, template, pack),
+        "period": {"wageMonth": month_start.strftime("%Y-%m"), "periodStart": month_start.isoformat(),
+                   "periodEnd": month_end.isoformat()},
+        "employeeRows": rows, "counts": counts,
+        "localEmployeesMeetingLqs": counts["MET"],
+        "thresholdsApplied": sorted(threshold_rows),
+        "evaluator": "engine/countries/singapore._lqs (persisted payslip trace)",
+        "knownGaps": [
+            "The MOM foreign-worker quota computation (local qualifying headcount, part-time weighting) is not "
+            "computed — this report lists each local employee's LQS result only.",
+            "Not an MOM submission. " + _SG_REPORT_NOT_CERTIFIED,
+        ],
+    }
+    _sg_report_pack_metadata(rendered, packs)
+    return _sg_persist_report(db, organization_id, template, f"PERIOD:{month_start.isoformat()}:{month_end.isoformat()}",
+                              str(year), f"{year}-{month:02d}", rendered, actor_id, pack)
+
+
+# Next step per IR21 case status (the case lifecycle's own transitions).
+_SG_IR21_NEXT_ACTION = {
+    "DRAFT": "File Form IR21 with IRAS by the file-by date and record the filing",
+    "RECONCILE_FIRST": "Confirm the case with IRAS after the disaster-recovery freeze",
+    "FILED": "Record the IRAS clearance directive (or EXEMPT / CANCELLED with a distinct approver)",
+    "CLEARED": "Release the held monies less the directed tax — distinct approver",
+    "EXCEPTION": "File an amended Form IR21 for the changed held payslip",
+}
+
+
+def generate_sg_ir21_register(
+    db: Session, organization_id: int, report_template_id: int, year: int, actor_id: Optional[int] = None,
+    today: Optional[date] = None,
+) -> GeneratedReport:
+    """SG-IR21-REGISTER: every IR21 case whose trigger falls in `year`, plus
+    every case still holding pay, from the sgp_ir21_cases lifecycle."""
+    template = _sg_require_active_template(db, report_template_id, "SG_IR21_REGISTER")
+    today = today or date.today()
+    cases = (_sg_ir21_query(db, organization_id)
+             .filter(or_(and_(SgpIr21Case.trigger_date >= date(year, 1, 1), SgpIr21Case.trigger_date <= date(year, 12, 31)),
+                         SgpIr21Case.status.in_(_SG_IR21_HOLD_STATUSES)))
+             .order_by(SgpIr21Case.trigger_date, SgpIr21Case.id).all())
+    audit_counts = dict(
+        db.query(TaxConfigurationAudit.entity_id, sa_func.count(TaxConfigurationAudit.id))
+        .filter(TaxConfigurationAudit.entity_type == "sgp_ir21_case",
+                TaxConfigurationAudit.entity_id.in_([c.id for c in cases] or [-1]))
+        .group_by(TaxConfigurationAudit.entity_id).all())
+    employees = {e.id: e for e in db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id,
+        PayrollEmployee.id.in_([c.employee_id for c in cases] or [-1]))}
+    rows = []
+    for case in cases:
+        view = serialize_sg_ir21_case(db, case)
+        employee = employees.get(case.employee_id)
+        needs_approver = case.status in _SG_IR21_APPROVER_STATUSES
+        rows.append({
+            "caseId": case.id, "employeeId": case.employee_id, "employeeCode": view["employeeCode"],
+            "employeeName": view["employeeName"],
+            "nricFinMasked": mask_nric_fin((employee.compliance_fields or {}).get("nric_fin")) if employee else None,
+            "triggerType": case.trigger_type, "terminationDate": view["triggerDate"],
+            "dateOfLeaving": _sg_iso(employee.date_of_leaving) if employee else None,
+            "awareDate": view["awareDate"], "fileByDate": view["fileByDate"],
+            "fileByOverdue": case.status == "DRAFT" and today > case.file_by_date,
+            "filedDate": view["filedDate"], "directiveDate": view["directiveDate"], "releasedAt": view["releasedAt"],
+            "status": case.status, "holdInForce": view["holdInForce"],
+            "withholdingAmount": view["currentHeldAmount"] if view["holdInForce"] else view["heldAmount"],
+            "directiveTaxAmount": view["directiveTaxAmount"], "releasedAmount": view["releasedAmount"],
+            "approvalStatus": ("APPROVED" if needs_approver and case.approved_by_id else
+                               "APPROVAL_MISSING" if needs_approver else
+                               "PENDING_APPROVAL_AT_RELEASE" if case.status == "CLEARED" else "NOT_REQUIRED"),
+            "makerChecker": {"preparedById": case.prepared_by_id, "approvedById": case.approved_by_id,
+                             "distinctApprover": (case.approved_by_id is not None
+                                                  and case.approved_by_id != case.prepared_by_id)},
+            "workflowState": "OPEN" if case.status in _SG_IR21_HOLD_STATUSES else "CLOSED",
+            "outstandingAction": _SG_IR21_NEXT_ACTION.get(case.status),
+            "evidence": {"filingReference": case.filing_reference, "directiveReference": case.directive_reference,
+                         "exceptionReason": case.exception_reason, "legalReference": _SG_IR21_LEGAL_REFERENCE,
+                         "auditEntries": audit_counts.get(case.id, 0)},
+        })
+    counts = {s: sum(1 for r in rows if r["status"] == s) for s in sorted({r["status"] for r in rows})}
+    rendered = {
+        **_sg_report_header(db, organization_id, template, None),
+        "period": {"year": year, "asOf": today.isoformat()},
+        "caseRows": rows, "counts": counts,
+        "openCases": sum(1 for r in rows if r["workflowState"] == "OPEN"),
+        "overdueFilings": sum(1 for r in rows if r["fileByOverdue"]),
+        "evaluator": "sgp_ir21_cases lifecycle (serialize_sg_ir21_case); no tax is calculated",
+        "knownGaps": ["Form IR21 is filed by the employer with IRAS (myTax Portal); Zoiko records the filing and "
+                      "directive, it does not submit or compute IR21 tax. " + _SG_REPORT_NOT_CERTIFIED],
+    }
+    # Phase 6.5: the register calculates nothing itself; its calculation
+    # context is the final payslip each case holds (none -> no pack version).
+    held_ids = [c.final_payslip_id for c in cases if c.final_payslip_id]
+    pinned_pack, pinned_ids = _sg_pinned_pack(
+        db, db.query(PayslipItem).filter(PayslipItem.id.in_(held_ids)).all() if held_ids else [])
+    if len(pinned_ids) > 1:
+        rendered["metadata"] = {"taxPacksUsed": pinned_ids}
+    return _sg_persist_report(db, organization_id, template, f"IR21_REGISTER:{year}", str(year), str(year),
+                              rendered, actor_id, pinned_pack)
+
+
+# ── Singapore: IR21 tax clearance — hold / clearance / release ──────────
+# IRAS "Tax Clearance for Employees (IR21)" (SourceArtifact iras_ir21): for
+# a non-Singapore-Citizen employee who ceases employment, goes on an
+# overseas posting or leaves Singapore for more than three months, the
+# employer files the Form IR21 at least one month before and must
+# "withhold all monies due to the employee from the date you are aware".
+# A cash-control workflow (SG-024/SG-025) — never a tax calculation: the
+# tax figure is whatever IRAS's clearance directive states, recorded here.
+
+_SG_IR21_TRIGGERS = ("CESSATION", "OVERSEAS_POSTING", "DEPARTURE")
+# Monies are held while the case is in any of these (not a separate status).
+_SG_IR21_HOLD_STATUSES = ("DRAFT", "FILED", "CLEARED", "EXCEPTION", "RECONCILE_FIRST")
+_SG_IR21_TRANSITIONS = {
+    "DRAFT": {"FILED", "EXEMPT", "CANCELLED"},
+    # SG-047: set only by the disaster-recovery freeze — confirm with IRAS.
+    "RECONCILE_FIRST": {"DRAFT", "FILED"},
+    "FILED": {"CLEARED", "EXEMPT", "CANCELLED", "EXCEPTION"},
+    "CLEARED": {"RELEASED", "EXCEPTION"},
+    "EXCEPTION": {"FILED", "CANCELLED"},
+    "RELEASED": set(), "EXEMPT": set(), "CANCELLED": set(),
+}
+# Transitions that lift the hold — maker-checker: a distinct approver.
+_SG_IR21_APPROVER_STATUSES = {"RELEASED", "EXEMPT", "CANCELLED"}
+# IRAS "When is Tax Clearance Not Required" — the only accepted EXEMPT reasons.
+_SG_IR21_EXEMPT_CATEGORIES = {
+    "SPR_NOT_LEAVING_PERMANENTLY_LOU": "SPR not leaving Singapore permanently — Letter of Undertaking held "
+                                        "(not available for an overseas posting)",
+    "WORKED_60_DAYS_OR_LESS": "Non-Singapore Citizen who worked 60 days or less in the calendar year (Scenario 1)",
+    "UNDER_21000_183_DAYS": "Worked 183 days or more in the calendar year and earned less than $21,000 (Scenario 2)",
+    "UNDER_21000_STRADDLING_TWO_YEARS": "Worked 183 days or more in a period straddling two years and earned "
+                                         "less than $21,000 (Scenario 3)",
+    "UNDER_21000_THREE_YEARS": "Worked three continuous years or more and earned less than $21,000 (Scenario 4)",
+    "GROUP_TRANSFER": "Transferred to another company in Singapore (merger/takeover/restructuring/group posting) — "
+                      "IRAS notified via myTax Mail",
+    "ABSENCE_3_TO_6_MONTHS": "Away 3–6 months for training, business or an overseas posting meeting IRAS Note 1",
+    "IRAS_NOT_REQUIRED_NOTIFICATION": "IRAS e-Filing notification that tax clearance is not required",
+}
+_SG_IR21_LEGAL_REFERENCE = "IRAS — Tax Clearance for Employees (IR21)"
+
+
+def _sg_ir21_query(db: Session, organization_id: int):
+    return db.query(SgpIr21Case).filter(SgpIr21Case.organization_id == organization_id)
+
+
+def get_sg_ir21_case(db: Session, organization_id: int, case_id: int) -> SgpIr21Case:
+    """Tenant-scoped: another organization's case is simply not found."""
+    case = _sg_ir21_query(db, organization_id).filter(SgpIr21Case.id == case_id).first()
+    if case is None:
+        raise NotFoundException(f"IR21 case {case_id} not found.")
+    return case
+
+
+def _sg_ir21_covered_payslips(db: Session, case: SgpIr21Case) -> list:
+    """The employee's SG payslips from the date the employer became aware
+    (IRAS: withhold all monies due from that date), oldest first."""
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == case.organization_id, PayslipItem.employee_id == case.employee_id,
+            PayslipItem.country_code == "SG", PayslipItem.status != PayslipStatus.FAILED,
+            PayrollRun.pay_date >= case.aware_date,
+        )
+        .order_by(PayrollRun.pay_date, PayrollRun.id, PayslipItem.id)
+        .all()
+    )
+
+
+def _sg_ir21_held_total(db: Session, case: SgpIr21Case) -> Decimal:
+    """Monies due = net pay of every covered payslip (CPF/SHG still go to
+    the CPF Board; it is the employee's cash that is withheld)."""
+    return sum((Decimal(str(i.net_pay or 0)) for i in _sg_ir21_covered_payslips(db, case)), Decimal("0")).quantize(Decimal("0.01"))
+
+
+def _sg_ir21_audit_view(case: SgpIr21Case) -> dict:
+    return {
+        "status": case.status, "heldAmount": str(case.held_amount), "filedDate": _sg_iso(case.filed_date),
+        "directiveDate": _sg_iso(case.directive_date), "directiveTaxAmount": _sg_str_or_none(case.directive_tax_amount),
+        "releasedAmount": _sg_str_or_none(case.released_amount), "finalPayslipId": case.final_payslip_id,
+        "exceptionReason": case.exception_reason,
+    }
+
+
+def _sg_iso(value):
+    return value.isoformat() if value else None
+
+
+def _sg_str_or_none(value):
+    return None if value is None else str(value)
+
+
+def serialize_sg_ir21_case(db: Session, case: SgpIr21Case) -> dict:
+    """Case view — deliberately no NRIC/FIN, bank or payment details."""
+    employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == case.employee_id).first()
+    covered = _sg_ir21_covered_payslips(db, case)
+    hold = case.status in _SG_IR21_HOLD_STATUSES
+    return {
+        "id": case.id, "employeeId": case.employee_id,
+        "employeeName": employee.name if employee else None,
+        "employeeCode": employee.employee_code if employee else None,
+        "triggerType": case.trigger_type, "triggerDate": _sg_iso(case.trigger_date),
+        "awareDate": _sg_iso(case.aware_date), "fileByDate": _sg_iso(case.file_by_date),
+        "fileByOverdue": case.status == "DRAFT" and date.today() > case.file_by_date,
+        "filedDate": _sg_iso(case.filed_date), "filingReference": case.filing_reference,
+        "status": case.status, "holdInForce": hold,
+        "heldAmount": str(case.held_amount),
+        "currentHeldAmount": str(_sg_ir21_held_total(db, case)) if hold else None,
+        "heldPayslipIds": [i.id for i in covered] if hold else [],
+        "directiveDate": _sg_iso(case.directive_date), "directiveReference": case.directive_reference,
+        "directiveTaxAmount": _sg_str_or_none(case.directive_tax_amount),
+        "releasedAmount": _sg_str_or_none(case.released_amount), "releasedAt": _sg_iso(case.released_at),
+        "finalPayslipId": case.final_payslip_id, "exceptionReason": case.exception_reason,
+        "preparedById": case.prepared_by_id, "approvedById": case.approved_by_id,
+        "createdAt": _sg_iso(case.created_at), "updatedAt": _sg_iso(case.updated_at),
+    }
+
+
+def list_sg_ir21_cases(db: Session, organization_id: int, status: Optional[str] = None) -> list:
+    query = _sg_ir21_query(db, organization_id)
+    if status:
+        query = query.filter(SgpIr21Case.status == status)
+    return [serialize_sg_ir21_case(db, c) for c in query.order_by(SgpIr21Case.trigger_date, SgpIr21Case.id).all()]
+
+
+def create_sg_ir21_case(
+    db: Session, organization_id: int, employee_id: int, trigger_type: str, trigger_date: date,
+    aware_date: date, actor_id: Optional[int] = None,
+) -> SgpIr21Case:
+    """Opens a case (DRAFT) — withholding starts immediately from
+    aware_date. The file-by date comes from the Active SG pack's
+    ir21_filing_lead_months row (fail-closed: no row, no case)."""
+    from app.modules.payroll.engine.countries.singapore import ir21_file_by
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    if (employee.country_code or "").upper() != "SG":
+        raise BadRequestException("IR21 tax clearance applies to Singapore employees only.")
+    if trigger_type not in _SG_IR21_TRIGGERS:
+        raise BadRequestException(f"IR21 trigger must be one of {', '.join(_SG_IR21_TRIGGERS)}.")
+    residency = employee.sgp_cpf_residency_status
+    if residency is None:
+        raise BadRequestException("The employee's citizenship/SPR/foreign status is required to decide whether IR21 applies.")
+    if residency == "SC":
+        raise BadRequestException("IRAS: tax clearance is not required for Singapore Citizens.")
+    if aware_date > trigger_date:
+        raise BadRequestException("The date the employer became aware cannot be after the cessation/departure date.")
+    rates, _slabs, _pack = resolve_tax_configuration(db, "SG", payroll_date=trigger_date)
+    lead = next((r for r in rates if r.component_key == "ir21_filing_lead_months" and r.flat_amount is not None), None)
+    if lead is None:
+        raise BadRequestException(
+            "ir21_filing_lead_months is not configured in the Active Singapore pack for this date — "
+            "the IR21 file-by date cannot be computed."
+        )
+    duplicate = _sg_ir21_query(db, organization_id).filter(
+        SgpIr21Case.employee_id == employee_id, SgpIr21Case.trigger_date == trigger_date,
+    ).first()
+    if duplicate is not None:
+        raise BadRequestException(f"An IR21 case for this employee and trigger date already exists (case {duplicate.id}).")
+    case = SgpIr21Case(
+        organization_id=organization_id, employee_id=employee_id, trigger_type=trigger_type,
+        trigger_date=trigger_date, aware_date=aware_date,
+        file_by_date=ir21_file_by(trigger_date, int(lead.flat_amount)),
+        status="DRAFT", prepared_by_id=actor_id, held_amount=Decimal("0"),
+    )
+    db.add(case)
+    db.flush()
+    case.held_amount = _sg_ir21_held_total(db, case)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="sgp_ir21_case", entity_id=case.id,
+        legal_reference=_SG_IR21_LEGAL_REFERENCE, new_value=_sg_ir21_audit_view(case),
+        reason=f"IR21 {trigger_type} on {trigger_date.isoformat()} (aware {aware_date.isoformat()})", auto_commit=False,
+    )
+    db.commit()
+    db.refresh(case)
+    return case
+
+
+def transition_sg_ir21_case(
+    db: Session, organization_id: int, case_id: int, status: str, actor_id: Optional[int] = None, *,
+    filed_date: Optional[date] = None, filing_reference: Optional[str] = None,
+    directive_date: Optional[date] = None, directive_reference: Optional[str] = None,
+    directive_tax_amount: Optional[Decimal] = None, exemption_category: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> SgpIr21Case:
+    """One audited lifecycle step. Lifting the hold (RELEASED / EXEMPT /
+    CANCELLED) needs a distinct approver — a different user from whoever
+    last prepared the case (same maker-checker principle as
+    set_germany_accident_insurance_profile_status)."""
+    from datetime import timezone as tz
+
+    # Row lock (as transition_sg_ir8a): two concurrent approvals of the same
+    # case must not both pass the status / maker-checker checks.
+    case = _sg_ir21_query(db, organization_id).filter(SgpIr21Case.id == case_id).with_for_update().first()
+    if case is None:
+        raise NotFoundException(f"IR21 case {case_id} not found.")
+    old_status = case.status
+    if status not in _SG_IR21_TRANSITIONS:
+        raise BadRequestException(f"Unknown IR21 status: {status!r}.")
+    if status not in _SG_IR21_TRANSITIONS[old_status]:
+        raise BadRequestException(f"Cannot move an IR21 case from {old_status} to {status}.")
+    if old_status == "RECONCILE_FIRST" and not (reason or "").strip():
+        raise BadRequestException("Reconciling an IR21 case after a restore needs a note on how the IRAS filing status "
+                                  "was confirmed (SG-047).")
+    if status in _SG_IR21_APPROVER_STATUSES and (actor_id is None or actor_id == case.prepared_by_id):
+        refuse_with_audit(
+            db, "sgp_ir21_case", case.id, actor_id, old_status, status,
+            f"Moving an IR21 case to {status} lifts the hold on the employee's monies and needs a distinct approver — "
+            "a different payroll operator from whoever last prepared the case."
+        )
+    before = _sg_ir21_audit_view(case)
+    held = _sg_ir21_held_total(db, case)
+    extra: dict = {}
+    if status == "FILED":
+        if filed_date is None:
+            raise BadRequestException("filedDate is required to record the Form IR21 filing.")
+        case.filed_date, case.filing_reference = filed_date, filing_reference
+        case.prepared_by_id, case.held_amount = actor_id, held
+        if old_status == "EXCEPTION":
+            case.exception_reason = None
+    elif status == "CLEARED":
+        if directive_date is None or directive_tax_amount is None or Decimal(str(directive_tax_amount)) < 0:
+            raise BadRequestException("directiveDate and a non-negative directiveTaxAmount (from the IRAS clearance directive) are required.")
+        case.directive_date, case.directive_reference = directive_date, directive_reference
+        case.directive_tax_amount = Decimal(str(directive_tax_amount))
+        case.prepared_by_id, case.held_amount = actor_id, held
+    elif status == "RELEASED":
+        covered = _sg_ir21_covered_payslips(db, case)
+        if not covered:
+            raise BadRequestException("No held payslip exists to carry the release payment.")
+        if held != Decimal(str(case.held_amount)):
+            raise BadRequestException(
+                f"The held monies changed since the clearance directive ({case.held_amount} → {held}) — IRAS requires an "
+                "amended Form IR21 for additional income: move the case to EXCEPTION and re-file."
+            )
+        tax = Decimal(str(case.directive_tax_amount or 0))
+        case.released_amount = max(held - tax, Decimal("0"))
+        extra["unrecoveredTax"] = str(max(tax - held, Decimal("0")))
+        case.final_payslip_id = case.final_payslip_id or covered[-1].id
+        case.approved_by_id, case.released_at = actor_id, datetime.now(tz.utc)
+    elif status == "EXEMPT":
+        if exemption_category not in _SG_IR21_EXEMPT_CATEGORIES:
+            raise BadRequestException(f"exemptionCategory must be one of {', '.join(_SG_IR21_EXEMPT_CATEGORIES)} (IRAS categories).")
+        case.exception_reason = f"{exemption_category}: {_SG_IR21_EXEMPT_CATEGORIES[exemption_category]}" + (f" — {reason}" if reason else "")
+        case.approved_by_id = actor_id
+    elif status in ("CANCELLED", "EXCEPTION"):
+        if not (reason or "").strip():
+            raise BadRequestException(f"A reason is required to move an IR21 case to {status}.")
+        case.exception_reason = reason.strip()
+        if status == "CANCELLED":
+            case.approved_by_id = actor_id
+        else:
+            case.prepared_by_id, case.held_amount = actor_id, held
+    case.status = status
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="sgp_ir21_case", entity_id=case.id,
+        legal_reference=_SG_IR21_LEGAL_REFERENCE, old_value=before, new_value={**_sg_ir21_audit_view(case), **extra},
+        reason=reason or exemption_category or f"{old_status} → {status}", auto_commit=False,
+    )
+    db.commit()
+    db.refresh(case)
+    return case
+
+
+def _sg_ir21_open_cases_for(db: Session, organization_id: int, employee_ids, pay_date) -> list:
+    """Cases whose withholding window covers `pay_date` (aware_date on or
+    before it), excluding ones that no longer affect payment."""
+    if not employee_ids:
+        return []
+    return (
+        _sg_ir21_query(db, organization_id)
+        .filter(
+            SgpIr21Case.employee_id.in_(list(employee_ids)), SgpIr21Case.aware_date <= pay_date,
+            SgpIr21Case.status.notin_(("EXEMPT", "CANCELLED")),
+        )
+        .all()
+    )
+
+
+def _sg_ir21_payment_treatment(db: Session, organization_id: int, run: PayrollRun, items: list) -> dict:
+    """{payslip id: (treatment, amount)} for SG payslips under an IR21 case —
+    HELD (excluded from the bank file), RELEASE (paid the approved released
+    amount on the case's final payslip), COVERED (an earlier held payslip
+    whose monies the release already includes). A payslip created AFTER the
+    release (id beyond the final payslip) is additional income, which IRAS
+    requires an amended IR21 for — held, never paid silently."""
+    sg_ids = {i.employee_id for i in items if (getattr(i, "country_code", None) or "").upper() == "SG"}
+    cases = _sg_ir21_open_cases_for(db, organization_id, sg_ids, run.pay_date)
+    out = {}
+    for item in items:
+        for case in (c for c in cases if c.employee_id == item.employee_id):
+            if case.status in _SG_IR21_HOLD_STATUSES:
+                out[item.id] = ("HELD", None)
+            elif case.status == "RELEASED" and case.final_payslip_id is not None:
+                if item.id == case.final_payslip_id:
+                    out.setdefault(item.id, ("RELEASE", case.released_amount))
+                elif item.id < case.final_payslip_id:
+                    out.setdefault(item.id, ("COVERED", None))
+                else:
+                    out[item.id] = ("HELD", None)
+    return out
+
+
+def _sg_ir21_guard_correction(db: Session, organization_id: int, employee_id: int, pay_date):
+    """Before a payslip correction: a RELEASED case covering it means the
+    released statutory amount would silently change — refused. Returns the
+    open case (if any) so the caller can re-check it afterwards."""
+    cases = _sg_ir21_open_cases_for(db, organization_id, {employee_id}, pay_date)
+    released = next((c for c in cases if c.status == "RELEASED"), None)
+    if released is not None:
+        raise BadRequestException(
+            f"IR21 case {released.id} has RELEASED this employee's held monies — correcting this payslip would change a "
+            "released amount. IRAS requires an amended Form IR21 for any additional income; handle it explicitly."
+        )
+    return next((c for c in cases if c.status in _SG_IR21_HOLD_STATUSES), None)
+
+
+def _sg_ir21_after_correction(db: Session, case: Optional[SgpIr21Case], actor_id: Optional[int] = None) -> None:
+    """After a correction of a held payslip: refresh the held amount; if the
+    form was already filed/cleared and the monies changed, the case moves
+    to EXCEPTION (amended IR21 required) — audited, never silent."""
+    if case is None:
+        return
+    db.refresh(case)
+    held = _sg_ir21_held_total(db, case)
+    if held == Decimal(str(case.held_amount)):
+        return
+    before = _sg_ir21_audit_view(case)
+    case.held_amount = held
+    reason = "held payslip corrected — held monies recalculated"
+    if case.status in ("FILED", "CLEARED"):
+        case.status = "EXCEPTION"
+        case.exception_reason = (f"Held monies changed after the Form IR21 was filed ({before['heldAmount']} → {held}) — "
+                                 "an amended Form IR21 is required before release (IRAS)")
+        reason = case.exception_reason
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change" if case.status != before["status"] else "update",
+        entity_type="sgp_ir21_case", entity_id=case.id, legal_reference=_SG_IR21_LEGAL_REFERENCE,
+        old_value=before, new_value=_sg_ir21_audit_view(case), reason=reason, auto_commit=False,
+    )
+    db.commit()
+
+
+# ── Singapore: Employer Registration readiness (ZP-SG-ENG-001 §9 panel H,
+# SG-027). The registration settings are the organization's Singapore
+# tax_identifiers (app/core/jurisdiction.py JURISDICTION_TAX_SCHEMAS["SG"]);
+# the evaluation is engine/jurisdictions/singapore/readiness.py (pure) —
+# this only gathers the facts, tenant-scoped.
+
+def _sg_active_pack_and_rates(db: Session, as_of: date):
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    rates, slabs, pack = resolve_tax_configuration(db, "SG", payroll_date=as_of)
+    return pack, {r.component_key: r for r in rates}, slabs
+
+
+def _sg_active_employees(db: Session, organization_id: int) -> list:
+    return db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id,
+        PayrollEmployee.country_code == "SG",
+        PayrollEmployee.status == EmployeeStatus.ACTIVE,
+    ).all()
+
+
+def get_sg_employer_readiness(db: Session, organization_id: int, as_of: Optional[date] = None) -> dict:
+    from app.modules.payroll.engine.jurisdictions.singapore.readiness import evaluate_employer_readiness
+
+    as_of = as_of or date.today()
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    employees = _sg_active_employees(db, organization_id)
+    pack, rates, _ = _sg_active_pack_and_rates(db, as_of)
+    threshold_row = rates.get("ais_mandatory_employee_threshold")
+    wp = [e for e in employees if e.sgp_work_pass_type == "WORK_PERMIT"]
+    ezpay = db.query(GeneratedReport.status).filter(
+        GeneratedReport.organization_id == organization_id, GeneratedReport.report_type == "SG_CPF_EZPAY",
+    ).all()
+    facts = {
+        "identifiers": (company.tax_identifiers if company else None) or {},
+        "company_name": company.name if company else None,
+        "company_address": company.address if company else None,
+        "settlement_bank": company.settlement_bank if company else None,
+        "settlement_acc": company.settlement_acc if company else None,
+        "employee_count": len(employees),
+        "foreign_pass_holders": sum(1 for e in employees if e.sgp_work_pass_type in _SG_FOREIGN_WORK_PASSES),
+        "work_permit_holders": len(wp),
+        "work_permit_sectors": {getattr(e, "sgp_wp_sector", None) for e in wp} - {None},
+        "pwm_flagged_employees": sum(1 for e in employees if (e.compliance_fields or {}).get("pwm_sector")),
+        "active_pack": f"{pack.pack_id} v{pack.version}" if pack else None,
+        "ais_threshold": threshold_row.flat_amount if threshold_row is not None else None,
+        "ezpay_generated": bool(ezpay),
+        "ezpay_accepted": any(status == "ACCEPTED" for (status,) in ezpay),
+    }
+    result = evaluate_employer_readiness(facts)
+    result.update({"organizationId": organization_id, "asOf": as_of.isoformat(),
+                   "certification": "Internal readiness evaluation only — not a CPF Board / IRAS / MOM approval"})
+    return result
+
+
+# ── Singapore: Super Admin statutory configuration summary + PWM reference
+# schedules (Phase 5.6). Tenant-independent and read-only: only canonical
+# (organization_id IS NULL) pack rows, the global sgp_pwm_overtime_schedules
+# table, SourceArtifacts, Singapore report templates and the SG filing
+# calendar are read — never an organization's payroll data. The section
+# layout is engine/jurisdictions/singapore/statutory_summary.py (pure).
+
+def _sg_pack_dict(pack) -> Optional[dict]:
+    if pack is None:
+        return None
+    return {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status,
+            "effectiveFrom": pack.effective_from.isoformat() if pack.effective_from else None,
+            "effectiveTo": pack.effective_to.isoformat() if pack.effective_to else None,
+            "taxYear": pack.tax_year, "createdById": pack.created_by_id, "updatedById": pack.updated_by_id,
+            "approvedById": pack.approved_by_id, "sourceDocumentId": pack.source_document_id,
+            "updatedAt": pack.updated_at.isoformat() if pack.updated_at else None}
+
+
+def _sg_decimal_str(value) -> Optional[str]:
+    return str(value) if value is not None else None
+
+
+_SG_ALEMBIC_HEADS: list = []                                    # parsed once per process
+
+
+def _alembic_script_heads() -> tuple:
+    if not _SG_ALEMBIC_HEADS:
+        from pathlib import Path
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        backend = Path(__file__).resolve().parents[3]
+        cfg = Config(str(backend / "alembic.ini"))
+        cfg.set_main_option("script_location", str(backend / "alembic"))
+        _SG_ALEMBIC_HEADS.extend(sorted(ScriptDirectory.from_config(cfg).get_heads()))
+    return tuple(_SG_ALEMBIC_HEADS)
+
+
+def _sg_evidence_rows(db: Session, form_number: Optional[str] = None) -> list:
+    """Singapore gate / decision / deploy sign-off evidence as the readiness
+    summary evaluates it (statutory_summary._evidence_state) — an ordinary
+    SourceArtifact plus its immutable review / decision audit rows. Shared by
+    the summary and the Phase 6.10 activation gate so the two can never
+    disagree on whether a gate has passed."""
+    query = db.query(SourceArtifact)
+    if form_number:
+        query = query.filter(SourceArtifact.form_number == form_number)
+    else:
+        query = query.filter(or_(SourceArtifact.form_number.like("SG-GATE-G%"),
+                                 SourceArtifact.form_number.like("SG-DECISION-D%"),
+                                 SourceArtifact.form_number == "SG-OPS-DEPLOYMENT"))
+    evidence = [{"tag": a.form_number, "id": a.id, "title": a.title, "agency": a.agency, "sha256": a.checksum_sha256,
+                 "createdById": a.created_by_id, "reviewerId": a.reviewer_id,
+                 "reviewedAt": a.reviewer_approved_at.isoformat() if a.reviewer_approved_at else None,
+                 "superseded": a.superseded_by_id is not None, "hasFile": bool(a.file_path)}
+                for a in query.order_by(SourceArtifact.id).all()]
+    extra = _sg_evidence_audits(db, [e["id"] for e in evidence])
+    for e in evidence:
+        for value in extra.get(e["id"], []):
+            if "sgEvidenceOutcome" in value:
+                e.update({"outcome": value["sgEvidenceOutcome"], "notes": value.get("notes"),
+                          "validUntil": value.get("validUntil"), "outcomeBy": value["actorId"], "outcomeAt": value["at"]})
+            if "sgDecision" in value:
+                e.update({"selectedValue": value.get("selectedValue"), "decisionReason": value.get("reason"),
+                          "decisionMakerId": value["actorId"], "decidedAt": value["at"]})
+    return evidence
+
+
+def _sg_gate_state(db: Session, tag: str, as_of: Optional[date] = None) -> Optional[str]:
+    """PASS / UNDER_REVIEW / SUBMITTED / EXPIRED / REJECTED, or None when no
+    current artifact carries `tag` — the readiness summary's own derivation."""
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import _evidence_state
+
+    return _evidence_state(_sg_evidence_rows(db, tag), tag, as_of or date.today())[0]
+
+
+# Phase 6.10: the golden vectors bound to the pack being activated.
+# run_golden_test_certification runs every fixture against the rate_map /
+# slabs embedded IN the fixture — it proves the engine, never the pack's
+# database rows. Before an SG pack goes Active, every fixture whose pay date
+# falls inside the pack's effective window is re-run with the fixture's
+# embedded rates REPLACED by this pack's own rows on that date; a single
+# mismatch (a wrong, missing or extra row) refuses activation.
+
+def pack_rows_for_golden(db: Session, pack: JurisdictionPack, on: date) -> tuple:
+    def text(v):
+        return None if v is None else str(v)
+
+    def effective(model):
+        return (model.organization_id.is_(None), model.jurisdiction_pack_id == pack.id,
+                or_(model.effective_from.is_(None), model.effective_from <= on),
+                or_(model.effective_to.is_(None), model.effective_to >= on))
+
+    rate_map = {r.component_key: {"employee_rate_pct": text(r.employee_rate_pct),
+                                  "employer_rate_pct": text(r.employer_rate_pct), "flat_amount": text(r.flat_amount),
+                                  "jurisdiction_state": r.jurisdiction_state, "text_value": r.text_value}
+                for r in db.query(ContributionRate).filter(*effective(ContributionRate)).all()}
+    slabs = [{**{k: text(getattr(t, k)) for k in ("min_amount", "max_amount", "rate_pct", "employer_rate_pct",
+                                                  "flat_amount", "adjustment_amount")},
+              **{k: getattr(t, k) for k in ("rule_type", "ni_category", "filing_status", "jurisdiction_state",
+                                            "assessment_basis", "tax_regime")},
+              "rate_label": t.rate_label or ""}
+             for t in db.query(TaxSlab).filter(*effective(TaxSlab)).all()]
+    return rate_map, slabs
+
+
+_sg_pack_rows_for_golden = pack_rows_for_golden          # compatibility alias
+
+
+def run_pack_golden_vectors(db: Session, pack: JurisdictionPack, fixtures_subdir: str, bind) -> dict:
+    """Every golden vector of ``fixtures_subdir`` whose pay date is inside the
+    pack's effective window, re-run through the production engine with the
+    fixture's embedded statutory rows REPLACED by the pack's own rows —
+    ``bind(context, pay_date)`` returns the context keys to substitute. Shared
+    by every country whose activation re-proves the pack (SG, HK).
+    {casesInWindow, passed, failures:[{case, diffs|error}]}."""
+    import copy as _copy
+    import json as _json
+    from pathlib import Path as _Path
+
+    from app.modules.payroll.hmrc_golden_harness import GoldenCaseMismatch, run_golden_case
+
+    fixtures_dir = _Path(__file__).resolve().parents[3] / "tests" / "fixtures" / fixtures_subdir
+    in_window, passed, failures = 0, 0, []
+    for path in sorted(fixtures_dir.glob("*.json")) if fixtures_dir.exists() else []:
+        if path.name.startswith("_"):
+            continue
+        with open(path, encoding="utf-8") as f:
+            case = _json.load(f)
+        pay_date = date.fromisoformat(case["context"]["pay_date"])
+        if not (pack.effective_from and pack.effective_from <= pay_date
+                and (pack.effective_to is None or pay_date <= pack.effective_to)):
+            continue
+        in_window += 1
+        bound = _copy.deepcopy(case)
+        bound["context"].update(_copy.deepcopy(bind(case["context"], pay_date)))
+        try:
+            run_golden_case(bound)
+            passed += 1
+        except GoldenCaseMismatch as e:
+            failures.append({"case": path.stem, "diffs": [{"field": d["field"], "expected": str(d["expected"]),
+                                                           "actual": str(d["actual"])} for d in e.diffs]})
+        except Exception as e:                                    # noqa: BLE001 — a crash is a failure, never a pass
+            failures.append({"case": path.stem, "error": f"{type(e).__name__}: {e}"})
+    return {"casesInWindow": in_window, "passed": passed, "failures": failures}
+
+
+def sg_pack_golden_check(db: Session, pack: JurisdictionPack) -> dict:
+    """{casesInWindow, passed, failures:[{case, diffs|error}]} for this pack."""
+    rows_on: dict = {}                               # most vectors share a pay date: one read per date
+
+    def bind(context, pay_date):
+        if pay_date not in rows_on:
+            rows_on[pay_date] = pack_rows_for_golden(db, pack, pay_date)
+        rate_map, slabs = rows_on[pay_date]
+        return {"rate_map": rate_map, "slabs": slabs}
+
+    return run_pack_golden_vectors(db, pack, _GOLDEN_FIXTURES_DIR_BY_COUNTRY["SG"], bind)
+
+
+def _sg_activation_evidence_refusal(db: Session, pack: JurisdictionPack) -> Optional[str]:
+    """Phase 6.10 Singapore activation gates beyond the country-scoped golden
+    run: G1 (CPF content certification) accepted, the pack reproducing every
+    golden vector in its window, and a wage-month-aligned effective date. Runs
+    on the normal AND the hotfix path — none of them is an approver check."""
+    if pack.effective_from and pack.effective_from.day != 1:
+        return (f"A Singapore pack must take effect on the 1st of a month (CPF resolves a whole wage month) — "
+                f"{pack.pack_id} v{pack.version} starts {pack.effective_from.isoformat()}.")
+    g1 = _sg_gate_state(db, "SG-GATE-G1")
+    if g1 != "PASS":
+        return ("Singapore packs need gate G1 (CPF content certification) evidence ACCEPTED before they can go "
+                f"Active — G1 is {g1 or 'EVIDENCE_REQUIRED'}. Record the signed independent comparison as "
+                "SG-GATE-G1; a different Super Admin reviews it.")
+    check = sg_pack_golden_check(db, pack)
+    if not check["casesInWindow"]:
+        return (f"No Singapore golden vector falls inside {pack.pack_id} v{pack.version}'s effective window — the "
+                "pack's own rows cannot be shown to reproduce any certified case.")
+    if check["failures"]:
+        return (f"{pack.pack_id} v{pack.version}'s own rows do not reproduce {len(check['failures'])} of "
+                f"{check['casesInWindow']} golden vector(s): "
+                + ", ".join(f["case"] for f in check["failures"][:5]) + " — fix the pack before activating it.")
+    return None
+
+
+def _sg_database_state(db: Session) -> dict:
+    """Read-only runtime facts for the readiness dashboard: the database's
+    Alembic revision against the code's head, and whether every Singapore
+    table / column the models declare exists. Never raises."""
+    out = {"codeHeads": [], "databaseHeads": [], "atHead": False, "missingSgObjects": None, "error": None}
+    try:
+        from alembic.runtime.migration import MigrationContext
+        from sqlalchemy import inspect as sa_inspect
+        from app.database import Base
+
+        out["codeHeads"] = list(_alembic_script_heads())
+        out["databaseHeads"] = sorted(MigrationContext.configure(db.connection()).get_current_heads())
+        out["atHead"] = bool(out["codeHeads"]) and out["databaseHeads"] == out["codeHeads"]
+        insp = sa_inspect(db.get_bind())
+        tables = set(insp.get_table_names())
+        missing = [t for t in Base.metadata.tables if t.startswith("sgp_") and t not in tables]
+        for name in ("payroll_employees", "payslip_items"):
+            if name in tables:
+                have = {c["name"] for c in insp.get_columns(name)}
+                missing += [f"{name}.{c.name}" for c in Base.metadata.tables[name].columns
+                            if c.name.startswith("sgp_") and c.name not in have]
+        out["missingSgObjects"] = sorted(missing)
+    except Exception as exc:                                     # noqa: BLE001 — reported, never raised
+        out["error"] = type(exc).__name__
+    return out
+
+
+def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import build_statutory_summary
+    from sqlalchemy import case
+    from app.modules.payroll.models import SgpPwmOvertimeSchedule as Pwm
+
+    as_of = as_of or date.today()
+    active, rate_map, slabs = _sg_active_pack_and_rates(db, as_of)
+    all_packs = (db.query(JurisdictionPack)
+                 .filter(JurisdictionPack.jurisdiction_country == "SG", JurisdictionPack.pack_type == "tax")
+                 .order_by(JurisdictionPack.effective_from, JurisdictionPack.id).all())
+    review = None
+    if active is None:
+        # No Active pack: show the latest pack covering the date for review,
+        # flagged valuesFromActivePack=False — never presented as in force.
+        covering = [p for p in all_packs
+                    if (p.effective_from is None or p.effective_from <= as_of)
+                    and (p.effective_to is None or p.effective_to >= as_of)]
+        review = max(covering, key=lambda p: (p.effective_from or date.min, p.id)) if covering else None
+        if review is not None:
+            rows = (db.query(ContributionRate)
+                    .filter(ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == review.id,
+                            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
+                            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of))
+                    .order_by(ContributionRate.sort_order).all())
+            rate_map = {r.component_key: r for r in rows}
+            slabs = (db.query(TaxSlab)
+                     .filter(TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == review.id,
+                             or_(TaxSlab.effective_from.is_(None), TaxSlab.effective_from <= as_of),
+                             or_(TaxSlab.effective_to.is_(None), TaxSlab.effective_to >= as_of)).all())
+
+    rates = {k: {"label": r.label, "flatAmount": _sg_decimal_str(r.flat_amount),
+                 "employerRatePct": _sg_decimal_str(r.employer_rate_pct), "textValue": r.text_value,
+                 "effectiveFrom": r.effective_from.isoformat() if r.effective_from else None,
+                 "effectiveTo": r.effective_to.isoformat() if r.effective_to else None,
+                 "sourceDocumentId": r.source_document_id}
+             for k, r in rate_map.items()}
+    cpf = [s for s in slabs if s.rule_type == "CPF_RATE_BAND"]
+    shg = [s for s in slabs if s.rule_type == "SHG_FUND_BAND"]
+    slab_facts = {"cpf_bands": len(cpf), "cpf_cohorts": sorted({s.filing_status for s in cpf}),
+                  "shg_bands": len(shg), "shg_funds": sorted({s.filing_status for s in shg}),
+                  "shg_source_ids": sorted({s.source_document_id for s in shg if s.source_document_id})}
+
+    # PWM reference table — aggregates only, never hydrates the ~6k rows.
+    sg_pwm = Pwm.jurisdiction_country == "SG"
+    total, active_rows, min_h, max_h, latest_retrieved, latest_created = db.query(
+        sa_func.count(Pwm.id), sa_func.sum(case((Pwm.status == "Active", 1), else_=0)),
+        sa_func.min(Pwm.overtime_hours), sa_func.max(Pwm.overtime_hours),
+        sa_func.max(Pwm.retrieved_at), sa_func.max(Pwm.created_at),
+    ).filter(sg_pwm).one()
+    pwm_schedule = {}
+    if total:
+        schedules = (db.query(Pwm.sector, Pwm.occupation_group, Pwm.job_level, Pwm.effective_from,
+                              Pwm.source_document_id).filter(sg_pwm).distinct().count())
+        windows = (db.query(Pwm.effective_from, Pwm.effective_to, sa_func.count(Pwm.id)).filter(sg_pwm)
+                   .group_by(Pwm.effective_from, Pwm.effective_to).order_by(Pwm.effective_from, Pwm.effective_to).all())
+        on_date = (db.query(sa_func.count(Pwm.id))
+                   .filter(sg_pwm, Pwm.status == "Active", Pwm.effective_from <= as_of,
+                           or_(Pwm.effective_to.is_(None), Pwm.effective_to >= as_of)).scalar())
+        pwm_schedule = {
+            "totalRows": total, "activeRows": int(active_rows or 0), "schedules": schedules,
+            "overtimeHoursMin": min_h, "overtimeHoursMax": max_h, "rowsEffectiveOnDate": on_date,
+            # Reference-data provenance: when MOM's tables were retrieved and
+            # when the rows were last seeded (created_at of the newest row).
+            "latestRetrievedAt": latest_retrieved.isoformat() if latest_retrieved else None,
+            "lastSeededAt": latest_created.isoformat() if latest_created else None,
+            "sectors": [s for (s,) in db.query(Pwm.sector).filter(sg_pwm).distinct().order_by(Pwm.sector).all()],
+            "windows": [{"effectiveFrom": f.isoformat(), "effectiveTo": t.isoformat() if t else None, "rows": n}
+                        for f, t, n in windows],
+            "sourceDocumentIds": [i for (i,) in db.query(Pwm.source_document_id).filter(sg_pwm)
+                                  .distinct().order_by(Pwm.source_document_id).all()],
+        }
+
+    sg_templates = list_report_templates(db, country="SG")
+    source_ids = ({r["sourceDocumentId"] for r in rates.values() if r["sourceDocumentId"]}
+                  | set(slab_facts["shg_source_ids"]) | {s.source_document_id for s in cpf if s.source_document_id}
+                  | set(pwm_schedule.get("sourceDocumentIds", []))
+                  | {p.source_document_id for p in all_packs if p.source_document_id}
+                  | {t.source_document_id for t in sg_templates if t.source_document_id})
+    sources = {a.id: {"id": a.id, "agency": a.agency, "title": a.title, "url": a.source_url,
+                      "sha256": a.checksum_sha256, "retrievedAt": a.retrieved_at.isoformat() if a.retrieved_at else None,
+                      "reviewed": a.reviewer_approved_at is not None}
+               for a in (db.query(SourceArtifact).filter(SourceArtifact.id.in_(source_ids)).all() if source_ids else [])}
+
+    version_counts = dict(db.query(ReportTemplate.template_key, sa_func.count(ReportTemplate.id))
+                          .filter(ReportTemplate.jurisdiction_country == "SG")
+                          .group_by(ReportTemplate.template_key).all())
+    active_versions = {k: {"activeVersion": v, "activeVersionId": i} for k, v, i in (
+        db.query(ReportTemplate.template_key, ReportTemplate.version, ReportTemplate.id)
+        .filter(ReportTemplate.jurisdiction_country == "SG", ReportTemplate.jurisdiction_state.is_(None),
+                ReportTemplate.status == "Active").all())}
+    audits: dict = {}
+    for entity_id, action, reason, created in (
+            db.query(TaxConfigurationAudit.entity_id, TaxConfigurationAudit.action, TaxConfigurationAudit.reason,
+                     TaxConfigurationAudit.created_at)
+            .filter(TaxConfigurationAudit.entity_type == "report_template",
+                    TaxConfigurationAudit.entity_id.in_([t.id for t in sg_templates] or [-1]))
+            .order_by(TaxConfigurationAudit.created_at, TaxConfigurationAudit.id).all()):
+        a = audits.setdefault(entity_id, {"count": 0, "approvedAt": None, "lastStatusChangeAt": None})
+        a["count"] += 1
+        if reason == "Approver set":
+            a["approvedAt"] = created.isoformat() if created else None
+        if action == "status_change":
+            a["lastStatusChangeAt"] = created.isoformat() if created else None
+    templates = [{"id": t.id, "templateKey": t.template_key, "name": t.name, "reportType": t.report_type,
+                  "status": t.status, "version": t.version,
+                  "effectiveFrom": t.effective_from.isoformat() if t.effective_from else None,
+                  "documentScope": t.document_scope, "approvedById": t.approved_by_id,
+                  "approvedAt": audits.get(t.id, {}).get("approvedAt") if t.approved_by_id else None,
+                  "lastStatusChangeAt": audits.get(t.id, {}).get("lastStatusChangeAt"),
+                  "auditEntries": audits.get(t.id, {}).get("count", 0),
+                  "versionCount": version_counts.get(t.template_key, 1), "previousVersionId": t.previous_version_id,
+                  "sourceDocumentId": t.source_document_id, "sourceReferences": t.source_references,
+                  "regulatoryAuthority": t.regulatory_authority, "description": t.description,
+                  "updatedAt": t.updated_at.isoformat() if t.updated_at else None,
+                  "effectiveTo": t.effective_to.isoformat() if t.effective_to else None,
+                  "allowedNextStatuses": list(REPORT_TEMPLATE_TRANSITIONS.get(t.status, ())),
+                  # The version a generator renders today (the listed row is the
+                  # LATEST version, which may be a Draft correction).
+                  **active_versions.get(t.template_key, {"activeVersion": None, "activeVersionId": None})}
+                 for t in sg_templates]
+    calendar_row = (db.query(StatutoryFilingCalendar)
+                    .filter(StatutoryFilingCalendar.jurisdiction_country == "SG",
+                            StatutoryFilingCalendar.report_type == "IR8A",
+                            StatutoryFilingCalendar.reporting_year == str(as_of.year))
+                    .order_by(StatutoryFilingCalendar.id).first())
+    golden = next(iter(list_test_certification_runs(db, limit=1, jurisdiction_country="SG")), None)
+
+    # Pack governance evidence for the pack the values come from: audit trail
+    # size by action (incl. refusals) and hotfix activations / open reviews.
+    values_pack = active or review
+    pack_audit = None
+    if values_pack is not None:
+        by_action = dict(db.query(TaxConfigurationAudit.action, sa_func.count(TaxConfigurationAudit.id))
+                         .filter(TaxConfigurationAudit.entity_type == "jurisdiction_pack",
+                                 TaxConfigurationAudit.entity_id == values_pack.id)
+                         .group_by(TaxConfigurationAudit.action).all())
+        last_change = (db.query(sa_func.max(TaxConfigurationAudit.created_at))
+                       .filter(TaxConfigurationAudit.entity_type == "jurisdiction_pack",
+                               TaxConfigurationAudit.entity_id == values_pack.id).scalar())
+        hotfixes = (db.query(PackHotfixActivation.reviewed, sa_func.count(PackHotfixActivation.id))
+                    .filter(PackHotfixActivation.jurisdiction_pack_id == values_pack.id)
+                    .group_by(PackHotfixActivation.reviewed).all())
+        pack_audit = {"entries": sum(by_action.values()), "byAction": by_action,
+                      "refused": by_action.get("refused", 0),
+                      "lastEntryAt": last_change.isoformat() if last_change else None,
+                      "hotfixActivations": sum(n for _r, n in hotfixes),
+                      "unreviewedHotfixes": sum(n for r, n in hotfixes if not r)}
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory import ezpay as _ezpay
+
+    operations = {
+        "ir8aTransitions": {k: list(v) for k, v in _SG_IR8A_TRANSITIONS.items()},
+        "ir8aMaxRecordsPerSubmission": _SG_MYTAX_MAX_RECORDS,
+        "ir21Transitions": {k: sorted(v) for k, v in _SG_IR21_TRANSITIONS.items()},
+        "ir21ApproverStatuses": sorted(_SG_IR21_APPROVER_STATUSES),
+        "ir21HoldStatuses": list(_SG_IR21_HOLD_STATUSES),
+        "ezpayTransitions": {k: list(v) for k, v in _SG_EZPAY_TRANSITIONS.items()},
+        "ezpayRecordLength": _ezpay.RECORD_LENGTH,
+    }
+
+    # Governance / configuration facts (closure programme). Platform-level
+    # only — this screen carries no organisation data (Phase 5.6 guard), so the
+    # per-organisation AIS choice is shown as its setting definition, from the
+    # canonical jurisdiction schema, not as tenant counts.
+    from app.core.jurisdiction import get_jurisdiction_schema
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    registry = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "SG").first()
+    ais_field = next((f for f in (get_jurisdiction_schema("SG") or {}).get("fields", [])
+                      if f.get("key") == "ais_submission_mode"), None)
+    governance = {
+        "hotfixPolicy": {"current": SG_HOTFIX_POLICY, "options": list(SG_HOTFIX_POLICIES),
+                         "unreviewedHotfixes": len(_sg_unreviewed_hotfixes(db))},
+        # D3: which governance controls are Singapore-only today (the switches themselves).
+        "controlScope": {"refusalAudit": list(_REFUSAL_AUDIT_COUNTRIES),
+                         "selfApprovalRefusedAtApprove": list(_SELF_APPROVAL_REFUSED_COUNTRIES),
+                         "hotfixDistinctReviewer": list(_HOTFIX_DISTINCT_REVIEWER_COUNTRIES),
+                         "packTransitionGraph": list(_PACK_TRANSITION_GRAPH_COUNTRIES),
+                         "approverNotActivator": list(_APPROVER_NOT_ACTIVATOR_COUNTRIES)},
+        "serviceAvailability": ({"availability": registry.availability,
+                                 "filingResponsibility": registry.filing_responsibility,
+                                 "paymentExecutionResponsibility": registry.payment_execution_responsibility,
+                                 "remittanceResponsibility": registry.remittance_responsibility}
+                                if registry else None),
+        "aisSubmissionModeSetting": ({"setting": "Company compliance → " + ais_field["label"],
+                                      "options": list(ais_field.get("options") or []),
+                                      "optionStates": {"EXPORT_ONLY": "READY", "DIRECT_API": "EXTERNAL_INTEGRATION_REQUIRED"}}
+                                     if ais_field else None),
+    }
+
+    # Evidence registry (production closure): gate / decision evidence is an
+    # ordinary SourceArtifact tagged with form_number SG-GATE-G1..G8 or
+    # SG-DECISION-D1..D3 — the existing Source Evidence store (SHA-256, file
+    # upload, reviewer != creator, audited review). No new table.
+    governance["evidence"] = _sg_evidence_rows(db)
+    governance["database"] = _sg_database_state(db)
+
+    return build_statutory_summary({
+        "governance": governance,
+        "pack_audit": pack_audit, "operations": operations,
+        "as_of": as_of, "active_pack": _sg_pack_dict(active), "review_pack": _sg_pack_dict(review),
+        "packs": [_sg_pack_dict(p) for p in all_packs], "rates": rates, "slabs": slab_facts, "sources": sources,
+        "pwm_schedule": pwm_schedule, "templates": templates,
+        "ais_calendar": ({"dueDate": calendar_row.due_date.isoformat(), "periodLabel": calendar_row.period_label,
+                          "status": calendar_row.status} if calendar_row else None),
+        # Phase 6.10: the vectors re-run against the pack the values come from.
+        "pack_golden_check": sg_pack_golden_check(db, values_pack) if values_pack is not None else None,
+        "latest_golden": ({"status": golden.status, "passedCases": golden.passed_cases,
+                           "totalCases": golden.total_cases,
+                           "runAt": golden.run_at.isoformat() if golden.run_at else None} if golden else None),
+    })
+
+
+def list_sg_pwm_schedules(
+    db: Session, *, sector: Optional[str] = None, occupation_group: Optional[str] = None,
+    job_level: Optional[str] = None, role_label: Optional[str] = None, effective_on: Optional[date] = None,
+    effective_from: Optional[date] = None,
+    effective_to: Optional[date] = None, overtime_hours: Optional[int] = None, status: Optional[str] = None,
+    search: Optional[str] = None, skip: int = 0, limit: int = 50,
+) -> dict:
+    """Paginated read of the global PWM overtime gross schedule. Filters:
+    effective_on = rows in force on that date; effective_from = windows
+    starting on/after it; effective_to = windows ending on/before it (open-
+    ended rows excluded). Column-level select with the SourceArtifact title
+    joined in the same statement — no ORM hydration, no per-row lookup."""
+    from app.modules.payroll.models import SgpPwmOvertimeSchedule as Pwm
+
+    query = (db.query(Pwm.id, Pwm.jurisdiction_country, Pwm.sector, Pwm.occupation_group, Pwm.job_level,
+                      Pwm.role_label, Pwm.effective_from, Pwm.effective_to, Pwm.overtime_hours, Pwm.required_gross,
+                      Pwm.source_document_id, Pwm.source_sha256, Pwm.retrieved_at, Pwm.status,
+                      SourceArtifact.title, SourceArtifact.source_url)
+             .outerjoin(SourceArtifact, SourceArtifact.id == Pwm.source_document_id)
+             .filter(Pwm.jurisdiction_country == "SG"))
+    if sector:
+        query = query.filter(Pwm.sector == sector)
+    if occupation_group:
+        query = query.filter(Pwm.occupation_group == occupation_group)
+    if job_level:
+        query = query.filter(Pwm.job_level == job_level)
+    if role_label:
+        query = query.filter(Pwm.role_label == role_label)
+    if effective_on:
+        query = query.filter(Pwm.effective_from <= effective_on,
+                             or_(Pwm.effective_to.is_(None), Pwm.effective_to >= effective_on))
+    if effective_from:
+        query = query.filter(Pwm.effective_from >= effective_from)
+    if effective_to:
+        query = query.filter(Pwm.effective_to.isnot(None), Pwm.effective_to <= effective_to)
+    if overtime_hours is not None:
+        query = query.filter(Pwm.overtime_hours == overtime_hours)
+    if status:
+        query = query.filter(Pwm.status == status)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(Pwm.role_label.ilike(like), Pwm.job_level.ilike(like)))
+
+    total = query.order_by(None).count()
+    rows = (query.order_by(Pwm.sector, Pwm.occupation_group, Pwm.job_level, Pwm.effective_from,
+                           Pwm.overtime_hours, Pwm.id)
+            .offset(skip).limit(limit).all())
+    return {
+        "total": total, "skip": skip, "limit": limit, "readOnly": True,
+        "classification": "Statutory Reference Data — Read Only",
+        "items": [{
+            "id": r.id, "jurisdiction": r.jurisdiction_country, "sector": r.sector,
+            "occupationGroup": r.occupation_group, "jobLevel": r.job_level, "roleLabel": r.role_label,
+            "effectiveFrom": r.effective_from.isoformat(),
+            "effectiveTo": r.effective_to.isoformat() if r.effective_to else None,
+            "overtimeHours": r.overtime_hours, "requiredGross": str(r.required_gross),
+            "sourceDocumentId": r.source_document_id, "sourceTitle": r.title, "sourceUrl": r.source_url,
+            "sourceSha256": r.source_sha256, "retrievedAt": r.retrieved_at.isoformat() if r.retrieved_at else None,
+            "status": r.status,
+        } for r in rows],
+    }
+
+
+# ── Singapore: CPF EZPay contribution file (CPF Board "CPF EZPay (FTP) File
+# Specifications", effective 16 Jan 2025) — the layout lives in
+# engine/jurisdictions/singapore/statutory/ezpay.py (pure). This is the
+# artifact + lifecycle, reusing GeneratedReport (report_type
+# "SG_CPF_EZPAY"): status carries the lifecycle, reconciliation carries the
+# history and the payroll-vs-file totals. SG-028: the employer submits the
+# file through CPF EZPay (Corppass) — no direct API is claimed; CPF Board's
+# acceptance is recorded from the employer's acknowledgement, never assumed.
+# The file needs full CPF account numbers (spec p4), so it is never stored:
+# rendered_data keeps masked rows + the file's SHA-256, and an authorised
+# download rebuilds the file and refuses if it no longer hashes the same.
+
+SG_EZPAY_REPORT_TYPE = "SG_CPF_EZPAY"
+_SG_EZPAY_LIVE = ("PREPARED", "APPROVED", "SUBMITTED", "ACCEPTED", "REJECTED", "UNKNOWN")
+_SG_EZPAY_TRANSITIONS = {
+    "PREPARED": ("APPROVED",),
+    "APPROVED": ("SUBMITTED",),
+    "SUBMITTED": ("ACCEPTED", "REJECTED", "UNKNOWN"),
+    # UNKNOWN is never success: only a reconciled outcome leaves it.
+    "UNKNOWN": ("ACCEPTED", "REJECTED"),
+}
+_SG_EZPAY_LEGAL_REFERENCE = 'CPF Board "CPF EZPay (FTP) File Specifications" (effective 16 Jan 2025); ZP-SG-ENG-001 SG-028/SG-038/SG-040'
+
+
+def _sg_ezpay_inputs(db: Session, organization_id: int, year: int, month: int, exclude_payslip_ids=()) -> dict:
+    """Per-employee month totals from the finalized payslips of the wage
+    month: CPF (employee + employer), actual OW/AW (trace inputs), SHG per
+    fund (trace), plus the employer's SDL payable (the SG_SDL_MONTHLY rule:
+    sum of per-employee SDL rounded DOWN to the dollar)."""
+    import calendar
+    from decimal import ROUND_FLOOR
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory.ezpay import employment_status
+
+    z = Decimal("0")
+    month_start = date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+    by_employee: dict = {}
+    excluded = set(exclude_payslip_ids or ())
+    for i in _sg_wage_month_payslips(db, organization_id, year, month):
+        if i.id in excluded:
+            continue
+        by_employee.setdefault(i.employee_id, []).append(i)
+    rows, sdl = [], z
+    for employee_id, items in sorted(by_employee.items()):
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id,
+                                                    PayrollEmployee.organization_id == organization_id).first()
+        sdl += sum((Decimal(str(i.employer_payroll_tax or 0)) for i in items), z)
+        shg: dict = {}
+        ow = aw = cpf = z
+        for i in items:
+            trace = i.sgp_calculation_trace or {}
+            ow += Decimal(str((trace.get("inputs") or {}).get("ordinaryWages") or 0))
+            aw += Decimal(str((trace.get("inputs") or {}).get("additionalWages") or 0))
+            cpf += Decimal(str(i.employee_pension or 0)) + Decimal(str(i.employer_pension or 0))
+            for fund, entry in ((trace.get("shg") or {}).get("funds") or {}).items():
+                shg[fund] = shg.get(fund, z) + Decimal(str(entry.get("amount") or 0))
+        cf = (employee.compliance_fields if employee else None) or {}
+        rows.append({
+            "employee_id": employee_id,
+            "employee_ref": employee.employee_code if employee else f"employee #{employee_id}",
+            "account_no": cf.get("nric_fin"),
+            "name": employee.name if employee else items[0].employee_name,
+            "cpf_total": cpf, "ordinary_wages": ow, "additional_wages": aw,
+            "employment_status": employment_status(getattr(employee, "date_of_joining", None),
+                                                   getattr(employee, "date_of_leaving", None), month_start, month_end),
+            "shg": {f: a for f, a in shg.items() if a > 0},
+            "payslip_ids": [i.id for i in items],
+        })
+    # Employees with neither CPF nor SHG (e.g. foreign employees) have no
+    # detail record — their SDL is still in the employer's code-11 total.
+    detail_rows = [r for r in rows if r["cpf_total"] > 0 or r["shg"]]
+    return {"employees": detail_rows, "all_rows": rows, "sdl_total": sdl.quantize(Decimal("1"), rounding=ROUND_FLOOR),
+            "sdl_before_rounding": sdl}
+
+
+def _sg_ezpay_build(db: Session, organization_id: int, year: int, month: int, advice_code: str, created_at: datetime,
+                    exclude_payslip_ids=()):
+    from app.modules.payroll.engine.jurisdictions.singapore.readiness import parse_csn
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory.ezpay import EzpayValidationError, build_file
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    csn = parse_csn(((company.tax_identifiers if company else None) or {}).get("cpf_submission_number"))
+    if csn is None:
+        raise BadRequestException("CPF EZPay: no valid CPF Submission Number (CSN) in the Singapore Employer Registration.")
+    inputs = _sg_ezpay_inputs(db, organization_id, year, month, exclude_payslip_ids)
+    if not inputs["all_rows"]:
+        raise BadRequestException(f"CPF EZPay: no finalized Singapore payslips for wage month {year}-{month:02d} that "
+                                  "another advice does not already cover.")
+    negative = [r["employee_ref"] for r in inputs["all_rows"] if r["cpf_total"] < 0 or any(a < 0 for a in r["shg"].values())]
+    if negative:
+        raise BadRequestException(f"CPF EZPay: net CPF / SHG over-contribution for {negative} in this advice — an "
+                                  "over-payment is refunded through a CPF Board refund application, never a negative line.")
+    try:
+        built = build_file(csn, advice_code, f"{year}-{month:02d}", created_at, inputs["employees"], inputs["sdl_total"])
+    except EzpayValidationError as exc:
+        raise BadRequestException("CPF EZPay file failed validation: " + "; ".join(exc.errors))
+    return company, csn, inputs, built
+
+
+def _sg_ezpay_live(db: Session, organization_id: int, scope_key: str) -> list:
+    return db.query(GeneratedReport).filter(
+        GeneratedReport.organization_id == organization_id, GeneratedReport.report_type == SG_EZPAY_REPORT_TYPE,
+        GeneratedReport.scope_key == scope_key, GeneratedReport.status.in_(_SG_EZPAY_LIVE),
+    ).all()
+
+
+def generate_sg_cpf_ezpay(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    advice_code: str = "01", actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    template = get_report_template(db, report_template_id)
+    if template.report_type != SG_EZPAY_REPORT_TYPE:
+        raise BadRequestException(f"generate_sg_cpf_ezpay is only for {SG_EZPAY_REPORT_TYPE} templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    if not 1 <= int(month) <= 12:
+        raise BadRequestException("month must be 1–12.")
+    scope_key = f"PERIOD:{year}-{month:02d}:ADVICE:{advice_code}"
+    # WS2: one EZPay preparation per organization at a time (row lock on the
+    # organization's compliance row) — two concurrent requests can never both
+    # leave a live PREPARED file for the same advice.
+    db.query(CompanyComplianceDetails.id).filter(CompanyComplianceDetails.organization_id == organization_id).with_for_update().all()
+    live = _sg_ezpay_live(db, organization_id, scope_key)
+    for row in live:
+        if row.status == "UNKNOWN":
+            raise HTTPException(status_code=409, detail=(
+                f"CPF EZPay {year}-{month:02d} advice {advice_code}: the previous submission's outcome is UNKNOWN — "
+                "reconcile it with CPF Board (record ACCEPTED or REJECTED) before preparing another file (SG-040)."))
+        if row.status in ("SUBMITTED", "ACCEPTED"):
+            raise HTTPException(status_code=409, detail=(
+                f"CPF EZPay {year}-{month:02d} advice {advice_code} is already {row.status} — a further payment for the "
+                "month needs a new advice code, never a regenerated file."))
+    # SG-044: a further advice for the month (e.g. correction deltas) covers
+    # only payslips no other live advice of the month already covers.
+    covered = set()
+    for other in db.query(GeneratedReport).filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.report_type == SG_EZPAY_REPORT_TYPE,
+            GeneratedReport.scope_key.like(f"PERIOD:{year}-{month:02d}:ADVICE:%"), GeneratedReport.scope_key != scope_key,
+            GeneratedReport.status.in_(("APPROVED", "SUBMITTED", "ACCEPTED", "UNKNOWN"))).all():
+        for r in (other.rendered_data or {}).get("employeeRows") or []:
+            covered.update(r.get("payslipIds") or [])
+        covered.update((other.rendered_data or {}).get("nonDetailPayslipIds") or [])
+    created_at = datetime.utcnow().replace(microsecond=0)
+    company, csn, inputs, built = _sg_ezpay_build(db, organization_id, year, month, advice_code, created_at, covered)
+    for row in live:                                   # PREPARED / APPROVED / REJECTED → superseded by the new file
+        row.status = "Superseded"
+        db.add(row)
+    z = Decimal("0")
+    payroll_cpf = sum((r["cpf_total"] for r in inputs["all_rows"]), z)
+    payroll_shg = sum((sum(r["shg"].values(), z) for r in inputs["all_rows"]), z)
+    file_summary = built["summary"]
+    file_cpf = Decimal(file_summary.get("01", {}).get("amount", "0"))
+    file_shg = sum((Decimal(file_summary[c]["amount"]) for c in ("02", "03", "04", "05") if c in file_summary), z)
+    reconciliation = {
+        "payrollTotals": {"cpf": str(payroll_cpf), "shg": str(payroll_shg), "sdlPayable": str(inputs["sdl_total"])},
+        "fileTotals": {"cpf": str(file_cpf), "shg": str(file_shg), "sdl": file_summary.get("11", {}).get("amount", "0"),
+                       "trailerTotal": built["total"]},
+        "matches": payroll_cpf == file_cpf and payroll_shg == file_shg,
+        "history": [{"status": "PREPARED", "actorId": actor_id, "at": created_at.isoformat()}],
+    }
+    rendered_data = {
+        "filename": built["filename"],
+        "relevantMonth": f"{year}-{month:02d}",
+        "adviceCode": advice_code,
+        "csn": f"{csn[0]}{csn[1]}{csn[2]}",
+        "createdAt": created_at.isoformat(),
+        "fileSha256": hashlib.sha256(built["content"].encode("ascii")).hexdigest(),
+        "recordCount": built["records"],
+        "detailRecordCount": built["detailRecords"],
+        "summaryRecords": file_summary,
+        "fileTotal": built["total"],
+        "employeeRows": [{
+            "employeeId": r["employee_id"], "employeeCode": r["employee_ref"],
+            "cpfAccountMasked": mask_nric_fin(r["account_no"]), "employmentStatus": r["employment_status"],
+            "cpf": str(r["cpf_total"]), "ordinaryWages": str(r["ordinary_wages"]), "additionalWages": str(r["additional_wages"]),
+            "shg": {f: str(a) for f, a in r["shg"].items()}, "payslipIds": r["payslip_ids"],
+        } for r in inputs["employees"]],
+        "sdl": {"beforeRounding": str(inputs["sdl_before_rounding"]), "payable": str(inputs["sdl_total"])},
+        "excludedPayslipIds": sorted(covered),
+        "nonDetailPayslipIds": sorted(pid for r in inputs["all_rows"] if not (r["cpf_total"] > 0 or r["shg"])
+                                      for pid in r["payslip_ids"]),
+        "submissionMode": "CUSTOMER_UPLOAD_VIA_CPF_EZPAY_CORPPASS",
+        "externalAcceptance": "BLOCKED — CPF Board acceptance is recorded only from the employer's acknowledgement",
+        "knownGaps": [
+            "Community Chest (payment code 10) is not collected by this payroll — a zero summary record, as in the "
+            "specification's sample layout.",
+            "CPF late-payment interest (payment code 07) is not computed.",
+        ],
+    }
+    file_payslip_ids = sorted({pid for r in inputs["all_rows"] for pid in r["payslip_ids"]})
+    pinned_pack, pinned_ids = _sg_pinned_pack(                    # Phase 6.5: the file's payslips' own pack
+        db, db.query(PayslipItem).filter(PayslipItem.id.in_(file_payslip_ids)).all() if file_payslip_ids else [])
+    if len(pinned_ids) > 1:
+        rendered_data["metadata"] = {"taxPacksUsed": pinned_ids}
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country="SG", jurisdiction_state=None, reporting_year=str(year),
+        reporting_period=f"{year}-{month:02d}",
+        applicable_tax_pack_id=pinned_pack.id if pinned_pack else None,
+        applicable_tax_pack_version=pinned_pack.version if pinned_pack else None,
+        status="PREPARED", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=reconciliation,
+    )
+    db.add(row)
+    db.flush()
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="sg_cpf_ezpay", entity_id=row.id,
+        legal_reference=_SG_EZPAY_LEGAL_REFERENCE, old_value=None,
+        new_value={"status": "PREPARED", "fileSha256": rendered_data["fileSha256"], "fileTotal": built["total"]},
+        reason=f"CPF EZPay file prepared for {year}-{month:02d} advice {advice_code}", auto_commit=False,
+    )
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def _get_sg_ezpay(db: Session, organization_id: int, report_id: int) -> GeneratedReport:
+    row = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id, GeneratedReport.organization_id == organization_id,
+        GeneratedReport.report_type == SG_EZPAY_REPORT_TYPE,
+    ).first()
+    if row is None:
+        raise NotFoundException("CPF EZPay submission", report_id)
+    return row
+
+
+def transition_sg_cpf_ezpay(
+    db: Session, organization_id: int, report_id: int, status: str, actor_id: Optional[int] = None,
+    reference: Optional[str] = None, note: Optional[str] = None, errors: Optional[list] = None,
+) -> GeneratedReport:
+    """PREPARED → APPROVED (a distinct approver, maker-checker) → SUBMITTED
+    (the employer uploaded it through CPF EZPay) → ACCEPTED / REJECTED /
+    UNKNOWN (the outcome CPF Board returned, with its acknowledgement
+    reference). UNKNOWN is never treated as success (SG-040)."""
+    row = _get_sg_ezpay(db, organization_id, report_id)
+    allowed = _SG_EZPAY_TRANSITIONS.get(row.status, ())
+    if status not in allowed:
+        raise BadRequestException(f"CPF EZPay submission is {row.status}; allowed next: {list(allowed) or 'none'}.")
+    if status == "APPROVED" and (actor_id is None or actor_id == row.generated_by_id):
+        refuse_with_audit(db, "sg_cpf_ezpay", row.id, actor_id, row.status, status,
+                                 "CPF EZPay approval needs a distinct approver — the preparer cannot approve (maker-checker)."
+                                 if actor_id is not None else
+                                 "CPF EZPay approval needs a distinct approver — an unidentified user cannot approve "
+                                 "(maker-checker).")
+    if status in ("ACCEPTED", "REJECTED") and not (reference or "").strip():
+        raise BadRequestException(f"{status} needs CPF Board's acknowledgement / reference — never recorded without evidence.")
+    if row.status == "UNKNOWN" and not (note or "").strip():
+        raise BadRequestException("Reconciling an UNKNOWN submission needs a note describing how the outcome was confirmed.")
+    before = row.status
+    captured = _sg_authority_errors(status, errors)
+    reconciliation = copy.deepcopy(row.reconciliation or {})
+    reconciliation.setdefault("history", []).append({
+        "status": status, "actorId": actor_id, "at": datetime.utcnow().replace(microsecond=0).isoformat(),
+        "reference": (reference or None), "note": (note or None), **({"errors": captured} if captured else {}),
+    })
+    if status in ("ACCEPTED", "REJECTED", "UNKNOWN"):
+        reconciliation["acknowledgement"] = {"outcome": status, "reference": reference or None}
+    row.reconciliation = reconciliation
+    row.status = status
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="sg_cpf_ezpay", entity_id=row.id,
+        legal_reference=_SG_EZPAY_LEGAL_REFERENCE, old_value={"status": before}, new_value={"status": status},
+        reason=note or f"CPF EZPay {before} → {status}" + (f" (ref {reference})" if reference else ""), auto_commit=False,
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_sg_cpf_ezpay_file(db: Session, organization_id: int, report_id: int, actor_id: Optional[int] = None) -> tuple:
+    """(filename, content) for an APPROVED-or-later submission — rebuilt
+    from the same payslips and creation time, refused if it no longer
+    hashes to the approved file (payroll changed since preparation). Every
+    download is audited (full CPF account numbers leave the system)."""
+    row = _get_sg_ezpay(db, organization_id, report_id)
+    if row.status in ("PREPARED", "Superseded", "Void"):
+        raise BadRequestException(f"CPF EZPay file is {row.status} — only an APPROVED (or later) file can be downloaded.")
+    data = row.rendered_data or {}
+    year, month = (int(x) for x in data["relevantMonth"].split("-"))
+    _, _, _, built = _sg_ezpay_build(db, organization_id, year, month, data["adviceCode"],
+                                     datetime.fromisoformat(data["createdAt"]), data.get("excludedPayslipIds") or ())
+    digest = hashlib.sha256(built["content"].encode("ascii")).hexdigest()
+    if digest != data.get("fileSha256"):
+        raise HTTPException(status_code=409, detail=(
+            "The payroll behind this CPF EZPay file changed after it was prepared — the approved file can no longer "
+            "be reproduced. Prepare and approve a new file."))
+    record_tax_audit(
+        db, actor_id=actor_id, action="export", entity_type="sg_cpf_ezpay", entity_id=row.id,
+        legal_reference=_SG_EZPAY_LEGAL_REFERENCE, old_value=None, new_value={"fileSha256": digest},
+        reason="CPF EZPay file downloaded (contains full CPF account numbers)", auto_commit=False,
+    )
+    db.commit()
+    return built["filename"], built["content"]
+
+
+# ── Singapore: payroll-run preflight / exceptions, approval binding and
+# IR21 on cessation (ZP-SG-ENG-001 §11 stages 1/4/5, SG-030, SG-032). The
+# checks are engine/jurisdictions/singapore/preflight.py (pure); every
+# statutory decision is the calculation engine's own: an employee not yet
+# calculated is DRY-RUN read-only through the same _compute_payslip_values
+# path a real run uses (no accumulator lock, nothing written), a calculated
+# one is read from its persisted trace.
+
+def _sg_run_employees(db: Session, run: PayrollRun) -> list:
+    """The SG employees a run covers — the same selection
+    generate_payslips_for_run makes."""
+    rows = db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == run.organization_id,
+        PayrollEmployee.status == EmployeeStatus.ACTIVE,
+        or_(PayrollEmployee.date_of_joining == None, PayrollEmployee.date_of_joining <= run.period_start),  # noqa: E711
+    ).all()
+    rows += _sg_mid_period_joiners(db, run.organization_id, run.period_start, run.period_end)
+    return [e for e in rows if _resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "SG"]
+
+
+def _sg_dry_run_trace(db: Session, run: PayrollRun, employee, cache: dict, calculation_mode, allowance_components, org_opted_in):
+    """(trace, None) or (None, SingaporeCalculationBlockedError) — read-only."""
+    from app.modules.payroll.engine.countries.singapore import SingaporeCalculationBlockedError
+
+    try:
+        country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, _pr, _po = _resolve_employee_calc_inputs(
+            db, run.organization_id, employee, cache=cache, payroll_date=run.pay_date, org_opted_in=org_opted_in, run=run,
+        )
+        ytd_inputs = _load_sg_cpf_ytd(db, employee.id, run.pay_date, lock=False, current_run_id=run.id, wage_date=_sg_wage_date(run))
+        values = _compute_payslip_values(
+            db, run, employee, rate_map, slabs, country, calculation_mode,
+            allowance_components=allowance_components, resolved_pack=resolved_pack,
+            state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+            reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs,
+        )
+        return values.get("sgp_calculation_trace") or {}, None
+    except SingaporeCalculationBlockedError as exc:
+        return None, exc
+
+
+def _sg_preflight_employee_facts(employee) -> dict:
+    return {
+        "id": employee.id, "code": employee.employee_code, "residency": employee.sgp_cpf_residency_status,
+        "dob": employee.date_of_birth, "spr_date": employee.sgp_spr_effective_date,
+        "nric": (employee.compliance_fields or {}).get("nric_fin"),
+    }
+
+
+def _sg_employee_ir21_case(db: Session, organization_id: int, employee_id: int) -> Optional[dict]:
+    case = (_sg_ir21_query(db, organization_id)
+            .filter(SgpIr21Case.employee_id == employee_id, SgpIr21Case.status.notin_(("CANCELLED",)))
+            .order_by(SgpIr21Case.trigger_date.desc()).first())
+    return None if case is None else {"id": case.id, "status": case.status}
+
+
+def sg_payroll_preflight(db: Session, organization_id: int, run_id: int, today: Optional[date] = None) -> dict:
+    from app.modules.payroll.engine.countries.singapore import resolve_wage_month, SingaporeCalculationBlockedError
+    from app.modules.payroll.engine.jurisdictions.singapore import preflight as pf
+
+    run = get_payroll_run_by_id(db, run_id, organization_id)
+    today = today or date.today()
+    checks = []
+    try:
+        month_start, month_end, _late, basis = resolve_wage_month(run.pay_date, run.period_start, run.period_end)
+    except SingaporeCalculationBlockedError as exc:
+        checks.append(pf.check(f"ENGINE_BLOCK:{exc.key}", pf.BLOCK, exc.reason, source="SG-011 wage month",
+                               action="Use a payroll period within one calendar month"))
+        return {"runId": run.id, **pf.summarize(checks)}
+    pack, rates, _slabs = _sg_active_pack_and_rates(db, month_end)
+    if pack is None:
+        checks.append(pf.check("SG_PACK_NOT_ACTIVE", pf.BLOCK, f"no Active Singapore statutory pack for wage month "
+                               f"{month_start.strftime('%Y-%m')}", source="tax_resolver", action="Activate the Singapore pack"))
+    employees = _sg_run_employees(db, run)
+    if _sg_is_correction_run(run):
+        delta_ids = {i.employee_id for i in db.query(PayslipItem.employee_id).filter(PayslipItem.payroll_run_id == run.id)}
+        employees = [e for e in employees if e.id in delta_ids]
+    persisted = {i.employee_id: i for i in db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "SG", PayslipItem.status != PayslipStatus.FAILED)}
+    cache: dict = {}
+    earnings: dict = {}
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    allowance_components = _resolve_allowance_components(db, organization_id)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    for employee in employees:
+        facts = _sg_preflight_employee_facts(employee)
+        checks.extend(pf.identity_checks(facts))
+        checks.extend(pf.transition_checks(facts, month_start, month_end, rates))
+        if employee.id in persisted:
+            trace = persisted[employee.id].sgp_calculation_trace or {}
+        elif pack is not None:
+            trace, exc = _sg_dry_run_trace(db, run, employee, cache, calculation_mode, allowance_components, org_opted_in)
+            if exc is not None:
+                checks.append(pf.engine_block_check(facts, exc))
+                continue
+        else:
+            continue
+        checks.extend(pf.trace_checks(facts, trace, _sg_employee_ir21_case(db, organization_id, employee.id), today))
+        checks.extend(_sg_labour_checks(db, run, employee, persisted.get(employee.id), trace, rates, month_start, month_end))
+        inputs = trace.get("inputs") or {}
+        iras = inputs.get("irasClassification") or {}
+        earnings[employee.id] = {"employeeCode": employee.employee_code, "lines": [
+            {"component": k, "label": v.get("label") or k, "amount": v.get("amount"), "cpfClass": v.get("class"),
+             "cpfSource": v.get("source"), "irasCategory": (iras.get(k) or {}).get("category")}
+            for k, v in (inputs.get("wageClassification") or {}).items()]}
+    out = pf.summarize(checks)
+    out["earnings"] = earnings
+    out.update({"runId": run.id, "wageMonth": month_start.strftime("%Y-%m"), "wageMonthBasis": basis,
+                "pack": f"{pack.pack_id} v{pack.version}" if pack else None, "employeeCount": len(employees),
+                "calculated": len(persisted)})
+    return out
+
+
+def _sg_wage_views(trace: dict) -> dict:
+    """Basic and PWM-gross (basic + allowances, excluding overtime,
+    additional wages and NON_CPF reimbursement-type items) from the engine's
+    own per-earning classification in the trace."""
+    z = Decimal("0")
+    classes = (trace.get("inputs") or {}).get("wageClassification") or {}
+    basic = Decimal(str((classes.get("basic") or {}).get("amount") or 0))
+    gross = sum((Decimal(str(e.get("amount") or 0)) for k, e in classes.items()
+                 if k not in ("overtime", "additional_compensation") and e.get("class") != "NON_CPF"), z)
+    overtime = Decimal(str((classes.get("overtime") or {}).get("amount") or 0))
+    month = trace.get("incompleteMonth") or {}
+    if month.get("status") == "INCOMPLETE_MONTH":
+        # Phase 5.2: the PWM floors are monthly wage RATES — evaluated on the
+        # contractual monthly rate, the salary itself being MOM's pro rata.
+        rates = month.get("monthlyRatesForPwm") or {}
+        return {"basic": Decimal(str(rates.get("basic") or 0)), "gross_ex_ot": Decimal(str(rates.get("grossExOvertime") or 0)),
+                "overtime": overtime, "incomplete_month": True, "no_pay_leave": False}
+    # Payslips calculated before Phase 5.2 recorded only the deducted amount.
+    no_pay = Decimal(str((trace.get("inputs") or {}).get("noPayLeaveDeduction") or 0))
+    return {"basic": basic, "gross_ex_ot": gross, "overtime": overtime, "no_pay_leave": no_pay > 0}
+
+
+def _sg_labour_checks(db, run, employee, item, trace, rates, month_start, month_end) -> list:
+    """Employment Act / PWM checks (Phase 5 STEPs 9–10) —
+    engine/jurisdictions/singapore/labour.py (pure, RulePack-driven)."""
+    from app.modules.payroll.engine.jurisdictions.singapore import labour
+    from app.modules.payroll.engine.jurisdictions.singapore.preflight import INFO, WARN, check
+
+    facts, cf, wages, p4, pwm_facts = _sg_pwm_inputs(db, employee, trace, rates, month_start, month_end)
+    out = []
+    if p4["status"] == "UNDETERMINED":
+        out.append(check("EA_PART4_UNDETERMINED", WARN, "Part 4 (hours / overtime / rest day) coverage cannot be determined: "
+                         "workman / non-workman status is not recorded (SG-035)", facts, source="MOM Employment Act coverage",
+                         action="Record the workman and manager/executive status"))
+    elif p4["status"] == "COVERED":
+        ot = labour.overtime_minimum_hourly(cf.get("ea_workman"), wages["basic"], rates)
+        out.append(check("EA_PART4_COVERED", INFO, f"covered by Part 4 ({p4['reason']}): overtime at least "
+                         f"S${ot['minimumOvertimeHourly']}/h ({ot['basis']}); overtime hours are not captured by payroll — "
+                         "time off cannot replace statutory overtime" if ot else f"covered by Part 4 ({p4['reason']})",
+                         facts, source="MOM Hours of work, overtime and rest day"))
+    out.extend(labour.salary_timing_check(facts, run.period_end, run.pay_date, employee.date_of_leaving, rates))
+    if not cf.get("employment_class"):
+        out.append(check("SG_EMPLOYMENT_CLASS_NOT_RECORDED", WARN, "employment class not recorded — calculated as STANDARD "
+                         "employment; platform workers, seafarers, overseas-only contracts and employer-of-record "
+                         "arrangements are not supported (SG-002)", facts, source="ZP-SG-ENG-001 SG-002",
+                         action="Record the employment class (STANDARD if none of the unsupported classes applies)"))
+    if item is not None:
+        statutory = Decimal(str(item.employee_pension or 0)) + Decimal(str(item.professional_tax or 0))
+        out.extend(labour.deduction_check(facts, Decimal(str(item.gross_pay or 0)), statutory,
+                                          Decimal(str(item.attendance_deduction or 0)), Decimal(str(item.total_deductions or 0)),
+                                          rates))
+    out.extend(labour.pwm_check(facts, pwm_facts, wages, rates))
+    return out
+
+
+def _sg_pwm_inputs(db, employee, trace, rates, month_start, month_end):
+    """The facts labour.pwm_check is evaluated on for one employee and wage
+    month — shared by the run preflight (_sg_labour_checks) and the
+    SG-PWM-COMPLIANCE report, so both evaluate identical inputs.
+    Returns (employee facts, compliance fields, wage views, Part 4 coverage, PWM facts)."""
+    from app.modules.payroll.engine.jurisdictions.singapore import labour
+
+    facts = _sg_preflight_employee_facts(employee)
+    month_facts, _block = _sg_statutory_facts_for_month(db, employee, month_start, month_end)
+    cf = {**(employee.compliance_fields or {}),
+          **{k: v for k, v in month_facts.items() if k in ("ea_workman", "ea_manager_executive", "employment_class")},
+          **_sg_trace_pwm_fields(trace)}
+    wages = _sg_wage_views(trace)
+    p4 = labour.part4_coverage(cf.get("ea_workman"), cf.get("ea_manager_executive"), wages["basic"], rates)
+    overtime_hours = (trace.get("overtime") or {}).get("hours")
+    pwm_facts = {
+        "pwm_sector": cf.get("pwm_sector"), "pwm_group": cf.get("pwm_group"), "pwm_job_level": cf.get("pwm_job_level"),
+        "residency": employee.sgp_cpf_residency_status, "employment_type": employee.employment_type,
+        "contractual_weekly_hours": cf.get("ea_contractual_weekly_hours"),
+        "part4": p4["status"], "overtime_paid": wages["overtime"] > 0,
+        "overtime_hours": overtime_hours, "overtime_amount": wages["overtime"],
+        "overtime_gross_requirement": _sg_pwm_overtime_requirement(
+            db, cf.get("pwm_sector"), cf.get("pwm_group"), cf.get("pwm_job_level"), month_end, overtime_hours),
+    }
+    return facts, cf, wages, p4, pwm_facts
+
+
+def _sg_trace_with_pwm_classification(trace, employee):
+    """Final completion programme: record the PWM job classification and
+    employment type in force when the payslip is calculated, so each month's
+    payslip carries its own role (MOM Retail Annex D §3 averages across role
+    changes, which needs every month's role, not only the current one). A
+    copy — the engine's result is not mutated; non-Singapore traces (None)
+    are returned unchanged."""
+    if not isinstance(trace, dict):
+        return trace
+    cf = getattr(employee, "compliance_fields", None) or {}
+    sector = cf.get("pwm_sector")
+    return {**trace, "pwmClassification": {
+        "sector": sector if sector not in ("", "NONE") else None, "group": cf.get("pwm_group"),
+        "level": cf.get("pwm_job_level"), "employmentType": getattr(employee, "employment_type", None)}}
+
+
+def _sg_trace_pwm_fields(trace) -> dict:
+    """The payslip's own PWM classification as compliance-field keys — {} for
+    a payslip calculated before it was recorded (the current record applies)."""
+    cls = (trace or {}).get("pwmClassification")
+    if not isinstance(cls, dict):
+        return {}
+    return {"pwm_sector": cls.get("sector"), "pwm_group": cls.get("group"), "pwm_job_level": cls.get("level")}
+
+
+_SG_PWM_AVERAGING_SOURCE = ("MOM Tripartite Cluster for Retail Industry report (Aug 2025), Annex D 'Averaging of Gross "
+                            "Wages' §1–4 and footnote 2")
+
+
+def _sg_month_back(year: int, month: int, back: int) -> tuple:
+    n = year * 12 + (month - 1) - back
+    return n // 12, n % 12 + 1
+
+
+def _sg_pwm_retail_averaging(db: Session, employee, window: list) -> dict:
+    """MOM Retail PWM 3-month averaging (Annex D): a retail employee is
+    compliant in a month if (a) that month's gross wage (incl. overtime) meets
+    that month's PWM wage requirement (incl. overtime) OR (b) the average of
+    the past 3 months' gross wages meets the average of the same months'
+    requirements. window = [(year, month, payslips)] oldest -> newest, the
+    last being the evaluated month. The requirement is the MOM Gross Wage
+    Requirement for the month's overtime hours (0 hours = the retail PWM
+    wage) for THAT month's recorded job level (§3: averaging applies across a
+    retail role change). §4 / footnote 2: averaging starts in the 3rd month of
+    employment; an incomplete first month counts with a pro-rated requirement.
+    Everything the source does not cover is NOT_EVALUATED — never assumed."""
+    from decimal import ROUND_HALF_UP
+
+    cent = Decimal("0.01")
+    out = {"status": None, "months": [], "reasons": [], "source": _SG_PWM_AVERAGING_SOURCE}
+
+    def stop(status, reason):
+        out["status"] = status
+        out["reasons"].append(reason)
+        return out
+
+    year, month, _ = window[-1]
+    joined = getattr(employee, "date_of_joining", None)
+    if joined is None:
+        return stop("NOT_EVALUATED", "date of joining not recorded — the 3rd month of employment cannot be determined")
+    index = (year - joined.year) * 12 + (month - joined.month) + 1
+    if index < 3:
+        return stop("NOT_YET_APPLICABLE", f"month {index} of employment — averaging starts in the 3rd month; months 1–2 "
+                                          "must meet the full requirement (Annex D §4)")
+    paid_total = required_total = Decimal("0")
+    for y, m, payslips in window:
+        label = f"{y}-{m:02d}"
+        _start, end = _sg_month_bounds(y, m)
+        if len(payslips) != 1:
+            return stop("NOT_EVALUATED", f"{label}: {len(payslips)} finalized payslips — the month cannot be averaged")
+        p = payslips[0]
+        trace = p.sgp_calculation_trace or {}
+        cls = trace.get("pwmClassification")
+        if not isinstance(cls, dict):
+            return stop("NOT_EVALUATED", f"{label}: payslip #{p.id} was calculated before the per-month PWM classification "
+                                         "was recorded")
+        if cls.get("sector") != "RETAIL":
+            return stop("NOT_APPLICABLE", f"{label}: not a Retail PWM job ({cls.get('sector') or 'none'}) — averaging "
+                                          "applies only across Retail PWM months (Annex D §1, §3)")
+        if (cls.get("employmentType") or "") == "Part-time":
+            return stop("NOT_EVALUATED", f"{label}: part-time — MOM publishes no part-time Gross Wage Requirement table")
+        views = _sg_wage_views(trace)
+        month_facts = trace.get("incompleteMonth") or {}
+        factor = None
+        if views.get("no_pay_leave") or month_facts.get("status") == "INCOMPLETE_MONTH":
+            if ((y, m) != (joined.year, joined.month) or views.get("no_pay_leave")
+                    or Decimal(str(month_facts.get("noPayDays") or 0)) > 0):
+                return stop("NOT_EVALUATED", f"{label}: incomplete month other than the first month of employment — "
+                                             "Annex D states no averaging treatment for it")
+            try:
+                factor = Decimal(str(month_facts["daysWorked"])) / Decimal(str(month_facts["workingDaysInMonth"]))
+            except Exception:  # noqa: BLE001 — missing / zero working days: not evaluable
+                return stop("NOT_EVALUATED", f"{label}: incomplete first month without its working days recorded")
+        hours = (trace.get("overtime") or {}).get("hours")
+        if hours in (None, ""):
+            if views["overtime"] > 0:
+                return stop("NOT_EVALUATED", f"{label}: overtime paid without its hours recorded")
+            hours = 0
+        req = _sg_pwm_overtime_requirement(db, "RETAIL", cls.get("group"), cls.get("level"), end, hours)
+        if req.get("status") != "FOUND":
+            return stop("NOT_EVALUATED", f"{label}: no MOM Gross Wage Requirement in force for {cls.get('level')} at "
+                                         f"{hours} overtime hours")
+        required = Decimal(str(req["required"]))
+        paid_ex_ot = views["gross_ex_ot"]
+        if factor is not None:                       # footnote 2: pro-rated first month (MOM incomplete-month formula)
+            required = (required * factor).quantize(cent, rounding=ROUND_HALF_UP)
+            paid_ex_ot = (paid_ex_ot * factor).quantize(cent, rounding=ROUND_HALF_UP)
+        paid = paid_ex_ot + views["overtime"]
+        paid_total += paid
+        required_total += required
+        out["months"].append({"wageMonth": label, "payslipId": p.id, "jobLevel": cls.get("level"),
+                              "overtimeHours": req["hours"], "grossPaid": str(paid), "requirement": str(required),
+                              "proRatedFirstMonth": factor is not None, "scheduleId": req["scheduleId"]})
+    three = Decimal("3")
+    out["averageGrossPaid"] = str((paid_total / three).quantize(cent, rounding=ROUND_HALF_UP))
+    out["averageRequirement"] = str((required_total / three).quantize(cent, rounding=ROUND_HALF_UP))
+    out["status"] = "MET" if paid_total >= required_total else "SHORTFALL"   # totals: no rounding asymmetry
+    return out
+
+
+def _sg_pwm_overtime_requirement(db: Session, sector, group, level, on_date: date, overtime_hours) -> dict:
+    """SG-018: the MOM "Total PWM Gross Wage Requirement" for the month's
+    overtime hours (MOM: "overtime hours worked in a month will be rounded
+    down to the nearest whole number"), from sgp_pwm_overtime_schedules —
+    the schedule in force on the wage month's last day. MISSING when MOM
+    publishes none for the job level / date / hours (never assumed)."""
+    from decimal import ROUND_FLOOR
+    from app.modules.payroll.models import SgpPwmOvertimeSchedule
+
+    if not (sector and group and level) or overtime_hours in (None, ""):
+        return {"status": "MISSING", "hours": None}
+    hours = int(Decimal(str(overtime_hours)).to_integral_value(rounding=ROUND_FLOOR))
+    row = (db.query(SgpPwmOvertimeSchedule)
+           .filter(SgpPwmOvertimeSchedule.jurisdiction_country == "SG", SgpPwmOvertimeSchedule.sector == sector,
+                   SgpPwmOvertimeSchedule.occupation_group == group, SgpPwmOvertimeSchedule.job_level == level,
+                   SgpPwmOvertimeSchedule.overtime_hours == hours, SgpPwmOvertimeSchedule.status == "Active",
+                   SgpPwmOvertimeSchedule.effective_from <= on_date,
+                   or_(SgpPwmOvertimeSchedule.effective_to.is_(None), SgpPwmOvertimeSchedule.effective_to >= on_date))
+           .order_by(SgpPwmOvertimeSchedule.effective_from.desc(), SgpPwmOvertimeSchedule.id.desc())
+           .first())
+    if row is None:
+        return {"status": "MISSING", "hours": hours}
+    return {"status": "FOUND", "hours": hours, "required": str(row.required_gross), "scheduleId": row.id,
+            "sourceDocumentId": row.source_document_id, "sha256": row.source_sha256, "roleLabel": row.role_label,
+            "effectiveFrom": row.effective_from.isoformat()}
+
+
+def list_sg_pwm_classifications(db: Session, as_of: Optional[date] = None) -> list:
+    """PWM sector / group / job level choices with the floor in force on
+    `as_of` — from the Active Singapore pack's pwm__ rows (never hard-coded)."""
+    from app.modules.payroll.engine.jurisdictions.singapore.labour import PWM_KEY_PREFIX
+
+    _pack, rates, _slabs = _sg_active_pack_and_rates(db, as_of or date.today())
+    out = []
+    for key, row in sorted(rates.items()):
+        if not key.startswith(PWM_KEY_PREFIX):
+            continue
+        sector, group, level = key[len(PWM_KEY_PREFIX):].split("__")
+        out.append({"sector": sector, "group": group, "jobLevel": level, "label": row.label,
+                    "wageBasis": row.text_value, "monthlyFloor": str(row.flat_amount),
+                    "effectiveFrom": _sg_iso(row.effective_from), "effectiveTo": _sg_iso(row.effective_to),
+                    "sourceDocumentId": row.source_document_id})
+    return out
+
+
+# SG-032 — "Approval is invalidated by changes in citizenship/SPR date,
+# earning classification, SHG instruction, Part IV status, work pass, bank
+# data, RulePack or prior-run correction"; §11 stage 5 "Approval binds
+# input/rule/status hashes". The fingerprint is stored in the audit trail
+# at approval (entity_type sg_run_approval) and re-verified before the run
+# moves on or its bank file is produced.
+_SG_EA_FACT_KEYS = ("ea_workman", "ea_manager_executive", "ea_part_iv", "ea_contractual_weekly_hours", "ea_rest_day",
+                    "ea_work_pattern")
+_SG_SHG_FACT_KEYS = ("shg_opt_out", "shg_alternate_amount", "shg_evidence_ref")
+
+
+def _sg_digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode("utf8")).hexdigest()
+
+
+def _sg_approval_fingerprint(db: Session, run: PayrollRun) -> dict:
+    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "SG").order_by(PayslipItem.id).all()
+    employee_ids = sorted({i.employee_id for i in items})
+    employees = db.query(PayrollEmployee).filter(PayrollEmployee.id.in_(employee_ids or [-1])).order_by(PayrollEmployee.id).all()
+    wage_year = _sg_wage_date(run).year
+    prior = (db.query(PayslipItem, PayrollRun.pay_date).join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+             .filter(PayslipItem.employee_id.in_(employee_ids or [-1]), PayslipItem.payroll_run_id != run.id,
+                     PayslipItem.country_code == "SG", PayrollRun.pay_date >= date(wage_year - 1, 12, 1),
+                     PayrollRun.pay_date <= run.pay_date)
+             .order_by(PayslipItem.id).all())
+    rules = (db.query(TaxabilityRule).filter(
+        TaxabilityRule.jurisdiction_country == "SG",
+        or_(TaxabilityRule.organization_id.is_(None), TaxabilityRule.organization_id == run.organization_id))
+        .order_by(TaxabilityRule.id).all())
+    components = {
+        "statusFacts": _sg_digest([(e.id, e.sgp_cpf_residency_status, e.sgp_spr_effective_date, e.sgp_cpf_contribution_arrangement,
+                                    e.date_of_birth, e.date_of_leaving) for e in employees]),
+        "workPass": _sg_digest([(e.id, e.sgp_work_pass_type, e.sgp_work_pass_issue_date, e.sgp_work_pass_end_date,
+                                 getattr(e, "sgp_wp_sector", None), getattr(e, "sgp_wp_skill_level", None),
+                                 getattr(e, "sgp_wp_levy_tier", None)) for e in employees]),
+        "shgInstruction": _sg_digest([(e.id, e.sgp_shg_funds, [(e.compliance_fields or {}).get(k) for k in _SG_SHG_FACT_KEYS])
+                                      for e in employees]),
+        "partIvStatus": _sg_digest([(e.id, [(e.compliance_fields or {}).get(k) for k in _SG_EA_FACT_KEYS]) for e in employees]),
+        "bankData": _sg_digest([(e.id, e.bank_name, e.bank_account, e.ifsc) for e in employees]),
+        "earningClassification": _sg_digest([(r.earning_type, r.tax_component, r.is_taxable, r.effective_from, r.effective_to,
+                                              r.organization_id) for r in rules]),
+        "rulePack": _sg_digest([(i.id, i.tax_policy_version, i.tax_rule_snapshot) for i in items]),
+        "priorRunCorrection": _sg_digest([(i.id, i.gross_pay, i.net_pay, i.employee_pension, i.employer_pension, i.professional_tax,
+                                           i.employer_payroll_tax, i.employer_eht, i.ytd_snapshot) for i, _d in prior]),
+        "payslips": _sg_digest([(i.id, i.employee_id, i.gross_pay, i.net_pay, i.employee_pension, i.employer_pension,
+                                 i.professional_tax, i.employer_payroll_tax, i.employer_eht, i.sgp_calculation_trace) for i in items]),
+    }
+    return {"fingerprint": _sg_digest(components), "components": components}
+
+
+def _sg_run_has_payslips(db: Session, run: PayrollRun) -> bool:
+    return db.query(PayslipItem.id).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "SG").first() is not None
+
+
+def _sg_stored_approval(db: Session, run: PayrollRun) -> Optional[dict]:
+    row = (db.query(TaxConfigurationAudit)
+           .filter(TaxConfigurationAudit.entity_type == "sg_run_approval", TaxConfigurationAudit.entity_id == run.id)
+           .order_by(TaxConfigurationAudit.id.desc()).first())
+    return None if row is None or row.action != "create" else row.new_value
+
+
+def _sg_before_run_transition(db: Session, run: PayrollRun, next_status, actor_id) -> None:
+    """SG-gated hook of advance_payroll_run_status (a run without SG payslips
+    is untouched)."""
+    if not _sg_run_has_payslips(db, run):
+        return
+    if next_status == PayrollStatus.APPROVED:
+        result = sg_payroll_preflight(db, run.organization_id, run.id)
+        blocks = [c for c in result["checks"] if c["severity"] == "BLOCK"]
+        if blocks:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                "Singapore preflight blocks approval: " + "; ".join(f"{c['code']} ({c.get('employeeCode') or 'run'})"
+                                                                   for c in blocks[:10])))
+        return
+    if next_status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
+        _sg_verify_run_approval(db, run, actor_id)
+
+
+def _sg_after_run_approved(db: Session, run: PayrollRun, actor_id) -> None:
+    if not _sg_run_has_payslips(db, run):
+        return
+    fp = _sg_approval_fingerprint(db, run)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="sg_run_approval", entity_id=run.id,
+                     legal_reference="ZP-SG-ENG-001 SG-032 / §11 stage 5", new_value=fp,
+                     reason="Singapore approval bound to its input / rule / status fingerprint", auto_commit=False)
+    db.commit()
+
+
+def _sg_verify_run_approval(db: Session, run: PayrollRun, actor_id=None) -> None:
+    """Refuses (and invalidates the approval: the run returns to Review) when
+    anything SG-032 names changed after approval."""
+    stored = _sg_stored_approval(db, run)
+    if stored is None:
+        return
+    current = _sg_approval_fingerprint(db, run)
+    if current["fingerprint"] == stored.get("fingerprint"):
+        return
+    changed = sorted(k for k, v in current["components"].items() if (stored.get("components") or {}).get(k) != v)
+    run.status = PayrollStatus.REVIEW
+    run.approved_by = None
+    run.approved_at = None
+    run.authorized_by = None
+    run.authorized_at = None
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="sg_run_approval", entity_id=run.id,
+                     legal_reference="ZP-SG-ENG-001 SG-032", old_value={"fingerprint": stored.get("fingerprint")},
+                     new_value={"fingerprint": current["fingerprint"], "changed": changed},
+                     reason="Singapore approval invalidated — " + ", ".join(changed) + " changed after approval",
+                     auto_commit=False)
+    db.commit()
+    raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+        f"Singapore approval invalidated (SG-032): {', '.join(changed)} changed after approval — the run is back in "
+        "Review; recalculate if needed and approve again."))
+
+
+def record_sg_cessation(db: Session, organization_id: int, employee_id: int, date_of_leaving: date,
+                        actor_id: Optional[int] = None) -> dict:
+    """Singapore termination: records the last day of employment (audited)
+    and, for a non-citizen, opens the IR21 hold (_sg_ir21_on_cessation)."""
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    if _resolve_employee_country(db, organization_id, employee.country_code) != "SG":
+        raise BadRequestException("Singapore cessation applies to Singapore employees only.")
+    if employee.date_of_joining and date_of_leaving < employee.date_of_joining:
+        raise BadRequestException("The last day of employment cannot be before the date of joining.")
+    before = employee.date_of_leaving
+    employee.date_of_leaving = date_of_leaving
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="payroll_employee_cessation", entity_id=employee.id,
+                     legal_reference="ZP-SG-ENG-001 §10 (tax clearance / termination)",
+                     old_value={"dateOfLeaving": _sg_iso(before)}, new_value={"dateOfLeaving": date_of_leaving.isoformat()},
+                     reason="Singapore cessation recorded", auto_commit=False)
+    db.commit()
+    db.refresh(employee)
+    case = _sg_ir21_on_cessation(db, employee, actor_id=actor_id)
+    return {"employeeId": employee.id, "dateOfLeaving": date_of_leaving.isoformat(),
+            "ir21Required": employee.sgp_cpf_residency_status in ("SPR", "FOREIGN"),
+            "ir21Case": serialize_sg_ir21_case(db, case) if case is not None else None}
+
+
+def _sg_ir21_on_cessation(db: Session, employee, actor_id: Optional[int] = None) -> Optional[SgpIr21Case]:
+    """Employee termination → IR21 (ZP-SG-ENG-001 §10 "Foreign final pay can
+    automatically route to hold"). IRAS: a non-Singapore-Citizen employee's
+    cessation needs tax clearance and all monies withheld from the date the
+    employer is aware; an SPR not leaving permanently (Letter of
+    Undertaking) is then recorded EXEMPT on the case. Opens a DRAFT case
+    unless one exists for that cessation; never for citizens."""
+    if employee.sgp_cpf_residency_status not in ("SPR", "FOREIGN") or employee.date_of_leaving is None:
+        return None
+    existing = _sg_ir21_query(db, employee.organization_id).filter(
+        SgpIr21Case.employee_id == employee.id, SgpIr21Case.trigger_date == employee.date_of_leaving).first()
+    if existing is not None:
+        return existing
+    try:
+        return create_sg_ir21_case(db, employee.organization_id, employee.id, "CESSATION", employee.date_of_leaving,
+                                   min(date.today(), employee.date_of_leaving), actor_id=actor_id)
+    except BadRequestException as exc:
+        db.rollback()
+        log_activity(db, employee.organization_id, f"IR21 case could not be opened automatically for {employee.name}: "
+                     f"{exc.detail} — open it manually.", ActivityStatus.INFO, actor_id=actor_id)
+        return None
+
+
+# ── Singapore: Appendix 8A benefit valuations + AIS year-end readiness
+# (SG-042). Benefit values reuse the shared EmployeeBenefitValuation (the
+# organization's own determined value — Zoiko never values a benefit);
+# these wrappers only enforce that the employee is a Singapore employee.
+
+def _sg_require_sg_employee(db: Session, organization_id: int, employee_id: int):
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    if _resolve_employee_country(db, organization_id, employee.country_code) != "SG":
+        raise BadRequestException("This is a Singapore (IR8A Appendix 8A) valuation — the employee is not a Singapore employee.")
+    return employee
+
+
+def create_sg_benefit_valuation(db: Session, organization_id: int, employee_id: int, tax_year: str, benefit_type: str,
+                                taxable_value: Decimal, description: Optional[str] = None):
+    _sg_require_sg_employee(db, organization_id, employee_id)
+    if not re.fullmatch(r"\d{4}", str(tax_year or "")):
+        raise BadRequestException("Singapore tax_year is the income (calendar) year, e.g. 2026.")
+    return create_employee_benefit_valuation(db, organization_id, employee_id, tax_year, benefit_type, taxable_value,
+                                             description=description)
+
+
+def list_sg_benefit_valuations(db: Session, organization_id: int, tax_year: Optional[str] = None) -> list:
+    sg_ids = {e.id for e in db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id).all()
+              if _resolve_employee_country(db, organization_id, e.country_code) == "SG"}
+    return [v for v in list_employee_benefit_valuations(db, organization_id, tax_year=tax_year) if v.employee_id in sg_ids]
+
+
+def sg_ais_readiness(db: Session, organization_id: int, year: int) -> dict:
+    """SG-042 — AIS year-end readiness as a running data-quality metric over
+    the income year's finalized payslips so far (not discovered in March)."""
+    from app.modules.payroll.engine.countries.singapore import IRAS_UNCLASSIFIED
+
+    items = _sg_ir8a_payslip_items(db, organization_id, year)
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+    z = Decimal("0")
+    issues = {"unclassifiedEarnings": 0, "missingNricFin": 0, "legacyDerived": 0, "draftValuations": 0}
+    unclassified_amount = z
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        acc = sg_iras_annual_accumulator(emp_items)
+        if acc["totals"].get(IRAS_UNCLASSIFIED, z) > z:
+            issues["unclassifiedEarnings"] += 1
+            unclassified_amount += acc["totals"][IRAS_UNCLASSIFIED]
+        if not ((employee.compliance_fields if employee else None) or {}).get("nric_fin"):
+            issues["missingNricFin"] += 1
+        if acc["legacyPayslipIds"]:
+            issues["legacyDerived"] += 1
+    issues["draftValuations"] = db.query(EmployeeBenefitValuation).filter(
+        EmployeeBenefitValuation.organization_id == organization_id, EmployeeBenefitValuation.tax_year == str(year),
+        EmployeeBenefitValuation.status == "Draft").count()
+    affected = sum(1 for k, v in issues.items() if v)
+    return {"year": year, "yearOfAssessment": year + 1, "employees": len(by_employee), "payslips": len(items),
+            "issues": issues, "unclassifiedAmount": str(unclassified_amount),
+            "status": "READY" if not affected else "REVIEW_REQUIRED",
+            "appendix8B": "BLOCKED — share-plan grant / exercise data is not captured",
+            "officialFileFormat": "NOT APPLICABLE — IRAS routes are AIS-API 2.0 (NOT READY) or the myTax Portal "
+                                  "digital service (manual entry from myTaxPortalEntry)",
+            "submission": "EXPORT_ONLY — AIS-API needs APEX / Corppass onboarding (external)"}
+
+
+# ── Singapore Compliance Centre (ZP-SG-ENG-001 §14, SG-041/SG-042) — one
+# backend-computed view (the browser only displays it): every row carries
+# STATUS / EFFECTIVE DATE / SOURCE-EVIDENCE / BLOCKER / OWNER / ACTION.
+# Item shape and clocks: engine/jurisdictions/singapore/compliance.py.
+
+def _sg_source_label(db: Session, source_document_id) -> Optional[str]:
+    if source_document_id is None:
+        return None
+    src = db.query(SourceArtifact).filter(SourceArtifact.id == source_document_id).first()
+    return None if src is None else f"{src.agency} — {src.title} (sha256 {src.checksum_sha256[:12]}…)"
+
+
+def get_sg_compliance_centre(db: Session, organization_id: int, as_of: Optional[date] = None) -> dict:
+    from app.modules.payroll.engine.jurisdictions.singapore import compliance as cc
+    from app.modules.payroll.engine.jurisdictions.singapore.preflight import BLOCK
+
+    as_of = as_of or date.today()
+    I, PASS, FAIL, REVIEW, BLOCKED, INFO = cc.item, cc.PASS, cc.FAIL, cc.REVIEW, cc.BLOCKED, cc.INFO
+    readiness = get_sg_employer_readiness(db, organization_id, as_of)
+    rd = {i["key"]: i for i in readiness["items"]}
+    pack, rates, _slabs = _sg_active_pack_and_rates(db, as_of)
+    employees = _sg_active_employees(db, organization_id)
+    runs = (db.query(PayrollRun).filter(PayrollRun.organization_id == organization_id).order_by(PayrollRun.pay_date.desc()).all())
+    sg_run = next((r for r in runs if _sg_run_has_payslips(db, r)), None)
+    items = []
+
+    def src(key):
+        row = rates.get(key)
+        return _sg_source_label(db, getattr(row, "source_document_id", None)) if row is not None else None
+
+    # CPF
+    pack27 = db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == "SG-PAYROLL-2027").order_by(JurisdictionPack.id.desc()).first()
+    items.append(I("CPF", "cpf_pack", "CPF rate tables in force", PASS if pack else BLOCKED,
+                   f"{pack.pack_id} v{pack.version} Active" if pack else "no Active Singapore pack",
+                   effective_date=_sg_iso(pack.effective_from) if pack else None,
+                   source=_sg_source_label(db, pack.source_document_id) if pack else None,
+                   blocker="Statutory configuration not activated (maker-checker + certification)", owner="Super Admin",
+                   action="Activate the Singapore pack"))
+    items.append(I("CPF", "cpf_2027", "CPF rates from 1 Jan 2027 (published by CPF Board)",
+                   PASS if pack27 is not None and pack27.status == "Active" else REVIEW,
+                   f"SG-PAYROLL-2027 {pack27.status}" if pack27 else "2027 pack not seeded", effective_date="2027-01-01",
+                   source="CPF Board — CPF Contribution Rate Tables from 1 January 2027",
+                   blocker="The 2027 tables must be Active before the first January 2027 wage month",
+                   owner="Super Admin", action="Review, approve and activate SG-PAYROLL-2027"))
+    missing_facts = [e.employee_code for e in employees if e.sgp_cpf_residency_status is None
+                     or (e.sgp_cpf_residency_status in ("SC", "SPR") and e.date_of_birth is None)]
+    items.append(I("CPF", "cpf_employee_facts", "CPF status facts complete", PASS if not missing_facts else FAIL,
+                   f"{len(employees)} employees; missing facts: {missing_facts[:10] or 'none'}",
+                   blocker="CPF cannot be calculated without residency / date of birth (SG-001)",
+                   action="Complete the employees' CPF status facts"))
+    # SDL / SHG
+    last_month = (as_of.replace(day=1) - timedelta(days=1))
+    sdl = db.query(GeneratedReport).filter(GeneratedReport.organization_id == organization_id,
+                                           GeneratedReport.report_type == "SG_SDL_MONTHLY",
+                                           GeneratedReport.status == "Generated").order_by(GeneratedReport.id.desc()).first()
+    items.append(I("SDL", "sdl", "Skills Development Levy (employer)", PASS if sdl else REVIEW,
+                   f"latest SDL output {sdl.rendered_data.get('period', {}).get('year')}-{sdl.rendered_data.get('period', {}).get('month')}"
+                   if sdl else "no SDL output generated", source=src("sdl"),
+                   blocker="SDL payable (payment code 11) has not been produced", action="Generate the monthly SDL output"))
+    shg_missing = [e.employee_code for e in employees if e.sgp_cpf_residency_status in ("SC", "SPR") and not e.sgp_shg_funds]
+    items.append(I("SHG", "shg", "Self-help group instructions recorded", PASS if not shg_missing else FAIL,
+                   f"missing SHG instruction: {shg_missing[:10] or 'none'}", source="CPF Board — Contributions to self-help groups",
+                   blocker="SHG fund (or NONE / opt-out evidence) must be recorded", action="Record each employee's SHG fund"))
+    # EZPay
+    ez = db.query(GeneratedReport).filter(GeneratedReport.organization_id == organization_id,
+                                          GeneratedReport.report_type == SG_EZPAY_REPORT_TYPE,
+                                          GeneratedReport.status.in_(_SG_EZPAY_LIVE)).order_by(GeneratedReport.id.desc()).all()
+    unknown = [r for r in ez if r.status == "UNKNOWN"]
+    latest = ez[0] if ez else None
+    items.append(I("EZPay", "ezpay", "CPF EZPay contribution file",
+                   BLOCKED if unknown else (PASS if latest and latest.status == "ACCEPTED" else REVIEW),
+                   (f"{len(unknown)} submission(s) with UNKNOWN outcome" if unknown else
+                    f"latest {latest.rendered_data.get('relevantMonth')} advice {latest.rendered_data.get('adviceCode')}: {latest.status}"
+                    if latest else "no EZPay file prepared"),
+                   source="CPF Board — CPF EZPay (FTP) File Specifications (16 Jan 2025)",
+                   blocker="UNKNOWN outcomes must be reconciled before any retry (SG-040)" if unknown
+                   else "CPF Board acceptance is recorded only from the employer's acknowledgement",
+                   owner="Employer (Corppass submitter)", action="Reconcile / submit the file through CPF EZPay"))
+    # IRAS
+    ais = sg_ais_readiness(db, organization_id, as_of.year)
+    items.append(I("IR8A", "ir8a", f"IR8A readiness YA{as_of.year + 1} (running, SG-042)",
+                   PASS if ais["status"] == "READY" else REVIEW, f"{ais['employees']} employees; issues {ais['issues']}",
+                   source="IRAS — Explanatory Notes for Form IR8A & Appendix 8A (YA2027)",
+                   blocker="Unclassified earnings / missing NRIC / unissued valuations", action="Resolve before year end"))
+    items.append(I("IR8A", "appendix_8b", "Appendix 8B (share-plan gains)", BLOCKED, "share-plan grant / exercise data not captured",
+                   source="IRAS — Explanatory Notes for Appendix 8B (YA2027)", blocker="No share-plan data model",
+                   owner="Zoiko product", action="Capture ESOP / ESOW detail before any share gain is reported"))
+    items.append(I("AIS", "ais_mode", "AIS submission mode", rd["ais_mode"]["status"], rd["ais_mode"]["evidence"],
+                   source="IRAS — Join the AIS", blocker=rd["ais_mode"]["blocker"], action=rd["ais_mode"]["action"]))
+    items.append(I("AIS", "ais_api", "API DIRECT SUBMISSION — NOT READY", BLOCKED,
+                   "AIS-API 2.0 is not onboarded: IR8A is an export plus the controlled manual-submission record (SG-023)",
+                   source="IRAS — AIS-API 2.0 specifications (APEX, OAuth 2.1, Corppass)",
+                   blocker="APEX credentials and Corppass onboarding are external", owner="Employer / IRAS",
+                   action="Complete IRAS AIS-API onboarding"))
+    # IR21
+    cases = [c for c in _sg_ir21_query(db, organization_id).all() if c.status not in ("RELEASED", "EXEMPT", "CANCELLED")]
+    overdue = [c for c in cases if c.status == "DRAFT" and c.file_by_date and c.file_by_date < as_of]
+    items.append(I("IR21", "ir21", "Tax clearance (IR21) cases", FAIL if overdue else (REVIEW if cases else PASS),
+                   f"{len(cases)} open (monies HELD_FOR_IR21); {len(overdue)} overdue",
+                   source=src("ir21_filing_lead_months"), blocker="Form IR21 not filed by the file-by date",
+                   action="File the Form IR21 with IRAS"))
+    # Foreign workforce
+    s_pass = [e for e in employees if e.sgp_work_pass_type == "S_PASS"]
+    ending = [e.employee_code for e in s_pass + [e for e in employees if e.sgp_work_pass_type == "WORK_PERMIT"]
+              if e.sgp_work_pass_end_date and e.sgp_work_pass_end_date.replace(day=1) == as_of.replace(day=1)]
+    items.append(I("S Pass", "s_pass", "S Pass levy", BLOCKED if ending else PASS,
+                   f"{len(s_pass)} S Pass holder(s); passes ending this month: {ending or 'none'}", source=src("fwl_s_pass_monthly"),
+                   blocker="MOM does not state whether the cancellation/expiry day is levied (end-day basis BLOCKED)",
+                   owner="Super Admin (evidence)", action="Obtain MOM's end-day rule"))
+    wp = [e for e in employees if e.sgp_work_pass_type == "WORK_PERMIT"]
+    wp_missing = [e.employee_code for e in wp if not (e.sgp_wp_sector and e.sgp_wp_skill_level and
+                                                      (e.sgp_wp_levy_tier or e.sgp_wp_sector == "MARINE_SHIPYARD"))]
+    items.append(I("Work Permit", "wp_levy", "Work Permit levy", FAIL if wp_missing else PASS,
+                   f"{len(wp)} Work Permit holder(s); missing sector/skill/tier: {wp_missing[:10] or 'none'}",
+                   effective_date="2026-09-24 (construction 2024-01-01)", source="MOM sector Work Permit requirement pages",
+                   blocker="The levy is never guessed without MOM's sector / skill / tier", action="Record the MOM levy facts"))
+    items.append(I("Work Permit", "wp_bill_import", "MOM levy bill import / reconciliation", BLOCKED, "not built",
+                   source="MOM — Paying the levy", blocker="MOM's levy-bill file format is not published",
+                   owner="Employer / MOM", action="Reconcile the levy bill manually"))
+    # PWM / LQS
+    from app.modules.payroll.engine.jurisdictions.singapore.labour import PWM_PART_TIME_44H_SECTORS, pwm_key
+
+    pwm_flagged = [e for e in employees if (e.compliance_fields or {}).get("pwm_sector") not in (None, "", "NONE")
+                   and e.sgp_cpf_residency_status in ("SC", "SPR")]          # PWM covers citizens and PRs (MOM)
+    pwm_incomplete = [e.employee_code for e in pwm_flagged
+                      if not ((e.compliance_fields or {}).get("pwm_group") and (e.compliance_fields or {}).get("pwm_job_level"))]
+    # SG-018: "Unconfigured applicable PWM cohort must block 'compliant' status"
+    # — an applicable employee with no floor in force, or a part-time employee
+    # whose floor cannot be evaluated, is never reported PASS.
+    pwm_unconfigured, pwm_unevaluated = [], []
+    for e in pwm_flagged:
+        cf = e.compliance_fields or {}
+        if e.employee_code in pwm_incomplete:
+            continue
+        if rates.get(pwm_key(cf["pwm_sector"], cf["pwm_group"], cf["pwm_job_level"])) is None:
+            pwm_unconfigured.append(e.employee_code)
+        elif (e.employment_type or "") == "Part-time" and (cf["pwm_sector"] not in PWM_PART_TIME_44H_SECTORS
+                                                          or not cf.get("ea_contractual_weekly_hours")):
+            pwm_unevaluated.append(e.employee_code)
+    pwm_fail = pwm_incomplete or pwm_unconfigured or pwm_unevaluated
+    items.append(I("PWM", "pwm", "Progressive Wage Model / Occupational PW floors", FAIL if pwm_fail else PASS,
+                   f"{len(pwm_flagged)} PWM-applicable employee(s); classification incomplete: {pwm_incomplete or 'none'}; "
+                   f"no floor in force: {pwm_unconfigured or 'none'}; part-time floor not evaluable: "
+                   f"{pwm_unevaluated or 'none'} — floors are checked in every run's preflight",
+                   source="MOM PWM sector pages and Occupational PW page (effective-dated rows)",
+                   blocker="applicable PWM cohort without an evaluable floor (SG-018)",
+                   action="Complete the PWM classification (sector / group / job level, part-time weekly hours) against "
+                          "the MOM tables"))
+    lqs_row = rates.get("lqs_full_time_monthly")
+    items.append(I("LQS", "lqs", "Local Qualifying Salary", INFO if lqs_row else BLOCKED,
+                   f"S${lqs_row.flat_amount} full-time from {_sg_iso(lqs_row.effective_from)}; part-time S$10.50/h "
+                   "(MOM, from 1 Jul 2024) evaluated from monthly gross ÷ attendance hours worked"
+                   if lqs_row else "no LQS row", effective_date=_sg_iso(lqs_row.effective_from) if lqs_row else None,
+                   source=src("lqs_full_time_monthly"), blocker="no LQS row in force"))
+    # Employment Act
+    undetermined = [e.employee_code for e in employees if (e.compliance_fields or {}).get("ea_workman") not in ("YES", "NO")
+                    and (e.compliance_fields or {}).get("ea_manager_executive") != "YES"]
+    items.append(I("Employment Act", "ea_part4", "Part 4 (hours / overtime / rest day) status", REVIEW if undetermined else PASS,
+                   f"undetermined: {undetermined[:10] or 'none'}; overtime hours are not captured by payroll",
+                   source=src("ea_part4_workman_basic_max"), blocker="Workman / non-workman status not recorded (SG-035)",
+                   action="Record workman and manager/executive status"))
+    if sg_run is not None:
+        preflight = sg_payroll_preflight(db, organization_id, sg_run.id, today=as_of)
+        blocks = [c for c in preflight["checks"] if c["severity"] == BLOCK]
+        items.append(I("Payroll run", "latest_run", f"Latest Singapore run ({sg_run.period_label})",
+                       FAIL if blocks else (REVIEW if preflight["counts"]["WARN"] else PASS),
+                       f"preflight {preflight['status']}: {preflight['counts']}", effective_date=_sg_iso(sg_run.pay_date),
+                       source="ZP-SG-ENG-001 §11", blocker="; ".join(sorted({c['code'] for c in blocks}))[:300] or None,
+                       action="Open the run's preflight and resolve"))
+    items.append(I("Employment Act", "payslips", "Itemised payslips", REVIEW,
+                   "payslip carries employer / employee, dates, basic, allowances, deductions (CPF, SHG), net; overtime "
+                   "hours (items 9–11) are not captured", source=src("ea_payslip_issue_working_days"),
+                   blocker="Overtime hours / period not captured", action="Record overtime hours outside payroll until captured"))
+    # Phase 5.1: deductions, corrections, disaster recovery
+    orders = db.query(CourtOrderedDeduction).filter(CourtOrderedDeduction.organization_id == organization_id,
+                                                    CourtOrderedDeduction.jurisdiction == SG_DEDUCTION_JURISDICTION,
+                                                    CourtOrderedDeduction.status == "active").all()
+    no_evidence = [o.id for o in orders if not (o.court_reference and o.issue_date)]
+    items.append(I("Employment Act", "deductions", "Salary deductions (SG-037)", FAIL if no_evidence else PASS,
+                   f"{len(orders)} active deduction(s); without consent / evidence: {no_evidence or 'none'} — MOM caps enforced "
+                   "at every payroll; prohibited work-pass costs refused", source="MOM Allowable salary deductions",
+                   blocker="A deduction without its consent / evidence", action="Record the evidence or cancel the deduction"))
+    deltas = [i for i in db.query(PayslipItem).filter(PayslipItem.organization_id == organization_id, PayslipItem.country_code == "SG").all()
+              if (i.sgp_calculation_trace or {}).get("correction")]
+    refunds = [d.id for d in deltas if d.sgp_calculation_trace["correction"].get("cpfRefundRequired")]
+    items.append(I("Corrections", "corrections", "Append-only corrections (SG-044)", REVIEW if refunds else PASS,
+                   f"{len(deltas)} correction delta(s); CPF refund applications needed for {refunds or 'none'}",
+                   source="ZP-SG-ENG-001 SG-044", blocker="Over-contributed CPF is refunded by CPF Board application",
+                   owner="Employer / CPF Board", action="Submit the CPF refund application"))
+    items.append(I("Disaster recovery", "dr", "Backup / restore and external-action freeze (SG-047)", BLOCKED,
+                   "in-repo: post-restore freeze — CPF EZPay and IR8A submissions to UNKNOWN, IR21 cases to "
+                   "RECONCILE_FIRST, bank export HOLD until reconciled — plus an internal dump / restore integrity check",
+                   source="ZP-SG-ENG-001 SG-047",
+                   blocker="Production backups, PITR, RPO / RTO are infrastructure outside this repository — not evidenced",
+                   owner="Platform operations", action="Evidence production backup + PITR and a restore drill"))
+    # PDPA / security / banking / readiness
+    items.append(I("PDPA", "pdpa", "NRIC / FIN handling", rd["pdpa"]["status"],
+                   f"{rd['pdpa']['evidence']}; UI and reports show partial NRIC only (PDPC: last 3 digits + checksum); "
+                   "full numbers leave the system only in the approved, audited EZPay file",
+                   source="PDPC — Advisory Guidelines for NRIC numbers (31 Aug 2018)", blocker=rd["pdpa"]["blocker"],
+                   owner="Employer data protection officer", action=rd["pdpa"]["action"]))
+    retention = sg_retention_report(db, organization_id, as_of)
+    items.append(I("PDPA", "retention", "Record retention (statutory minimums, read-only)",
+                   BLOCKED if retention["status"] == "BLOCKED" else REVIEW,
+                   retention.get("blocker") or (
+                       f"payslips within a statutory minimum: {retention['payslips']['withinStatutoryMinimum']}; beyond every "
+                       f"minimum: {retention['payslips']['beyondAllStatutoryMinimums']} — nothing is deleted automatically"),
+                   source="MOM Employment records; IRAS Record Keeping Requirements",
+                   blocker="the maximum retention period is the organization's own PDPA policy (no statutory maximum)",
+                   owner="Employer data protection officer",
+                   action="Decide the organization's retention policy for records past every statutory minimum"))
+    items.append(I("PDPA", "pdpa_roles", "PDPA accountability and data-intermediary roles (SG-046)", REVIEW,
+                   "Controller (the employer): purposes, notification / consent, retention policy, access and correction "
+                   "requests, breach assessment and any notification. Data intermediary (Zoiko): processes payroll data on "
+                   "the employer's documented instruction, protects it and supports the employer's breach assessment. "
+                   "Processing purposes: payroll, CPF / SDL / SHG, IRAS reporting and MOM compliance. Engineering controls: "
+                   "partial NRIC, role checks, tenant isolation, audited exports and SHG-data reads.",
+                   source="ZP-SG-ENG-001 SG-046 / §16", blocker="organization-specific PDPA documentation is not recorded",
+                   owner="Employer data protection officer",
+                   action="Record the organization's PDPA documentation (not a legal certification)"))
+    items.append(I("Security", "security", "Access control and audit", PASS,
+                   "Singapore endpoints require the payroll-operator role and are tenant-scoped; EZPay approval is "
+                   "maker-checker; EZPay downloads, IR21 and approval bindings are audited", source="Zoiko internal tests"))
+    items.append(I("Banking", "banking", "Salary bank file", rd["banking"]["status"],
+                   f"{rd['banking']['evidence']}; IR21-held monies are excluded from the bank file",
+                   blocker=rd["banking"]["blocker"], action=rd["banking"]["action"]))
+    items.append(I("Readiness", "readiness", "Launch readiness (SG-027)", PASS if readiness["status"] == "LIVE_READY" else BLOCKED,
+                   f"{readiness['status']} {readiness['counts']}", source="ZP-SG-ENG-001 SG-027",
+                   blocker="Blocking readiness items remain (see Employer Registration)", action="Resolve the readiness items"))
+
+    # Clocks (SG-041)
+    holidays = {date(y, m, d) for y, rows in _SG_GAZETTED_PUBLIC_HOLIDAYS.items() for (m, d), _n in rows}
+    calendar_row = db.query(StatutoryFilingCalendar).filter(
+        StatutoryFilingCalendar.jurisdiction_country == "SG", StatutoryFilingCalendar.report_type == "IR8A",
+        StatutoryFilingCalendar.reporting_year == str(as_of.year)).first()
+    wage_month = _sg_wage_date(sg_run).replace(day=1) if sg_run else as_of.replace(day=1)
+    ir21_clock = [{"id": c.id, "employeeId": c.employee_id, "status": c.status, "fileBy": _sg_iso(c.file_by_date)} for c in cases]
+    clocks = cc.clocks(wage_month, sg_run.period_end if sg_run else None, sg_run.pay_date if sg_run else None, rates, holidays,
+                       calendar_row.due_date if calendar_row else date(as_of.year + 1, 3, 1), ir21_clock)
+    counts = {s: sum(1 for i in items if i["status"] == s) for s in (PASS, FAIL, REVIEW, BLOCKED, INFO)}
+    return {"organizationId": organization_id, "asOf": as_of.isoformat(), "items": items, "clocks": clocks, "counts": counts,
+            "certification": "Internal Zoiko evaluation — not a CPF Board / IRAS / MOM approval"}
+
+
+# ── Singapore: append-only corrections of FINALIZED payroll (SG-044,
+# Phase 5.1 WS1). The finalized payslip is never rewritten: it is
+# recalculated on its OWN frozen statutory context (tax_rule_snapshot,
+# ytd_snapshot "before" values, frozen CPF / IRAS classification — exactly
+# what regenerate_employee_payslip replays) with the corrected facts, and
+# only the DIFFERENCE is persisted as a delta payslip in a dedicated
+# correction run (PayrollRun.notes marker), linked to the original with
+# before / after / delta, reason, actor and time, and audited. The CPF
+# month logic (month_to_date), IR8A (by wage year), EZPay (supplementary
+# advice) and YTD all see the delta like any other payslip of the month.
+
+SG_CORRECTION_MARKER = "[SG-CORRECTION]"
+_SG_FINALIZED_RUN_STATUSES = (PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED)
+_SG_DELTA_COLUMNS = ("basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+                     "attendance_deduction", "employee_pension", "employer_pension", "professional_tax",
+                     "employer_payroll_tax", "employer_eht", "total_deductions", "net_pay")
+
+
+def _sg_org_is_singapore(db: Session, organization_id: Optional[int]) -> bool:
+    if not organization_id:
+        return False
+    row = db.query(CompanyComplianceDetails.jurisdiction_country).filter(
+        CompanyComplianceDetails.organization_id == organization_id).first()
+    return bool(row) and _normalize_country(row[0]) == "SG"
+
+
+def _sg_lock_run(db: Session, run: PayrollRun) -> None:
+    """SG-043 / Phase 5.1 WS2: serialise concurrent operations on one
+    Singapore payroll run (generate / approve / correct) — a second caller
+    waits on the row lock (PostgreSQL SELECT … FOR UPDATE; a no-op on
+    SQLite) and then sees the first caller's committed state."""
+    db.query(PayrollRun.id).filter(PayrollRun.id == run.id).with_for_update().one()
+
+
+def _sg_is_correction_run(run) -> bool:
+    return bool(run is not None and (run.notes or "").startswith(SG_CORRECTION_MARKER))
+
+
+def _sg_trace_metrics(trace: dict) -> dict:
+    """The additive statutory quantities of one payslip trace."""
+    z = Decimal("0")
+    t = trace or {}
+    inputs, cpf, result = t.get("inputs") or {}, t.get("cpf") or {}, t.get("result") or {}
+    aw = cpf.get("additionalWages") or {}
+    m = {
+        "ordinaryWages": inputs.get("ordinaryWages"), "additionalWages": inputs.get("additionalWages"),
+        "nonCpfWages": inputs.get("nonCpfWages"), "owSubject": cpf.get("owSubject"),
+        "awSubject": aw.get("awSubjectThisPayment"), "awPaid": aw.get("awPaid"),
+        "employeeCpf": result.get("employeeCpf"), "employerCpf": result.get("employerCpf"),
+        "sdl": result.get("sdl"), "fwl": result.get("fwl"), "shg": result.get("shg"),
+    }
+    out = {k: Decimal(str(v)) if v not in (None, "") else z for k, v in m.items()}
+    for fund, d in ((t.get("shg") or {}).get("funds") or {}).items():
+        out[f"shg:{fund}"] = Decimal(str((d or {}).get("amount") or 0))
+    for cat, v in ((t.get("iras") or {}).get("totals") or {}).items():
+        out[f"iras:{cat}"] = Decimal(str(v or 0))
+    for line in ((t.get("salaryDeductions") or {}).get("lines") or []):
+        out[f"deduction:{line.get('id')}"] = Decimal(str(line.get("amount") or 0))
+    return out
+
+
+def _sg_correction_chain(db: Session, original: PayslipItem) -> list:
+    return [i for i in db.query(PayslipItem).filter(PayslipItem.employee_id == original.employee_id,
+                                                    PayslipItem.country_code == "SG").order_by(PayslipItem.id).all()
+            if ((i.sgp_calculation_trace or {}).get("correction") or {}).get("originalPayslipId") == original.id]
+
+
+def _sg_frozen_recompute(db: Session, run: PayrollRun, employee, item: PayslipItem, organization_id: int) -> dict:
+    """The corrected values of a finalized payslip, recalculated on its own
+    frozen statutory context (the same replay regenerate_employee_payslip
+    performs) — read-only; nothing is persisted."""
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, _pr, _po = _resolve_employee_calc_inputs(
+        db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in, run=run,
+    )
+    if item.tax_rule_snapshot:
+        replay_rates, replay_slabs = _reconstruct_rate_map_and_slabs_from_snapshot(item.tax_rule_snapshot)
+        if replay_rates or replay_slabs:
+            rate_map = {_normalize_engine_component_key(r.component_key): r for r in replay_rates}
+            slabs = replay_slabs
+    ytd_inputs = {}
+    for component, field_name in (("cpf_ow_subject", "ytd_cpf_ow_subject_before"), ("cpf_aw_subject", "ytd_cpf_aw_subject_before"),
+                                  ("cpf_aw_paid", "ytd_cpf_aw_paid_before")):
+        before = ((item.ytd_snapshot or {}).get(component) or {}).get("ytd_before")
+        if before not in (None, "None"):
+            ytd_inputs[field_name] = Decimal(before)
+    wage_date = _sg_wage_date(run)
+    ytd_inputs["sgp_aw_ledger"] = _load_sg_aw_ledger(db, employee.id, run.pay_date, current_run_id=run.id, wage_year=wage_date.year)
+    ytd_inputs["sgp_month_to_date"] = _load_sg_month_to_date(db, employee.id, run.pay_date, current_run_id=run.id,
+                                                            wage_month=wage_date.strftime("%Y-%m"))
+    ytd_inputs["sgp_employer_hires_foreign_workers"] = _sg_employer_hires_foreign_workers(db, employee.id)
+    inputs = (item.sgp_calculation_trace or {}).get("inputs") or {}
+    if inputs.get("wageClassification") is not None:
+        ytd_inputs["sgp_cpf_wage_classification"] = _sg_frozen_classification(inputs["wageClassification"])
+    if inputs.get("irasClassification") is not None:
+        ytd_inputs["sgp_iras_classification"] = _sg_frozen_iras_classification(inputs["irasClassification"])
+    values = _compute_payslip_values(
+        db, run, employee, rate_map, slabs, country, calculation_mode,
+        allowance_components=_resolve_allowance_components(db, organization_id), resolved_pack=resolved_pack,
+        state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+        reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs,
+    )
+    return values
+
+
+def correct_sg_finalized_payslip(db: Session, organization_id: int, payslip_id: int, reason: str,
+                                 actor_id: Optional[int] = None) -> dict:
+    from app.modules.payroll.engine.base import PayrollResult
+
+    if not (reason or "").strip():
+        raise BadRequestException("A correction needs a reason (SG-044).")
+    item = db.query(PayslipItem).filter(PayslipItem.id == payslip_id, PayslipItem.organization_id == organization_id).first()
+    if item is None:
+        raise NotFoundException(f"Payslip {payslip_id} not found.")
+    if (item.country_code or "").upper() != "SG":
+        raise BadRequestException("Append-only corrections here are for Singapore payslips.")
+    if (item.sgp_calculation_trace or {}).get("correction"):
+        raise BadRequestException("Correct the original payslip, not a correction delta.")
+    # WS2: serialise every correction / run operation on this run and employee.
+    run = db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).with_for_update().one()
+    employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == item.employee_id).with_for_update().one()
+    if run.status not in _SG_FINALIZED_RUN_STATUSES:
+        raise BadRequestException("This payslip's run is not finalized — recalculate it in place instead.")
+    wage_month = _sg_trace_wage_month(item.sgp_calculation_trace, run.pay_date)
+    chain = _sg_correction_chain(db, item)
+    chain_ids = {c.id for c in chain} | {item.id}
+    later = [p for p in _sg_prior_payslips(db, employee.id, date(int(wage_month[:4]), 12, 31) + timedelta(days=15),
+                                           wage_year=int(wage_month[:4]))
+             if p.id not in chain_ids and p.payroll_run_id != run.id
+             and (_sg_trace_wage_month(p.sgp_calculation_trace, run.pay_date), p.payroll_run_id) > (wage_month, run.id)]
+    if later:
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            f"Payslip(s) {sorted(p.id for p in later)} were calculated after this one and built on its CPF / YTD figures — "
+            "correct the latest payslip first (or use the year-end true-up)."))
+    corrected = _sg_frozen_recompute(db, run, employee, item, organization_id)
+    new_trace = corrected.get("sgp_calculation_trace") or {}
+    effective = _sg_trace_metrics(item.sgp_calculation_trace)
+    effective_cols = {c: Decimal(str(getattr(item, c) or 0)) for c in _SG_DELTA_COLUMNS}
+    for c in chain:
+        for k, v in _sg_trace_metrics(c.sgp_calculation_trace).items():
+            effective[k] = effective.get(k, Decimal("0")) + v
+        for col in _SG_DELTA_COLUMNS:
+            effective_cols[col] += Decimal(str(getattr(c, col) or 0))
+    after = _sg_trace_metrics(new_trace)
+    keys = sorted(set(effective) | set(after))
+    delta = {k: after.get(k, Decimal("0")) - effective.get(k, Decimal("0")) for k in keys}
+    col_delta = {c: Decimal(str(corrected.get(c) or 0)) - effective_cols[c] for c in _SG_DELTA_COLUMNS}
+    if not any(delta.values()) and not any(col_delta.values()):
+        raise BadRequestException("The recalculation produces no change — nothing to correct.")
+    if delta.get("awPaid", Decimal("0")) < 0 or delta.get("awSubject", Decimal("0")) < 0:
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "The correction reduces Additional Wages — excess CPF on AW is recovered through a CPF Board refund "
+            "application, not a negative contribution; record it with CPF Board."))
+    now = datetime.utcnow().replace(microsecond=0)
+    fmt = lambda d: {k: str(v) for k, v in d.items()}  # noqa: E731
+    correction = {"originalPayslipId": item.id, "originalRunId": run.id, "sequence": len(chain) + 1,
+                  "reason": reason.strip(), "actorId": actor_id, "at": now.isoformat(),
+                  "before": {**fmt(effective), **{f"col:{c}": str(v) for c, v in effective_cols.items()}},
+                  "after": {**fmt(after), **{f"col:{c}": str(corrected.get(c) or 0) for c in _SG_DELTA_COLUMNS}},
+                  "delta": {**fmt(delta), **{f"col:{c}": str(v) for c, v in col_delta.items()}},
+                  "cpfRefundRequired": delta.get("employeeCpf", Decimal("0")) + delta.get("employerCpf", Decimal("0")) < 0,
+                  "employeeRecoveryAmount": str(-col_delta["net_pay"]) if col_delta["net_pay"] < 0 else "0",
+                  "frozenContext": "original tax_rule_snapshot + ytd_snapshot + CPF / IRAS classification"}
+    nt = new_trace
+    ct = nt.get("cpf") or {}
+    d_aw_paid, d_aw_subject = delta.get("awPaid", Decimal("0")), delta.get("awSubject", Decimal("0"))
+    ledger = None
+    if d_aw_paid > 0 and (ct.get("additionalWages") or {}).get("ledgerEntry"):
+        ledger = {**ct["additionalWages"]["ledgerEntry"], "awPaid": str(d_aw_paid), "awSubjected": str(d_aw_subject)}
+    delta_trace = {
+        "engine": nt.get("engine"), "wageMonth": nt.get("wageMonth") or wage_month, "cohort": nt.get("cohort"),
+        "effectiveResidency": nt.get("effectiveResidency"),
+        # The corrected month's MOM incomplete-month facts (joining / leaving /
+        # no-pay days) — the original payslip keeps its own (Phase 5.2).
+        "incompleteMonth": nt.get("incompleteMonth"),
+        "inputs": {"ordinaryWages": str(delta.get("ordinaryWages", 0)), "additionalWages": str(delta.get("additionalWages", 0)),
+                   "nonCpfWages": str(delta.get("nonCpfWages", 0)),
+                   "wageClassification": (nt.get("inputs") or {}).get("wageClassification"),
+                   "irasClassification": (nt.get("inputs") or {}).get("irasClassification")},
+        "cpf": {"owSubject": str(delta.get("owSubject", 0)), "ageBand": ct.get("ageBand"), "rule": ct.get("rule"),
+                "additionalWages": {"awPaid": str(d_aw_paid), "awSubjectThisPayment": str(d_aw_subject),
+                                    **({"ledgerEntry": ledger} if ledger else {})}},
+        "result": {"employeeCpf": str(delta.get("employeeCpf", 0)), "employerCpf": str(delta.get("employerCpf", 0)),
+                   "sdl": str(delta.get("sdl", 0)), "fwl": str(delta.get("fwl", 0)), "shg": str(delta.get("shg", 0))},
+        "shg": {"funds": {k.split(":", 1)[1]: {"amount": str(v)} for k, v in delta.items() if k.startswith("shg:") and v}},
+        "iras": {"totals": {k.split(":", 1)[1]: str(v) for k, v in delta.items() if k.startswith("iras:") and v},
+                 "unclassified": str(delta.get("iras:UNCLASSIFIED", 0))},
+        "salaryDeductions": {"lines": [{"id": int(k.split(":", 1)[1]) if k.split(":", 1)[1].isdigit() else k.split(":", 1)[1],
+                                        "amount": str(v)} for k, v in delta.items() if k.startswith("deduction:") and v]},
+        "correction": correction,
+    }
+    corr_run = PayrollRun(organization_id=organization_id, period_label=f"Correction {correction['sequence']} of {run.period_label}"[:50],
+                          period_start=run.period_start, period_end=run.period_end, pay_date=run.pay_date,
+                          notes=f"{SG_CORRECTION_MARKER} original run {run.id}, payslip {item.id}: {reason.strip()}"[:2000],
+                          created_by=actor_id, calculation_mode=run.calculation_mode)
+    db.add(corr_run)
+    db.flush()
+    delta_item = PayslipItem(
+        payroll_run_id=corr_run.id, employee_id=employee.id, organization_id=organization_id,
+        employee_name=item.employee_name, country_code="SG", status=PayslipStatus.PENDING,
+        compliance_fields=item.compliance_fields, tax_policy_version=item.tax_policy_version,
+        tax_rule_snapshot=item.tax_rule_snapshot, sgp_calculation_trace=delta_trace,
+        notes=f"Correction delta of payslip {item.id}", **col_delta,
+    )
+    pre = _ytd_capture_state(db, employee.id, organization_id)
+    db.add(delta_item)
+    db.flush()
+    if corrected.get("_sg_cpf_ytd_result") is not None:
+        _upsert_sg_cpf_ytd_accumulator(db, employee.id, _sg_wage_date(run), corrected["_sg_cpf_ytd_result"], payslip_id=delta_item.id)
+    _ytd_record_postings(db, delta_item, pre)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="sg_payslip_correction", entity_id=delta_item.id,
+                     legal_reference="ZP-SG-ENG-001 SG-044 (append-only corrections)",
+                     old_value={"originalPayslipId": item.id, "before": correction["before"]},
+                     new_value={"after": correction["after"], "delta": correction["delta"]}, reason=reason.strip(),
+                     auto_commit=False)
+    _sg_update_run_totals(db, corr_run)
+    db.commit()
+    db.refresh(delta_item)
+    return {"correctionRunId": corr_run.id, "deltaPayslipId": delta_item.id, "originalPayslipId": item.id,
+            "sequence": correction["sequence"], "delta": correction["delta"],
+            "cpfRefundRequired": correction["cpfRefundRequired"], "employeeRecoveryAmount": correction["employeeRecoveryAmount"]}
+
+
+def _sg_update_run_totals(db: Session, run: PayrollRun) -> None:
+    z = Decimal("0")
+    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
+    run.employee_count = len(items)
+    run.total_gross = sum((i.gross_pay or z for i in items), z)
+    run.total_deductions = sum((i.total_deductions or z for i in items), z)
+    run.total_employer_contribution = sum(((i.employer_pension or z) + (i.employer_payroll_tax or z) + (i.employer_eht or z)
+                                           for i in items), z)
+    run.total_net = sum((i.net_pay or z for i in items), z)
+
+
+def list_sg_payslip_corrections(db: Session, organization_id: int, payslip_id: int) -> list:
+    item = db.query(PayslipItem).filter(PayslipItem.id == payslip_id, PayslipItem.organization_id == organization_id).first()
+    if item is None:
+        raise NotFoundException(f"Payslip {payslip_id} not found.")
+    return [{"deltaPayslipId": c.id, "correctionRunId": c.payroll_run_id,
+             **{k: v for k, v in ((c.sgp_calculation_trace or {}).get("correction") or {}).items() if k != "frozenContext"}}
+            for c in _sg_correction_chain(db, item)]
+
+
+# ── Singapore: disaster recovery — SG-047 "After disaster recovery,
+# external actions with uncertain status remain FROZEN until authority/bank
+# reconciliation. Never replay CPF, AIS or bank outbox events merely because
+# the local database was restored to an earlier point." After a restore,
+# every CPF EZPay submission whose external outcome may have moved on after
+# the restore point (APPROVED — it may since have been uploaded; SUBMITTED —
+# CPF may since have processed it) is set UNKNOWN, which already refuses a
+# new file for that month / advice until CPF Board's real outcome is
+# recorded (transition_sg_cpf_ezpay). Audited; tenant-scoped.
+
+_SG_BANK_HOLD_ENTITY = "sg_bank_export_hold"
+
+
+def sg_freeze_after_restore(db: Session, organization_id: int, restore_point: str, actor_id: Optional[int] = None,
+                            restore_date: Optional[date] = None) -> dict:
+    """SG-047 — every external action whose outcome may have moved on after
+    the restore point is frozen until it is reconciled with the authority /
+    bank; nothing is replayed:
+      CPF EZPay APPROVED / SUBMITTED → UNKNOWN (a new file for that month /
+        advice is refused until CPF Board's real outcome is recorded);
+      IR8A SUBMITTED_MANUALLY → UNKNOWN (never resubmitted blindly);
+      IR21 cases not yet FILED → RECONCILE_FIRST (the form may have been
+        filed after the backup; the monies stay held until confirmed);
+      bank export of every SG run that may already have been paid (Approved /
+        Authorized / Paid, pay date on or after restore_date when given) →
+        HOLD until an operator records the bank reconciliation.
+    Audited; tenant-scoped."""
+    if not (restore_point or "").strip():
+        raise BadRequestException("State the restore point (backup timestamp / identifier) being recovered from.")
+    point = restore_point.strip()
+    at = datetime.utcnow().replace(microsecond=0).isoformat()
+    frozen, ir21, bank = [], [], []
+    for row in db.query(GeneratedReport).filter(
+            GeneratedReport.organization_id == organization_id,
+            or_(and_(GeneratedReport.report_type == SG_EZPAY_REPORT_TYPE, GeneratedReport.status.in_(("APPROVED", "SUBMITTED"))),
+                and_(GeneratedReport.report_type == SG_IR8A_REPORT_TYPE, GeneratedReport.status == "SUBMITTED_MANUALLY"))
+    ).with_for_update().all():
+        before = row.status
+        reconciliation = copy.deepcopy(row.reconciliation or {})
+        reconciliation.setdefault("history", []).append({
+            "status": "UNKNOWN", "actorId": actor_id, "at": at,
+            "note": f"frozen after disaster recovery (restore point {point}) — SG-047"})
+        row.reconciliation = reconciliation
+        row.status = "UNKNOWN"
+        entity = "sg_cpf_ezpay" if row.report_type == SG_EZPAY_REPORT_TYPE else "sg_ir8a"
+        record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type=entity, entity_id=row.id,
+                         legal_reference="ZP-SG-ENG-001 SG-047", old_value={"status": before}, new_value={"status": "UNKNOWN"},
+                         reason=f"Disaster recovery freeze — restore point {point}", auto_commit=False)
+        frozen.append({"id": row.id, "reportType": row.report_type,
+                       "relevantMonth": (row.rendered_data or {}).get("relevantMonth"),
+                       "reportingYear": row.reporting_year,
+                       "adviceCode": (row.rendered_data or {}).get("adviceCode"), "previousStatus": before})
+    for case in _sg_ir21_query(db, organization_id).filter(SgpIr21Case.status == "DRAFT").with_for_update().all():
+        case.status = "RECONCILE_FIRST"
+        record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="sgp_ir21_case", entity_id=case.id,
+                         legal_reference="ZP-SG-ENG-001 SG-047", old_value={"status": "DRAFT"},
+                         new_value={"status": "RECONCILE_FIRST", "restorePoint": point},
+                         reason=f"Disaster recovery — confirm with IRAS whether Form IR21 was filed after restore point {point}",
+                         auto_commit=False)
+        ir21.append({"id": case.id, "employeeId": case.employee_id, "previousStatus": "DRAFT"})
+    runs = db.query(PayrollRun).filter(
+        PayrollRun.organization_id == organization_id,
+        PayrollRun.status.in_((PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID)),
+        *([PayrollRun.pay_date >= restore_date] if restore_date else []),
+    ).with_for_update().all()
+    for run in runs:
+        if not db.query(PayslipItem.id).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "SG").first():
+            continue
+        if _sg_bank_hold_active(db, run.id):
+            continue
+        record_tax_audit(db, actor_id=actor_id, action="hold", entity_type=_SG_BANK_HOLD_ENTITY, entity_id=run.id,
+                         legal_reference="ZP-SG-ENG-001 SG-047", old_value=None,
+                         new_value={"restorePoint": point, "restoreDate": restore_date.isoformat() if restore_date else None},
+                         reason=f"Disaster recovery — the bank file may already have been paid after restore point {point}",
+                         auto_commit=False)
+        bank.append({"runId": run.id, "periodLabel": run.period_label, "payDate": _sg_iso(run.pay_date)})
+    db.commit()
+    return {"restorePoint": point, "frozen": frozen, "ir21ReconcileFirst": ir21, "bankExportHeld": bank,
+            "rule": "SG-047: reconcile each with CPF Board / IRAS / the bank before any retry; nothing is replayed from "
+                    "the restored database"}
+
+
+def _sg_bank_hold_active(db: Session, run_id: int) -> bool:
+    last = (db.query(TaxConfigurationAudit)
+            .filter(TaxConfigurationAudit.entity_type == _SG_BANK_HOLD_ENTITY, TaxConfigurationAudit.entity_id == run_id)
+            .order_by(TaxConfigurationAudit.id.desc()).first())
+    return last is not None and last.action == "hold"
+
+
+def release_sg_bank_export_hold(db: Session, organization_id: int, run_id: int, reference: str,
+                                actor_id: Optional[int] = None) -> dict:
+    """An operator records the bank reconciliation of a held run (SG-047):
+    the reference of the bank statement / payment confirmation is required."""
+    run = get_payroll_run_by_id(db, run_id, organization_id)
+    if not _sg_bank_hold_active(db, run.id):
+        raise BadRequestException("This run's bank export is not on a disaster-recovery hold.")
+    if not (reference or "").strip():
+        raise BadRequestException("Record the bank reconciliation reference (statement / payment confirmation) to release the hold.")
+    record_tax_audit(db, actor_id=actor_id, action="release", entity_type=_SG_BANK_HOLD_ENTITY, entity_id=run.id,
+                     legal_reference="ZP-SG-ENG-001 SG-047", old_value={"hold": True},
+                     new_value={"hold": False, "reference": reference.strip()},
+                     reason=f"Bank reconciliation recorded: {reference.strip()}", auto_commit=False)
+    db.commit()
+    return {"runId": run.id, "released": True, "reference": reference.strip()}
+
+
+# ── Singapore: record-retention report (SG-046) — READ ONLY. The statutory
+# retention MINIMUMS come from pack rows (MOM "Employment records"; IRAS
+# "Record Keeping Requirements"); nothing is ever deleted — the maximum is
+# the organization's own PDPA retention decision (Zoiko acts as its data
+# intermediary).
+
+def sg_retention_report(db: Session, organization_id: int, as_of: Optional[date] = None) -> dict:
+    as_of = as_of or date.today()
+    _pack, rates, _slabs = _sg_active_pack_and_rates(db, as_of)
+    keys = ("retention_mom_records_years", "retention_mom_after_leaving_years", "retention_iras_years_from_ya")
+    rows = {k: rates.get(k) for k in keys}
+    if any(r is None or r.flat_amount is None for r in rows.values()):
+        return {"status": "BLOCKED", "asOf": as_of.isoformat(),
+                "blocker": "BLOCKED — RETENTION PERIOD EVIDENCE REQUIRED (retention rows not configured in the active pack)"}
+    mom_years, after_years, iras_years = (int(rows[k].flat_amount) for k in keys)
+
+    def add_years(d, n):
+        try:
+            return d.replace(year=d.year + n)
+        except ValueError:                      # 29 Feb
+            return d.replace(year=d.year + n, day=28)
+
+    employees = {e.id: e for e in db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id).all()}
+    within = beyond = 0
+    beyond_employees = set()
+    for item, pay_date in (db.query(PayslipItem, PayrollRun.pay_date)
+                           .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+                           .filter(PayslipItem.organization_id == organization_id, PayslipItem.country_code == "SG").all()):
+        # IRAS: at least N years from the relevant YA (income year + 1) — counted
+        # from the END of that YA, the longer reading of "from the YA".
+        iras_until = date(pay_date.year + 1 + iras_years, 12, 31)
+        emp = employees.get(item.employee_id)
+        leaving = getattr(emp, "date_of_leaving", None)
+        # MOM: latest N years for current employees; for ex-employees the last
+        # N years, kept for M year(s) after leaving.
+        mom_until = add_years(leaving, after_years) if leaving else add_years(pay_date, mom_years)
+        if leaving is None and add_years(pay_date, mom_years) < as_of:
+            mom_until = add_years(pay_date, mom_years)
+        if as_of <= max(iras_until, mom_until):
+            within += 1
+        else:
+            beyond += 1
+            beyond_employees.add(item.employee_id)
+    return {
+        "status": "READY", "asOf": as_of.isoformat(),
+        "rules": [
+            {"key": k, "value": int(rows[k].flat_amount), "label": rows[k].label, "sourceDocumentId": rows[k].source_document_id}
+            for k in keys],
+        "payslips": {"withinStatutoryMinimum": within, "beyondAllStatutoryMinimums": beyond},
+        "employeesWithRecordsBeyondMinimums": sorted(beyond_employees),
+        "deletion": "never automatic — records past every statutory minimum are listed for the organization's own PDPA "
+                    "retention decision (retention limitation); Zoiko acts on its documented instruction",
+        "basis": "IRAS minimum counted from the end of the relevant Year of Assessment (income year + 1); MOM minimum per "
+                 "its employment-records page",
+    }
+
+
+# ── Singapore: SHG data access audit (SG-046 — SHG fund choice is race /
+# religion-linked personal data). The shared employee read routes stay as
+# they are for every country; for Singapore employees carrying an SHG fund
+# each read is recorded.
+
+def audit_sg_shg_read(db: Session, organization_id: int, actor_id: Optional[int], employees) -> None:
+    employees = employees if isinstance(employees, (list, tuple)) else [employees]
+    ids = [e.id for e in employees
+           if (getattr(e, "country_code", None) or "").upper() == "SG" and (getattr(e, "sgp_shg_funds", None) or "NONE") != "NONE"]
+    if not ids:
+        return
+    record_tax_audit(db, actor_id=actor_id, action="read", entity_type="sg_shg_data",
+                     entity_id=ids[0] if len(ids) == 1 else organization_id,
+                     legal_reference="ZP-SG-ENG-001 SG-046 / §16 Sensitive SHG data", old_value=None,
+                     new_value={"employeeIds": ids}, reason="SHG fund data read through the employee record",
+                     auto_commit=False)
+    db.commit()
+
+
 # ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule (both
 # monthly) ──────────────────────────────────────────────────────────────
 # (Caribbean forms gap-closure, country #4, 2026-09-23). Same per-
@@ -12559,7 +18851,21 @@ def generate_ky_pension_submission(
     return row
 
 
+# Hong Kong's report generators, preflight and employer readiness live in the
+# jurisdiction statutory module (hong_kong_service). The shared generic generator
+# refuses every HK report type — kept here because the refusal is platform code.
+# Every HK report type has a bespoke generator, so the shared
+# generate_report_from_template refuses all of them (see the check inside it).
+# Kept as one tuple so the refusal and the seeded catalog cannot drift apart.
+_HK_DEDICATED_GENERATOR_REPORT_TYPES = (
+    "HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G",
+    "HK_EMPF_REMITTANCE", "HK_MPF_CONTRIBUTION_RECORD", "HK_TERMINATION_STATEMENT",
+)
+
+
 # ── RTI XML rendering (§18 gap-closure Part 9, 2026-09-09) ──────────────
+
+
 # Serializes a FPS/EPS/P45 GeneratedReport's rendered_data into HMRC's
 # real RTI top-level element structure — a correctly-SHAPED submission
 # file, a genuine deliverable on its own even before any transmission
@@ -12729,7 +19035,18 @@ _CA_FORM_REPORT_TYPES = ("T4", "RL1", "ROE", "PD7A")
 # shipped (same session) — their own GeneratedReport rows need the same
 # cross-org visibility STP gets.
 _AU_FORM_REPORT_TYPES = ("STP", "SUPERSTREAM", "AU_PAYROLL_TAX_RETURN")
-_RTI_FORMS_SUMMARY_REPORT_TYPES = _UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES + _AU_FORM_REPORT_TYPES
+# Hong Kong (ZP-HK-ENG-001 §7, HK-011 / HK-010) widened 2026-09-30 the same
+# way: the IRD annual return (BIR56A cover), the per-employee IR56B, the three
+# employee notifications (E/F/G), the eMPF remittance statement and the
+# employee's MPF contribution record are all GeneratedReport rows now, so
+# Super Admin needs the same cross-org visibility India's and Australia's
+# forms already had. RtiSubmission tracking stays empty for these — it is a
+# UK-specific HMRC concept, and an HK row renders "Not tracked" exactly like
+# every other non-UK report type that predates RTI tracking.
+_HK_FORM_REPORT_TYPES = ("HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G",
+                         "HK_EMPF_REMITTANCE", "HK_MPF_CONTRIBUTION_RECORD")
+_RTI_FORMS_SUMMARY_REPORT_TYPES = (_UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES
+                                   + _AU_FORM_REPORT_TYPES + _HK_FORM_REPORT_TYPES)
 
 
 def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) -> list[dict]:
@@ -12771,7 +19088,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden"}
 
 
 def run_golden_test_certification(
@@ -12836,7 +19153,7 @@ def list_test_certification_runs(db: Session, limit: int = 20, jurisdiction_coun
         query = query.filter(TestCertificationRun.jurisdiction_country == jurisdiction_country.strip().upper())
     return (
         query
-        .order_by(TestCertificationRun.run_at.desc())
+        .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc())   # same tie-break as the activation gate
         .limit(limit)
         .all()
     )
@@ -12887,8 +19204,32 @@ def get_generated_report(db: Session, organization_id: int, generated_report_id:
 
 def void_generated_report(db: Session, organization_id: int, generated_report_id: int, reason: str, actor_id: Optional[int] = None) -> GeneratedReport:
     row = get_generated_report(db, organization_id, generated_report_id)
+    refusal = None
+    if row.report_type == "SG_CPF_EZPAY" and row.status in ("SUBMITTED", "ACCEPTED", "UNKNOWN"):
+        # Singapore: a file already handed to CPF Board cannot be voided out
+        # of its lifecycle (transition_sg_cpf_ezpay records the outcome).
+        refusal = f"A {row.status} CPF EZPay submission cannot be voided — record its CPF Board outcome instead."
+    if row.report_type == SG_IR8A_REPORT_TYPE and row.status in ("SUBMITTED_MANUALLY", "UNKNOWN", "ACKNOWLEDGED"):
+        # Completion programme: an IR8A extract keyed into IRAS (or confirmed
+        # by IRAS) is filing evidence, and an ACKNOWLEDGED original is the
+        # base of every revision / amendment — record IRAS's outcome, or file
+        # a modification, instead of voiding it.
+        refusal = (f"A {row.status} IR8A extract cannot be voided — record IRAS's outcome, or prepare a "
+                   "revision / amendment of an acknowledged original.")
+    if refusal:
+        # Closure programme: a refused void of filing evidence is audited
+        # (one row; nothing else pending — _sg_refuse_self_approval rolls back).
+        refuse_with_audit(db, "generated_report", row.id, actor_id, row.status, "Void", refusal)
+    before = row.status
     row.status = "Void"
     row.notes = reason
+    if row.jurisdiction_country == "SG":
+        # Completion programme: voiding a Singapore report is audited.
+        record_tax_audit(
+            db, actor_id=actor_id, action="status_change", entity_type="generated_report", entity_id=row.id,
+            tax_version=row.template_version, old_value={"status": before},
+            new_value={"status": "Void", "reportType": row.report_type}, reason=reason, auto_commit=False,
+        )
     db.commit()
     db.refresh(row)
     return row
@@ -13230,6 +19571,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     deduction is applied and the engine falls back to the 30-day basis."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
 
     country = _normalize_country(country)
     calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
@@ -13253,6 +19595,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             PayrollEmployee.date_of_joining <= (period_start or date.today()),
         ),
     ).all()
+    employees += _sg_mid_period_joiners(db, organization_id, period_start, period_end, employee_ids)
 
     # Batch-fetch every employee's attendance rows for the period in ONE query
     # instead of 2 queries per employee (unpaid-leave count + rewards/bonus
@@ -13395,6 +19738,31 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             )
         state_rate_map, state_slabs = _state_scoped_cache[state_cache_key]
 
+        france_inputs = (
+            _resolve_france_calc_inputs(db, organization_id, emp, period_end or date.today())
+            if emp_country == "FR" else None
+        )
+        # Ireland (ZP-IE-ENG-001): frozen RPN + NAERSA MyFutureFund status +
+        # independent cumulative bases. Read-only here — IE-032 forbids a
+        # preview from advancing any Ireland YTD figure.
+        ireland_inputs = (
+            _resolve_ie_calc_inputs(db, organization_id, emp, period_end or date.today())
+            if emp_country == "IE" else None
+        )
+        # Sweden (ZP-SE-ENG-001): worker profile + youth-threshold month
+        # accumulator. Read-only; a preview never advances anything.
+        sweden_inputs = (
+            _resolve_se_calc_inputs(db, organization_id, emp, period_end or date.today())
+            if emp_country == "SE" else None
+        )
+        # Italy (ZP-IT-ENG-001): facts only, read-only; a preview never
+        # advances an Italian accumulator (IT-055).
+        italy_inputs = (
+            _italy_service.resolve_it_calc_inputs(
+                db, organization_id, emp, period_end or date.today(),
+                period_start=period_start, period_end=period_end)
+            if emp_country == "IT" else None
+        )
         germany_kwargs = {}
         if emp_country == "DE":
             resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
@@ -13435,7 +19803,11 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_ky_pension_ytd(db, emp.id, period_end or date.today())
             if emp_country == "KY" else
             _load_gy_paye_credit_ytd(db, emp.id, period_end or date.today())
-            if emp_country == "GY" else {}
+            if emp_country == "GY" else
+            _load_pr_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "PR" else
+            _load_sg_cpf_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "SG" else {}
         )
         option2_inputs = (
             _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if emp_country == "CA" else {}
@@ -13496,6 +19868,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             get_india_salary_tds_inputs(db, organization_id, emp.id, india_tax_year_for_date(period_end or date.today()))
             if emp_country == "IN" else {}
         )
+        pr_certificate_inputs = (
+            get_pr_certificate_inputs(db, organization_id, emp.id) if emp_country == "PR" else {}
+        )
         employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
 
         # Delegate to the strategy engine
@@ -13518,14 +19893,37 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             annual_perquisites_total=salary_tds_inputs.get("perquisites_total", Decimal("0")),
             work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
             **germany_kwargs,
+            france_inputs=france_inputs,
+        ireland_inputs=ireland_inputs,
+            sweden_inputs=sweden_inputs,
+            italy_inputs=italy_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
             **org_levy_inputs,
             **option2_inputs,
+            **pr_certificate_inputs,
+            **_sg_named_allowance_inputs(emp_country, allowance_items),
+            **(_sg_employment_inputs(db, organization_id, emp, period_start, period_end,
+                                     attendance_by_employee.get(emp.id, []) if period_start and period_end else None)
+               if emp_country == "SG" else {}),
         )
         try:
             calc = calculate_payroll(ctx, calculation_mode)
+        except FranceCalculationBlockedError as exc:
+            # Same diagnostic contract as Germany below: one blocked France
+            # employee never aborts the whole preview (FR-027 reason shown).
+            results.append({
+                "employeeId": emp.id,
+                "employeeName": employee_name,
+                "department": getattr(emp, "department", None),
+                "attendanceStatus": "active" if is_active else "inactive",
+                "blocked": True,
+                "blockedReasonCode": exc.code,
+                "blockedReasonMessage": exc.message,
+                "calculationTrace": None,
+            })
+            continue
         except GermanyCalculationError as exc:
             # Preview is diagnostic across a batch — one blocked German
             # employee must not abort the whole preview. Surface the
@@ -13717,6 +20115,15 @@ def _resolve_holiday_date(entry: dict, year: int) -> date:
         return _nth_weekday_of_month(year, entry["month"], entry["weekday"], entry["n"])
     if rule == "easter_offset":
         return _easter_sunday(year) + timedelta(days=entry["offset_days"])
+    if rule == "first_monday_unless_friday":
+        # St Brigid's Day (Ireland): the first Monday in February, EXCEPT when
+        # 1 February itself falls on a Friday, in which case the holiday is
+        # 1 February. This conditional cannot be expressed as `nth_weekday` or
+        # `fixed`, and it is the reason this rule type exists.
+        first_of_february = date(year, 2, 1)
+        if first_of_february.weekday() == 4:  # Friday
+            return first_of_february
+        return _nth_weekday_of_month(year, 2, 0, 1)
     raise ValueError(f"Unknown holiday date rule: {rule}")
 
 
@@ -13766,10 +20173,77 @@ _DEFAULT_HOLIDAYS_BY_COUNTRY = {
         {"name": "German Unity Day", "rule": "fixed", "month": 10, "day": 3},
         {"name": "Christmas Day", "rule": "fixed", "month": 12, "day": 25},
     ],
+    # Ireland's ten statutory public holidays (ZP-IE-ENG-001 §11, WRC S17).
+    # Every date is DERIVED from its statutory rule rather than hardcoded, so a
+    # new year is correct without editing this table.
+    #
+    # Deliberately NO weekend substitute-day handling: Ireland does not roll a
+    # public holiday forward when it lands on a weekend (unlike Great Britain,
+    # which has no substitute rule here either but whose bank-holiday convention
+    # is a common import mistake) and 26 December is a separate listed holiday
+    # in its own right. Where a listed holiday falls on a weekend, the
+    # entitlement question is an EMPLOYMENT/labour-relations matter, not a date
+    # shift — see `_ie_public_holiday_entitlement_notes` in the Phase 4
+    # statutory-leave module, and gate G5. Nothing here silently moves a date.
+    "IE": [
+        {"name": "New Year's Day", "rule": "fixed", "month": 1, "day": 1},
+        {"name": "St Brigid's Day", "rule": "first_monday_unless_friday"},
+        {"name": "St Patrick's Day", "rule": "fixed", "month": 3, "day": 17},
+        {"name": "Easter Monday", "rule": "easter_offset", "offset_days": 1},
+        {"name": "May Day", "rule": "nth_weekday", "month": 5, "weekday": 0, "n": 1},
+        {"name": "June Holiday", "rule": "nth_weekday", "month": 6, "weekday": 0, "n": 1},
+        {"name": "August Holiday", "rule": "nth_weekday", "month": 8, "weekday": 0, "n": 1},
+        {"name": "October Holiday", "rule": "nth_weekday", "month": 10, "weekday": 0, "n": -1},
+        {"name": "Christmas Day", "rule": "fixed", "month": 12, "day": 25},
+        {"name": "St Stephen's Day", "rule": "fixed", "month": 12, "day": 26},
+    ],
 }
 
 
+# Singapore's 11 gazetted public holidays (Employment Act) fall on lunar /
+# gazetted dates, not a rule — MOM "Public holidays" (retrieved 2026-09-24,
+# page last updated 19 Jun 2026; public-holidays-sg-2026.ics /
+# -2027.ics). If a holiday falls on an employee's rest day the next working
+# day is the paid holiday (MOM) — that depends on each employee's rest day
+# and is shown as a note, not seeded as a second holiday.
+_SG_GAZETTED_PUBLIC_HOLIDAYS = {
+    2026: (((1, 1), "New Year's Day"), ((2, 17), "Chinese New Year"), ((2, 18), "Chinese New Year (second day)"),
+           ((3, 21), "Hari Raya Puasa"), ((4, 3), "Good Friday"), ((5, 1), "Labour Day"), ((5, 27), "Hari Raya Haji"),
+           ((5, 31), "Vesak Day (Monday 1 Jun if the rest day falls on 31 May)"),
+           ((8, 9), "National Day (Monday 10 Aug if the rest day falls on 9 Aug)"),
+           ((11, 8), "Deepavali (Monday 9 Nov if the rest day falls on 8 Nov)"), ((12, 25), "Christmas Day")),
+    2027: (((1, 1), "New Year's Day"), ((2, 6), "Chinese New Year"),
+           ((2, 7), "Chinese New Year (second day; Monday 8 Feb if the rest day falls on 7 Feb)"),
+           ((3, 10), "Hari Raya Puasa"), ((3, 26), "Good Friday"), ((5, 1), "Labour Day"), ((5, 17), "Hari Raya Haji"),
+           ((5, 20), "Vesak Day"), ((8, 9), "National Day"), ((10, 28), "Deepavali"), ((12, 25), "Christmas Day")),
+}
+
+
+
+
 def _seed_holidays_for_country(db: Session, organization_id: int, country: str, year: int) -> List[PayrollHoliday]:
+    if country == "SG":
+        # Gazetted dates (see _SG_GAZETTED_PUBLIC_HOLIDAYS): a year MOM has
+        # not published yet seeds nothing — never a guessed lunar date.
+        rows = [PayrollHoliday(organization_id=organization_id, country="SG", category="National",
+                               date=date(year, m, d), name=name)
+                for (m, d), name in _SG_GAZETTED_PUBLIC_HOLIDAYS.get(year, ())]
+        for row in rows:
+            db.add(row)
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
+    if country == "HK":
+        rows = [PayrollHoliday(organization_id=organization_id, country="HK", category="Statutory",
+                               date=date.fromisoformat(h["date"]), name=h["name"])
+                for h in jurisdiction_hooks.call("HK", "pack_holidays", db, year)]
+        for row in rows:
+            db.add(row)
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
     defaults = _DEFAULT_HOLIDAYS_BY_COUNTRY.get(country, [])
     if not defaults:
         import logging
@@ -14169,6 +20643,360 @@ def _upsert_us_ytd_accumulator(db: Session, employee_id: int, pay_date, result, 
     db.flush()
 
 
+# ── Puerto Rico: five independent wage-base/threshold YTD trackers ─────
+# (ZP-PR-ENG-001 §13/§14 — SS $184,500, Additional Medicare $200,000,
+# FUTA-equivalent $7,000, DTRH unemployment $7,000, SINOT $9,000). Same
+# read/write/multi-component-in-one-call shape as _load_us_ytd/
+# _upsert_us_ytd_accumulator above, but with its OWN PayrollYtdAccumulator
+# component keys and its OWN calendar-year accumulator key — entirely
+# independent of _US_YTD_COMPONENTS/_us_ytd_tax_year, per
+# engine/countries/puerto_rico.py's "never import from or share state
+# with us.py" doctrine.
+_PR_YTD_COMPONENTS = (
+    "pr_ss_wages", "pr_medicare_wages", "pr_futa_wages", "pr_unemployment_wages", "pr_sinot_wages",
+)
+
+
+def _pr_ytd_tax_year(pay_date) -> str:
+    """Calendar-year accumulator key for Puerto Rico wage-base tracking —
+    same deliberate "its own concept, not a display label" reasoning as
+    _us_ytd_tax_year's own docstring."""
+    return f"PR-CY-{pay_date.year}"
+
+
+def _load_pr_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's ytd_pr_*_before
+    params — empty dict when PR hasn't opted into the rollout switch, or
+    when no accumulator rows exist yet for this employee/tax-year (a
+    brand-new PR employee's first payslip of the year). Never guesses/
+    backfills a starting value."""
+    if "PR" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _pr_ytd_tax_year(pay_date)
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component.in_(_PR_YTD_COMPONENTS),
+        )
+        .all()
+    )
+    by_component = {r.tax_component: r.ytd_taxable_wages for r in rows}
+    ss_key, medicare_key, futa_key, unemployment_key, sinot_key = _PR_YTD_COMPONENTS
+    return dict(
+        ytd_pr_ss_wages_before=by_component.get(ss_key, Decimal("0")),
+        ytd_pr_medicare_wages_before=by_component.get(medicare_key, Decimal("0")),
+        ytd_pr_futa_wages_before=by_component.get(futa_key, Decimal("0")),
+        ytd_pr_unemployment_wages_before=by_component.get(unemployment_key, Decimal("0")),
+        ytd_pr_sinot_wages_before=by_component.get(sinot_key, Decimal("0")),
+    )
+
+
+def _upsert_pr_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative wage figures back
+    to PayrollYtdAccumulator — get-or-create per (employee, tax_year,
+    component), flush (not commit; caller's own transaction boundary
+    still governs). No-op if the result carries no YTD figures (i.e. the
+    calculation ran dormant — result.ytd_pr_ss_wages_after is None), so
+    calling this unconditionally from every persisting entry point is
+    safe even while the rollout switch is off."""
+    if result.ytd_pr_ss_wages_after is None:
+        return
+    tax_year = _pr_ytd_tax_year(pay_date)
+    ss_key, medicare_key, futa_key, unemployment_key, sinot_key = _PR_YTD_COMPONENTS
+    values = {
+        ss_key: result.ytd_pr_ss_wages_after,
+        medicare_key: result.ytd_pr_medicare_wages_after,
+        futa_key: result.ytd_pr_futa_wages_after,
+        unemployment_key: result.ytd_pr_unemployment_wages_after,
+        sinot_key: result.ytd_pr_sinot_wages_after,
+    }
+    for component, value in values.items():
+        if value is None:
+            continue
+        row = (
+            db.query(PayrollYtdAccumulator)
+            .filter(
+                PayrollYtdAccumulator.employee_id == employee_id,
+                PayrollYtdAccumulator.tax_year == tax_year,
+                PayrollYtdAccumulator.tax_component == component,
+            )
+            .first()
+        )
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=component)
+            db.add(row)
+        row.ytd_taxable_wages = value
+        row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# ── Puerto Rico: Form 499 R-4/R-4.1 withholding certificate (PR-005) ───
+# Same create-Draft -> submit -> approve-supersedes-prior immutable-
+# versioning CRUD pattern as create_salary_tds_declaration/
+# submit_salary_tds_declaration/approve_salary_tds_declaration above —
+# see PRWithholdingCertificate's own model docstring. Not tax-year-scoped.
+
+def create_pr_withholding_certificate(
+    db: Session, organization_id: int, employee_id: int,
+    personal_exemption_amount: Decimal = Decimal("0"), dependents_count: int = 0,
+    dependent_exemption_per_dependent: Decimal = Decimal("0"), deduction_allowance_amount: Decimal = Decimal("0"),
+    optional_married_computation: bool = False, msrra_election: bool = False,
+    additional_withholding_amount: Decimal = Decimal("0"),
+) -> PRWithholdingCertificate:
+    _get_employee_or_404(db, organization_id, employee_id)
+    row = PRWithholdingCertificate(
+        employee_id=employee_id, organization_id=organization_id,
+        personal_exemption_amount=personal_exemption_amount, dependents_count=dependents_count,
+        dependent_exemption_per_dependent=dependent_exemption_per_dependent,
+        deduction_allowance_amount=deduction_allowance_amount,
+        optional_married_computation=optional_married_computation, msrra_election=msrra_election,
+        additional_withholding_amount=additional_withholding_amount,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _get_pr_withholding_certificate_or_404(db: Session, organization_id: int, certificate_id: int) -> PRWithholdingCertificate:
+    row = db.query(PRWithholdingCertificate).filter(
+        PRWithholdingCertificate.id == certificate_id, PRWithholdingCertificate.organization_id == organization_id,
+    ).first()
+    if not row:
+        raise NotFoundException(f"Puerto Rico withholding certificate {certificate_id} not found.")
+    return row
+
+
+def submit_pr_withholding_certificate(db: Session, organization_id: int, certificate_id: int) -> PRWithholdingCertificate:
+    row = _get_pr_withholding_certificate_or_404(db, organization_id, certificate_id)
+    if row.status != "Draft":
+        raise BadRequestException(f"Certificate is {row.status}, not Draft — cannot submit.")
+    row.status = "Submitted"
+    row.submitted_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def approve_pr_withholding_certificate(db: Session, organization_id: int, certificate_id: int, approver_id: int) -> PRWithholdingCertificate:
+    row = _get_pr_withholding_certificate_or_404(db, organization_id, certificate_id)
+    if row.status != "Submitted":
+        raise BadRequestException(f"Certificate is {row.status}, not Submitted — cannot approve.")
+    existing = (
+        db.query(PRWithholdingCertificate)
+        .filter(
+            PRWithholdingCertificate.organization_id == organization_id, PRWithholdingCertificate.employee_id == row.employee_id,
+            PRWithholdingCertificate.status == "Approved",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+    row.status = "Approved"
+    row.approved_by_id = approver_id
+    row.approved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_pr_withholding_certificates(db: Session, organization_id: int, employee_id: Optional[int] = None) -> List[PRWithholdingCertificate]:
+    query = db.query(PRWithholdingCertificate).filter(PRWithholdingCertificate.organization_id == organization_id)
+    if employee_id:
+        query = query.filter(PRWithholdingCertificate.employee_id == employee_id)
+    return query.order_by(PRWithholdingCertificate.created_at.desc()).all()
+
+
+def accrue_pr_monthly_leave(
+    db: Session, organization_id: int, employee_id: int,
+    hired_before_2017: bool, years_of_service: Decimal, qualifying_small_employer: bool,
+    qualifying_hours_in_month: Decimal, period_label: Optional[str] = None,
+) -> PayrollLeaveAllocation:
+    """PR-028/PR-029: monthly vacation (Act 4-2017/Law 180, cohort-based)
+    + sick leave (flat 1 day/month at 130 hours) accrual — calls
+    engine/countries/puerto_rico.py's own pure calculators, then adds
+    this month's days to the SAME generic PayrollLeaveAllocation.
+    leave_balances JSON every other country's leave management already
+    uses (get_leave_allocations/bulk_save_leaves), reusing the existing
+    "sick" key and a new "vacation" key rather than a bespoke parallel
+    ledger. ADDITIVE only — this adds to whatever "total" already
+    exists, never resets or overwrites a balance an Org Admin has
+    separately edited. Not itself scheduled/automatic (no monthly job
+    calls this yet) — a manual/triggered action per month, same
+    "mechanism exists, orchestration is follow-up scope" contract as
+    every other PR calculator in this build."""
+    from app.modules.payroll.engine.countries import puerto_rico
+
+    _get_employee_or_404(db, organization_id, employee_id)
+    vacation_days = puerto_rico.calculate_pr_vacation_accrual(
+        hired_before_2017=hired_before_2017, years_of_service=years_of_service,
+        qualifying_small_employer=qualifying_small_employer, qualifying_hours_in_month=qualifying_hours_in_month,
+    )
+    sick_days = puerto_rico.calculate_pr_sick_leave_accrual(qualifying_hours_in_month)
+
+    row = (
+        db.query(PayrollLeaveAllocation)
+        .filter(PayrollLeaveAllocation.organization_id == organization_id, PayrollLeaveAllocation.employee_id == employee_id)
+        .first()
+    )
+    if row is None:
+        row = PayrollLeaveAllocation(organization_id=organization_id, employee_id=employee_id, leave_balances={})
+        db.add(row)
+        db.flush()
+
+    balances = dict(row.leave_balances or {})
+    vacation = dict(balances.get("vacation") or {"used": 0, "total": 0})
+    vacation["total"] = float(Decimal(str(vacation.get("total") or 0)) + vacation_days)
+    balances["vacation"] = vacation
+
+    sick = dict(balances.get("sick") or {"used": 0, "total": 0})
+    sick["total"] = float(Decimal(str(sick.get("total") or 0)) + sick_days)
+    balances["sick"] = sick
+
+    row.leave_balances = balances
+    if period_label:
+        row.period_label = period_label
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# Puerto Rico Christmas Bonus bonus-year accumulator (PR-032) — the bonus
+# year runs Oct 1-Sep 30, NOT a calendar/tax year, so this reuses the SAME
+# PayrollYtdAccumulator table every other wage-base tracker in this build
+# uses, but with its own "PR-BONUS-<year>" pseudo-tax-year key rather than
+# a calendar-year one. Two component keys under that key: cumulative
+# bonus-year WAGES and cumulative bonus-year HOURS — the hours figure is
+# stored in the SAME ytd_taxable_wages numeric column as a plain hours
+# count (not a dollar amount), the same "reuse an existing generic column
+# for a different unit" convention Trinidad's own NIS-class
+# adjustment_amount reuse already establishes elsewhere in this codebase.
+_PR_BONUS_YEAR_WAGES_COMPONENT = "pr_bonus_year_wages"
+_PR_BONUS_YEAR_HOURS_COMPONENT = "pr_bonus_year_hours"
+
+
+def _pr_bonus_year_key(as_of_date) -> str:
+    """PR-032: Puerto Rico's Christmas Bonus bonus year runs Oct 1-Sep
+    30 — "PR-BONUS-2026" for any date from 2025-10-01 through
+    2026-09-30 (the bonus year named for the calendar year it ENDS in,
+    matching the doc's own "Oct 1-Sep 30" framing)."""
+    start_year = as_of_date.year if as_of_date.month >= 10 else as_of_date.year - 1
+    return f"PR-BONUS-{start_year + 1}"
+
+
+def accrue_pr_bonus_year_totals(
+    db: Session, organization_id: int, employee_id: int, as_of_date,
+    wages_this_period: Decimal, hours_this_period: Decimal,
+) -> dict:
+    """Adds this period's wages/hours to the employee's running Christmas
+    Bonus bonus-year totals. ADDITIVE only — never resets. Not itself
+    scheduled/automatic (no payroll-run hook calls this yet); a manual/
+    triggered action per pay period, same "mechanism exists, orchestration
+    is follow-up scope" contract as accrue_pr_monthly_leave above."""
+    _get_employee_or_404(db, organization_id, employee_id)
+    bonus_year = _pr_bonus_year_key(as_of_date)
+
+    def _upsert(component: str, delta: Decimal):
+        row = (
+            db.query(PayrollYtdAccumulator)
+            .filter(
+                PayrollYtdAccumulator.employee_id == employee_id,
+                PayrollYtdAccumulator.tax_year == bonus_year,
+                PayrollYtdAccumulator.tax_component == component,
+            )
+            .first()
+        )
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=bonus_year, tax_component=component, ytd_taxable_wages=Decimal("0"))
+            db.add(row)
+        row.ytd_taxable_wages = (row.ytd_taxable_wages or Decimal("0")) + delta
+        return row
+
+    wages_row = _upsert(_PR_BONUS_YEAR_WAGES_COMPONENT, wages_this_period)
+    hours_row = _upsert(_PR_BONUS_YEAR_HOURS_COMPONENT, hours_this_period)
+    db.commit()
+    db.refresh(wages_row)
+    db.refresh(hours_row)
+    return dict(bonus_year=bonus_year, cumulative_wages=wages_row.ytd_taxable_wages, cumulative_hours=hours_row.ytd_taxable_wages)
+
+
+def get_pr_bonus_year_totals(db: Session, organization_id: int, employee_id: int, as_of_date) -> dict:
+    """Returns {bonus_year, cumulative_wages, cumulative_hours} (Decimal)
+    for the bonus year containing as_of_date — Decimal("0") for either
+    figure when nothing has been accrued yet this bonus year. Never
+    guesses/backfills."""
+    bonus_year = _pr_bonus_year_key(as_of_date)
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == bonus_year,
+            PayrollYtdAccumulator.tax_component.in_((_PR_BONUS_YEAR_WAGES_COMPONENT, _PR_BONUS_YEAR_HOURS_COMPONENT)),
+        )
+        .all()
+    )
+    by_component = {r.tax_component: r.ytd_taxable_wages for r in rows}
+    return dict(
+        bonus_year=bonus_year,
+        cumulative_wages=by_component.get(_PR_BONUS_YEAR_WAGES_COMPONENT, Decimal("0")),
+        cumulative_hours=by_component.get(_PR_BONUS_YEAR_HOURS_COMPONENT, Decimal("0")),
+    )
+
+
+def calculate_pr_christmas_bonus_from_accumulator(
+    db: Session, organization_id: int, employee_id: int, as_of_date,
+    hired_before_2017: bool, employer_size_over_threshold: bool, is_first_year: bool = False,
+) -> dict:
+    """Convenience wrapper: reads this employee's real accrued bonus-year
+    wages/hours (get_pr_bonus_year_totals) and feeds them straight into
+    engine/countries/puerto_rico.py's calculate_pr_christmas_bonus — the
+    full end-to-end path from real accumulated data to a real statutory
+    bonus figure, closing the gap the pure calculator's own module
+    docstring discloses (previously the caller had to supply final
+    totals itself)."""
+    from app.modules.payroll.engine.countries import puerto_rico
+
+    totals = get_pr_bonus_year_totals(db, organization_id, employee_id, as_of_date)
+    result = puerto_rico.calculate_pr_christmas_bonus(
+        hired_before_2017=hired_before_2017, employer_size_over_threshold=employer_size_over_threshold,
+        qualifying_hours=totals["cumulative_hours"], bonus_year_wages=totals["cumulative_wages"],
+        is_first_year=is_first_year,
+    )
+    result["bonus_year"] = totals["bonus_year"]
+    result["cumulative_wages"] = totals["cumulative_wages"]
+    result["cumulative_hours"] = totals["cumulative_hours"]
+    return result
+
+
+def get_pr_certificate_inputs(db: Session, organization_id: int, employee_id: int) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    pr_certificate_* params — empty dict (PR-006: engine falls back to
+    its own default treatment) when no Approved certificate exists for
+    this employee. Never guesses/backfills a certificate."""
+    row = (
+        db.query(PRWithholdingCertificate)
+        .filter(
+            PRWithholdingCertificate.organization_id == organization_id,
+            PRWithholdingCertificate.employee_id == employee_id,
+            PRWithholdingCertificate.status == "Approved",
+        )
+        .first()
+    )
+    if row is None:
+        return {}
+    return dict(
+        pr_certificate_personal_exemption=row.personal_exemption_amount,
+        pr_certificate_dependents_count=row.dependents_count,
+        pr_certificate_dependent_exemption_per_dependent=row.dependent_exemption_per_dependent,
+        pr_certificate_deduction_allowance=row.deduction_allowance_amount,
+        pr_certificate_additional_withholding=row.additional_withholding_amount,
+        pr_certificate_msrra_election=row.msrra_election,
+    )
+
+
 # ── Australia: Superannuation Guarantee Maximum Contribution Base YTD ───
 # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2, 2026-09-16) — same
 # read/write/tax-year-key shape as _load_us_ytd/_upsert_us_ytd_accumulator
@@ -14294,6 +21122,486 @@ def _upsert_au_whm_ytd_accumulator(db: Session, employee_id: int, pay_date, resu
     row.ytd_taxable_wages = result.ytd_whm_earnings_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Ireland (ZP-IE-ENG-001) — service layer
+#
+# Placed inline in service.py, exactly like every other jurisdiction
+# (_load_au_sg_ytd, _load_fr_ytd, _load_ca_ytd above): there is no
+# service_ireland.py, and none should ever be added.
+#
+# Ireland USES the generic PayrollYtdAccumulator and the
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES switch, the same as the UK and Australia
+# (2026-09-28: this used to be a dedicated payroll_ie_ytd_accumulators table,
+# which was the one genuine piece of duplication in the Ireland schema — the
+# UK and AU both rode the shared table). Ireland's five independent cumulative
+# figures are now five tax_component rows rather than five columns of one row.
+# That is a strictly better fit than the old column-per-figure layout, because
+# the generic table's (taxable_wages, tax_withheld) pair now names a real
+# concept per row instead of being overloaded: USC genuinely has a payable base
+# AND a paid figure, PRSI genuinely has a reckonable total and no employee tax,
+# and MyFutureFund genuinely has an earnings total. The component key carries
+# that meaning, so no reader has to remember which half of the pair is live.
+# ═════════════════════════════════════════════════════════════════════
+
+# IE-032: PREVIEW MUST NEVER WRITE an Ireland accumulator. Every writer below
+# is called only from a real payslip-persisting path, and each one re-checks
+# that it is holding a real payslip id, so a preview can never advance a
+# cumulative figure.
+#
+# The MyFutureFund threshold-crossing date (IE-020) is deliberately NOT a
+# component row, and the old payroll_ie_ytd_accumulators column holding it was
+# dropped rather than relocated, because it was pure redundancy: the crossing
+# payroll is already reconstructable from data this platform persists, on the
+# payslip, immutably, per occurrence. The engine's MyFutureFund block returns
+# threshold / earnings_ytd_before / earnings_ytd_after on EVERY branch, and
+# ie_calculation_trace is snapshotted verbatim onto the payslip, so "the
+# payroll that crossed the threshold" is exactly the payslip where
+# earnings_ytd_before < threshold <= earnings_ytd_after. The old column was
+# additionally write-only — nothing ever read it back, and cessation is derived
+# by the engine from the running total, not from a stored date.
+_IE_YTD_COMPONENTS = (
+    "ie_usc_payable",      # ytd_taxable_wages = USC's own payable base (IE-009/IE-010)
+    "ie_usc_paid",         # ytd_tax_withheld  = USC charged to date
+    "ie_prsi_reckonable",  # ytd_taxable_wages = reckonable pay, PRSI has no employee tax
+    "ie_prsi_weeks",       # ytd_tax_withheld  = contribution weeks to date
+    "ie_mff_earnings",     # ytd_taxable_wages = MyFutureFund earnings before this period
+)
+
+
+def _ie_tax_year(pay_date) -> int:
+    """IE-006: the Irish tax year is selected by PAY DATE and is the calendar
+    year — income earned in 2025 but paid in 2026 is processed under 2026."""
+    return int(pay_date.year)
+
+
+def _ie_ytd_rows_for_update(db: Session, employee_id: int, tax_year: int) -> dict:
+    """component -> locked PayrollYtdAccumulator row, for this employee/year.
+
+    IE-039: Ireland's cumulative PAYE/USC and the annual MyFutureFund threshold
+    are exactly the case where a second concurrent commit must not consume
+    stale year-to-date values, so every component row is read FOR UPDATE. Same
+    forward-looking discipline the shared table's own docstring describes and
+    the UK/AU loaders already apply.
+
+    The rows are NOT created here: a read must never mint a row, only a real
+    commit may."""
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == str(tax_year),
+            PayrollYtdAccumulator.tax_component.in_(_IE_YTD_COMPONENTS),
+        )
+        .with_for_update()
+        .all()
+    )
+    return {r.tax_component: r for r in rows}
+
+
+def _ie_component_value(rows: dict, component: str, column: str) -> Decimal:
+    """Read one cumulative figure, defaulting to zero for a not-yet-written
+    component. A brand-new employee's first payslip of the year legitimately
+    has no rows at all; that is zero, never an error and never a guess."""
+    row = rows.get(component)
+    if row is None:
+        return Decimal("0")
+    value = getattr(row, column)
+    return Decimal("0") if value is None else Decimal(str(value))
+
+
+def _load_ie_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's ireland_ytd param.
+
+    Gated on the shared _YTD_ACCUMULATOR_ENABLED_COUNTRIES switch, like the
+    UK and AU loaders, so Ireland's cumulative state rolls out and can be
+    rolled back with every other jurisdiction's rather than independently.
+
+    A starting value is never guessed or backfilled: no rows means this is the
+    employee's first payslip of the tax year and every figure is legitimately
+    zero."""
+    if "IE" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    rows = _ie_ytd_rows_for_update(db, employee_id, _ie_tax_year(pay_date))
+    if not rows:
+        return {}
+    return {
+        "usc_payable_ytd": _ie_component_value(rows, "ie_usc_payable", "ytd_taxable_wages"),
+        "usc_paid_ytd": _ie_component_value(rows, "ie_usc_paid", "ytd_tax_withheld"),
+        "prsi_reckonable_ytd": _ie_component_value(rows, "ie_prsi_reckonable", "ytd_taxable_wages"),
+        "prsi_contribution_weeks_ytd": _ie_component_value(rows, "ie_prsi_weeks", "ytd_tax_withheld"),
+        "mff_earnings_ytd_before": _ie_component_value(rows, "ie_mff_earnings", "ytd_taxable_wages"),
+    }
+
+
+def _upsert_ie_ytd_accumulator(db: Session, employee_id: int, organization_id: int,
+                               pay_date, result, payslip_id: int = None) -> None:
+    """Advance Ireland's independent cumulative bases from a REAL persisted
+    payslip.
+
+    IE-032: preview must not write here, so this returns immediately unless
+    the caller passed a real payslip id. IE-039: every component row is read
+    FOR UPDATE before the figures are merged in, so a concurrent commit cannot
+    consume a stale "before" value.
+
+    Each figure lands in its own component row, created on demand by this
+    writer (and only this writer). The MyFutureFund threshold crossing (IE-020)
+    needs no write here at all: it is derived from the payslip's own snapshot
+    (see the note above), so this writer only carries the running earnings
+    total forward.
+    """
+    if payslip_id is None:
+        return  # preview / non-persisted calculation — never advances a cumulative
+    ytd_after = result.ie_ytd_after
+    if not ytd_after:
+        return  # Week 1 / Emergency basis produce no cumulative state
+    tax_year = _ie_tax_year(pay_date)
+    rows = _ie_ytd_rows_for_update(db, employee_id, tax_year)
+
+    def _row_for(component: str):
+        row = rows.get(component)
+        if row is None:
+            row = PayrollYtdAccumulator(
+                employee_id=employee_id,
+                tax_year=str(tax_year),
+                tax_component=component,
+                ytd_taxable_wages=Decimal("0"),
+                ytd_tax_withheld=Decimal("0"),
+            )
+            db.add(row)
+            rows[component] = row
+        return row
+
+    if ytd_after.get("usc_payable_ytd") is not None:
+        _row_for("ie_usc_payable").ytd_taxable_wages = ytd_after["usc_payable_ytd"]
+    if ytd_after.get("usc_paid_ytd") is not None:
+        _row_for("ie_usc_paid").ytd_tax_withheld = ytd_after["usc_paid_ytd"]
+    if ytd_after.get("prsi_reckonable_ytd") is not None:
+        _row_for("ie_prsi_reckonable").ytd_taxable_wages = ytd_after["prsi_reckonable_ytd"]
+        weeks = result.ie_prsi_contribution_weeks
+        if weeks is not None:
+            weeks_row = _row_for("ie_prsi_weeks")
+            weeks_row.ytd_tax_withheld = (weeks_row.ytd_tax_withheld or Decimal("0")) + weeks
+    if ytd_after.get("mff_earnings_ytd") is not None:
+        _row_for("ie_mff_earnings").ytd_taxable_wages = ytd_after["mff_earnings_ytd"]
+    for component in _IE_YTD_COMPONENTS:
+        row = rows.get(component)
+        if row is not None:
+            row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+def _load_ie_rpn(db: Session, employee_id: int, pay_date) -> dict:
+    """The frozen Revenue Payroll Notification for this employee's Irish tax
+    year, as the engine's input dict (IE-005/IE-022).
+
+    IE-022 forbids the core calculator making live Revenue calls, so the
+    snapshot retrieved during preflight IS the calculation input. The most
+    recent non-stale snapshot wins; a stale one is still returned (flagged
+    `is_stale`) rather than silently dropped, because dropping it would make
+    the engine fall through to EMERGENCY basis and produce a plausible but
+    wrong number rather than a block.
+
+    An employee with no snapshot is the legitimate EMERGENCY case (IE-008) —
+    the engine blocks on its own if that is not really the case, because
+    EMERGENCY requires a reason and a week counter."""
+    tax_year = str(_ie_tax_year(pay_date))
+    row = (
+        db.query(IrelandRpnSnapshot)
+        .filter(
+            IrelandRpnSnapshot.employee_id == employee_id,
+            IrelandRpnSnapshot.tax_year == tax_year,
+        )
+        .order_by(IrelandRpnSnapshot.issued_at.desc(), IrelandRpnSnapshot.id.desc())
+        .first()
+    )
+    if row is None:
+        return {}
+    return {
+        "snapshot_id": row.id,
+        "rpn_number": row.rpn_number,
+        "issued_at": row.issued_at,
+        "basis": row.calculation_basis,
+        "ppsn_supplied": row.ppsn_supplied,
+        "standard_rate_band": row.standard_rate_band,
+        "tax_credit": row.tax_credit,
+        "standard_rate_band_period": row.standard_rate_band_period,
+        "tax_credit_period": row.tax_credit_period,
+        "previous_taxable_pay_ytd": row.previous_taxable_pay_ytd,
+        "previous_pay_ytd": row.previous_pay_ytd,
+        "periods_elapsed": row.periods_elapsed,
+        "lpt_instructed": row.lpt_instructed,
+        "lpt_rate_pct": row.lpt_rate_pct,
+        "emergency_tax_credit_weekly": row.emergency_tax_credit_weekly,
+        "raw_hash": row.raw_hash,
+        "is_stale": row.is_stale,
+    }
+
+
+def upsert_ie_rpn_snapshot(
+    db: Session,
+    organization_id: int,
+    employee_id: int,
+    rpn_number: str,
+    issued_at,
+    tax_year: str,
+    calculation_basis: str,
+    ppsn_supplied: bool,
+    standard_rate_band,
+    tax_credit,
+    standard_rate_band_period,
+    tax_credit_period,
+    previous_taxable_pay_ytd,
+    previous_pay_ytd,
+    periods_elapsed: int,
+    lpt_instructed: bool,
+    lpt_rate_pct,
+    emergency_tax_credit_weekly,
+    raw_hash: str,
+    raw_payload: dict = None,
+    statutory_profile_id: int = None,
+) -> "IrelandRpnSnapshot":
+    """Insert or update a frozen Revenue Payroll Notification snapshot (IE-005,
+    IE-022, IE-033, IE-045).
+
+    The snapshot is content-addressed by raw_hash: if the same authority response
+    is ingested again (same raw_hash for the same employee/tax_year), we return
+    the existing row rather than duplicating it. A genuine change (new raw_hash)
+    creates a new immutable row — the historical payroll must always be
+    reproducible from the exact snapshot that was in force (IE-045).
+
+    The caller must supply a deterministic raw_hash over the full authority
+    response (e.g. SHA-256 of the canonical JSON). The raw_payload is stored
+    verbatim for audit/replay (IE-033/IE-047)."""
+    from datetime import datetime
+    from app.modules.payroll.models import IrelandRpnSnapshot
+
+    tax_year = str(tax_year)
+
+    # Check if this exact content already exists for this employee/year
+    existing = (
+        db.query(IrelandRpnSnapshot)
+        .filter(
+            IrelandRpnSnapshot.employee_id == employee_id,
+            IrelandRpnSnapshot.tax_year == tax_year,
+            IrelandRpnSnapshot.raw_hash == raw_hash,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+
+    # Normalize issued_at to datetime if it's a date/string
+    if not isinstance(issued_at, datetime):
+        if isinstance(issued_at, str):
+            issued_at = datetime.fromisoformat(issued_at.replace("Z", "+00:00"))
+        else:
+            # Assume it's a date; promote to datetime at midnight UTC
+            issued_at = datetime.combine(issued_at, datetime.min.time())
+
+    # Helper to coerce numeric strings/Decimals to Numeric-compatible values
+    def _num(v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float, Decimal)):
+            return v
+        try:
+            return Decimal(str(v))
+        except Exception:
+            return None
+
+    row = IrelandRpnSnapshot(
+        organization_id=organization_id,
+        employee_id=employee_id,
+        statutory_profile_id=statutory_profile_id,
+        rpn_number=rpn_number,
+        issued_at=issued_at,
+        tax_year=tax_year,
+        calculation_basis=calculation_basis,
+        ppsn_supplied=bool(ppsn_supplied),
+        standard_rate_band=_num(standard_rate_band),
+        tax_credit=_num(tax_credit),
+        standard_rate_band_period=_num(standard_rate_band_period),
+        tax_credit_period=_num(tax_credit_period),
+        previous_taxable_pay_ytd=_num(previous_taxable_pay_ytd),
+        previous_pay_ytd=_num(previous_pay_ytd),
+        periods_elapsed=int(periods_elapsed) if periods_elapsed is not None else None,
+        lpt_instructed=bool(lpt_instructed),
+        lpt_rate_pct=_num(lpt_rate_pct),
+        emergency_tax_credit_weekly=_num(emergency_tax_credit_weekly),
+        raw_hash=raw_hash,
+        raw_payload=raw_payload,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _load_ie_myfuturefund_status(db: Session, employee_id: int, pay_date) -> dict:
+    """The NAERSA-notified MyFutureFund status in force on pay_date (IE-018).
+
+    Effective-dated: the row whose [effective_from, effective_to] window
+    contains pay_date wins, so a historical payroll replays the status that
+    was notified at the time rather than today's. There is deliberately no
+    admin "enrol this employee" control anywhere — status rows are written
+    only from a NAERSA notification, and the engine blocks rather than
+    defaulting when none is in force."""
+    row = (
+        db.query(IrelandMyFutureFundStatus)
+        .filter(
+            IrelandMyFutureFundStatus.employee_id == employee_id,
+            IrelandMyFutureFundStatus.effective_from <= pay_date,
+            (IrelandMyFutureFundStatus.effective_to.is_(None))
+            | (IrelandMyFutureFundStatus.effective_to >= pay_date),
+        )
+        .order_by(IrelandMyFutureFundStatus.effective_from.desc(), IrelandMyFutureFundStatus.id.desc())
+        .first()
+    )
+    if row is None:
+        return {}
+    return {
+        "status": row.status,
+        "status_reason": row.status_reason,
+        "effective_from": row.effective_from,
+        "employee_contribution_pct": row.employee_contribution_pct,
+        "employer_contribution_pct": row.employer_contribution_pct,
+        "threshold_state": row.threshold_state,
+        "contributions_ceased": row.contributions_ceased,
+        "exemption_reference": row.exemption_reference,
+        "source": row.source,
+    }
+
+
+# ── Ireland Revenue Integration (ZP-IE-ENG-001 WP2) — NOT IMPLEMENTED ────
+# Real-time payroll submission (on/before pay date), monthly statement
+# retrieval, return reconciliation and payment tracking (IE-022/IE-026/IE-027)
+# are specified but deliberately NOT present in the service layer.
+#
+# They were scaffolded once and then removed on 2026-09-28, because they could
+# not have been correct: they wrote rows to payroll_ie_revenue_submissions /
+# payroll_ie_revenue_monthly_returns, two tables the 2026-09-28 Ireland schema
+# refactor had removed as dead weight (and which
+# tests/test_ireland_statutory_catalog.py::test_ie_has_no_dedicated_ytd_accumulator_table
+# pins must never come back), and they had no ROS transport behind them, so
+# "ACKNOWLEDGED" would have been written without Revenue ever having answered.
+#
+# A working implementation needs, in this order:
+#   1. the official ROS endpoint, its request/response schema and credentials;
+#   2. the real-time submission + monthly statement/return contracts;
+#   3. a persisted correction chain (original/cancel/amend linkage per IE-025);
+#   4. a separate payment record — a return's liability and the act of paying
+#      it are different facts and must not share one row.
+# Until 1 and 2 exist, Ireland payroll produces RPN-driven results only and
+# filing remains a manual, out-of-band step. Nothing here may be stubbed to
+# "succeed", because a false acknowledgement is indistinguishable from a real
+# one at audit time.
+
+def _resolve_ie_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
+                            exclude_run_id: Optional[int] = None) -> dict:
+    """Build build_context_from_employee(ireland_inputs=...) for one Ireland
+    employee on payroll_date: the frozen RPN instruction, the NAERSA
+    MyFutureFund status in force, the independent cumulative bases, and the
+    employee's own statutory facts.
+
+    Mirrors _resolve_france_calc_inputs above in shape and in discipline: it
+    assembles only authority-sourced and employee-sourced facts and never
+    derives a statutory result. Whatever it cannot establish is simply left
+    absent, so the engine raises its own specific block (IE_MFF_STATUS_MISSING,
+    IE_PRSI_CLASS_MISSING, IE_NMW_HOURS_EVIDENCE_MISSING, ...) instead of this
+    layer guessing.
+
+    Ireland is a COUNTRY-LEVEL jurisdiction: there is no province/state
+    dimension, so nothing here is scoped by state.
+    """
+    rpn = _load_ie_rpn(db, employee.id, payroll_date)
+    myfuturefund = _load_ie_myfuturefund_status(db, employee.id, payroll_date)
+    ytd = _load_ie_ytd(db, employee.id, payroll_date)
+
+    # IE-005: PPSN presence on the RPN drives the Emergency basis treatment
+    # (higher rate, no credit), so it is the authority value, not merely
+    # whether the employee record happens to carry a PPSN.
+    ppsn_supplied = rpn.get("ppsn_supplied")
+    if ppsn_supplied is None:
+        ppsn_supplied = bool(getattr(employee, "ie_ppsn", None))
+
+    employee_facts = {
+        "prsi_class": getattr(employee, "ie_prsi_class", None),
+        "prsi_exemption_reference": getattr(employee, "ie_prsi_exemption_reference", None),
+        "usc_status": getattr(employee, "ie_usc_status", None),
+        "ppsn_supplied": bool(ppsn_supplied),
+        "ppsn": getattr(employee, "ie_ppsn", None),
+        "sector_wage_order": getattr(employee, "ie_sector_wage_order", None),
+        "contracted_weekly_hours": getattr(employee, "ie_contracted_weekly_hours", None),
+        "emergency_reason": getattr(employee, "ie_emergency_reason", None),
+        "emergency_week": getattr(employee, "ie_emergency_week", None),
+        "pension_scheme_reference": getattr(employee, "ie_pension_scheme_reference", None),
+    }
+
+    return {
+        "ireland_pay_date": payroll_date,
+        "ireland_rpn": rpn,
+        "ireland_employee": employee_facts,
+        "ireland_myfuturefund": myfuturefund,
+        "ireland_ytd": ytd,
+        "ireland_employee_id": employee.id,
+        "ireland_organization_id": organization_id,
+    }
+
+
+# Payroll runs whose payslips are COMMITTED remuneration for Sweden's youth
+# threshold accumulator: a Draft/Review run is not yet payroll, and counting
+# it would let a regenerated draft consume the SEK threshold twice.
+_SE_COMMITTED_RUN_STATUSES = (
+    PayrollStatus.APPROVED.value, PayrollStatus.AUTHORIZED.value,
+    PayrollStatus.PAID.value, PayrollStatus.CLOSED.value,
+)
+
+
+def _se_month_to_date_prior(db: Session, organization_id: int, employee_id: int, pay_date,
+                            exclude_run_id: Optional[int] = None) -> Decimal:
+    """spec §6 "Threshold allocation": remuneration ALREADY paid by this
+    employer to this person in the same calendar payment month (SE-005:
+    payment date decides the month), from committed runs only. The youth
+    reduction's SEK cap is allocated against this before the current run."""
+    month_start = pay_date.replace(day=1)
+    next_month = (month_start.replace(year=month_start.year + 1, month=1) if month_start.month == 12
+                  else month_start.replace(month=month_start.month + 1))
+    query = (
+        db.query(sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0))
+        .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.employee_id == employee_id,
+            PayrollRun.pay_date >= month_start, PayrollRun.pay_date < next_month,
+            PayrollRun.status.in_(_SE_COMMITTED_RUN_STATUSES),
+        )
+    )
+    if exclude_run_id is not None:
+        query = query.filter(PayrollRun.id != exclude_run_id)
+    return Decimal(str(query.scalar() or 0))
+
+
+def _resolve_se_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
+                            exclude_run_id: Optional[int] = None) -> dict:
+    """Build build_context_from_employee(sweden_inputs=...) for one Swedish
+    employee on payroll_date — the worker tax/social-insurance profile in
+    force on that date, the youth-threshold month accumulator and the
+    worker's date of birth (cohort). Same discipline as _resolve_ie_calc_inputs:
+    only facts, never a statutory result; anything it cannot establish is
+    left absent so sweden.py raises its own specific block (spec §5)."""
+    profile = resolve_employee_statutory_profile(db, employee.id, organization_id, as_of=payroll_date)
+    return {
+        "sweden_statutory_profile": profile,
+        "se_organization_id": organization_id,
+        "se_employee_id": employee.id,
+        "se_month_to_date_prior": _se_month_to_date_prior(
+            db, organization_id, employee.id, payroll_date, exclude_run_id=exclude_run_id),
+        # SLP base (SE-007) is the employer pension-cost LEDGER, which has no
+        # Sweden source yet — left unset, which the engine treats as a
+        # legitimate zero, never as gross pay.
+    }
 
 
 # Cayman Islands mandatory-pension CI$87,000 annual cap (KY-008, 2026-09-21)
@@ -14424,6 +21732,584 @@ def _upsert_gy_paye_credit_ytd_accumulator(db: Session, employee_id: int, pay_da
     row.ytd_taxable_wages = result.ytd_gy_paye_credit_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
+
+
+# Singapore CPF annual wage ceiling (ZP-SG-ENG-001 SG-007/SG-010/SG-043) —
+# same read/write/component-key shape as _load_ky_pension_ytd/
+# _upsert_ky_pension_ytd_accumulator above, reusing PayrollYtdAccumulator
+# with two component keys (OW and AW subject to CPF). Keyed per
+# employee_id, and a PayrollEmployee belongs to exactly one organization
+# (legal employer), so two legal employers never share a ceiling even
+# within one customer tenant (§3's critical invariant).
+_SG_CPF_OW_YTD_COMPONENT = "cpf_ow_subject"
+_SG_CPF_AW_YTD_COMPONENT = "cpf_aw_subject"
+# Total Additional Wages PAID in the year (subject to CPF or not) — the
+# Option A AW-ceiling true-up needs it to know how much earlier AW is still
+# owed contributions (CPF Board AW ceiling examples 6-14).
+_SG_CPF_AW_PAID_YTD_COMPONENT = "cpf_aw_paid"
+_SG_CPF_YTD_COMPONENTS = (_SG_CPF_OW_YTD_COMPONENT, _SG_CPF_AW_YTD_COMPONENT, _SG_CPF_AW_PAID_YTD_COMPONENT)
+_SG_FOREIGN_WORK_PASSES = ("EP", "S_PASS", "WORK_PERMIT")
+
+
+def _sg_ytd_tax_year(pay_date) -> str:
+    """Singapore CPF calendar-year accumulator key — "SG-CY-2026"."""
+    return f"SG-CY-{pay_date.year}"
+
+
+def _query_sg_cpf_ytd_rows(db: Session, employee_id: int, pay_date, lock: bool) -> dict:
+    query = db.query(PayrollYtdAccumulator).filter(
+        PayrollYtdAccumulator.employee_id == employee_id,
+        PayrollYtdAccumulator.tax_year == _sg_ytd_tax_year(pay_date),
+        PayrollYtdAccumulator.tax_component.in_(_SG_CPF_YTD_COMPONENTS),
+    )
+    if lock:
+        # SG-043: serialise AW-ceiling consumption per employee — a second
+        # concurrent persisting run blocks here until the first commits, so
+        # both can't consume the same remaining ceiling. A no-op on SQLite;
+        # a first-of-year concurrent INSERT is caught by the table's own
+        # uq_ytd_accumulator_employee_year_component constraint instead.
+        query = query.with_for_update()
+    return {row.tax_component: row for row in query.all()}
+
+
+def _sg_wage_date(run: PayrollRun):
+    """The last day of the CPF wage month of a Singapore payroll run (SG-011,
+    singapore.resolve_wage_month): the run period's month when the pay date
+    is on or before the 14th of the following month, otherwise the pay-date
+    month. Pack/rate resolution, the YTD tax year, the AW ledger and the
+    month-to-date aggregation all key on it. A period the engine will BLOCK
+    (two calendar months) falls back to the pay date here — the engine
+    itself raises the block."""
+    from app.modules.payroll.engine.countries.singapore import SingaporeCalculationBlockedError, resolve_wage_month
+
+    try:
+        return resolve_wage_month(run.pay_date, run.period_start, run.period_end)[1]
+    except SingaporeCalculationBlockedError:
+        return run.pay_date
+
+
+def _sg_prior_payslips(db: Session, employee_id: int, pay_date, current_run_id: Optional[int] = None,
+                       wage_year: Optional[int] = None) -> list:
+    """This employee's SG payslips of CPF wage year `wage_year` (their
+    persisted trace's wageMonth; default: the pay-date year) that come
+    BEFORE the one being calculated — earlier pay dates, plus earlier runs on
+    the same pay date (ordered by pay date, then run id); `current_run_id`
+    excludes the run being generated/corrected itself and anything after it.
+    A December wage month can be paid up to 14 January (SG-011), so the pay
+    date window starts a month early. Only payslips with a persisted trace
+    (never FAILED ones). Read-only."""
+    wage_year = wage_year or pay_date.year
+    order_key = (pay_date, current_run_id if current_run_id is not None else 10 ** 12)
+    rows = (
+        db.query(PayslipItem, PayrollRun.pay_date, PayrollRun.id)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.country_code == "SG",
+            PayslipItem.status != PayslipStatus.FAILED,
+            PayslipItem.sgp_calculation_trace.isnot(None),
+            PayrollRun.pay_date >= date(wage_year - 1, 12, 1),
+            PayrollRun.pay_date <= pay_date,
+        )
+        .order_by(PayrollRun.pay_date, PayrollRun.id, PayslipItem.id)
+        .all()
+    )
+    prefix = f"{wage_year}-"
+    return [item for item, run_pay_date, run_id in rows
+            if (run_pay_date, run_id) < order_key and _sg_trace_wage_month(item.sgp_calculation_trace, run_pay_date).startswith(prefix)]
+
+
+def _sg_trace_wage_month(trace, run_pay_date) -> str:
+    """The CPF wage month a persisted payslip belongs to — its trace's
+    wageMonth (every engine trace records it); for a trace without one, its
+    AW ledger entry's month; else the pay-date month (backward compatible)."""
+    trace = trace or {}
+    ledger_month = (((trace.get("cpf") or {}).get("additionalWages") or {}).get("ledgerEntry") or {}).get("month")
+    return str(trace.get("wageMonth") or ledger_month or run_pay_date.strftime("%Y-%m"))
+
+
+def _sg_guard_later_same_month_payslip(db: Session, employee_id: int, run: PayrollRun, action: str) -> None:
+    """A later payslip of the same wage month booked only the DIFFERENCE from
+    this one (month_to_date), so changing or deleting this one afterwards
+    would leave that later payslip's CPF/SDL/SHG/levy silently wrong. Refused
+    until the later payslip(s) are removed or corrected first (fail-safe)."""
+    wage_date = _sg_wage_date(run)
+    wage_month = wage_date.strftime("%Y-%m")
+    candidates = (
+        db.query(PayslipItem, PayrollRun.period_label)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.employee_id == employee_id, PayslipItem.country_code == "SG",
+            PayslipItem.status != PayslipStatus.FAILED,
+            # a wage month's payslips are paid between its own start and the
+            # 14th of the next month (SG-011); the trace decides the month
+            PayrollRun.pay_date >= wage_date.replace(day=1) - timedelta(days=31),
+            PayrollRun.pay_date <= wage_date + timedelta(days=45),
+            or_(PayrollRun.pay_date > run.pay_date, and_(PayrollRun.pay_date == run.pay_date, PayrollRun.id > run.id)),
+        )
+        .all()
+    )
+    later = [(item.id, label) for item, label in candidates
+             if (item.sgp_calculation_trace or {}).get("wageMonth") == wage_month]
+    if later:
+        raise BadRequestException(
+            f"Cannot {action} this Singapore payslip: a later payslip of the same wage month "
+            f"({', '.join(label for _, label in later)}) booked only the difference from it. "
+            "Remove or correct the later payslip(s) first so the month is recalculated consistently."
+        )
+
+
+def _load_sg_month_to_date(db: Session, employee_id: int, pay_date, current_run_id: Optional[int] = None,
+                           wage_month: Optional[str] = None) -> list:
+    """Earlier payslips of the SAME wage month (e.g. the salary run before an
+    off-cycle backpay run), as copies of their persisted traces tagged with
+    paymentId — singapore.month_to_date recalculates the month on the
+    combined wages and books only the difference. No new table."""
+    wage_month = wage_month or pay_date.strftime("%Y-%m")
+    out = []
+    for item in _sg_prior_payslips(db, employee_id, pay_date, current_run_id, wage_year=int(wage_month[:4])):
+        trace = item.sgp_calculation_trace or {}
+        if trace.get("wageMonth") == wage_month:
+            out.append({**copy.deepcopy(trace), "paymentId": f"PS-{item.id}"})
+    return out
+
+
+def _load_sg_aw_ledger(db: Session, employee_id: int, pay_date, current_run_id: Optional[int] = None,
+                       wage_year: Optional[int] = None) -> list:
+    """Per-AW-PAYMENT ledger for the calendar year, rebuilt read-only from
+    the persisted PayslipItem.sgp_calculation_trace of this employee's
+    payslips that come BEFORE the one being calculated — earlier pay dates,
+    plus earlier runs on the same pay date (ordered by pay date, then run
+    id). Each payslip's ledgerEntry becomes its own entry (paymentId =
+    "PS-<payslip id>"), so two AW payments in one wage month under
+    different rates each keep their original rate/rule/pack; awSubjected
+    grows by every later SHORTFALL allocation naming that payment
+    (sourcePaymentId), or — for traces written before payment ids existed —
+    the first unfilled entry of its sourceMonth. No separate ledger table.
+    `current_run_id` excludes the run being generated/corrected itself."""
+    ledger: list = []
+    by_payment: dict = {}
+    shortfalls: list = []
+    for item in _sg_prior_payslips(db, employee_id, pay_date, current_run_id, wage_year=wage_year):
+        aw = ((item.sgp_calculation_trace or {}).get("cpf") or {}).get("additionalWages") or {}
+        entry = aw.get("ledgerEntry")
+        if entry:
+            payment = {**copy.deepcopy(entry), "paymentId": f"PS-{item.id}"}
+            ledger.append(payment)
+            by_payment[payment["paymentId"]] = payment
+        shortfalls.extend(copy.deepcopy(a) for a in aw.get("allocations") or [] if a.get("kind") == "SHORTFALL")
+    for alloc in shortfalls:
+        target = by_payment.get(alloc.get("sourcePaymentId"))
+        if target is None:  # pre-paymentId trace: fill that month's payments oldest first
+            remaining = Decimal(alloc["amount"])
+            for e in (e for e in ledger if e["month"] == alloc["sourceMonth"]):
+                room = Decimal(e["awPaid"]) - Decimal(e["awSubjected"])
+                take = min(room, remaining)
+                if take > 0:
+                    e["awSubjected"] = str(Decimal(e["awSubjected"]) + take)
+                    remaining -= take
+            continue
+        target["awSubjected"] = str(Decimal(target["awSubjected"]) + Decimal(alloc["amount"]))
+    return ledger
+
+
+def _sg_employer_hires_foreign_workers(db: Session, employee_id: int) -> bool:
+    """LQS applies only to firms hiring foreign workers (EP/S Pass/WP) — true
+    when any active employee of this employee's organization is recorded as
+    FOREIGN or holds one of those passes."""
+    employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+    if employee is None:
+        return None
+    return db.query(PayrollEmployee.id).filter(
+        PayrollEmployee.organization_id == employee.organization_id,
+        PayrollEmployee.status == EmployeeStatus.ACTIVE,
+        or_(PayrollEmployee.sgp_cpf_residency_status == "FOREIGN",
+            PayrollEmployee.sgp_work_pass_type.in_(_SG_FOREIGN_WORK_PASSES)),
+    ).first() is not None
+
+
+_SG_CPF_WAGE_COMPONENTS = ("cpf_ordinary_wages", "cpf_additional_wages")
+
+
+def _sg_cpf_wage_classification(db: Session, employee_id: Optional[int], as_of, organization_id: Optional[int] = None) -> dict:
+    """Singapore OW/AW/non-CPF classification per earning component — the
+    shared TaxabilityRule primitive (get_taxability_classification), org
+    rows winning over canonical ones, effective-dated. Empty per-component
+    dicts = singapore.py's default mapping."""
+    if organization_id is None and employee_id is not None:
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        organization_id = employee.organization_id if employee else None
+    return {
+        component: get_taxability_classification(db, "SG", component, organization_id, as_of)
+        for component in _SG_CPF_WAGE_COMPONENTS
+    }
+
+
+def _sg_iras_classification(db: Session, employee_id: Optional[int], as_of, organization_id: Optional[int] = None) -> dict:
+    """Singapore IRAS Form IR8A item per earning component — the same shared
+    TaxabilityRule primitive as the CPF classes (tax_component = one of
+    singapore.IRAS_CATEGORIES). Empty = singapore.py's default mapping."""
+    from app.modules.payroll.engine.countries.singapore import IRAS_CATEGORIES, IRAS_SHARE_PLAN_CATEGORY
+
+    if organization_id is None and employee_id is not None:
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        organization_id = employee.organization_id if employee else None
+    return {
+        component: get_taxability_classification(db, "SG", component, organization_id, as_of)
+        for component in (*IRAS_CATEGORIES, IRAS_SHARE_PLAN_CATEGORY)
+    }
+
+
+def _sg_frozen_iras_classification(frozen: dict) -> dict:
+    """Rebuilds explicit per-component IRAS rules from a trace's recorded
+    irasClassification so a correction reports exactly as the original."""
+    from app.modules.payroll.engine.countries.singapore import IRAS_CATEGORIES, IRAS_UNCLASSIFIED, _default_iras_category
+
+    out = {c: {} for c in IRAS_CATEGORIES}
+    for component, entry in frozen.items():
+        category = entry.get("category")
+        if category in out:
+            out[category][component] = True
+        elif category == IRAS_UNCLASSIFIED:
+            try:
+                out[_default_iras_category(component)][component] = False
+            except KeyError:
+                continue
+    return out
+
+
+def _sg_employment_inputs(db: Session, organization_id: int, employee, period_start, period_end, attendance_records=None) -> dict:
+    """ctx kwargs for MOM's incomplete-month salary (Phase 5.2): the work
+    pattern and rest day from the employee's Employment Act facts, and the
+    DATE of every unpaid attendance day in the period — the same records
+    _count_unpaid_leave_days counts ("absent", or "leave" with leave_type
+    unpaid / None), so both paths agree on what is unpaid."""
+    cf = employee.compliance_fields or {}
+    dates = []
+    if period_start and period_end and period_end >= period_start:
+        if attendance_records is None:
+            attendance_records = db.query(PayrollAttendanceRecord).filter(
+                PayrollAttendanceRecord.organization_id == organization_id,
+                PayrollAttendanceRecord.employee_id == employee.id,
+                PayrollAttendanceRecord.date >= period_start, PayrollAttendanceRecord.date <= period_end,
+            ).all()
+        unpaid = [r for r in attendance_records
+                  if r.status == "absent" or (r.status == "leave" and r.leave_type in ("unpaid", None))]
+        dates = sorted({r.date.isoformat() for r in unpaid})
+        half = sorted({r.date.isoformat() for r in unpaid if getattr(r, "is_half_day", False)})
+        worked = []
+        for r in attendance_records:
+            if (r.status or "present") == "present" and getattr(r, "hours", None):
+                try:
+                    worked.append(Decimal(str(r.hours).strip()))
+                except Exception:  # noqa: BLE001 — an unparsable figure is not counted
+                    pass
+        hours_worked = str(sum(worked, Decimal("0"))) if worked else None
+    else:
+        half, hours_worked = [], None
+    return {"sgp_employment_facts": {"workPattern": cf.get("ea_work_pattern"), "restDay": cf.get("ea_rest_day"),
+                                     "unpaidDates": dates, "unpaidHalfDayDates": half,
+                                     "employmentClass": cf.get("employment_class"),
+                                     # MOM part-time LQS: monthly gross ÷ total hours worked in the month.
+                                     "hoursWorked": hours_worked}}
+
+
+def _sg_mid_period_joiners(db: Session, organization_id: int, period_start, period_end, employee_ids=None) -> list:
+    """Active Singapore employees who join AFTER the period's first day but
+    within it (Phase 5.2). The shared selection keeps only employees who had
+    joined by the period start; a Singapore joiner is paid MOM's
+    incomplete-month salary for the month of joining, with CPF on it, so
+    they are added here — every other country's selection is unchanged
+    (only employees whose country resolves to SG are returned)."""
+    if not period_start or not period_end:
+        return []
+    query = db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id,
+        PayrollEmployee.status == EmployeeStatus.ACTIVE,
+        PayrollEmployee.date_of_joining > period_start,
+        PayrollEmployee.date_of_joining <= period_end,
+    )
+    if employee_ids:
+        query = query.filter(PayrollEmployee.id.in_(employee_ids))
+    # Hong Kong joins the same selection (ZP-HK-ENG-001 §5): MPF employer
+    # contributions run from the FIRST day of employment, so a mid-period
+    # joiner's first wage period must exist (the days before joining are
+    # unpaid — see _compute_payslip_values).
+    return [e for e in query.order_by(PayrollEmployee.id).all()
+            if _resolve_employee_country(db, organization_id, getattr(e, "country_code", None)) in ("SG", "HK")]
+
+
+def _sg_overtime(db: Session, run: PayrollRun, employee, monthly_basic: Decimal, rate_map: dict, attendance_records=None,
+                 cf: dict = None):
+    """(overtime amount, ctx kwargs) for a Singapore employee (Phase 5.1 WS4).
+    Hours from attendance beyond the policy category's expected daily hours
+    (labour.overtime_hours_from_attendance). A Part 4 employee's statutory
+    minimum (labour.statutory_overtime_pay, RulePack rows) is PAID only when
+    the organization's overtime policy is enabled without an approval step —
+    otherwise it is recorded UNPAID and the preflight BLOCKS approval (the
+    minimum is never silently dropped). Non-Part-4 overtime follows the
+    contract and is not computed."""
+    from app.modules.payroll.engine.jurisdictions.singapore import labour
+
+    if attendance_records is None:
+        attendance_records = db.query(PayrollAttendanceRecord).filter(
+            PayrollAttendanceRecord.organization_id == run.organization_id,
+            PayrollAttendanceRecord.employee_id == employee.id,
+            PayrollAttendanceRecord.date >= run.period_start, PayrollAttendanceRecord.date <= run.period_end,
+        ).all()
+    try:
+        from app.modules.payroll.policy.service import get_active_policy
+        policy = get_active_policy(db, run.organization_id)
+    except Exception:
+        policy = None
+    category_key = (employee.employment_type or "full_time").strip().lower().replace("-", "_").replace(" ", "_")
+    category = next((c for c in (getattr(policy, "employee_categories", None) or []) if c.category == category_key), None)
+    rule = getattr(policy, "overtime_rule", None)
+    if category is None:
+        return Decimal("0"), {}
+    worked = labour.overtime_hours_from_attendance(attendance_records, category.expected_hours,
+                                                   getattr(rule, "minimum_overtime_minutes", 0) if rule else 0)
+    if worked["hours"] <= 0:
+        return Decimal("0"), {}
+    rates = {k: v for k, v in (rate_map or {}).items()}
+    cf = cf if cf is not None else (employee.compliance_fields or {})
+    p4 = labour.part4_coverage(cf.get("ea_workman"), cf.get("ea_manager_executive"), monthly_basic, rates)
+    max_row = rates.get("ea_overtime_max_hours_month")
+    max_hours = Decimal(str(max_row.flat_amount)) if max_row is not None and max_row.flat_amount is not None else None
+    facts = {"hours": str(worked["hours"]), "days": worked["days"], "expectedDailyHours": worked["expectedDailyHours"],
+             "part4": p4["status"], "maxHours": str(max_hours) if max_hours is not None else None,
+             "overLimit": max_hours is not None and worked["hours"] > max_hours,
+             "method": "attendance hours beyond the policy's expected daily hours"}
+    if p4["status"] != "COVERED":
+        facts.update({"status": "NOT_PART4" if p4["status"] == "NOT_COVERED" else "UNDETERMINED", "reason": p4["reason"]})
+        return Decimal("0"), {"sgp_overtime_facts": facts}
+    pay = labour.statutory_overtime_pay(cf.get("ea_workman"), monthly_basic, worked["hours"], rates)
+    if pay is None:
+        facts.update({"status": "NOT_EVALUATED", "reason": "overtime rule rows not configured"})
+        return Decimal("0"), {"sgp_overtime_facts": facts}
+    facts.update({"statutoryMinimum": str(pay["amount"]), "rate": {**pay, "amount": str(pay["amount"])}})
+    if rule is None or not rule.enabled or rule.approval_required:
+        facts.update({"status": "UNPAID_STATUTORY_MINIMUM",
+                      "reason": "the organization overtime policy is disabled" if rule is None or not rule.enabled
+                      else "the organization overtime policy requires approval, which is not captured"})
+        return Decimal("0"), {"sgp_overtime_facts": facts}
+    facts["status"] = "PAID"
+    return pay["amount"], {"sgp_overtime_facts": facts}
+
+
+SG_DEDUCTION_JURISDICTION = "SINGAPORE"
+
+
+def _sg_deduction_inputs(db: Session, run: PayrollRun, employee) -> dict:
+    """Active Singapore salary-deduction orders for the run's period, with
+    the amount already collected by each (rebuilt from earlier payslips'
+    traces — no running counter to reverse)."""
+    orders = db.query(CourtOrderedDeduction).filter(
+        CourtOrderedDeduction.employee_id == employee.id, CourtOrderedDeduction.organization_id == run.organization_id,
+        CourtOrderedDeduction.jurisdiction == SG_DEDUCTION_JURISDICTION, CourtOrderedDeduction.status == "active",
+        CourtOrderedDeduction.start_date <= run.period_end,
+        or_(CourtOrderedDeduction.end_date.is_(None), CourtOrderedDeduction.end_date >= run.period_start),
+    ).order_by(CourtOrderedDeduction.priority.is_(None), CourtOrderedDeduction.priority, CourtOrderedDeduction.id).all()
+    if not orders:
+        return {}
+    collected: dict = {}
+    for item in db.query(PayslipItem).filter(PayslipItem.employee_id == employee.id, PayslipItem.payroll_run_id != run.id,
+                                             PayslipItem.status != PayslipStatus.FAILED).all():
+        for line in ((item.sgp_calculation_trace or {}).get("salaryDeductions") or {}).get("lines") or []:
+            collected[line.get("id")] = collected.get(line.get("id"), Decimal("0")) + Decimal(str(line.get("amount") or 0))
+    return {"sgp_deduction_orders": [{
+        "id": o.id, "category": o.order_type, "amount": o.fixed_deduction_amount, "rate_pct": o.fixed_deduction_rate_pct,
+        "evidence_ref": o.court_reference, "evidence_date": o.issue_date, "start_date": o.start_date,
+        "total_to_collect": o.total_amount_to_collect, "collected_before": collected.get(o.id, Decimal("0")),
+    } for o in orders]}
+
+
+def create_sg_salary_deduction(
+    db: Session, organization_id: int, employee_id: int, category: str, start_date, *, evidence_ref: str = None,
+    evidence_date=None, end_date=None, amount: Decimal = None, rate_pct: Decimal = None,
+    total_to_collect: Decimal = None, priority: int = None, created_by_id: int = None,
+) -> CourtOrderedDeduction:
+    """A Singapore Employment Act salary deduction on the shared deduction-
+    order model (CourtOrderedDeduction, jurisdiction "SINGAPORE" — the same
+    table UK and Australia use): category = MOM category; court_reference =
+    the consent / evidence reference; issue_date = its date. Validated here
+    and again, against the salary, by the engine at every payroll."""
+    from app.modules.payroll.engine.jurisdictions.singapore.labour import SG_DEDUCTION_CATEGORIES, SG_PROHIBITED_DEDUCTIONS
+
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    if _resolve_employee_country(db, organization_id, employee.country_code) != "SG":
+        raise BadRequestException("Singapore salary deductions apply to Singapore employees only.")
+    category = (category or "").upper()
+    if category in SG_PROHIBITED_DEDUCTIONS:
+        raise BadRequestException(f"MOM prohibits recovering {category.lower().replace('_', ' ')} costs from the employee.")
+    if category not in SG_DEDUCTION_CATEGORIES:
+        raise BadRequestException(f"Unknown Singapore deduction category {category!r} — one of {sorted(SG_DEDUCTION_CATEGORIES)}.")
+    if not (evidence_ref or "").strip() or evidence_date is None:
+        raise BadRequestException(f"{category}: {SG_DEDUCTION_CATEGORIES[category]['evidence']} — reference and date required.")
+    if (amount is None) == (rate_pct is None):
+        raise BadRequestException("Give exactly one of a fixed amount or a percentage of salary.")
+    order = CourtOrderedDeduction(
+        organization_id=organization_id, employee_id=employee_id, jurisdiction=SG_DEDUCTION_JURISDICTION,
+        order_type=category, court_reference=evidence_ref.strip(), issue_date=evidence_date, start_date=start_date,
+        end_date=end_date, priority=priority, fixed_deduction_amount=amount, fixed_deduction_rate_pct=rate_pct,
+        total_amount_to_collect=total_to_collect, status="active", created_by_id=created_by_id,
+    )
+    db.add(order)
+    db.flush()
+    record_tax_audit(db, actor_id=created_by_id, action="create", entity_type="sg_salary_deduction", entity_id=order.id,
+                     legal_reference="MOM Allowable salary deductions (Employment Act)",
+                     new_value={"category": category, "evidenceRef": order.court_reference,
+                                "amount": str(amount) if amount is not None else None,
+                                "ratePct": str(rate_pct) if rate_pct is not None else None},
+                     reason="Singapore salary deduction recorded", auto_commit=False)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+def _sg_named_allowance_inputs(country: str, allowance_items) -> dict:
+    """SG-only context input: the payslip's named allowances, so each is
+    classified on its own for CPF OW/AW and IRAS. Empty for every other country."""
+    if country != "SG" or not allowance_items:
+        return {}
+    return {"sgp_named_allowance_items": [
+        {"key": i["key"], "label": i["label"], "amount": i["amount"]} for i in allowance_items
+    ]}
+
+
+def _load_sg_cpf_ytd(db: Session, employee_id: int, pay_date, lock: bool = False, current_run_id: Optional[int] = None,
+                     wage_date=None) -> dict:
+    """Returns kwargs for build_context_from_employee: the YTD OW/AW-subject/
+    AW-paid accumulators (Decimal("0") for a component with no row yet —
+    never guessed/backfilled), the per-AW-payment ledger rebuilt from prior
+    payslip traces, and the employer's foreign-workforce flag (LQS). Empty
+    dict when SG hasn't opted into the rollout switch. Read-only apart
+    from `lock=True` (persisting paths only — payroll run / manual
+    payslip), never from preview."""
+    if "SG" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    # SG-011: the CPF wage month (not the pay date) decides the tax year.
+    wage_date = wage_date or pay_date
+    rows = _query_sg_cpf_ytd_rows(db, employee_id, wage_date, lock)
+
+    def _value(component):
+        row = rows.get(component)
+        return row.ytd_taxable_wages if row else Decimal("0")
+
+    return dict(
+        ytd_cpf_ow_subject_before=_value(_SG_CPF_OW_YTD_COMPONENT),
+        ytd_cpf_aw_subject_before=_value(_SG_CPF_AW_YTD_COMPONENT),
+        ytd_cpf_aw_paid_before=_value(_SG_CPF_AW_PAID_YTD_COMPONENT),
+        sgp_aw_ledger=_load_sg_aw_ledger(db, employee_id, pay_date, current_run_id=current_run_id, wage_year=wage_date.year),
+        sgp_month_to_date=_load_sg_month_to_date(db, employee_id, pay_date, current_run_id=current_run_id,
+                                                 wage_month=wage_date.strftime("%Y-%m")),
+        sgp_employer_hires_foreign_workers=_sg_employer_hires_foreign_workers(db, employee_id),
+        sgp_cpf_wage_classification=_sg_cpf_wage_classification(db, employee_id, wage_date),
+        sgp_iras_classification=_sg_iras_classification(db, employee_id, wage_date),
+    )
+
+
+def _sg_frozen_classification(frozen: dict) -> dict:
+    """Rebuilds explicit per-component rules from a trace's recorded
+    classification so a correction classifies exactly as the original."""
+    out = {"cpf_ordinary_wages": {}, "cpf_additional_wages": {}}
+    defaults = {"additional_compensation": "AW"}
+    for component, entry in frozen.items():
+        cls = entry.get("class")
+        default = defaults.get(component, "OW")
+        if cls == "OW":
+            out["cpf_ordinary_wages"][component] = True
+        elif cls == "AW":
+            out["cpf_additional_wages"][component] = True
+        elif cls == "NON_CPF":
+            out["cpf_ordinary_wages" if default == "OW" else "cpf_additional_wages"][component] = False
+    return out
+
+
+def _upsert_sg_cpf_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation YTD OW subject / AW subject /
+    AW paid back to PayrollYtdAccumulator — get-or-create per (employee,
+    calendar year, component), flush (not commit). No-op when the result
+    carries no YTD figure (a non-CPF-eligible employee, or the switch is off)."""
+    if result.ytd_cpf_ow_subject_after is None or result.ytd_cpf_aw_subject_after is None:
+        return
+    tax_year = _sg_ytd_tax_year(pay_date)
+    rows = _query_sg_cpf_ytd_rows(db, employee_id, pay_date, lock=False)
+    values = (
+        (_SG_CPF_OW_YTD_COMPONENT, result.ytd_cpf_ow_subject_after),
+        (_SG_CPF_AW_YTD_COMPONENT, result.ytd_cpf_aw_subject_after),
+        (_SG_CPF_AW_PAID_YTD_COMPONENT, result.ytd_cpf_aw_paid_after),
+    )
+    for component, value in values:
+        if value is None:
+            continue
+        row = rows.get(component)
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=component)
+            db.add(row)
+        row.ytd_taxable_wages = value
+        row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+def _sg_rows_in_force(rows, as_of):
+    """Same row-level effective-date filter tax_resolver.resolve_tax_configuration
+    applies (NULL effective_from/_to = governed by the pack's own window)."""
+    return [
+        r for r in rows
+        if (r.effective_from is None or r.effective_from <= as_of)
+        and (r.effective_to is None or r.effective_to >= as_of)
+    ]
+
+
+def preview_singapore_calculation(db: Session, data) -> dict:
+    """Read-only Super Admin preview (approved D-A): runs the SAME production
+    engine a payroll run uses (calculate_payroll(ctx, "standard") →
+    engine/countries/singapore.py) against ONE selected Singapore pack's
+    canonical rows, in force on data.payDate. Writes nothing — no payroll
+    run, payslip, employee, YTD accumulator or pack is created or changed;
+    the session is never flushed or committed here. A blocked calculation
+    returns blocked=True with the engine's own reason (never a figure)."""
+    from app.modules.payroll.engine.base import PayrollContext
+    from app.modules.payroll.engine.resolver import calculate_payroll
+    from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
+    if pack is None:
+        raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
+    if pack.jurisdiction_country != "SG" or pack.pack_type != "tax":
+        raise BadRequestException("Singapore calculation preview requires a Singapore tax pack.")
+    rates = _sg_rows_in_force(list_canonical_contribution_rates(db, jurisdiction_pack_id=pack.id), data.payDate)
+    slabs = _sg_rows_in_force(list_canonical_tax_slabs(db, jurisdiction_pack_id=pack.id), data.payDate)
+    ctx = PayrollContext(
+        gross=data.gross, basic=data.gross - data.additionalWages, additional_compensation=data.additionalWages,
+        sgp_cpf_wage_classification=_sg_cpf_wage_classification(db, None, data.payDate, organization_id=None),
+        country="SG", pay_frequency="Monthly", pay_date=data.payDate,
+        rate_map={r.component_key: r for r in rates}, slabs=slabs,
+        date_of_birth=data.dateOfBirth, date_of_joining=data.dateOfJoining, date_of_leaving=data.dateOfLeaving,
+        employment_type=data.employmentType,
+        sgp_cpf_residency_status=data.residencyStatus, sgp_spr_effective_date=data.sprEffectiveDate,
+        sgp_cpf_contribution_arrangement=data.contributionArrangement, sgp_work_pass_type=data.workPass,
+        sgp_shg_funds=data.shgFunds, sgp_employer_hires_foreign_workers=data.employerHiresForeignWorkers,
+        ytd_cpf_ow_subject_before=data.ytdOwSubjectBefore, ytd_cpf_aw_subject_before=data.ytdAwSubjectBefore,
+        ytd_cpf_aw_paid_before=data.ytdAwPaidBefore, sgp_aw_ledger=data.awLedger,
+    )
+    base = {"pack": {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status},
+            "payDate": data.payDate.isoformat(), "readOnly": True}
+    try:
+        result = calculate_payroll(ctx, "standard")
+    except MissingComplianceConfigurationError as exc:
+        return {**base, "blocked": True, "blockedKey": exc.key, "blockedReason": str(exc)}
+    return {
+        **base, "blocked": False,
+        "result": {
+            "gross": str(result.gross), "employeeCpf": str(result.employee_pension),
+            "employerCpf": str(result.employer_pension), "shg": str(result.professional_tax),
+            "sdl": str(result.employer_payroll_tax), "fwl": str(result.employer_eht), "tds": str(result.tds),
+            "totalDeductions": str(result.total_deductions), "netPay": str(result.net_pay),
+        },
+        "trace": result.sgp_calculation_trace,
+    }
 
 
 def _add_business_days(d: date, n: int) -> date:
@@ -15520,6 +23406,104 @@ def calculate_us_federal_deposit_schedule(
         "futa_deposit_required": futa_deposit_required,
         "futa_deposit_threshold": futa_threshold,
         "form_w2_w3_deadline": w2_w3_deadline,
+    }
+
+
+# ── Puerto Rico: Hacienda deposit-category classification (PR-011) ─────
+# (ZP-PR-ENG-001 §3). Standalone, ORG-scoped calculator, same "not woven
+# into the regular per-period calculate() path" shape as
+# calculate_us_federal_deposit_schedule immediately above — reuses that
+# function's own pure date-math helpers (_next_business_day/
+# _next_weekday_on_or_after/_fifteenth_of_next_month, which carry no
+# country-specific state) but is its OWN independent function reading
+# PR-scoped rates only (country="PR"), never calling or modifying
+# calculate_us_federal_deposit_schedule itself — that function is
+# hardcoded to country="US" internally (its own get_contribution_rates
+# call), so it could not be reused directly without touching US's own
+# mechanism, which this build deliberately never does.
+#
+# PR-011's own FOUR-way classification (genuinely different from the
+# federal MONTHLY/SEMIWEEKLY/next-day-only shape above): a quarterly
+# remittance EXCEPTION (current-quarter withholding under $2,500) takes
+# precedence over the lookback-based Monthly/Semiweekly test entirely —
+# an employer below that threshold never has a per-payroll deposit due
+# date at all, only the quarterly 499 R-1B's own due date (PR-012).
+
+def calculate_pr_deposit_schedule(
+    db: Session, organization_id: int, lookback_period_liability: Decimal, current_quarter_withholding: Decimal,
+    payroll_date, accumulated_undeposited_liability: Optional[Decimal] = None,
+) -> dict:
+    """Returns this Puerto Rico employer's Hacienda withholding deposit
+    category (QUARTERLY_EXCEPTION/MONTHLY/SEMIWEEKLY) and the resulting
+    deposit due date for `payroll_date`, plus the $100,000 next-business-
+    day rule check when accumulated_undeposited_liability is supplied,
+    plus the Form 499R-2/W-2PR January 31-equivalent deadline for the
+    calendar year `payroll_date` falls in. Thresholds are Super-Admin-
+    configurable via rate_map (resolve_jurisdiction_parameter), falling
+    back to Administrative Determination 18-14's own 2026 figures. Same
+    weekend-only date adjustment as the federal version — no PR authority
+    holiday calendar is sourced anywhere in this engine, so a due date
+    landing on an actual PR government holiday is NOT further adjusted
+    (PR-012's own "unless an authority-approved holiday/weekend rule
+    shifts the date" caveat)."""
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+
+    if lookback_period_liability is None or lookback_period_liability < 0:
+        raise BadRequestException("lookback_period_liability must be zero or positive.")
+    if current_quarter_withholding is None or current_quarter_withholding < 0:
+        raise BadRequestException("current_quarter_withholding must be zero or positive.")
+    if payroll_date is None:
+        raise BadRequestException("payroll_date is required.")
+    if accumulated_undeposited_liability is not None and accumulated_undeposited_liability < 0:
+        raise BadRequestException("accumulated_undeposited_liability must be zero or positive.")
+
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    monthly_semiweekly_threshold = resolve_jurisdiction_parameter(
+        rate_map, "pr_deposit_monthly_semiweekly_thresh", Decimal("50000"), country="PR",
+    )
+    quarterly_exception_threshold = resolve_jurisdiction_parameter(
+        rate_map, "pr_deposit_quarterly_exception_thresh", Decimal("2500"), country="PR",
+    )
+    next_day_threshold = resolve_jurisdiction_parameter(
+        rate_map, "pr_deposit_next_day_thresh", Decimal("100000"), country="PR",
+    )
+
+    if current_quarter_withholding <= quarterly_exception_threshold:
+        depositor_status = "QUARTERLY_EXCEPTION"
+        deposit_due_date = None
+    elif lookback_period_liability <= monthly_semiweekly_threshold:
+        depositor_status = "MONTHLY"
+        deposit_due_date = _next_business_day(_fifteenth_of_next_month(payroll_date))
+    else:
+        depositor_status = "SEMIWEEKLY"
+        if payroll_date.weekday() in (2, 3, 4):
+            deposit_due_date = _next_weekday_on_or_after(payroll_date, 2)
+        else:
+            deposit_due_date = _next_weekday_on_or_after(payroll_date, 4)
+
+    next_day_rule_triggered = (
+        accumulated_undeposited_liability is not None and accumulated_undeposited_liability >= next_day_threshold
+    )
+    next_day_deposit_due_date = (
+        _next_business_day(payroll_date + timedelta(days=1)) if next_day_rule_triggered else None
+    )
+
+    form_499r2_deadline = _next_business_day(date(payroll_date.year + 1, 1, 31))
+
+    return {
+        "depositor_status": depositor_status,
+        "lookback_period_liability": lookback_period_liability,
+        "current_quarter_withholding": current_quarter_withholding,
+        "monthly_semiweekly_threshold": monthly_semiweekly_threshold,
+        "quarterly_exception_threshold": quarterly_exception_threshold,
+        "deposit_due_date": deposit_due_date,
+        "next_day_rule_triggered": next_day_rule_triggered,
+        "next_day_deposit_threshold": next_day_threshold,
+        "next_day_deposit_due_date": next_day_deposit_due_date,
+        "form_499r2_deadline": form_499r2_deadline,
     }
 
 
@@ -16636,6 +24620,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     calculation, and CA until the caller opts in) means no YTD wired."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
     from app.core.exceptions import GermanyCalculationBlockedException
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
@@ -16664,6 +24649,26 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
 
     is_active = employee.status == EmployeeStatus.ACTIVE
     overtime  = Decimal("0")
+    sg_overtime_inputs = {}
+    sg_month_facts = {}
+    if country == "SG" and is_active:
+        import calendar as _calendar
+
+        anchor = run.period_end or run.pay_date
+        sg_month_facts, sg_fact_block = _sg_statutory_facts_for_month(
+            db, employee, anchor.replace(day=1), anchor.replace(day=_calendar.monthrange(anchor.year, anchor.month)[1]))
+        month_cf = {**(employee.compliance_fields or {}),
+                    **{k: v for k, v in sg_month_facts.items() if k in ("ea_workman", "ea_manager_executive", "employment_class")}}
+        overtime, sg_overtime_inputs = _sg_overtime(db, run, employee, basic, rate_map, attendance_records, cf=month_cf)
+        sg_overtime_inputs.update(_sg_deduction_inputs(db, run, employee))
+        sg_overtime_inputs.update(_sg_employment_inputs(db, run.organization_id, employee, run.period_start,
+                                                        run.period_end, attendance_records))
+        facts = sg_overtime_inputs["sgp_employment_facts"]
+        facts["employmentClass"] = month_cf.get("employment_class")
+        if sg_month_facts:
+            facts["statutoryFactsApplied"] = {k: v for k, v in sg_month_facts.items()}
+        if sg_fact_block:
+            facts["statutoryChangeBlock"] = sg_fact_block
     additional_compensation = (
         _sum_attendance_extras(db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records)
         if is_active else Decimal("0")
@@ -16716,6 +24721,30 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         get_india_salary_tds_inputs(db, run.organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
     )
+    pr_certificate_inputs = (
+        get_pr_certificate_inputs(db, run.organization_id, employee.id) if country == "PR" else {}
+    )
+    france_inputs = (
+        _resolve_france_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "FR" else None
+    )
+    # Ireland (ZP-IE-ENG-001): same resolution as the preview path, but this
+    # one DOES persist real payslips below, so the matching
+    # _upsert_ie_ytd_accumulator call is what advances the cumulative bases.
+    ireland_inputs = (
+        _resolve_ie_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "IE" else None
+    )
+    sweden_inputs = (
+        _resolve_se_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "SE" else None
+    )
+    italy_inputs = (
+        _italy_service.resolve_it_calc_inputs(
+            db, run.organization_id, employee, run.pay_date,
+            period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
+        if country == "IT" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -16737,6 +24766,38 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                 db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records,
             ),
         )
+    hk_inputs = {}
+    hk_pre_joining_days = 0
+    hk_post_leaving_days = 0
+    hk_termination_date = None
+    if country == "HK" and run.period_start and is_active:
+        period_last_day = run.period_end or run.pay_date
+        joining = employee.date_of_joining
+        leaving = employee.date_of_leaving
+        if joining and run.period_start < joining <= period_last_day:
+            # Days of the wage period before employment began are not payable —
+            # applied through the platform's own per-day unpaid-day model, not a
+            # new Hong Kong proration rule (none is statutory).
+            hk_pre_joining_days = (joining - run.period_start).days
+            unpaid_leave_days += hk_pre_joining_days
+        if leaving and run.period_start <= leaving < period_last_day:
+            # Final period (ZP-HK-ENG-001): the day after termination is the
+            # end of the wage period, so days beyond it are not payable either.
+            # Same unpaid-day model as the joiner side — symmetric, not a new
+            # statutory rule.
+            hk_post_leaving_days = (period_last_day - leaving).days
+            unpaid_leave_days += hk_post_leaving_days
+            hk_termination_date = leaving
+    if country == "HK":
+        # Hong Kong (ZP-HK-ENG-001): effective-dated profile facts, verified
+        # hours, prior-period MPF state and the pinned pack's period-split
+        # rule rows — all read here so the calculator itself stays pure.
+        hk_inputs = jurisdiction_hooks.call("HK", "calc_inputs", db, run, employee, resolved_pack)
+        if hk_pre_joining_days:
+            hk_inputs["hk_worker_facts"]["preJoiningUnpaidDays"] = hk_pre_joining_days
+        if hk_post_leaving_days:
+            hk_inputs["hk_worker_facts"]["postLeavingUnpaidDays"] = hk_post_leaving_days
+            hk_inputs["hk_worker_facts"]["finalPeriodTerminationDate"] = hk_termination_date.isoformat()
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,
@@ -16759,14 +24820,29 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         locality_rate=locality_rate,
         residence_locality_rate=residence_locality_rate,
         **germany_kwargs,
+        france_inputs=france_inputs,
+        ireland_inputs=ireland_inputs,
+        sweden_inputs=sweden_inputs,
+        italy_inputs=italy_inputs,
         pay_date=run.pay_date,
+        period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
         **(reciprocity or {}),
         **(ytd_inputs or {}),
         **(org_levy_inputs or {}),
+        **(pr_certificate_inputs or {}),
+        **_sg_named_allowance_inputs(country, allowance_items),
+        **sg_overtime_inputs,
+        **hk_inputs,
     )
+    # SG-045: the value in force for this wage month, not today's.
+    for key, column in _SG_STATUTORY_FACTS:
+        if column and key in sg_month_facts:
+            setattr(ctx, column, sg_month_facts[key])
     try:
         result = calculate_payroll(ctx, calculation_mode)
+    except FranceCalculationBlockedError as exc:
+        raise _france_blocked(exc)
     except GermanyCalculationError as exc:
         raise GermanyCalculationBlockedException(
             exc.code, exc.message, trace=(exc.trace.to_dict() if exc.trace else None),
@@ -16876,6 +24952,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "au_statutory_deductions_total": result.au_statutory_deductions_total,
         "au_workers_compensation_premium": result.au_workers_compensation_premium,
         "au_calculation_trace": result.au_calculation_trace,
+        "sgp_calculation_trace": _sg_trace_with_pwm_classification(result.sgp_calculation_trace, employee),
+        "hk_calculation_trace": result.hk_calculation_trace,
         # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
         # same splat-then-pop contract as "_org_levy_result" above. Only
         # ever non-empty when a real order actually contributed a
@@ -16892,8 +24970,22 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # even if the underlying registries later change (spec's
         # reproducibility requirement). None for every non-German payslip
         # and for any German payslip generated before this column existed.
-        "employee_statutory_profile_id": result.germany_statutory_profile_id,
+        "employee_statutory_profile_id": result.germany_statutory_profile_id or result.hk_statutory_profile_id,
         "germany_calculation_snapshot": result.germany_calculation_snapshot,
+        # France — frozen result + the YTD state the next period reads back.
+        "fr_calculation_snapshot": _fr_payslip_snapshot(result),
+        # Ireland (ZP-IE-ENG-001) — same per-country JSON snapshot contract as
+        # the Germany and France lines above, and for the same reason: the Irish
+        # engine's per-head breakdown (USC, PRSI sub-class/credit/weeks, the
+        # NAERSA-notified MFF status, the LPT instruction, the applied RPN's
+        # number/hash, and ie_calculation_trace itself) has no scalar
+        # PayslipItem column, so without this it was computed and thrown away.
+        # IE-045 (no reconstructing a historical result from current content)
+        # is only satisfiable because the RPN actually applied is frozen here.
+        "ie_calculation_snapshot": _ie_payslip_snapshot(result),
+        "it_calculation_snapshot": _italy_service.it_payslip_snapshot(result),
+        # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
+        "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
         # above, for the before/after cumulative figures this payslip
         # actually consumed per component. None unless YTD accumulation
@@ -16921,6 +25013,13 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                 "futa": {"ytd_before": str(ctx.ytd_futa_wages_before), "ytd_after": str(result.ytd_futa_wages_after)},
                 "medicare_additional": {"ytd_before": str(ctx.ytd_medicare_wages_before), "ytd_after": str(result.ytd_medicare_wages_after)},
             } if result.ytd_ss_wages_after is not None else
+            {
+                # Singapore CPF annual-ceiling accumulators (SG-010) — frozen
+                # before/after per component, same contract as CA/US above.
+                "cpf_ow_subject": {"ytd_before": str(ctx.ytd_cpf_ow_subject_before), "ytd_after": str(result.ytd_cpf_ow_subject_after)},
+                "cpf_aw_subject": {"ytd_before": str(ctx.ytd_cpf_aw_subject_before), "ytd_after": str(result.ytd_cpf_aw_subject_after)},
+                "cpf_aw_paid": {"ytd_before": str(ctx.ytd_cpf_aw_paid_before), "ytd_after": str(result.ytd_cpf_aw_paid_after)},
+            } if result.ytd_cpf_ow_subject_after is not None else
             {
                 **({"sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(result.ytd_sg_qualifying_earnings_after)}} if result.ytd_sg_qualifying_earnings_after is not None else {}),
                 # WHM Schedule 15 cumulative $45,000 test — a SEPARATE AU
@@ -16950,15 +25049,32 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Australia WHM Schedule 15 cumulative-cap tracking — a separate
         # key since it's gated on ITS OWN result field, independent of SG.
         "_au_whm_ytd_result": result if result.ytd_whm_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for Ireland's
+        # INDEPENDENT cumulative bases (ZP-IE-ENG-001 IE-009/IE-010/IE-032/
+        # IE-039: USC, PRSI and MyFutureFund each carry their own figure, so
+        # this is a dedicated key gated on ITS OWN result field, and it writes
+        # to IrelandYtdAccumulator rather than the generic
+        # PayrollYtdAccumulator).
+        "_ie_ytd_result": result if result.ie_ytd_after else None,
+        # Italy (ZP-IT-ENG-001): the engine's post-period running totals,
+        # persisted by italy_service.post_it_payslip_ytd.
+        "_it_ytd_result": result if result.it_ytd_after else None,
         # Same splat-then-pop contract as "_ytd_result" above, for
         # Cayman Islands mandatory-pension CI$87,000 annual-cap tracking
         # (KY-008) — a separate key since it's gated on ITS OWN result
         # field.
         "_ky_pension_ytd_result": result if result.ytd_ky_mandatory_pensionable_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for Puerto
+        # Rico's five wage-base/threshold trackers (ZP-PR-ENG-001) — a
+        # separate key since it's gated on ITS OWN result field.
+        "_pr_ytd_result": result if result.ytd_pr_ss_wages_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for the
         # Guyana PAYE statutory credit ledger (GY-010) — a separate key
         # since it's gated on ITS OWN result field.
         "_gy_paye_credit_ytd_result": result if result.ytd_gy_paye_credit_after is not None else None,
+        # Same splat-then-pop contract, for the Singapore CPF annual wage
+        # ceiling accumulators (SG-010).
+        "_sg_cpf_ytd_result": result if result.ytd_cpf_ow_subject_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for Canada
         # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
         # — a separate key since it's gated on ITS OWN result field,
@@ -17034,6 +25150,284 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     }
 
 
+# ── YTD accumulator postings: delete reversal + correction refresh ──────
+# (Phase 4A, shared, every YTD jurisdiction). Every accumulator row a
+# payslip writes — PayrollYtdAccumulator rows hold ABSOLUTE year-to-date
+# totals (the writer sets the post-period value); OrganizationYtdAccumulator
+# rows are ADDITIVE (each payslip adds its increment) — ends up with
+# last_updated_payslip_id = that payslip. Capturing the rows' state just
+# before the posting block and reading back the rows the payslip now owns
+# records each posting (before / after / previous writer) in the payslip's
+# existing ytd_snapshot JSON under "ytdPostings" — no schema change, no
+# change to any writer. A delete reverses the postings; a correction
+# reverses and re-posts them. The foreign keys are never weakened.
+
+_YTD_POSTINGS_KEY = "ytdPostings"
+# Legacy payslips (written before postings were recorded): snapshot keys
+# that are EXACTLY the accumulator's tax_component and so can be restored
+# from ytd_before. Every other family refuses rather than guess.
+_LEGACY_YTD_SNAPSHOT_COMPONENTS = {
+    "cpf_ow_subject", "cpf_aw_subject", "cpf_aw_paid",               # Singapore
+    "social_security", "futa", "medicare_additional",                # United States
+}
+
+
+class YtdPostingConflict(Exception):
+    """A YTD reversal/refresh that would leave accumulators inconsistent."""
+
+
+def _ytd_models():
+    return (("employee", PayrollYtdAccumulator), ("organization", OrganizationYtdAccumulator))
+
+
+def _ytd_capture_state(db: Session, employee_id: int, organization_id: int) -> dict:
+    """{(table, row id): (wages, tax, last_updated_payslip_id)} for every
+    accumulator row this payslip could touch — read just before posting."""
+    db.flush()
+    state = {}
+    for table, model in _ytd_models():
+        owner = model.employee_id == employee_id if table == "employee" else model.organization_id == organization_id
+        for r in db.query(model).filter(owner):
+            state[(table, r.id)] = (r.ytd_taxable_wages, r.ytd_tax_withheld, r.last_updated_payslip_id)
+    return state
+
+
+def _ytd_collect_postings(db: Session, item: PayslipItem, pre_state: dict) -> list:
+    db.flush()
+    postings = []
+    for table, model in _ytd_models():
+        owner = model.employee_id == item.employee_id if table == "employee" else model.organization_id == item.organization_id
+        for r in db.query(model).filter(owner, model.last_updated_payslip_id == item.id).order_by(model.id):
+            before = pre_state.get((table, r.id))
+            postings.append({
+                "table": table, "rowId": r.id, "taxYear": r.tax_year, "component": r.tax_component,
+                "mode": "absolute" if table == "employee" else "additive", "created": before is None,
+                "before": {"wages": str(before[0] if before else 0), "tax": str(before[1] if before else 0)},
+                "after": {"wages": str(r.ytd_taxable_wages), "tax": str(r.ytd_tax_withheld)},
+                "prevWriter": before[2] if before else None,
+            })
+    return postings
+
+
+def _ytd_store_postings(item: PayslipItem, postings: list) -> None:
+    """Postings live beside the per-component before/after entries in the
+    payslip's ytd_snapshot (deepcopy: a nested JSON mutation must be a new
+    object to persist). Nothing is stored for a payslip that posted nothing."""
+    if not postings and not isinstance(item.ytd_snapshot, dict):
+        return
+    snap = copy.deepcopy(item.ytd_snapshot) if isinstance(item.ytd_snapshot, dict) else {}
+    snap[_YTD_POSTINGS_KEY] = postings
+    item.ytd_snapshot = snap
+
+
+def _ytd_record_postings(db: Session, item: PayslipItem, pre_state: dict) -> None:
+    _ytd_store_postings(item, _ytd_collect_postings(db, item, pre_state))
+
+
+def _ytd_postings_of(item: PayslipItem):
+    snap = item.ytd_snapshot if isinstance(item.ytd_snapshot, dict) else None
+    return snap.get(_YTD_POSTINGS_KEY) if snap is not None and _YTD_POSTINGS_KEY in snap else None
+
+
+def _ytd_existing_payslip_id(db: Session, payslip_id):
+    return payslip_id if payslip_id is not None and db.get(PayslipItem, payslip_id) is not None else None
+
+
+def _ytd_reverse_postings(db: Session, item: PayslipItem, postings: list, *, require_latest: bool,
+                          delete_created: bool) -> None:
+    """Undo a payslip's postings. ABSOLUTE rows go back to their value before
+    this payslip — only valid while this payslip is still the row's latest
+    writer (a later payslip read this one's total as its own starting point),
+    otherwise YtdPostingConflict. ADDITIVE rows lose this payslip's increment
+    (order-independent). last_updated_payslip_id returns to the previous
+    writer (or NULL) so the foreign key never dangles."""
+    models = dict(_ytd_models())
+    rows = [(p, db.get(models[p["table"]], p["rowId"])) for p in postings]
+    if require_latest:
+        for p, r in rows:
+            if p["mode"] == "absolute" and r is not None and r.last_updated_payslip_id != item.id:
+                raise YtdPostingConflict(
+                    f"a later payslip (id {r.last_updated_payslip_id}) has already accumulated {p['component']} "
+                    f"({p['taxYear']}) on top of this one — remove or correct the later payslip(s) first"
+                )
+    for p, r in rows:
+        if r is None:
+            continue
+        prev = _ytd_existing_payslip_id(db, p.get("prevWriter"))
+        if p["mode"] == "absolute":
+            if p["created"] and delete_created:
+                db.delete(r)
+                continue
+            r.ytd_taxable_wages = Decimal(p["before"]["wages"])
+            r.ytd_tax_withheld = Decimal(p["before"]["tax"])
+            r.last_updated_payslip_id = prev
+        else:
+            r.ytd_taxable_wages -= Decimal(p["after"]["wages"]) - Decimal(p["before"]["wages"])
+            r.ytd_tax_withheld -= Decimal(p["after"]["tax"]) - Decimal(p["before"]["tax"])
+            if r.last_updated_payslip_id == item.id:
+                r.last_updated_payslip_id = prev
+    db.flush()
+
+
+def _ytd_reverse_legacy(db: Session, item: PayslipItem) -> None:
+    """A payslip written before postings were recorded. Restorable only when
+    every accumulator row it still owns is an ABSOLUTE employee row whose
+    component is in _LEGACY_YTD_SNAPSHOT_COMPONENTS (value = the snapshot's
+    ytd_before), and no later payslip has built on its snapshot components.
+    Anything else refuses — an increment that was never recorded cannot be
+    reversed without guessing."""
+    snap = item.ytd_snapshot if isinstance(item.ytd_snapshot, dict) else {}
+    components = {k for k, v in snap.items() if isinstance(v, dict) and "ytd_before" in v}
+    owned_org = db.query(OrganizationYtdAccumulator).filter(OrganizationYtdAccumulator.last_updated_payslip_id == item.id).all()
+    if owned_org:
+        raise YtdPostingConflict(
+            "this payslip pre-dates YTD posting records and added to employer-level accumulators "
+            f"({', '.join(sorted(r.tax_component for r in owned_org))}) — its increment cannot be reversed safely"
+        )
+    owned = db.query(PayrollYtdAccumulator).filter(PayrollYtdAccumulator.last_updated_payslip_id == item.id).all()
+    for r in owned:
+        entry = snap.get(r.tax_component) if r.tax_component in _LEGACY_YTD_SNAPSHOT_COMPONENTS else None
+        if not isinstance(entry, dict) or entry.get("ytd_before") in (None, "None") or (r.ytd_tax_withheld or 0) != 0:
+            raise YtdPostingConflict(
+                f"this payslip pre-dates YTD posting records and its {r.tax_component} ({r.tax_year}) total cannot be "
+                "restored from its snapshot — it cannot be reversed safely"
+            )
+    later = db.query(PayrollYtdAccumulator).filter(
+        PayrollYtdAccumulator.employee_id == item.employee_id,
+        PayrollYtdAccumulator.tax_component.in_(components or {"__none__"}),
+        PayrollYtdAccumulator.last_updated_payslip_id > item.id,
+    ).first()
+    if later is not None:
+        raise YtdPostingConflict(
+            f"a later payslip (id {later.last_updated_payslip_id}) has already accumulated {later.tax_component} "
+            "on top of this one — remove or correct the later payslip(s) first"
+        )
+    for r in owned:
+        r.ytd_taxable_wages = Decimal(str(snap[r.tax_component]["ytd_before"]))
+        r.last_updated_payslip_id = None
+    db.flush()
+
+
+def _ytd_posting_signature(postings: list) -> dict:
+    """What a correction must reproduce to be YTD-neutral: each absolute
+    row's post-payslip total and each additive row's increment."""
+    sig = {}
+    for p in postings or []:
+        key = (p["table"], p["taxYear"], p["component"])
+        if p["mode"] == "absolute":
+            sig[key] = (Decimal(p["after"]["wages"]), Decimal(p["after"]["tax"]))
+        else:
+            sig[key] = (Decimal(p["after"]["wages"]) - Decimal(p["before"]["wages"]),
+                        Decimal(p["after"]["tax"]) - Decimal(p["before"]["tax"]))
+    return sig
+
+
+def _ytd_restore_state(db: Session, state: dict, employee_id: int, organization_id: int) -> None:
+    """Put every accumulator row back exactly as captured (values and
+    previous writer); rows created since the capture are removed."""
+    for table, model in _ytd_models():
+        owner = model.employee_id == employee_id if table == "employee" else model.organization_id == organization_id
+        for r in db.query(model).filter(owner):
+            captured = state.get((table, r.id))
+            if captured is None:
+                db.delete(r)
+            else:
+                r.ytd_taxable_wages, r.ytd_tax_withheld, r.last_updated_payslip_id = captured
+    db.flush()
+
+
+def _post_payslip_ytd(db: Session, run: PayrollRun, employee, item: PayslipItem, country: str, r: dict) -> None:
+    """Every YTD accumulator write for one payslip (generation and the
+    correction re-post share it). `r` holds the popped "_*_ytd_result" /
+    increment values from _compute_payslip_values."""
+    db.flush()  # need item.id for last_updated_payslip_id
+    work_state = getattr(employee, "work_state", None)
+    if r.get("ytd_result") is not None:
+        _upsert_ca_ytd_accumulator(db, employee.id, run.pay_date, work_state, r["ytd_result"], payslip_id=item.id)
+    if r.get("us_ytd_result") is not None:
+        _upsert_us_ytd_accumulator(db, employee.id, run.pay_date, r["us_ytd_result"], payslip_id=item.id)
+    if r.get("au_sg_ytd_result") is not None:
+        _upsert_au_sg_ytd_accumulator(db, employee.id, run.pay_date, r["au_sg_ytd_result"], payslip_id=item.id)
+    if r.get("au_whm_ytd_result") is not None:
+        _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, r["au_whm_ytd_result"], payslip_id=item.id)
+    if r.get("ky_pension_ytd_result") is not None:
+        _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, r["ky_pension_ytd_result"], payslip_id=item.id)
+    if r.get("gy_paye_credit_ytd_result") is not None:
+        _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, r["gy_paye_credit_ytd_result"], payslip_id=item.id)
+    if r.get("sg_cpf_ytd_result") is not None:
+        _upsert_sg_cpf_ytd_accumulator(db, employee.id, _sg_wage_date(run), r["sg_cpf_ytd_result"], payslip_id=item.id)
+    if r.get("ie_ytd_result") is not None:
+        # IE-032/IE-039: advances USC/PRSI/MyFutureFund cumulative state from
+        # a real persisted payslip only, with the row read FOR UPDATE.
+        _upsert_ie_ytd_accumulator(db, employee.id, run.organization_id, run.pay_date,
+                                   r["ie_ytd_result"], payslip_id=item.id)
+    if r.get("pr_ytd_result") is not None:
+        _upsert_pr_ytd_accumulator(db, employee.id, run.pay_date, r["pr_ytd_result"], payslip_id=item.id)
+    if r.get("it_ytd_result") is not None:
+        _italy_service.post_it_payslip_ytd(db, employee.id, r["it_ytd_result"], payslip_id=item.id)
+    if r.get("option2_ytd_result") is not None:
+        _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, r["option2_ytd_result"], payslip_id=item.id)
+    if r.get("uk_director_ytd_result") is not None:
+        _upsert_uk_director_ytd_accumulator(db, employee.id, run.pay_date, r["uk_director_ytd_result"], payslip_id=item.id)
+    if r.get("org_levy_result") is not None:
+        _upsert_ca_org_levy_ytd(
+            db, run.organization_id, run.pay_date, r["org_levy_result"], payslip_id=item.id,
+            tax_year=_au_ytd_tax_year(run.pay_date) if country == "AU" else None,
+        )
+    uk_gross_increment, uk_employer_ni_increment = r.get("uk_org_levy_increment") or (None, None)
+    if uk_gross_increment is not None or uk_employer_ni_increment is not None:
+        _upsert_uk_org_levy_ytd(db, run.organization_id, run.pay_date, uk_gross_increment, uk_employer_ni_increment, payslip_id=item.id)
+    if r.get("jm_heart_increment") is not None:
+        _upsert_jm_heart_ytd(db, run.organization_id, run.pay_date, r["jm_heart_increment"], payslip_id=item.id)
+
+
+def _refresh_ytd_after_correction(db: Session, run: PayrollRun, employee, item: PayslipItem, country: str,
+                                  r: dict, old_postings) -> list:
+    """Correction = reverse this payslip's employee-level (ABSOLUTE) postings
+    and re-post them from the recalculated result. The correction path never
+    recomputes employer-level increments (org levies) or CA Option 2 (see
+    regenerate_employee_payslip), so ADDITIVE postings are carried over
+    untouched, and an absolute row whose family the correction did not
+    recompute is put back to its original value. If a LATER payslip already
+    built on these totals, the correction may only proceed when its YTD
+    effect is unchanged (nothing is touched); a changed effect is refused —
+    never silently applied under the later payslip. Returns the postings to
+    store on the payslip."""
+    old_abs = [p for p in old_postings if p["mode"] == "absolute"]
+    old_add = [p for p in old_postings if p["mode"] != "absolute"]
+    state = _ytd_capture_state(db, item.employee_id, item.organization_id)
+    later = any(state.get((p["table"], p["rowId"]), (None, None, item.id))[2] != item.id for p in old_abs)
+    _ytd_reverse_postings(db, item, old_abs, require_latest=False, delete_created=False)
+    pre = _ytd_capture_state(db, item.employee_id, item.organization_id)
+    _post_payslip_ytd(db, run, employee, item, country, {**r, "org_levy_result": None,
+                                                         "uk_org_levy_increment": None, "jm_heart_increment": None})
+    # after the reversal only the rows just re-posted point at this payslip
+    new_abs = [p for p in _ytd_collect_postings(db, item, pre) if p["mode"] == "absolute"]
+    new_keys = {(p["table"], p["taxYear"], p["component"]) for p in new_abs}
+    models = dict(_ytd_models())
+    kept = []
+    for p in old_abs:
+        if (p["table"], p["taxYear"], p["component"]) in new_keys:
+            continue
+        row = db.get(models[p["table"]], p["rowId"])
+        if row is not None:   # family not recomputed by the correction — original value stands
+            row.ytd_taxable_wages = Decimal(p["after"]["wages"])
+            row.ytd_tax_withheld = Decimal(p["after"]["tax"])
+            row.last_updated_payslip_id = state.get((p["table"], p["rowId"]), (None, None, item.id))[2]
+        kept.append(p)
+    db.flush()
+    changed = _ytd_posting_signature(new_abs + kept) != _ytd_posting_signature(old_abs)
+    if later:
+        _ytd_restore_state(db, state, item.employee_id, item.organization_id)
+        if changed:
+            raise YtdPostingConflict(
+                "this correction changes year-to-date totals that a later payslip has already built on — "
+                "remove or correct the later payslip(s) first"
+            )
+        return old_postings
+    return new_abs + kept + old_add
+
+
 def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str,
                               calculation_mode: str = "standard", payslip_number: str = None,
                               attendance_records: List["PayrollAttendanceRecord"] = None,
@@ -17079,8 +25473,12 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     us_ytd_result = values.pop("_us_ytd_result", None)
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
+    ie_ytd_result = values.pop("_ie_ytd_result", None)
+    it_ytd_result = values.pop("_it_ytd_result", None)
     ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
+    pr_ytd_result = values.pop("_pr_ytd_result", None)
+    sg_cpf_ytd_result = values.pop("_sg_cpf_ytd_result", None)
     au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
@@ -17108,17 +25506,18 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
                if germany_unavailable_components else None),
         **values,
     )
+    ytd_pre_state = _ytd_capture_state(db, employee.id, run.organization_id)
     db.add(item)
-    if ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        work_state = getattr(employee, "work_state", None)
-        _upsert_ca_ytd_accumulator(db, employee.id, run.pay_date, work_state, ytd_result, payslip_id=item.id)
-    if us_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_us_ytd_accumulator(db, employee.id, run.pay_date, us_ytd_result, payslip_id=item.id)
+    _post_payslip_ytd(db, run, employee, item, country, dict(
+        ytd_result=ytd_result, us_ytd_result=us_ytd_result, au_sg_ytd_result=au_sg_ytd_result,
+        au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
+        gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
+        ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
+        option2_ytd_result=option2_ytd_result, uk_director_ytd_result=uk_director_ytd_result,
+        org_levy_result=org_levy_result, uk_org_levy_increment=uk_org_levy_increment,
+        jm_heart_increment=jm_heart_increment,
+    ))
     if au_sg_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id/payslip_item_id
-        _upsert_au_sg_ytd_accumulator(db, employee.id, run.pay_date, au_sg_ytd_result, payslip_id=item.id)
         # Payday Super (§10): "each payday creates a traceable SG
         # liability" — one row per real, persisted payslip, mirroring the
         # accumulator write immediately above (both gated on the exact
@@ -17130,37 +25529,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
             ytd_qualifying_earnings_after=au_sg_ytd_result.ytd_sg_qualifying_earnings_after,
             mcb_reached=au_sg_ytd_result.sg_mcb_reached, payslip_item_id=item.id,
         )
-    if au_whm_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, au_whm_ytd_result, payslip_id=item.id)
-    if ky_pension_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, ky_pension_ytd_result, payslip_id=item.id)
-    if gy_paye_credit_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, gy_paye_credit_ytd_result, payslip_id=item.id)
     if au_statutory_deductions_detail is not None:
         _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
-    if option2_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        work_state = getattr(employee, "work_state", None)
-        _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, option2_ytd_result, payslip_id=item.id)
-    if uk_director_ytd_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_uk_director_ytd_accumulator(db, employee.id, run.pay_date, uk_director_ytd_result, payslip_id=item.id)
-    if org_levy_result is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_ca_org_levy_ytd(
-            db, run.organization_id, run.pay_date, org_levy_result, payslip_id=item.id,
-            tax_year=_au_ytd_tax_year(run.pay_date) if country == "AU" else None,
-        )
-    uk_gross_increment, uk_employer_ni_increment = uk_org_levy_increment or (None, None)
-    if uk_gross_increment is not None or uk_employer_ni_increment is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_uk_org_levy_ytd(db, run.organization_id, run.pay_date, uk_gross_increment, uk_employer_ni_increment, payslip_id=item.id)
-    if jm_heart_increment is not None:
-        db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_jm_heart_ytd(db, run.organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
+    _ytd_record_postings(db, item, ytd_pre_state)
     return item
 
 
@@ -17233,7 +25604,7 @@ def _resolve_run_calc_inputs(db: Session, run: PayrollRun, organization_id: int 
 
 def _resolve_employee_calc_inputs(
     db: Session, organization_id: int, employee, cache: dict = None,
-    payroll_date=None, org_opted_in: bool = False,
+    payroll_date=None, org_opted_in: bool = False, run: Optional[PayrollRun] = None,
 ):
     """Per-employee jurisdiction + rate-map/slab resolution for payslip
     generation — an employee's own country_code overrides the org default
@@ -17275,6 +25646,10 @@ def _resolve_employee_calc_inputs(
     employee for the same reason, None unless the employee has
     work_locality set AND a matching rate exists."""
     country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if run is not None and country == "SG":
+        # SG-011: a December wage month paid in January uses the December
+        # (prior-year) pack — resolve on the CPF wage date, not the pay date.
+        payroll_date = _sg_wage_date(run)
     state = getattr(employee, "work_state", None)
     tax_regime = getattr(employee, "tax_regime", None)
     # US-specific (NULL/unused for every other country): Form W-4 filing
@@ -17367,7 +25742,312 @@ def _resolve_employee_calc_inputs(
     return country, rate_map, slabs, resolved_pack, state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, resolution_state
 
 
+def _resolve_payslip_generation_inputs(
+    db: Session,
+    run: PayrollRun,
+    employee,
+    organization_id: int,
+    *,
+    calculation_mode: str,
+    allowance_components: list,
+    org_opted_in: bool,
+    payslip_number: Optional[str] = None,
+    calc_cache: Optional[dict] = None,
+    attendance_by_employee: Optional[dict] = None,
+) -> dict:
+    """Resolve EVERY input _generate_single_payslip needs for ONE employee.
+
+    This is the single source of truth for per-employee payslip inputs,
+    shared by generate_payslips_for_run's batch loop and by the
+    per-employee Celery entry point (generate_payslip_for_employee). Its
+    existence is what makes a chord safe: the alternative — a worker task
+    re-deriving these inputs from its own knowledge of the batch path — is
+    a second implementation that diverges the first time either one is
+    touched, and the divergence shows up as one employee's payslip being
+    computed from different inputs than their colleague's in the same run.
+
+    `calc_cache` is the per-call jurisdiction cache (see
+    _resolve_employee_calc_inputs). It is optional: a single-employee call
+    passes None and resolves fresh, which is CORRECT — the cache exists
+    only to deduplicate repeated resolution of the same jurisdiction
+    within one batch, never to carry state between calls. Passing a cache
+    here that outlives one payroll date would be the bug; no date is part
+    of its key.
+
+    `attendance_by_employee`: optional pre-fetched {employee_id: [rows]}
+    map so a batch caller keeps its single batched attendance query. When
+    absent (the single-employee path) the rows for this employee and this
+    run's period are fetched in one query rather than the two queries the
+    batch path used to issue per employee — same rows, same filters.
+
+    Returns a dict shaped as `_generate_single_payslip(**kwargs)`, plus
+    two non-kwargs entries: `country` (the resolved country, needed by
+    callers for the Germany blocked-handler) and `employee`.
+    """
+    country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
+        db, organization_id, employee, cache=calc_cache,
+        payroll_date=run.pay_date, org_opted_in=org_opted_in, run=run,
+    )
+
+    if attendance_by_employee is not None:
+        attendance_records = attendance_by_employee.get(employee.id, [])
+    elif run.period_start and run.period_end and run.period_end >= run.period_start:
+        attendance_records = (
+            db.query(PayrollAttendanceRecord).filter(
+                PayrollAttendanceRecord.organization_id == run.organization_id,
+                PayrollAttendanceRecord.employee_id == employee.id,
+                PayrollAttendanceRecord.date >= run.period_start,
+                PayrollAttendanceRecord.date <= run.period_end,
+            ).all()
+        )
+    else:
+        attendance_records = []
+
+    ytd_inputs = (
+        _load_ca_ytd(db, employee.id, run.pay_date, getattr(employee, "work_state", None))
+        if country == "CA" else
+        _load_uk_director_ytd(db, employee.id, run.pay_date)
+        if country == "UK" else
+        _load_us_ytd(db, employee.id, run.pay_date)
+        if country == "US" else
+        {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)}
+        if country == "AU" else
+        _load_ky_pension_ytd(db, employee.id, run.pay_date)
+        if country == "KY" else
+        _load_gy_paye_credit_ytd(db, employee.id, run.pay_date)
+        if country == "GY" else
+        _load_pr_ytd(db, employee.id, run.pay_date)
+        if country == "PR" else
+        _load_sg_cpf_ytd(db, employee.id, run.pay_date, lock=True, current_run_id=run.id, wage_date=_sg_wage_date(run))
+        if country == "SG" else None
+    )
+    # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be persisted
+    # into the calculation snapshot, not just used to pick a rate/slab pack
+    # and discarded (see _resolve_country_aware_state).
+    poe_snapshot = (
+        {"poe_result": poe_result, "poe_reason": poe_reason} if country == "CA" else None
+    )
+    # Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET — see
+    # _ca_org_levy_read_inputs's own docstring for the gating rationale.
+    # Read fresh per employee (not cached) — the org's running total
+    # changes with every prior same-jurisdiction employee processed in this
+    # same sequential loop, exactly as proven safe for the per-employee
+    # YTD accumulator's own read-then-flush ordering.
+    org_levy_inputs = (
+        _ca_org_levy_read_inputs(db, organization_id, run.pay_date, getattr(employee, "work_state", None))
+        if country == "CA" else
+        _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
+        if country == "UK" else
+        _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(employee, "work_state", None))
+        if country == "AU" else
+        _load_jm_heart_ytd(db, organization_id, run.pay_date)
+        if country == "JM" else {}
+    )
+
+    return {
+        "country": country,
+        "employee": employee,
+        "rate_map": rate_map,
+        "slabs": slabs,
+        "calculation_mode": calculation_mode,
+        "payslip_number": payslip_number,
+        "attendance_records": attendance_records,
+        "allowance_components": allowance_components,
+        "resolved_pack": resolved_pack,
+        "state_rate_map": state_rate_map,
+        "state_slabs": state_slabs,
+        "employer_tax_profiles": employer_tax_profiles,
+        "reciprocity": reciprocity,
+        "locality_rate": locality_rate,
+        "ytd_inputs": ytd_inputs,
+        "poe_snapshot": poe_snapshot,
+        "org_levy_inputs": org_levy_inputs or None,
+    }
+
+
+def generate_payslip_for_employee(
+    db: Session,
+    run: PayrollRun,
+    employee_id: int,
+    organization_id: int,
+    *,
+    payslip_number: Optional[str] = None,
+    skip_if_exists: bool = True,
+) -> dict:
+    """Generate ONE employee's payslip inside an existing run.
+
+    The per-employee entry point Phase 2.2 needs: a chord header task
+    calls this once per employee, and every input comes from
+    _resolve_payslip_generation_inputs — the same function the batch loop
+    uses — so the chord cannot compute a payslip from inputs the batch
+    path would not have used.
+
+    Returns {"status": ..., "employee_id": ..., "payslip_id": ...} with
+    status one of "generated" | "exists" | "blocked". It does NOT commit:
+    the caller owns the transaction, so a chord header can accumulate one
+    session across its group, and the batch path keeps its existing
+    single-transaction boundary. It does NOT touch run aggregates —
+    _recompute_run_aggregates is the caller's responsibility, because
+    recomputing per employee in a loop would be N full re-aggregations.
+
+    `skip_if_exists` defaults True, mirroring the batch path's
+    idempotency: an employee who already has a non-FAILED payslip in this
+    run is left alone. Set False only where the caller has already
+    established the employee has no payslip (the batch path does this
+    after its own existing_ids pass).
+    """
+    from app.core.exceptions import GermanyCalculationBlockedException
+
+    employee = db.query(PayrollEmployee).filter(
+        PayrollEmployee.id == employee_id,
+        PayrollEmployee.organization_id == (organization_id or run.organization_id),
+    ).first()
+    if not employee:
+        raise NotFoundException(f"PayrollEmployee {employee_id} not found.")
+
+    if skip_if_exists:
+        existing = db.query(PayslipItem).filter(
+            PayslipItem.payroll_run_id == run.id,
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.status != PayslipStatus.FAILED,
+        ).first()
+        if existing:
+            return {"status": "exists", "employee_id": employee_id, "payslip_id": existing.id}
+
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    allowance_components = _resolve_allowance_components(db, organization_id)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+
+    resolved = _resolve_payslip_generation_inputs(
+        db, run, employee, organization_id,
+        calculation_mode=calculation_mode,
+        allowance_components=allowance_components,
+        org_opted_in=org_opted_in,
+        payslip_number=payslip_number,
+    )
+    country = resolved["country"]
+    resolved.pop("employee")
+
+    try:
+        item = _generate_single_payslip(db, run, employee, **resolved)
+    except GermanyCalculationBlockedException as exc:
+        employee_name = getattr(employee, "name", None) or f"Employee #{employee.id}"
+        db.add(PayslipItem(
+            payroll_run_id=run.id, employee_id=employee.id, organization_id=run.organization_id,
+            employee_name=employee_name, country_code=country, status=PayslipStatus.FAILED,
+            germany_calculation_snapshot=exc.trace,
+            notes=f"[{exc.error_code}] {exc.message}",
+        ))
+        log_activity(
+            db, organization_id or run.organization_id,
+            f"Payroll for {employee_name} in run '{run.period_label}' is blocked: {exc.message}",
+            ActivityStatus.INFO, actor_id=run.created_by,
+        )
+        # No payslip_number consumed — same contract as the batch loop's
+        # handler: the number stays unused for this employee rather than
+        # being burned on a row that was never really generated.
+        return {"status": "blocked", "employee_id": employee_id, "payslip_id": None}
+
+    return {"status": "generated", "employee_id": employee_id, "payslip_id": item.id}
+
+
+def parallel_payslip_generation_blocker(
+    db: Session, organization_id: int, employees: list,
+) -> Optional[str]:
+    """Return why these employees CANNOT be paysliped in parallel, else None.
+
+    Phase 2.2's safety gate for the Celery chord. The batch path processes
+    employees in a single sequential loop inside one transaction, and that
+    ordering is part of the RESULT for any country whose org-level
+    accumulator is shared across employees — not merely an implementation
+    detail:
+
+      * _ca_org_levy_read_inputs reads the org's running
+        `<component>_ytd_remuneration_before`, canada.py banding
+        (Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET) applies the
+        rate from that running total, then _upsert_ca_org_levy_ytd ADDS
+        this employee's increment. Two workers reading the "before" figure
+        concurrently both see the same value, both band against it, and
+        one increment is lost — a wrong rate AND a wrong total, silently.
+      * The UK Apprenticeship Levy / Employment Levy, Australia's payroll
+        tax and Jamaica's HEART trust do the same read-modify-write on one
+        org-wide row.
+
+    So a run touching any of those countries is processed sequentially by
+    the chord's fallback rather than split across workers — correctness
+    before throughput, because the wrong payslip number is not a
+    retryable failure: it is a persisted, plausible-looking figure.
+
+    Per-employee YTD accumulators (_YTD_ACCUMULATOR_ENABLED_COUNTRIES) are
+    deliberately NOT a blocker: they are keyed by employee_id, so
+    concurrent workers touch disjoint rows.
+
+    `employees` is the already-loaded pending list — no query here, since
+    the caller has just built it.
+    """
+    # Singapore generation is serialised per run behind a SESSION-level
+    # advisory lock held by generate_payslips_for_run (SG-043), and it adds
+    # mid-period joiners the chord's pending list never sees. Per-employee
+    # workers would bypass both, so a Singapore org is always sequential.
+    if organization_id and _sg_org_is_singapore(db, organization_id):
+        return ("this is a Singapore organization — Singapore payroll generation is "
+                "serialised per run (SG-043) and must not be split across workers")
+    enabled = set(_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES)
+    if not enabled:
+        return None
+    for emp in employees:
+        country = _resolve_employee_country(
+            db, organization_id, getattr(emp, "country_code", None))
+        if country in enabled:
+            return (
+                f"employee {getattr(emp, 'employee_code', None) or emp.id} is in "
+                f"{country}, whose org-level levy accumulator is shared across "
+                f"employees — this run must be generated sequentially so every "
+                f"employee's levy bands against the true running total"
+            )
+    return None
+
+
 def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
+    """Public entry point. Singapore (Phase 5.1 WS2, SG-043): the whole
+    generation is serialised per run by a SESSION-level PostgreSQL advisory
+    lock — generation commits internally (policy get-or-create, activity
+    log), which would release a transaction-scoped row lock half-way. Every
+    other country goes straight to the unchanged implementation."""
+    if organization_id and dialect_is_postgres(db) and _sg_org_is_singapore(db, organization_id):
+        from sqlalchemy import text as _sql_text
+
+        # A session-level advisory lock is owned by ONE connection; the ORM
+        # session hands its connection back to the pool on every commit, so
+        # the lock lives on a dedicated connection for the whole generation.
+        bind = db.get_bind()
+        lock_conn = getattr(bind, "engine", bind).connect()
+        try:
+            lock_conn.execute(_sql_text("SELECT pg_advisory_lock(8702, :run_id)"), {"run_id": run.id})
+            lock_conn.commit()
+            db.refresh(run)
+            try:
+                result = _generate_payslips_for_run(db, run, organization_id, employee_ids)
+            except Exception:
+                db.rollback()             # nothing of a failed run is committed (no partial payroll)
+                raise
+            db.commit()
+            return result
+        finally:
+            lock_conn.execute(_sql_text("SELECT pg_advisory_unlock(8702, :run_id)"), {"run_id": run.id})
+            lock_conn.commit()
+            lock_conn.close()
+    return _generate_payslips_for_run(db, run, organization_id, employee_ids)
+
+
+def dialect_is_postgres(db: Session) -> bool:
+    try:
+        return db.get_bind().dialect.name == "postgresql"
+    except Exception:
+        return False
+
+
+def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
     """Generate a payslip for every Active employee in the org (or only the
     specified employee_ids if provided). Idempotent: re-running skips
     employees who already have a payslip in this run.
@@ -17379,6 +26059,12 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     aborts the whole call, exactly as before this phase."""
     from app.core.exceptions import GermanyCalculationBlockedException
 
+    if _sg_is_correction_run(run):
+        raise BadRequestException("A Singapore correction run holds correction deltas only — it is never generated from "
+                                  "employee data (SG-044).")
+    if (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise BadRequestException("A Hong Kong correction run holds one correction delta only — it is never generated "
+                                  "from employee data (D-14).")
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     # Org-level, not per-employee — resolved once for the whole run, same as
     # rate_map/slabs are cached per-jurisdiction below.
@@ -17402,6 +26088,8 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
         )
     )
     employees = employees_query.all()
+    # Singapore joiners within the period (incomplete-month salary) — SG only.
+    employees += _sg_mid_period_joiners(db, organization_id, run.period_start, run.period_end, employee_ids)
 
     # Phase 8BI: a FAILED item (a prior statutorily-blocked attempt —
     # e.g. Germany PAP unavailable) does NOT count as "already generated"
@@ -17470,48 +26158,27 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     for emp in employees:
         if emp.id in existing_ids:
             continue
-        country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
-            db, organization_id, emp, cache=calc_cache,
-            payroll_date=run.pay_date, org_opted_in=org_opted_in,
-        )
         payslip_number = f"{base_payslip_code}{seq:05d}" if base_payslip_code else None
-        ytd_inputs = (
-            _load_ca_ytd(db, emp.id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "CA" else
-            _load_uk_director_ytd(db, emp.id, run.pay_date)
-            if country == "UK" else
-            _load_us_ytd(db, emp.id, run.pay_date)
-            if country == "US" else
-            {**_load_au_sg_ytd(db, emp.id, run.pay_date), **_load_au_whm_ytd(db, emp.id, run.pay_date)}
-            if country == "AU" else
-            _load_ky_pension_ytd(db, emp.id, run.pay_date)
-            if country == "KY" else
-            _load_gy_paye_credit_ytd(db, emp.id, run.pay_date)
-            if country == "GY" else None
+        # Phase 2.2: the batch loop no longer resolves these inputs inline.
+        # _resolve_payslip_generation_inputs is the single implementation
+        # shared with generate_payslip_for_employee, so a chord worker and
+        # this loop cannot disagree about what inputs an employee's payslip
+        # was computed from. Everything batch-specific stays here: payslip
+        # number sequencing, the batched attendance map, calc_cache reuse,
+        # and PARTIAL activity logging (which is a batch-surface concern).
+        resolved_inputs = _resolve_payslip_generation_inputs(
+            db, run, emp, organization_id,
+            calculation_mode=calculation_mode,
+            allowance_components=allowance_components,
+            org_opted_in=org_opted_in,
+            payslip_number=payslip_number,
+            calc_cache=calc_cache,
+            attendance_by_employee=attendance_by_employee,
         )
-        # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
-        # persisted into the calculation snapshot, not just used to pick
-        # a rate/slab pack and discarded (see _resolve_country_aware_state).
-        poe_snapshot = (
-            {"poe_result": poe_result, "poe_reason": poe_reason} if country == "CA" else None
-        )
-        # Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET — see
-        # _ca_org_levy_read_inputs's own docstring for the gating
-        # rationale. Read fresh per employee (not cached) — the org's
-        # running total changes with every prior same-jurisdiction
-        # employee processed in this same sequential loop, exactly as
-        # proven safe for the per-employee YTD accumulator's own
-        # read-then-flush ordering.
-        org_levy_inputs = (
-            _ca_org_levy_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "CA" else
-            _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
-            if country == "UK" else
-            _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "AU" else
-            _load_jm_heart_ytd(db, organization_id, run.pay_date)
-            if country == "JM" else {}
-        )
+        # "country" stays in the dict — _generate_single_payslip takes it.
+        # Only the caller's own reference (employee) is stripped.
+        country = resolved_inputs["country"]
+        resolved_inputs.pop("employee")
         # Phase 8BI (P0): a statutorily-blocked employee (today, only
         # Germany — GermanyCalculationBlockedException, e.g. no PUBLISHED
         # PAP asset / no effective EmployeeStatutoryProfile) must NEVER
@@ -17529,12 +26196,7 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
         # fabricated monetary figures) and moves on to the next employee.
         try:
             generated_item = _generate_single_payslip(
-                db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
-                attendance_records=attendance_by_employee.get(emp.id, []),
-                allowance_components=allowance_components, resolved_pack=resolved_pack,
-                state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-                reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs, poe_snapshot=poe_snapshot,
-                org_levy_inputs=org_levy_inputs or None,
+                db, run, emp, **resolved_inputs,
             )
             # Phase 8BV: a PARTIAL payslip (Phase 8BU) is a real, persisted
             # outcome an operator needs to know about — the FAILED sentinel
@@ -17593,6 +26255,12 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     run = run_query.first()
     if not run:
         raise NotFoundException(f"Payroll run {run_id} not found.")
+    if (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise BadRequestException("A Hong Kong correction delta is not recalculated — reject it and request a new "
+                                  "correction of the original payslip (D-14).")
+    if _sg_is_correction_run(run):
+        raise BadRequestException("A Singapore correction delta is not recalculated — create a further correction of the "
+                                  "original payslip instead (SG-044).")
     if run.status not in (PayrollStatus.DRAFT, PayrollStatus.REVIEW):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -17614,8 +26282,13 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
     country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
-        db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in,
+        db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in, run=run,
     )
+    # Singapore IR21: never silently change a RELEASED amount (refused
+    # here); a correction of a still-held payslip is re-checked below.
+    ir21_case = _sg_ir21_guard_correction(db, organization_id, employee.id, run.pay_date) if country == "SG" else None
+    if country == "SG":
+        _sg_guard_later_same_month_payslip(db, employee.id, run, "recalculate")
     poe_snapshot = {"poe_result": poe_result, "poe_reason": poe_reason} if country == "CA" else None
     allowance_components = _resolve_allowance_components(db, organization_id)
     # Phase 8AS: capture the currently-ATTACHED Germany overtime premium
@@ -17651,6 +26324,14 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             rate_map = {_normalize_engine_component_key(r.component_key): r for r in replay_rates}
             slabs = replay_slabs
             replaying_from_snapshot = True
+            # Hong Kong: the period-split rows (minimum-wage segments etc.) the
+            # HK calculator reads from the pack must come from the SAME pinned
+            # pack as the replayed snapshot — same rule as _hk_frozen_recompute —
+            # never from whichever pack resolves today.
+            pinned_pack = (db.get(JurisdictionPack, existing_item.tax_policy_pack_id)
+                           if country == "HK" and existing_item.tax_policy_pack_id else None)
+            if pinned_pack is not None and resolved_pack is not None:
+                resolved_pack = (resolved_pack[0], resolved_pack[1], pinned_pack)
         # AC-32 historical-replay gap closure (see _build_overlay_tax_
         # snapshot's own docstring) — replay the provincial/employer-
         # overlay/reciprocity/locality inputs too, not just the country-
@@ -17709,6 +26390,35 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             if before is not None:
                 ytd_inputs[field_name] = Decimal(before)
     # Same recalculate-from-frozen-snapshot, never-write contract as
+    # Canada/US above, for Singapore's CPF annual-ceiling accumulators —
+    # the ledger of earlier AW payments is rebuilt read-only from prior
+    # months' persisted traces, so a correction reproduces the original
+    # AW estimate / true-up exactly when nothing else changed.
+    if country == "SG" and existing_snapshot:
+        component_to_field = {
+            "cpf_ow_subject": "ytd_cpf_ow_subject_before", "cpf_aw_subject": "ytd_cpf_aw_subject_before",
+            "cpf_aw_paid": "ytd_cpf_aw_paid_before",
+        }
+        for component, field_name in component_to_field.items():
+            before = (existing_snapshot.get(component) or {}).get("ytd_before")
+            if before not in (None, "None"):
+                ytd_inputs[field_name] = Decimal(before)
+        if ytd_inputs:
+            sg_wage_date = _sg_wage_date(run)
+            ytd_inputs["sgp_aw_ledger"] = _load_sg_aw_ledger(db, employee.id, run.pay_date, current_run_id=run.id,
+                                                            wage_year=sg_wage_date.year)
+            ytd_inputs["sgp_month_to_date"] = _load_sg_month_to_date(db, employee.id, run.pay_date, current_run_id=run.id,
+                                                                    wage_month=sg_wage_date.strftime("%Y-%m"))
+            ytd_inputs["sgp_employer_hires_foreign_workers"] = _sg_employer_hires_foreign_workers(db, employee.id)
+            # Replay the classification the original payslip actually used
+            # (frozen in its trace), not today's TaxabilityRule rows.
+            frozen = ((getattr(existing_item, "sgp_calculation_trace", None) or {}).get("inputs") or {}).get("wageClassification")
+            if frozen is not None:
+                ytd_inputs["sgp_cpf_wage_classification"] = _sg_frozen_classification(frozen)
+            frozen_iras = ((getattr(existing_item, "sgp_calculation_trace", None) or {}).get("inputs") or {}).get("irasClassification")
+            if frozen_iras is not None:
+                ytd_inputs["sgp_iras_classification"] = _sg_frozen_iras_classification(frozen_iras)
+    # Same recalculate-from-frozen-snapshot, never-write contract as
     # Canada/US above, for Australia's SG qualifying-earnings MCB tracking
     # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2).
     if country == "AU" and existing_snapshot:
@@ -17726,13 +26436,25 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs or None,
         poe_snapshot=poe_snapshot,
     )
+    # Phase 4A: the correction now RE-POSTS year-to-date totals from these
+    # results (see _refresh_ytd_after_correction below) instead of the
+    # former never-write contract, which left YTD stale after a
+    # value-changing correction. Payslips without posting records keep the
+    # former behaviour.
     ytd_result = values.pop("_ytd_result", None)
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
-    us_ytd_result = values.pop("_us_ytd_result", None)  # never written from this correction path — same reasoning as _ytd_result above
-    values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
-    values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
-    values.pop("_ky_pension_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
-    values.pop("_gy_paye_credit_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
+    us_ytd_result = values.pop("_us_ytd_result", None)
+    au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
+    au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
+    ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
+    gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
+    sg_cpf_ytd_result = values.pop("_sg_cpf_ytd_result", None)
+    # Ireland / Puerto Rico: re-posted through the same Phase 4A lifecycle
+    # (_refresh_ytd_after_correction reverses this payslip's absolute postings
+    # first), so a correction REPLACES their year-to-date rather than advancing it.
+    ie_ytd_result = values.pop("_ie_ytd_result", None)
+    it_ytd_result = values.pop("_it_ytd_result", None)
+    pr_ytd_result = values.pop("_pr_ytd_result", None)
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
     # the ORIGINAL run already collected against.
@@ -17779,8 +26501,33 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             "ytd_snapshot to reproduce from — figures may differ from the original run.",
             existing_item.id,
         )
+    old_ytd_postings = _ytd_postings_of(existing_item)
+    new_ytd_postings = None
+    if old_ytd_postings is not None:
+        try:
+            new_ytd_postings = _refresh_ytd_after_correction(db, run, employee, existing_item, country, dict(
+                ytd_result=ytd_result, us_ytd_result=us_ytd_result, au_sg_ytd_result=au_sg_ytd_result,
+                au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
+                gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
+                ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
+                uk_director_ytd_result=uk_director_ytd_result,
+            ), old_ytd_postings)
+        except YtdPostingConflict as exc:
+            db.rollback()
+            raise BadRequestException(f"Cannot recalculate this payslip: {exc}")
+    if country == "SG" and values.get("allowance_items"):
+        # Singapore corrections with named allowances: the setattr + flush
+        # below would INSERT the recomputed allowance lines before DELETING
+        # the old ones (same mapper, unit-of-work order) and trip
+        # UNIQUE(payslip_item_id, key). The old lines are removed first.
+        # (The same defect exists for every other country — out of scope
+        # for the Singapore build, deliberately not changed here.)
+        existing_item.allowance_items = []
+        db.flush()
     for field, value in values.items():
         setattr(existing_item, field, value)
+    if new_ytd_postings is not None:
+        _ytd_store_postings(existing_item, new_ytd_postings)
     # Phase 8BU: same PARTIAL-vs-PENDING decision as the initial-generation
     # path (_generate_single_payslip) — a recalculation can just as easily
     # land on/off the internal tariff's verified date range.
@@ -17824,6 +26571,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
 
     db.commit()
     run = _recompute_run_aggregates(db, run)
+    _sg_ir21_after_correction(db, ir21_case, actor_id=actor_id)
 
     # Phase 8BV: distinguish a recalculation that LANDED on PARTIAL from an
     # ordinary successful recalculation — previously both produced the
@@ -17858,8 +26606,8 @@ def _apply_employee_filter(query, organization_id):
 
 
 def get_employees(db: Session, organization_id: int,
-                   search: str = None, department: str = None, status: str = None,
-                   limit: int = None, offset: int = None) -> List[PayrollEmployee]:
+                    search: str = None, department: str = None, status: str = None,
+                    limit: int = None, offset: int = None) -> List[PayrollEmployee]:
     query = _apply_employee_filter(db.query(PayrollEmployee), organization_id)
     if department:
         query = query.filter(PayrollEmployee.department == department)
@@ -17880,6 +26628,45 @@ def get_employees(db: Session, organization_id: int,
     if limit:
         query = query.limit(limit)
     return query.all()
+
+
+def get_employee_roster(db: Session, organization_id: int,
+                        status: str = None,
+                        limit: int = None, offset: int = None) -> List[dict]:
+    """Lightweight employee roster for attendance/leave screens.
+    
+    Returns only the columns needed by attendance UI: id, name, employee_code, 
+    department, designation. Uses load_only to avoid loading all columns.
+    """
+    from sqlalchemy.orm import load_only
+    query = _apply_employee_filter(
+        db.query(PayrollEmployee).options(
+            load_only(
+                PayrollEmployee.id,
+                PayrollEmployee.name,
+                PayrollEmployee.employee_code,
+                PayrollEmployee.department,
+                PayrollEmployee.designation,
+            )
+        ), organization_id)
+    if status:
+        query = query.filter(PayrollEmployee.status == status)
+    query = query.order_by(PayrollEmployee.name)
+    if offset:
+        query = query.offset(offset)
+    if limit:
+        query = query.limit(limit)
+    # Convert to dict to avoid detached instance issues
+    return [
+        {
+            "id": emp.id,
+            "name": emp.name,
+            "employee_code": emp.employee_code,
+            "department": emp.department,
+            "designation": emp.designation,
+        }
+        for emp in query.all()
+    ]
 
 
 def get_employee_by_id(db: Session, employee_id: int, organization_id: int) -> PayrollEmployee:
@@ -17990,8 +26777,88 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         if data.de_grundlohn_hourly is not None and data.de_grundlohn_hourly <= 0:
             errors.append("de_grundlohn_hourly must be greater than 0.")
 
+    if country_code == "HK":
+        errors.extend(jurisdiction_hooks.call("HK", "statutory_profile_errors", data))
+    if country_code == "SE":
+        errors.extend(_se_profile_field_errors(data))
+
     if errors:
         raise BadRequestException("; ".join(errors))
+
+
+
+
+
+
+
+
+
+
+# Sweden worker-profile vocabularies (ZP-SE-ENG-001 §2/§5/§9/§11) — the exact
+# values engine/countries/sweden.py resolves; anything else would only ever
+# block at calculation time, so it is refused at write time instead.
+_SE_TAX_STATUSES = {"A_TAX", "SINK", "SPECIAL_DECISION", "OTHER"}
+_SE_INCOME_ROLES = {"MAIN_INCOME", "SUPPLEMENTARY_INCOME", "ONE_TIME_PAYMENT", "POST_EMPLOYMENT"}
+_SE_SINK_STATUSES = {"VALID", "EXPIRED", "PENDING", "NOT_APPLICABLE"}
+_SE_SOCIAL_INSURANCE_STATUSES = {"SWEDISH", "FOREIGN_COVERAGE", "A1", "SOCIAL_SECURITY_AGREEMENT"}
+_SE_CBA_STATUSES = {"NONE", "EMPLOYER_SPECIFIC", "SECTOR", "LOCAL_SUPPLEMENT"}
+_SE_TAX_TABLES = {str(n) for n in range(29, 43)}
+
+
+def _se_profile_field_errors(data) -> list:
+    """Write-time refusals for a Sweden statutory profile — each one a state
+    the engine could never lawfully calculate from (spec §5 failure cases,
+    SE-001 override evidence, §9 explicit CBA status)."""
+    errors = []
+
+    def _enum(field, allowed):
+        value = getattr(data, field, None)
+        if value is not None and value not in allowed:
+            errors.append(f"{field} must be one of {sorted(allowed)}.")
+
+    _enum("se_tax_status", _SE_TAX_STATUSES)
+    _enum("se_income_role", _SE_INCOME_ROLES)
+    _enum("se_sink_status", _SE_SINK_STATUSES)
+    _enum("se_social_insurance_status", _SE_SOCIAL_INSURANCE_STATUSES)
+    _enum("se_cba_status", _SE_CBA_STATUSES)
+    if data.se_tax_table is not None and data.se_tax_table not in _SE_TAX_TABLES:
+        errors.append("se_tax_table must be a Skatteverket table number 29–42.")
+    if data.se_tax_status == "SINK" and data.se_sink_status is None:
+        errors.append("se_sink_status is required when se_tax_status is SINK (spec §3 [S5]).")
+    if data.se_tax_status == "A_TAX" and data.se_income_role == "MAIN_INCOME" and not data.se_decision_override:
+        if not data.se_tax_table or not data.se_tax_column:
+            errors.append("A-tax main income needs se_tax_table and se_tax_column, or a Skatteverket decision (spec §5 step 3).")
+    if data.se_decision_override:
+        # SE-001: a manual override requires evidence + effective dates, and
+        # spec §5 step 4 requires an executable instruction.
+        if not data.se_skatteverket_decision_id:
+            errors.append("se_skatteverket_decision_id is required when se_decision_override is set (SE-001).")
+        if data.se_decision_effective_from is None:
+            errors.append("se_decision_effective_from is required when se_decision_override is set (SE-001).")
+        if data.se_decision_monthly_withholding is None and data.se_decision_rate_pct is None:
+            errors.append("A Skatteverket decision needs se_decision_monthly_withholding or se_decision_rate_pct.")
+        if data.se_decision_monthly_withholding is not None and data.se_decision_rate_pct is not None:
+            errors.append("Set either se_decision_monthly_withholding or se_decision_rate_pct, not both.")
+        if not data.reason:
+            errors.append("reason is required for a Skatteverket decision override (SE-001).")
+    if (data.se_decision_effective_from and data.se_decision_effective_to
+            and data.se_decision_effective_to < data.se_decision_effective_from):
+        errors.append("se_decision_effective_to must not be before se_decision_effective_from.")
+    if data.se_decision_monthly_withholding is not None and data.se_decision_monthly_withholding < 0:
+        errors.append("se_decision_monthly_withholding must not be negative.")
+    if data.se_decision_rate_pct is not None and not (Decimal("0") <= data.se_decision_rate_pct <= Decimal("100")):
+        errors.append("se_decision_rate_pct must be between 0 and 100.")
+    for field in ("se_employee_pension_share", "se_employer_pension_share"):
+        value = getattr(data, field, None)
+        if value is not None and not (Decimal("0") <= value <= Decimal("100")):
+            errors.append(f"{field} must be between 0 and 100.")
+    if data.se_cba_status not in (None, "NONE") and data.se_cba_id is None:
+        errors.append("se_cba_id is required unless se_cba_status is NONE — no agreement is ever applied implicitly (spec §9).")
+    if data.se_cba_status == "NONE" and data.se_cba_id is not None:
+        errors.append("se_cba_id must be empty when se_cba_status is NONE.")
+    if (data.se_coverage_start and data.se_coverage_end and data.se_coverage_end < data.se_coverage_start):
+        errors.append("se_coverage_end must not be before se_coverage_start.")
+    return errors
 
 
 def _validate_statutory_profile_no_overlap(
@@ -18096,7 +26963,54 @@ def create_employee_statutory_profile_version(
         de_elstam_schema_version=data.de_elstam_schema_version,
         de_elstam_import_reference=data.de_elstam_import_reference,
         de_grundlohn_hourly=data.de_grundlohn_hourly,
+        # Sweden (ZP-SE-ENG-001 §2/§20/§21) — applicability-resolver facts,
+        # appended verbatim like the de_* block above; se_cba_id references a
+        # payroll_collective_agreements row validated by
+        # _validate_statutory_profile_fields (SE branch).
+        se_tax_status=data.se_tax_status,
+        se_income_role=data.se_income_role,
+        se_tax_table=data.se_tax_table,
+        se_tax_column=data.se_tax_column,
+        se_skatteverket_decision_id=data.se_skatteverket_decision_id,
+        se_decision_effective_from=data.se_decision_effective_from,
+        se_decision_effective_to=data.se_decision_effective_to,
+        se_decision_override=data.se_decision_override,
+        se_decision_monthly_withholding=data.se_decision_monthly_withholding,
+        se_decision_rate_pct=data.se_decision_rate_pct,
+        se_sink_status=data.se_sink_status,
+        se_sink_decision=data.se_sink_decision,
+        se_residence_municipality=data.se_residence_municipality,
+        se_tax_table_area=data.se_tax_table_area,
+        se_social_insurance_status=data.se_social_insurance_status,
+        se_foreign_coverage_status=data.se_foreign_coverage_status,
+        se_a1_status=data.se_a1_status,
+        se_agreement_country=data.se_agreement_country,
+        se_coverage_start=data.se_coverage_start,
+        se_coverage_end=data.se_coverage_end,
+        se_evidence_document=data.se_evidence_document,
+        se_evidence_validation=data.se_evidence_validation,
+        se_cba_status=data.se_cba_status,
+        se_cba_id=data.se_cba_id,
+        se_cba_version=data.se_cba_version,
+        se_occupation=data.se_occupation,
+        se_grade=data.se_grade,
+        se_pension_plan=data.se_pension_plan,
+        se_pension_provider=data.se_pension_provider,
+        se_employee_pension_share=data.se_employee_pension_share,
+        se_employer_pension_share=data.se_employer_pension_share,
+        se_payroll_period=data.se_payroll_period,
+        se_agi_reporting_period=data.se_agi_reporting_period,
+        se_monthly_gross=data.se_monthly_gross,
+        se_taxable_benefits=data.se_taxable_benefits,
+        se_annual_income=data.se_annual_income,
     )
+    if country_code == "HK":
+        latest = previous_open or (
+            db.query(EmployeeStatutoryProfile).filter(EmployeeStatutoryProfile.employee_id == employee_id,
+                                                      EmployeeStatutoryProfile.effective_from < data.effective_from)
+            .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
+        for col, value in jurisdiction_hooks.call("HK", "statutory_profile_values", db, employee, data, latest).items():
+            setattr(row, col, value)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -20551,6 +29465,15 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
             create_new_hire_report(db, organization_id, employee.id)
         except Exception:
             pass
+    # ASUME new/rehire reporting (PR-007/PR-023) — same auto-trigger shape
+    # as US new-hire reporting above, reusing the identical NewHireReport
+    # model/table with its own PR-scoped due-days constant (see that
+    # constant's own docstring for why it's separately named).
+    elif country_code == "PR":
+        try:
+            create_new_hire_report(db, organization_id, employee.id, due_date_days=_PR_ASUME_NEW_HIRE_REPORT_DEFAULT_DAYS)
+        except Exception:
+            pass
 
     _notify_employee_created(db, employee, organization_id)
 
@@ -20566,14 +29489,17 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
 # canonical tax config changes.
 def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organization_id: int, actor_id: Optional[int] = None) -> PayrollEmployee:
     employee = get_employee_by_id(db, employee_id, organization_id)
-    updates = data.model_dump(exclude_unset=True)
+    # A masked bank account / PAN / UAN round-tripped by the edit form is not an edit.
+    updates = restore_masked_employee_columns(data.model_dump(exclude_unset=True), employee)
 
     country_code = _resolve_employee_country(
         db, organization_id, updates.get("country_code", employee.country_code)
     )
     if "compliance_fields" in updates or "country_code" in updates:
         strategy = get_employee_validation_strategy(country_code)
-        merged_compliance = {**(employee.compliance_fields or {}), **(updates.get("compliance_fields") or {})}
+        # A masked identifier round-tripped by the edit form is not an edit.
+        incoming_cf = restore_masked_compliance_fields(updates.get("compliance_fields") or {}, employee.compliance_fields or {})
+        merged_compliance = {**(employee.compliance_fields or {}), **incoming_cf}
         updates["compliance_fields"] = strategy.validate(merged_compliance)
         updates["country_code"] = country_code
         updates.update(strategy.sync_to_columns(updates["compliance_fields"]))
@@ -20594,6 +29520,9 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
         "td1x_estimated_annual_commission", "td1x_estimated_annual_expenses",
     )
     old_declaration_values = {f: getattr(employee, f, None) for f in declaration_fields}
+    sg_fact_changes, sg_effective = ([], None)
+    if country_code == "SG" and "compliance_fields" in updates:
+        sg_fact_changes, sg_effective = _sg_statutory_fact_changes(employee, updates)
 
     # Payroll-Core sensitive-field snapshot — before mutation, for the
     # employee notification diff (see _snapshot_sensitive_fields).
@@ -20616,11 +29545,93 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
                 old_value={field: str(old_value) if old_value is not None else None},
                 new_value={field: str(new_value) if new_value is not None else None},
             )
+    for key, old, new in sg_fact_changes:
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type=_SG_FACT_CHANGE_ENTITY, entity_id=employee.id,
+            legal_reference="ZP-SG-ENG-001 SG-045",
+            old_value={"field": key, "value": old},
+            new_value={"field": key, "value": new, "effectiveDate": sg_effective.isoformat() if sg_effective else None},
+            reason=(f"{key}: {old!r} → {new!r} effective {sg_effective.isoformat()}" if sg_effective
+                    else f"{key}: first recorded as {new!r}"),
+        )
 
     sensitive_changes = _sensitive_field_changes(employee, sensitive_snapshot)
     _notify_employee_sensitive_fields_changed(db, employee, sensitive_changes, organization_id)
 
     return employee
+
+
+# ── Singapore: effective-dated statutory facts (SG-045) ─────────────────
+# "Worker status changes effective mid-period must be represented as
+# effective-dated segments. The payroll engine uses only the segments that
+# apply to the statutory base being calculated." The employee row holds the
+# CURRENT value; every change of a recorded fact is audited with its
+# effective date (no history table), and each wage month is calculated on
+# the value in force for that month. A change effective inside a month has no
+# published segmentation rule for these facts, so it BLOCKS — it is never
+# applied to the whole month. (Work-pass issue / end dates, the SPR effective
+# date and joining / leaving keep their own dated handling.)
+_SG_FACT_CHANGE_ENTITY = "sg_statutory_fact_change"
+_SG_STATUTORY_FACTS = (      # (compliance_fields key, PayrollEmployee column or None)
+    ("cpf_residency_status", "sgp_cpf_residency_status"), ("work_pass_type", "sgp_work_pass_type"),
+    ("shg_funds", "sgp_shg_funds"), ("ea_workman", None), ("ea_manager_executive", None), ("employment_class", None),
+)
+
+
+def _sg_fact_value(employee, key, column):
+    return getattr(employee, column, None) if column else (employee.compliance_fields or {}).get(key)
+
+
+def _sg_statutory_fact_changes(employee, updates: dict) -> tuple:
+    """([(key, old, new)], effective date) — the effective date is required
+    when a previously recorded fact changes; a first recording needs none.
+    The date is consumed here, never stored on the employee."""
+    new_cf = updates["compliance_fields"]
+    raw = new_cf.pop("statutory_change_effective_date", None)
+    effective = date.fromisoformat(raw) if raw else None
+    changes = []
+    for key, column in _SG_STATUTORY_FACTS:
+        old = _sg_fact_value(employee, key, column)
+        new = updates.get(column, old) if column else new_cf.get(key)
+        if (old or None) != (new or None):
+            changes.append((key, old, new))
+    if effective is None and any(old not in (None, "") for _k, old, _n in changes):
+        fields = ", ".join(k for k, old, _n in changes if old not in (None, ""))
+        raise BadRequestException(
+            f"Changing a recorded Singapore statutory fact ({fields}) needs statutory_change_effective_date — the "
+            "payroll calculates each month on the value in force for that month (SG-045).")
+    return changes, effective
+
+
+def _sg_statutory_facts_for_month(db: Session, employee, month_start: date, month_end: date) -> tuple:
+    """({key: value in force for the month}, block or None). Only keys whose
+    value for the month differs from the employee's current value are
+    returned; a change effective inside the month (after its first day) is
+    the block."""
+    rows = (db.query(TaxConfigurationAudit)
+            .filter(TaxConfigurationAudit.entity_type == _SG_FACT_CHANGE_ENTITY, TaxConfigurationAudit.entity_id == employee.id)
+            .order_by(TaxConfigurationAudit.id).all())
+    changes = []
+    for r in rows:
+        nv, ov = r.new_value or {}, r.old_value or {}
+        if nv.get("effectiveDate"):
+            changes.append((nv.get("field"), ov.get("value"), nv.get("value"), date.fromisoformat(nv["effectiveDate"])))
+    applied, block = {}, None
+    for key, column in _SG_STATUTORY_FACTS:
+        current = _sg_fact_value(employee, key, column)
+        value = current
+        for field, old, new, effective in sorted((c for c in changes if c[0] == key), key=lambda c: c[3], reverse=True):
+            if effective > month_end:
+                value = old                       # not yet in force for this month
+                continue
+            if effective > month_start:
+                block = block or {"field": key, "old": old, "new": new, "effectiveDate": effective.isoformat()}
+            break
+        if value != current:
+            applied[key] = value
+    return applied, block
+
+
 
 
 # Curated to what actually matters for pay and tax identity (bank details, tax
@@ -20907,7 +29918,7 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
             failed.append({"row": {"id": row.id, "name": row.name}, "reason": f"No employee found with ID {row.id} in this organization."})
             continue
 
-        mapped = _map_employee_row(row)
+        mapped = restore_masked_employee_columns(_map_employee_row(row), employee)
 
         # Same jurisdiction resolution/validation/duplicate-check
         # update_employee() runs — only when this row actually touches
@@ -20919,7 +29930,8 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
                     db, organization_id, mapped.get("country_code", employee.country_code)
                 )
                 strategy = get_employee_validation_strategy(country_code)
-                merged_compliance = {**(employee.compliance_fields or {}), **(row.complianceFields or {})}
+                incoming_cf = restore_masked_compliance_fields(row.complianceFields or {}, employee.compliance_fields or {})
+                merged_compliance = {**(employee.compliance_fields or {}), **incoming_cf}
                 mapped["compliance_fields"] = strategy.validate(merged_compliance)
                 mapped["country_code"] = country_code
                 mapped.update(strategy.sync_to_columns(mapped["compliance_fields"]))
@@ -20994,6 +30006,11 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
 
 def delete_employee(db: Session, employee_id: int, organization_id: int):
     employee = get_employee_by_id(db, employee_id, organization_id)
+    employee_country = _normalize_country(employee.country_code or "")
+    if retention_service.enabled(employee_country):
+        # Shared records governance (Hong Kong: D-19): a legal hold or any
+        # retained statutory record of the employee's jurisdiction blocks deletion.
+        retention_service.assert_employee_deletable(db, employee_country, organization_id, employee.id)
     has_payslips = db.query(PayslipItem.id).filter(PayslipItem.employee_id == employee_id).first()
     if has_payslips:
         raise HTTPException(
@@ -21717,6 +30734,11 @@ def _notify_report_generation_failed(db: Session, organization_id: int, report_l
         logger.warning(f"[payroll-mail] report-failed email failed for org {organization_id}: {exc}")
 
 
+def _run_has_country_payslips(db: Session, run: PayrollRun, country: str) -> bool:
+    return db.query(PayslipItem.id).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == country).first() is not None
+
+
 def advance_payroll_run_status(
     db: Session, run_id: int, approver_id: int, organization_id: int = None,
     background_tasks: "BackgroundTasks" = None,
@@ -21731,6 +30753,9 @@ def advance_payroll_run_status(
     n-employee run. Falls back to running them inline if no background_tasks
     is passed (e.g. from a script or test)."""
     run = get_payroll_run_by_id(db, run_id, organization_id)
+    if _sg_run_has_payslips(db, run):
+        _sg_lock_run(db, run)
+        db.refresh(run)                   # the status another (serialised) caller may just have committed
     current_idx = PAYROLL_STATUS_ORDER.index(run.status)
     if current_idx >= len(PAYROLL_STATUS_ORDER) - 1:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="This run has already reached its final status.")
@@ -21752,6 +30777,15 @@ def advance_payroll_run_status(
                     f"unresolved statuses: {statuses}. Resolve or recalculate them first."
                 ),
             )
+    # Singapore (SG-gated): preflight blocks approval; a later step re-verifies
+    # the approval fingerprint (SG-032). Runs without SG payslips skip this.
+    _sg_before_run_transition(db, run, next_status, approver_id)
+    # Jurisdiction statutory modules (Hong Kong): the preflight's BLOCK checks
+    # are statutory exceptions, so they refuse approval. A run without that
+    # jurisdiction's payslips never reaches its module.
+    for country in jurisdiction_hooks.countries():
+        if _run_has_country_payslips(db, run, country):
+            jurisdiction_hooks.call(country, "before_run_transition", db, run, next_status, approver_id)
     run.status = next_status
     if next_status == PayrollStatus.APPROVED:
         run.approved_by = approver_id
@@ -21767,6 +30801,8 @@ def advance_payroll_run_status(
         )
     db.commit()
     db.refresh(run)
+    if next_status == PayrollStatus.APPROVED:
+        _sg_after_run_approved(db, run, approver_id)
 
     log_activity(db, organization_id, f"Payroll run '{run.period_label}' advanced to {next_status.value}.",
                  ActivityStatus.SUCCESS, actor_id=approver_id)
@@ -21789,6 +30825,9 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft runs can be deleted.")
+    if (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))
     _deleted_run_period = run.period_label
     _deleted_run_code = run.run_code
     db.delete(run)
@@ -21806,6 +30845,9 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
     run = db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).first()
     if run and run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only payslips in Draft runs can be deleted.")
+    if run and (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "This is a Hong Kong correction delta — reject the correction instead (its record is kept for audit)."))
     # Phase 8AS: fail-closed — refuse to delete a payslip that has Germany
     # overtime premium components still ATTACHED. Deleting would silently
     # erase money the operator explicitly attached (the credited allowance
@@ -21824,6 +30866,32 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
                 "still attached. Detach them first (this reverses their money), then delete."
             ),
         )
+    # Singapore IR21: a payslip that carries (or is covered by) a RELEASED
+    # tax-clearance release is part of a released statutory amount.
+    if (item.country_code or "").upper() == "SG" and run is not None:
+        try:
+            _sg_guard_later_same_month_payslip(db, item.employee_id, run, "delete")
+        except BadRequestException as exc:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=exc.detail)
+        released = next((c for c in _sg_ir21_open_cases_for(db, item.organization_id, {item.employee_id}, run.pay_date)
+                         if c.status == "RELEASED" or c.final_payslip_id == item.id), None)
+        if released is not None:
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=f"Cannot delete this payslip: IR21 case {released.id} ({released.status}) covers it.",
+            )
+    # Year-to-date accumulators (every YTD jurisdiction): reverse what this
+    # payslip posted, or refuse when a later payslip already built on it —
+    # never leave a stale total or a dangling last_updated_payslip_id.
+    postings = _ytd_postings_of(item)
+    try:
+        if postings is not None:
+            _ytd_reverse_postings(db, item, postings, require_latest=True, delete_created=True)
+        else:
+            _ytd_reverse_legacy(db, item)
+    except YtdPostingConflict as exc:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payslip: {exc}")
     db.delete(item)
     db.commit()
     _notify_payslip_deleted(db, item, run, organization_id)
@@ -21855,7 +30923,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     resolution_state, poe_reason = _resolve_country_aware_state(country, employee, work_state, db=db, organization_id=organization_id)
     poe_snapshot = {"poe_result": resolution_state, "poe_reason": poe_reason} if country == "CA" else None
     rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
-        db, organization_id, country, run.pay_date, org_opted_in,
+        db, organization_id, country, _sg_wage_date(run) if country == "SG" else run.pay_date, org_opted_in,
         state=resolution_state, tax_regime=getattr(employee, "tax_regime", None),
         filing_status=getattr(employee, "w4_filing_status", None),
     )
@@ -21909,6 +30977,28 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # batch path (_compute_payslip_values) uses for DE. Without this, a manual
     # DE payslip would bypass statutory-profile/health-fund/ceiling/PV wiring
     # and could not be reproducibly snapshotted.
+    france_inputs = (
+        _resolve_france_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "FR" else None
+    )
+    # Ireland (ZP-IE-ENG-001): a manually-added IE payslip must consume the
+    # SAME frozen RPN / MyFutureFund / YTD inputs as a generated run, or it
+    # would bypass the statutory wiring and could not be reproducibly
+    # snapshotted.
+    ireland_inputs = (
+        _resolve_ie_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "IE" else None
+    )
+    sweden_inputs = (
+        _resolve_se_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "SE" else None
+    )
+    italy_inputs = (
+        _italy_service.resolve_it_calc_inputs(
+            db, organization_id, employee, run.pay_date,
+            period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
+        if country == "IT" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved_de = _resolve_germany_calc_inputs(db, organization_id, employee, run.pay_date)
@@ -21941,6 +31031,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         else {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)} if country == "AU"
         else _load_ky_pension_ytd(db, employee.id, run.pay_date) if country == "KY"
         else _load_gy_paye_credit_ytd(db, employee.id, run.pay_date) if country == "GY"
+        else _load_pr_ytd(db, employee.id, run.pay_date) if country == "PR"
+        else _load_sg_cpf_ytd(db, employee.id, run.pay_date, lock=True, current_run_id=run.id, wage_date=_sg_wage_date(run)) if country == "SG"
         else {}
     )
 
@@ -21963,6 +31055,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # Delegate to the strategy engine (no attendance data for manual payslips)
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
     from app.core.exceptions import GermanyCalculationBlockedException
     ni_category_override = (
         _resolve_uk_ni_category_override(db, employee, run.pay_date, rate_map) if country == "UK" else None
@@ -21995,6 +31088,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         get_india_salary_tds_inputs(db, organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
     )
+    pr_certificate_inputs = (
+        get_pr_certificate_inputs(db, organization_id, employee.id) if country == "PR" else {}
+    )
     ctx = build_context_from_employee(
         employee, gross=gross, basic=data.basic_salary,
         hra=data.hra or Decimal("0"), special_allowance=data.special_allowance or Decimal("0"),
@@ -22016,16 +31112,24 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         locality_rate=locality_rate,
         residence_locality_rate=residence_locality_rate,
         pay_date=run.pay_date,
+        period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
         calendar_days=_calendar_days(run.period_start, run.period_end),
         **reciprocity,
         **germany_kwargs,
+        france_inputs=france_inputs,
+        ireland_inputs=ireland_inputs,
+        sweden_inputs=sweden_inputs,
+        italy_inputs=italy_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
+        **pr_certificate_inputs,
     )
     try:
         calc = calculate_payroll(ctx, calculation_mode)
+    except FranceCalculationBlockedError as exc:
+        raise _france_blocked(exc)
     except GermanyCalculationError as exc:
         # Same structured 400 the batch path returns — never fabricate a
         # Germany payslip when wage-tax execution is unavailable (§25).
@@ -22148,6 +31252,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         au_statutory_deductions_total=calc.au_statutory_deductions_total,
         au_workers_compensation_premium=calc.au_workers_compensation_premium,
         au_calculation_trace=calc.au_calculation_trace,
+        sgp_calculation_trace=calc.sgp_calculation_trace,
         net_pay=calc.net_pay,
         unpaid_leave_days=calc.unpaid_leave_days,
         attendance_deduction=calc.attendance_deduction,
@@ -22158,6 +31263,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         # batch path; None for every non-German manual payslip.
         employee_statutory_profile_id=calc.germany_statutory_profile_id,
         germany_calculation_snapshot=calc.germany_calculation_snapshot,
+        fr_calculation_snapshot=_fr_payslip_snapshot(calc),
         # Phase 8BU: same PARTIAL-vs-PENDING decision as the batch path
         # (_generate_single_payslip) — a manually-added Germany payslip
         # must not silently present a PARTIAL calculation as complete.
@@ -22176,12 +31282,20 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                 "medicare_additional": {"ytd_before": str(ctx.ytd_medicare_wages_before), "ytd_after": str(calc.ytd_medicare_wages_after)},
             } if calc.ytd_ss_wages_after is not None else
             {
+                # Singapore CPF annual-ceiling accumulators (SG-010) — frozen
+                # before/after per component, same contract as CA/US above.
+                "cpf_ow_subject": {"ytd_before": str(ctx.ytd_cpf_ow_subject_before), "ytd_after": str(calc.ytd_cpf_ow_subject_after)},
+                "cpf_aw_subject": {"ytd_before": str(ctx.ytd_cpf_aw_subject_before), "ytd_after": str(calc.ytd_cpf_aw_subject_after)},
+                "cpf_aw_paid": {"ytd_before": str(ctx.ytd_cpf_aw_paid_before), "ytd_after": str(calc.ytd_cpf_aw_paid_after)},
+            } if calc.ytd_cpf_ow_subject_after is not None else
+            {
                 **({"sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(calc.ytd_sg_qualifying_earnings_after)}} if calc.ytd_sg_qualifying_earnings_after is not None else {}),
                 **({"whm_earnings": {"ytd_before": str(ctx.ytd_whm_earnings_before), "ytd_after": str(calc.ytd_whm_earnings_after)}} if calc.ytd_whm_earnings_after is not None else {}),
             } if (calc.ytd_sg_qualifying_earnings_after is not None or calc.ytd_whm_earnings_after is not None) else None
         ),
         poe_snapshot=poe_snapshot,
     )
+    ytd_pre_state = _ytd_capture_state(db, employee.id, organization_id)
     db.add(item)
     if calc.ytd_pensionable_earnings is not None:
         db.flush()  # need item.id for last_updated_payslip_id
@@ -22208,12 +31322,25 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_whm_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ie_ytd_after:
+        db.flush()  # need item.id for last_payslip_id
+        # Ireland (ZP-IE-ENG-001) manually-added payslip path — this one DOES
+        # persist a real payslip, so it must advance USC/PRSI/MyFutureFund
+        # cumulative state exactly like a generated run, or those bases would
+        # silently regress to zero-only behaviour here.
+        _upsert_ie_ytd_accumulator(db, employee.id, organization_id, run.pay_date, calc, payslip_id=item.id)
     if calc.ytd_ky_mandatory_pensionable_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
     if calc.ytd_gy_paye_credit_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_pr_ss_wages_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_pr_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_cpf_ow_subject_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_sg_cpf_ytd_accumulator(db, employee.id, _sg_wage_date(run), calc, payslip_id=item.id)
     if calc.au_statutory_deductions_detail:
         _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:
@@ -22262,6 +31389,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         db.flush()  # need item.id for last_updated_payslip_id
         jm_heart_increment = calc.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
         _upsert_jm_heart_ytd(db, organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
+    _ytd_record_postings(db, item, ytd_pre_state)
     db.commit()
     db.refresh(item)
     _recompute_run_aggregates(db, run)
@@ -22362,8 +31490,33 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
     currency_code = org_currency or _get_currency_code(country)
     company_name = getattr(company, "name", None) or ""
 
+    # Singapore IR21: monies under an open tax-clearance case are withheld
+    # (IRAS) — those payslips are left out of the payment file; a RELEASED
+    # case pays its approved released amount once, on its final payslip.
+    # Every other payslip (and every other country) is untouched.
+    ir21 = _sg_ir21_payment_treatment(db, organization_id, run, items) if organization_id else {}
+    if any((i.country_code or "").upper() == "SG" for i in items):
+        if _sg_bank_hold_active(db, run.id):          # SG-047: disaster-recovery hold until bank reconciliation
+            raise HTTPException(status_code=409, detail=(
+                "This run's bank export is on hold after a database restore (SG-047) — record the bank reconciliation "
+                "before any file is produced; a restored database is never permission to pay again."))
+        _sg_verify_run_approval(db, run)              # SG-032: bank data / payslips unchanged since approval
+
+    # Hong Kong IR56G: payslips under an active tax-clearance hold (or final
+    # pay whose IR56G filing is unresolved) are left out of the payment file;
+    # their net pay stays owed and is traced on the hold's ledger lines.
+    hk_holds = {}
+    if organization_id and any((i.country_code or "").upper() == "HK" for i in items):
+        hk_holds = jurisdiction_hooks.call("HK", "payment_treatment", db, organization_id, run, items)
+        db.commit()
     rows = []
     for item in items:
+        if item.id in hk_holds:
+            continue
+        treatment, released = ir21.get(item.id, (None, None))
+        if treatment in ("HELD", "COVERED") or (treatment == "RELEASE" and not released):
+            continue
+        amount = float(released) if treatment == "RELEASE" else float(item.net_pay or 0)
         # Multi-jurisdiction routing (ZP-MJR-2026-001): each row's own
         # snapshotted country wins; rows generated before PayslipItem
         # snapshotted a country fall back to the resolved org jurisdiction
@@ -22378,9 +31531,9 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
             account_number=item.bank_account or "",
             ifsc=item.ifsc or "",
             branch=None,   # not captured anywhere upstream — left blank rather than fabricated
-            amount=float(item.net_pay or 0),
+            amount=amount,
             reference_number=item.payslip_number or f"RUN{run.id}-{item.employee_id}",
-            narration=f"Salary {run.period_label}",
+            narration=f"IR21 release {run.period_label}" if treatment == "RELEASE" else f"Salary {run.period_label}",
             payment_date=run.pay_date.isoformat(),
             currency=currency_code,
             company_name=company_name,
@@ -22463,6 +31616,8 @@ def _resolve_org_country(db: Session, organization_id: int = None, *, required: 
             )
         return None
     return _normalize_country(raw)
+
+
 
 
 def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) -> dict:
@@ -22584,6 +31739,10 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "auStatutoryDeductionsTotal": item.au_statutory_deductions_total or z,
         "auWorkersCompensationPremium": item.au_workers_compensation_premium or z,
         "auCalculationTrace": item.au_calculation_trace,
+        "sgpCalculationTrace": item.sgp_calculation_trace,
+        "hkgCalculationTrace": item.hk_calculation_trace,
+        "hkTaxClearanceHold": (jurisdiction_hooks.call("HK", "payslip_hold_view", item)
+                               if (item.country_code or "").upper() == "HK" else None),
         # UK: Automatic Enrolment assessment (gap-closure Part 3) —
         # informational classification, not a monetary field.
         "autoEnrolmentStatus": item.auto_enrolment_status,
@@ -22683,12 +31842,24 @@ def _get_currency_symbol(country: str) -> str:
         "OMR": "OMR", "PKR": "\u20a8", "QAR": "QAR", "RWF": "RF",
         "SAR": "SAR", "SEK": "kr", "SGD": "S$", "THB": "\u0e3f",
         "TZS": "TSh", "UGX": "USh", "ZAR": "R",
+        # Caribbean production jurisdictions (2026-09-21) + Puerto Rico
+        # (2026-09-23) \u2014 symbols mirror frontend/src/utils/currency.js's
+        # CURRENCY_MASTER exactly so the BTF/payslip PDF never disagrees
+        # with the frontend's own currency display.
+        "BBD": "Bds$", "KYD": "CI$", "DOP": "RD$", "GYD": "G$",
+        "JMD": "J$", "BSD": "B$", "TTD": "TT$",
     }
     if country and country.upper() in _iso_to_sym:
         return _iso_to_sym[country.upper()]
     return {
         "IN": "\u20b9", "US": "$", "UK": "\u00a3",
         "AU": "A$", "DE": "\u20ac", "CA": "C$",
+        "BB": "Bds$", "KY": "CI$", "DO": "RD$", "GY": "G$",
+        "JM": "J$", "BS": "B$", "TT": "TT$", "PR": "$",
+        # Ireland (ZP-IE-ENG-001) uses the euro. Without this row IE silently
+        # fell through to the "$" default below, which is a silently wrong
+        # currency rather than a visible failure.
+        "IE": "\u20ac", "FR": "\u20ac",
     }.get(country, "$")
 
 
@@ -22700,12 +31871,20 @@ def _get_currency_code(country: str) -> str:
         "BRL", "CHF", "CNY", "DKK", "GHS", "HKD", "JPY", "KES", "KRW",
         "KWD", "LKR", "MXN", "MYR", "NGN", "NOK", "NPR", "NZD", "OMR",
         "PKR", "QAR", "RWF", "SAR", "SEK", "SGD", "THB", "TZS", "UGX", "ZAR",
+        # Caribbean production jurisdictions (2026-09-21) + Puerto Rico
+        # (2026-09-23) — mirrors frontend/src/utils/currency.js exactly.
+        "BBD", "KYD", "DOP", "GYD", "JMD", "BSD", "TTD",
     }
     if country and country.upper() in _iso_codes:
         return country.upper()
     return {
         "IN": "INR", "US": "USD", "UK": "GBP",
         "AU": "AUD", "DE": "EUR", "CA": "CAD",
+        "BB": "BBD", "KY": "KYD", "DO": "DOP", "GY": "GYD",
+        "JM": "JMD", "BS": "BSD", "TT": "TTD", "PR": "USD",
+        # Ireland (ZP-IE-ENG-001) uses the euro; without this row IE silently
+        # fell through to the "USD" default below.
+        "IE": "EUR", "FR": "EUR",
     }.get(country, "USD")
 
 
@@ -22801,6 +31980,12 @@ def _register_rupee_font(c):
     return None
 
 
+def _ssn_last_four(value) -> Optional[str]:
+    """US SSN as printed on a wage statement: XXX-XX-1234."""
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    return f"XXX-XX-{digits[-4:]}" if len(digits) >= 4 else None
+
+
 def _payslip_identity_rows(country: str, data: dict) -> list:
     """Country-appropriate identity/bank-routing fields for the payslip's
     three PAN/UAN/IFSC row slots. India uses its own dedicated pan/uan/ifsc
@@ -22813,11 +31998,44 @@ def _payslip_identity_rows(country: str, data: dict) -> list:
         return [("PAN / Tax ID", data.get("pan")), ("UAN", data.get("uan")), ("IFSC", data.get("ifsc"))]
     cf = data.get("complianceFields") or {}
     rows_by_country = {
-        "US": [("SSN", cf.get("ssn")), ("Filing Status", cf.get("w4_filing_status")), ("ABA Routing No.", cf.get("aba_routing_number"))],
+        # SSN: last four digits only — California Labor Code §226(a)(7) requires
+        # a wage statement to show "only the last four digits of their social
+        # security number" (verified against leginfo.legislature.ca.gov,
+        # Phase 4A). Other identifiers below are unchanged until their own
+        # payslip-content rules are verified from an authoritative source.
+        "US": [("SSN", _ssn_last_four(cf.get("ssn"))), ("Filing Status", cf.get("w4_filing_status")), ("ABA Routing No.", cf.get("aba_routing_number"))],
         "UK": [("NINO", cf.get("nino")), ("Tax Code", cf.get("paye_tax_code")), ("Sort Code", cf.get("sort_code"))],
         "AU": [("TFN", cf.get("tfn")), ("Super Fund USI", cf.get("super_fund_usi")), ("BSB Code", cf.get("bsb_code"))],
         "CA": [("SIN", cf.get("sin")), ("Province", cf.get("province")), ("Transit No.", cf.get("transit_number"))],
         "DE": [("Steuer-ID", cf.get("steuer_id")), ("Steuerklasse", cf.get("steuerklasse")), ("IBAN", cf.get("iban"))],
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # mirrors frontend/src/utils/jurisdictionLabels.js's IDENTITY_FIELD.
+        # This data was already captured end-to-end (compliance_fields);
+        # only this display mapping was missing, so these payslips
+        # previously fell through to the generic fallback below.
+        # Countries with only one captured statutory identifier fill the
+        # middle slot with the jurisdiction's real payment-rail name
+        # (bank_routing.payment_mode_label) rather than a fabricated/blank
+        # field — every other row on this table is a real value.
+        "BB": [("TAMIS TIN", cf.get("tamis_tin")), ("NIS Number", cf.get("nis_number")), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "KY": [("NIB Member No.", cf.get("nib_member_number")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "DO": [("Cédula", cf.get("cedula")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "GY": [("GRA TIN", cf.get("gra_tin")), ("NIS Number", cf.get("nis_number")), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "JM": [("TRN", cf.get("trn")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "BS": [("NIB Number", cf.get("nib_number")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("ACH Routing No.", cf.get("ach_routing_number"))],
+        "TT": [("BIR File No.", cf.get("bir_file_number")), ("NIBTT No.", cf.get("nibtt_number")), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "PR": [("SSN", cf.get("ssn")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("ACH Routing No.", cf.get("ach_routing_number"))],
+        # Singapore: partial NRIC/FIN only (PDPC NRIC guidelines §5.2 — last 3
+        # digits + checksum); MOM's itemised-payslip items need no NRIC at all.
+        "SG": [("NRIC / FIN", mask_nric_fin(cf.get("nric_fin"))), ("CPF Status", cf.get("cpf_residency_status")),
+               ("Work Pass", cf.get("work_pass_type"))],
+        # Hong Kong: masked HKID only (HK-022 / PCPD HR Code — identity
+        # masked in ordinary output).
+        # Three slots like every country (the layout unpacks three rows): the
+        # third is the HKICL bank-branch code in the bank-file format.
+        "HK": [("HKID", mask_identifier(cf.get("hkid") or cf.get("passport_number"))),
+               ("MPF Account", mask_identifier(cf.get("mpf_member_account"))),
+               ("Bank-Branch Code", "-".join(v for v in (cf.get("bank_code"), cf.get("branch_code")) if v) or None)],
     }
     return rows_by_country.get(country, [("Tax ID", None), ("Reference", None), ("Routing", None)])
 
@@ -22952,7 +32170,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # ── Build earnings & deduction items (pre-computed for layout) ──
     earnings_items = [
         ("Basic Salary", data["basicPay"]),
-        ("House Rent Allowance (HRA)", data["hra"]),
+        ("Housing Allowance" if country == "HK" else "House Rent Allowance (HRA)", data["hra"]),
     ]
     # Named allowance components (Transport/Medical/Other/...), if this org
     # has any configured — shown as their own line items, same as Overtime/
@@ -22966,14 +32184,16 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         earnings_items.append(("Overtime", ov))
     add_comp = float(data.get("additionalCompensation", 0) or 0)
     if add_comp > 0:
-        earnings_items.append(("Additional Compensation", add_comp))
+        # Singapore: this is exactly the CPF Additional Wages figure the
+        # engine used (engine/countries/singapore.py — OW = gross − AW).
+        earnings_items.append(("Additional Wages (AW)" if country == "SG" else "Additional Compensation", add_comp))
     earnings_total = float(data["salary"] or 0)
 
     deduction_items = []
     attendance_ded = float(data.get("attendanceDeduction", 0) or 0)
     if attendance_ded > 0:
         unpaid_days = data.get("unpaidLeaveDays")
-        lbl = "LOP Deduction"
+        lbl = "No-pay Leave Deduction" if country == "HK" else "LOP Deduction"
         if unpaid_days:
             lbl += f" ({float(unpaid_days):g} day{'s' if float(unpaid_days) != 1 else ''})"
         deduction_items.append((lbl, attendance_ded))
@@ -22985,6 +32205,19 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     income_tax_labels = {
         "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
         "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
+        # Ireland (ZP-IE-ENG-001) routes PAYE through `tds`; without this row
+        # an Irish payslip read the "TDS" default, which is India's term.
+        "IE": "PAYE", "FR": "Prélèvement à la Source",
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # real terms verified from each country's own engine module
+        # docstring (engine/countries/*.py), not guessed. Bahamas/Cayman
+        # deliberately have no entry here: `tds` is always Decimal("0") for
+        # both (no personal income tax — see bahamas.py/cayman_islands.py's
+        # own module docstrings), so the existing `if v > 0` filter below
+        # already omits the line correctly; adding a label would risk it
+        # being read as "this country's income tax happened to be zero".
+        "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
+        "PR": "Hacienda Withholding",
     }
     # US: federal/state/local are stored (and shown here) as three separate
     # lines instead of one combined "Federal Withholding" figure — `tds`
@@ -23018,11 +32251,18 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
         "CA": {"esi": "Employment Insurance (EI)"},
     }.get(country, {})
+    # Trinidad reuses the `professional_tax` field for its Health Surcharge
+    # (see trinidad_and_tobago.py's own comment on that field) — it was
+    # previously shown under the literal "Professional Tax" for every
+    # country, mislabeling Trinidad's deduction with an India-specific term.
+    # Singapore reuses professional_tax for its Self-Help Group deduction
+    # (CDAC/ECF/MBMF/SINDA) — see engine/countries/singapore.py.
+    professional_tax_label = {"TT": "Health Surcharge", "SG": "SHG Contribution"}.get(country, "Professional Tax")
     for lbl, key in [
         *income_tax_line_items,
         (pf_esi_labels.get("pf", "Provident Fund (PF)"), "pf"),
         (pf_esi_labels.get("esi", "Employee State Insurance (ESI)"), "esi"),
-        ("Professional Tax", "professionalTax"),
+        (professional_tax_label, "professionalTax"),
     ]:
         v = float(data.get(key, 0) or 0)
         if v > 0:
@@ -23042,15 +32282,33 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     other_labels = {
         "CA": {"socialSecurity": "Canada Pension Plan (CPP)"},
         "AU": {"medicare": "Medicare Levy"},
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # real terms verified from each country's own engine module
+        # docstring. `employeePension` and `niEmployee` are both reused/
+        # repurposed fields in these countries, NOT a literal pension or UK
+        # National Insurance — see barbados.py/dominican_republic.py/
+        # jamaica.py's own comments on those fields.
+        "BB": {"socialSecurity": "NIS", "employeePension": "Reserve & Retraining (R&R) Levy"},
+        "DO": {"socialSecurity": "SFS (Seguro Familiar de Salud)", "employeePension": "Pension (SVDS)"},
+        "GY": {"socialSecurity": "NIS"},
+        "JM": {"socialSecurity": "NIS", "employeePension": "National Housing Trust (NHT)", "niEmployee": "Education Tax"},
+        "TT": {"socialSecurity": "NIS"},
+        "BS": {"socialSecurity": "NIB"},
+        "KY": {"socialSecurity": "NIB Pension"},
+        # Singapore reuses employee_pension for employee CPF.
+        "SG": {"employeePension": "CPF (Employee)"},
+        # Hong Kong: MPF employee mandatory contribution — never an income
+        # tax line (no `tds` is ever set for HK).
+        "HK": {"employeePension": "MPF Mandatory Contribution (Employee)"},
     }.get(country, {})
     for lbl, key in [
         (other_labels.get("socialSecurity", "Social Security"), "socialSecurity"),
         (other_labels.get("medicare", "Medicare"), "medicare"),
-        ("National Insurance", "niEmployee"),
+        (other_labels.get("niEmployee", "National Insurance"), "niEmployee"),
         # UK: Workplace Pension (employee side) and Student/Postgraduate
         # Loan — both correctly computed/persisted but previously invisible
         # on every UK payslip PDF (see _serialize_payslip's own fix note).
-        ("Workplace Pension", "employeePension"),
+        (other_labels.get("employeePension", "Workplace Pension"), "employeePension"),
         ("Student Loan Deduction", "studyLoanDeduction"),
         ("Postgraduate Loan Deduction", "postgradLoanDeduction"),
     ]:
@@ -23377,7 +32635,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     c.drawString(col_mid + 3 * mm, y - pd_row_h + 3.2 * mm, "Salary Credit Date")
 
     c.setFont(F, 10.5)
-    c.drawString(margin_l + 3 * mm, y - 2 * pd_row_h + 3.2 * mm, "Bank Transfer (NEFT)")
+    c.drawString(margin_l + 3 * mm, y - 2 * pd_row_h + 3.2 * mm, "Bank Transfer" if country == "HK" else "Bank Transfer (NEFT)")
     c.drawString(col_mid + 3 * mm, y - 2 * pd_row_h + 3.2 * mm, fmt_date(data["payDate"]))
     y -= 2 * pd_row_h + gap_after_payment
 
@@ -24524,21 +33782,49 @@ def bulk_save_attendance(db: Session, data: BulkAttendanceRequest, organization_
     }
 
 
-def get_attendance_records(
+def import_attendance_xlsx(
+    db: Session,
+    organization_id: int,
+    file_source: Any,
+    chunk_size: int = 500,
+    skip_duplicates: bool = False,
+) -> dict:
+    """Stream XLSX attendance file and bulk upsert records (Phases 2.3, 2.4, 2.5)."""
+    from app.modules.payroll.attendance_importer import import_attendance_from_stream
+    return import_attendance_from_stream(
+        db, organization_id, file_source, chunk_size=chunk_size, skip_duplicates=skip_duplicates
+    )
+
+
+def _attendance_records_base_query(
     db: Session,
     organization_id: int,
     *,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     employee_id: Optional[int] = None,
-) -> List[dict]:
-    """Fetch attendance records with optional date range and employee filter."""
-    query = db.query(
-        PayrollAttendanceRecord,
-        PayrollEmployee.name,
-        PayrollEmployee.department,
-        PayrollEmployee.designation,
-    ).outerjoin(
+    with_employee_columns: bool = True,
+):
+    """Shared filtered query for attendance reads.
+
+    Employee name/department/designation come from an outer join so an
+    attendance row survives an employee record that has since been removed.
+    Pass with_employee_columns=False for the COUNT path: counting the joined
+    projection would wrap the whole select in a subquery, and the join cannot
+    duplicate attendance rows (employee_id is the join key) so it is not needed
+    to get an accurate total.
+    """
+    columns = (
+        (
+            PayrollAttendanceRecord,
+            PayrollEmployee.name,
+            PayrollEmployee.department,
+            PayrollEmployee.designation,
+        )
+        if with_employee_columns
+        else (PayrollAttendanceRecord,)
+    )
+    query = db.query(*columns).outerjoin(
         PayrollEmployee,
         (PayrollAttendanceRecord.employee_id == PayrollEmployee.id) &
         (PayrollEmployee.organization_id == organization_id)
@@ -24551,30 +33837,462 @@ def get_attendance_records(
         query = query.filter(PayrollAttendanceRecord.date <= end_date)
     if employee_id:
         query = query.filter(PayrollAttendanceRecord.employee_id == employee_id)
+    return query
 
-    rows = query.order_by(PayrollAttendanceRecord.date.desc()).all()
+
+def _attendance_row_to_dict(record, name, department, designation) -> dict:
+    return {
+        "id": record.id,
+        "employee_id": record.employee_id,
+        "name": name,
+        "department": department,
+        "designation": designation,
+        "date": record.date,
+        "check_in": record.check_in,
+        "check_out": record.check_out,
+        "status": record.status,
+        "leave_type": record.leave_type,
+        "is_half_day": record.is_half_day,
+        "leave_request_id": record.leave_request_id,
+        "hours": record.hours,
+        "rewards": record.rewards,
+        "bonus": record.bonus,
+        "other_compensation": record.other_compensation,
+        "notes": record.notes,
+    }
+
+
+def get_attendance_records(
+    db: Session,
+    organization_id: int,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    employee_id: Optional[int] = None,
+    limit: int = 1000,
+    offset: int = 0,
+) -> List[dict]:
+    """Fetch attendance records with optional date range and employee filter.
+
+    Paginated: limit/offset default to 1000/0 for backwards compatibility.
+
+    Returns a bare list, so the caller cannot tell a short page from the end of
+    the data. Callers that need to page should use
+    get_attendance_records_page(), which also reports the total.
+    """
+    query = _attendance_records_base_query(
+        db, organization_id,
+        start_date=start_date, end_date=end_date, employee_id=employee_id,
+    )
+    query = query.order_by(PayrollAttendanceRecord.date.desc())
+    if limit > 0:
+        query = query.limit(limit)
+    if offset > 0:
+        query = query.offset(offset)
+
     return [
-        {
-            "id": record.id,
-            "employee_id": record.employee_id,
-            "name": name,
-            "department": department,
-            "designation": designation,
-            "date": record.date,
-            "check_in": record.check_in,
-            "check_out": record.check_out,
-            "status": record.status,
-            "leave_type": record.leave_type,
-            "is_half_day": record.is_half_day,
-            "leave_request_id": record.leave_request_id,
-            "hours": record.hours,
-            "rewards": record.rewards,
-            "bonus": record.bonus,
-            "other_compensation": record.other_compensation,
-            "notes": record.notes,
-        }
-        for record, name, department, designation in rows
+        _attendance_row_to_dict(record, name, department, designation)
+        for record, name, department, designation in query.all()
     ]
+
+
+def get_attendance_records_page(
+    db: Session,
+    organization_id: int,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    employee_id: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """Page through attendance records with an exact total.
+
+    Returns {items, total, limit, offset, hasMore}. `total` is a COUNT over the
+    same predicates, so a client can show "showing 100 of 4,312" and know
+    whether another fetch is worth making, instead of inferring the end of the
+    data from a short page.
+    """
+    total = _attendance_records_base_query(
+        db, organization_id,
+        start_date=start_date, end_date=end_date, employee_id=employee_id,
+        with_employee_columns=False,
+    ).count()
+
+    # Fetch one extra row so hasMore is exact without a second COUNT query:
+    # LIMIT n+1 answers "is there more" directly.
+    rows = (
+        _attendance_records_base_query(
+            db, organization_id,
+            start_date=start_date, end_date=end_date, employee_id=employee_id,
+        )
+        .order_by(PayrollAttendanceRecord.date.desc(), PayrollAttendanceRecord.id.desc())
+        .limit(limit + 1)
+        .offset(offset)
+        .all()
+    )
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    # Oldest/newest date in the filtered set, so a client paging through rows
+    # can still report the true span of the range instead of the span of
+    # whichever page it happens to hold.
+    span = (
+        _attendance_records_base_query(
+            db, organization_id,
+            start_date=start_date, end_date=end_date, employee_id=employee_id,
+            with_employee_columns=False,
+        )
+        .with_entities(
+            sa_func.min(PayrollAttendanceRecord.date),
+            sa_func.max(PayrollAttendanceRecord.date),
+        )
+        .one()
+    )
+    first_date, last_date = span if span else (None, None)
+
+    return {
+        "items": [
+            _attendance_row_to_dict(record, name, department, designation)
+            for record, name, department, designation in page
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": has_more,
+        "firstDate": first_date,
+        "lastDate": last_date,
+    }
+
+
+def _parse_attendance_hours(raw) -> float:
+    """Coerce the text `hours` column to a number, treating junk as 0.
+
+    `hours` is String(10) holding things like "8" / "8.5", and it is optional.
+    The previous client-side aggregation did `Number(rec.hours || 0)`, which
+    turns "N/A" into NaN and poisons the whole running total. Anything that
+    is not a finite number is treated as 0 here instead, so one bad row cannot
+    corrupt an employee's hours.
+    """
+    if raw is None:
+        return 0.0
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value == value and value not in (float("inf"), float("-inf")) else 0.0
+
+
+_EMPTY_ATTENDANCE_TOTALS = {
+    "totalDays": 0, "present": 0, "absent": 0, "leave": 0,
+    "unpaidLeaves": 0, "paidLeaves": 0,
+}
+
+
+def get_attendance_summary_by_employee(
+    db: Session,
+    organization_id: int,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """Per-employee attendance aggregates over a date range, paged.
+
+    This exists so the Summary tab no longer has to download every attendance
+    row in order to count days. Counts are aggregated by the database; the
+    remaining fields need grouping over *distinct* values rather than rows, so
+    they are grouped in SQL by (employee_id, value) and finished in Python.
+    That keeps the work bounded by the number of distinct check-in times and
+    hour strings per employee instead of by the number of attendance rows,
+    and avoids casting the text `hours` column in SQL -- `CAST('' AS NUMERIC)`
+    raises on Postgres while silently yielding 0 on SQLite, so a cast here
+    would be a portability landmine.
+
+    Semantics deliberately mirror the previous client-side aggregation:
+      * future-dated rows are excluded, so scheduled attendance never counts
+        toward completed stats;
+      * leaveType "paid" counts as paid leave; "unpaid" or missing/legacy
+        (null) counts as unpaid; sick/casual count toward Leave Days only;
+      * "totalDays" counts every recorded day, whatever the status;
+      * avgCheckIn/avgCheckOut are the MOST FREQUENT recorded times, not
+        arithmetic means;
+      * avgBreak is always 0 -- payroll_attendance_records has no
+        break_minutes column, so there is no data source for it. The previous
+        client code read a field that never existed on the record and rendered
+        0; that is preserved rather than invented.
+    """
+    today = date.today()
+
+    base = _attendance_records_base_query(
+        db, organization_id,
+        start_date=start_date, end_date=end_date, with_employee_columns=False,
+    ).filter(PayrollAttendanceRecord.date <= today)
+
+    # Free-text employee search has to happen here, not in the browser, or it
+    # would only ever match the page that happens to be loaded.
+    search = (search or "").strip()
+    if search:
+        like = f"%{search}%"
+        matching_ids = [
+            e.id
+            for e in db.query(PayrollEmployee.id)
+            .filter(
+                PayrollEmployee.organization_id == organization_id,
+                or_(
+                    PayrollEmployee.name.ilike(like),
+                    PayrollEmployee.department.ilike(like),
+                ),
+            )
+            .all()
+        ]
+        if not matching_ids:
+            return {
+                "items": [], "total": 0, "limit": limit, "offset": offset,
+                "hasMore": False, "totals": _EMPTY_ATTENDANCE_TOTALS,
+            }
+        base = base.filter(PayrollAttendanceRecord.employee_id.in_(matching_ids))
+
+    def _grouped(*extra):
+        cols = [PayrollAttendanceRecord.employee_id, *extra]
+        return base.with_entities(*cols).group_by(*cols)
+
+    def _counts_for(emp_ids):
+        """Day/status counts for a specific set of employees."""
+        if not emp_ids:
+            return {}
+        rows = (
+            base
+            .with_entities(
+                PayrollAttendanceRecord.employee_id,
+                sa_func.count().label("days"),
+                sa_func.sum(
+                    sa_case(
+                        (PayrollAttendanceRecord.status == "present", 1), else_=0,
+                    )
+                ).label("present"),
+                sa_func.sum(
+                    sa_case(
+                        (PayrollAttendanceRecord.status == "absent", 1), else_=0,
+                    )
+                ).label("absent"),
+                sa_func.sum(
+                    sa_case(
+                        (PayrollAttendanceRecord.status == "leave", 1), else_=0,
+                    )
+                ).label("leave"),
+                sa_func.sum(
+                    sa_case(
+                        (
+                            sa_and_(
+                                PayrollAttendanceRecord.status == "leave",
+                                # "paid" is deliberately absent: the old client-side
+                                # logic was an if/else-if chain, so a paid day was
+                                # counted as paid and never also as unpaid.
+                                or_(
+                                    PayrollAttendanceRecord.leave_type.is_(None),
+                                    PayrollAttendanceRecord.leave_type == "unpaid",
+                                ),
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("unpaid"),
+                sa_func.sum(
+                    sa_case(
+                        (
+                            sa_and_(
+                                PayrollAttendanceRecord.status == "leave",
+                                PayrollAttendanceRecord.leave_type == "paid",
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("paid"),
+            )
+            .filter(PayrollAttendanceRecord.employee_id.in_(emp_ids))
+            .group_by(PayrollAttendanceRecord.employee_id)
+            .all()
+        )
+        return {
+            r.employee_id: {
+                "totalDays": int(r.days or 0),
+                "present": int(r.present or 0),
+                "absent": int(r.absent or 0),
+                "leave": int(r.leave or 0),
+                "unpaidLeaves": int(r.unpaid or 0),
+                "paidLeaves": int(r.paid or 0),
+            }
+            for r in rows
+        }
+
+    def _counts_for_all():
+        """Same counts, summed across every employee in the filtered set.
+
+        Deliberately computed in SQL rather than by summing the page in Python:
+        the page is a slice, so summing it would under-report as soon as there
+        is a second page.
+        """
+        row = (
+            base
+            .with_entities(
+                sa_func.count().label("days"),
+                sa_func.sum(sa_case(
+                    (PayrollAttendanceRecord.status == "present", 1), else_=0,
+                )).label("present"),
+                sa_func.sum(sa_case(
+                    (PayrollAttendanceRecord.status == "absent", 1), else_=0,
+                )).label("absent"),
+                sa_func.sum(sa_case(
+                    (PayrollAttendanceRecord.status == "leave", 1), else_=0,
+                )).label("leave"),
+                sa_func.sum(sa_case(
+                    (
+                        sa_and_(
+                            PayrollAttendanceRecord.status == "leave",
+                            or_(
+                                PayrollAttendanceRecord.leave_type.is_(None),
+                                PayrollAttendanceRecord.leave_type == "unpaid",
+                            ),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )).label("unpaid"),
+                sa_func.sum(sa_case(
+                    (
+                        sa_and_(
+                            PayrollAttendanceRecord.status == "leave",
+                            PayrollAttendanceRecord.leave_type == "paid",
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )).label("paid"),
+            )
+            .one()
+        )
+        if row is None:
+            return dict(_EMPTY_ATTENDANCE_TOTALS)
+        return {
+            "totalDays": int(row.days or 0),
+            "present": int(row.present or 0),
+            "absent": int(row.absent or 0),
+            "leave": int(row.leave or 0),
+            "unpaidLeaves": int(row.unpaid or 0),
+            "paidLeaves": int(row.paid or 0),
+        }
+
+    # The employee list is the paging unit, so the page has to be chosen in SQL.
+    employee_ids = [
+        row.employee_id
+        for row in (
+            _grouped()
+            .order_by(PayrollAttendanceRecord.employee_id)
+            .limit(limit + 1)
+            .offset(offset)
+            .all()
+        )
+    ]
+    has_more = len(employee_ids) > limit
+    employee_ids = employee_ids[:limit]
+    total_employees = _grouped().count()
+
+    # Org-wide totals for the whole filtered set, not just this page. The
+    # Summary tab's stat cards sum across every employee, so summing only the
+    # loaded page would quietly under-report. This is an aggregate, so it stays
+    # cheap in the database -- the cost being avoided is shipping thousands of
+    # rows to the browser and counting them there.
+    totals = _counts_for_all()
+
+    if not employee_ids:
+        return {
+            "items": [], "total": total_employees, "limit": limit,
+            "offset": offset, "hasMore": False, "totals": totals,
+        }
+
+    people = {
+        e.id: e
+        for e in db.query(PayrollEmployee).filter(
+            PayrollEmployee.organization_id == organization_id,
+            PayrollEmployee.id.in_(employee_ids),
+        ).all()
+    }
+    counts = _counts_for(employee_ids)
+
+    # Hours: sum over DISTINCT hour strings, not over every attendance row.
+    hours_by_emp: dict = {eid: 0.0 for eid in employee_ids}
+    for eid, raw, n in (
+        base
+        .with_entities(
+            PayrollAttendanceRecord.employee_id,
+            PayrollAttendanceRecord.hours,
+            sa_func.count().label("n"),
+        )
+        .filter(PayrollAttendanceRecord.employee_id.in_(employee_ids))
+        .group_by(PayrollAttendanceRecord.employee_id, PayrollAttendanceRecord.hours)
+        .all()
+    ):
+        hours_by_emp[eid] = hours_by_emp.get(eid, 0.0) + _parse_attendance_hours(raw) * int(n or 0)
+
+    def _modal_times(column):
+        """Most frequent non-empty value per employee, ties broken by first
+        appearance in (date, id) order so the result is deterministic."""
+        winners: dict = {}
+        for eid, value, n in (
+            base
+            .with_entities(
+                PayrollAttendanceRecord.employee_id,
+                column,
+                sa_func.count().label("n"),
+            )
+            .filter(PayrollAttendanceRecord.employee_id.in_(employee_ids))
+            .group_by(PayrollAttendanceRecord.employee_id, column)
+            .order_by(PayrollAttendanceRecord.employee_id, sa_func.count().desc())
+            .all()
+        ):
+            if not value:
+                continue
+            key = int(eid)
+            best = winners.get(key)
+            if best is None or int(n or 0) > best[0]:
+                winners[key] = (int(n or 0), value)
+        return {k: v[1] for k, v in winners.items()}
+
+    top_in = _modal_times(PayrollAttendanceRecord.check_in)
+    top_out = _modal_times(PayrollAttendanceRecord.check_out)
+
+    items = []
+    for eid in employee_ids:
+        emp = people.get(eid)
+        agg = counts.get(eid, {
+            "totalDays": 0, "present": 0, "absent": 0, "leave": 0,
+            "unpaidLeaves": 0, "paidLeaves": 0,
+        })
+        items.append({
+            "employeeId": eid,
+            "name": getattr(emp, "name", None) or f"Employee {eid}",
+            "department": getattr(emp, "department", None) or "",
+            "designation": getattr(emp, "designation", None) or "",
+            **agg,
+            "totalHours": round(hours_by_emp.get(eid, 0.0), 2),
+            "avgCheckIn": top_in.get(eid, ""),
+            "avgCheckOut": top_out.get(eid, ""),
+            "avgBreak": 0,
+        })
+
+    return {
+        "items": items,
+        "total": total_employees,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": has_more,
+        "totals": totals,
+    }
 
 
 def clear_attendance_records(
@@ -25170,7 +34888,24 @@ _COUNTRY_NAME_TO_JURISDICTION_CODE = {
     "australia": "AU",
     "germany": "DE",
     "canada": "CA",
+    "france": "FR",
+    "ireland": "IE",
 }
+
+
+def _jurisdiction_code_for_org_country(country_name: Optional[str]) -> Optional[str]:
+    """Resolve Organization.country (a full name) to the 2-letter jurisdiction
+    code. Falls back to app.core.jurisdiction's complete registry for
+    countries not in the small dict above (the Caribbean jurisdictions +
+    Puerto Rico) instead of returning None and silently skipping the
+    Compliance-row jurisdiction backfill for those orgs."""
+    if not country_name:
+        return None
+    code = _COUNTRY_NAME_TO_JURISDICTION_CODE.get(country_name.strip().lower())
+    if code:
+        return code
+    from app.core.jurisdiction import get_jurisdiction_code
+    return get_jurisdiction_code(country_name)
 
 
 def _merge_tax_identifiers(existing: dict | None, incoming: dict | None) -> dict:
@@ -25248,7 +34983,7 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
                 row.phone = org.phone
                 changed = True
         if org and needs_jurisdiction_backfill:
-            code = org.country and _COUNTRY_NAME_TO_JURISDICTION_CODE.get(org.country.strip().lower())
+            code = _jurisdiction_code_for_org_country(org.country)
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -26458,11 +36193,30 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
     income_tax_labels = {
         "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
         "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
+        # Ireland (ZP-IE-ENG-001) — mirrors generate_payslip_pdf_bytes's own
+        # label map above.
+        "IE": "PAYE", "FR": "Prélèvement à la Source",
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # mirrors generate_payslip_pdf_bytes's own label map. Bahamas/Cayman
+        # have no entry: `tds` is always 0 for both (no personal income
+        # tax), so income_tax_labels.get(country, "TDS") is never reached
+        # with a nonzero value for them.
+        "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
+        "PR": "Hacienda Withholding",
     }
     pf_esi_labels = {
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
         "CA": {"esi": "Employment Insurance (EI)"},
     }.get(country, {})
+    other_labels = {
+        "CA": "Canada Pension Plan (CPP)",
+        "AU": None,  # AU's "medicare" label is handled separately below
+        "BB": "NIS", "DO": "SFS (Seguro Familiar de Salud)", "GY": "NIS",
+        "JM": "NIS", "TT": "NIS", "BS": "NIB", "KY": "NIB Pension",
+    }.get(country)
+    ni_employee_label = "Education Tax" if country == "JM" else "National Insurance"
+    professional_tax_label = "Health Surcharge" if country == "TT" else "Professional Tax"
+    medicare_label = "Medicare Levy" if country == "AU" else "Medicare"
     # US: federal/state/local shown as three separate slices instead of one
     # combined "Federal Withholding" total — falls back to the combined
     # `tds` figure when the split is all-zero (a US org with no payslips
@@ -26481,10 +36235,10 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
         *income_tax_fields,
         (pf_esi_labels.get("pf", "Provident Fund (PF)"), "pf"),
         (pf_esi_labels.get("esi", "Employee State Insurance (ESI)"), "esi"),
-        ("Professional Tax", "professional_tax"),
-        ("Social Security", "social_security"),
-        ("Medicare", "medicare"),
-        ("National Insurance", "ni_employee"),
+        (professional_tax_label, "professional_tax"),
+        (other_labels or "Social Security", "social_security"),
+        (medicare_label, "medicare"),
+        (ni_employee_label, "ni_employee"),
     ]
     stat_deductions = []
     total_stat_ded = Decimal("0")
@@ -26661,6 +36415,56 @@ def _enrich_leave_request(db: Session, record: PayrollLeaveRequest, organization
         "statutoryAweSnapshot": record.statutory_awe_snapshot,
         "statutoryPayTotalAmount": record.statutory_pay_total_amount,
         "statutoryPayNote": record.statutory_pay_note,
+        # Irish statutory sick pay is assessed into its own IE-037 ledger row
+        # rather than these UK-shaped columns, so it is surfaced as a nested
+        # summary. Absent (null) whenever no assessment exists — which is every
+        # country other than Ireland, and Ireland while the G5 rollout switch is
+        # off. Never defaulted to zeros, so "not assessed" stays distinguishable
+        # from "assessed and nothing was owed".
+        "ireStatutorySickLeave": _ie_sick_leave_summary(db, record),
+    }
+
+
+def _ie_sick_leave_summary(db: Session, record: PayrollLeaveRequest) -> Optional[dict]:
+    """The IE-037 assessment for a leave request, as a read model for the Leave
+    Management screen. Returns None when no assessment row exists.
+
+    Deliberately read-only: it reports what was assessed and why, and does not
+    re-derive any of it. A claim's amount is frozen at approval time, so this
+    must never recompute it from today's rate pack (the same rule
+    IrelandRpnSnapshot and PayslipItem.ie_calculation_snapshot follow).
+    """
+    row = db.query(IrelandStatutorySickLeaveRecord).filter(
+        IrelandStatutorySickLeaveRecord.leave_request_id == record.id,
+    ).order_by(IrelandStatutorySickLeaveRecord.id.desc()).first()
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "calendarYear": row.calendar_year,
+        "absenceStartDate": row.absence_start_date,
+        "absenceEndDate": row.absence_end_date,
+        "daysClaimed": row.days_claimed,
+        "daysCredited": row.days_credited,
+        "daysDisallowed": row.days_disallowed,
+        "daysTakenBefore": row.days_taken_before,
+        "entitlementDays": row.entitlement_days,
+        "entitlementRemainingAfter": row.entitlement_remaining_after,
+        "pctApplied": row.pct_applied,
+        "dailyCap": row.daily_cap,
+        "usualDailyEarnings": row.usual_daily_earnings,
+        "dailyRateBeforeCap": row.daily_rate_before_cap,
+        "dailyRate": row.daily_rate,
+        "capApplied": row.cap_applied,
+        "amount": row.amount,
+        "serviceStartDate": row.service_start_date,
+        "serviceWeeksActual": row.service_weeks_actual,
+        "serviceWeeksRequired": row.service_weeks_required,
+        "serviceQualified": row.service_qualified,
+        "certified": row.certified,
+        "eligible": row.eligible,
+        "reason": row.reason,
+        "status": row.status,
     }
 
 
@@ -26826,6 +36630,228 @@ def _maybe_compute_uk_statutory_leave_pay(db: Session, record: PayrollLeaveReque
     record.statutory_pay_note = f"computed over {weeks} week(s)"
 
 
+def _ie_rate_map_for_statutory_leave(db: Session, organization_id: int, as_of: date) -> dict:
+    """Ireland's component-key -> rate row map for a LEAVE assessment on `as_of`.
+
+    Deliberately NOT `_resolve_effective_rate_inputs()`. That function is the
+    payroll calculation path and it ends in `_assert_jurisdiction_ready()`,
+    which refuses to resolve unless the jurisdiction's tax SLABS are also
+    configured. Statutory sick pay is an entitlement, not a tax computation: it
+    depends only on the four ie_sick_leave_* rows, and demanding a signed
+    income-tax slab table before an employer can have a sick day assessed would
+    be a category error that also blocks the assessment for any employer who has
+    not finished tax configuration.
+
+    It still honours the same content resolution discipline as a real payroll
+    run, so a claim is never decided against different content than the engine
+    would have used: the canonical, date-effective pack wins when the org has
+    opted into canonical tax packs, otherwise the org's own country-level rows
+    are used (seeding the IE catalog on first access, as a payroll run would).
+    """
+    if _org_uses_canonical_tax_pack(db, organization_id):
+        from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+        canonical_rates, _canonical_slabs, pack = resolve_tax_configuration(
+            db, "IE", state=None, tax_regime=None, payroll_date=as_of,
+        )
+        if pack is not None and canonical_rates:
+            return {
+                _normalize_engine_component_key(r.component_key): r
+                for r in canonical_rates
+            }
+    return {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="IE", payroll_date=as_of)
+    }
+
+
+def _ie_sick_days_taken_in_calendar_year(db: Session, employee_id: int, calendar_year: int,
+                                         exclude_leave_request_id: Optional[int] = None) -> Decimal:
+    """Days of Irish statutory sick entitlement already CREDITED for this
+    employee in this calendar year (IE-037's calendar-year counter).
+
+    Derived from the ledger rather than kept as a mutable running total, so the
+    figure is reconstructable and cannot drift away from the records behind it.
+    Reversed claims are excluded, because a withdrawn entitlement must return to
+    the employee rather than stay consumed.
+
+    REVERSED rows for the same request are excluded alongside the request's own
+    prior assessment, so re-approving a request re-assesses it against the
+    counter it would have seen the first time rather than against its own
+    previous claim.
+    """
+    query = db.query(
+        sa_func.coalesce(
+            sa_func.sum(IrelandStatutorySickLeaveRecord.days_credited), 0
+        )
+    ).filter(
+        IrelandStatutorySickLeaveRecord.employee_id == employee_id,
+        IrelandStatutorySickLeaveRecord.calendar_year == int(calendar_year),
+        IrelandStatutorySickLeaveRecord.status != "REVERSED",
+    )
+    if exclude_leave_request_id is not None:
+        query = query.filter(IrelandStatutorySickLeaveRecord.leave_request_id != exclude_leave_request_id)
+    total = query.scalar()
+    return Decimal(str(total if total is not None else 0))
+
+
+def _ie_usual_daily_earnings(db: Session, employee_id: int, as_of: date) -> Optional[Decimal]:
+    """Usual daily earnings for a sick claim: gross actually PAID on this
+    employee's most recent paid payslip, divided by the calendar days from that
+    pay date to the absence.
+
+    Uses real paid payslips rather than the current contract salary, because
+    statutory sick pay is defined on what the employee ordinarily earns over the
+    pay period, not on salary annualised through the platform's fixed 30-day
+    payroll model. Only PAID items count — a pending or failed payslip is not
+    evidence of ordinary earnings.
+
+    Returns None when there is no usable paid history, which the caller must
+    treat as "not evidenced" — never as zero, which would silently assess 70%
+    of nothing as a genuine entitlement.
+    """
+    row = (
+        db.query(PayslipItem.gross_pay, PayrollRun.pay_date)
+        .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+        .filter(
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.status == PayslipStatus.PAID.value,
+            PayrollRun.pay_date != None,  # noqa: E711 — SQLAlchemy needs the operator form
+        )
+        .order_by(PayrollRun.pay_date.desc(), PayslipItem.id.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    gross_pay, pay_date = row
+    if not pay_date or as_of <= pay_date:
+        return None
+    covered_days = (as_of - pay_date).days
+    if covered_days <= 0:
+        return None
+    gross = Decimal(str(gross_pay if gross_pay is not None else 0))
+    if gross <= 0:
+        return None
+    return _round2(gross / Decimal(covered_days))
+
+
+def _maybe_assess_ie_statutory_sick_leave(db: Session, record: PayrollLeaveRequest,
+                                          organization_id: int) -> Optional[IrelandStatutorySickLeaveRecord]:
+    """Called once, right after an Irish `sick` leave request is approved.
+
+    Writes ONE IrelandStatutorySickLeaveRecord capturing the full IE-037
+    evidence — absence dates, entitlement used, usual daily earnings, the rate
+    before and after the cap, the service qualification, the certification
+    state, and the reason for the outcome. Mirrors
+    _maybe_compute_uk_statutory_leave_pay above: additive at approval time,
+    frozen there and never recomputed, so a later rate update cannot rewrite a
+    historic claim.
+
+    Returns None (silently, leaving no record) when the switch is off, the
+    leave type is not `sick`, or the employee is not Irish — none of these are
+    errors, they just mean there is no Irish statutory sick pay to assess.
+
+    The computed amount is recorded as EVIDENCE ONLY. It is deliberately not
+    added to gross: see
+    engine/countries/shared.py::_IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES for
+    why the payroll mechanism waits behind G5.
+    """
+    if "IE" not in _IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES:
+        return None
+    if record.leave_type != "sick":
+        return None
+
+    from app.modules.payroll.engine.countries.ireland import (
+        build_rate_pack,
+        calculate_statutory_sick_pay,
+    )
+
+    employee = db.query(PayrollEmployee).filter(
+        PayrollEmployee.id == record.employee_id, PayrollEmployee.organization_id == organization_id,
+    ).first()
+    if not employee:
+        return None
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "IE":
+        return None
+
+    absence_start = record.start_date
+    calendar_year = int(absence_start.year) if absence_start else None
+    if calendar_year is None:
+        return None
+
+    try:
+        ie_pack = build_rate_pack(
+            _ie_rate_map_for_statutory_leave(db, organization_id, absence_start), organization_id,
+        )
+        taken_before = _ie_sick_days_taken_in_calendar_year(
+            db, employee.id, calendar_year, exclude_leave_request_id=record.id,
+        )
+        assessment = calculate_statutory_sick_pay(
+            pack=ie_pack,
+            usual_daily_earnings=_ie_usual_daily_earnings(db, employee.id, absence_start),
+            days_claimed=record.days,
+            days_taken_in_calendar_year=taken_before,
+            service_start_date=getattr(employee, "date_of_joining", None),
+            absence_start_date=absence_start,
+            absence_end_date=record.end_date,
+            # Certification is a statutory CONDITION and there is no field on
+            # the generic leave request to carry it. Until one exists the claim
+            # is assessed as uncertified, which disallows the entitlement and
+            # says so in the record — it is never assumed certified because the
+            # absence was reported.
+            certified=False,
+        )
+    except Exception:
+        # A payroll run must not fail because signed sick-pay content is not
+        # yet configured for this employer. The absence is still an approved
+        # leave request and the attendance sync has already happened; the claim
+        # simply is not assessed, and that silence is visible because no record
+        # exists. Raising here would block an unrelated employee's payroll.
+        import logging
+        logging.getLogger("zoiko").warning(
+            f"[payroll-leave] Ireland statutory sick pay assessment skipped for leave "
+            f"request {record.id}: statutory content or evidence unavailable",
+            exc_info=True,
+        )
+        return None
+
+    row = IrelandStatutorySickLeaveRecord(
+        organization_id=organization_id,
+        employee_id=employee.id,
+        leave_request_id=record.id,
+        calendar_year=calendar_year,
+        absence_start_date=absence_start,
+        absence_end_date=record.end_date,
+        days_claimed=Decimal(str(record.days or 0)),
+        days_credited=assessment["days_credited"],
+        days_disallowed=assessment["days_disallowed"],
+        days_taken_before=taken_before,
+        entitlement_remaining_after=max(
+            Decimal("0"),
+            assessment["entitlement_remaining_before"] - assessment["days_credited"],
+        ),
+        entitlement_days=assessment["entitlement_days"],
+        pct_applied=assessment["pct_applied"],
+        daily_cap=assessment["daily_cap"],
+        usual_daily_earnings=assessment["usual_daily_earnings"] or None,
+        daily_rate_before_cap=assessment["daily_rate_before_cap"] or None,
+        daily_rate=assessment["daily_rate"] or None,
+        cap_applied=bool(assessment["cap_applied"]),
+        amount=assessment["amount"],
+        service_start_date=getattr(employee, "date_of_joining", None),
+        service_weeks_actual=assessment.get("service_weeks_actual"),
+        service_weeks_required=assessment["service_weeks_required"],
+        service_qualified=bool(assessment["service_weeks_satisfied"]),
+        certified=bool(assessment["certified"]),
+        eligible=bool(assessment["eligible"]),
+        reason=assessment["reason"] or "allowed in full",
+        status="ASSESSED",
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
 def review_payroll_leave_request(db: Session, request_id: int, data, organization_id: int, reviewer_id: int) -> dict:
     record = db.query(PayrollLeaveRequest).filter(
         PayrollLeaveRequest.id == request_id,
@@ -26846,6 +36872,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
     if record.status == "approved" and prev_status != "approved":
         _sync_leave_to_attendance(db, record, organization_id)
         _maybe_compute_uk_statutory_leave_pay(db, record, organization_id)
+        _maybe_assess_ie_statutory_sick_leave(db, record, organization_id)
         alloc = db.query(PayrollLeaveAllocation).filter(
             PayrollLeaveAllocation.organization_id == organization_id,
             PayrollLeaveAllocation.employee_id == record.employee_id,
@@ -26929,3 +36956,1607 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
             logging.getLogger("zoiko").warning(f"[payroll-mail] leave-request status email failed: {exc}")
 
     return _enrich_leave_request(db, record, organization_id)
+
+
+# ── France (ZP-FR-ENG-001) ───────────────────────────────────────────────
+
+_FR_FILING_DUE_DATE_CLASSES = {"M5", "M15", "DEFERRED_M15"}
+_FR_PAS_RATE_TYPES = {"PERSONALIZED", "NEUTRAL"}
+_FR_PAS_SOURCES = {"CRM", "NEUTRAL_GRID"}
+_FR_DSN_STATUSES = (
+    "DRAFT", "VALIDATED", "QUEUED", "TRANSMITTED", "ACKNOWLEDGED",
+    "BUSINESS_REJECTED", "CRM_RESOLVED", "UNKNOWN", "SETTLED",
+)
+_FR_DSN_TRANSITIONS = {
+    "DRAFT": {"VALIDATED"},              # re-runs the FR-031 validator
+    "VALIDATED": {"QUEUED"},
+    "QUEUED": {"TRANSMITTED", "UNKNOWN"},
+    "TRANSMITTED": {"ACKNOWLEDGED", "BUSINESS_REJECTED", "UNKNOWN"},
+    "ACKNOWLEDGED": {"CRM_RESOLVED", "SETTLED"},
+    "BUSINESS_REJECTED": {"CRM_RESOLVED"},  # a correction is a NEW submission (correction_of_id)
+    "CRM_RESOLVED": {"SETTLED"},
+    # UNKNOWN (timeout / uncertain transport) is resolved by reconciliation
+    # only — never re-queued or re-transmitted blind (FR-033/FR-058).
+    "UNKNOWN": {"ACKNOWLEDGED", "BUSINESS_REJECTED"},
+    "SETTLED": set(),
+}
+_FR_DSN_OUTBOX_ACTIONS = {"TRANSMIT", "PAS_RATE_EXCHANGE", "CRM_CLOSE", "CORRECTION"}
+_FR_DSN_OUTBOX_STATUSES = ("PENDING", "SENT", "UNKNOWN", "ACKNOWLEDGED", "FAILED")
+
+
+def seed_france_pack_rows(db: Session, pack: JurisdictionPack) -> List[ContributionRate]:
+    """Insert every France statutory content row (engine/countries/
+    france_content.py — the catalog france.py reads) that `pack` is missing.
+    INSERT-ONLY: a (component_key, effective_from) row already in the pack
+    is never overwritten, so a Super Admin's edits survive. Row-dated
+    content (the 1 June SMIC) is included only where its window overlaps
+    the pack's own window. Shared by the Super Admin "load statutory
+    defaults" action and scripts/seed_france_canonical_packs.py."""
+    from app.modules.payroll.engine.countries.france_content import FR_2026_CONTENT
+
+    existing = {
+        (r.component_key, r.effective_from)
+        for r in db.query(ContributionRate).filter(
+            ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))
+    }
+    added: List[ContributionRate] = []
+    for sort_order, (key, label, _category, kind, value, eff_from, eff_to, note) in enumerate(FR_2026_CONTENT):
+        if pack.effective_from is not None and eff_to is not None and eff_to < pack.effective_from:
+            continue
+        if pack.effective_to is not None and eff_from is not None and eff_from > pack.effective_to:
+            continue
+        if (key, eff_from) in existing:
+            continue
+        amount = Decimal(value)
+        display = f"{amount}%" if kind in ("ee", "er") else str(amount)
+        row = ContributionRate(
+            jurisdiction_pack_id=pack.id,
+            jurisdiction_country="FR",
+            organization_id=None,
+            component_key=key,
+            label=label if note != "PENDING_G1" else f"{label} [PENDING G1]",
+            employee_share=display if kind in ("ee", "amount") else "—",
+            employer_share=display if kind == "er" else "—",
+            total=display,
+            employee_rate_pct=amount if kind == "ee" else None,
+            employer_rate_pct=amount if kind == "er" else None,
+            flat_amount=amount if kind == "amount" else None,
+            effective_from=eff_from,
+            effective_to=eff_to,
+            sort_order=sort_order,
+        )
+        db.add(row)
+        added.append(row)
+    db.flush()
+    return added
+
+
+def load_france_statutory_defaults(db: Session, pack_id: int, actor_id: Optional[int] = None) -> dict:
+    """Super Admin action: fill a France tax pack's missing statutory rows
+    from the content catalog. Only a France pack_type='tax' pack that is
+    still editable (never an Active/published one); insert-only and audited
+    row by row; an existing approval is invalidated like any other edit."""
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", pack_id)
+    if _normalize_country(pack.jurisdiction_country) != "FR" or pack.pack_type != "tax":
+        raise BadRequestException("France statutory defaults can only be loaded into a France tax pack.")
+    _require_editable_pack(pack)
+    added = seed_france_pack_rows(db, pack)
+    if added:
+        _invalidate_pack_approval_on_edit(pack)
+    db.commit()
+    for row in added:
+        db.refresh(row)
+        record_tax_audit(
+            db, actor_id=actor_id, action="create", entity_type="contribution_rate", entity_id=row.id,
+            jurisdiction_pack_id=pack.id, tax_version=pack.version,
+            new_value={"component_key": row.component_key, "employee_rate_pct": str(row.employee_rate_pct),
+                       "employer_rate_pct": str(row.employer_rate_pct), "flat_amount": str(row.flat_amount),
+                       "effective_from": str(row.effective_from), "effective_to": str(row.effective_to)},
+            reason="Loaded France 2026 statutory defaults (ZP-FR-ENG-001 content catalog)",
+        )
+    pending = sorted({r.component_key for r in added if r.label.endswith("[PENDING G1]")})
+    return {
+        "packId": pack.id,
+        "added": len(added),
+        "addedKeys": sorted({r.component_key for r in added}),
+        "pendingG1Keys": pending,
+        "message": (f"Added {len(added)} France statutory row(s)." if added
+                    else "Nothing to add — the pack already has every France statutory row."),
+    }
+
+
+_FR_FNAL_CLASSES = {"UNDER_50", "OVER_50"}
+_FR_CFP_CLASSES = {"UNDER_11", "OVER_11"}
+
+
+def require_france_organization(db: Session, organization_id: int):
+    """Every France authority endpoint is organization-scoped; reject an id
+    that is not an existing organization whose country resolves to FR, so a
+    typo or a non-French org can never silently accumulate France records
+    (or report a misleading "not ready")."""
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise NotFoundException("Organization", organization_id)
+    if get_jurisdiction_code(getattr(org, "country", None)) != "FR":
+        raise BadRequestException(
+            f"Organization {organization_id} is not a France organization "
+            f"(country={getattr(org, 'country', None)!r}); France compliance data is FR-only."
+        )
+    return org
+
+
+def require_ireland_organization(db: Session, organization_id: int):
+    """Every Ireland authority endpoint is organization-scoped; reject an id
+    that is not an existing organization whose country resolves to IE, so a
+    typo or a non-Irish org can never silently accumulate Ireland records."""
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise NotFoundException("Organization", organization_id)
+    if get_jurisdiction_code(getattr(org, "country", None)) != "IE":
+        raise BadRequestException(
+            f"Organization {organization_id} is not an Ireland organization "
+            f"(country={getattr(org, 'country', None)!r}); Ireland compliance data is IE-only."
+        )
+    return org
+
+
+def _validate_france_employer_classes(fnal_class: Optional[str], cfp_class: Optional[str]) -> None:
+    """The stored FNAL/CFP vocabulary — the engine maps these to its rate
+    keys (france.normalize_fnal_class / normalize_cfp_class)."""
+    if fnal_class is not None and fnal_class not in _FR_FNAL_CLASSES:
+        raise BadRequestException(f"fnalClass must be one of {sorted(_FR_FNAL_CLASSES)}, got {fnal_class!r}.")
+    if cfp_class is not None and cfp_class not in _FR_CFP_CLASSES:
+        raise BadRequestException(f"cfpClass must be one of {sorted(_FR_CFP_CLASSES)}, got {cfp_class!r}.")
+
+
+def _fr_dsn_payload_hash(organization_id: int, period_start, period_end, release_ref: str, due_date) -> str:
+    canonical = json.dumps(
+        {
+            "organization_id": organization_id,
+            "period_start": str(period_start),
+            "period_end": str(period_end),
+            "release_ref": release_ref,
+            "dsn_version": "P26V01",
+            "due_date": str(due_date),
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def get_employer_france_profile(db: Session, organization_id: int) -> EmployerFranceProfile:
+    row = (db.query(EmployerFranceProfile)
+           .filter(EmployerFranceProfile.organization_id == organization_id).first())
+    if not row:
+        raise NotFoundException(f"France employer profile for organization {organization_id} not found.")
+    return row
+
+
+_FR_IDCC_STATUSES = {"APPLICABLE", "NOT_APPLICABLE", "UNDER_REVIEW"}
+_FR_INSEE_RE = re.compile(r"^(\d{5}|2[AB]\d{3})$")
+
+
+def upsert_employer_france_profile(
+    db: Session, organization_id: int, data: "EmployerFranceProfileUpsert", actor_id: Optional[int] = None,
+) -> EmployerFranceProfile:
+    """Create or update the org 1:1 France employer profile (FR §11 panels
+    A/C/D). Not payload-writable (never overwritten by a profile save):
+    pas_crm_status (authority-held), effectif_state (governed history —
+    record_france_effectif / correct_france_effectif) and readiness_status
+    (computed by get_france_readiness; LIVE only via set_france_live)."""
+    siren = (data.siren or "").strip()
+    if not re.match(r"^\d{9}$", siren):
+        raise BadRequestException("French SIREN must be exactly 9 digits.")
+    if data.filingDueDateClass not in _FR_FILING_DUE_DATE_CLASSES:
+        raise BadRequestException(
+            f"filingDueDateClass must be one of {sorted(_FR_FILING_DUE_DATE_CLASSES)}, "
+            f"got {data.filingDueDateClass!r}."
+        )
+    if data.idccStatus is not None and data.idccStatus not in _FR_IDCC_STATUSES:
+        raise BadRequestException(f"idccStatus must be one of {sorted(_FR_IDCC_STATUSES)}, got {data.idccStatus!r}.")
+    if data.idccStatus == "APPLICABLE" and not (data.idcc or "").strip():
+        raise BadRequestException("idccStatus APPLICABLE requires the IDCC code (FR-035).")
+
+    row = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    action = "update" if row else "create"
+    old_value = None
+    if row:
+        old_value = {"siren": row.siren, "idcc": row.idcc, "filing_due_date_class": row.filing_due_date_class}
+        if row.siren != siren:
+            siret_mismatch = (db.query(FranceEstablishment)
+                              .filter(FranceEstablishment.organization_id == organization_id,
+                                      ~FranceEstablishment.siret.startswith(siren)).first())
+            if siret_mismatch:
+                raise BadRequestException(
+                    f"SIREN {siren} does not match existing establishment SIRET {siret_mismatch.siret} "
+                    "(a SIRET is the SIREN + a 5-digit NIC)."
+                )
+    else:
+        row = EmployerFranceProfile(organization_id=organization_id, siren=siren, created_by_id=actor_id)
+        db.add(row)
+    row.siren = siren
+    row.legal_name = data.legalName
+    row.legal_form = data.legalForm
+    row.address = data.address
+    row.payroll_contact = data.payrollContact
+    row.idcc = (data.idcc or "").strip() or None
+    if data.idccStatus is not None:
+        row.idcc_status = data.idccStatus
+    elif row.idcc:
+        row.idcc_status = row.idcc_status or "APPLICABLE"
+    row.urssaf_account = data.urssafAccount
+    row.dsn_declarant = data.dsnDeclarant
+    row.filing_due_date_class = data.filingDueDateClass
+    row.payment_mandate_ref = data.paymentMandateRef
+    row.pas_collector_identity = data.pasCollectorIdentity
+
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action=action, entity_type="france_employer_profile",
+        entity_id=row.id, old_value=old_value, new_value={
+            "organization_id": organization_id, "siren": siren,
+            "idcc": row.idcc, "idcc_status": row.idcc_status,
+            "filing_due_date_class": row.filing_due_date_class,
+        },
+    )
+    log_activity(db, organization_id, f"France employer profile {action}d (SIREN {siren}).",
+                 actor_id=actor_id)
+    return row
+
+
+def record_france_effectif(
+    db: Session, organization_id: int, data: "FranceEffectifRecord", actor_id: Optional[int] = None,
+) -> EmployerFranceProfile:
+    """Record a NEW year of governed annual effectif (FR-015/FR-036). An
+    already-recorded year is changed only through correct_france_effectif,
+    which keeps the previous value in that year's history."""
+    profile = get_employer_france_profile(db, organization_id)
+    if data.value < 0:
+        raise BadRequestException("Annual effectif cannot be negative.")
+    if not (1980 <= data.year <= 2100):
+        raise BadRequestException(f"Effectif year {data.year} is outside a plausible range.")
+    if not (data.source or "").strip():
+        raise BadRequestException("An effectif value needs its governed source (e.g. DSN, Urssaf notice).")
+    state = dict(profile.effectif_state or {})
+    if str(data.year) in state:
+        raise BadRequestException(
+            f"Effectif {data.year} is already recorded ({state[str(data.year)].get('value')}); "
+            "use the correction action to change it — history is never overwritten."
+        )
+    state[str(data.year)] = {
+        "value": data.value,
+        "source": data.source,
+        "validatedAt": datetime.utcnow().isoformat(),
+        "history": [],
+    }
+    profile.effectif_state = state
+    db.commit()
+    db.refresh(profile)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="france_employer_profile",
+        entity_id=profile.id, new_value={f"effectif.{data.year}": state[str(data.year)]},
+    )
+    log_activity(db, organization_id, f"France annual effectif {data.year} recorded = {data.value}.", actor_id=actor_id)
+    return profile
+
+
+def correct_france_effectif(
+    db: Session, organization_id: int, data: "FranceEffectifCorrection", actor_id: Optional[int] = None,
+) -> EmployerFranceProfile:
+    """Correct an already-recorded effectif year: the prior value/source
+    move into that year's `history` with the reason and actor — auditable,
+    never silently replaced."""
+    profile = get_employer_france_profile(db, organization_id)
+    if data.value < 0:
+        raise BadRequestException("Annual effectif cannot be negative.")
+    if not (data.reason or "").strip():
+        raise BadRequestException("A correction needs a reason.")
+    state = dict(profile.effectif_state or {})
+    current = state.get(str(data.year))
+    if not current:
+        raise NotFoundException(f"No effectif recorded for {data.year} — record it first.")
+    history = list(current.get("history") or [])
+    history.append({
+        "value": current.get("value"), "source": current.get("source"),
+        "validatedAt": current.get("validatedAt"),
+        "replacedAt": datetime.utcnow().isoformat(), "replacedBy": actor_id, "reason": data.reason,
+    })
+    state[str(data.year)] = {
+        "value": data.value, "source": data.source,
+        "validatedAt": datetime.utcnow().isoformat(), "history": history,
+    }
+    profile.effectif_state = state
+    db.commit()
+    db.refresh(profile)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="france_employer_profile",
+        entity_id=profile.id, legal_reference="FR-015/FR-036",
+        old_value={f"effectif.{data.year}": current.get("value")},
+        new_value={f"effectif.{data.year}": data.value, "reason": data.reason},
+    )
+    log_activity(db, organization_id,
+                 f"France annual effectif {data.year} corrected {current.get('value')} → {data.value}.",
+                 actor_id=actor_id)
+    return profile
+
+
+# ── Establishments (SIRET registry, FR §11 panel B) ────────────────────
+
+def _validate_siret_for_org(db: Session, organization_id: int, siret: str) -> str:
+    siret = (siret or "").strip().replace(" ", "")
+    if not re.match(r"^\d{14}$", siret):
+        raise BadRequestException("French SIRET must be exactly 14 digits.")
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    if profile and not siret.startswith(profile.siren):
+        raise BadRequestException(
+            f"SIRET {siret} does not belong to SIREN {profile.siren} (SIRET = SIREN + 5-digit NIC)."
+        )
+    return siret
+
+
+def upsert_france_establishment(
+    db: Session, organization_id: int, data: "FranceEstablishmentUpsert",
+    establishment_id: Optional[int] = None, actor_id: Optional[int] = None,
+) -> FranceEstablishment:
+    """Create (establishment_id None) or update an establishment. The SIRET
+    of an existing establishment is immutable — rate packs and filings are
+    keyed on it; open a new establishment instead."""
+    siret = _validate_siret_for_org(db, organization_id, data.siret)
+    commune = (data.communeInsee or "").strip().upper() or None
+    if commune and not _FR_INSEE_RE.match(commune):
+        raise BadRequestException("Commune INSEE code must be 5 characters (e.g. 75056, or 2A004 / 2B033 for Corsica).")
+
+    if establishment_id is not None:
+        row = (db.query(FranceEstablishment)
+               .filter(FranceEstablishment.id == establishment_id,
+                       FranceEstablishment.organization_id == organization_id).first())
+        if not row:
+            raise NotFoundException("FranceEstablishment", establishment_id)
+        if row.siret != siret:
+            raise BadRequestException("An establishment's SIRET cannot change — create a new establishment.")
+        action = "update"
+    else:
+        if db.query(FranceEstablishment).filter(
+                FranceEstablishment.organization_id == organization_id,
+                FranceEstablishment.siret == siret).first():
+            raise BadRequestException(f"SIRET {siret} is already registered for this organization.")
+        profile = db.query(EmployerFranceProfile).filter(
+            EmployerFranceProfile.organization_id == organization_id).first()
+        row = FranceEstablishment(
+            organization_id=organization_id, siret=siret,
+            employer_profile_id=profile.id if profile else None, created_by_id=actor_id,
+        )
+        db.add(row)
+        action = "create"
+    row.name = data.name
+    row.address = data.address
+    row.commune_insee = commune
+    row.workforce_location = data.workforceLocation
+    row.payroll_identifier = data.payrollIdentifier
+    row.is_active = bool(data.isActive)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(db, actor_id=actor_id, action=action, entity_type="france_establishment",
+                     entity_id=row.id, legal_reference="FR-002",
+                     new_value={"siret": siret, "commune_insee": commune, "is_active": row.is_active})
+    log_activity(db, organization_id, f"France establishment {siret} {action}d.", actor_id=actor_id)
+    return row
+
+
+def list_france_establishments(db: Session, organization_id: int, include_inactive: bool = True) -> List[FranceEstablishment]:
+    query = db.query(FranceEstablishment).filter(FranceEstablishment.organization_id == organization_id)
+    if not include_inactive:
+        query = query.filter(FranceEstablishment.is_active.is_(True))
+    return query.order_by(FranceEstablishment.siret).all()
+
+
+# ── Establishment rate packs (FR-002/FR-013) ───────────────────────────
+
+def _validate_rate_pack_values(at_mp, at_mp_evidence, at_mp_source, vm_rate, vm_evidence, vm_source, fnal, cfp):
+    for label, value in (("AT/MP", at_mp), ("Versement mobilité", vm_rate)):
+        if value is not None and not (Decimal("0") <= Decimal(str(value)) <= Decimal("100")):
+            raise BadRequestException(f"{label} rate must be between 0 and 100%.")
+    if at_mp is not None and not at_mp_evidence and not at_mp_source:
+        raise BadRequestException(
+            "An AT/MP rate is authority decision data (FR-013) — provide atMpEvidence and/or atMpSource."
+        )
+    if vm_rate is not None and not vm_evidence and not vm_source:
+        raise BadRequestException(
+            "A versement mobilité rate is authority data (FR-013) — provide vmEvidence and/or vmSource."
+        )
+    _validate_france_employer_classes(fnal, cfp)
+
+
+def upsert_france_establishment_rate_pack(
+    db: Session, organization_id: int, data: "FranceEstablishmentRatePackUpsert", actor_id: Optional[int] = None,
+) -> FranceEstablishmentRatePack:
+    """Append a new effective-dated SIRET rate-pack period row, auto-closing
+    the previous period's row (effective_to = day before new effective_from)
+    so Jan/Jul history is never rewritten (FR-002/FR-013). Backdated periods
+    are accepted — Urssaf AT/MP notices are frequently retroactive."""
+    establishment = None
+    if data.establishmentId is not None:
+        establishment = (db.query(FranceEstablishment)
+                         .filter(FranceEstablishment.id == data.establishmentId,
+                                 FranceEstablishment.organization_id == organization_id).first())
+        if not establishment:
+            raise NotFoundException("FranceEstablishment", data.establishmentId)
+        siret = establishment.siret
+    else:
+        siret = _validate_siret_for_org(db, organization_id, data.siret or "")
+        establishment = (db.query(FranceEstablishment)
+                         .filter(FranceEstablishment.organization_id == organization_id,
+                                 FranceEstablishment.siret == siret).first())
+    _validate_rate_pack_values(data.atMpRatePct, data.atMpEvidence, data.atMpSource,
+                               data.vmRatePct, data.vmEvidence, data.vmSource, data.fnalClass, data.cfpClass)
+    if data.effectiveTo is not None and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
+
+    open_period = (db.query(FranceEstablishmentRatePack)
+                   .filter(
+                       FranceEstablishmentRatePack.organization_id == organization_id,
+                       FranceEstablishmentRatePack.siret == siret,
+                       FranceEstablishmentRatePack.effective_to.is_(None),
+                   )
+                   .first())
+    if open_period:
+        if open_period.effective_from >= data.effectiveFrom:
+            raise BadRequestException(
+                f"A rate pack for SIRET {siret} is already effective from {open_period.effective_from}; "
+                "a new period must start after it (edit the future period instead)."
+            )
+        open_period.effective_to = data.effectiveFrom - timedelta(days=1)
+    new_pack = FranceEstablishmentRatePack(
+        organization_id=organization_id,
+        establishment_id=establishment.id if establishment else None,
+        siret=siret,
+        commune_insee=(establishment.commune_insee if establishment and establishment.commune_insee else data.communeInsee),
+        workplace_label=data.workplaceLabel or (establishment.name if establishment else None),
+        at_mp_rate_pct=data.atMpRatePct,
+        at_mp_risk_code=data.atMpRiskCode,
+        at_mp_evidence=data.atMpEvidence,
+        at_mp_source=data.atMpSource,
+        vm_rate_pct=data.vmRatePct,
+        vm_threshold_applies=data.vmThresholdApplies,
+        vm_source=data.vmSource,
+        vm_evidence=data.vmEvidence,
+        ags_special_status=data.agsSpecialStatus,
+        fnal_class=data.fnalClass,
+        cfp_class=data.cfpClass,
+        effectif=data.effectif,
+        effective_from=data.effectiveFrom,
+        effective_to=data.effectiveTo,
+        created_by_id=actor_id,
+    )
+    db.add(new_pack)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BadRequestException(
+            f"A France rate pack for SIRET {siret} effective {data.effectiveFrom} already exists for this "
+            "organization — a new period must start on a different date."
+        )
+    db.refresh(new_pack)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_establishment_rate_pack",
+                     entity_id=new_pack.id, legal_reference="FR-002/FR-013",
+                     new_value={"siret": siret, "effective_from": str(data.effectiveFrom),
+                                "at_mp_rate_pct": str(new_pack.at_mp_rate_pct),
+                                "vm_rate_pct": str(new_pack.vm_rate_pct)})
+    log_activity(db, organization_id, f"France SIRET {siret} rate pack effective {data.effectiveFrom} recorded.",
+                 actor_id=actor_id)
+    return new_pack
+
+
+def _get_france_rate_pack(db: Session, organization_id: int, pack_id: int) -> FranceEstablishmentRatePack:
+    pack = (db.query(FranceEstablishmentRatePack)
+            .filter(FranceEstablishmentRatePack.id == pack_id,
+                    FranceEstablishmentRatePack.organization_id == organization_id).first())
+    if not pack:
+        raise NotFoundException("FranceEstablishmentRatePack", pack_id)
+    return pack
+
+
+def update_france_establishment_rate_pack(
+    db: Session, organization_id: int, pack_id: int, data: "FranceEstablishmentRatePackUpdate",
+    actor_id: Optional[int] = None,
+) -> FranceEstablishmentRatePack:
+    """Edit a period that has not started yet. A period already in force (a
+    payroll may have run on it) is never edited in place — append a new
+    period instead."""
+    pack = _get_france_rate_pack(db, organization_id, pack_id)
+    if pack.effective_from <= date.today():
+        raise BadRequestException(
+            f"This period has been in force since {pack.effective_from}; it cannot be edited in place — "
+            "add a new rate-pack period (history the payroll ran on stays intact)."
+        )
+    fields = data.model_dump(exclude_unset=True)
+    merged = {
+        "at_mp": fields.get("atMpRatePct", pack.at_mp_rate_pct),
+        "at_mp_evidence": fields.get("atMpEvidence", pack.at_mp_evidence),
+        "at_mp_source": fields.get("atMpSource", pack.at_mp_source),
+        "vm_rate": fields.get("vmRatePct", pack.vm_rate_pct),
+        "vm_evidence": fields.get("vmEvidence", pack.vm_evidence),
+        "vm_source": fields.get("vmSource", pack.vm_source),
+        "fnal": fields.get("fnalClass", pack.fnal_class),
+        "cfp": fields.get("cfpClass", pack.cfp_class),
+    }
+    _validate_rate_pack_values(**merged)
+    old_value = {"at_mp_rate_pct": str(pack.at_mp_rate_pct), "vm_rate_pct": str(pack.vm_rate_pct),
+                 "fnal_class": pack.fnal_class, "cfp_class": pack.cfp_class}
+    column_for = {
+        "communeInsee": "commune_insee", "workplaceLabel": "workplace_label",
+        "atMpRatePct": "at_mp_rate_pct", "atMpRiskCode": "at_mp_risk_code",
+        "atMpEvidence": "at_mp_evidence", "atMpSource": "at_mp_source",
+        "vmRatePct": "vm_rate_pct", "vmThresholdApplies": "vm_threshold_applies",
+        "vmSource": "vm_source", "vmEvidence": "vm_evidence", "agsSpecialStatus": "ags_special_status",
+        "fnalClass": "fnal_class", "cfpClass": "cfp_class", "effectif": "effectif",
+    }
+    for key, value in fields.items():
+        setattr(pack, column_for[key], value)
+    db.commit()
+    db.refresh(pack)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_establishment_rate_pack",
+                     entity_id=pack.id, legal_reference="FR-002/FR-013", old_value=old_value,
+                     new_value={k: str(v) for k, v in fields.items()})
+    log_activity(db, organization_id, f"France SIRET {pack.siret} future rate pack ({pack.effective_from}) edited.",
+                 actor_id=actor_id)
+    return pack
+
+
+def close_france_establishment_rate_pack(
+    db: Session, organization_id: int, pack_id: int, data: "FranceRatePackClose", actor_id: Optional[int] = None,
+) -> FranceEstablishmentRatePack:
+    pack = _get_france_rate_pack(db, organization_id, pack_id)
+    if pack.effective_to is not None:
+        raise BadRequestException(f"This period is already closed ({pack.effective_to}).")
+    if data.effectiveTo < pack.effective_from:
+        raise BadRequestException("A period cannot close before it starts.")
+    pack.effective_to = data.effectiveTo
+    db.commit()
+    db.refresh(pack)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_establishment_rate_pack",
+                     entity_id=pack.id, legal_reference="FR-013", new_value={"effective_to": str(data.effectiveTo)})
+    log_activity(db, organization_id, f"France SIRET {pack.siret} rate pack closed on {data.effectiveTo}.",
+                 actor_id=actor_id)
+    return pack
+
+
+def list_france_establishment_rate_packs(
+    db: Session, organization_id: int, siret: Optional[str] = None,
+) -> List[FranceEstablishmentRatePack]:
+    query = db.query(FranceEstablishmentRatePack).filter(
+        FranceEstablishmentRatePack.organization_id == organization_id)
+    if siret:
+        query = query.filter(FranceEstablishmentRatePack.siret == siret)
+    return query.order_by(FranceEstablishmentRatePack.siret, FranceEstablishmentRatePack.effective_from.desc()).all()
+
+
+# ── PAS (FR-008/FR-010) ────────────────────────────────────────────────
+
+_FR_PAS_APPLICATION_WINDOW_DAYS = 60
+
+
+def ingest_france_pas_rate(
+    db: Session, organization_id: int, data: "FrancePASRateUpsert", actor_id: Optional[int] = None,
+) -> FrancePASRate:
+    """Record a PAS rate (FR-008/FR-010).
+
+    PERSONALIZED = a DGFiP CRM rate transcribed WITH its provenance: the
+    DGFiP rate identifier, the CRM reference and the receipt date are all
+    mandatory, and the rate must be applied within the legal window —
+    no earlier than its receipt and no later than 60 days after it. NEUTRAL
+    rows carry no percentage (the engine resolves the statutory grid).
+    `source` is derived from the type, never chosen. A correction marks the
+    corrected row CORRECTED (excluded from lookups); a plain supersede
+    closes the previous row (STALE — still valid for its own window, so
+    re-running an old period uses the rate that governed it)."""
+    if data.rateType not in _FR_PAS_RATE_TYPES:
+        raise BadRequestException(f"rateType must be one of {sorted(_FR_PAS_RATE_TYPES)}, got {data.rateType!r}.")
+    source = "CRM" if data.rateType == "PERSONALIZED" else "NEUTRAL_GRID"
+    if data.source is not None and data.source != source:
+        raise BadRequestException(f"A {data.rateType} rate's source is {source}, not {data.source!r}.")
+    if data.rateType == "PERSONALIZED":
+        if data.ratePct is None:
+            raise BadRequestException("A PERSONALIZED PAS rate requires ratePct (DGFiP authority value).")
+        if not (Decimal("0") <= Decimal(str(data.ratePct)) <= Decimal("100")):
+            raise BadRequestException("A PAS rate must be between 0 and 100%.")
+        missing = [label for label, value in (("dgfipRateId", data.dgfipRateId),
+                                              ("crmReference", data.crmReference),
+                                              ("receivedDate", data.receivedDate)) if not value]
+        if missing:
+            raise BadRequestException(
+                "A PERSONALIZED rate is DGFiP authority data — its provenance is mandatory (FR-008/FR-010): "
+                + ", ".join(missing)
+            )
+        if data.effectiveFrom < data.receivedDate:
+            raise BadRequestException("A PAS rate cannot be applied before the DGFiP CRM delivering it was received.")
+        if data.effectiveFrom > data.receivedDate + timedelta(days=_FR_PAS_APPLICATION_WINDOW_DAYS):
+            raise BadRequestException(
+                f"A DGFiP rate must be applied within {_FR_PAS_APPLICATION_WINDOW_DAYS} days of receipt "
+                f"(received {data.receivedDate}, latest start "
+                f"{data.receivedDate + timedelta(days=_FR_PAS_APPLICATION_WINDOW_DAYS)})."
+            )
+    elif data.ratePct is not None or data.dgfipRateId:
+        raise BadRequestException(
+            "NEUTRAL PAS rows carry no percentage or DGFiP rate id — the statutory neutral grid is resolved "
+            "by the engine from the payroll date."
+        )
+    if data.effectiveTo is not None and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
+
+    employee = (db.query(PayrollEmployee)
+                .filter(PayrollEmployee.id == data.employeeId,
+                        PayrollEmployee.organization_id == organization_id).first())
+    if not employee:
+        raise NotFoundException("PayrollEmployee", data.employeeId)
+
+    if data.correctionOfId is not None:
+        prior = (db.query(FrancePASRate)
+                 .filter(FrancePASRate.id == data.correctionOfId,
+                         FrancePASRate.organization_id == organization_id).first())
+        if not prior:
+            raise NotFoundException("FrancePASRate", data.correctionOfId)
+        if prior.employee_id != data.employeeId:
+            raise BadRequestException(
+                f"correctionOfId {data.correctionOfId} belongs to employee {prior.employee_id}, "
+                f"not {data.employeeId} — a correction must replace the same employee's rate."
+            )
+        prior.status = "CORRECTED"
+    else:
+        open_rows = (db.query(FrancePASRate)
+                     .filter(FrancePASRate.organization_id == organization_id,
+                             FrancePASRate.employee_id == data.employeeId,
+                             FrancePASRate.status.in_(["ACTIVE", "PENDING"]),
+                             FrancePASRate.effective_to.is_(None)).all())
+        for previous in open_rows:
+            if previous.effective_from >= data.effectiveFrom:
+                raise BadRequestException(
+                    f"Employee {data.employeeId} already has a PAS rate from {previous.effective_from}; "
+                    "a replacement must start after it (or record it as a correction)."
+                )
+            previous.status = "STALE"
+            previous.effective_to = data.effectiveFrom - timedelta(days=1)
+
+    new_rate = FrancePASRate(
+        organization_id=organization_id,
+        employee_id=data.employeeId,
+        rate_type=data.rateType,
+        rate_pct=data.ratePct,
+        dgfip_rate_id=data.dgfipRateId,
+        crm_reference=data.crmReference,
+        source=source,
+        received_date=data.receivedDate,
+        effective_from=data.effectiveFrom,
+        effective_to=data.effectiveTo,
+        status="ACTIVE" if data.effectiveFrom <= date.today() else "PENDING",
+        correction_of_id=data.correctionOfId,
+        created_by_id=actor_id,
+    )
+    db.add(new_rate)
+    db.commit()
+    db.refresh(new_rate)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_pas_rate",
+                     entity_id=new_rate.id, legal_reference="FR-008/FR-010",
+                     new_value={"employee_id": data.employeeId, "rate_type": data.rateType,
+                                "rate_pct": str(data.ratePct), "source": source,
+                                "crm_reference": data.crmReference,
+                                "received_date": str(data.receivedDate),
+                                "effective_from": str(data.effectiveFrom),
+                                "correction_of_id": data.correctionOfId})
+    log_activity(db, organization_id, f"France PAS {data.rateType} rate recorded for employee {data.employeeId}.",
+                 actor_id=actor_id)
+    return new_rate
+
+
+def get_active_france_pas_rate(
+    db: Session, organization_id: int, employee_id: int, as_of: Optional[date] = None,
+) -> Optional[FrancePASRate]:
+    """The PAS rate governing a France employee at as_of (default today),
+    selected by its effective window: a superseded (STALE) row still
+    governs its own past window, so re-running an old period uses the rate
+    that applied then (FR §4 correction rule). CORRECTED / EXPIRED rows
+    never resolve."""
+    as_of = as_of or date.today()
+    return (db.query(FrancePASRate)
+            .filter(FrancePASRate.organization_id == organization_id,
+                    FrancePASRate.employee_id == employee_id,
+                    FrancePASRate.effective_from <= as_of)
+            .filter((FrancePASRate.effective_to.is_(None)) | (FrancePASRate.effective_to >= as_of))
+            .filter(FrancePASRate.status.in_(["ACTIVE", "PENDING", "STALE"]))
+            .order_by(FrancePASRate.effective_from.desc(), FrancePASRate.id.desc())
+            .first())
+
+
+def list_france_pas_rates(
+    db: Session, organization_id: int, employee_id: Optional[int] = None,
+) -> List[FrancePASRate]:
+    query = db.query(FrancePASRate).filter(FrancePASRate.organization_id == organization_id)
+    if employee_id:
+        query = query.filter(FrancePASRate.employee_id == employee_id)
+    return query.order_by(FrancePASRate.employee_id, FrancePASRate.effective_from.desc()).all()
+
+
+# ── Readiness (FR §11 gate H + FR-031 dry-run) ──────────────────────────
+
+def _france_employees(db: Session, organization_id: int) -> List[PayrollEmployee]:
+    """France employees of the org — explicit FR, or no country of their own
+    in a France organization (country_code is nullable and then inherits
+    the org's), so a NULL-country employee is never skipped by the checks."""
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    org_is_fr = bool(org) and get_jurisdiction_code(getattr(org, "country", None)) == "FR"
+    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    if org_is_fr:
+        query = query.filter((PayrollEmployee.country_code == "FR") | (PayrollEmployee.country_code.is_(None)))
+    else:
+        query = query.filter(PayrollEmployee.country_code == "FR")
+    return query.all()
+
+
+def compute_france_readiness_checks(db: Session, organization_id: int, period: date) -> List[dict]:
+    """Every §11 A–H launch check, computed from the real records — the ONE
+    readiness definition shared by the readiness endpoint, the go-live
+    action and the FR-031 DSN pre-submit validator."""
+    checks: List[dict] = []
+
+    def check(key, section, label, ok, detail):
+        checks.append({"key": key, "section": section, "label": label, "ok": bool(ok),
+                       "detail": None if ok else detail})
+
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    check("legal_entity", "A", "Legal entity (SIREN, legal name)",
+          profile is not None and profile.siren and profile.legal_name,
+          "France employer profile is not configured (SIREN, legal name).")
+    idcc_ok = bool(profile) and (
+        (profile.idcc_status in (None, "APPLICABLE") and profile.idcc)
+        or profile.idcc_status == "NOT_APPLICABLE"
+    )
+    check("idcc", "A", "Collective agreement (IDCC) resolved", idcc_ok,
+          "IDCC must be set, or explicitly NOT_APPLICABLE — UNDER_REVIEW/empty blocks launch (FR-035, gate G3).")
+
+    establishments = list_france_establishments(db, organization_id, include_inactive=False)
+    check("establishments", "B", "At least one active establishment (SIRET)", establishments,
+          "No active France establishment (SIRET) is registered.")
+
+    check("urssaf_dsn", "C", "Urssaf / DSN identity",
+          profile is not None and profile.urssaf_account and profile.dsn_declarant
+          and profile.filing_due_date_class in _FR_FILING_DUE_DATE_CLASSES,
+          "Urssaf account, DSN declarant and filing due-date class are all required.")
+    check("payment_mandate", "C", "Payment mandate", profile is not None and profile.payment_mandate_ref,
+          "No Urssaf payment mandate reference recorded.")
+    check("pas_collector", "D", "DGFiP PAS collector identity", profile is not None and profile.pas_collector_identity,
+          "No DGFiP PAS collector identity recorded.")
+
+    packs = list_france_establishment_rate_packs(db, organization_id)
+    uncovered = []
+    for est in establishments:
+        effective = [p for p in packs
+                     if (p.establishment_id == est.id or p.siret == est.siret)
+                     and p.effective_from <= period and (p.effective_to is None or p.effective_to >= period)]
+        pack = effective[0] if effective else None
+        if (pack is None or pack.at_mp_rate_pct is None
+                or (pack.vm_rate_pct is None and pack.vm_threshold_applies is not False)
+                or pack.fnal_class not in _FR_FNAL_CLASSES or pack.cfp_class not in _FR_CFP_CLASSES):
+            uncovered.append(est.siret)
+    check("employer_rates", "E", "Employer rates effective for every establishment (AT/MP, VM, FNAL, CFP)",
+          establishments and not uncovered,
+          f"No complete rate pack (AT/MP, versement mobilité, FNAL/CFP class) effective at {period} for SIRET "
+          + (", ".join(uncovered) if uncovered else "(no establishments)") + ".")
+
+    effectif_state = (profile.effectif_state if profile else None) or {}
+    latest_year = max((int(k) for k in effectif_state if str(k).isdigit()), default=None)
+    check("effectif", "E", "Governed annual effectif (FR-015)",
+          latest_year is not None and latest_year >= period.year - 1,
+          "No governed annual effectif recorded (FR-015)." if latest_year is None
+          else f"Latest governed effectif is for {latest_year}; expected {period.year - 1} or later.")
+
+    employees = _france_employees(db, organization_id)
+    missing_pas = [e for e in employees if get_active_france_pas_rate(db, organization_id, e.id, as_of=period) is None]
+    check("pas_rates", "D", "PAS rate for every France employee", not missing_pas,
+          f"{len(missing_pas)} France employee(s) have no active PAS rate at period start.")
+
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    _rates, fr_slabs, pack = resolve_tax_configuration(db, "FR", payroll_date=period)
+    check("statutory_pack", "H", "Active France statutory pack (gate G1)", pack is not None,
+          f"No Active France statutory pack covers {period} — approve and activate the FR pack (gate G1).")
+    neutral_employees = [e for e in employees
+                         if (lambda r: r is not None and r.rate_type == "NEUTRAL" and r.rate_pct is None)(
+                             get_active_france_pas_rate(db, organization_id, e.id, as_of=period))]
+    if neutral_employees:
+        has_grid = any(getattr(sl, "rule_type", None) == "FR_PAS_NEUTRAL" for sl in (fr_slabs or []))
+        check("pas_neutral_grid", "D", "PAS neutral grid loaded (FR-009)", has_grid,
+              f"{len(neutral_employees)} employee(s) are on the neutral PAS rate but the active France pack has no "
+              f"FR_PAS_NEUTRAL grid covering {period}.")
+    return checks
+
+
+def _validate_france_dsn_completeness(
+    db: Session, organization_id: int, period_start: date,
+) -> Tuple[List[str], Optional[str]]:
+    """FR-031 pre-submit validator. Returns (errors, blocked_reason) from
+    the shared readiness checks. A clean run passes into VALIDATED; any
+    error keeps the submission DRAFT with the detail recorded — approval is
+    blocked, never bypassed (FR-027)."""
+    errors = [c["detail"] for c in compute_france_readiness_checks(db, organization_id, period_start) if not c["ok"]]
+    blocked = "; ".join(errors) if errors else None
+    return errors, blocked
+
+
+def get_france_readiness(db: Session, organization_id: int, for_period: Optional[date] = None) -> dict:
+    """Per-org France launch readiness (FR §11 gate H + FR-031 dry-run).
+    Computed from the real records on every call — the status is never a
+    hand-set flag. LIVE is shown only after set_france_live accepted it."""
+    period = for_period or (date.today().replace(day=28) + timedelta(days=4)).replace(day=1)
+    checks = compute_france_readiness_checks(db, organization_id, period)
+    errors = [c["detail"] for c in checks if not c["ok"]]
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    packs = list_france_establishment_rate_packs(db, organization_id)
+    ready = not errors
+    if profile is not None and profile.readiness_status == "LIVE":
+        status = "LIVE" if ready else "LIVE_CHECKS_FAILING"
+    else:
+        status = "READY" if ready else "NOT_READY"
+    return {
+        "asOf": str(date.today()),
+        "forPeriod": str(period),
+        "ready": ready,
+        "organizationId": organization_id,
+        "profileConfigured": profile is not None,
+        "readinessStatus": status,
+        "pasCrmStatus": profile.pas_crm_status if profile else "NOT_CONNECTED",
+        "effectiveRatePacks": sum(1 for p in packs if p.effective_from <= period
+                                  and (p.effective_to is None or p.effective_to >= period)),
+        "effectifGoverned": bool(profile and profile.effectif_state),
+        "dsnBlockedReason": "; ".join(errors) if errors else None,
+        "missing": errors,
+        "checks": checks,
+    }
+
+
+def set_france_live(
+    db: Session, organization_id: int, data: "FranceGoLiveRequest", actor_id: Optional[int] = None,
+) -> dict:
+    """Mark France payroll LIVE for an org — accepted only when every
+    computed check passes; evidence is recorded on the profile and audited."""
+    readiness = get_france_readiness(db, organization_id)
+    if not readiness["ready"]:
+        raise BadRequestException("France cannot go LIVE until every readiness check passes: "
+                                  + "; ".join(readiness["missing"]))
+    profile = get_employer_france_profile(db, organization_id)
+    old_status = profile.readiness_status
+    profile.readiness_status = "LIVE"
+    profile.readiness_evidence = {
+        **(data.evidence or {}),
+        "checks": readiness["checks"], "wentLiveAt": datetime.utcnow().isoformat(), "wentLiveBy": actor_id,
+    }
+    db.commit()
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_employer_profile",
+                     entity_id=profile.id, legal_reference="FR §11 gate H",
+                     old_value={"readiness_status": old_status}, new_value={"readiness_status": "LIVE"})
+    log_activity(db, organization_id, "France payroll marked LIVE (all readiness checks passed).", actor_id=actor_id)
+    return get_france_readiness(db, organization_id)
+
+
+# ── DSN (FR-030..033) ───────────────────────────────────────────────────
+
+def create_france_dsn_submission(
+    db: Session, organization_id: int, data: "FranceDsnSubmissionCreate", actor_id: Optional[int] = None,
+) -> FranceDsnSubmission:
+    """Open a FranceDsnSubmission (FR-030..033). payload_hash is computed
+    over the immutable original identity; due_date follows the profile's
+    filing_due_date_class (5th or 15th of M+1). Runs the FR-031 validator:
+    clean → VALIDATED, blocked → DRAFT with validation_errors recorded.
+    `correctionOfId` opens a correction of an earlier same-period
+    submission; the original is never modified (FR-033/FR-053)."""
+    period_start = data.periodStart
+    if data.correctionOfId is not None:
+        original = (db.query(FranceDsnSubmission)
+                    .filter(FranceDsnSubmission.id == data.correctionOfId,
+                            FranceDsnSubmission.organization_id == organization_id).first())
+        if not original:
+            raise NotFoundException("FranceDsnSubmission", data.correctionOfId)
+        if original.period_start != period_start:
+            raise BadRequestException("A correction must cover the same period as the submission it corrects.")
+        if original.status not in {"BUSINESS_REJECTED", "ACKNOWLEDGED", "CRM_RESOLVED", "SETTLED"}:
+            raise BadRequestException(
+                f"Only a filed submission can be corrected (status {original.status}); "
+                "an unfiled one is simply revalidated."
+            )
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    due_day = 5 if profile is not None and profile.filing_due_date_class == "M5" else 15
+    period_end = data.periodEnd or (period_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    due_date = (period_end.replace(day=28) + timedelta(days=4)).replace(day=1) + timedelta(days=due_day - 1)
+
+    errors, blocked = _validate_france_dsn_completeness(db, organization_id, period_start)
+    submission = FranceDsnSubmission(
+        organization_id=organization_id,
+        dsn_version="P26V01",
+        release_ref=data.releaseRef,
+        payload_hash=_fr_dsn_payload_hash(organization_id, period_start, period_end, data.releaseRef, due_date),
+        period_start=period_start,
+        period_end=period_end,
+        due_date=due_date,
+        status="DRAFT" if errors else "VALIDATED",
+        validation_errors=errors or [],
+        blocked_reason=blocked,
+        correction_of_id=data.correctionOfId,
+        created_by_id=actor_id,
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_dsn_submission",
+                     entity_id=submission.id, legal_reference="FR-030/FR-031",
+                     new_value={"period_start": str(period_start), "period_end": str(period_end),
+                                "due_date": str(due_date), "status": submission.status,
+                                "correction_of_id": data.correctionOfId})
+    log_activity(db, organization_id,
+                 f"France DSN {submission.dsn_version} for {period_start} opened ({submission.status}).",
+                 actor_id=actor_id)
+    return submission
+
+
+def list_france_dsn_submissions(
+    db: Session, organization_id: int, status: Optional[str] = None,
+) -> List[FranceDsnSubmission]:
+    query = db.query(FranceDsnSubmission).filter(FranceDsnSubmission.organization_id == organization_id)
+    if status:
+        if status not in _FR_DSN_STATUSES:
+            raise BadRequestException(f"Unknown DSN status {status!r}.")
+        query = query.filter(FranceDsnSubmission.status == status)
+    return query.order_by(FranceDsnSubmission.period_start.desc()).all()
+
+
+# Which lifecycle column must carry evidence for a target status (FR-032):
+# an authority state is never asserted without the signal that proves it.
+_FR_DSN_EVIDENCE_FOR_STATUS = {
+    "ACKNOWLEDGED": ("technical_ack", "technicalAck (transport acknowledgement)"),
+    "BUSINESS_REJECTED": ("business_crm", "businessCrm (the rejecting business CRM)"),
+    "CRM_RESOLVED": ("business_crm", "businessCrm (the CRM showing anomalies resolved)"),
+    "SETTLED": ("payment_state", "paymentState (the settlement reference)"),
+}
+
+
+def transition_france_dsn_submission(
+    db: Session, organization_id: int, submission_id: int, data: "FranceDsnStatusUpdate",
+    actor_id: Optional[int] = None,
+) -> FranceDsnSubmission:
+    """State-machine DSN lifecycle (FR-032/FR-033). Transport
+    acknowledgement, business CRM and payment settlement are separate
+    columns, and each authority state requires its evidence. DRAFT →
+    VALIDATED re-runs the FR-031 validator (never a bypass). UNKNOWN is
+    resolved only by reconciliation to ACKNOWLEDGED or BUSINESS_REJECTED —
+    never re-queued or re-transmitted blind (FR-058)."""
+    if data.status not in _FR_DSN_STATUSES:
+        raise BadRequestException(f"Unknown DSN status {data.status!r}.")
+    submission = (db.query(FranceDsnSubmission)
+                  .filter(FranceDsnSubmission.id == submission_id,
+                          FranceDsnSubmission.organization_id == organization_id).first())
+    if not submission:
+        raise NotFoundException("FranceDsnSubmission", submission_id)
+    allowed = _FR_DSN_TRANSITIONS.get(submission.status, set())
+    if data.status not in allowed:
+        raise BadRequestException(
+            f"Cannot transition a France DSN from {submission.status} to {data.status}."
+        )
+    if data.status == "VALIDATED":
+        errors, blocked = _validate_france_dsn_completeness(db, organization_id, submission.period_start)
+        if errors:
+            submission.validation_errors = errors
+            submission.blocked_reason = blocked
+            db.commit()
+            raise BadRequestException("The FR-031 pre-submit validator still fails: " + blocked)
+        submission.validation_errors = []
+        submission.blocked_reason = None
+    if data.technicalAck is not None:
+        submission.technical_ack = data.technicalAck
+    if data.businessCrm is not None:
+        submission.business_crm = data.businessCrm
+    if data.paymentState is not None:
+        submission.payment_state = data.paymentState
+    evidence = _FR_DSN_EVIDENCE_FOR_STATUS.get(data.status)
+    if evidence and not getattr(submission, evidence[0]):
+        db.rollback()
+        raise BadRequestException(f"Moving a DSN to {data.status} requires {evidence[1]}.")
+    old_status = submission.status
+    submission.status = data.status
+    if data.blockedReason is not None:
+        submission.blocked_reason = data.blockedReason
+    if data.status == "TRANSMITTED":
+        submission.submitted_at = datetime.utcnow()
+    if data.status in {"ACKNOWLEDGED", "CRM_RESOLVED"}:
+        submission.acknowledged_at = submission.acknowledged_at or datetime.utcnow()
+    db.commit()
+    db.refresh(submission)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_dsn_submission",
+                     entity_id=submission.id, legal_reference="FR-032",
+                     old_value={"status": old_status}, new_value={"status": data.status})
+    return submission
+
+
+def create_france_dsn_outbox_item(
+    db: Session, organization_id: int, data: "FranceDsnOutboxCreate", actor_id: Optional[int] = None,
+) -> FranceDsnOutboxItem:
+    """Durable idempotent outbox (FR-033). The idempotency key is the
+    (organization, submission, action) identity — NOT the payload — so a
+    retry with a changed payload still resolves to the one existing row
+    instead of queuing a second transmission of the same action."""
+    if data.action not in _FR_DSN_OUTBOX_ACTIONS:
+        raise BadRequestException(f"action must be one of {sorted(_FR_DSN_OUTBOX_ACTIONS)}, got {data.action!r}.")
+    submission = (db.query(FranceDsnSubmission)
+                  .filter(FranceDsnSubmission.id == data.submissionId,
+                          FranceDsnSubmission.organization_id == organization_id).first())
+    if not submission:
+        raise NotFoundException("FranceDsnSubmission", data.submissionId)
+
+    idempotency_key = hashlib.sha256(
+        json.dumps({"org": organization_id, "submission": data.submissionId, "action": data.action},
+                   sort_keys=True).encode("utf-8")
+    ).hexdigest()[:64]
+
+    existing = (db.query(FranceDsnOutboxItem)
+                .filter(FranceDsnOutboxItem.idempotency_key == idempotency_key).first())
+    if existing:
+        return existing
+
+    item = FranceDsnOutboxItem(
+        submission_id=data.submissionId,
+        action=data.action,
+        payload=data.payload or {},
+        idempotency_key=idempotency_key,
+        status="PENDING",
+    )
+    db.add(item)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (db.query(FranceDsnOutboxItem)
+                    .filter(FranceDsnOutboxItem.idempotency_key == idempotency_key).first())
+        if existing:
+            return existing
+        raise
+    db.refresh(item)
+    return item
+
+
+def list_france_dsn_outbox_items(
+    db: Session, organization_id: int, submission_id: Optional[int] = None,
+) -> List[FranceDsnOutboxItem]:
+    query = (db.query(FranceDsnOutboxItem)
+             .join(FranceDsnSubmission, FranceDsnSubmission.id == FranceDsnOutboxItem.submission_id)
+             .filter(FranceDsnSubmission.organization_id == organization_id))
+    if submission_id:
+        query = query.filter(FranceDsnOutboxItem.submission_id == submission_id)
+    return query.order_by(FranceDsnOutboxItem.created_at.desc()).all()
+
+
+# Outbox transport states (FR-033/FR-058). UNKNOWN is resolved only by
+# reconciliation (ACKNOWLEDGED, or FAILED once non-receipt is proven) —
+# never straight back to SENT; only a DEFINITE failure may be re-sent.
+_FR_DSN_OUTBOX_TRANSITIONS = {
+    "PENDING": {"SENT", "UNKNOWN", "FAILED"},
+    "SENT": {"ACKNOWLEDGED", "UNKNOWN", "FAILED"},
+    "UNKNOWN": {"ACKNOWLEDGED", "FAILED"},
+    "FAILED": {"SENT"},
+    "ACKNOWLEDGED": set(),
+}
+
+
+def transition_france_dsn_outbox_item(
+    db: Session, organization_id: int, item_id: int, status: str,
+    last_error: Optional[str] = None, actor_id: Optional[int] = None,
+) -> FranceDsnOutboxItem:
+    """Transport-side outbox transition (FR-033/FR-058) — see
+    _FR_DSN_OUTBOX_TRANSITIONS. Declaring an UNKNOWN item FAILED requires a
+    reconciliation note (last_error)."""
+    if status not in _FR_DSN_OUTBOX_STATUSES:
+        raise BadRequestException(f"Outbox status must be one of {_FR_DSN_OUTBOX_STATUSES}, got {status!r}.")
+    item = (db.query(FranceDsnOutboxItem)
+            .join(FranceDsnSubmission, FranceDsnSubmission.id == FranceDsnOutboxItem.submission_id)
+            .filter(FranceDsnOutboxItem.id == item_id,
+                    FranceDsnSubmission.organization_id == organization_id).first())
+    if not item:
+        raise NotFoundException("FranceDsnOutboxItem", item_id)
+    if status not in _FR_DSN_OUTBOX_TRANSITIONS.get(item.status, set()):
+        raise BadRequestException(f"Cannot move a France DSN outbox item from {item.status} to {status}.")
+    if item.status == "UNKNOWN" and status == "FAILED" and not (last_error or "").strip():
+        raise BadRequestException("Declaring an UNKNOWN transmission FAILED requires the reconciliation result (last_error).")
+    old_status = item.status
+    item.status = status
+    if status == "SENT":
+        item.attempts += 1
+    item.last_error = last_error
+    if status in {"SENT", "ACKNOWLEDGED"}:
+        item.sent_at = item.sent_at or datetime.utcnow()
+    if status == "ACKNOWLEDGED":
+        item.acknowledged_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_dsn_outbox_item",
+                     entity_id=item.id, legal_reference="FR-033",
+                     old_value={"status": old_status}, new_value={"status": status})
+    return item
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sweden (ZP-SE-ENG-001) — readiness, preview, collective-agreement registry,
+# sick-pay episodes and annual-leave ledgers.
+#
+# Statutory figures are computed ONLY by engine/countries/sweden.py; this
+# layer assembles facts, enforces governance (four-eyes, explicit CBA status,
+# no national default agreement) and stores the separate ledgers SE-006 and
+# spec §8 require. Nothing here activates live Swedish payroll.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _latest_se_tax_pack(db: Session, pack_id: Optional[int] = None):
+    query = db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == "SE",
+                                             JurisdictionPack.pack_type == "tax")
+    if pack_id is not None:
+        pack = query.filter(JurisdictionPack.id == pack_id).first()
+        if pack is None:
+            raise NotFoundException("JurisdictionPack", pack_id)
+        return pack
+    # Default: the pack in force today; else the most recent one.
+    today = date.today()
+    in_force = (query.filter(or_(JurisdictionPack.effective_from.is_(None), JurisdictionPack.effective_from <= today),
+                             or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= today))
+                .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first())
+    return in_force or query.order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first()
+
+
+def get_se_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
+    """spec §16 release gates / §37 checklist for one Sweden tax pack —
+    read-only. `ready` is True only when every REQUIRED item is complete;
+    the items that depend on work outside this platform (specialist
+    sign-off, AGI XML certification, parallel payroll) are listed as
+    required and stay incomplete until evidenced — Sweden never becomes
+    production-ready merely because the country record exists."""
+    pack = _latest_se_tax_pack(db, pack_id)
+    items = []
+
+    def add(key, label, complete, detail=None, required=True):
+        items.append({"key": key, "label": label, "required": required, "complete": bool(complete), "detail": detail})
+
+    if pack is None:
+        add("statutory_pack", "Sweden statutory tax pack exists", False, "No SE tax pack — run the Sweden seed.")
+        return {"packId": None, "packVersion": None, "ready": False, "items": items,
+                "blockers": ["No Sweden tax pack exists."]}
+
+    source = (db.query(SourceArtifact).filter(SourceArtifact.id == pack.source_document_id).first()
+              if pack.source_document_id else None)
+    add("source_evidence", "Primary-source evidence linked to the pack", source is not None,
+        source.title if source else "Link a Source Evidence artifact.")
+    add("specialist_review", "Swedish payroll/tax specialist has reviewed the evidence (§16)",
+        bool(source and source.reviewer_approved_at),
+        "Reviewed" if source and source.reviewer_approved_at else "Awaiting independent review of the source artifact.")
+    content_blockers = se_activation_blockers(db, pack)
+    param_blockers = [b for b in content_blockers if b.startswith("missing ")]
+    table_blockers = [b for b in content_blockers if not b.startswith("missing ")]
+    add("parameters", "Employer-contribution, SINK, SLP and cohort parameters configured", not param_blockers,
+        "; ".join(param_blockers) or "All required parameters configured.")
+    add("tax_tables", "Tax tables 29–42 and one-time-payment tables entered from Skatteverket", not table_blockers,
+        "; ".join(table_blockers) or "All tax-table rows declare an AMOUNT/PERCENT basis.")
+    latest_run = (db.query(TestCertificationRun).filter(TestCertificationRun.jurisdiction_country == "SE")
+                  .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc()).first())
+    add("certification", "Golden-vector certification PASS", latest_run is not None and latest_run.status == "PASS",
+        f"Latest run #{latest_run.id}: {latest_run.status}" if latest_run else "No SE certification run yet.")
+    add("approval", "Distinct approver recorded (four-eyes)", pack.approved_by_id is not None,
+        "Approved" if pack.approved_by_id else "Not yet approved by a distinct Super Admin.")
+    calendar_rows = (db.query(StatutoryFilingCalendar)
+                     .filter(StatutoryFilingCalendar.jurisdiction_country == "SE",
+                             StatutoryFilingCalendar.report_type == "AGI",
+                             StatutoryFilingCalendar.reporting_year == (pack.tax_year or "")).count())
+    add("agi_calendar", "AGI declaration/payment calendar for the income year", calendar_rows >= 12,
+        f"{calendar_rows} of 12 monthly periods configured.")
+    agi_template = (db.query(ReportTemplate).filter(ReportTemplate.jurisdiction_country == "SE",
+                                                    ReportTemplate.report_type == "AGI").first())
+    add("agi_template", "AGI individual-statement template", agi_template is not None,
+        f"{agi_template.template_key} ({agi_template.status})" if agi_template else "Not seeded.")
+    add("agi_xml", "AGI XML generated and validated against Technical Description 1.1.18.2 (§10/§16)", False,
+        "Not built — XML generation and Skatteverket test-service validation are a separate, gated phase (SE-008).")
+    add("parallel_payroll", "Two reconciled parallel payroll cycles (§16)", False,
+        "Evidence required from the implementation team.")
+    cba_count = (db.query(CollectiveAgreement)
+                 .filter(CollectiveAgreement.jurisdiction_country == "SE", CollectiveAgreement.status == "Active").count())
+    add("cba_registry", "Collective-agreement registry (optional: no national default exists)", True,
+        f"{cba_count} Active agreement(s); employers without one resolve to an explicit NONE.", required=False)
+
+    blockers = [f"{i['label']}: {i['detail']}" for i in items if i["required"] and not i["complete"]]
+    return {"packId": pack.id, "packVersion": pack.version, "ready": not blockers, "items": items,
+            "blockers": blockers}
+
+
+def preview_sweden_calculation(db: Session, data) -> dict:
+    """Read-only Super Admin simulation (spec §13 "simulation before
+    activation"): the SAME production engine a payroll run uses, against ONE
+    Sweden pack's canonical rows in force on data.payDate, with the worker's
+    facts supplied inline. Writes nothing; a blocked calculation returns the
+    engine's own reason, never a figure."""
+    from types import SimpleNamespace
+
+    from app.modules.payroll.engine.base import PayrollContext
+    from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+    from app.modules.payroll.engine.resolver import calculate_payroll
+
+    pack = _latest_se_tax_pack(db, data.jurisdictionPackId)
+    rates = _sg_rows_in_force(list_canonical_contribution_rates(db, jurisdiction_pack_id=pack.id), data.payDate)
+    slabs = _sg_rows_in_force(list_canonical_tax_slabs(db, jurisdiction_pack_id=pack.id), data.payDate)
+    profile = SimpleNamespace(
+        se_tax_status=data.taxStatus, se_income_role=data.incomeRole,
+        se_tax_table=data.taxTable, se_tax_column=data.taxColumn, se_sink_status=data.sinkStatus,
+        se_decision_override=data.decisionOverride, se_skatteverket_decision_id=data.decisionId,
+        se_decision_effective_from=data.decisionEffectiveFrom, se_decision_effective_to=data.decisionEffectiveTo,
+        se_decision_monthly_withholding=data.decisionMonthlyWithholding, se_decision_rate_pct=data.decisionRatePct,
+        se_annual_income=data.annualIncome, se_employee_pension_share=data.employeePensionShare,
+        se_employer_pension_share=data.employerPensionShare, se_pension_plan=None,
+        se_cba_status="NONE", se_cba_id=None,
+    )
+    ctx = PayrollContext(
+        gross=data.gross, basic=data.gross, country="SE", pay_frequency=data.payFrequency, pay_date=data.payDate,
+        rate_map={_normalize_engine_component_key(r.component_key): r for r in rates}, slabs=slabs,
+        date_of_birth=data.dateOfBirth, sweden_statutory_profile=profile, se_organization_id=None,
+        se_month_to_date_prior=data.monthToDatePrior, se_cash_pay=data.cashPay,
+        se_pension_cost_base=data.pensionCostBase,
+    )
+    base = {"pack": {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status},
+            "payDate": data.payDate.isoformat(), "readOnly": True}
+    try:
+        result = calculate_payroll(ctx, "standard")
+    except MissingComplianceConfigurationError as exc:
+        return {**base, "blocked": True, "blockedKey": exc.key,
+                "blockedReason": getattr(exc, "reason", None) or str(exc)}
+    return {**base, "blocked": False,
+            "result": {"gross": str(result.gross), "totalDeductions": str(result.total_deductions),
+                       "netPay": str(result.net_pay)},
+            "sweden": _se_payslip_snapshot(result)}
+
+
+# ── Collective-agreement registry (spec §9/§13 "Agreement registry") ─────
+
+_CBA_TYPES = ("EMPLOYER_SPECIFIC", "SECTOR", "LOCAL_SUPPLEMENT")  # deliberately no NATIONAL
+_CBA_MODULES = ("wage_scales", "overtime", "unsocial_hours", "sickness_supplements", "parental_pay",
+                "vacation_enhancement", "occupational_pension", "insurance", "termination")
+_CBA_TRANSITIONS = {
+    "Draft": ("In Review",),
+    "In Review": ("Draft", "Approved"),
+    "Approved": ("Draft", "Active"),
+    "Active": ("Superseded",),
+    "Superseded": (),
+}
+
+
+def list_collective_agreements(db: Session, country: str = "SE",
+                               organization_id: Optional[int] = None) -> List[CollectiveAgreement]:
+    """Agreement definitions (organization_id NULL) plus, when an org is
+    given, that employer's own assignments."""
+    query = db.query(CollectiveAgreement).filter(CollectiveAgreement.jurisdiction_country == _normalize_country(country))
+    if organization_id is not None:
+        query = query.filter(or_(CollectiveAgreement.organization_id == organization_id,
+                                 CollectiveAgreement.organization_id.is_(None)))
+    return query.order_by(CollectiveAgreement.agreement_code, CollectiveAgreement.version).all()
+
+
+def upsert_collective_agreement(db: Session, data, actor_id: Optional[int] = None) -> CollectiveAgreement:
+    """Create or edit a Draft agreement version. Refuses a NATIONAL/unknown
+    type (spec §44: no Swedish national default CBA) and editing any version
+    that has left Draft — a change to released content is a NEW version."""
+    if data.agreementType not in _CBA_TYPES:
+        raise BadRequestException(f"agreementType must be one of {list(_CBA_TYPES)} — there is no national "
+                                  "default collective agreement (ZP-SE-ENG-001 §9).")
+    unknown = [m for m in (data.modules or []) if m not in _CBA_MODULES]
+    if unknown:
+        raise BadRequestException(f"Unknown agreement module(s): {unknown}. Allowed: {list(_CBA_MODULES)}.")
+    if data.effectiveFrom and data.effectiveTo and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+    if data.id:
+        row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == data.id).first()
+        if row is None:
+            raise NotFoundException("CollectiveAgreement", data.id)
+        if row.status != "Draft":
+            raise BadRequestException(f"Agreement {row.agreement_code} v{row.version} is {row.status} — create a new "
+                                      "version instead of editing released content.")
+        old = {"status": row.status, "version": row.version}
+    else:
+        clash = (db.query(CollectiveAgreement)
+                 .filter(CollectiveAgreement.agreement_code == data.agreementCode,
+                         CollectiveAgreement.version == data.version).first())
+        if clash is not None:
+            raise BadRequestException(f"Agreement {data.agreementCode} v{data.version} already exists.")
+        row = CollectiveAgreement(created_by_id=actor_id, status="Draft")
+        db.add(row)
+        old = None
+    row.jurisdiction_country = _normalize_country(data.jurisdictionCountry)
+    row.organization_id = data.organizationId
+    row.agreement_code = data.agreementCode
+    row.name = data.name
+    row.agreement_type = data.agreementType
+    row.employer_scope = data.employerScope
+    row.employee_group = data.employeeGroup
+    row.occupation = data.occupation
+    row.grade = data.grade
+    row.version = data.version
+    row.effective_from = data.effectiveFrom
+    row.effective_to = data.effectiveTo
+    row.modules = data.modules or []
+    row.source_document_id = data.sourceDocumentId
+    row.previous_version_id = data.previousVersionId
+    row.notes = data.notes
+    row.updated_by_id = actor_id
+    row.approved_by_id = None          # any edit invalidates a prior approval
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="create" if old is None else "update",
+                     entity_type="collective_agreement", entity_id=row.id, legal_reference="ZP-SE-ENG-001 §9",
+                     old_value=old, new_value={"code": row.agreement_code, "version": row.version,
+                                               "type": row.agreement_type, "modules": row.modules},
+                     reason=data.reason, auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def set_collective_agreement_status(db: Session, agreement_id: int, status: str, actor_id: Optional[int] = None,
+                                    reason: Optional[str] = None) -> CollectiveAgreement:
+    """Governed lifecycle (spec §13: "No rule activation without source /
+    effective dates / test pack"; §14 four-eyes): the approver is never the
+    author/last editor, the activator is never the approver, and an Active
+    version needs a source artifact, an effective-from date and at least one
+    module. Activating a version supersedes the previous Active one."""
+    row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == agreement_id).first()
+    if row is None:
+        raise NotFoundException("CollectiveAgreement", agreement_id)
+    if status not in _CBA_TRANSITIONS.get(row.status, ()):
+        raise BadRequestException(f"Cannot move agreement from {row.status} to {status}.")
+    if status == "Approved":
+        if actor_id is not None and actor_id in (row.updated_by_id, row.created_by_id):
+            raise BadRequestException("The approver must be a different Super Admin than the agreement's author/editor.")
+        row.approved_by_id = actor_id
+    if status == "Active":
+        if not row.source_document_id:
+            raise BadRequestException("An agreement needs a linked source artifact before it can go Active.")
+        if not row.effective_from:
+            raise BadRequestException("An agreement needs an effective-from date before it can go Active.")
+        if not row.modules:
+            raise BadRequestException("An agreement with no configured modules has no payroll effect — configure one first.")
+        if row.approved_by_id is None or (actor_id is not None and row.approved_by_id == actor_id):
+            raise BadRequestException("The Super Admin who approved this agreement cannot also activate it.")
+        for prior in (db.query(CollectiveAgreement)
+                      .filter(CollectiveAgreement.agreement_code == row.agreement_code,
+                              CollectiveAgreement.id != row.id, CollectiveAgreement.status == "Active")):
+            prior.status = "Superseded"
+    if status == "Draft":
+        row.approved_by_id = None
+    before = row.status
+    row.status = status
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="collective_agreement",
+                     entity_id=row.id, legal_reference="ZP-SE-ENG-001 §9/§14",
+                     old_value={"status": before}, new_value={"status": status}, reason=reason, auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# ── Sick-pay episodes (spec §8) ───────────────────────────────────────────
+
+_SE_SICK_RECURRENCE_DAYS = 5         # spec §8 "Recurrence within 5 days" — rule shape
+_SE_EMPLOYER_SICK_PERIOD_DAYS = 14   # spec §8 "days 1-14" — rule shape
+
+
+def _se_in_force_param(db: Session, key: str, as_of) -> Optional[Decimal]:
+    """A Sweden amount parameter from the ACTIVE canonical pack in force on
+    `as_of` — None when no Active pack configures it (never a default)."""
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    rates, _slabs, pack = resolve_tax_configuration(db, "SE", payroll_date=as_of)
+    if pack is None or pack.status != "Active":
+        return None
+    for row in rates:
+        if _normalize_engine_component_key(row.component_key) == key and row.flat_amount is not None:
+            return Decimal(str(row.flat_amount))
+    return None
+
+
+def list_se_sick_episodes(db: Session, organization_id: int, employee_id: Optional[int] = None) -> List[SwedenSickEpisode]:
+    query = db.query(SwedenSickEpisode).filter(SwedenSickEpisode.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(SwedenSickEpisode.employee_id == employee_id)
+    return query.order_by(SwedenSickEpisode.episode_start.desc(), SwedenSickEpisode.id.desc()).all()
+
+
+def upsert_se_sick_episode(db: Session, organization_id: int, data, actor_id: Optional[int] = None) -> SwedenSickEpisode:
+    """Record one sickness episode and resolve its statutory state (spec §8):
+      * RECURRENCE — an episode starting within 5 days of the previous one's
+        end joins its recurrence group: one combined 14-day employer period,
+        and no second full qualifying deduction if one was already made;
+      * EMPLOYER PERIOD — which of days 1–14 this episode covers; any day
+        beyond 14 flags the Försäkringskassan transfer;
+      * QUALIFYING DEDUCTION — pct × expected average-week sick pay, never
+        exceeding the payable sick pay. The pct comes from the request or the
+        Active pack's se_sick_qualifying_deduction_pct — neither → refused.
+    Only a certificate REFERENCE is stored; never clinical content (§14)."""
+    employee = get_employee_by_id(db, data.employeeId, organization_id)
+    if _normalize_country(getattr(employee, "country_code", None)) != "SE":
+        raise BadRequestException("Swedish sick-pay episodes can only be recorded for a Sweden employee.")
+    if data.episodeEnd is not None and data.episodeEnd < data.episodeStart:
+        raise BadRequestException("episodeEnd must not be before episodeStart.")
+    if data.workCapacityPct is not None and not (Decimal("0") < data.workCapacityPct <= Decimal("100")):
+        raise BadRequestException("workCapacityPct must be greater than 0 and at most 100.")
+
+    row = None
+    if data.id:
+        row = (db.query(SwedenSickEpisode)
+               .filter(SwedenSickEpisode.id == data.id, SwedenSickEpisode.organization_id == organization_id).first())
+        if row is None:
+            raise NotFoundException("SwedenSickEpisode", data.id)
+        if row.status == "CLOSED":
+            raise BadRequestException("A closed sick-pay episode cannot be edited — record a correction episode.")
+    others = [SwedenSickEpisode.id != row.id] if row is not None else []
+
+    previous = (db.query(SwedenSickEpisode)
+                .filter(SwedenSickEpisode.employee_id == employee.id,
+                        SwedenSickEpisode.organization_id == organization_id,
+                        SwedenSickEpisode.episode_start < data.episodeStart,
+                        SwedenSickEpisode.episode_end.isnot(None), *others)
+                .order_by(SwedenSickEpisode.episode_start.desc()).first())
+    group_root = None
+    if previous is not None and (data.episodeStart - previous.episode_end).days <= _SE_SICK_RECURRENCE_DAYS:
+        group_root = previous.recurrence_group_id or previous.id
+    group = []
+    if group_root is not None:
+        group = (db.query(SwedenSickEpisode)
+                 .filter(or_(SwedenSickEpisode.id == group_root, SwedenSickEpisode.recurrence_group_id == group_root),
+                         *others)
+                 .all())
+    days_before = sum(((g.episode_end - g.episode_start).days + 1) for g in group if g.episode_end)
+    own_days = ((data.episodeEnd - data.episodeStart).days + 1) if data.episodeEnd else None
+    day_from = days_before + 1
+    day_to = (days_before + own_days) if own_days is not None else None
+    transfer = bool(day_to is not None and day_to > _SE_EMPLOYER_SICK_PERIOD_DAYS)
+    deduction_already = any(g.deduction_already_applied or (g.qualifying_deduction_amount or 0) > 0 for g in group)
+
+    deduction_pct = data.qualifyingDeductionPct
+    if deduction_pct is None:
+        deduction_pct = _se_in_force_param(db, "se_sick_qualifying_deduction_pct", data.episodeStart)
+    deduction_amount = Decimal("0")
+    if not deduction_already and day_from <= _SE_EMPLOYER_SICK_PERIOD_DAYS:
+        if data.expectedWeeklySickPay is None:
+            raise BadRequestException("expectedWeeklySickPay is required to apply the qualifying deduction (spec §8).")
+        if deduction_pct is None:
+            raise BadRequestException("No qualifying-deduction percentage: supply qualifyingDeductionPct or activate a "
+                                      "Sweden pack configuring se_sick_qualifying_deduction_pct.")
+        deduction_amount = (Decimal(str(deduction_pct)) / Decimal("100") * data.expectedWeeklySickPay).quantize(Decimal("0.01"))
+        if data.employerSickPayAmount is not None and deduction_amount > data.employerSickPayAmount:
+            deduction_amount = Decimal(str(data.employerSickPayAmount))   # never exceeds payable sick pay
+
+    if row is None:
+        row = SwedenSickEpisode(organization_id=organization_id, employee_id=employee.id)
+        db.add(row)
+    row.episode_start = data.episodeStart
+    row.episode_end = data.episodeEnd
+    row.recurrence_group_id = group_root
+    row.work_capacity_pct = data.workCapacityPct
+    row.expected_weekly_sick_pay = data.expectedWeeklySickPay
+    row.qualifying_deduction_pct = deduction_pct
+    row.qualifying_deduction_amount = deduction_amount
+    row.deduction_already_applied = bool(deduction_already or deduction_amount > 0)
+    row.employer_period_day_from = day_from
+    row.employer_period_day_to = min(day_to, _SE_EMPLOYER_SICK_PERIOD_DAYS) if day_to is not None else None
+    row.transfer_to_forsakringskassan = transfer
+    row.medical_certificate_ref = data.medicalCertificateRef
+    row.absence_reported = data.absenceReported
+    row.employer_sick_pay_amount = data.employerSickPayAmount
+    row.cba_supplement_amount = data.cbaSupplementAmount
+    row.cba_agreement_id = data.cbaAgreementId
+    row.status = data.status or "OPEN"
+    row.source = data.source
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="update" if data.id else "create", entity_type="se_sick_episode",
+                     entity_id=row.id, legal_reference="ZP-SE-ENG-001 §8",
+                     new_value={"dayFrom": str(day_from), "dayTo": str(row.employer_period_day_to),
+                                "recurrenceGroup": str(group_root), "deduction": str(deduction_amount),
+                                "transfer": str(transfer)},
+                     auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# ── Annual-leave ledgers (spec §7, SE-006) ────────────────────────────────
+
+_SE_VACATION_METHODS = ("PERCENTAGE_12", "SAME_PAY", "CBA_OVERRIDE")
+_SE_STATUTORY_LEAVE_DAYS = Decimal("25")          # spec §7 [S10] — statutory baseline
+_SE_SAVEABLE_ABOVE_PAID_DAYS = Decimal("20")      # spec §7 "Paid days exceeding 20 may generally be saved"
+_SE_SAVED_DAYS_YEARS = 5                          # spec §7 "normally taken within five years"
+
+
+def list_se_leave_ledgers(db: Session, organization_id: int, employee_id: Optional[int] = None) -> List[SwedenLeaveLedger]:
+    query = db.query(SwedenLeaveLedger).filter(SwedenLeaveLedger.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(SwedenLeaveLedger.employee_id == employee_id)
+    return query.order_by(SwedenLeaveLedger.entitlement_year.desc(), SwedenLeaveLedger.id.desc()).all()
+
+
+def upsert_se_leave_ledger(db: Session, organization_id: int, data, actor_id: Optional[int] = None) -> SwedenLeaveLedger:
+    """One (employee, entitlement year) leave ledger. Days and money stay
+    separate (SE-006): this row holds days + the qualifying-year earnings;
+    vacation MONEY is never derived from the day balance here. Statutory
+    bounds apply unless a CBA override method is recorded with its agreement."""
+    employee = get_employee_by_id(db, data.employeeId, organization_id)
+    if _normalize_country(getattr(employee, "country_code", None)) != "SE":
+        raise BadRequestException("Swedish leave ledgers can only be recorded for a Sweden employee.")
+    if data.vacationPayMethod not in _SE_VACATION_METHODS:
+        raise BadRequestException(f"vacationPayMethod must be one of {list(_SE_VACATION_METHODS)}.")
+    for label, value in (("paidDays", data.paidDays), ("unpaidDays", data.unpaidDays),
+                         ("savedDays", data.savedDays), ("carryoverDays", data.carryoverDays)):
+        if value is not None and value < 0:
+            raise BadRequestException(f"{label} must not be negative.")
+    if data.vacationPayMethod == "CBA_OVERRIDE":
+        if data.cbaAgreementId is None:
+            raise BadRequestException("CBA_OVERRIDE requires the governing cbaAgreementId (spec §7 CBA override).")
+    else:
+        if data.paidDays + data.unpaidDays > _SE_STATUTORY_LEAVE_DAYS:
+            raise BadRequestException("Paid + unpaid days exceed the 25-day statutory entitlement; record the governing "
+                                      "agreement with vacationPayMethod CBA_OVERRIDE if an agreement grants more.")
+        if data.savedDays > max(Decimal("0"), data.paidDays - _SE_SAVEABLE_ABOVE_PAID_DAYS):
+            raise BadRequestException("Only paid days exceeding 20 may be saved (spec §7 Saving days).")
+    if data.carryoverExpiry is not None and data.entitlementYear.isdigit():
+        if data.carryoverExpiry.year > int(data.entitlementYear) + _SE_SAVED_DAYS_YEARS:
+            raise BadRequestException("Saved days are normally taken within five years — carryoverExpiry is too late.")
+
+    if data.id:
+        row = (db.query(SwedenLeaveLedger)
+               .filter(SwedenLeaveLedger.id == data.id, SwedenLeaveLedger.organization_id == organization_id).first())
+        if row is None:
+            raise NotFoundException("SwedenLeaveLedger", data.id)
+    else:
+        row = (db.query(SwedenLeaveLedger)
+               .filter(SwedenLeaveLedger.employee_id == employee.id,
+                       SwedenLeaveLedger.entitlement_year == data.entitlementYear).first())
+    if row is not None and row.status == "Closed":
+        raise BadRequestException("This ledger is closed (final vacation allowance settled) — it can no longer be edited.")
+    old = None if row is None else {"paidDays": str(row.paid_days), "savedDays": str(row.saved_days)}
+    if row is None:
+        row = SwedenLeaveLedger(organization_id=organization_id, employee_id=employee.id,
+                                entitlement_year=data.entitlementYear)
+        db.add(row)
+    row.qualifying_year = data.qualifyingYear
+    row.paid_days = data.paidDays
+    row.unpaid_days = data.unpaidDays
+    row.saved_days = data.savedDays
+    row.carryover_days = data.carryoverDays
+    row.carryover_expiry = data.carryoverExpiry
+    row.qualifying_earnings = data.qualifyingEarnings
+    row.vacation_pay_method = data.vacationPayMethod
+    row.credited_absence = data.creditedAbsence
+    row.final_vacation_allowance = data.finalVacationAllowance
+    row.cba_agreement_id = data.cbaAgreementId
+    row.effective_from = data.effectiveFrom
+    row.effective_to = data.effectiveTo
+    row.version = data.version
+    row.status = data.status
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="update" if old else "create", entity_type="se_leave_ledger",
+                     entity_id=row.id, legal_reference="ZP-SE-ENG-001 §7/SE-006", old_value=old,
+                     new_value={"paidDays": str(row.paid_days), "savedDays": str(row.saved_days),
+                                "method": row.vacation_pay_method}, auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row

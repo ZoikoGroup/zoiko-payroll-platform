@@ -14,18 +14,58 @@ const INCOME_TAX_LABELS = {
   AU: "PAYG",
   DE: "Lohnsteuer",
   CA: "Federal Tax",
+  // Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+  // real terms verified from each country's own engine module docstring
+  // (backend/app/modules/payroll/engine/countries/*.py), not guessed.
+  // Bahamas/Cayman deliberately have no entry: `tds` is always 0 for both
+  // (no personal income tax), so this map is never consulted with a
+  // nonzero value for them.
+  BB: "PAYE", DO: "ISR", GY: "PAYE", JM: "PAYE", TT: "PAYE",
+  PR: "Hacienda Withholding",
+  // Ireland's PAYE is the `tds` column, same shape as the other PAYE
+  // jurisdictions. USC, PRSI and MyFutureFund ride on the payslip's
+  // complianceFields snapshot rather than dedicated columns, so they are
+  // labelled from the identity/compliance field path below.
+  IE: "PAYE",
+  // Sweden's preliminary tax (preliminär skatt) — table/column, 30%
+  // supplementary, one-time or SINK, per the frozen se_calculation_snapshot.
+  SE: "Preliminary Tax",
 };
+
+// Jurisdictions with NO payroll income-tax withholding at all — the payslip
+// shows no income-tax line (not even a zero one). Hong Kong Salaries Tax is
+// employee-assessed by the IRD (ZP-HK-ENG-001 architecture lock).
+const NO_PAYROLL_INCOME_TAX = new Set(["HK"]);
 
 const PF_LABELS = { DE: "Pension Insurance" };
 const ESI_LABELS = { DE: "Social Insurance (Health / Unemployment / Care)", CA: "Employment Insurance (EI)" };
 const EMPLOYER_PF_LABELS = { DE: "Employer Pension Insurance" };
 const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution" };
-const SOCIAL_SECURITY_LABELS = { CA: "Canada Pension Plan (CPP)" };
+const SOCIAL_SECURITY_LABELS = {
+  CA: "Canada Pension Plan (CPP)",
+  BB: "NIS", DO: "SFS (Seguro Familiar de Salud)", GY: "NIS", JM: "NIS", TT: "NIS",
+  BS: "NIB", KY: "NIB Pension",
+};
 const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
-const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)" };
+const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)" };
 const CHURCH_TAX_LABELS = { DE: "Kirchensteuer" };
 const SOLIDARITY_SURCHARGE_LABELS = { DE: "Solidaritätszuschlag" };
+// Trinidad reuses the `professionalTax` field for its Health Surcharge (see
+// trinidad_and_tobago.py's own comment on that field) — was previously
+// shown under the literal, India-specific "Professional Tax" for every
+// country.
+const PROFESSIONAL_TAX_LABELS = { TT: "Health Surcharge" };
+// `employeePension`/`niEmployee` are reused/repurposed fields in these
+// Caribbean countries, NOT a literal pension or UK National Insurance —
+// see barbados.py/dominican_republic.py/jamaica.py's own field comments.
+const EMPLOYEE_PENSION_LABELS = {
+  BB: "Reserve & Retraining (R&R) Levy",
+  DO: "Pension (SVDS)",
+  JM: "National Housing Trust (NHT)",
+  HK: "MPF Mandatory Contribution (Employee)",
+};
+const NI_EMPLOYEE_LABELS = { JM: "Education Tax" };
 
 // US-specific: federal/state/local income tax are stored as separate
 // PayslipItem columns (federal_income_tax/state_income_tax/local_tax) —
@@ -39,6 +79,7 @@ const SOLIDARITY_SURCHARGE_LABELS = { DE: "Solidaritätszuschlag" };
 // RunDetailPanel, ...) can spread them in place of a single generic line.
 export function getIncomeTaxLines(payslip) {
   const c = (payslip?.country || "IN").toUpperCase();
+  if (NO_PAYROLL_INCOME_TAX.has(c)) return [];
   if (c === "US") {
     const fed = Number(payslip?.federalIncomeTax) || 0;
     const state = Number(payslip?.stateIncomeTax) || 0;
@@ -57,7 +98,8 @@ export function getIncomeTaxLines(payslip) {
 export function getPayrollLabels(country) {
   const c = (country || "IN").toUpperCase();
   return {
-    incomeTax: INCOME_TAX_LABELS[c] || "TDS",
+    incomeTax: NO_PAYROLL_INCOME_TAX.has(c) ? "Salaries Tax (not withheld)" : (INCOME_TAX_LABELS[c] || "TDS"),
+    noPayrollIncomeTax: NO_PAYROLL_INCOME_TAX.has(c),
     pf: PF_LABELS[c] || "Provident Fund (PF)",
     esi: ESI_LABELS[c] || "Employee State Insurance (ESI)",
     employerPf: EMPLOYER_PF_LABELS[c] || "Employer PF",
@@ -68,6 +110,9 @@ export function getPayrollLabels(country) {
     employerPension: EMPLOYER_PENSION_LABELS[c] || "Employer Pension",
     churchTax: CHURCH_TAX_LABELS[c] || null,
     solidaritySurcharge: SOLIDARITY_SURCHARGE_LABELS[c] || null,
+    professionalTax: PROFESSIONAL_TAX_LABELS[c] || "Professional Tax",
+    employeePension: EMPLOYEE_PENSION_LABELS[c] || "Workplace Pension",
+    niEmployee: NI_EMPLOYEE_LABELS[c] || "National Insurance",
   };
 }
 
@@ -80,6 +125,7 @@ const TAX_ID_LABELS = {
   AU: "Tax File Number (TFN/ABN)",
   DE: "Tax Registration No. (Steuernummer / USt-IdNr.)",
   CA: "Business Number (BN)",
+  HK: "Business Registration No. / IRD Employer's File No.",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only
@@ -92,6 +138,7 @@ const STATE_RULE_NOTES = {
   CA: "Statutory deductions such as provincial income tax vary by province.",
   DE: "Statutory contribution rates can vary by state (Bundesland).",
   UK: "Statutory rates are generally uniform nationwide, but some allowances vary by region.",
+  HK: "One territory-wide regime: MPF is deducted through payroll; Salaries Tax is assessed by the IRD on the employee and is never withheld from pay.",
 };
 
 // The one statutory ID that best identifies an employee to their tax
@@ -107,6 +154,23 @@ const IDENTITY_FIELD = {
   AU: { label: "TFN", get: (p) => p.complianceFields?.tfn },
   CA: { label: "SIN", get: (p) => p.complianceFields?.sin },
   DE: { label: "Steuer-ID", get: (p) => p.complianceFields?.steuer_id },
+  // Masked server-side (SENSITIVE_FIELDS) before it ever reaches the browser.
+  HK: { label: "HKID", get: (p) => p.complianceFields?.hkid || p.complianceFields?.passport_number },
+  // Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) — the
+  // data was already captured end-to-end (complianceFields), only this
+  // display mapping was missing, so a Caribbean/PR payslip previously fell
+  // back to IDENTITY_FIELD.IN below ("PAN", always blank for these
+  // employees).
+  BB: { label: "TAMIS TIN", get: (p) => p.complianceFields?.tamis_tin },
+  KY: { label: "NIB Member No.", get: (p) => p.complianceFields?.nib_member_number },
+  DO: { label: "Cédula", get: (p) => p.complianceFields?.cedula },
+  GY: { label: "GRA TIN", get: (p) => p.complianceFields?.gra_tin },
+  JM: { label: "TRN", get: (p) => p.complianceFields?.trn },
+  BS: { label: "NIB No.", get: (p) => p.complianceFields?.nib_number },
+  TT: { label: "BIR File No.", get: (p) => p.complianceFields?.bir_file_number },
+  PR: { label: "SSN", get: (p) => p.complianceFields?.ssn },
+  IE: { label: "PPSN", get: (p) => p.complianceFields?.ppsn },
+  SE: { label: "Personnummer", get: (p) => p.complianceFields?.swedish_id_number },
 };
 
 export function getIdentityField(payslip) {

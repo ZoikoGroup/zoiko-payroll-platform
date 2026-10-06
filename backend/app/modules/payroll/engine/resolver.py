@@ -80,6 +80,24 @@ def calculate_payroll(
             "GERMANY_SIMPLE_MODE_UNSUPPORTED",
             "Germany payroll cannot use simple calculation mode; use standard or enterprise.",
         )
+    if (ctx.country or "").upper() == "FR" and key == "simple":
+        # Same boundary for France: simple mode would silently skip every
+        # statutory contribution and PAS (FR-027).
+        from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
+
+        raise FranceCalculationBlockedError(
+            "FRANCE_SIMPLE_MODE_UNSUPPORTED",
+            "France payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+    if (ctx.country or "").upper() == "IE" and key == "simple":
+        # Ireland: simple mode would silently skip PAYE/USC/PRSI/MyFutureFund
+        # and hand back a plausible net pay built on an absent RPN (IE-001).
+        from app.modules.payroll.engine.countries.ireland import IrelandCalculationBlockedError
+
+        raise IrelandCalculationBlockedError(
+            "IRELAND_SIMPLE_MODE_UNSUPPORTED",
+            "Ireland payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
 
     strategy = resolve_strategy(calculation_mode)
     try:
@@ -152,6 +170,23 @@ def build_context_from_employee(
     ytd_sg_qualifying_earnings_before: Decimal | None = None,
     ytd_whm_earnings_before: Decimal | None = None,
     ytd_ky_mandatory_pensionable_earnings_before: Decimal | None = None,
+    ytd_cpf_ow_subject_before: Decimal | None = None,
+    ytd_cpf_aw_subject_before: Decimal | None = None,
+    ytd_cpf_aw_paid_before: Decimal | None = None,
+    sgp_aw_ledger: list | None = None,
+    sgp_employer_hires_foreign_workers: bool | None = None,
+    sgp_cpf_wage_classification: dict | None = None,
+    sgp_named_allowance_items: list | None = None,
+    sgp_iras_classification: dict | None = None,
+    sgp_overtime_facts: dict | None = None,
+    sgp_deduction_orders: list | None = None,
+    sgp_employment_facts: dict | None = None,
+    sgp_month_to_date: list | None = None,
+    hk_worker_facts: dict | None = None,
+    hk_hours: dict | None = None,
+    hk_rule_segments: dict | None = None,
+    period_start=None,
+    period_end=None,
     ytd_gy_paye_credit_before: Decimal | None = None,
     option2_cumulative_gross_before: Decimal | None = None,
     option2_periods_elapsed_before: int | None = None,
@@ -178,6 +213,10 @@ def build_context_from_employee(
     ytd_director_ni_employer_paid: Decimal | None = None,
     is_final_ni_period: bool = False,
     ni_category_override: str | None = None,
+    france_inputs: dict | None = None,
+    ireland_inputs: dict | None = None,
+    sweden_inputs: dict | None = None,
+    italy_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -299,6 +338,39 @@ def build_context_from_employee(
         ytd_sg_qualifying_earnings_before=ytd_sg_qualifying_earnings_before,
         ytd_whm_earnings_before=ytd_whm_earnings_before,
         ytd_ky_mandatory_pensionable_earnings_before=ytd_ky_mandatory_pensionable_earnings_before,
+        ytd_cpf_ow_subject_before=ytd_cpf_ow_subject_before,
+        ytd_cpf_aw_subject_before=ytd_cpf_aw_subject_before,
+        ytd_cpf_aw_paid_before=ytd_cpf_aw_paid_before,
+        sgp_aw_ledger=sgp_aw_ledger,
+        sgp_employer_hires_foreign_workers=sgp_employer_hires_foreign_workers,
+        sgp_cpf_wage_classification=sgp_cpf_wage_classification,
+        sgp_named_allowance_items=sgp_named_allowance_items,
+        sgp_iras_classification=sgp_iras_classification,
+        sgp_overtime_facts=sgp_overtime_facts,
+        sgp_deduction_orders=sgp_deduction_orders,
+        sgp_employment_facts=sgp_employment_facts,
+        sgp_month_to_date=sgp_month_to_date,
+        hk_worker_facts=hk_worker_facts,
+        hk_hours=hk_hours,
+        hk_rule_segments=hk_rule_segments,
+        period_start=period_start,
+        period_end=period_end,
+        date_of_joining=getattr(employee, "date_of_joining", None),
+        date_of_leaving=getattr(employee, "date_of_leaving", None),
+        employment_type=getattr(employee, "employment_type", None),
+        # Singapore CPF cohort facts — dedicated columns fed from
+        # compliance_fields via SGEmployeeValidation.FIELD_COLUMN_MAP.
+        sgp_cpf_residency_status=getattr(employee, "sgp_cpf_residency_status", None),
+        sgp_spr_effective_date=getattr(employee, "sgp_spr_effective_date", None),
+        sgp_cpf_contribution_arrangement=getattr(employee, "sgp_cpf_contribution_arrangement", None),
+        sgp_work_pass_type=getattr(employee, "sgp_work_pass_type", None),
+        sgp_work_pass_issue_date=getattr(employee, "sgp_work_pass_issue_date", None),
+        sgp_work_pass_end_date=getattr(employee, "sgp_work_pass_end_date", None),
+        sgp_work_pass_end_reason=(getattr(employee, "compliance_fields", None) or {}).get("work_pass_end_reason"),
+        sgp_shg_funds=getattr(employee, "sgp_shg_funds", None),
+        sgp_wp_sector=getattr(employee, "sgp_wp_sector", None),
+        sgp_wp_skill_level=getattr(employee, "sgp_wp_skill_level", None),
+        sgp_wp_levy_tier=getattr(employee, "sgp_wp_levy_tier", None),
         ytd_gy_paye_credit_before=ytd_gy_paye_credit_before,
         on_eht_ytd_remuneration_before=on_eht_ytd_remuneration_before,
         jm_heart_ytd_remuneration_before=jm_heart_ytd_remuneration_before,
@@ -315,4 +387,17 @@ def build_context_from_employee(
         au_payroll_tax_charity_exempt=au_payroll_tax_charity_exempt,
         au_national_taxable_wages_ytd_before=au_national_taxable_wages_ytd_before,
         au_statutory_deduction_orders=au_statutory_deduction_orders or [],
+        # France (ZP-FR-ENG-001): the france_* context fields resolved by
+        # service._resolve_france_calc_inputs (PAS, SIRET rate pack, YTD).
+        **(france_inputs or {}),
+        # Ireland (ZP-IE-ENG-001): the ireland_* context fields resolved by
+        # service._resolve_ie_calc_inputs (frozen RPN snapshot, MyFutureFund
+        # authority status, independent YTD bases, preflight PRSI class).
+        **(ireland_inputs or {}),
+        # Sweden (ZP-SE-ENG-001): sweden_statutory_profile + se_* context
+        # fields resolved by service._resolve_se_calc_inputs.
+        **(sweden_inputs or {}),
+        # Italy (ZP-IT-ENG-001): italy_statutory_profile + it_* context fields
+        # resolved by italy_service.resolve_it_calc_inputs.
+        **(italy_inputs or {}),
     )

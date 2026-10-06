@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     # ── JWT / Auth (own secret — never reuse the main platform's) ──────
     PAYROLL_SECRET_KEY: str = "change-me-payroll-platform-secret"
+    # Hong Kong identity-token key (D-19): HMAC key for the pseudonymous HKID /
+    # passport token. Unset → derived from PAYROLL_SECRET_KEY under a fixed
+    # domain label. Set a dedicated value in production.
+    HK_IDENTITY_TOKEN_KEY: str = ""
     ALGORITHM: str = "HS256"
     # Distinct issuer/token-namespace so tokens from this platform can
     # never be confused with (or accepted by) the main platform.
@@ -65,8 +69,9 @@ class Settings(BaseSettings):
     # ── CORS ──────────────────────────────────────────────────────────
     PAYROLL_CORS_ORIGINS: str = (
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
-        "http://127.0.0.1:5173,http://127.0.0.1:5174,"
-        "http://192.168.31.148:5173,http://192.168.31.149:5173"
+        "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,"
+        "http://192.168.31.148:5173,http://192.168.31.148:5174,http://192.168.31.148:5175,"
+        "http://192.168.31.149:5173,http://192.168.31.149:5174,http://192.168.31.149:5175"
     )
 
     # ── Public-facing links (e.g. "Send Template" form-fill emails) ────
@@ -84,6 +89,10 @@ class Settings(BaseSettings):
     # is embedded in every message as an inline CID image, so it renders even
     # when FRONTEND_URL is not publicly reachable.
     EMAIL_LOGO_URL: str = ""
+
+    # ── Redis Cache ──────────────────────────────────────────────────────
+    REDIS_URL: str = ""
+    REDIS_TTL_SECONDS: int = 3600
 
     # ── Super Admin setup key ─────────────────────────────────────────
     # Required to run scripts/seed_super_admin.py and to create Super

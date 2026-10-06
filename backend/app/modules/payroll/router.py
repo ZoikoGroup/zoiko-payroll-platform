@@ -52,7 +52,7 @@ import os
 import uuid
 from datetime import date
 from typing import Optional, List
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
@@ -62,7 +62,7 @@ from app.core import object_storage
 from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
 )
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.modules.billing.entitlements import require_writeable_workspace, require_active_subscription, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_BWM
 from app.modules.billing.models import DunningStage
@@ -73,6 +73,7 @@ from app.modules.payroll.enterprise.router import enterprise_router
 from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.schemas import (
+    SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
     PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,
     PayslipItemCreate, PayslipItemResponse,
@@ -98,6 +99,7 @@ from app.modules.payroll.schemas import (
     GermanyElsterCertificateConfigSet, GermanyElsterTransmissionCreate,
     GermanyElsterCertificateConfigResponse, GermanyElsterTransmissionResponse,
     AttendanceRecordCreate, BulkAttendanceRequest, AttendanceRecordResponse,
+    AttendancePageResponse, EmployeeAttendanceSummaryPageResponse,
     AttendanceSummaryResponse, BulkAttendanceResponse,
     LeaveAllocationCreate, BulkLeaveRequest, LeaveAllocationResponse,
     PayrollLeaveRequestCreate, PayrollLeaveRequestUpdate, PayrollLeaveRequestResponse,
@@ -114,20 +116,39 @@ from app.modules.payroll.schemas import (
     GratuityCalculateRequest, GratuityCalculateResponse,
     IndiaForm138GenerateRequest, IndiaForm123GenerateRequest, USW2GenerateRequest,
     USForm941GenerateRequest, USForm940GenerateRequest,
+    HongKongBir56aGenerateRequest, HongKongIr56bGenerateRequest,
+    HongKongIr56NotificationGenerateRequest, HongKongEmpfRemittanceGenerateRequest,
+    HongKongMpfContributionRecordGenerateRequest, HongKongTerminationStatementGenerateRequest,
     AUSuperstreamGenerateRequest, AUPayrollTaxReturnGenerateRequest,
     NewHireReportCreate, NewHireReportMarkFiledRequest, NewHireReportResponse,
     SalaryTdsDeclarationCreate, SalaryTdsDeclarationResponse,
+    PRWithholdingCertificateCreate, PRWithholdingCertificateResponse,
+    PRAccrueMonthlyLeaveRequest,
+    PRAccrueBonusYearRequest, PRBonusYearTotalsResponse,
+    PRChristmasBonusCalculateRequest, PRChristmasBonusCalculateResponse,
     SalaryTdsClaimCreate, SalaryTdsClaimResponse, SalaryTdsClaimRejectRequest,
     EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
     CAPd7aGenerateRequest,
     GYMonthlyReportGenerateRequest,
     JMAnnualReportGenerateRequest,
+    SGAnnualReportGenerateRequest,
+    SGIr21CaseCreateRequest,
+    SGIr21CaseTransitionRequest,
+    SGCpfEzpayGenerateRequest,
+    SGCessationRequest,
+    SGRestoreFreezeRequest,
+    SGBankHoldReleaseRequest,
+    SGCorrectionRequest,
+    SGSalaryDeductionCreate,
+    SGCpfEzpayTransitionRequest,
+    SGIr8aModificationCreateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
     AUSchedule5CalculateRequest, AUSchedule5CalculateResponse,
     AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
     USSupplementalWageCalculateRequest, USSupplementalWageCalculateResponse,
     USFederalDepositScheduleRequest, USFederalDepositScheduleResponse,
+    PRDepositScheduleRequest, PRDepositScheduleResponse,
     CARetiringAllowanceCalculateRequest, CARetiringAllowanceCalculateResponse,
     CATd1xCommissionCalculateRequest, CATd1xCommissionCalculateResponse,
     CAWsdrfCalculateRequest, CAWsdrfCalculateResponse,
@@ -135,6 +156,10 @@ from app.modules.payroll.schemas import (
     HolidayCreate, BulkHolidayRequest, HolidayResponse,
     ApplicableTemplateResponse, GenerateReportRequest, GeneratedReportResponse, VoidGeneratedReportRequest,
     FilingCalendarResponse,
+    EmployerFranceProfileUpsert, FranceEstablishmentRatePackUpsert,
+    FrancePASRateUpsert, FranceEffectifRecord,
+    FranceDsnSubmissionCreate, FranceDsnStatusUpdate, FranceDsnOutboxCreate,
+    FranceDsnSubmissionResponse, FranceDsnOutboxItemResponse,
 )
 
 payroll_router = APIRouter(
@@ -164,10 +189,31 @@ def list_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_employees(
+    employees = service.get_employees(
         db, current_user.organization_id,
         search=search, department=department, status=status,
         limit=limit, offset=offset,
+    )
+    service.audit_sg_shg_read(db, current_user.organization_id, current_user.id, employees)   # Singapore SHG data only
+    return employees
+
+
+@payroll_router.get(
+    "/employees/roster",
+    response_model=List[dict],
+    response_model_by_alias=True,
+    summary="Lightweight employee roster for attendance/leave (id, name, code, department, designation)",
+)
+def list_employee_roster(
+    status: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=5000),
+    offset: Optional[int] = Query(None, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_employee_roster(
+        db, current_user.organization_id,
+        status=status, limit=limit, offset=offset,
     )
 
 
@@ -180,7 +226,9 @@ def get_employee(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_employee_by_id(db, employee_id, current_user.organization_id)
+    employee = service.get_employee_by_id(db, employee_id, current_user.organization_id)
+    service.audit_sg_shg_read(db, current_user.organization_id, current_user.id, employee)    # Singapore SHG data only
+    return employee
 
 
 @payroll_router.post(
@@ -290,11 +338,28 @@ def delete_employee(
 )
 def get_employee_statutory_profile(
     employee_id: int,
+    request: Request,
     as_of: Optional[date] = Query(None, description="Resolve the profile applicable on this date; defaults to today."),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_employee_statutory_profile_as_of(db, employee_id, current_user.organization_id, as_of)
+    profile = service.get_employee_statutory_profile_as_of(db, employee_id, current_user.organization_id, as_of)
+    _log_hk_profile_view(db, current_user, employee_id, profile, request)
+    return profile
+
+
+def _log_hk_profile_view(db, current_user, employee_id, profile, request) -> None:
+    """D-19: views of a HONG KONG statutory profile are access-logged; every
+    other country's profile read is untouched."""
+    if profile is None:
+        return
+    rows = profile if isinstance(profile, list) else [profile]
+    if any((getattr(p, "country_code", None) or "").upper() == "HK" for p in rows):
+        from app.modules.payroll import retention_service
+
+        retention_service.record_access(db, "HK", current_user.organization_id, current_user.id, "VIEW_STATUTORY_PROFILE",
+                                 "employee_statutory_profile", resource_id=getattr(rows[0], "id", None),
+                                 employee_id=employee_id, request=request)
 
 
 @payroll_router.get(
@@ -303,10 +368,13 @@ def get_employee_statutory_profile(
 )
 def get_employee_statutory_profile_history(
     employee_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.list_employee_statutory_profile_history(db, employee_id, current_user.organization_id)
+    history = service.list_employee_statutory_profile_history(db, employee_id, current_user.organization_id)
+    _log_hk_profile_view(db, current_user, employee_id, history, request)
+    return history
 
 
 @payroll_router.post(
@@ -323,6 +391,60 @@ def create_employee_statutory_profile(
     return service.create_employee_statutory_profile_version(
         db, employee_id, current_user.organization_id, data, current_user.id,
     )
+
+
+# ── Sweden sick-pay episodes and annual-leave ledgers (ZP-SE-ENG-001 §7/§8)
+# Tenant-owned statutory facts — same security tier as the statutory-profile
+# endpoints above. Days/deduction state only; no clinical content is accepted.
+
+@payroll_router.get(
+    "/sweden/sick-episodes", response_model=List[SwedenSickEpisodeResponse], response_model_by_alias=True,
+    summary="List Swedish sick-pay episodes (days 1–14 employer period, qualifying deduction state)",
+)
+def list_sweden_sick_episodes(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_se_sick_episodes(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post(
+    "/sweden/sick-episodes", response_model=SwedenSickEpisodeResponse, response_model_by_alias=True,
+    summary="Record a Swedish sick-pay episode — recurrence, day 1–14 period and qualifying deduction resolved",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_sweden_sick_episode(
+    data: SwedenSickEpisodeUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.upsert_se_sick_episode(db, current_user.organization_id, data, current_user.id)
+
+
+@payroll_router.get(
+    "/sweden/leave-ledgers", response_model=List[SwedenLeaveLedgerResponse], response_model_by_alias=True,
+    summary="List Swedish annual-leave ledgers (entitlement, paid/unpaid/saved days — separate from money)",
+)
+def list_sweden_leave_ledgers(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_se_leave_ledgers(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post(
+    "/sweden/leave-ledgers", response_model=SwedenLeaveLedgerResponse, response_model_by_alias=True,
+    summary="Record a Swedish annual-leave ledger row for one entitlement year",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_sweden_leave_ledger(
+    data: SwedenLeaveLedgerUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.upsert_se_leave_ledger(db, current_user.organization_id, data, current_user.id)
 
 
 # ── Germany overtime/shift-premium work records (Phase 8AC) ─────────────
@@ -1045,6 +1167,44 @@ def add_item(
 
 
 @payroll_router.post(
+    "/runs/{run_id}/generate-payslips", response_model=PayrollRunResponse, response_model_by_alias=True,
+    summary="Generate or recalculate payslips for a draft payroll run",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_run_payslips(
+    run_id: int,
+    async_dispatch: bool = Query(False, description="Dispatch asynchronously via Celery chord if configured"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Phase 2.1: Generate payslips for a run with optional async chord dispatch."""
+    from fastapi.responses import JSONResponse
+    from app.config import settings
+    from app.modules.payroll.models import PayrollStatus
+
+    run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
+    if run.status != PayrollStatus.DRAFT.value:
+        raise BadRequestException(f"Payslips can only be generated for DRAFT runs (current status: {run.status})")
+
+    if async_dispatch and settings.REDIS_URL:
+        from app.tasks.payroll_tasks import generate_payslips_for_run_task
+        task = generate_payslips_for_run_task.delay(run_id, current_user.organization_id)
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "taskId": task.id,
+                "runId": run_id,
+                "status": "QUEUED",
+                "message": "Payslip generation queued in background via Celery chord.",
+            },
+        )
+
+    # Synchronous execution (default or fallback)
+    service.generate_payslips_for_run(db, run, current_user.organization_id)
+    return service.get_payroll_run_detail(db, run_id, current_user.organization_id)
+
+
+@payroll_router.post(
     "/uk/statutory-pay/calculate", response_model=UKStatutoryPayResponse, response_model_by_alias=True,
     summary="On-demand UK Statutory Sick Pay / Statutory Family Pay calculator (preview only, not a payslip mutation)",
     dependencies=[Depends(get_current_payroll_operator)],
@@ -1434,6 +1594,23 @@ def calculate_us_federal_deposit_schedule(
 
 
 @payroll_router.post(
+    "/pr/deposit-schedule/calculate", response_model=PRDepositScheduleResponse, response_model_by_alias=True,
+    summary="Calculate Puerto Rico Hacienda deposit category (Quarterly Exception/Monthly/Semiweekly), deposit due date, "
+            "$100,000 next-day rule, and Form 499R-2 deadline (PR-011)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_pr_deposit_schedule(
+    data: PRDepositScheduleRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_pr_deposit_schedule(
+        db, current_user.organization_id, data.lookback_period_liability, data.current_quarter_withholding,
+        data.payroll_date, accumulated_undeposited_liability=data.accumulated_undeposited_liability,
+    )
+
+
+@payroll_router.post(
     "/canada/retiring-allowance/calculate", response_model=CARetiringAllowanceCalculateResponse, response_model_by_alias=True,
     summary="Calculate federal lump-sum withholding for a Canada retiring allowance/severance payment (rate-table lookup, no hardcoded rate)",
     dependencies=[Depends(get_current_payroll_operator)],
@@ -1535,6 +1712,118 @@ def approve_salary_tds_declaration(
     current_user=Depends(get_current_user),
 ):
     return service.approve_salary_tds_declaration(db, current_user.organization_id, declaration_id, current_user.id)
+
+
+# ── Puerto Rico: Form 499 R-4/R-4.1 withholding certificate (PR-005) ────
+
+@payroll_router.post(
+    "/pr/withholding-certificates", response_model=PRWithholdingCertificateResponse, response_model_by_alias=True,
+    summary="Create a Form 499 R-4/R-4.1 Puerto Rico withholding certificate (Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_pr_withholding_certificate(
+    data: PRWithholdingCertificateCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_pr_withholding_certificate(
+        db, current_user.organization_id, data.employee_id,
+        personal_exemption_amount=data.personal_exemption_amount, dependents_count=data.dependents_count,
+        dependent_exemption_per_dependent=data.dependent_exemption_per_dependent,
+        deduction_allowance_amount=data.deduction_allowance_amount,
+        optional_married_computation=data.optional_married_computation, msrra_election=data.msrra_election,
+        additional_withholding_amount=data.additional_withholding_amount,
+    )
+
+
+@payroll_router.get(
+    "/pr/withholding-certificates", response_model=List[PRWithholdingCertificateResponse], response_model_by_alias=True,
+    summary="List Form 499 R-4/R-4.1 Puerto Rico withholding certificates",
+)
+def list_pr_withholding_certificates(
+    employeeId: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_pr_withholding_certificates(db, current_user.organization_id, employee_id=employeeId)
+
+
+@payroll_router.put(
+    "/pr/withholding-certificates/{certificate_id}/submit", response_model=PRWithholdingCertificateResponse, response_model_by_alias=True,
+    summary="Submit a Form 499 R-4/R-4.1 certificate (Draft -> Submitted)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def submit_pr_withholding_certificate(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.submit_pr_withholding_certificate(db, current_user.organization_id, certificate_id)
+
+
+@payroll_router.put(
+    "/pr/withholding-certificates/{certificate_id}/approve", response_model=PRWithholdingCertificateResponse, response_model_by_alias=True,
+    summary="Approve a Form 499 R-4/R-4.1 certificate (Submitted -> Approved) — supersedes any prior Approved certificate for this employee",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def approve_pr_withholding_certificate(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.approve_pr_withholding_certificate(db, current_user.organization_id, certificate_id, current_user.id)
+
+
+@payroll_router.post(
+    "/pr/leave/accrue-monthly", response_model=LeaveAllocationResponse, response_model_by_alias=True,
+    summary="Accrue one month of Puerto Rico vacation (Act 4-2017/Law 180) + sick leave (PR-028/PR-029) into the "
+            "employee's existing leave balances",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def accrue_pr_monthly_leave(
+    data: PRAccrueMonthlyLeaveRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.accrue_pr_monthly_leave(
+        db, current_user.organization_id, data.employee_id,
+        hired_before_2017=data.hired_before_2017, years_of_service=data.years_of_service,
+        qualifying_small_employer=data.qualifying_small_employer,
+        qualifying_hours_in_month=data.qualifying_hours_in_month, period_label=data.period_label,
+    )
+
+
+@payroll_router.post(
+    "/pr/christmas-bonus/accrue", response_model=PRBonusYearTotalsResponse, response_model_by_alias=True,
+    summary="Add one pay period's wages/hours to an employee's Puerto Rico Christmas Bonus bonus-year (Oct 1-Sep 30) totals (PR-032)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def accrue_pr_bonus_year_totals(
+    data: PRAccrueBonusYearRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.accrue_pr_bonus_year_totals(
+        db, current_user.organization_id, data.employee_id, data.as_of_date,
+        data.wages_this_period, data.hours_this_period,
+    )
+
+
+@payroll_router.post(
+    "/pr/christmas-bonus/calculate", response_model=PRChristmasBonusCalculateResponse, response_model_by_alias=True,
+    summary="Calculate an employee's Puerto Rico Christmas Bonus (Act 148) from their real accrued bonus-year totals",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_pr_christmas_bonus(
+    data: PRChristmasBonusCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_pr_christmas_bonus_from_accumulator(
+        db, current_user.organization_id, data.employee_id, data.as_of_date,
+        hired_before_2017=data.hired_before_2017, employer_size_over_threshold=data.employer_size_over_threshold,
+        is_first_year=data.is_first_year,
+    )
 
 
 # ── India: Form 124 (Chapter VIII claims/evidence) ───────────────────────
@@ -1699,6 +1988,7 @@ def get_bank_transfer_summary(
 )
 def download_bank_transfer_file(
     run_id: int,
+    request: Request,
     format: Optional[str] = Query(None, description="csv | xlsx | txt | pdf — defaults to the Banking Policy format"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -1706,6 +1996,11 @@ def download_bank_transfer_file(
     file_bytes, content_type, _ext, filename = service.generate_bank_transfer_file(
         db, run_id, current_user.organization_id, actor_id=current_user.id, format_override=format,
     )
+    from app.modules.payroll import retention_service
+
+    retention_service.log_payslip_access(db, current_user.organization_id, current_user.id,
+                                  [i.id for i in service.get_payslips_for_run(db, run_id, current_user.organization_id)],
+                                  "DOWNLOAD_BANK_FILE", request=request, run_id=run_id)          # HK only
     return StreamingResponse(
         io.BytesIO(file_bytes),
         media_type=content_type,
@@ -1719,6 +2014,7 @@ def download_bank_transfer_file(
 )
 def download_run_payslips(
     run_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1733,6 +2029,10 @@ def download_run_payslips(
             safe_name = (item.employee_name or f"employee_{item.employee_id}").replace(" ", "_")
             zf.writestr(f"payslip_{safe_name}_{item.id}.pdf", pdf_bytes)
     zip_buf.seek(0)
+    from app.modules.payroll import retention_service
+
+    retention_service.log_payslip_access(db, current_user.organization_id, current_user.id, [i.id for i in items],
+                                  "DOWNLOAD_PAYSLIPS_ZIP", request=request, run_id=run_id)       # HK only
 
     label = (run.period_label or f"run_{run_id}").replace(" ", "_")
     return StreamingResponse(
@@ -1780,10 +2080,15 @@ def get_payslip(
 )
 def download_payslip(
     payslip_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     pdf_bytes = service.generate_payslip_pdf_bytes(db, payslip_id, current_user.organization_id)
+    from app.modules.payroll import retention_service
+
+    retention_service.log_payslip_access(db, current_user.organization_id, current_user.id, [payslip_id],
+                                  "DOWNLOAD_PAYSLIP", request=request)                            # HK only
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -1975,12 +2280,36 @@ def list_attendance(
     startDate: Optional[date] = Query(None),
     endDate: Optional[date] = Query(None),
     employeeId: Optional[int] = Query(None),
+    limit: int = Query(1000, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     return service.get_attendance_records(
         db, current_user.organization_id,
         start_date=startDate, end_date=endDate, employee_id=employeeId,
+        limit=limit, offset=offset,
+    )
+
+
+@payroll_router.get(
+    "/attendance/page", response_model=AttendancePageResponse,
+    response_model_by_alias=True,
+    summary="Page through attendance records with an exact total",
+)
+def list_attendance_page(
+    startDate: Optional[date] = Query(None),
+    endDate: Optional[date] = Query(None),
+    employeeId: Optional[int] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_attendance_records_page(
+        db, current_user.organization_id,
+        start_date=startDate, end_date=endDate, employee_id=employeeId,
+        limit=limit, offset=offset,
     )
 
 
@@ -2013,6 +2342,30 @@ def attendance_summary(
     current_user=Depends(get_current_user),
 ):
     return service.get_attendance_summary(db, current_user.organization_id)
+
+
+@payroll_router.get(
+    "/attendance/summary/by-employee",
+    response_model=EmployeeAttendanceSummaryPageResponse,
+    response_model_by_alias=True,
+    summary="Paged per-employee attendance aggregates for a date range",
+)
+def attendance_summary_by_employee(
+    startDate: Optional[date] = Query(None),
+    endDate: Optional[date] = Query(None),
+    search: Optional[str] = Query(None, max_length=200),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Replaces the Summary tab's client-side aggregation, which had to fetch
+    every attendance row in the range just to count days per employee."""
+    return service.get_attendance_summary_by_employee(
+        db, current_user.organization_id,
+        start_date=startDate, end_date=endDate,
+        search=search, limit=limit, offset=offset,
+    )
 
 
 # ── Compliance ─────────────────────────────────────────────────────────
@@ -2131,6 +2484,12 @@ def upsert_jurisdiction_pack(
     # the existing convention that orgs configure operational policy but
     # never statutory tax values.
     if payload.packType == "tax" and (current_user.role or "").lower() != "super_admin":
+        raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
+    # The payload's own packType is not enough: a "policy" payload carrying an
+    # existing TAX pack's id (or packId/version) would otherwise edit that
+    # platform-wide statutory pack from an organization account.
+    target = service.find_jurisdiction_pack_upsert_target(db, payload)
+    if target is not None and target.pack_type == "tax" and (current_user.role or "").lower() != "super_admin":
         raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
     return service.upsert_jurisdiction_pack(db, payload, actor_id=current_user.id)
 
@@ -2352,10 +2711,16 @@ def list_generated_reports(
 )
 def get_generated_report(
     generated_report_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_generated_report(db, current_user.organization_id, generated_report_id)
+    report = service.get_generated_report(db, current_user.organization_id, generated_report_id)
+    from app.modules.payroll import retention_service
+
+    retention_service.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
+                                   "VIEW_REPORT", request=request)                                  # HK only
+    return report
 
 
 @payroll_router.get(
@@ -2392,10 +2757,15 @@ def void_generated_report(
 def download_report_certificate(
     generated_report_id: int,
     employee_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     pdf_bytes = service.generate_report_certificate_pdf_bytes(db, current_user.organization_id, generated_report_id, employee_id)
+    from app.modules.payroll import retention_service
+
+    retention_service.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
+                                   "DOWNLOAD_CERTIFICATE", employee_id=employee_id, request=request)   # HK only
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -2409,6 +2779,7 @@ def download_report_certificate(
 )
 def download_report_certificates_zip(
     generated_report_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -2426,6 +2797,10 @@ def download_report_certificates_zip(
             safe_name = (entry.get("employeeName") or f"employee_{entry['employeeId']}").replace(" ", "_")
             zf.writestr(f"certificate_{safe_name}_{entry['employeeId']}.pdf", pdf_bytes)
     zip_buf.seek(0)
+    from app.modules.payroll import retention_service
+
+    retention_service.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
+                                   "DOWNLOAD_CERTIFICATES_ZIP", request=request)                    # HK only
 
     return StreamingResponse(
         zip_buf,
@@ -2607,6 +2982,200 @@ def generate_us_940(
 ):
     return service.generate_us_940(
         db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+# ── Hong Kong: IRD reporting and MPF records (ZP-HK-ENG-001 §7, §5, HK-011,
+# HK-010). Shaped exactly like /us/reports/* — an Active ReportTemplate, a
+# shared GeneratedReport output, employee certificate PDF for the per-employee
+# forms via the shared /generated-reports/{id}/certificate/{employee_id}
+# route. The HK statutory case/submission tables remain the filing trackers.
+
+
+@payroll_router.post(
+    "/hong-kong/reports/bir56a", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Hong Kong BIR56A annual employer's return for a year of assessment",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_hong_kong_bir56a(
+    data: HongKongBir56aGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.generate_hong_kong_bir56a(
+        db, current_user.organization_id, data.report_template_id, data.year_of_assessment,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/hong-kong/reports/ir56b", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Hong Kong IR56B per-employee annual return (also the employee's copy)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_hong_kong_ir56b(
+    data: HongKongIr56bGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.generate_hong_kong_ir56b(
+        db, current_user.organization_id, data.report_template_id, data.employee_id, data.year_of_assessment,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/hong-kong/reports/ir56-notification", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Hong Kong IR56E / IR56F / IR56G employee notification from its reporting case",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_hong_kong_ir56_notification(
+    data: HongKongIr56NotificationGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.generate_hong_kong_ir56_notification(
+        db, current_user.organization_id, data.report_template_id, data.case_id,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/hong-kong/reports/empf-remittance", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Hong Kong eMPF remittance statement for a prepared contribution-period submission",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_hong_kong_empf_remittance(
+    data: HongKongEmpfRemittanceGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.generate_hong_kong_empf_remittance(
+        db, current_user.organization_id, data.report_template_id, data.submission_id,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/hong-kong/reports/mpf-contribution-record", response_model=GeneratedReportResponse,
+    response_model_by_alias=True,
+    summary="Generate an employee's Hong Kong MPF contribution record for one contribution period (HK-010)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_hong_kong_mpf_contribution_record(
+    data: HongKongMpfContributionRecordGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.generate_hong_kong_mpf_contribution_record(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.contribution_period, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/hong-kong/reports/termination-statement", response_model=GeneratedReportResponse,
+    response_model_by_alias=True,
+    summary="Generate the employee's Hong Kong termination statement from an APPROVED termination calculation",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_hong_kong_termination_statement(
+    data: HongKongTerminationStatementGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.generate_hong_kong_termination_statement(
+        db, current_user.organization_id, data.report_template_id, data.termination_result_id,
+        actor_id=current_user.id,
+    )
+
+
+
+
+# ── Puerto Rico: Form 499 R-1B + federal-equivalent 941/940 (ZP-PR-ENG-001
+# §10) ────────────────────────────────────────────────────────────────
+# Reuses the SAME generic request schemas as the US 941/940 endpoints
+# above (report_template_id/year[/quarter] — no country-specific fields),
+# but routes to PR's own independently-computed service functions, never
+# service.generate_us_941/generate_us_940.
+
+@payroll_router.post(
+    "/pr/reports/499r1b", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Puerto Rico Form 499 R-1B (quarterly Hacienda withholding return) for one calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_499r1b(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_499r1b(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/941", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a federal Form 941 for a Puerto Rico employer (FICA on PR wages) for one IRS calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_941(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_941(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/940", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a federal Form 940 (FUTA-equivalent) for a Puerto Rico employer for one calendar year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_940(
+    data: USForm940GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_940(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/w2pr", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Puerto Rico Form 499R-2/W-2PR (annual employee withholding statement) for one calendar tax year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_w2pr(
+    data: USW2GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_w2pr(
+        db, current_user.organization_id, data.report_template_id, data.employee_id, data.tax_year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/dtrh-quarterly", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Puerto Rico DTRH quarterly wage/contribution return for one calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_dtrh_quarterly(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_dtrh_quarterly(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
         actor_id=current_user.id,
     )
 
@@ -2886,6 +3455,504 @@ def generate_jm_s02(
     )
 
 
+# ── Singapore: IR8A annual employment-income data extract (EXPORT_READY only)
+
+@payroll_router.post(
+    "/singapore/reports/ir8a", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Singapore IR8A data extract for one income year — EXPORT_READY only, never submitted to IRAS",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_ir8a(
+    data: SGAnnualReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_ir8a(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/singapore/reports/sdl", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore monthly SDL payable — employer total of per-employee SDL, rounded down to the dollar",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_sdl_monthly(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_sdl_monthly(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+# Singapore Phase 5.7 — internal compliance reports from the existing
+# evaluators (PWM check, engine LQS trace, IR21 case lifecycle). Own
+# organization only; payroll operators only; not MOM / IRAS submissions.
+@payroll_router.post(
+    "/singapore/reports/pwm-compliance", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore PWM compliance report for a CPF wage month (internal — not an MOM submission)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_pwm_compliance(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_pwm_compliance(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/singapore/reports/lqs-compliance", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore LQS compliance report for a CPF wage month (internal — not an MOM submission)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_lqs_compliance(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_lqs_compliance(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/singapore/reports/ir21-register", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore IR21 tax-clearance register for a year (internal — not an IRAS filing)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_ir21_register(
+    data: JMAnnualReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_ir21_register(
+        db, current_user.organization_id, data.report_template_id, data.year, actor_id=current_user.id,
+    )
+
+
+# ── Singapore: CPF EZPay contribution file — prepared here, submitted by the
+# employer through CPF EZPay (Corppass). Own organization only; payroll
+# operators only; the file itself (full CPF account numbers) only after a
+# distinct approver has approved it, and every download is audited.
+
+@payroll_router.post(
+    "/singapore/reports/cpf-ezpay", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Prepare the Singapore CPF EZPay (FTP) contribution file for a wage month (status PREPARED)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_cpf_ezpay(
+    data: SGCpfEzpayGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_cpf_ezpay(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        advice_code=data.advice_code, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/singapore/reports/ir8a",
+    summary="List the Singapore IR8A extracts with their controlled manual-submission status (SG-023)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_ir8a(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_ir8a(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/singapore/reports/ir8a/{report_id}/transition",
+    summary="Record the manual IR8A submission / IRAS outcome (SUBMITTED_MANUALLY / ACKNOWLEDGED / REJECTED / UNKNOWN)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transition_sg_ir8a(
+    report_id: int,
+    data: SGCpfEzpayTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_sg_ir8a(db, current_user.organization_id, report_id, data.status,
+                                      actor_id=current_user.id, reference=data.reference, note=data.note,
+                                      errors=data.errors)
+
+
+# Phase 6.8 (G3): IR8A Revision / Amendment of an IRAS-acknowledged extract —
+# own organization only; payroll operators only; filed through the transition
+# route above like any IR8A extract.
+@payroll_router.post(
+    "/singapore/reports/ir8a/{report_id}/modifications",
+    summary="Prepare an IR8A Revision (full values) or Amendment (differences) of an IRAS-acknowledged extract",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_ir8a_modification(
+    report_id: int,
+    data: SGIr8aModificationCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_sg_ir8a_modification(db, current_user.organization_id, report_id, data.method,
+                                               reason=data.reason, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/reports/ir8a/{report_id}/modifications",
+    summary="List the Revisions / Amendments of an IR8A extract",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_ir8a_modifications(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_ir8a_modifications(db, current_user.organization_id, report_id)
+
+
+@payroll_router.post(
+    "/singapore/reports/cpf-ezpay/{report_id}/transition", response_model=GeneratedReportResponse,
+    response_model_by_alias=True,
+    summary="Advance a CPF EZPay submission (APPROVED / SUBMITTED / ACCEPTED / REJECTED / UNKNOWN)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transition_sg_cpf_ezpay(
+    report_id: int,
+    data: SGCpfEzpayTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_sg_cpf_ezpay(
+        db, current_user.organization_id, report_id, data.status, actor_id=current_user.id,
+        reference=data.reference, note=data.note, errors=data.errors,
+    )
+
+
+@payroll_router.get(
+    "/singapore/reports/cpf-ezpay/{report_id}/file",
+    summary="Download an APPROVED CPF EZPay file (audited — contains full CPF account numbers)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def download_sg_cpf_ezpay_file(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    filename, content = service.get_sg_cpf_ezpay_file(db, current_user.organization_id, report_id, actor_id=current_user.id)
+    return StreamingResponse(
+        io.BytesIO(content.encode("ascii")),
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+# ── Singapore: payroll-run preflight / exceptions (§11 stages 1 and 4) —
+# read-only; BLOCK items refuse approval (enforced in advance_payroll_run_status).
+
+@payroll_router.get(
+    "/singapore/runs/{run_id}/preflight",
+    summary="Singapore preflight + exceptions for a payroll run (read-only dry run of the engine)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_payroll_preflight(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_payroll_preflight(db, current_user.organization_id, run_id)
+
+
+@payroll_router.get(
+    "/hong-kong/runs/{run_id}/preflight",
+    summary="Hong Kong preflight + exceptions for a payroll run (read-only dry run of the engine)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_hk_payroll_preflight(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return hong_kong_service.hk_payroll_preflight(db, current_user.organization_id, run_id)
+
+
+@payroll_router.get(
+    "/hong-kong/readiness",
+    summary="Hong Kong payroll readiness dashboard (employer registrations, pack, worker facts, IRD, eMPF) — read-only",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_hk_employer_readiness(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.hk_employer_readiness(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/singapore/employees/{employee_id}/cessation",
+    summary="Record a Singapore employee's cessation — a non-citizen's monies go on IR21 hold automatically",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def record_sg_cessation(
+    employee_id: int,
+    data: SGCessationRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.record_sg_cessation(db, current_user.organization_id, employee_id, data.date_of_leaving,
+                                       actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/pwm-classifications",
+    summary="Progressive Wage Model sector / group / job-level choices with the floor in force (Active SG pack)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_pwm_classifications(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_pwm_classifications(db)
+
+
+@payroll_router.post(
+    "/singapore/benefit-valuations", response_model=EmployeeBenefitValuationResponse, response_model_by_alias=True,
+    summary="Record a Singapore IR8A Appendix 8A benefit value (the organization's own valuation; Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_benefit_valuation(
+    data: EmployeeBenefitValuationCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_sg_benefit_valuation(db, current_user.organization_id, data.employee_id, data.tax_year,
+                                               data.benefit_type, data.taxable_value, description=data.description)
+
+
+@payroll_router.get(
+    "/singapore/benefit-valuations", response_model=List[EmployeeBenefitValuationResponse], response_model_by_alias=True,
+    summary="List Singapore Appendix 8A benefit valuations",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_benefit_valuations(
+    taxYear: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_benefit_valuations(db, current_user.organization_id, tax_year=taxYear)
+
+
+@payroll_router.get(
+    "/singapore/ais-readiness",
+    summary="Singapore AIS year-end readiness — running data-quality metric (SG-042)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_ais_readiness(
+    year: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_ais_readiness(db, current_user.organization_id, year)
+
+
+@payroll_router.get(
+    "/singapore/compliance-centre",
+    summary="Singapore Compliance Centre — status / effective date / evidence / blocker / owner / action per area, plus clocks",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_compliance_centre(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_sg_compliance_centre(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/singapore/employees/{employee_id}/deductions", response_model=UKCourtOrderResponse, response_model_by_alias=True,
+    summary="Record a Singapore Employment Act salary deduction (MOM category, consent / evidence, caps enforced)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_salary_deduction(
+    employee_id: int,
+    data: SGSalaryDeductionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_sg_salary_deduction(
+        db, current_user.organization_id, employee_id, data.category, data.start_date, evidence_ref=data.evidence_ref,
+        evidence_date=data.evidence_date, end_date=data.end_date, amount=data.amount, rate_pct=data.rate_pct,
+        total_to_collect=data.total_to_collect, priority=data.priority, created_by_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/singapore/employees/{employee_id}/deductions", response_model=list[UKCourtOrderResponse], response_model_by_alias=True,
+    summary="List a Singapore employee's salary deductions",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_salary_deductions(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return [o for o in service.list_court_ordered_deductions(db, current_user.organization_id, employee_id)
+            if o.jurisdiction == service.SG_DEDUCTION_JURISDICTION]
+
+
+@payroll_router.post(
+    "/singapore/payslips/{payslip_id}/corrections",
+    summary="Append-only correction of a finalized Singapore payslip — a linked delta payslip, the original is never changed",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def correct_sg_finalized_payslip(
+    payslip_id: int,
+    data: SGCorrectionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.correct_sg_finalized_payslip(db, current_user.organization_id, payslip_id, data.reason,
+                                                actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/payslips/{payslip_id}/corrections",
+    summary="The correction chain of a Singapore payslip (before / after / delta, reason, actor, time)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_payslip_corrections(
+    payslip_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_payslip_corrections(db, current_user.organization_id, payslip_id)
+
+
+@payroll_router.post(
+    "/singapore/disaster-recovery/freeze",
+    summary="SG-047: after a restore, freeze every CPF EZPay submission with an uncertain external outcome (UNKNOWN)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def sg_freeze_after_restore(
+    data: SGRestoreFreezeRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_freeze_after_restore(db, current_user.organization_id, data.restore_point, actor_id=current_user.id,
+                                           restore_date=data.restore_date)
+
+
+@payroll_router.post(
+    "/singapore/disaster-recovery/bank-hold/{run_id}/release",
+    summary="SG-047: record the bank reconciliation that releases a post-restore bank-export hold (audited)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def release_sg_bank_export_hold(
+    run_id: int,
+    data: SGBankHoldReleaseRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.release_sg_bank_export_hold(db, current_user.organization_id, run_id, data.reference,
+                                               actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/retention-report",
+    summary="SG-046: read-only record-retention report against the MOM / IRAS statutory minimums (never deletes)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def sg_retention_report(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_retention_report(db, current_user.organization_id)
+
+
+# ── Singapore: Employer Registration readiness (SG-027) — own organization only.
+
+@payroll_router.get(
+    "/singapore/readiness",
+    summary="Singapore employer launch-readiness card (SG-027) — internal evaluation, not an authority approval",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_employer_readiness(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_sg_employer_readiness(db, current_user.organization_id)
+
+
+# ── Singapore: IR21 tax clearance — hold / clearance / release. Tenant-
+# scoped (the caller's own organization only); lifting a hold needs a
+# distinct approver (enforced in service.transition_sg_ir21_case).
+
+@payroll_router.get(
+    "/singapore/ir21-cases",
+    summary="List this organization's Singapore IR21 tax-clearance cases",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_ir21_cases(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_ir21_cases(db, current_user.organization_id, status=status)
+
+
+@payroll_router.post(
+    "/singapore/ir21-cases",
+    summary="Open a Singapore IR21 case — the employee's monies are withheld from the aware date",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_ir21_case(
+    data: SGIr21CaseCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    case = service.create_sg_ir21_case(
+        db, current_user.organization_id, data.employee_id, data.trigger_type, data.trigger_date, data.aware_date,
+        actor_id=current_user.id,
+    )
+    return service.serialize_sg_ir21_case(db, case)
+
+
+@payroll_router.get(
+    "/singapore/ir21-cases/{case_id}",
+    summary="Get one Singapore IR21 case (own organization only)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_ir21_case(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.serialize_sg_ir21_case(db, service.get_sg_ir21_case(db, current_user.organization_id, case_id))
+
+
+@payroll_router.post(
+    "/singapore/ir21-cases/{case_id}/transition",
+    summary="Advance a Singapore IR21 case (FILED / CLEARED / RELEASED / EXEMPT / CANCELLED / EXCEPTION)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transition_sg_ir21_case(
+    case_id: int,
+    data: SGIr21CaseTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    case = service.transition_sg_ir21_case(
+        db, current_user.organization_id, case_id, data.status, actor_id=current_user.id,
+        filed_date=data.filed_date, filing_reference=data.filing_reference,
+        directive_date=data.directive_date, directive_reference=data.directive_reference,
+        directive_tax_amount=data.directive_tax_amount, exemption_category=data.exemption_category,
+        reason=data.reason,
+    )
+    return service.serialize_sg_ir21_case(db, case)
+
+
 # ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule
 # generation (Caribbean forms gap-closure, country #4, 2026-09-23).
 
@@ -3142,3 +4209,426 @@ def dashboard_breakdowns(
     current_user=Depends(get_current_user),
 ):
     return service.get_dashboard_breakdowns(db, current_user.organization_id, year=year, month=month)
+
+
+# ── Hong Kong (ZP-HK-ENG-001) — tenant operational workflows ────────────
+# Payroll operators only; always the caller's own organization
+# (current_user.organization_id), never an id from the body (HK-021). The
+# statutory calculation itself runs inside the normal payroll run; these
+# endpoints cover hours evidence, IR56G holds, IRD reporting, eMPF batches,
+# Employment Ordinance entitlements and termination. Four-eyes approvals
+# are enforced in hong_kong_service (approver != preparer).
+from app.modules.payroll import hong_kong_service# noqa: E402
+from app.modules.payroll.schemas import (  # noqa: E402
+    HKAnnualReturnRequest, HKAverageWageOverrideRequest, HKAverageWageRequest, HKDepartureChangeRequest,
+    HKDepartureRequest, HKEmpfPrepareRequest, HKEmpfTransitionRequest, HKEntitlementRequest, HKIr56gFiledRequest,
+    HKCorrectionRequest, HKLegalHoldRequest, HKEmployeeCopyRequest, HKIrdAmendRequest, HKIrdTransitionRequest, HKReasonRequest, HKReleaseRequest, HKSalariesTaxEstimateRequest, HKTerminationRequest,
+    HKWorkHoursRequest,
+)
+
+_HK_READ = [Depends(get_current_payroll_operator)]
+_HK_WRITE = [Depends(get_current_payroll_operator), Depends(require_writeable_workspace())]
+
+
+@payroll_router.post("/hong-kong/employees/{employee_id}/work-hours", dependencies=_HK_WRITE,
+                     summary="Record verified daily hours (append-only; a correction supersedes)")
+def hk_record_work_hours(employee_id: int, data: HKWorkHoursRequest, db: Session = Depends(get_db),
+                         current_user=Depends(get_current_user)):
+    rows = hong_kong_service.record_work_hours(db, current_user.organization_id, employee_id,
+                                        [e.model_dump() for e in data.entries], current_user.id, data.reason)
+    return [{"id": r.id, "date": r.work_date.isoformat(), "hours": str(r.hours), "source": r.source} for r in rows]
+
+
+@payroll_router.get("/hong-kong/employees/{employee_id}/continuous-contract", dependencies=_HK_READ,
+                    summary="Continuous-contract status on a date (4-18 before / 4-week 17-68 from 18 Jan 2026)")
+def hk_continuous_contract(employee_id: int, as_of: date = Query(...), db: Session = Depends(get_db),
+                           current_user=Depends(get_current_user)):
+    return hong_kong_service.continuous_contract(db, current_user.organization_id, employee_id, as_of)
+
+
+@payroll_router.get("/hong-kong/tax-clearance", dependencies=_HK_READ, summary="List IR56G tax-clearance cases")
+def hk_list_holds(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll.models import HongKongTaxClearanceHold
+
+    holds = db.query(HongKongTaxClearanceHold).filter(HongKongTaxClearanceHold.organization_id == current_user.organization_id).all()
+    return [hong_kong_service.serialize_hold(db, h) for h in holds]
+
+
+@payroll_router.post("/hong-kong/tax-clearance", dependencies=_HK_WRITE, summary="Identify a departure (IR56G case)")
+def hk_identify_departure(data: HKDepartureRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    hold = hong_kong_service.identify_departure(db, current_user.organization_id, data.employeeId, data.expectedDepartureDate,
+                                         current_user.id, data.identifiedOn, data.returnDate)
+    return hong_kong_service.serialize_hold(db, hold)
+
+
+@payroll_router.post("/hong-kong/tax-clearance/{hold_id}/filed", dependencies=_HK_WRITE,
+                     summary="Record the IR56G filing; the legal hold becomes active")
+def hk_ir56g_filed(hold_id: int, data: HKIr56gFiledRequest, db: Session = Depends(get_db),
+                   current_user=Depends(get_current_user)):
+    hold = hong_kong_service.record_ir56g_filed(db, current_user.organization_id, hold_id, data.filedOn, data.filingReference,
+                                         current_user.id)
+    return hong_kong_service.serialize_hold(db, hold)
+
+
+@payroll_router.post("/hong-kong/tax-clearance/{hold_id}/release-request", dependencies=_HK_WRITE,
+                     summary="Request release of held money (letter of release / statutory period elapsed) with evidence")
+def hk_release_request(hold_id: int, data: HKReleaseRequest, db: Session = Depends(get_db),
+                       current_user=Depends(get_current_user)):
+    hold = hong_kong_service.request_hold_release(db, current_user.organization_id, hold_id, data.basis, data.reference,
+                                           data.evidenceRef, current_user.id)
+    return hong_kong_service.serialize_hold(db, hold)
+
+
+@payroll_router.post("/hong-kong/tax-clearance/{hold_id}/release-approve", dependencies=_HK_WRITE,
+                     summary="Approve a release (a different operator from the requester)")
+def hk_release_approve(hold_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    hold = hong_kong_service.approve_hold_release(db, current_user.organization_id, hold_id, current_user.id)
+    return hong_kong_service.serialize_hold(db, hold)
+
+
+@payroll_router.post("/hong-kong/tax-clearance/{hold_id}/change", dependencies=_HK_WRITE,
+                     summary="Departure cancelled / changed: evidence required; an active hold is never silently cleared")
+def hk_departure_change(hold_id: int, data: HKDepartureChangeRequest, db: Session = Depends(get_db),
+                        current_user=Depends(get_current_user)):
+    hold = hong_kong_service.change_departure(db, current_user.organization_id, hold_id, data.reason, data.evidenceRef,
+                                       current_user.id, data.newDepartureDate)
+    return hong_kong_service.serialize_hold(db, hold)
+
+
+@payroll_router.post("/hong-kong/tax-clearance/{hold_id}/close", dependencies=_HK_WRITE, summary="Close a case")
+def hk_close_hold(hold_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.serialize_hold(db, hong_kong_service.close_hold(db, current_user.organization_id, hold_id, current_user.id))
+
+
+@payroll_router.get("/hong-kong/ird/cases", dependencies=_HK_READ, summary="List IRD reporting cases")
+def hk_list_ird_cases(year_of_assessment: Optional[str] = Query(None), db: Session = Depends(get_db),
+                      current_user=Depends(get_current_user)):
+    from app.modules.payroll.models import HongKongIrdReportingCase
+
+    q = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.organization_id == current_user.organization_id)
+    if year_of_assessment:
+        q = q.filter(HongKongIrdReportingCase.year_of_assessment == year_of_assessment)
+    return [hong_kong_service.serialize_ird_case(c) for c in q.order_by(HongKongIrdReportingCase.id).all()]
+
+
+@payroll_router.get("/hong-kong/ird/cases/{case_id}/history", dependencies=_HK_READ,
+                    summary="An IRD case's filing history (filings, rejections with the filed evidence, re-filings)")
+def hk_ird_case_history(case_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.ird_case_history(db, current_user.organization_id, case_id)
+
+
+@payroll_router.post("/hong-kong/ird/employees/{employee_id}/event-cases", dependencies=_HK_WRITE,
+                     summary="Create due IR56E / IR56F cases from the employee's effective statutory facts")
+def hk_ird_event_cases(employee_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    rows = hong_kong_service.create_event_cases(db, current_user.organization_id, employee_id, current_user.id)
+    return [hong_kong_service.serialize_ird_case(c) for c in rows]
+
+
+@payroll_router.post("/hong-kong/ird/annual-return", dependencies=_HK_WRITE,
+                     summary="Prepare BIR56A + IR56B for a year of assessment (ending 31 March) from committed payroll")
+def hk_ird_annual_return(data: HKAnnualReturnRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.generate_annual_return(db, current_user.organization_id, data.yearOfAssessment, current_user.id)
+
+
+@payroll_router.post("/hong-kong/ird/cases/{case_id}/transition", dependencies=_HK_WRITE,
+                     summary="Move an IRD case (validate / record filing / record acknowledgement)")
+def hk_ird_transition(case_id: int, data: HKIrdTransitionRequest, db: Session = Depends(get_db),
+                      current_user=Depends(get_current_user)):
+    submission = {k: getattr(data, k) for k in ("submissionMode", "authorizedSigner", "transactionReference",
+                                                "controlListReference", "submittedOn")}
+    case = hong_kong_service.transition_ird_case(db, current_user.organization_id, case_id, data.target, current_user.id,
+                                          data.filingReference, data.receiptReference, submission=submission)
+    return hong_kong_service.serialize_ird_case(case)
+
+
+@payroll_router.post("/hong-kong/ird/cases/{case_id}/amend", dependencies=_HK_WRITE,
+                     summary="Amend a filed case: creates a linked replacement; filed evidence is never overwritten")
+def hk_ird_amend(case_id: int, data: HKIrdAmendRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.serialize_ird_case(hong_kong_service.amend_ird_case(db, current_user.organization_id, case_id, data.reason,
+                                                                   current_user.id, amendment_type=data.amendmentType))
+
+
+@payroll_router.post("/hong-kong/ird/cases/{case_id}/employee-copy", dependencies=_HK_WRITE,
+                     summary="Record that the employee was given their copy of the IR56B / E / F / G (once, with evidence)")
+def hk_ird_employee_copy(case_id: int, data: HKEmployeeCopyRequest, db: Session = Depends(get_db),
+                         current_user=Depends(get_current_user)):
+    return hong_kong_service.serialize_ird_case(hong_kong_service.record_employee_copy_delivered(
+        db, current_user.organization_id, case_id, data.evidenceRef, current_user.id))
+
+
+@payroll_router.post("/hong-kong/payslips/{payslip_id}/corrections", dependencies=_HK_WRITE,
+                     summary="Request a linked correction of a COMMITTED Hong Kong payslip (maker; D-14)")
+def hk_request_correction(payslip_id: int, data: HKCorrectionRequest, db: Session = Depends(get_db),
+                          current_user=Depends(get_current_user)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.serialize(hong_kong_service.request_correction(
+        db, current_user.organization_id, payslip_id, data.reason, current_user.id))
+
+
+@payroll_router.get("/hong-kong/corrections", dependencies=_HK_READ, summary="List Hong Kong payroll corrections")
+def hk_list_corrections(employee_id: Optional[int] = Query(None), db: Session = Depends(get_db),
+                        current_user=Depends(get_current_user)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.list_corrections(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post("/hong-kong/corrections/{correction_id}/approve", dependencies=_HK_WRITE,
+                     summary="Approve a Hong Kong payroll correction (checker ≠ requester); applies its consequences")
+def hk_approve_correction(correction_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.serialize(hong_kong_service.approve_correction(
+        db, current_user.organization_id, correction_id, current_user.id))
+
+
+@payroll_router.post("/hong-kong/corrections/{correction_id}/reject", dependencies=_HK_WRITE,
+                     summary="Reject / withdraw a Hong Kong payroll correction (its record is kept)")
+def hk_reject_correction(correction_id: int, data: HKReasonRequest, db: Session = Depends(get_db),
+                         current_user=Depends(get_current_user)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.serialize(hong_kong_service.reject_correction(
+        db, current_user.organization_id, correction_id, data.reason, current_user.id))
+
+
+@payroll_router.get("/hong-kong/legal-holds", dependencies=_HK_READ, summary="List Hong Kong legal holds")
+def hk_list_legal_holds(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import retention_service
+
+    return retention_service.list_legal_holds(db, "HK", current_user.organization_id)
+
+
+@payroll_router.post("/hong-kong/legal-holds", dependencies=_HK_WRITE,
+                     summary="Place a legal hold on Hong Kong records (organisation-wide or one employee)")
+def hk_place_legal_hold(data: HKLegalHoldRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import retention_service
+
+    retention_service.place_legal_hold(db, "HK", current_user.organization_id, data.employeeId, data.reason, data.reference,
+                                current_user.id)
+    return retention_service.list_legal_holds(db, "HK", current_user.organization_id)
+
+
+@payroll_router.post("/hong-kong/legal-holds/{hold_id}/release", dependencies=_HK_WRITE,
+                     summary="Release a legal hold (a different user from the one who placed it)")
+def hk_release_legal_hold(hold_id: int, data: HKReasonRequest, db: Session = Depends(get_db),
+                          current_user=Depends(get_current_user)):
+    from app.modules.payroll import retention_service
+
+    retention_service.release_legal_hold(db, "HK", current_user.organization_id, hold_id, data.reason, current_user.id)
+    return retention_service.list_legal_holds(db, "HK", current_user.organization_id)
+
+
+@payroll_router.get("/hong-kong/access-events", dependencies=_HK_READ,
+                    summary="Hong Kong statutory-data access log (downloads and statutory-profile views)")
+def hk_access_events(employee_id: Optional[int] = Query(None), limit: int = Query(200, ge=1, le=1000),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import retention_service
+
+    return retention_service.list_access_events(db, "HK", current_user.organization_id, employee_id, limit)
+
+
+@payroll_router.post("/hong-kong/employees/{employee_id}/average-wage", dependencies=_HK_WRITE,
+                     summary="Compute and freeze a 12-month average-wage snapshot from committed payroll")
+def hk_average_wage(employee_id: int, data: HKAverageWageRequest, db: Session = Depends(get_db),
+                    current_user=Depends(get_current_user)):
+    snap = hong_kong_service.calculate_average_wage(db, current_user.organization_id, employee_id, data.benefitType,
+                                             data.referenceDate, data.disregarded, current_user.id, data.overtimeConstant)
+    return {"id": snap.id, "status": snap.status, **snap.result}
+
+
+@payroll_router.get("/hong-kong/employees/{employee_id}/average-wage-snapshots", dependencies=_HK_READ,
+                    summary="List an employee's average-wage snapshots and their override state")
+def hk_average_wage_snapshots(employee_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.list_average_wage_snapshots(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.get("/hong-kong/termination-results", dependencies=_HK_READ,
+                    summary="List Hong Kong termination calculations (for four-eyes approval and statements)")
+def hk_termination_results(employee_id: Optional[int] = Query(None), db: Session = Depends(get_db),
+                           current_user=Depends(get_current_user)):
+    return hong_kong_service.list_termination_results(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post("/hong-kong/average-wage/{snapshot_id}/override-request", dependencies=_HK_WRITE,
+                     summary="Request a controlled average-wage override (reason + evidence)")
+def hk_average_override_request(snapshot_id: int, data: HKAverageWageOverrideRequest, db: Session = Depends(get_db),
+                                current_user=Depends(get_current_user)):
+    snap = hong_kong_service.request_average_wage_override(db, current_user.organization_id, snapshot_id, data.averageDailyWage,
+                                                    data.reason, data.evidenceRef, current_user.id)
+    return {"id": snap.id, "status": snap.status, "overrideRequested": str(snap.override_average_daily_wage)}
+
+
+@payroll_router.post("/hong-kong/average-wage/{snapshot_id}/override-approve", dependencies=_HK_WRITE,
+                     summary="Approve an average-wage override (different operator)")
+def hk_average_override_approve(snapshot_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    snap = hong_kong_service.approve_average_wage_override(db, current_user.organization_id, snapshot_id, current_user.id)
+    return {"id": snap.id, "status": snap.status, **hong_kong_service.effective_average(snap)}
+
+
+@payroll_router.post("/hong-kong/employees/{employee_id}/entitlements", dependencies=_HK_READ,
+                     summary="Employment Ordinance entitlement (holiday / annual leave / sickness / maternity / paternity pay)")
+def hk_entitlement(employee_id: int, data: HKEntitlementRequest, db: Session = Depends(get_db),
+                   current_user=Depends(get_current_user)):
+    payload = data.model_dump(exclude_none=True)
+    return hong_kong_service.calculate_entitlement(db, current_user.organization_id, employee_id, payload.pop("benefit"), payload)
+
+
+@payroll_router.post("/hong-kong/employees/{employee_id}/termination", dependencies=_HK_WRITE,
+                     summary="Termination calculator: SP/LSP with the 1 May 2025 MPF-offset transition split")
+def hk_termination(employee_id: int, data: HKTerminationRequest, db: Session = Depends(get_db),
+                   current_user=Depends(get_current_user)):
+    row = hong_kong_service.calculate_termination(db, current_user.organization_id, employee_id,
+                                           data.model_dump(exclude_none=True, mode="json"), current_user.id)
+    return {"id": row.id, "status": row.status, "employeeId": row.employee_id, **row.result}
+
+
+@payroll_router.post("/hong-kong/termination/{result_id}/approve", dependencies=_HK_WRITE,
+                     summary="Approve a termination calculation (different operator)")
+def hk_termination_approve(result_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    row = hong_kong_service.approve_termination(db, current_user.organization_id, result_id, current_user.id)
+    return {"id": row.id, "status": row.status}
+
+
+def _hk_empf_view(sub) -> dict:
+    return {"id": sub.id, "contributionPeriod": sub.contribution_period, "status": sub.status, "rows": sub.rows,
+            "totals": sub.totals, "validationErrors": sub.validation_errors or [],
+            "contributionDay": sub.contribution_day.isoformat() if sub.contribution_day else None,
+            "submissionReference": sub.submission_reference, "rowOutcomes": sub.row_outcomes,
+            "settlementReference": sub.settlement_reference, "payloadHash": sub.payload_hash,
+            "transmission": "NOT_CERTIFIED: prepared for the operator's own eMPF submission"}
+
+
+@payroll_router.post("/hong-kong/empf/submissions", dependencies=_HK_WRITE,
+                     summary="Prepare + validate an eMPF remittance batch (no transmission; no certified interface)")
+def hk_empf_prepare(data: HKEmpfPrepareRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    sub = hong_kong_service.prepare_empf_submission(db, current_user.organization_id, data.contributionPeriod, current_user.id)
+    return _hk_empf_view(sub)
+
+
+@payroll_router.get("/hong-kong/empf/submissions", dependencies=_HK_READ, summary="List eMPF submissions")
+def hk_empf_list(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll.models import HongKongEmpfSubmission
+
+    return [_hk_empf_view(s) for s in db.query(HongKongEmpfSubmission)
+            .filter(HongKongEmpfSubmission.organization_id == current_user.organization_id).order_by(HongKongEmpfSubmission.id)]
+
+
+@payroll_router.post("/hong-kong/empf/submissions/{submission_id}/transition", dependencies=_HK_WRITE,
+                     summary="Record an eMPF submission / outcome / settlement from the operator's eMPF evidence")
+def hk_empf_transition(submission_id: int, data: HKEmpfTransitionRequest, db: Session = Depends(get_db),
+                       current_user=Depends(get_current_user)):
+    sub = hong_kong_service.transition_empf_submission(db, current_user.organization_id, submission_id, data.target,
+                                                current_user.id, data.submissionReference, data.rowOutcomes,
+                                                data.settlementReference)
+    return _hk_empf_view(sub)
+
+
+@payroll_router.post("/hong-kong/salaries-tax/estimate", dependencies=_HK_READ,
+                     summary="INFORMATIONAL Salaries Tax estimate: never withheld from pay")
+def hk_salaries_tax_estimate(data: HKSalariesTaxEstimateRequest, db: Session = Depends(get_db)):
+    return hong_kong_service.salaries_tax_estimate(db, data.yearOfAssessment, data.income, data.deductions, data.allowances,
+                                             data.deductionClaims, data.elections)
+
+
+# ── France filing lifecycle (ZP-FR-ENG-001 §10/§13) ─────────────────────
+# Org-facing: the employer opens its DSN, follows the four lifecycle signals
+# and drives its own outbox. Authority data (PAS rates, AT/MP rate packs,
+# effectif, employer profile) is Super Admin-owned — see
+# super_admin/router.py /compliance/france/*.
+
+@payroll_router.post(
+    "/france/dsn-submissions", response_model=FranceDsnSubmissionResponse, response_model_by_alias=True,
+    summary="Open a France DSN P26V01 submission for a period (runs the FR-031 pre-submit validator: clean → VALIDATED, blocked → DRAFT with recorded errors)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def create_france_dsn_submission(
+    data: FranceDsnSubmissionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_france_dsn_submission(db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/france/dsn-submissions", response_model=list[FranceDsnSubmissionResponse], response_model_by_alias=True,
+    summary="List this organization's France DSN submissions, optionally by lifecycle status",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_france_dsn_submissions(
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_france_dsn_submissions(db, current_user.organization_id, status)
+
+
+@payroll_router.put(
+    "/france/dsn-submissions/{submission_id}/status",
+    response_model=FranceDsnSubmissionResponse, response_model_by_alias=True,
+    summary="Transition a France DSN lifecycle state (FR-032); transport/business/payment signals land in separate columns",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def transition_france_dsn_submission(
+    submission_id: int,
+    data: FranceDsnStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_france_dsn_submission(db, current_user.organization_id, submission_id, data, actor_id=current_user.id)
+
+
+@payroll_router.post(
+    "/france/dsn-outbox", response_model=FranceDsnOutboxItemResponse, response_model_by_alias=True,
+    summary="Enqueue a durable idempotent DSN outbox action (FR-033)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def create_france_dsn_outbox_item(
+    data: FranceDsnOutboxCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_france_dsn_outbox_item(db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/france/dsn-outbox", response_model=list[FranceDsnOutboxItemResponse], response_model_by_alias=True,
+    summary="List this organization's France DSN outbox actions",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_france_dsn_outbox_items(
+    submission_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_france_dsn_outbox_items(db, current_user.organization_id, submission_id)
+
+
+@payroll_router.put(
+    "/france/dsn-outbox/{item_id}/status", response_model=FranceDsnOutboxItemResponse, response_model_by_alias=True,
+    summary="Record a transport-side outbox acknowledgement (FR-033); UNKNOWN triggers reconciliation, never blind replay",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def transition_france_dsn_outbox_item(
+    item_id: int,
+    status: str = Query(...),
+    last_error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_france_dsn_outbox_item(
+        db, current_user.organization_id, item_id, status, last_error=last_error, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/france/readiness",
+    summary="France launch readiness for this organization (FR §11 gate H + FR-031 dry-run for the open period)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def france_readiness(
+    for_period: Optional[date] = Query(None, description="Period start to dry-run, defaults to next month"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_france_readiness(db, current_user.organization_id, for_period=for_period)
