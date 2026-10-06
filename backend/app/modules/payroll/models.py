@@ -32,7 +32,7 @@ performed an action, not a payroll employee record.
 import enum
 from sqlalchemy import (
     Column, Integer, String, Date, DateTime, Boolean,
-    ForeignKey, Text, Numeric, UniqueConstraint, Index, JSON, text,
+    ForeignKey, Text, Numeric, SmallInteger, UniqueConstraint, Index, JSON, text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -1048,6 +1048,39 @@ class EmployeeStatutoryProfile(Base):
     it_contractual_weekly_hours = Column(Numeric(5, 2), nullable=True)
     it_termination_reason      = Column(String(50), nullable=True)
 
+    # ── Switzerland: statutory-anchor employee facts (CH spec) ─────────────
+    # All nullable/additive — no existing non-CH employee row is affected.
+    ch_work_canton             = Column(String(5), nullable=True)
+    ch_residence_canton        = Column(String(5), nullable=True)
+    ch_qst_canton              = Column(String(5), nullable=True)
+    ch_residence_country       = Column(String(2), nullable=True)
+    ch_nationality             = Column(String(2), nullable=True)
+    ch_permit_type             = Column(String(10), nullable=True)
+    ch_cross_border            = Column(Boolean, nullable=True)     # Grenzgänger (frontaliers)
+    ch_ahv_number              = Column(String(16), nullable=True)
+    ch_ahv_status              = Column(String(30), nullable=True)
+    ch_alv_subject             = Column(Boolean, nullable=True)     # unemployment-insurance liability
+    ch_weekly_hours            = Column(Numeric(5, 2), nullable=True)
+    ch_multiple_employment     = Column(Boolean, nullable=True)
+    ch_other_employment_pct    = Column(Numeric(5, 2), nullable=True)
+    # YES | NO | REVIEW_REQUIRED — QST-liability is never inferred.
+    ch_qst_subject             = Column(String(20), nullable=True)
+    ch_qst_tariff_code         = Column(String(10), nullable=True)
+    ch_marital_status          = Column(String(20), nullable=True)
+    ch_spouse_employed         = Column(Boolean, nullable=True)
+    ch_children_count          = Column(Integer, nullable=True)
+    ch_church_tax              = Column(Boolean, nullable=True)
+    ch_bvg_plan_scheme_id      = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+    ch_uvg_policy_scheme_id    = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+    ch_ktg_policy_scheme_id    = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+    ch_uvg_risk_class          = Column(String(20), nullable=True)
+    ch_contract_end            = Column(Date, nullable=True)
+    ch_wage_floor_agreement_id = Column(Integer, ForeignKey("payroll_collective_agreements.id"), nullable=True)
+    ch_occupation              = Column(String(100), nullable=True)
+    ch_grade                   = Column(String(50), nullable=True)
+    ch_experience_years        = Column(Numeric(4, 1), nullable=True)
+    ch_evidence_document_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1770,6 +1803,11 @@ class PayslipItem(Base):
     # contribution holiday, SMW segments, classification and every rule's
     # provenance. Never a Salaries Tax withholding. NULL for non-HK payslips.
     hkg_calculation_trace = Column(JSON, nullable=True)
+    # Switzerland calculation snapshot (CH spec) — same country-scoped JSON
+    # column precedent as the SG/HK/AU traces: the frozen statutory inputs,
+    # rates, bracket and YTD-ledger facts the CH payrun used. NULL for every
+    # non-CH payslip and every CH payslip before this column existed.
+    ch_calculation_snapshot = Column(JSON, nullable=True)
     # India: EPS diversion + residual — purely-informational breakdown of
     # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
     # employer_pf_residual == employer_pf always, never additional to it.
@@ -5277,6 +5315,15 @@ class TaxabilityRule(Base):
     effective_to           = Column(Date, nullable=True)
     organization_id        = Column(Integer, ForeignKey("organizations.id"), nullable=True)
 
+    # Approval-gated alteration lifecycle (CH QST overlay uses this) — all
+    # nullable/additive, so every pre-existing rule row is unaffected. An
+    # approved CHANGE is a new superceding rule row, never an edit.
+    treatment          = Column(String(30), nullable=True)
+    status             = Column(String(20), nullable=True)
+    source_document_id = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    approved_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+
     __table_args__ = (
         UniqueConstraint(
             "jurisdiction_country", "jurisdiction_state", "earning_type", "tax_component", "organization_id",
@@ -7476,6 +7523,10 @@ class CollectiveAgreement(Base):
     organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
 
     jurisdiction_country = Column(String(10), nullable=False, index=True)  # "SE"
+    # State/canton-level scope — NULL = country-wide (mirrors TaxabilityRule's
+    # own nullable jurisdiction_state). Switzerland models cantonal wage-floor
+    # agreements as a CBA row with jurisdiction_state="ZH" etc.
+    jurisdiction_state   = Column(String(100), nullable=True)
     agreement_code       = Column(String(50), nullable=False)   # e.g. "SE-SECTOR-TEKNIK-2026"
     name                 = Column(String(200), nullable=False)
     # EMPLOYER_SPECIFIC | SECTOR | LOCAL_SUPPLEMENT — deliberately no NATIONAL
@@ -7647,3 +7698,266 @@ class SwedenLeaveLedger(Base):
 
     def __repr__(self):
         return f"<SwedenLeaveLedger emp={self.employee_id} year={self.entitlement_year} paid={self.paid_days} saved={self.saved_days}>"
+
+
+# ── Switzerland: authority scheme profiles (CH spec) ──────────────────────
+# ONE registry for every authority scheme a CH employer interacts with, so the
+# scheme_* FKs (entity profile, employee statutory profile, entitlements,
+# absence-benefit events) always point at a single lifecycle-managed row.
+# organization_id NULL = platform catalog DEFINITION (authored by Super Admin,
+# same null-means-platform convention as CollectiveAgreement/TaxabilityRule);
+# set = that employer's ASSIGNMENT of it.
+
+class ChSchemeProfile(Base):
+    """One versioned Swiss authority-scheme profile — a compensation office,
+    an FAK fund, a BVG plan, an UVG policy or a KTG policy."""
+    __tablename__ = "payroll_ch_scheme_profiles"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    # COMPENSATION_OFFICE | FAK | BVG_PLAN | UVG_POLICY | KTG_POLICY
+    scheme_type            = Column(String(30), nullable=False)
+    scheme_code            = Column(String(50), nullable=False)
+    name                   = Column(String(200), nullable=False)
+    authority_identifier   = Column(String(50), nullable=True)
+    canton                 = Column(String(5), nullable=True)
+    rules                  = Column(JSON, nullable=True)
+    rules_sha256           = Column(String(64), nullable=True)
+    version                = Column(String(20), nullable=False, default="1.0")
+
+    # DRAFT | APPROVED | LIVE | RETIRED
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)
+    previous_version_id    = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+    source_document_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    activated_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "scheme_type", "scheme_code", "version",
+            name="uq_ch_scheme_profile_scope_version",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<ChSchemeProfile org={self.organization_id} {self.scheme_type} {self.scheme_code} {self.status}>"
+
+
+class ChEntityProfile(Base):
+    """1:1 org-level Switzerland employer profile: UID/seat, canton-level
+    tax registrations, the assigned compensation-office and FAK schemes, and
+    the evidence-driven readiness gate — mirrors EmployerFranceProfile's
+    readiness_status/readiness_evidence contract exactly. A revised profile
+    is a NEW effective-dated row chained by previous_version_id, never an
+    in-place edit of a governing row."""
+    __tablename__ = "payroll_ch_entity_profiles"
+
+    id                            = Column(Integer, primary_key=True, index=True)
+    organization_id               = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+    uid                           = Column(String(15), nullable=True)  # Swiss UID (e.g. CHE-)
+    seat_canton                   = Column(String(5), nullable=True)
+    canton_registrations          = Column(JSON, nullable=True)
+    compensation_office_scheme_id = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+    fak_scheme_id                 = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+
+    effective_from                = Column(Date, nullable=False)
+    effective_to                  = Column(Date, nullable=True)
+    previous_version_id           = Column(Integer, ForeignKey("payroll_ch_entity_profiles.id"), nullable=True)
+
+    # NOT_READY | READY | LIVE
+    readiness_status              = Column(String(30), nullable=False, default="NOT_READY", server_default="NOT_READY")
+    readiness_evidence            = Column(JSON, nullable=True)
+
+    created_by_id                 = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<ChEntityProfile org={self.organization_id} uid={self.uid} readiness={self.readiness_status}>"
+
+
+class ChQstTariffFile(Base):
+    """One imported/validated canonical QST tariff file for a canton — the
+    versioned authority snapshot the QST calculation reads, never a live
+    scrape. supersedes_id chains intra-canton replacements; file_sha256 is
+    the tamper-evident identity; validation_report holds the import/validate
+    outcome without ever inventing a "correct" figure."""
+    __tablename__ = "payroll_ch_qst_tariff_files"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    canton             = Column(String(5), nullable=False)
+    tax_year           = Column(Integer, nullable=True)
+    format_version     = Column(String(30), nullable=True)
+    publication_date   = Column(Date, nullable=True)
+    effective_from     = Column(Date, nullable=True)
+    effective_to       = Column(Date, nullable=True)
+    source_document_id = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    file_sha256        = Column(String(64), nullable=False)
+    row_count          = Column(Integer, nullable=True)
+
+    # IMPORTED | VALIDATED | APPROVED | ACTIVE | SUPERSEDED | REJECTED
+    status             = Column(String(20), nullable=False, default="IMPORTED", server_default="IMPORTED")
+    supersedes_id      = Column(Integer, ForeignKey("payroll_ch_qst_tariff_files.id"), nullable=True)
+
+    imported_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    imported_at        = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at        = Column(DateTime(timezone=True), nullable=True)
+    activated_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    activated_at       = Column(DateTime(timezone=True), nullable=True)
+    validation_report  = Column(JSON, nullable=True)
+
+    created_at         = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at         = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("canton", "file_sha256", name="uq_ch_qst_tariff_file_canton_sha"),
+    )
+
+    def __repr__(self):
+        return f"<ChQstTariffFile canton={self.canton} {self.file_sha256[:12]} {self.status}>"
+
+
+class ChQstTariffRow(Base):
+    """One QST tariff row within a ChQstTariffFile — per canton, per family-
+    composition bracket. Values are frozen as imported and never recomputed,
+    so a historical payslip can always prove which rate/code applied."""
+    __tablename__ = "payroll_ch_qst_tariff_rows"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    tariff_file_id = Column(Integer, ForeignKey("payroll_ch_qst_tariff_files.id"), nullable=False, index=True)
+    tariff_code    = Column(String(10), nullable=False)
+    children       = Column(SmallInteger, nullable=True)
+    church_tax     = Column(Boolean, nullable=True)
+    income_from    = Column(Numeric(12, 2), nullable=True)
+    income_to      = Column(Numeric(12, 2), nullable=True)
+    rate_pct       = Column(Numeric(7, 4), nullable=True)
+    min_tax        = Column(Numeric(10, 2), nullable=True)
+    raw_record     = Column(String(200), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ch_qst_tariff_row_bracket", "tariff_file_id", "tariff_code", "children", "income_from"),
+    )
+
+    def __repr__(self):
+        return f"<ChQstTariffRow file={self.tariff_file_id} {self.tariff_code} children={self.children}>"
+
+
+class ChFamilyAllowanceEntitlement(Base):
+    """One per-child family-allowance entitlement decision (CH spec §FAK):
+    allowance_type, entitlement basis (PRIMARY vs DIFFERENTIAL), the
+    precedence/employer-mandate evidence, coverage period and the family
+    fund's own decision reference. PRECEDENCE is stored, never re-derived —
+    a differential entitlement exists only because a primary fund elsewhere
+    is proven (precedence_evidence)."""
+    __tablename__ = "payroll_ch_family_allowance_entitlements"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id            = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    child_reference        = Column(String(50), nullable=True)
+    child_birth_date       = Column(Date, nullable=True)
+    # CHILD | EDUCATION | BIRTH | ADOPTION
+    allowance_type         = Column(String(30), nullable=False)
+    training_status        = Column(String(30), nullable=True)
+    # PRIMARY | DIFFERENTIAL
+    entitlement_basis      = Column(String(20), nullable=False, default="PRIMARY", server_default="PRIMARY")
+    precedence_evidence    = Column(JSON, nullable=True)
+    canton                 = Column(String(5), nullable=True)
+    fak_scheme_id          = Column(Integer, ForeignKey("payroll_ch_scheme_profiles.id"), nullable=True)
+    period_from            = Column(Date, nullable=True)
+    period_to              = Column(Date, nullable=True)
+
+    # REQUESTED | APPROVED | REJECTED | ENDED
+    status                 = Column(String(20), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    fund_decision_reference = Column(String(100), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source_document_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<ChFamilyAllowanceEntitlement emp={self.employee_id} {self.allowance_type} {self.status}>"
+
+
+class ChAbsenceBenefitEvent(Base):
+    """One CH statutory daily-allowance event — maternity, other-parental,
+    adoption, illness (CO/KTG), accident (UVG) or pregnancy protection.
+    Stores the insurer/benefit facts needed to reconcile the employer's
+    top-up with the authority's daily allowance. Deliberately no medical
+    content: evidence_document_id is a REFERENCE only (same discipline as
+    SwedenSickEpisode's medical_certificate_ref)."""
+    __tablename__ = "payroll_ch_absence_benefit_events"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    # MATERNITY | OTHER_PARENT | ADOPTION | ILLNESS_CO | ILLNESS_KTG |
+    # ACCIDENT_UVG | PREGNANCY_PROTECTION
+    event_type              = Column(String(30), nullable=False)
+    period_from             = Column(Date, nullable=False)
+    period_to               = Column(Date, nullable=True)
+    daily_allowance_rate    = Column(Numeric(10, 2), nullable=True)
+    insured_salary_basis    = Column(Numeric(14, 2), nullable=True)
+    insurer_claim_reference = Column(String(100), nullable=True)
+    benefit_amount_expected = Column(Numeric(14, 2), nullable=True)
+    benefit_amount_received = Column(Numeric(14, 2), nullable=True)
+    employer_topup_amount   = Column(Numeric(14, 2), nullable=True)
+    status                  = Column(String(20), nullable=False, default="OPEN", server_default="OPEN")
+    evidence_document_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_ch_absence_benefit_event_emp", "employee_id", "period_from"),
+    )
+
+    def __repr__(self):
+        return f"<ChAbsenceBenefitEvent emp={self.employee_id} {self.event_type} {self.status}>"
+
+
+class ChElmSubmission(Base):
+    """One ELM submission envelope for a CH authority domain. The payload is
+    referenced (payload_ref + payload_sha256), never duplicated; the full
+    authority + settlement state machine is tracked per submission so retries
+    stay idempotent (idempotency_key is UNIQUE). correction_of_id chains a
+    replacement/corrected submission to the original it supersedes."""
+    __tablename__ = "payroll_ch_elm_submissions"
+
+    id                         = Column(Integer, primary_key=True, index=True)
+    organization_id            = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    statutory_filing_id        = Column(Integer, ForeignKey("statutory_filings.id"), nullable=True)
+    # QST | AHV | FAK | UVG | UVGZ | KTG | BFS
+    domain                     = Column(String(20), nullable=False)
+    receiver_id                = Column(String(50), nullable=True)
+    canton                     = Column(String(5), nullable=True)
+    schema_version             = Column(String(30), nullable=True)
+    period_key                 = Column(String(50), nullable=True)
+    payload_sha256             = Column(String(64), nullable=True)
+    payload_ref                = Column(String(255), nullable=True)
+    transport_status           = Column(String(30), nullable=True)
+    receiver_validation_status = Column(String(30), nullable=True)
+    authority_ack_status       = Column(String(30), nullable=True)
+    settlement_status          = Column(String(30), nullable=True)
+    receipt_reference          = Column(String(100), nullable=True)
+    rejection_detail           = Column(JSON, nullable=True)
+    correction_of_id           = Column(Integer, ForeignKey("payroll_ch_elm_submissions.id"), nullable=True)
+    idempotency_key            = Column(String(64), nullable=False, unique=True)
+    actor_id                   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    correlation_id             = Column(String(64), nullable=True)
+    created_at                 = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                 = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_ch_elm_submission_org_domain", "organization_id", "domain", "period_key"),
+    )
+
+    def __repr__(self):
+        return f"<ChElmSubmission org={self.organization_id} {self.domain} {self.transport_status}>"

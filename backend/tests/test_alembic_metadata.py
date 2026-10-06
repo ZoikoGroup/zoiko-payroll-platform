@@ -133,7 +133,12 @@ def test_alembic_heads_is_single_head():
     # d7e6f5a4b3c2 (ZP-IT-ENG-001 3C): Italy LUL registered content — payload,
     # event_kind, method, registered_reference on payroll_it_lul_entries; single
     # child of c9d8e7f6a5b4, so no new branchpoint.
-    assert heads == ["d7e6f5a4b3c2"]
+    # 3baddbaa011a (CH jurisdiction support): Switzerland data model — seven
+    # payroll_ch_* tables, 29 nullable ch_* profile columns, five taxability-rule
+    # lifecycle columns, CollectiveAgreement.jurisdiction_state,
+    # payslip_items.ch_calculation_snapshot; single child of d7e6f5a4b3c2, so no
+    # new branchpoint.
+    assert heads == ["3baddbaa011a"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -145,7 +150,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["d7e6f5a4b3c2"]
+    assert list(script.get_heads()) == ["3baddbaa011a"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -176,7 +181,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 174   # + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong)
+    assert len(revs) == 175   # + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
 
 
 def test_germany_head_chain_wiring_is_intact():
