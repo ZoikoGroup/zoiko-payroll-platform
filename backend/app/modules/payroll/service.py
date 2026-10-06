@@ -1105,7 +1105,15 @@ def _pack_to_tax_snapshot(rates, slabs, pack) -> dict:
                 "rateLabel": s.rate_label, "taxFormula": s.tax_formula, "sortOrder": s.sort_order,
                 "jurisdictionCountry": s.jurisdiction_country, "jurisdictionState": s.jurisdiction_state,
                 "jurisdictionLocality": s.jurisdiction_locality, "taxRegime": s.tax_regime,
-                "filingStatus": s.filing_status, "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
+                "filingStatus": s.filing_status, "ruleType": s.rule_type,
+                # Additive (2026-10-06): Italy's surtax ladder tables (§5 addregionale/
+                # addcomunale) and Sweden's municipality/local income-tax tables are
+                # keyed by TaxSlab.tax_table_number (italy.py _rows, sweden.py) — without
+                # it a replay could not tell which locality's bracket table to apply.
+                # Absent on snapshots taken before this field existed, where replay
+                # degrades exactly as it always did.
+                "taxTableNumber": s.tax_table_number,
+                "formulaExpression": s.formula_expression,
                 "flatAmount": _dec(s.flat_amount), "adjustmentAmount": _dec(s.adjustment_amount),
                 "niCategory": s.ni_category, "employerRatePct": _dec(s.employer_rate_pct),
                 # Additive (2026-09-23): the row's formula/assessment basis —
@@ -1258,7 +1266,7 @@ class _ReplayTaxSlab:
     __slots__ = (
         "min_amount", "max_amount", "rate_pct", "rate_label", "tax_formula",
         "sort_order", "jurisdiction_country", "jurisdiction_state", "jurisdiction_locality",
-        "tax_regime", "filing_status", "rule_type", "formula_expression",
+        "tax_regime", "filing_status", "rule_type", "tax_table_number", "formula_expression",
         "flat_amount", "adjustment_amount", "ni_category", "employer_rate_pct",
         "assessment_basis",
     )
@@ -1312,7 +1320,8 @@ def _reconstruct_rate_map_and_slabs_from_snapshot(snapshot: Optional[dict]) -> t
             rate_label=s.get("rateLabel"), tax_formula=s.get("taxFormula"), sort_order=s.get("sortOrder"),
             jurisdiction_country=s.get("jurisdictionCountry"), jurisdiction_state=s.get("jurisdictionState"),
             jurisdiction_locality=s.get("jurisdictionLocality"), tax_regime=s.get("taxRegime"),
-            filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
+            filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), tax_table_number=s.get("taxTableNumber"),
+            formula_expression=s.get("formulaExpression"),
             flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
             ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
             # .get(): None for snapshots taken before assessmentBasis was
@@ -1363,7 +1372,8 @@ def _reconstruct_overlay_from_snapshot(snapshot: Optional[dict]):
                 rate_label=s.get("rateLabel"), tax_formula=s.get("taxFormula"), sort_order=s.get("sortOrder"),
                 jurisdiction_country=s.get("jurisdictionCountry"), jurisdiction_state=s.get("jurisdictionState"),
                 jurisdiction_locality=s.get("jurisdictionLocality"), tax_regime=s.get("taxRegime"),
-                filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
+                filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), tax_table_number=s.get("taxTableNumber"),
+                formula_expression=s.get("formulaExpression"),
                 flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
                 ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
                 # .get(): None for snapshots taken before assessmentBasis was
@@ -26306,28 +26316,50 @@ def _post_payslip_ytd(db: Session, run: PayrollRun, employee, item: PayslipItem,
         _upsert_jm_heart_ytd(db, run.organization_id, run.pay_date, r["jm_heart_increment"], payslip_id=item.id)
 
 
-def _refresh_ytd_after_correction(db: Session, run: PayrollRun, employee, item: PayslipItem, country: str,
-                                  r: dict, old_postings) -> list:
-    """Correction = reverse this payslip's employee-level (ABSOLUTE) postings
-    and re-post them from the recalculated result. The correction path never
-    recomputes employer-level increments (org levies) or CA Option 2 (see
-    regenerate_employee_payslip), so ADDITIVE postings are carried over
-    untouched, and an absolute row whose family the correction did not
-    recompute is put back to its original value. If a LATER payslip already
-    built on these totals, the correction may only proceed when its YTD
-    effect is unchanged (nothing is touched); a changed effect is refused —
-    never silently applied under the later payslip. Returns the postings to
-    store on the payslip."""
+def _begin_ytd_correction(db: Session, item: PayslipItem, old_postings) -> dict:
+    """Correction, part 1 — reverse this payslip's employee-level (ABSOLUTE)
+    postings BEFORE the recompute, not after. Ireland and Italy resolve their
+    YTD inputs by reading the LIVE accumulator inside _compute_payslip_values
+    (see _resolve_ie_calc_inputs / _italy_service.resolve_it_calc_inputs):
+    with this payslip's own prior posting still in place, that read already
+    includes it, so the recalculated absolute totals (and every LATER
+    payslip that reads them) would double-count this period. Reversing first
+    gives them the same true pre-this-payslip base the other YTD
+    jurisdictions get from their frozen ytd_inputs. The correction path
+    never recomputes employer-level increments (org levies) or CA Option 2
+    (see regenerate_employee_payslip), so ADDITIVE postings are carried over
+    untouched by the finish phase.
+
+    The caller restores ctx["state"] if the recompute raises; the finish
+    phase restores it if a LATER payslip already built on these totals and
+    the correction's YTD effect changed (YtdPostingConflict)."""
     old_abs = [p for p in old_postings if p["mode"] == "absolute"]
     old_add = [p for p in old_postings if p["mode"] != "absolute"]
     state = _ytd_capture_state(db, item.employee_id, item.organization_id)
     later = any(state.get((p["table"], p["rowId"]), (None, None, item.id))[2] != item.id for p in old_abs)
     _ytd_reverse_postings(db, item, old_abs, require_latest=False, delete_created=False)
     pre = _ytd_capture_state(db, item.employee_id, item.organization_id)
+    return {"old_postings": old_postings, "old_abs": old_abs, "old_add": old_add,
+            "state": state, "later": later, "pre": pre}
+
+
+def _finish_ytd_correction(db: Session, run: PayrollRun, employee, item: PayslipItem, country: str,
+                           r: dict, ctx: dict) -> list:
+    """Correction, part 2 — after the recompute, re-post the recalculated
+    ABSOLUTE totals and settle the correction begun by _begin_ytd_correction.
+    An absolute row whose family the correction did not recompute is put back
+    to its original value. If a LATER payslip already built on these totals,
+    the correction may only proceed when its YTD effect is unchanged (nothing
+    is touched); a changed effect is refused — never silently applied under
+    the later payslip. Returns the postings to store on the payslip."""
+    old_abs = ctx["old_abs"]
+    old_add = ctx["old_add"]
+    state = ctx["state"]
+    later = ctx["later"]
     _post_payslip_ytd(db, run, employee, item, country, {**r, "org_levy_result": None,
                                                          "uk_org_levy_increment": None, "jm_heart_increment": None})
     # after the reversal only the rows just re-posted point at this payslip
-    new_abs = [p for p in _ytd_collect_postings(db, item, pre) if p["mode"] == "absolute"]
+    new_abs = [p for p in _ytd_collect_postings(db, item, ctx["pre"]) if p["mode"] == "absolute"]
     new_keys = {(p["table"], p["taxYear"], p["component"]) for p in new_abs}
     models = dict(_ytd_models())
     kept = []
@@ -26349,7 +26381,7 @@ def _refresh_ytd_after_correction(db: Session, run: PayrollRun, employee, item: 
                 "this correction changes year-to-date totals that a later payslip has already built on — "
                 "remove or correct the later payslip(s) first"
             )
-        return old_postings
+        return ctx["old_postings"]
     return new_abs + kept + old_add
 
 
@@ -27247,6 +27279,18 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         replay_rates, replay_slabs = _reconstruct_rate_map_and_slabs_from_snapshot(existing_tax_snapshot)
         if replay_rates or replay_slabs:
             rate_map = {_normalize_engine_component_key(r.component_key): r for r in replay_rates}
+            if country == "IT" and replay_rates:
+                # Mirror the live resolution path (see
+                # _resolve_effective_rate_inputs): the §7 INPS matrix row
+                # set carries many rows per component_key — one per CSC and
+                # worker class — so keying by family alone would replay only
+                # the LAST class's rates (that collision is exactly the
+                # "§7 INPS matrix ... one class's rates for everyone" note
+                # written above the live path's own italy_rate_map call).
+                # AC-32 historical replay must reproduce the ORIGINAL class
+                # matrix, so an Italy correction behaves the same against a
+                # replayed snapshot as against the live pack.
+                rate_map = _italy_service.italy_rate_map(replay_rates)
             slabs = replay_slabs
             replaying_from_snapshot = True
         # AC-32 historical-replay gap closure (see _build_overlay_tax_
@@ -27346,15 +27390,35 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         if whm_before is not None:
             ytd_inputs["ytd_whm_earnings_before"] = Decimal(whm_before)
 
-    values = _compute_payslip_values(
-        db, run, employee, rate_map, slabs, country, calculation_mode,
-        allowance_components=allowance_components, resolved_pack=resolved_pack,
-        state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-        reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs or None,
-        poe_snapshot=poe_snapshot,
-    )
+    # Phase 4A (reversal-integrity fix): the correction reverses this
+    # payslip's posted YTD BEFORE the recompute — not after. Ireland and
+    # Italy resolve their YTD inputs by reading the LIVE accumulator inside
+    # _compute_payslip_values (see _resolve_ie_calc_inputs /
+    # _italy_service.resolve_it_calc_inputs); with the payslip's own prior
+    # posting still present that read already includes it, so the
+    # recalculated absolute totals — and every LATER payslip that reads
+    # them — would double-count this period. Reversing first gives IE/IT the
+    # same pre-this-payslip "frozen" base the other YTD jurisdictions get
+    # from the ytd_inputs built above. On a failed compute the reversal is
+    # undone (a recalculation never leaves the accumulator half-reversed).
+    old_ytd_postings = _ytd_postings_of(existing_item)
+    ytd_correction_ctx = None
+    if old_ytd_postings is not None:
+        ytd_correction_ctx = _begin_ytd_correction(db, existing_item, old_ytd_postings)
+    try:
+        values = _compute_payslip_values(
+            db, run, employee, rate_map, slabs, country, calculation_mode,
+            allowance_components=allowance_components, resolved_pack=resolved_pack,
+            state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+            reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs or None,
+            poe_snapshot=poe_snapshot,
+        )
+    except BaseException:
+        if ytd_correction_ctx is not None:
+            _ytd_restore_state(db, ytd_correction_ctx["state"], existing_item.employee_id, existing_item.organization_id)
+        raise
     # Phase 4A: the correction now RE-POSTS year-to-date totals from these
-    # results (see _refresh_ytd_after_correction below) instead of the
+    # results (see _begin_ytd_correction/_finish_ytd_correction below) instead of the
     # former never-write contract, which left YTD stale after a
     # value-changing correction. Payslips without posting records keep the
     # former behaviour.
@@ -27367,8 +27431,8 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     sg_cpf_ytd_result = values.pop("_sg_cpf_ytd_result", None)
     # Ireland / Puerto Rico: re-posted through the same Phase 4A lifecycle
-    # (_refresh_ytd_after_correction reverses this payslip's absolute postings
-    # first), so a correction REPLACES their year-to-date rather than advancing it.
+    # (_begin_ytd_correction reversed this payslip's absolute postings before
+    # the recompute above), so a correction REPLACES their year-to-date rather than advancing it.
     ie_ytd_result = values.pop("_ie_ytd_result", None)
     it_ytd_result = values.pop("_it_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
@@ -27418,17 +27482,16 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             "ytd_snapshot to reproduce from — figures may differ from the original run.",
             existing_item.id,
         )
-    old_ytd_postings = _ytd_postings_of(existing_item)
     new_ytd_postings = None
     if old_ytd_postings is not None:
         try:
-            new_ytd_postings = _refresh_ytd_after_correction(db, run, employee, existing_item, country, dict(
+            new_ytd_postings = _finish_ytd_correction(db, run, employee, existing_item, country, dict(
                 ytd_result=ytd_result, us_ytd_result=us_ytd_result, au_sg_ytd_result=au_sg_ytd_result,
                 au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
                 gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
                 ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
                 uk_director_ytd_result=uk_director_ytd_result,
-            ), old_ytd_postings)
+            ), ytd_correction_ctx)
         except YtdPostingConflict as exc:
             db.rollback()
             raise BadRequestException(f"Cannot recalculate this payslip: {exc}")
@@ -31848,6 +31911,27 @@ def advance_payroll_run_status(
     return run
 
 
+def _reverse_run_ytd_postings(db: Session, run: PayrollRun) -> None:
+    """Reverse every payslip's posted YTD within a run before the run itself
+    is deleted — DELETE-payroll-run integrity. Iterated newest-first so the
+    ADDITIVE employer-level rows rewind their last_updated_payslip_id
+    ownership chain back to the run's predecessor (or NULL) instead of a
+    payslip this deletion is about to cascade-remove; rows are only left with
+    a previous writer that still exists. Fail-closed (YtdPostingConflict) on
+    an ABSOLUTE row a later payslip — in another run — already built on,
+    exactly like delete_payslip: deleting the run would silently abandon
+    that total's provenance."""
+    items = (db.query(PayslipItem)
+             .filter(PayslipItem.payroll_run_id == run.id)
+             .order_by(PayslipItem.id.desc()).all())
+    for item in items:
+        postings = _ytd_postings_of(item)
+        if postings is not None:
+            _ytd_reverse_postings(db, item, postings, require_latest=True, delete_created=True)
+        else:
+            _ytd_reverse_legacy(db, item)
+
+
 def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if run.status != PayrollStatus.DRAFT:
@@ -31857,6 +31941,16 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
             "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))
     _deleted_run_period = run.period_label
     _deleted_run_code = run.run_code
+    # Year-to-date accumulators (every YTD jurisdiction): reverse what every
+    # payslip in this run posted before the run itself is deleted — never
+    # leave a stale total or a dangling last_updated_payslip_id pointing at a
+    # cascade-removed payslip. Refused (fail-closed) when a later payslip
+    # already built on one of this run's absolute totals.
+    try:
+        _reverse_run_ytd_postings(db, run)
+    except YtdPostingConflict as exc:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payroll run: {exc}")
     db.delete(run)
     db.commit()
     _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id, run_id=run_id)
