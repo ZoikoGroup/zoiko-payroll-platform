@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from typing import Callable, Optional
 
 from fastapi import BackgroundTasks
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -150,7 +151,7 @@ def _token_hash(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
-def _action_link(purpose: SecurityActionPurpose, raw_token: str) -> str:
+def _action_link(purpose: SecurityActionPurpose, raw_token: str, base_url: Optional[str] = None) -> str:
     """Reset links open the React app's /reset-password page (which calls the
     JSON API). Invite links open the backend-hosted claim page that issues a
     one-time temporary password. NOTE: routers are mounted under "/api" in
@@ -163,7 +164,11 @@ def _action_link(purpose: SecurityActionPurpose, raw_token: str) -> str:
     if purpose == SecurityActionPurpose.INVITE:
         api_base = os.environ.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
         return f"{api_base}/api/auth/accept-invite?{query}"
-    base = os.environ.get("ACTION_BASE_URL", "").rstrip("/") or settings.FRONTEND_URL.rstrip("/")
+    # Explicit config wins; then the SPA origin the request came from (already
+    # validated against the CORS allowlist by the router); then FRONTEND_URL.
+    base = (os.environ.get("ACTION_BASE_URL", "").rstrip("/")
+            or (base_url or "").rstrip("/")
+            or settings.FRONTEND_URL.rstrip("/"))
     return f"{base}/reset-password?{query}"
 
 
@@ -970,8 +975,11 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
 
 # ── Password flows ──────────────────────────────────────────────────────────
 
-def request_password_reset(db: Session, email: str) -> dict:
+def request_password_reset(db: Session, email: str, base_url: Optional[str] = None) -> dict:
+    email = (email or "").strip()
     user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
     if user is not None and user.is_active:
         # §04 idempotency key: tenant | event | recipient | template | material
         # version — a double "Forgot password" submit can never leave two live,
@@ -986,7 +994,7 @@ def request_password_reset(db: Session, email: str) -> dict:
             SecurityActionPurpose.RESET,
             idempotency_key=idempotency_key,
         )
-        link = _action_link(SecurityActionPurpose.RESET, raw_token)
+        link = _action_link(SecurityActionPurpose.RESET, raw_token, base_url)
         db.commit()
         _dispatch_email_guarded(
             db,
