@@ -1,7 +1,7 @@
 """Italy F24 causale catalog + F24 line idempotency
 
 Revision ID: c9d8e7f6a5b4
-Revises: 917a54ed2347
+Revises: cd62503afe26
 Create Date: 2026-10-05 00:00:00.000000
 
 ZP-IT-ENG-001 section 16 / IT-043 / IT-046, phase 3A. Two changes, both
@@ -31,6 +31,11 @@ and IT-045 keeps an accepted filing separate from a settled payment.
 Every operation is guarded (skipped when its object already exists), matching
 the pattern adopted after the 2026-09-29 deploy failed on a table an unmerged
 branch had already created.
+
+Re-parented onto cd62503afe26 (Hong Kong) when venu merged main (2026-10-06):
+917a54ed2347 -> cd62503afe26 -> c9d8e7f6a5b4 -> d7e6f5a4b3c2. Both Italy revisions
+were only ever on venu (never on a deployed database), so re-parenting removes
+the fork without a merge migration.
 """
 from typing import Sequence, Union
 
@@ -40,7 +45,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'c9d8e7f6a5b4'
-down_revision: Union[str, Sequence[str], None] = '917a54ed2347'
+down_revision: Union[str, Sequence[str], None] = 'cd62503afe26'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

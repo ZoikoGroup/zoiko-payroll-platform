@@ -127,15 +127,13 @@ def test_alembic_heads_is_single_head():
     # of 7a1b2c3d4e5f, so no new branchpoint.
 # c9d8e7f6a5b4 (ZP-IT-ENG-001 3A): Italy F24 causale catalog
     # (payroll_it_f24_causales, seeded EMPTY — IT-043 forbids inventing causali)
-    # plus uq_it_f24_line_identity on payroll_it_f24_lines; single child of
-    # 917a54ed2347, so still no new branchpoint.
+    # plus uq_it_f24_line_identity on payroll_it_f24_lines; re-parented onto
+    # cd62503afe26 (Hong Kong) when venu merged main (2026-10-06), so the chain
+    # is linear: 917a54ed2347 -> cd62503afe26 -> c9d8e7f6a5b4 -> d7e6f5a4b3c2.
     # d7e6f5a4b3c2 (ZP-IT-ENG-001 3C): Italy LUL registered content — payload,
     # event_kind, method, registered_reference on payroll_it_lul_entries; single
-    # child of c9d8e7f6a5b4, so still no new branchpoint.
-    # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001) is ALSO a child of
-    # 917a54ed2347, so this graph currently forks into two heads
-    # (d7e6f5a4b3c2 and cd62503afe26) until the fork is rejoined.
-    assert sorted(heads) == ["cd62503afe26", "d7e6f5a4b3c2"]
+    # child of c9d8e7f6a5b4, so no new branchpoint.
+    assert heads == ["d7e6f5a4b3c2"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -147,7 +145,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert sorted(script.get_heads()) == ["cd62503afe26", "d7e6f5a4b3c2"]
+    assert list(script.get_heads()) == ["d7e6f5a4b3c2"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
