@@ -1247,6 +1247,53 @@ class ITEmployeeValidation(EmployeeValidationStrategy):
             raise BadRequestException("A pension-fund TFR destination needs the fund named (pension_fund).")
 
 
+def swiss_ahv_number_is_valid(value: str) -> bool:
+    """Shape AND EAN-13 check digit. The AHV/AVS number is the 13-digit EAN-13
+    with the 756 (Switzerland) national prefix — e.g. 756.9217.0769.85 is
+    digits 7569217076985; the 13th digit is the standard EAN-13 check digit
+    (weights 1, 3, 1, 3, ... from the FIRST digit of the 12-digit payload).
+    Tolerates the printed dot/space formatting; refuses every other shape."""
+    raw = re.sub(r"[.\s-]", "", str(value or ""))
+    if not re.fullmatch(r"756\d{10}", raw):
+        return False
+    total = sum(int(d) * (1 if i % 2 == 0 else 3) for i, d in enumerate(raw[:12]))
+    return (10 - total % 10) % 10 == int(raw[12])
+
+
+class CHEmployeeValidation(EmployeeValidationStrategy):
+    """Switzerland — AHV/AVS number.
+
+    The AHV/AVS number is validated in shape AND EAN-13 check digit, because a
+    wrong one breaks the compensation office (Ausgleichskasse) contribution
+    accounting and the Lohnausweis — a typo must be caught at entry against the
+    AHV insurance card (AHV-Ausweis), never at the first AHV payment. It is
+    SENSITIVE (masked in API responses) and the duplicate check key. No federal
+    wage floor or income tax is captured here: source tax (Quellensteuer) and
+    FAK top-ups are canton pack content (CH-PAYROLL-2026 canton packs), the
+    federal rates resolve from the CH federal pack, and Switzerland has no
+    federal statutory minimum wage (CH_WAGE_FLOOR)."""
+    country_code = "CH"
+    duplicate_field = "ahv_number"
+    SENSITIVE_FIELDS = ('ahv_number',)
+    FIELD_SPECS = {
+        "ahv_number": {
+            "required": True,
+            # 756 national prefix + 10 digits + 1 EAN-13 check digit, dots/spaces
+            # tolerated in entry (756.9217.0769.85) — stripped before matching.
+            "strip_chars": ". ",
+            "pattern": re.compile(r"^756\d{10}$"),
+            "error": "AHV number must be the 13-digit AHV/AVS number 756.XXXX.XXXX.XX from the AHV insurance card.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        n = cleaned.get("ahv_number")
+        if n and not swiss_ahv_number_is_valid(n):
+            raise BadRequestException("AHV number fails the EAN-13 check digit — check the number against the "
+                                      "employee's AHV insurance card (AHV-Ausweis).")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1268,6 +1315,7 @@ _STRATEGIES = {
     "HK": HKEmployeeValidation,
     "SE": SEEmployeeValidation,
     "IT": ITEmployeeValidation,
+    "CH": CHEmployeeValidation,
 }
 
 
