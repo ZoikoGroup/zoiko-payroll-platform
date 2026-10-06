@@ -16,6 +16,7 @@ export { default as PRCompliancePage } from "./PRCompliancePage";
 export { default as FRCompliancePage } from "./FRCompliancePage";
 export { default as IECompliancePage } from "./IECompliancePage";
 export { default as SGCompliancePage } from "./SGCompliancePage";
+export { default as HKCompliancePage } from "./HKCompliancePage";
 export { default as SECompliancePage } from "./SECompliancePage";
 export { default as ITCompliancePage } from "./ITCompliancePage";
 
@@ -40,6 +41,7 @@ export const COUNTRY_CODE_TO_ROUTE = {
   FR: "france",
   IE: "ireland",
   SG: "singapore",
+  HK: "hong-kong",
   SE: "sweden",
   IT: "italy",
 };

@@ -69,6 +69,9 @@ class MissingComplianceConfigurationError(Exception):
 #      with zero existing orgs/employees/synced rows, so none of the
 #      IN-style re-sync risk above applies — and singapore.py defines no
 #      hardcoded fallback at all, so there is nothing to fall back to.
+# HK — enabled from day one, 2026-09-30 (ZP-HK-ENG-001: "never invent a
+#      statutory value"). Same reasoning as SG: a brand-new jurisdiction
+#      with no orgs and no hardcoded fallback in countries/hong_kong.py.
 #   IE — enabled on venu (ZP-IE-ENG-001); kept alongside SG at the merge.
 #   SE — enabled with the Sweden build (ZP-SE-ENG-001): a brand-new
 #        jurisdiction with zero existing orgs/employees/synced rows, and
@@ -84,7 +87,7 @@ class MissingComplianceConfigurationError(Exception):
 # Italy is the same case (ZP-IT-ENG-001 §30): no Italian packs, rates, registry
 # row or payroll runs exist, so flipping IT on at landing makes readiness — not
 # a default — the thing that keeps payroll honest.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT"}
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact

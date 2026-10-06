@@ -61,6 +61,23 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "acn", label: "ACN", pattern: "^\\d{3}\\s?\\d{3}\\s?\\d{3}$", example: "008 672 000", primary: false },
     ],
   },
+  // Hong Kong — mirrors backend core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.HK
+  // (the backend re-validates every write and stays authoritative).
+  HK: {
+    label: "BR Number / IRD Employer's File Number",
+    fields: [
+      { key: "br_number", label: "Business Registration Number", pattern: "^\\d{8}$", example: "12345678", primary: true },
+      { key: "ird_employer_file_number", label: "IRD Employer's File Number", pattern: "^\\d[A-Z0-9]{2}-?\\d{6,8}$", example: "6A1-12345678", primary: false },
+      { key: "empf_employer_account", label: "eMPF employer account number", pattern: "^[A-Za-z0-9-]{4,30}$", example: "ER-12345678", primary: false },
+      { key: "mpf_scheme_name", label: "MPF scheme (trustee) the employer participates in", pattern: "^[A-Za-z0-9 .,'&()/-]{2,100}$", example: "Example MPF Master Trust", primary: false },
+      { key: "empf_submission_channel", label: "eMPF submission channel", pattern: "^(EMPF_PLATFORM_MANUAL|NOT_CONFIGURED)$", example: "EMPF_PLATFORM_MANUAL", primary: false, options: ["EMPF_PLATFORM_MANUAL", "NOT_CONFIGURED"] },
+      { key: "ird_filing_channel", label: "IRD employer's return filing channel", pattern: "^(IRD_ETAX_MANUAL|PAPER|NOT_CONFIGURED)$", example: "IRD_ETAX_MANUAL", primary: false, options: ["IRD_ETAX_MANUAL", "PAPER", "NOT_CONFIGURED"] },
+      { key: "ec_insurance_policy_number", label: "Employees' Compensation insurance policy number", pattern: "^[A-Za-z0-9/-]{3,40}$", example: "EC-2026-000123", primary: false },
+      { key: "ec_insurance_expiry", label: "Employees' Compensation insurance expiry (YYYY-MM-DD)", pattern: "^\\d{4}-\\d{2}-\\d{2}$", example: "2027-06-30", primary: false },
+      { key: "pics_published", label: "Employment Personal Information Collection Statement issued", pattern: "^(YES|NO)$", example: "NO", primary: false, options: ["YES", "NO"] },
+      { key: "bank_workflow_validated", label: "Salary bank-payment workflow validated", pattern: "^(YES|NO)$", example: "NO", primary: false, options: ["YES", "NO"] },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -71,6 +88,7 @@ const COUNTRY_NAME_TO_CODE = {
   uk: "UK",
   germany: "DE",
   australia: "AU",
+  "hong kong": "HK",
   france: "FR",
   ireland: "IE",
 };
@@ -81,6 +99,7 @@ const CODE_TO_COUNTRY_NAME = {
   UK: "United Kingdom",
   DE: "Germany",
   AU: "Australia",
+  HK: "Hong Kong",
   FR: "France",
   IE: "Ireland",
 };

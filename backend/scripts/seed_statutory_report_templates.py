@@ -1537,6 +1537,7 @@ def run():
         # document) — folding it into the generic ReportTemplate shape
         # would duplicate, not reuse, that existing architecture.
 
+        seed_hong_kong(db)
         # ------------------------------------------------------------------
         # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) templates.
         # ------------------------------------------------------------------
@@ -1726,6 +1727,309 @@ def run():
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:
         db.close()
+
+
+def seed_hong_kong(db):
+    """The seven Hong Kong report templates and the BIR56A / IR56B filing
+    calendar rows, seeded through the same validated service functions every
+    other jurisdiction uses. Exposed as its own function (rather than inlined
+    in run()) so a test can seed Hong Kong in isolation without paying for - or
+    polluting its fixtures with - every other country's templates.
+    """
+    # ── Hong Kong (ZP-HK-ENG-001 §7, §5, HK-011, HK-010) ─────────────
+    # Hong Kong's reporting runs through the SAME shared pipeline as every
+    # other jurisdiction: these seven templates are ordinary ReportTemplates
+    # (versioned, effective dated, maker-checker approved, Activated
+    # before use), and each of the five generators below writes a shared
+    # GeneratedReport whose rendered_data the shared certificate PDF
+    # renders for the per-employee forms.
+    #
+    # Two things are deliberately true of every one of them:
+    #  1. NO "tax" component. Hong Kong has no payroll income tax — Salaries
+    #     Tax is employee-assessed and reported to IRD after the year of
+    #     assessment, never withheld by the employer. MPF uses the shared
+    #     employee/employer pension slots. Same reasoning as Cayman
+    #     (KY_PENSION) and The Bahamas (BS_NIB_STATEMENT).
+    #  2. The description states, per template, that this is Zoiko's own
+    #     INTERNAL layout and not the IRD / eMPF prescribed format. The
+    #     official BIR56A / IR56B / IR56E / IR56F / IR56G XML schemas and
+    #     the eMPF remittance specification are not archived in this
+    #     build, so no official layout is invented and no e-filing is
+    #     offered (release gate G2). The source_column values are real
+    #     persisted columns or, for bespoke-computed figures, the same
+    #     real-column placeholder convention JM-S02 / SG-IR8A use.
+    _HK_DISCLOSURE = ("[INTERNAL LAYOUT — NOT THE IRD/eMPF PRESCRIBED FORMAT, gate G2] Zoiko's own field map. "
+                      "The official IRD BIR56A/IR56B/IR56E/IR56F/IR56G XML schemas and the eMPF remittance "
+                      "specification are not archived in this build, so no official layout is claimed and "
+                      "nothing is transmitted to IRD or eMPF. All figures are computed from committed "
+                      "payroll; the HK statutory pack (ZP-HK-ENG-001 v1.0) is the source of every value.")
+    _hk_employer = ("employer_info", "Employer Information", [
+        ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+        ("employer_address", "Employer Address", "text", "EMPLOYER_PROFILE", "address", None),
+        ("employer_br_number", "Business Registration (BR) Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+        ("employer_ird_file_number", "IRD Employer File Number", "text", "EMPLOYER_PROFILE", "ird_employer_file_number", None),
+        ("employer_empf_account", "eMPF Employer Account", "text", "EMPLOYER_PROFILE", "empf_employer_account", None),
+    ])
+    _hk_filing_metadata = ("filing_metadata", "Filing Metadata", [
+        ("schema_status", "Filing Status / Schema", "text", "PAYSLIP_ITEM", "gross_pay", None),
+    ])
+
+    print("Seeding Hong Kong BIR56A annual employer's return (aggregate)...")
+    _seed_template(
+        db, template_key="HK-BIR56A", name="BIR56A — Annual Employer's Return (Year of Assessment)",
+        report_type="HK_BIR56A", country="HK", reporting_year="2025/26", document_scope="AGGREGATE",
+        description=_HK_DISCLOSURE, regulatory_authority="Inland Revenue Department (IRD)",
+        effective_from=date(2025, 4, 1),
+        source_references="IRD PAM (employer) — annual employer's return for the year of assessment ending "
+                          "31 March. Field map computed by service.generate_hong_kong_bir56a; no official "
+                          "BIR56A XML layout is certified (G2).",
+        components=[
+            _hk_employer,
+            ("employee_summary", "Employee Summary", [
+                ("employee_count", "Employees reported", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                ("bir56a_case_id", "BIR56A reporting case", "number", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("totals", "Totals", [
+                ("employer_ya", "Year of Assessment (1 April – 31 March)", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_remuneration", "Total remuneration reported (IRD fields)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("committed_payroll_gross", "Committed payroll gross (reconciliation target)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            _hk_filing_metadata,
+        ],
+    )
+
+    print("Seeding Hong Kong IR56B per-employee annual return (employee copy)...")
+    _seed_template(
+        db, template_key="HK-IR56B", name="IR56B — Employee's Annual Return",
+        report_type="HK_IR56B", country="HK", reporting_year="2025/26", document_scope="PER_EMPLOYEE",
+        description=_HK_DISCLOSURE + " PER_EMPLOYEE, so the shared certificate PDF renders the employee's own copy.",
+        regulatory_authority="Inland Revenue Department (IRD)", effective_from=date(2025, 4, 1),
+        source_references="IRD PAM — the employee's annual return for the year of assessment ending 31 March. "
+                          "Field map computed by service.generate_hong_kong_ir56b from the employee's "
+                          "committed HK payslips and the HK_EARNING_CLASS pack rows.",
+        components=[
+            _hk_employer,
+            ("employee_info", "Employee Information", [
+                ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ("employee_hkid", "HKID", "text", "PAYROLL_EMPLOYEE", "hkid", None),
+                ("employee_passport_number", "Passport Number", "text", "PAYROLL_EMPLOYEE", "passport_number", None),
+            ]),
+            ("employment", "Employment Period", [
+                ("year_of_assessment", "Year of Assessment", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("employment_start", "Employment start reported", "date", "PAYROLL_EMPLOYEE", "date_of_joining", None),
+                ("employment_end", "Employment end reported", "date", "PAYROLL_EMPLOYEE", "date_of_leaving", None),
+            ]),
+            ("remuneration", "Remuneration Details", [
+                # The per-field breakdown the generator already computes from the
+                # case payload (ird_<field>): earning classes mapped to an IR56B
+                # field. Internal field names, NOT the IRD prescribed items (G2).
+                ("ird_salary_wages", "Salary / wages (internal IRD field)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("ird_other_rewards_allowances", "Other rewards / allowances (internal IRD field)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("ird_unmapped_requires_classification", "Unclassified remuneration (blocks filing until classified)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_remuneration", "Total reportable remuneration", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("mpf_relevant_income_total", "Total MPF relevant income", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("contributions", "MPF (Employee)", [
+                ("mpf_employee_total", "MPF mandatory contribution (employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+            ]),
+            ("employer_contributions", "MPF (Employer)", [
+                ("mpf_employer_total", "MPF mandatory contribution (employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+            ]),
+            _hk_filing_metadata,
+        ],
+    )
+
+    _hk_notification_identity = [
+        _hk_employer,
+        ("employee_info", "Employee Information", [
+            ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+            ("employee_hkid", "HKID", "text", "PAYROLL_EMPLOYEE", "hkid", None),
+            ("employee_passport_number", "Passport Number", "text", "PAYROLL_EMPLOYEE", "passport_number", None),
+        ]),
+    ]
+    for _key, _name, _type, _event_label in [
+        ("HK-IR56E", "IR56E — Employee's Notification of Commencement of Employment", "HK_IR56E", "Commencement Details"),
+        ("HK-IR56F", "IR56F — Employee's Notification of Cessation of Employment", "HK_IR56F", "Cessation Details"),
+    ]:
+        print(f"Seeding Hong Kong {_key} employee notification (per-employee)...")
+        _seed_template(
+            db, template_key=_key, name=_name, report_type=_type, country="HK",
+            reporting_year="2025/26", document_scope="PER_EMPLOYEE",
+            description=_HK_DISCLOSURE, regulatory_authority="Inland Revenue Department (IRD)",
+            effective_from=date(2025, 4, 1),
+            source_references="IRD PAM — the employee's notification for this event. Field map computed by "
+                              "service.generate_hong_kong_ir56_notification from the reporting case, which "
+                              "hk_service builds from committed payroll.",
+            components=_hk_notification_identity + [
+                ("event", _event_label, [
+                    ("form_type", "Form", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("event_date", "Event date", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("due_date", "Notification due by", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("income_period_start", "Income period from", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("income_period_end", "Income period to", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("reported_total", "Remuneration reported", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                _hk_filing_metadata,
+            ],
+        )
+
+    print("Seeding Hong Kong IR56G departure notification (per-employee, with the tax-clearance hold)...")
+    _seed_template(
+        db, template_key="HK-IR56G", name="IR56G — Employee's Notification of Departure from Hong Kong",
+        report_type="HK_IR56G", country="HK", reporting_year="2025/26", document_scope="PER_EMPLOYEE",
+        description=_HK_DISCLOSURE + " The amount withheld is a LEGAL HOLD under the IR56G tax clearance, not a "
+                                      "deduction — net pay is unchanged and the money stays owed to the employee.",
+        regulatory_authority="Inland Revenue Department (IRD)", effective_from=date(2025, 4, 1),
+        source_references="IRD PAM 46(e) — the departure notification and the one-month tax-clearance hold. "
+                          "Field map computed by service.generate_hong_kong_ir56_notification.",
+        components=_hk_notification_identity + [
+            ("event", "Departure Details", [
+                ("form_type", "Form", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("event_date", "Expected departure date", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("due_date", "Notification due by", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("income_period_start", "Income period from", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("income_period_end", "Income period to", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("reported_total", "Remuneration reported", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("tax_clearance_hold", "Tax Clearance Hold (amount withheld)", [
+                ("hold_state", "Hold state", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("hold_filing_deadline", "Filing deadline", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("hold_statutory_expiry", "Statutory hold expiry", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("amount_withheld", "Amount withheld (legal hold, not a deduction)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            _hk_filing_metadata,
+        ],
+    )
+
+    print("Seeding Hong Kong eMPF monthly remittance statement (aggregate, per contribution period)...")
+    _seed_template(
+        db, template_key="HK-EMPF-REMITTANCE", name="eMPF — Monthly Remittance Statement",
+        report_type="HK_EMPF_REMITTANCE", country="HK", reporting_year="2026", document_scope="AGGREGATE",
+        description=_HK_DISCLOSURE + " Zoiko transmits nothing to eMPF (no certified interface, G2): this "
+                                      "statement is the employer's input to its own eMPF submission.",
+        regulatory_authority="MPFA / eMPF platform", effective_from=date(2026, 1, 1),
+        source_references="MPFA Mandatory Contributions — Employees. Field map computed by "
+                          "service.generate_hong_kong_empf_remittance from the prepared eMPF submission.",
+        components=[
+            _hk_employer,
+            ("contributions", "MPF Contributions", [
+                ("contribution_period", "Contribution period", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("contribution_day", "Contribution day", "date", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_relevant_income", "Total relevant income", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_employer_mandatory", "Total mandatory contribution (employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ("total_employee_mandatory", "Total mandatory contribution (employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+            ]),
+            ("members", "Contributing Members", [
+                ("member_count", "Contributing members", "number", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("totals", "Period Totals", [
+                ("total_relevant_income", "Total relevant income", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_employer_mandatory", "Total employer mandatory contribution", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ("total_employee_mandatory", "Total employee mandatory contribution", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                ("validation_error_count", "Rows with validation errors", "number", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            _hk_filing_metadata,
+        ],
+    )
+
+    print("Seeding Hong Kong employee MPF contribution record (per-employee, HK-010)...")
+    _seed_template(
+        db, template_key="HK-MPF-CONTRIBUTION-RECORD",
+        name="MPF Contribution Record (employee's own record)", report_type="HK_MPF_CONTRIBUTION_RECORD",
+        country="HK", reporting_year="2026", document_scope="PER_EMPLOYEE",
+        description="Employee's own MPF contribution / pay record (HK-010). NOT a filing and not an IRD form — "
+                    "there is no e-file layout to disclose. Mandatory employer and employee contributions "
+                    "only: MPF voluntary contributions are OUT OF SCOPE for the first release and no "
+                    "voluntary-contribution subsystem exists.",
+        regulatory_authority="MPFA (employee record)", effective_from=date(2026, 1, 1),
+        source_references="MPFA Mandatory Contributions — Employees. Field map computed by "
+                          "service.generate_hong_kong_mpf_contribution_record from the employee's committed "
+                          "HK payslips, including the statutory pack pinned on each payslip's tax_rule_snapshot.",
+        components=[
+            _hk_employer,
+            ("employee_info", "Employee Information", [
+                ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ("employee_hkid", "HKID", "text", "PAYROLL_EMPLOYEE", "hkid", None),
+            ]),
+            ("contributions", "MPF Contributions", [
+                ("contribution_period", "Contribution period", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("payslip_count", "Payslips in the period", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_relevant_income", "Total relevant income", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_employer_mandatory", "MPF mandatory contribution (employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ("total_employee_mandatory", "MPF mandatory contribution (employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+            ]),
+            ("ytd", "Statutory Pack Provenance", [
+                ("pack_id", "Statutory pack (HK-PAYROLL-YYYY)", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("pack_version", "Statutory pack version", "text", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("coverage", "MPF Coverage", [
+                ("total_relevant_income", "Total relevant income", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+        ],
+    )
+
+    print("Seeding Hong Kong employee termination statement (per-employee, document service)...")
+    _seed_template(
+        db, template_key="HK-TERMINATION-STATEMENT",
+        name="Termination Statement (employee's copy)", report_type="HK_TERMINATION_STATEMENT",
+        country="HK", reporting_year="2026", document_scope="PER_EMPLOYEE",
+        description="Employee's termination statement rendered from an APPROVED (four-eyes) termination "
+                    "calculation: SP / LSP with the 1 May 2025 pre / post transition split, permitted offsets, "
+                    "final wages, annual leave pay and holiday pay. NOT a filing — nothing is transmitted.",
+        regulatory_authority="Labour Department (employee document)", effective_from=date(2026, 1, 1),
+        source_references="Labour Department Concise Guide ch.11 (SP / LSP) and Abolition of the MPF Offsetting "
+                          "Arrangement. Field map computed by service.generate_hong_kong_termination_statement "
+                          "from the approved HkgTerminationResult (evidence hash included).",
+        components=[
+            _hk_employer,
+            ("employee_info", "Employee Information", [
+                ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ("employee_hkid", "HKID", "text", "PAYROLL_EMPLOYEE", "hkid", None),
+            ]),
+            ("termination", "Termination", [
+                ("termination_date", "Termination date", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("termination_reason", "Reason", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("payment_type", "Statutory payment (SP / LSP / none)", "text", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("entitlement", "Severance / Long Service Payment", [
+                ("pre_transition_portion", "Pre-transition portion (to 30 Apr 2025)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("post_transition_portion", "Post-transition portion (from 1 May 2025)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("gross_entitlement", "Gross entitlement", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_offsets", "Permitted offsets", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("net_statutory_payment", "Net statutory payment", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+            ("final_payment", "Final Payment", [
+                ("final_wages", "Final wages", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("annual_leave_pay", "Annual leave pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("holiday_pay", "Holiday pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("total_final_payment", "Total final payment", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ("payment_hold", "Payment hold (IR56G)", "text", "PAYSLIP_ITEM", "gross_pay", None),
+                ("evidence_hash", "Calculation evidence hash", "text", "PAYSLIP_ITEM", "gross_pay", None),
+            ]),
+        ],
+    )
+
+    # Hong Kong filing calendar (ZP-HK-ENG-001 §7, HK-011). BIR56A / IR56B
+    # are issued on the first working day of April and are due within one
+    # month of issue; the IR56 notification deadlines are themselves
+    # resolved from the statutory pack at run time, not hard-coded here, so
+    # only the employer-level annual return gets calendar rows (the same
+    # restraint India uses — it seeds Form 138's quarters, not per-employee
+    # notification deadlines).
+    print("Seeding Hong Kong filing calendar (BIR56A / IR56B annual return)...")
+    for period_key, period_label, due_date in [
+        ("ANNUAL-2025/26", "Year of assessment 2025/26 (issued 1 Apr 2026)", "2026-05-01"),
+        ("ANNUAL-2026/27", "Year of assessment 2026/27 (issued 1 Apr 2027)", "2027-05-01"),
+    ]:
+        year = period_key.split("-")[1]
+        for report_type, label in (("HK_BIR56A", "BIR56A"), ("HK_IR56B", "IR56B")):
+            entry = service.upsert_filing_calendar_entry(
+                db, FilingCalendarUpsert(
+                    jurisdictionCountry="HK", reportType=report_type, reportingYear=year,
+                    periodKey=period_key, periodLabel=f"{label} — {period_label}", dueDate=due_date,
+                ), actor_id=None,
+            )
+            print(f"  seeded HK {report_type} {period_key} due {due_date} (id={entry.id}, status={entry.status})")
 
 
 if __name__ == "__main__":

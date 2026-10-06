@@ -140,13 +140,13 @@ def test_revision_chains_onto_the_italy_engine_migration():
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_ROOT / "alembic.ini")))
     assert script.get_revision(REVISION).down_revision == PARENT
-    # This migration is no longer the head: c9d8e7f6a5b4 (3A, Italy F24 causale
-    # catalog) chains onto it. What matters here is that it has exactly one
-    # child, so the chain stays linear.
-    children = [r.revision for r in script.walk_revisions()
-                if REVISION in (r.down_revision if isinstance(r.down_revision, tuple)
-                                else (r.down_revision,))]
-    assert children == ["c9d8e7f6a5b4"]
+# This migration is no longer the head: later revisions (Italy's
+    # c9d8e7f6a5b4 F24 causale catalog, Hong Kong's cd62503afe26) chain onto it.
+    # The contract is the graph-level one: exactly ONE head, and this revision
+    # is on its chain.
+    heads = script.get_heads()
+    assert len(heads) == 1
+    assert REVISION in {r.revision for r in script.walk_revisions("base", heads[0])}
 
 
 def test_ytd_component_names_fit_the_generic_accumulator():

@@ -272,7 +272,7 @@ def test_f2_opt_in_is_singapore_only():
     §14 (four-eyes). No other country is silently widened."""
     from app.modules.payroll.service import _APPROVER_NOT_ACTIVATOR_COUNTRIES
 
-    assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == ("SG", "SE")
+    assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == ("SG", "SE", "HK")
 
 
 # ══ F3 — 2026 / 2027 pack effective periods ════════════════════════════════

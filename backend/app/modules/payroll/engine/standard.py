@@ -70,6 +70,7 @@ from app.modules.payroll.engine.countries import puerto_rico as _puerto_rico
 from app.modules.payroll.engine.countries import france as _france
 from app.modules.payroll.engine.countries import ireland as _ireland
 from app.modules.payroll.engine.countries import singapore as _singapore
+from app.modules.payroll.engine.countries import hong_kong as _hong_kong
 from app.modules.payroll.engine.countries import sweden as _sweden
 from app.modules.payroll.engine.countries import italy as _italy
 
@@ -141,6 +142,7 @@ _calc_puerto_rico = _puerto_rico.calculate
 _calc_france = _france.calculate
 _calc_ireland = _ireland.calculate
 _calc_singapore = _singapore.calculate
+_calc_hong_kong = _hong_kong.calculate
 _calc_sweden = _sweden.calculate
 _calc_italy = _italy.calculate
 
@@ -178,6 +180,10 @@ _COUNTRY_CALC = {
     # Singapore (ZP-SG-ENG-001) — CPF/SDL/SHG only, never `tds` (not a
     # monthly-PAYE jurisdiction). Fail-closed: see countries/singapore.py.
     "SG": _calc_singapore,
+    # Hong Kong (ZP-HK-ENG-001) — MPF + SMW assessment + IRD reportable
+    # income, never `tds` (employee-assessed Salaries Tax, not monthly PAYE).
+    # Fail-closed: see countries/hong_kong.py.
+    "HK": _calc_hong_kong,
     # Sweden (ZP-SE-ENG-001) — table-lookup preliminary tax (never a
     # national %), component-summed employer contributions with cohorts,
     # SLP from its own pension-cost ledger. Fail-closed: countries/sweden.py.
@@ -522,6 +528,8 @@ class StandardStrategy(PayrollStrategy):
             ytd_cpf_aw_subject_after=deductions.get("ytd_cpf_aw_subject_after"),
             ytd_cpf_aw_paid_after=deductions.get("ytd_cpf_aw_paid_after"),
             sgp_calculation_trace=deductions.get("sgp_calculation_trace"),
+            hkg_calculation_trace=deductions.get("hkg_calculation_trace"),
+            hkg_statutory_profile_id=deductions.get("_hk_statutory_profile_id"),
             ytd_gy_paye_credit_after=deductions.get("ytd_gy_paye_credit_after"),
             ytd_pr_ss_wages_after=deductions.get("ytd_pr_ss_wages_after"),
             ytd_pr_medicare_wages_after=deductions.get("ytd_pr_medicare_wages_after"),

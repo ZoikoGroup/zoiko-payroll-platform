@@ -4,6 +4,7 @@
 //
 //   IN -> IFSC      UK -> Sort Code      US -> ABA routing number
 //   CA -> Transit + Institution Number   DE -> IBAN + BIC   AU -> BSB
+//   HK -> HKICL bank (clearing) code + branch code
 //
 // Storage stays exactly as on the backend:
 //   * India keeps its dedicated `ifscCode` employee column (a real
@@ -20,7 +21,7 @@
 
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
-export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE"];
+export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK"];
 
 // Mirrors backend bank_routing.py's PAYMENT_MODE_LABEL.
 const PAYMENT_MODE_LABEL = {
@@ -52,6 +53,7 @@ const BTF_ROUTING_LABEL = {
   CA: "Transit No.",
   DE: "IBAN",
   AU: "BSB",
+  HK: "Bank-Branch Code",
   FR: "IBAN",
   IE: "IBAN",
   BB: "Bank/Branch Code",
@@ -75,6 +77,7 @@ const BANKING_COMPLIANCE_KEYS = {
   CA: ["transit_number", "financial_institution_number"],
   DE: ["iban", "bic"],
   AU: ["bsb_code"],
+  HK: ["bank_code", "branch_code"],
   FR: ["iban", "bic"],
   IE: ["iban", "bic"],
   BB: ["bank_branch_code"],
@@ -154,6 +157,7 @@ export function readRoutingField(employee, field) {
 // backend btf_routing_value():
 //   CA -> "{transit_number}-{institution}" (e.g. 12345-001)
 //   DE -> "{iban} {bic}" (IBAN alone when no BIC)
+//   HK -> "{bank_code}-{branch_code}" (e.g. 004-123)
 //   everything else -> its single routing code.
 export function combineRoutingValue(country, get) {
   const code = normalizeCountry(country);
@@ -168,6 +172,12 @@ export function combineRoutingValue(country, get) {
     const institution = read("financial_institution_number");
     if (transit && institution) return `${transit}-${institution}`;
     return transit || institution;
+  }
+  if (code === "HK") {
+    const bank = read("bank_code");
+    const branch = read("branch_code");
+    if (bank && branch) return `${bank}-${branch}`;
+    return bank || branch;
   }
   if (code === "DE") {
     const iban = read("iban");
