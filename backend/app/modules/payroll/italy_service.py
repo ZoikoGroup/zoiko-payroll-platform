@@ -397,3 +397,349 @@ def seed_italy_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
             rate_label=label[:150], tax_formula=label[:150], sort_order=order))
     db.flush()
     return pack
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Employer profile, readiness and Super Admin preview (§17, §20, gates G1-G8)
+#
+# Nothing here computes a statutory figure: the preview runs the production
+# engine, and readiness only reports which facts and content exist. Nothing
+# here activates Italian payroll — the registry row stays PLANNED and the pack
+# stays Draft until the release gates are evidenced.
+# ═══════════════════════════════════════════════════════════════════════════
+_FUND_POSITIONS = ("FIS", "CIG", "SECTOR_FUND")
+_FIS_BANDS = ("UP_TO_5", "OVER_5")
+_TESORERIA_STATUSES = ("OBLIGED", "NOT_OBLIGED", "TRANSFER_PRESERVED")
+
+
+def latest_it_tax_pack(db: Session, pack_id: Optional[int] = None, as_of: Optional[date] = None):
+    """The IT tax pack by id; otherwise the one in force on `as_of` (default
+    today), else the most recent. None when no Italian pack exists."""
+    from sqlalchemy import or_
+
+    from app.core.exceptions import NotFoundException
+    from app.modules.payroll.models import JurisdictionPack
+
+    query = db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == _COUNTRY,
+                                             JurisdictionPack.pack_type == "tax")
+    if pack_id is not None:
+        pack = query.filter(JurisdictionPack.id == pack_id).first()
+        if pack is None:
+            raise NotFoundException("JurisdictionPack", pack_id)
+        return pack
+    as_of = as_of or date.today()
+    in_force = (query.filter(or_(JurisdictionPack.effective_from.is_(None), JurisdictionPack.effective_from <= as_of),
+                             or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= as_of))
+                .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first())
+    return in_force or query.order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first()
+
+
+def _pack_rows(db: Session, pack):
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    if pack is None:
+        return [], []
+    rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                              ContributionRate.organization_id.is_(None)).all()
+    slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                     TaxSlab.organization_id.is_(None)).all()
+    return rates, slabs
+
+
+def _inps_scope(csc: Optional[str], ca: Optional[str]) -> Optional[str]:
+    csc = (csc or "").strip().upper()
+    ca = (ca or "").strip().upper()
+    return (f"CSC_{csc}" + (f"_CA_{ca}" if ca else "")) if csc else None
+
+
+def evaluate_employer_readiness(db: Session, profile: EmployerItalyProfile) -> tuple:
+    """§17H / IT-049 — recompute the employer launch gate from facts. Never
+    hand-set: the operator edits facts, this decides the status. Returns
+    (status, evidence)."""
+    items = []
+
+    def add(key, label, complete, detail):
+        items.append({"key": key, "label": label, "complete": bool(complete), "detail": detail})
+
+    identity = bool(profile.matricola_inps and profile.csc_code)
+    add("inps_identity", "INPS matricola and CSC captured (§17B)", identity,
+        "Captured." if identity else "Matricola INPS and CSC are both required.")
+    scope = _inps_scope(profile.csc_code, profile.ca_code)
+    pack = latest_it_tax_pack(db)
+    rates, _slabs = _pack_rows(db, pack)
+    covered = scope is not None and any((r.jurisdiction_state or "") == scope and r.component_key == "it_inps_ivs"
+                                        for r in rates)
+    add("inps_classification", "INPS classification matrix covers this employer (IT-002)", covered,
+        f"{scope} has IVS rows in {pack.pack_id} v{pack.version}." if covered else
+        f"No IVS rows for {scope or 'an uncaptured CSC'} in the Italian pack — payroll would block.")
+    status = profile.fund_status if isinstance(profile.fund_status, dict) else {}
+    fund = (status.get("fund") or "").upper()
+    fund_ok = fund == "CIG" or (fund == "FIS" and (status.get("fisBand") or "").upper() in _FIS_BANDS)
+    add("fund_status", "Income-support fund position (FIS / CIG) (§7, IT-020)", fund_ok,
+        "Captured." if fund_ok else ("Sector bilateral funds are not supported yet." if fund == "SECTOR_FUND"
+                                     else "Record FIS with its size band, or CIG."))
+    add("headcount", "Prior-year average headcount for the Fondo Tesoreria rule (IT-040)",
+        profile.prior_year_avg_headcount is not None,
+        f"{profile.prior_year_avg_headcount} employees." if profile.prior_year_avg_headcount is not None
+        else "Required to decide where unallocated TFR goes.")
+    agreement = None
+    if profile.cnel_code:
+        agreement = (db.query(CollectiveAgreement)
+                     .filter(CollectiveAgreement.jurisdiction_country == _COUNTRY,
+                             CollectiveAgreement.agreement_code == profile.cnel_code,
+                             CollectiveAgreement.status == "Active").first())
+    add("ccnl", "Reference CCNL configured and Active (§9)", agreement is not None,
+        f"{profile.cnel_code} is Active." if agreement is not None else
+        ("No Active agreement for " + profile.cnel_code if profile.cnel_code else "No CNEL code captured."))
+    models_ok = bool(profile.f24_operating_model and profile.lul_method)
+    add("operating_models", "F24 and LUL operating models chosen (§17F/G)", models_ok,
+        "Chosen." if models_ok else "Choose both operating models.")
+    # IT-022 facts live on EmployerTaxProfile (component_code IT_INAIL_<voce>,
+    # agency_account_id = PAT, employer_rate_pct = tasso). Recording them is
+    # the employer's part; the INAIL cost CALCULATION is a platform gate (G3)
+    # reported by get_it_readiness, not an employer fact.
+    from app.modules.payroll.models import EmployerTaxProfile
+
+    today = date.today()
+    inail_rows = [r for r in db.query(EmployerTaxProfile).filter(
+        EmployerTaxProfile.organization_id == profile.organization_id,
+        EmployerTaxProfile.component_code.like(f"{italy_content.IT_INAIL_COMPONENT_PREFIX}%")).all()
+        if r.effective_from <= today and (r.effective_to is None or r.effective_to >= today)]
+    inail_ok = bool(inail_rows) and all(r.agency_account_id and r.employer_rate_pct is not None for r in inail_rows)
+    add("inail", "INAIL PAT and applicable rate recorded per voce di tariffa (§8, IT-022)", inail_ok,
+        f"{len(inail_rows)} voce(i) recorded; INAIL cost is not calculated yet (platform gate G3)." if inail_ok else
+        ("A recorded voce is missing its PAT or rate." if inail_rows else
+         "Record each voce di tariffa with its PAT and tasso applicabile."))
+    ready = all(i["complete"] for i in items)
+    return ("READY" if ready else "NOT_READY"), {"items": items, "evaluatedAt": date.today().isoformat()}
+
+
+def get_employer_profile(db: Session, organization_id: int) -> Optional[EmployerItalyProfile]:
+    return (db.query(EmployerItalyProfile)
+            .filter(EmployerItalyProfile.organization_id == organization_id).first())
+
+
+def upsert_employer_profile(db: Session, organization_id: int, data, actor_id: Optional[int]) -> EmployerItalyProfile:
+    """Create or edit the org's Italy employer facts, then RECOMPUTE readiness
+    (readiness_status is never written from the request)."""
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll.service import record_tax_audit
+
+    errors = []
+    fund_status = data.fundStatus
+    if fund_status is not None:
+        fund = (fund_status.get("fund") or "").upper()
+        if fund not in _FUND_POSITIONS:
+            errors.append(f"fundStatus.fund must be one of {', '.join(_FUND_POSITIONS)}.")
+        band = (fund_status.get("fisBand") or "").upper() or None
+        if fund == "FIS" and band not in _FIS_BANDS:
+            errors.append(f"An FIS employer needs fundStatus.fisBand: {' or '.join(_FIS_BANDS)}.")
+        fund_status = {"fund": fund, "fisBand": band if fund == "FIS" else None}
+    if data.priorYearAvgHeadcount is not None and data.priorYearAvgHeadcount < 0:
+        errors.append("priorYearAvgHeadcount must not be negative.")
+    if data.tesoreriaStatus and data.tesoreriaStatus.strip().upper() not in _TESORERIA_STATUSES:
+        errors.append(f"tesoreriaStatus must be one of {', '.join(_TESORERIA_STATUSES)}.")
+    for field, value in (("cscCode", data.cscCode), ("caCode", data.caCode)):
+        if value and not value.strip().isalnum():
+            errors.append(f"{field} must be letters and digits only.")
+    if errors:
+        raise BadRequestException("; ".join(errors))
+
+    profile = get_employer_profile(db, organization_id)
+    old = None
+    if profile is None:
+        profile = EmployerItalyProfile(organization_id=organization_id)
+        db.add(profile)
+    else:
+        old = {"readinessStatus": profile.readiness_status, "cscCode": profile.csc_code,
+               "caCode": profile.ca_code, "fundStatus": profile.fund_status}
+
+    def code(value):
+        return (value or "").strip().upper() or None
+
+    def text(value):
+        return (value or "").strip() or None
+
+    profile.matricola_inps = text(data.matricolaInps)
+    profile.csc_code = code(data.cscCode)
+    profile.ca_code = code(data.caCode)
+    profile.ateco_code = text(data.atecoCode)
+    profile.inps_office = text(data.inpsOffice)
+    profile.cnel_code = code(data.cnelCode)
+    profile.fund_status = fund_status
+    profile.prior_year_avg_headcount = data.priorYearAvgHeadcount
+    profile.tesoreria_status = code(data.tesoreriaStatus)
+    profile.f24_operating_model = code(data.f24OperatingModel)
+    profile.lul_method = code(data.lulMethod)
+    db.flush()
+    profile.readiness_status, profile.readiness_evidence = evaluate_employer_readiness(db, profile)
+    db.commit()
+    db.refresh(profile)
+    record_tax_audit(db, actor_id=actor_id, action="update" if old else "create",
+                     entity_type="italy_employer_profile", entity_id=profile.id,
+                     legal_reference="ZP-IT-ENG-001 §17", old_value=old,
+                     new_value={"readinessStatus": profile.readiness_status, "cscCode": profile.csc_code,
+                                "caCode": profile.ca_code, "fundStatus": profile.fund_status})
+    return profile
+
+
+def get_it_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
+    """Super Admin release gates (spec §27 G1-G8) for one Italian tax pack —
+    read-only. Gates that depend on work outside this platform stay
+    incomplete until evidenced: Italy never becomes ready because its content
+    merely exists."""
+    from app.modules.payroll.engine import fallback_registry
+    from app.modules.payroll.models import ItalyF24Causale, SourceArtifact, TestCertificationRun
+
+    pack = latest_it_tax_pack(db, pack_id)
+    items = []
+
+    def add(key, label, complete, detail, required=True):
+        items.append({"key": key, "label": label, "required": required, "complete": bool(complete),
+                      "detail": detail})
+
+    if pack is None:
+        add("statutory_pack", "Italian statutory tax pack exists", False,
+            "No IT tax pack — run scripts/seed_italy_canonical_pack.py.")
+        return {"packId": None, "packVersion": None, "packStatus": None, "ready": False, "items": items,
+                "blockers": ["No Italian tax pack exists."]}
+
+    rates, slabs = _pack_rows(db, pack)
+    rate_keys = {r.component_key for r in rates if not (r.jurisdiction_state or "").startswith("CSC_")}
+    rule_types = {s.rule_type for s in slabs}
+    tables = {s.tax_table_number for s in slabs}
+
+    source = (db.query(SourceArtifact).filter(SourceArtifact.id == pack.source_document_id).first()
+              if pack.source_document_id else None)
+    add("source_evidence", "Primary-source evidence linked to the pack (IT-003)", source is not None,
+        source.title if source else "Link a Source Evidence artifact.")
+    reviewed = bool(source and source.reviewer_approved_at)
+    add("statutory_review", "G1 — IRPEF, deductions, wedge and local-tax content independently validated",
+        reviewed, "Reviewed." if reviewed else "Awaiting independent Italian payroll review.")
+
+    required = [e["resolverKey"] for e in fallback_registry._ENGINE_CONSTANT_REGISTRY
+                if e["country"] == _COUNTRY and e.get("required", True)]
+    missing = sorted(k for k in required if k not in rate_keys)
+    add("parameters", "Scalar parameters configured (thresholds, TFR, FIS, floors)", not missing,
+        "Missing: " + ", ".join(missing) if missing else f"All {len(required)} required parameters configured.")
+    matrix_scopes = sorted({r.jurisdiction_state for r in rates
+                            if (r.jurisdiction_state or "").startswith("CSC_") and r.component_key == "it_inps_ivs"})
+    add("inps_matrix", "INPS classification matrix from the INPS catalogs (IT-002, IT-043)", bool(matrix_scopes),
+        (f"IVS rows for {', '.join(matrix_scopes)}" if matrix_scopes else "No IVS rows.")
+        + " — codes are Draft placeholders until replaced from the INPS catalog.")
+    needed_rules = (italy_content.IT_IRPEF_BRACKET_RULE, italy_content.IT_DETR_FIXED_RULE,
+                    italy_content.IT_DETR_TAPER_RULE, italy_content.IT_ADDL_FIXED_RULE,
+                    italy_content.IT_ADDL_TAPER_RULE, italy_content.IT_WEDGE_SUM_RULE)
+    absent = [r for r in needed_rules if r not in rule_types]
+    add("tax_tables", "IRPEF brackets, detrazione, wedge sum and additional deduction (§3/§4)", not absent,
+        "Missing: " + ", ".join(absent) if absent else "All national tax tables present.")
+    uncovered = [name for cadastral, name, region in italy_content.IT_LAUNCH_COMMUNI
+                 if f"{italy_content.REGION_TABLE_PREFIX}{region}" not in tables
+                 or f"{italy_content.COMUNE_TABLE_PREFIX}{cadastral}" not in tables]
+    add("local_tax", "Regional and municipal surtax for every launch commune (IT-012, D4)", not uncovered,
+        "No MEF content for: " + ", ".join(uncovered) if uncovered else "All launch communes covered.")
+    placeholders = sum(1 for s in slabs if "needs" in (s.rate_label or "").lower())
+    add("no_placeholders", "No 'needs source' placeholder content left", placeholders == 0,
+        f"{placeholders} band(s) still marked as needing a source." if placeholders else "None.")
+    latest_run = (db.query(TestCertificationRun).filter(TestCertificationRun.jurisdiction_country == _COUNTRY)
+                  .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc()).first())
+    add("certification", "Golden-vector certification PASS", latest_run is not None and latest_run.status == "PASS",
+        f"Latest run #{latest_run.id}: {latest_run.status}" if latest_run else
+        "No IT certification run — the golden fixtures run in the test suite only so far.")
+    add("approval", "Distinct approver recorded (four-eyes)", pack.approved_by_id is not None,
+        "Approved." if pack.approved_by_id else "Not yet approved by a distinct Super Admin.")
+    add("inail", "G3 — INAIL PAT rates and employer-cost model (§8)", False, "Not built.")
+    # F24 and UniEmens were one gate saying "file generation is not built". That
+    # conflated two unrelated states and, once 3A landed, became false in both
+    # directions: F24 derivation IS built and tested, UniEmens genuinely is not.
+    # A gate that misreports a delivered capability is worse than no gate — it
+    # trains a reviewer to dismiss the whole checklist. They are now separate.
+    add("f24_lines", "F24 line derivation from committed payroll (IT-046, IT-047)", True,
+        "Built and covered by tests/test_italy_f24_liability.py.")
+    approved_causali = (db.query(ItalyF24Causale)
+                        .filter(ItalyF24Causale.status == "Approved")
+                        .count())
+    add("f24_causale_catalog", "F24 causale catalog populated from the Agenzia delle Entrate catalog (IT-043)",
+        approved_causali > 0,
+        (f"{approved_causali} approved causale(s) recorded."
+         if approved_causali else
+         "Empty by design. IT-043 forbids inventing causali, so build_italy_f24_lines "
+         "refuses rather than emitting guessed codes; no F24 can be produced until "
+         "real codes are loaded from the Agenzia catalog."))
+    add("lul", "LUL registration ledger: sequence, corrections, retention (IT-058/IT-059/IT-060)", True,
+        "Built and covered by tests/test_italy_lul_ledger.py. event_kind is recorded "
+        "unvalidated until the official S10 vocabulary is available.")
+    add("uniemens", "UniEmens transmission from committed payroll (IT-044)", False,
+        "Not built. The filing outbox exists, but file generation is blocked on the "
+        "INPS v4.32.0 technical spec and annex v4.32.3, which are not published.")
+    add("parallel_payroll", "Two reconciled parallel payroll cycles plus termination and conguaglio (§27)", False,
+        "Evidence required from the implementation team.")
+    blockers = [f"{i['label']}: {i['detail']}" for i in items if i["required"] and not i["complete"]]
+    return {"packId": pack.id, "packVersion": pack.version, "packStatus": pack.status, "ready": not blockers,
+            "items": items, "blockers": blockers}
+
+
+def preview_italy_calculation(db: Session, data) -> dict:
+    """Read-only Super Admin simulation against ONE Italian pack: the SAME
+    production engine a payroll run uses, with every worker and employer fact
+    supplied inline. Writes nothing; a blocked calculation returns the
+    engine's own reason, never a figure."""
+    from types import SimpleNamespace
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll.engine.base import PayrollContext
+    from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+    from app.modules.payroll.engine.resolver import calculate_payroll
+    from app.modules.payroll.service import _sg_rows_in_force
+
+    pack = latest_it_tax_pack(db, data.jurisdictionPackId, as_of=data.payDate)
+    if pack is None:
+        raise BadRequestException("No Italian tax pack exists — run the Italy seed first.")
+    rates, slabs = _pack_rows(db, pack)
+    rates = _sg_rows_in_force(rates, data.payDate)
+    slabs = _sg_rows_in_force(slabs, data.payDate)
+    profile = SimpleNamespace(
+        it_worker_class=data.workerClass, it_contract_type=data.contractType,
+        it_cigs_applies=data.cigsApplies, it_contributory_cap_cohort=data.capCohort,
+        it_tfr_destination=data.tfrDestination, it_pension_fund=data.pensionFund,
+        it_tax_domicile_region=data.taxDomicileRegion, it_tax_domicile_comune=data.taxDomicileComune,
+        it_fringe_child_declared=data.fringeChildDeclared, it_cnel_code=None, it_cnel_level=None,
+        it_contractual_weekly_hours=None, it_termination_reason=None,
+    )
+    employer = SimpleNamespace(csc_code=data.cscCode, ca_code=data.caCode,
+                               fund_status={"fund": data.fund, "fisBand": data.fisBand},
+                               prior_year_avg_headcount=data.priorYearAvgHeadcount)
+    inputs = {
+        "italy_statutory_profile": profile, "italy_employer_profile": employer, "italy_organization_id": None,
+        "it_ytd_taxable_prior": data.ytdTaxablePrior, "it_ytd_irpef_withheld_prior": data.ytdIrpefWithheldPrior,
+        "it_ytd_contributory_base_prior": data.ytdContributoryBasePrior,
+        "it_mensilita_paid_prior": data.mensilitaPaidPrior, "it_mensilita": data.mensilita,
+        "it_work_days_in_year": data.workDaysInYear,
+        "it_ytd_fringe_prior": data.ytdFringePrior, "it_ytd_wedge_paid_prior": data.ytdWedgePaidPrior,
+        "it_wedge_recovery_outstanding": data.wedgeRecoveryOutstanding,
+        "it_wedge_recovery_instalment": data.wedgeRecoveryInstalment,
+        # A preview is one ordinary full month: no termination, no conguaglio.
+        "it_contributory_full_month": True,
+        "it_is_conguaglio_period": False, "it_is_termination_period": False,
+    }
+    # §5: a determined surtax amount is passed only when the operator supplies
+    # it — exactly as a real run passes it only when its ledger row exists.
+    for key, value in (("it_addreg_saldo_due", data.addregSaldoDue),
+                       ("it_addcom_saldo_due", data.addcomSaldoDue),
+                       ("it_addcom_acconto_due", data.addcomAccontoDue)):
+        if value is not None:
+            inputs[key] = value
+            inputs[key.replace("_due", "_withheld_prior")] = ZERO
+    ctx = PayrollContext(gross=data.gross, basic=data.gross, country=_COUNTRY, pay_frequency="Monthly",
+                         pay_date=data.payDate, rate_map=italy_rate_map(rates), slabs=slabs, **inputs)
+    base = {"pack": {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status},
+            "payDate": data.payDate.isoformat(), "readOnly": True}
+    try:
+        result = calculate_payroll(ctx, "standard")
+    except MissingComplianceConfigurationError as exc:
+        return {**base, "blocked": True, "blockedKey": exc.key,
+                "blockedReason": getattr(exc, "reason", None) or str(exc)}
+    return {**base, "blocked": False,
+            "result": {"gross": str(result.gross), "totalDeductions": str(result.total_deductions),
+                       "netPay": str(result.net_pay)},
+            "italy": it_payslip_snapshot(result)}

@@ -159,6 +159,7 @@ const IDENTITY_FIELD = {
   PR: { label: "SSN", get: (p) => p.complianceFields?.ssn },
   IE: { label: "PPSN", get: (p) => p.complianceFields?.ppsn },
   SE: { label: "Personnummer", get: (p) => p.complianceFields?.swedish_id_number },
+  IT: { label: "Codice fiscale", get: (p) => p.complianceFields?.codice_fiscale },
 };
 
 export function getIdentityField(payslip) {

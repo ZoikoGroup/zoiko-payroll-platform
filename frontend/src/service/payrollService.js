@@ -2259,6 +2259,24 @@ export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) =
   }
 };
 
+// Italy (ZP-IT-ENG-001 §17) — this organization's employer profile. The
+// readiness status in the response is recomputed server-side, never sent.
+export const getItalyEmployerProfile = async () => {
+  try {
+    return await api.get("/api/payroll/italy/employer-profile");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const saveItalyEmployerProfile = async (payload) => {
+  try {
+    return await api.put("/api/payroll/italy/employer-profile", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
 export const getFranceReadinessForOrg = async (forPeriod) => {
   try {
     return await api.get("/api/payroll/france/readiness", {

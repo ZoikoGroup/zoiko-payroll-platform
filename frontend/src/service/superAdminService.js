@@ -115,6 +115,14 @@ export const getSwedenReadiness = (packId) =>
 export const previewSwedenCalculation = (payload) =>
   apiFetch("/api/super-admin/compliance/sweden/calculation-preview", { method: "POST", body: payload });
 
+// Italy (ZP-IT-ENG-001) — release gates G1-G8 and a read-only calculation
+// preview run by the backend's production engine.
+export const getItalyReadiness = (packId) =>
+  apiFetch("/api/super-admin/compliance/italy/readiness", { params: packId ? { packId } : {} });
+
+export const previewItalyCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/italy/calculation-preview", { method: "POST", body: payload });
+
 // Governed collective-agreement registry (spec §9) — no national default.
 export const listCollectiveAgreements = (params) =>
   apiFetch("/api/super-admin/compliance/collective-agreements", { params });

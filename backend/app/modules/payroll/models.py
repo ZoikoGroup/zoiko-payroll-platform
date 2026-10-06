@@ -6453,6 +6453,59 @@ class ItalyF24Line(Base):
                 f"{self.reference_period} {self.debit_amount}>")
 
 
+class ItalyF24Causale(Base):
+    """section 16 / IT-043 / IT-046 -- the governed (section, component) -> F24 causale
+    mapping that lets a derived F24 line carry a REAL codice tributo.
+
+    Why this is a table and not a constant: IT-043 forbids inventing UniEmens
+    and F24 codes, and the causali live in the Agenzia delle Entrate catalogs
+    that change over time. Hardcoding them would be exactly the invention IT-043
+    prohibits, so the catalog is authored as governed data instead - a Super
+    Admin records a real code against a real component, effective-dated, and
+    build_italy_f24_lines refuses to emit a line whose component has no
+    governed causale rather than emitting a plausible-looking invented one.
+
+    component_key is one of the codes the Italy engine already reports on
+    PayslipItem.it_calculation_snapshot (inps.employee, inps.employer,
+    irpef.withheld, localTax.regionalSaldo, ...), so the mapping is to a fact
+    this platform actually computed -- not to a re-derivation of it.
+
+    Seeding is deliberately EMPTY. A populated catalog is a data-governance
+    task with real legal consequences (get_it_readiness's inps_matrix gate
+    records the same posture for the INPS codes: "Draft placeholders until
+    replaced from the catalog"), and shipping guessed causali into a payment
+    instruction would be worse than shipping nothing."""
+
+    __tablename__ = "payroll_it_f24_causales"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "section", "component_key",
+                         "effective_from", name="uq_it_f24_causale_component_from"),
+    )
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    section         = Column(String(20), nullable=False)
+    component_key   = Column(String(40), nullable=False)
+    tax_code        = Column(String(10), nullable=False)
+    requires_region = Column(Boolean, nullable=False, default=False, server_default="0")
+    requires_comune = Column(Boolean, nullable=False, default=False, server_default="0")
+    direction       = Column(String(10), nullable=False, default="DEBIT", server_default="DEBIT")
+    effective_from  = Column(Date, nullable=False)
+    effective_to    = Column(Date, nullable=True)
+    source_document_id = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    status          = Column(String(20), nullable=False, default="Draft", server_default="Draft")
+    notes           = Column(Text, nullable=True)
+    created_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return (f"<ItalyF24Causale org={self.organization_id} {self.section} "
+                f"{self.component_key} -> {self.tax_code} {self.status}>")
+
+
+
 class ItalyLulEntry(Base):
     """§20 / IT-058 — one Libro Unico del Lavoro registration.
 
@@ -6476,6 +6529,10 @@ class ItalyLulEntry(Base):
     payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
     payroll_run_id    = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
     content_hash      = Column(String(64), nullable=False)   # sha256 of the registered content
+    payload           = Column(JSON, nullable=True)           # the registered content itself (§20)
+    event_kind        = Column(String(40), nullable=True)     # statutory event; no closed vocabulary
+    method            = Column(String(30), nullable=True)     # WEB | software | intermediary — snapshot
+    registered_reference = Column(String(7), nullable=True, index=True)
     registered_at     = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     retention_until   = Column(Date, nullable=False)
     created_at        = Column(DateTime(timezone=True), server_default=func.now())

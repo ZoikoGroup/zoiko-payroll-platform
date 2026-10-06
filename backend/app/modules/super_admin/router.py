@@ -48,6 +48,7 @@ from app.modules.super_admin.schemas import (
 from app.modules.payroll.schemas import (
     CollectiveAgreementResponse, CollectiveAgreementStatusUpdate, CollectiveAgreementUpsert,
     SwedenCalculationPreviewRequest, SwedenReadinessResponse,
+    ItalyCalculationPreviewRequest, ItalyReadinessResponse,
     JurisdictionPackResponse, JurisdictionPackUpsert,
     CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
     CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
@@ -374,6 +375,36 @@ def preview_sweden_calculation(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.preview_sweden_calculation(db, data)
+
+
+@router.get(
+    "/compliance/italy/readiness", response_model=ItalyReadinessResponse, response_model_by_alias=True,
+    summary="Read-only: Italy release gates G1-G8 for one IT tax pack (ZP-IT-ENG-001 §27)",
+)
+def get_italy_readiness(
+    pack_id: Optional[int] = Query(None, alias="packId", description="IT tax pack id (default: the one in force)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import italy_service
+
+    return italy_service.get_it_readiness(db, pack_id)
+
+
+@router.post(
+    "/compliance/italy/calculation-preview",
+    summary="Read-only: simulate an Italy calculation against one IT pack's rows — writes nothing",
+)
+def preview_italy_calculation(
+    data: ItalyCalculationPreviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Same production engine as a payroll run (engine/countries/italy.py);
+    the frontend never computes statutory figures itself."""
+    from app.modules.payroll import italy_service
+
+    return italy_service.preview_italy_calculation(db, data)
 
 
 @router.get(

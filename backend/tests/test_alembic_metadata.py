@@ -121,7 +121,14 @@ def test_alembic_heads_is_single_head():
     # 917a54ed2347 (ZP-IT-ENG-001 P2): Italy ledgers — CCNL level terms, TFR
     # ledger, F24 lines, LUL entries + it_contractual_weekly_hours; single child
     # of 7a1b2c3d4e5f, so no new branchpoint.
-    assert heads == ["917a54ed2347"]
+    # c9d8e7f6a5b4 (ZP-IT-ENG-001 3A): Italy F24 causale catalog
+    # (payroll_it_f24_causales, seeded EMPTY — IT-043 forbids inventing causali)
+    # plus uq_it_f24_line_identity on payroll_it_f24_lines; single child of
+    # 917a54ed2347, so still no new branchpoint.
+    # d7e6f5a4b3c2 (ZP-IT-ENG-001 3C): Italy LUL registered content — payload,
+    # event_kind, method, registered_reference on payroll_it_lul_entries; single
+    # child of c9d8e7f6a5b4, so still no new branchpoint.
+    assert heads == ["d7e6f5a4b3c2"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -133,7 +140,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["917a54ed2347"]
+    assert list(script.get_heads()) == ["d7e6f5a4b3c2"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -164,7 +171,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 171   # + 917a54ed2347 (Italy P2 ledgers)
+    assert len(revs) == 173   # + 917a54ed2347 (Italy P2 ledgers), + c9d8e7f6a5b4 (Italy F24 causale catalog), + d7e6f5a4b3c2 (Italy LUL registered content)
 
 
 def test_germany_head_chain_wiring_is_intact():
