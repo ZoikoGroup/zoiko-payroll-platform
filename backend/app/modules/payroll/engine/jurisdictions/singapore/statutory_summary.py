@@ -384,8 +384,14 @@ def _readiness_dashboard(sections: list, activation: dict, governance: dict, gol
             f"Not inspectable ({db_state.get('error')})"),
         row("migration", "Migration", PASS if db_state.get("atHead") else BLOCKED, "runtime",
             f"database {db_state.get('databaseHeads')} vs code {db_state.get('codeHeads')}"),
-        row("deployment", "Deployment", EXTERNAL_REQUIRED, "owner",
-            "Deploy-owner review of scripts/deploy_migrate.sh and execution of docs/SINGAPORE_PRODUCTION_ACTIVATION_RUNBOOK.md"),
+        # Phase 6.10: the deploy owner's sign-off is ordinary gate evidence
+        # (SG_DEPLOYMENT_SIGNOFF_TAG, reviewed by a different Super Admin), so
+        # this row can pass on a record instead of never passing at all.
+        row("deployment", "Deployment",
+            PASS if (activation.get("deploymentSignoff") or {}).get("status") == PASS else EXTERNAL_REQUIRED, "owner",
+            "Deploy-owner review of scripts/deploy_migrate.sh and execution of docs/SINGAPORE_PRODUCTION_ACTIVATION_RUNBOOK.md"
+            + f" — sign-off evidence {SG_DEPLOYMENT_SIGNOFF_TAG}: "
+            + ((activation.get("deploymentSignoff") or {}).get("status") or EVIDENCE_REQUIRED)),
         row("testing", "Testing", PASS if golden and golden.get("status") == "PASS" else BLOCKED, "runtime",
             f"Latest SG golden-vector run: {golden['status']} {golden['passedCases']}/{golden['totalCases']}"
             if golden else "No SG golden-vector run recorded in this database"),
@@ -429,6 +435,75 @@ def _service_registry_item(availability):
     return _readiness_item("service_registry", "Singapore service registry", PASS if state == "AVAILABLE" else BLOCKED,
                            f"{state} — onboarding " + ("open" if state == "AVAILABLE" else
                                                         "closed until the owner makes Singapore AVAILABLE after G1–G8"))
+
+
+# Phase 6.10 — the owner's PLANNED -> AVAILABLE step, gated (Singapore only).
+# Before this, the registry row had no API at all: opening onboarding meant a
+# raw database UPDATE with no audit row and no check that any gate had passed.
+# The requirements below are derived from this summary alone (server-side,
+# never client-supplied) and service.transition_sg_service_registry re-derives
+# them at the moment of the change. Every requirement is fail-closed: an owner
+# who wants a narrower launch set (e.g. G2/G5/G8 collected during a pilot) needs
+# a recorded decision and a reviewed code change, not a switch.
+SG_DEPLOYMENT_SIGNOFF_TAG = "SG-OPS-DEPLOYMENT"
+SG_REGISTRY_OPEN, SG_REGISTRY_CLOSED = "AVAILABLE", "PLANNED"
+
+
+def registry_transition_requirements(sections: list, activation: dict) -> list:
+    """What must hold before Singapore may be made AVAILABLE. Each item is
+    {key, label, met, detail}."""
+    by_key = {s["key"]: s for s in sections}
+    dash = {r["key"]: r for r in activation["readinessDashboard"]}
+    pack = activation["statutoryPack"]
+    templates = by_key["reportTemplates"]["values"]["templates"]
+    missing_active = [t["templateKey"] for t in templates if not t["generatable"]]
+    hotfix = pack.get("hotfixPolicy") or {}
+
+    def req(key, label, met, detail):
+        return {"key": key, "label": label, "met": bool(met), "detail": detail}
+
+    items = [
+        req("pack_active", "An Active Singapore statutory pack is in force", pack["activation"] == "ACTIVE",
+            f"{pack.get('packId') or 'no pack'} v{pack.get('version') or '—'} {pack.get('status') or ''}".strip()),
+        req("golden_vectors", "Latest Singapore golden-vector run is PASS", dash["testing"]["status"] == PASS,
+            dash["testing"]["evidence"]),
+        req("templates_active", "Every Singapore report template has an Active version", not missing_active,
+            "All Active" if not missing_active else "Not Active: " + ", ".join(missing_active)),
+        req("configuration", "Statutory configuration complete", dash["configuration"]["status"] == PASS,
+            dash["configuration"]["evidence"]),
+        req("database", "Every Singapore table / column present", dash["database"]["status"] == PASS,
+            dash["database"]["evidence"]),
+        req("migration", "Database at the code's Alembic head", dash["migration"]["status"] == PASS,
+            dash["migration"]["evidence"]),
+    ]
+    items += [req(f"gate_{g['key']}", f"{g['key']} {g['label']}: evidence accepted", g["status"] == PASS, g["status"])
+              for g in activation["productionGates"]]
+    items += [req(f"decision_{d['key']}", f"{d['key']} {d['label']}: decision recorded, and in force",
+                  d["status"] == DECISION_RECORDED and not d.get("inForceDiffers"),
+                  d["status"] if d["status"] != DECISION_RECORDED else
+                  (f"recorded {d.get('recordedValue')} differs from {d.get('inForceValue')} in force — the code change "
+                   "is not made" if d.get("inForceDiffers") else f"recorded {d.get('recordedValue')}"))
+              for d in activation["pendingDecisions"]]
+    items += [
+        req("deployment_signoff", f"Deploy-owner sign-off accepted ({SG_DEPLOYMENT_SIGNOFF_TAG})",
+            dash["deployment"]["status"] == PASS, (activation.get("deploymentSignoff") or {}).get("status")
+            or EVIDENCE_REQUIRED),
+        req("no_unreviewed_hotfix", "No Singapore hotfix awaiting its review", not hotfix.get("unreviewedHotfixes"),
+            f"{hotfix.get('unreviewedHotfixes') or 0} awaiting review"),
+    ]
+    return items
+
+
+def _registry_transition(sections: list, activation: dict) -> dict:
+    current = (activation.get("serviceAvailability") or {}).get("availability")
+    requirements = registry_transition_requirements(sections, activation)
+    unmet = [r for r in requirements if not r["met"]]
+    return {"current": current, "targets": [SG_REGISTRY_OPEN, SG_REGISTRY_CLOSED],
+            "requirements": requirements, "unmet": len(unmet),
+            "availableAllowed": current == SG_REGISTRY_CLOSED and not unmet,
+            "plannedAllowed": current == SG_REGISTRY_OPEN,
+            "note": "Server-derived. Making Singapore AVAILABLE opens onboarding to every prospective Singapore "
+                    "employer (there is no pilot / allow-list mode); PLANNED closes it again."}
 
 
 def _pending_decisions(governance: dict) -> list:
@@ -476,6 +551,11 @@ def _external_dependencies(rates: dict, activation: dict, sections: list) -> lis
                        ("lqs_part_time_hourly", "Part-time LQS hourly rate")):
         if rates.get(key) is None:
             deps.append({"key": key, "label": label, "authority": "MOM", "status": EXTERNAL_DATA_REQUIRED})
+    if rates.get("cpf_leap_day_birthday_basis") is None:          # Phase 6.10 (engine BLOCKS those months)
+        deps.append({"key": "cpf_leap_day_birthday_basis",
+                     "label": "Whether a 29 February birthday is observed on 28 February or 1 March in a non-leap year "
+                              "(decides the month a 55/60/65/70 CPF age band starts) — those two months are BLOCKED",
+                     "authority": "CPF Board", "status": EXTERNAL_DATA_REQUIRED})
     if not any(k.startswith(LQS_QUOTA_PREFIX) for k in rates):
         deps.append({"key": "lqs_quota", "label": "Foreign-worker quota tables (dependency ratios, headcount rules)",
                      "authority": "MOM", "status": EXTERNAL_DATA_REQUIRED})
@@ -801,7 +881,29 @@ def build_statutory_summary(facts: dict) -> dict:
                       "nextAction": (_NEXT_ACTION[shown].format(tag=tag) if shown in _NEXT_ACTION else
                                      "Record decision D1 (AIS submission mode) first")})
     activation["productionGates"] = gates
+    # Phase 6.10 activation gates (mirrors service._sg_activation_evidence_refusal).
+    g1 = next(g for g in gates if g["key"] == "G1")
+    golden_check = facts.get("pack_golden_check")
+    starts = (values_pack or {}).get("effectiveFrom")
+    activation["statutoryPack"]["packGoldenCheck"] = golden_check
+    activation["statutoryPack"]["activationGates"] += [
+        {"key": "g1_evidence_accepted", "met": g1["status"] == PASS},
+        {"key": "pack_reproduces_golden_vectors",
+         "met": bool(golden_check and golden_check["casesInWindow"] and not golden_check["failures"])},
+        {"key": "effective_from_first_of_month", "met": bool(starts and str(starts).endswith("-01"))},
+    ]
+    deploy_state, deploy_recorded = _evidence_state(evidence_rows, SG_DEPLOYMENT_SIGNOFF_TAG, as_of)
+    deploy_lead = _lead(deploy_recorded, deploy_state) if deploy_state else None
+    activation["deploymentSignoff"] = {
+        "evidenceTag": SG_DEPLOYMENT_SIGNOFF_TAG, "status": deploy_state or EVIDENCE_REQUIRED,
+        "evidenceRecorded": deploy_recorded or None, "submittedArtifactId": (deploy_lead or {}).get("id"),
+        "reviewedBy": (deploy_lead or {}).get("reviewerId") or (deploy_lead or {}).get("outcomeBy"),
+        "requiredArtifact": "Deploy-owner sign-off: runbook A6/A7 and B–D complete, production runtime verified "
+                            "(deployed commit, service healthy, database at head, drift check clean)",
+        "blockingReason": _BLOCKING.get(deploy_state or EVIDENCE_REQUIRED),
+        "nextAction": _NEXT_ACTION[deploy_state or EVIDENCE_REQUIRED].format(tag=SG_DEPLOYMENT_SIGNOFF_TAG)}
     activation["readinessDashboard"] = _readiness_dashboard(sections, activation, governance, golden)
+    activation["registryTransition"] = _registry_transition(sections, activation)
     return {
         "jurisdiction": "SG", "asOf": as_of.isoformat(), "activationReadiness": activation,
         "activePack": active, "valuesFromPack": values_pack, "valuesFromActivePack": bool(active),

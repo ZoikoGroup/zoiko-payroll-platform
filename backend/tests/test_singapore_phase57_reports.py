@@ -96,11 +96,16 @@ def _generate_payslips(db, organization, pay_date, label):
 
 
 def _payslip(db, run, employee, trace, gross="2000"):
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
     from app.modules.payroll.models import PayslipItem
 
+    # Phase 6.10: a generated Singapore payslip always pins the pack it was
+    # calculated under (reports no longer substitute the pack in force today
+    # for an unpinned one), so a hand-built payslip carries the same pin.
+    pack = resolve_tax_configuration(db, "SG", payroll_date=run.pay_date)[2]
     item = PayslipItem(payroll_run_id=run.id, employee_id=employee.id, organization_id=run.organization_id,
                        employee_name=employee.name, country_code="SG", gross_pay=D(gross), net_pay=D(gross),
-                       sgp_calculation_trace=trace)
+                       sgp_calculation_trace=trace, tax_policy_pack_id=pack.id if pack else None)
     db.add(item)
     db.commit()
     return item

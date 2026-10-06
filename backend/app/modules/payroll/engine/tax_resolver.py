@@ -318,6 +318,21 @@ def find_active_tax_pack(
 _REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG",)
 
 
+def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str]) -> Optional[str]:
+    """Phase 6.10: moving an EXISTING organization into a registry-gated
+    country (_REGISTRY_ROW_REQUIRED_COUNTRIES) is onboarding into it, so it
+    passes the same gate as registration. Before this, PUT /organizations/me
+    (and the Super Admin organization update) set `country` directly — any
+    organization could move itself into a PLANNED Singapore. Changes that do
+    not enter such a country are untouched (None)."""
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    new_code = get_jurisdiction_code(new_country)
+    if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):
+        return None
+    return get_jurisdiction_onboarding_block_reason(db, new_country)
+
+
 def get_jurisdiction_onboarding_block_reason(
     db: Session,
     country: Optional[str],

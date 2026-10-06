@@ -33,6 +33,8 @@ from app.modules.super_admin.schemas import (
     FinanceByOrganizationResponse,
     PolicyStatusUpdate,
     SgDecisionCreate,
+    SgServiceRegistryResponse,
+    SgServiceRegistryTransition,
     SgEvidenceReview,
     SourceArtifactSupersede,
     ReportsListResponse,
@@ -2213,6 +2215,23 @@ def record_sg_decision(
     row = payroll_service.record_sg_decision(db, payload.key, payload.selectedValue, payload.reason,
                                              actor_id=current_user.id)
     return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.post(
+    "/compliance/singapore/service-registry", response_model=SgServiceRegistryResponse,
+    summary="Singapore registry step: AVAILABLE (opens onboarding; refused unless every readiness requirement is met, "
+            "re-checked server-side) or PLANNED (closes it). Audited, reason required",
+)
+def transition_sg_service_registry(
+    payload: SgServiceRegistryTransition,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.transition_sg_service_registry(db, payload.availability, payload.reason,
+                                                         actor_id=current_user.id)
+    return SgServiceRegistryResponse(country=row.country, availability=row.availability, updatedAt=row.updated_at)
 
 
 @router.put(
