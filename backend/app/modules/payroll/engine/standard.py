@@ -73,6 +73,7 @@ from app.modules.payroll.engine.countries import singapore as _singapore
 from app.modules.payroll.engine.countries import hong_kong as _hong_kong
 from app.modules.payroll.engine.countries import sweden as _sweden
 from app.modules.payroll.engine.countries import italy as _italy
+from app.modules.payroll.engine.countries import switzerland as _switzerland
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -145,6 +146,7 @@ _calc_singapore = _singapore.calculate
 _calc_hong_kong = _hong_kong.calculate
 _calc_sweden = _sweden.calculate
 _calc_italy = _italy.calculate
+_calc_switzerland = _switzerland.calculate
 
 
 _COUNTRY_CALC = {
@@ -193,6 +195,9 @@ _COUNTRY_CALC = {
     # municipal additions on the TAX DOMICILE. Fail-closed:
     # countries/italy.py.
     "IT": _calc_italy,
+    # Switzerland (CH spec) — federal AHV/IV/EO/ALV + admin cost, ALV ceiling
+    # with YTD cap, family allowances added to net. Fail-closed: countries/switzerland.py.
+    "CH": _calc_switzerland,
 }
 
 

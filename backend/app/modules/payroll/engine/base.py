@@ -1479,6 +1479,29 @@ class PayrollResult:
     it_employee_total: Decimal = Decimal("0")
     it_calculation_trace: dict = None
 
+    # ── Switzerland (CH spec) ──────────────────────────────────────────────────
+    # Federal social insurance contributions (AHV/IV/EO/ALV).
+    ch_ahv_employee: Decimal = Decimal("0")
+    ch_ahv_employer: Decimal = Decimal("0")
+    ch_iv_employee: Decimal = Decimal("0")
+    ch_iv_employer: Decimal = Decimal("0")
+    ch_eo_employee: Decimal = Decimal("0")
+    ch_eo_employer: Decimal = Decimal("0")
+    ch_alv_employee: Decimal = Decimal("0")
+    ch_alv_employer: Decimal = Decimal("0")
+    # Compensation office admin cost (employer only).
+    ch_admin_cost_employer: Decimal = Decimal("0")
+    # Employee total (AHV+IV+EO+ALV employee shares) — deducted from gross.
+    ch_employee_total: Decimal = Decimal("0")
+    # Employer total (AHV+IV+EO+ALV employer shares + admin cost).
+    ch_employer_total: Decimal = Decimal("0")
+    # Family allowances (FAK federal minimums) — ADDED to net pay.
+    ch_family_allowance_total: Decimal = Decimal("0")
+    ch_fak_child_total: Decimal = Decimal("0")
+    ch_fak_education_total: Decimal = Decimal("0")
+    # Snapshot / trace (lines, bases, accumulators, hashes).
+    ch_calculation_trace: dict = None
+
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through
     # engine/resolver.py's calculate_payroll() (e.g. a strategy invoked

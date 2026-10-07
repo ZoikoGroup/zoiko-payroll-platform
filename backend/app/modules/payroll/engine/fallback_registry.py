@@ -30,7 +30,7 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, hong_kong, india, singapore, sweden, uk, us
+from app.modules.payroll.engine.countries import australia, canada, germany, hong_kong, india, singapore, sweden, switzerland, uk, us
 from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
@@ -44,6 +44,7 @@ _MODULES = {
     "singapore": singapore,
     "hong_kong": hong_kong,
     "sweden": sweden,
+    "switzerland": switzerland,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -323,6 +324,23 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_FIXED_PCT", "label": "TFR Revaluation — Fixed Part", "resolverKey": "it_tfr_revaluation_fixed_pct", "side": "employer", "note": "NO FALLBACK — 1.5% a year, pro-rated by month (§13 / c.c. art. 2120)."},
     {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_ISTAT_SHARE", "label": "TFR Revaluation — Share of ISTAT FOI Increase", "resolverKey": "it_tfr_revaluation_istat_share", "side": "employer", "note": "NO FALLBACK — 75% of the ISTAT FOI increase (§13); the index itself is authority data supplied per run."},
     {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_TAX_PCT", "label": "TFR Revaluation — Substitute Tax", "resolverKey": "it_tfr_revaluation_tax_pct", "side": "employee", "note": "NO FALLBACK — 17%, pending G1 review."},
+
+    # ── Switzerland ──────────────────────────────────────────────────────────
+    # Fail-closed from day one (CH spec + shared.py's _VALIDATION_ENABLED_COUNTRIES):
+    # every constant below is None — listed so the readiness check knows which
+    # keys a Swiss federal pack must configure. Switzerland has NO engine fallback;
+    # a missing row BLOCKS the calculation. Canton-scaffold keys are not registered
+    # here (they are inert NULL rows on canton packs until the canton publishes).
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal AHV Rate (Employee/Employer)", "resolverKey": "ch_ahv", "side": "employee", "note": "NO FALLBACK — federal AHV 8.7% (4.35%/4.35%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal IV Rate (Employee/Employer)", "resolverKey": "ch_iv", "side": "employee", "note": "NO FALLBACK — federal IV 1.4% (0.70%/0.70%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal EO Rate (Employee/Employer)", "resolverKey": "ch_eo", "side": "employee", "note": "NO FALLBACK — federal EO 0.5% (0.25%/0.25%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal ALV Rate (Employee/Employer)", "resolverKey": "ch_alv", "side": "employee", "note": "NO FALLBACK — federal ALV 2.2% (1.10%/1.10%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "ALV Max Insured Annual Salary", "resolverKey": "ch_alv_ceiling", "note": "NO FALLBACK — CHF 148,200 from Active federal pack; ALV cap with YTD accumulator."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Compensation Office Admin Cost %", "resolverKey": "ch_admin_cost_pct", "side": "employer", "note": "NO FALLBACK — from LIVE COMPENSATION_OFFICE scheme rules; employer-only line."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "ALV Proration Method", "resolverKey": "ch_alv_proration_rule", "note": "NO FALLBACK — 'monthly' or 'annual' from content rule; determines cap tracking."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "FAK Federal Child Minimum (Monthly)", "resolverKey": "ch_fak_child_min", "note": "NO FALLBACK — CHF 215 from Active federal pack; added to net pay."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "FAK Federal Education Minimum (Monthly)", "resolverKey": "ch_fak_education_min", "note": "NO FALLBACK — CHF 268 from Active federal pack; added to net pay."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Swiss Rounding Rule", "resolverKey": "ch_rounding_rule", "note": "NO FALLBACK — nearest CHF 0.05 (5 Rappen) from Active federal pack."},
 ]
 
 
