@@ -68,6 +68,33 @@ def _reset_rollout_switches():
         current.update(original)
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "attendance_gate: run with the real payroll attendance gate (off by default in tests).",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _attendance_gate_off_by_default(request, monkeypatch):
+    """The payroll attendance gate (service.enforce_attendance_readiness,
+    2026-10-06) refuses any run whose employees lack attendance for every
+    working day. Production keeps it on by default; but hundreds of engine
+    tests (Germany/Singapore/HK/CA/...) create runs purely to exercise
+    calculations and never record attendance, so it is neutralised here
+    unless a test opts in with @pytest.mark.attendance_gate
+    (tests/test_attendance_gate.py). Patching the module attribute covers
+    every caller: service.py resolves the name from its module globals at
+    call time, and router.py calls it as service.enforce_attendance_readiness."""
+    if request.node.get_closest_marker("attendance_gate"):
+        yield
+        return
+    from app.modules.payroll import service as payroll_service
+
+    monkeypatch.setattr(payroll_service, "enforce_attendance_readiness", lambda *args, **kwargs: None)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _isolated_redis_cache():
     """Start and end every test with no memoized Redis client and a closed

@@ -54,6 +54,7 @@ from app.modules.super_admin.schemas import (
 from app.modules.payroll.schemas import (
     CollectiveAgreementResponse, CollectiveAgreementStatusUpdate, CollectiveAgreementUpsert,
     SwedenCalculationPreviewRequest, SwedenReadinessResponse,
+    ItalyCalculationPreviewRequest, ItalyReadinessResponse,
     JurisdictionPackResponse, JurisdictionPackUpsert,
     CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
     CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
@@ -380,6 +381,36 @@ def preview_sweden_calculation(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.preview_sweden_calculation(db, data)
+
+
+@router.get(
+    "/compliance/italy/readiness", response_model=ItalyReadinessResponse, response_model_by_alias=True,
+    summary="Read-only: Italy release gates G1-G8 for one IT tax pack (ZP-IT-ENG-001 §27)",
+)
+def get_italy_readiness(
+    pack_id: Optional[int] = Query(None, alias="packId", description="IT tax pack id (default: the one in force)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import italy_service
+
+    return italy_service.get_it_readiness(db, pack_id)
+
+
+@router.post(
+    "/compliance/italy/calculation-preview",
+    summary="Read-only: simulate an Italy calculation against one IT pack's rows — writes nothing",
+)
+def preview_italy_calculation(
+    data: ItalyCalculationPreviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Same production engine as a payroll run (engine/countries/italy.py);
+    the frontend never computes statutory figures itself."""
+    from app.modules.payroll import italy_service
+
+    return italy_service.preview_italy_calculation(db, data)
 
 
 @router.get(
@@ -4054,3 +4085,251 @@ def hong_kong_pack_golden_check(pack_row_id: int, current_user=Depends(get_curre
     if pack is None:
         raise NotFoundException("Hong Kong pack", pack_row_id)
     return {"packId": pack.pack_id, "version": pack.version, **hong_kong_service.pack_golden_check(db, pack)}
+
+
+# ── Switzerland (CH spec) — Quellensteuer tariff files ──────────────────
+# Governed data: an authority tariff file is imported byte-for-byte, then
+# validated, approved (not by its importer) and activated (not by its
+# approver). Tariff rows are never edited or deleted — there is deliberately
+# no PUT / PATCH / DELETE route here; a changed tariff is a new file.
+
+@router.post("/compliance/switzerland/qst-tariffs",
+             summary="Import a canton's QST tariff file (SHA-256 identity; an identical file is refused; audited)")
+async def import_switzerland_qst_tariff(
+    canton: str = Form(..., description="CH-XX canton code, e.g. CH-ZH"),
+    format_version: str = Form(..., alias="formatVersion"),
+    effective_from: date = Form(..., alias="effectiveFrom"),
+    effective_to: Optional[date] = Form(None, alias="effectiveTo"),
+    tax_year: Optional[int] = Form(None, alias="taxYear"),
+    publication_date: Optional[date] = Form(None, alias="publicationDate"),
+    source_document_id: Optional[int] = Form(None, alias="sourceDocumentId"),
+    file: UploadFile = File(..., description="The authority tariff file, unmodified"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import switzerland_service
+
+    contents = await file.read()
+    return switzerland_service.import_qst_tariff_file(db, canton, contents, {
+        "format_version": format_version, "effective_from": effective_from, "effective_to": effective_to,
+        "tax_year": tax_year, "publication_date": publication_date, "source_document_id": source_document_id,
+    }, actor_id=current_user.id)
+
+
+@router.get("/compliance/switzerland/qst-tariffs",
+            summary="List QST tariff files (every status, including SUPERSEDED and REJECTED)")
+def list_switzerland_qst_tariffs(canton: Optional[str] = Query(None), status_filter: Optional[str] = Query(None, alias="status"),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_qst_tariff_files(db, canton=canton, status=status_filter)
+
+
+@router.get("/compliance/switzerland/qst-tariffs/{tariff_file_id}",
+            summary="One QST tariff file by id, any status (a superseded file stays readable for replay)")
+def get_switzerland_qst_tariff(tariff_file_id: int, current_user=Depends(get_current_super_admin),
+                               db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_qst_tariff_file(db, tariff_file_id)
+
+
+@router.post("/compliance/switzerland/qst-tariffs/{tariff_file_id}/validate",
+             summary="Structural validation of an IMPORTED tariff file -> VALIDATED or REJECTED (report stored; audited)")
+def validate_switzerland_qst_tariff(tariff_file_id: int, current_user=Depends(get_current_super_admin),
+                                    db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.validate_qst_tariff_file(db, tariff_file_id, current_user.id)
+
+
+@router.post("/compliance/switzerland/qst-tariffs/{tariff_file_id}/approve",
+             summary="Approve a VALIDATED tariff file (a Super Admin other than its importer; audited)")
+def approve_switzerland_qst_tariff(tariff_file_id: int, reason: Optional[str] = Body(None, embed=True),
+                                   current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.approve_qst_tariff_file(db, tariff_file_id, current_user.id, reason)
+
+
+@router.post("/compliance/switzerland/qst-tariffs/{tariff_file_id}/activate",
+             summary="Activate an APPROVED tariff file (a Super Admin other than its approver); overlapping ACTIVE "
+                     "files for the canton become SUPERSEDED. Audited")
+def activate_switzerland_qst_tariff(tariff_file_id: int, reason: Optional[str] = Body(None, embed=True),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.activate_qst_tariff_file(db, tariff_file_id, current_user.id, reason)
+
+
+# ── Switzerland (CH Step 5) — platform catalog: scheme definitions,
+# earning classification (TaxabilityRule) and wage floors ────────────────
+# Same write contract as the org CH routes: Idempotency-Key required,
+# X-Correlation-ID echoed, one transaction per write (ch_write).
+from app.modules.payroll.switzerland_http import ChWriteContext, ch_write, ch_write_headers  # noqa: E402
+from app.modules.payroll.switzerland_schemas import (  # noqa: E402
+    ChReasonBody, ChSchemeCreate, ChSchemeUpdate, ChTaxabilityRuleCreate, ChWageFloorCreate,
+)
+
+
+@router.get("/compliance/switzerland/schemes", summary="CH scheme catalog (organization_id NULL definitions)")
+def list_switzerland_catalog_schemes(scheme_type: Optional[str] = Query(None, alias="schemeType"),
+                                     status_filter: Optional[str] = Query(None, alias="status"),
+                                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_schemes(db, None, scheme_type=scheme_type, status=status_filter)
+
+
+@router.get("/compliance/switzerland/schemes/{scheme_id}", summary="One CH catalog scheme")
+def get_switzerland_catalog_scheme(scheme_id: int, current_user=Depends(get_current_super_admin),
+                                   db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_scheme(db, scheme_id, None)
+
+
+@router.post("/compliance/switzerland/schemes", summary="Create a DRAFT CH catalog scheme version")
+def create_switzerland_catalog_scheme(payload: ChSchemeCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return ch_write(db, ctx, organization_id=None, operation="scheme.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_scheme(
+                        db, None, payload, current_user.id, ctx.correlation_id))
+
+
+@router.put("/compliance/switzerland/schemes/{scheme_id}", summary="Edit a DRAFT CH catalog scheme")
+def update_switzerland_catalog_scheme(scheme_id: int, payload: ChSchemeUpdate,
+                                      ctx: ChWriteContext = Depends(ch_write_headers),
+                                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return ch_write(db, ctx, organization_id=None, operation=f"scheme.update:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json", exclude_unset=True),
+                    perform=lambda: switzerland_service.update_scheme(
+                        db, scheme_id, None, payload, current_user.id, ctx.correlation_id))
+
+
+@router.delete("/compliance/switzerland/schemes/{scheme_id}", summary="Delete an unreferenced DRAFT CH catalog scheme")
+def delete_switzerland_catalog_scheme(scheme_id: int, ctx: ChWriteContext = Depends(ch_write_headers),
+                                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return ch_write(db, ctx, organization_id=None, operation=f"scheme.delete:{scheme_id}", actor_id=current_user.id,
+                    request={}, perform=lambda: switzerland_service.delete_scheme(
+                        db, scheme_id, None, current_user.id, correlation_id=ctx.correlation_id))
+
+
+@router.post("/compliance/switzerland/schemes/{scheme_id}/approve",
+             summary="Approve a DRAFT CH catalog scheme (a Super Admin other than its author / editors)")
+def approve_switzerland_catalog_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
+                                       ctx: ChWriteContext = Depends(ch_write_headers),
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    return ch_write(db, ctx, organization_id=None, operation=f"scheme.approve:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.approve_scheme(
+                        db, scheme_id, None, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@router.post("/compliance/switzerland/schemes/{scheme_id}/activate",
+             summary="Activate an APPROVED CH catalog scheme (a Super Admin other than its approver)")
+def activate_switzerland_catalog_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
+                                        ctx: ChWriteContext = Depends(ch_write_headers),
+                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    return ch_write(db, ctx, organization_id=None, operation=f"scheme.activate:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.activate_scheme(
+                        db, scheme_id, None, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@router.get("/compliance/switzerland/taxability-rules",
+            summary="CH earning classification rules (Draft and Approved; only Approved rows govern)")
+def list_switzerland_taxability_rules(status_filter: Optional[str] = Query(None, alias="status"),
+                                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_ch_taxability_rules(db, status=status_filter)
+
+
+@router.post("/compliance/switzerland/taxability-rules", summary="Create a Draft CH earning classification rule")
+def create_switzerland_taxability_rule(payload: ChTaxabilityRuleCreate,
+                                       ctx: ChWriteContext = Depends(ch_write_headers),
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return ch_write(db, ctx, organization_id=None, operation="taxability_rule.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_ch_taxability_rule(
+                        db, payload, current_user.id, ctx.correlation_id))
+
+
+@router.post("/compliance/switzerland/taxability-rules/{rule_id}/approve",
+             summary="Approve a Draft CH classification (a Super Admin other than its author; source document "
+                     "required); the previous Approved rule for the same scope is closed the day before")
+def approve_switzerland_taxability_rule(rule_id: int, payload: Optional[ChReasonBody] = None,
+                                        ctx: ChWriteContext = Depends(ch_write_headers),
+                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    return ch_write(db, ctx, organization_id=None, operation=f"taxability_rule.approve:{rule_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.approve_ch_taxability_rule(
+                        db, rule_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@router.get("/compliance/switzerland/wage-floors",
+            summary="CH wage floors (canton minimums, GAV, NAV) — CollectiveAgreement rows")
+def list_switzerland_wage_floors(canton: Optional[str] = Query(None), status_filter: Optional[str] = Query(None, alias="status"),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_ch_wage_floors(db, canton=canton, status=status_filter)
+
+
+@router.post("/compliance/switzerland/wage-floors", summary="Create a Draft CH wage floor version")
+def create_switzerland_wage_floor(payload: ChWageFloorCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return ch_write(db, ctx, organization_id=None, operation="wage_floor.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_ch_wage_floor(
+                        db, payload, current_user.id, ctx.correlation_id))
+
+
+@router.post("/compliance/switzerland/wage-floors/{agreement_id}/approve",
+             summary="Approve a Draft CH wage floor (a Super Admin other than its author)")
+def approve_switzerland_wage_floor(agreement_id: int, payload: Optional[ChReasonBody] = None,
+                                   ctx: ChWriteContext = Depends(ch_write_headers),
+                                   current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    return ch_write(db, ctx, organization_id=None, operation=f"wage_floor.approve:{agreement_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.approve_ch_wage_floor(
+                        db, agreement_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@router.post("/compliance/switzerland/wage-floors/{agreement_id}/activate",
+             summary="Activate an Approved CH wage floor (a Super Admin other than its approver; source document "
+                     "required); the previous Active version is Superseded")
+def activate_switzerland_wage_floor(agreement_id: int, payload: Optional[ChReasonBody] = None,
+                                    ctx: ChWriteContext = Depends(ch_write_headers),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    return ch_write(db, ctx, organization_id=None, operation=f"wage_floor.activate:{agreement_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.activate_ch_wage_floor(
+                        db, agreement_id, current_user.id, payload.reason, ctx.correlation_id))

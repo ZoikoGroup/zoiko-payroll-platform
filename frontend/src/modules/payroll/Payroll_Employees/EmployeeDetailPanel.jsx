@@ -8,6 +8,7 @@ import IndiaStatutoryFormsModal from "./IndiaStatutoryFormsModal";
 import CAStatutoryFormsModal from "./CAStatutoryFormsModal";
 import USStatutoryFormsModal from "./USStatutoryFormsModal";
 import GermanyStatutoryProfilePanel from "./GermanyStatutoryProfilePanel";
+import ItalyStatutoryProfilePanel from "./ItalyStatutoryProfilePanel";
 import HKStatutoryProfilePanel from "./HKStatutoryProfilePanel";
 import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
 import GermanyOvertimePanel from "./GermanyOvertimePanel";
@@ -92,6 +93,7 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [showCaStatutoryForms, setShowCaStatutoryForms] = useState(false);
   const [showUsStatutoryForms, setShowUsStatutoryForms] = useState(false);
   const [showGermanyStatutory, setShowGermanyStatutory] = useState(false);
+const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showHkStatutory, setShowHkStatutory] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
   const [showGermanyOvertime, setShowGermanyOvertime] = useState(false);
@@ -290,6 +292,27 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                 </div>
               )}
 
+{employee.countryCode === "IT" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Italy statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowItalyStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    INPS worker class, contract, tax domicile and TFR election — required before Italy payroll can be
+                    calculated for this employee.
+                  </p>
+                </div>
+              )}
+
               {employee.countryCode === "HK" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <div className="flex items-center justify-between">
@@ -440,6 +463,9 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
       )}
       {showCaStatutoryForms && (
         <CAStatutoryFormsModal employee={employee} onClose={() => setShowCaStatutoryForms(false)} />
+      )}
+      {showItalyStatutory && (
+        <ItalyStatutoryProfilePanel employee={employee} onClose={() => setShowItalyStatutory(false)} />
       )}
       {showGermanyStatutory && (
         <GermanyStatutoryProfilePanel employee={employee} onClose={() => setShowGermanyStatutory(false)} />

@@ -19,6 +19,13 @@ import { usePayrollSetup } from "../PayrollSetupContext";
 const tabs = ["General", "Employee Categories", "Leave & Overtime", "Integrations"];
 
 const INTEGRATION_CATEGORY_ORDER = ["attendance", "banking", "notifications"];
+// Attendance gate settings (backend: PayrollPolicy.attendance_*).
+const ATTENDANCE_EMPLOYMENT_TYPES = ["Full-time", "Part-time", "Contract", "Intern"];
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: "Mon" }, { value: 1, label: "Tue" }, { value: 2, label: "Wed" }, { value: 3, label: "Thu" },
+  { value: 4, label: "Fri" }, { value: 5, label: "Sat" }, { value: 6, label: "Sun" },
+];
+const DEFAULT_WEEKLY_OFF_DAYS = [5, 6];
 const INTEGRATION_CATEGORY_LABELS = {
   attendance: "Attendance",
   banking: "Banking",
@@ -234,8 +241,8 @@ export default function PayrollPolicyPage() {
       // "configured" immediately, without a reload.
       refreshPayrollSetup();
       addToast?.("Policy updated.", "success");
-    } catch {
-      addToast?.("Failed to update policy.", "error");
+    } catch (err) {
+      addToast?.(err?.message ? `Failed to update policy: ${err.message}` : "Failed to update policy.", "error");
     } finally {
       setSaving(false);
     }
@@ -721,7 +728,9 @@ export default function PayrollPolicyPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {INTEGRATION_CATEGORY_ORDER.map((cat) => {
             const items = policy.integrations.filter((i) => i.category === cat);
-            if (!items.length) return null;
+            // The attendance card also holds the payroll attendance-gate
+            // settings, so it renders even with no attendance integrations.
+            if (!items.length && cat !== "attendance") return null;
             return (
               <Card key={cat}>
                 <div className="flex items-center gap-2 mb-3">
@@ -769,6 +778,80 @@ export default function PayrollPolicyPage() {
                     </Field>
                     <p className="text-[11px] text-foreground-muted mt-2">
                       Used to generate the downloadable bank transfer file when a payroll run is approved.
+                    </p>
+                  </div>
+                )}
+                {cat === "attendance" && (
+                  <div className="mt-4 border-t border-border pt-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-foreground">Require complete attendance before payroll runs</p>
+                        <p className="text-[11px] text-foreground-muted mt-0.5">
+                          When on, a payroll run is blocked until every employee below has attendance (present, absent or leave) for every working day of the period. Days with no attendance are otherwise paid as present. Admins can still override a run with a recorded reason.
+                        </p>
+                      </div>
+                      <Toggle
+                        checked={policy.attendanceRequired !== false}
+                        disabled={saving}
+                        onChange={() => handleSaveGeneral({ attendanceRequired: policy.attendanceRequired === false })}
+                      />
+                    </div>
+                    <Field label="Applies to">
+                      <div className="flex flex-wrap gap-3">
+                        {ATTENDANCE_EMPLOYMENT_TYPES.map((t) => {
+                          const selected = policy.attendanceRequiredEmploymentTypes || [];
+                          const checked = selected.length === 0 || selected.includes(t);
+                          return (
+                            <label key={t} className="flex items-center gap-1.5 text-[12px] text-foreground cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={saving || policy.attendanceRequired === false}
+                                onChange={() => {
+                                  const current = selected.length === 0 ? [...ATTENDANCE_EMPLOYMENT_TYPES] : selected;
+                                  const next = checked ? current.filter((x) => x !== t) : [...current, t];
+                                  if (next.length === 0) {
+                                    addToast?.("Select at least one employment type, or turn the requirement off.", "error");
+                                    return;
+                                  }
+                                  // Every type selected is stored as [] (= all employees).
+                                  handleSaveGeneral({ attendanceRequiredEmploymentTypes: next.length === ATTENDANCE_EMPLOYMENT_TYPES.length ? [] : next });
+                                }}
+                              />
+                              {t}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </Field>
+                    <Field label="Weekly off days (not expected in attendance)">
+                      <div className="flex flex-wrap gap-3">
+                        {WEEKDAY_OPTIONS.map((d) => {
+                          const offDays = policy.attendanceWeeklyOffDays ?? DEFAULT_WEEKLY_OFF_DAYS;
+                          const checked = offDays.includes(d.value);
+                          return (
+                            <label key={d.value} className="flex items-center gap-1.5 text-[12px] text-foreground cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={saving || policy.attendanceRequired === false}
+                                onChange={() => {
+                                  const next = checked ? offDays.filter((x) => x !== d.value) : [...offDays, d.value].sort();
+                                  if (next.length >= 7) {
+                                    addToast?.("At least one day of the week must be a working day.", "error");
+                                    return;
+                                  }
+                                  handleSaveGeneral({ attendanceWeeklyOffDays: next });
+                                }}
+                              />
+                              {d.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </Field>
+                    <p className="text-[11px] text-foreground-muted">
+                      Company holidays from the Attendance › Holidays tab are excluded automatically.
                     </p>
                   </div>
                 )}

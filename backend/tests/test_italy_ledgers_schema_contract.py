@@ -26,6 +26,14 @@ from app.modules.payroll.models import (
 
 REVISION = "917a54ed2347"
 PARENT = "7a1b2c3d4e5f"
+# Additive revisions that extend the tables 917a54ed2347 creates. The model is
+# the CURRENT declaration of the schema, so the contract has to replay the whole
+# Italy chain, not just the creating revision: without d7e6f5a4b3c2 the four LUL
+# columns are missing from the migrated database and the comparison reports a
+# difference that does not exist in production.
+ADDITIVE_REVISIONS = {
+    "payroll_it_lul_entries": ("d7e6f5a4b3c2",),
+}
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_PATH = next((BACKEND_ROOT / "alembic" / "versions").glob(f"{REVISION}_*.py"))
 PROFILE_TABLE = "payroll_employee_statutory_profiles"
@@ -41,8 +49,10 @@ PARENTS = ("organizations", "users", "payroll_employees", "payroll_runs", "paysl
            PROFILE_TABLE)
 
 
-def _load():
-    spec = importlib.util.spec_from_file_location("italy_ledgers_migration", MIGRATION_PATH)
+def _load(revision=None):
+    revision = revision or REVISION
+    path = next((BACKEND_ROOT / "alembic" / "versions").glob(f"{revision}_*.py"))
+    spec = importlib.util.spec_from_file_location(f"migration_{revision}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -54,14 +64,20 @@ def _run(steps):
         connection.begin()
         for table in PARENTS:
             connection.execute(sa.text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)"))
-        module = _load()
-        original = module.op
-        module.op = Operations(MigrationContext.configure(connection))
-        try:
-            for step in steps:
+        # Apply the creating revision, then every additive revision that alters
+        # the tables it created, in chain order, then the requested steps
+        # (which run against the creating revision, as before).
+        chain = [(REVISION, "upgrade")]
+        chain += [(rev, "upgrade") for revs in ADDITIVE_REVISIONS.values() for rev in revs]
+        chain += [(REVISION, step) for step in steps]
+        for revision, step in chain:
+            module = _load(revision)
+            original = module.op
+            module.op = Operations(MigrationContext.configure(connection))
+            try:
                 getattr(module, step)()
-        finally:
-            module.op = original
+            finally:
+                module.op = original
         inspector = sa.inspect(connection)
         tables = set(inspector.get_table_names())
         return {
@@ -124,8 +140,10 @@ def test_revision_chains_onto_the_italy_engine_migration():
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_ROOT / "alembic.ini")))
     assert script.get_revision(REVISION).down_revision == PARENT
-    # Later jurisdictions chain on top (Hong Kong's cd62503afe26 follows it), so the
-    # contract is: the graph has ONE head and this revision is on its chain.
+    # This migration is no longer the head: later revisions (Italy's
+    # c9d8e7f6a5b4 F24 causale catalog, then d7e6f5a4b3c2 LUL content, and
+    # Hong Kong's cd62503afe26) chain onto it. The contract is the
+    # graph-level one: exactly ONE head, and this revision is on its chain.
     heads = script.get_heads()
     assert len(heads) == 1
     assert REVISION in {r.revision for r in script.walk_revisions("base", heads[0])}

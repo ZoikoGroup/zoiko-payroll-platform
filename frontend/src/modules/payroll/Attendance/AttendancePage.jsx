@@ -3,7 +3,7 @@ import { CalendarCheck, Clock, Users, FileText, List, CalendarDays, Save, Dollar
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../ToastContext";
-import { getEmployeeRoster, saveAttendanceRecords, getAttendanceRecords, getAttendanceRecordsPaginated, getAttendanceSummaryByEmployee, getAttendanceHistory, getHolidays, getPayrollLeaveRequests } from "../../../service/payrollService";
+import { getEmployeeRoster, getEmployees, saveAttendanceRecordsInBatches, describeAttendanceSaveError, getAttendanceRecords, getAttendanceRecordsPaginated, getAttendanceSummaryByEmployee, getHolidays, getPayrollLeaveRequests } from "../../../service/payrollService";
 import * as XLSX from "xlsx";
 
 function lsKey(orgId) {
@@ -22,15 +22,26 @@ function setLocalRecords(map, orgId) {
   try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
 }
 
-function mergeLocalIntoRecords(records, date, orgId) {
+function clearLocalRecords(orgId) {
+  const key = lsKey(orgId);
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch {}
+}
+
+// Attendance used to be written into this browser's localStorage on every
+// save and kept there when the server save failed ("saved locally"). Payroll
+// only ever reads the server, so those rows were invisible to it. Nothing
+// writes this cache any more; it is only read once to find rows that never
+// reached the server, so the user can sync or discard them.
+function flattenLocalRecords(orgId) {
   const local = getLocalRecords(orgId);
-  const dayRecords = local[date];
-  if (!dayRecords) return records;
-  return records.map((r) => {
-    const saved = dayRecords.find((d) => String(d.employeeId) === String(r.employeeId));
-    if (!saved) return r;
-    return { ...r, ...saved };
+  const rows = [];
+  Object.entries(local).forEach(([d, list]) => {
+    (Array.isArray(list) ? list : []).forEach((rec) => {
+      if (rec && typeof rec === "object") rows.push({ ...rec, date: rec.date || d });
+    });
   });
+  return rows;
 }
 
 // A stable per-record identity for de-duping/merging. Falls back to name when
@@ -285,15 +296,6 @@ export default function AttendancePage() {
   const loadRecords = useCallback(async () => {
     const requestId = ++recordsRequestIdRef.current;
     setLoading(true);
-    const local = getLocalRecords(orgId);
-    const localToday = local[date] || [];
-    let list = localToday.map((r) => ({
-      ...r,
-      breakMinutes: r.breakMinutes ?? 60,
-      checkInPeriod: r.checkInPeriod || "AM",
-      checkOutPeriod: r.checkOutPeriod || "PM",
-    }));
-    if (requestId === recordsRequestIdRef.current) setRecords(list.length ? list : []);
     try {
       const [rosterData, savedRecords, leaveReqs] = await Promise.all([
         getEmployeeRoster({ status: "Active" }),
@@ -332,17 +334,18 @@ export default function AttendancePage() {
           leaveType: approvedLeaveType || undefined,
         };
       });
-      apiList = mergeLocalIntoRecords(apiList, date, orgId);
       if (requestId === recordsRequestIdRef.current) {
         setRecords(apiList);
         setTotalEmployeeCount(apiList.length);
       }
-    } catch {
-      if (requestId === recordsRequestIdRef.current && !list.length) addToast?.("Loaded from local storage.", "info");
+    } catch (err) {
+      if (requestId === recordsRequestIdRef.current) {
+        addToast?.(`Couldn't load attendance from the server: ${describeAttendanceSaveError(err)}`, "error");
+      }
     } finally {
       if (requestId === recordsRequestIdRef.current) setLoading(false);
     }
-  }, [addToast, date, orgId]);
+  }, [addToast, date]);
 
   useEffect(() => {
     loadRecords();
@@ -450,6 +453,86 @@ export default function AttendancePage() {
     }
     toRemove.forEach((key) => { try { localStorage.removeItem(key); } catch {} });
   }, [orgId]);
+
+  // Rows left in this browser by the old "saved locally" fallback that the
+  // server doesn't have. Compared against the server (not just "the cache is
+  // non-empty") because the old code also mirrored every SUCCESSFUL save
+  // into the cache. Anything already on the server is dropped silently.
+  const [localOnly, setLocalOnly] = useState(null);
+  const [localOnlySyncing, setLocalOnlySyncing] = useState(false);
+
+  const findLocalOnlyRecords = useCallback(async () => {
+    if (!orgId) return;
+    const rows = flattenLocalRecords(orgId).filter((r) => r.date);
+    if (!rows.length) { setLocalOnly(null); return; }
+    const dates = rows.map((r) => r.date).sort();
+    const firstDate = dates[0];
+    const lastDate = dates[dates.length - 1];
+    const serverById = new Set();
+    const serverByName = new Set();
+    const PAGE = 1000;
+    for (let offset = 0; ; offset += PAGE) {
+      const page = await getAttendanceRecordsPaginated({ startDate: firstDate, endDate: lastDate }, PAGE, offset);
+      if (page.error) return;   // can't compare — leave the cache alone, try again next visit
+      page.items.forEach((r) => {
+        serverById.add(`${r.employeeId}-${r.date}`);
+        if (r.name) serverByName.add(`${String(r.name).trim().toLowerCase()}-${r.date}`);
+      });
+      if (!page.hasMore) break;
+    }
+    const seen = new Set();
+    const missing = rows.filter((r) => {
+      const key = recordKey(r);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const hasId = r.employeeId !== null && r.employeeId !== undefined && r.employeeId !== "";
+      if (hasId) return !serverById.has(`${r.employeeId}-${r.date}`);
+      return !serverByName.has(`${String(r.name || "").trim().toLowerCase()}-${r.date}`);
+    });
+    if (!missing.length) {
+      clearLocalRecords(orgId);
+      setLocalOnly(null);
+      return;
+    }
+    const missingDates = missing.map((r) => r.date).sort();
+    setLocalOnly({ records: missing, firstDate: missingDates[0], lastDate: missingDates[missingDates.length - 1] });
+  }, [orgId]);
+
+  useEffect(() => { findLocalOnlyRecords(); }, [findLocalOnlyRecords]);
+
+  async function handleSyncLocalOnly() {
+    if (!localOnly?.records.length) return;
+    setLocalOnlySyncing(true);
+    try {
+      // eslint-disable-next-line no-unused-vars
+      const payload = localOnly.records.map(({ id, ...rec }) => rec);
+      const result = await saveAttendanceRecordsInBatches(payload);
+      clearLocalRecords(orgId);
+      setLocalOnly(null);
+      addToast?.(
+        result.skipped > 0
+          ? `Synced ${result.saved} record(s) to the server. ${result.skipped} skipped (e.g. employee no longer active).`
+          : `Synced ${result.saved} record(s) to the server.`,
+        result.skipped > 0 ? "warning" : "success"
+      );
+      await loadRecords();
+      await loadHistory(timeRange);
+      await loadSummary(0, employeeSearch);
+    } catch (err) {
+      const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were synced before the error.` : "";
+      addToast?.(`Sync failed: ${describeAttendanceSaveError(err)}${partial}`, "error");
+      if (err?.savedCount) await findLocalOnlyRecords();
+    } finally {
+      setLocalOnlySyncing(false);
+    }
+  }
+
+  function handleDiscardLocalOnly() {
+    if (!window.confirm(`Discard ${localOnly?.records.length || 0} attendance record(s) that exist only in this browser? They were never saved to the server and cannot be recovered.`)) return;
+    clearLocalRecords(orgId);
+    setLocalOnly(null);
+    addToast?.("Browser-only attendance discarded.", "success");
+  }
 
   const loadHolidays = useCallback(async () => {
     setHolidaysLoading(true);
@@ -663,20 +746,21 @@ export default function AttendancePage() {
         otherCompensation: Number(r.otherCompensation) || 0,
         notes: r.notes,
       }));
-      const local = getLocalRecords(orgId);
-      local[date] = payload;
-      setLocalRecords(local, orgId);
-      const result = await saveAttendanceRecords(payload);
-      const savedCount = result?.saved ?? payload.length;
-      const skippedCount = result?.skipped ?? 0;
+      const result = await saveAttendanceRecordsInBatches(payload);
+      const savedCount = result.saved;
+      const skippedCount = result.skipped;
       if (skippedCount > 0) {
         addToast?.(`Saved ${savedCount} record(s). ${skippedCount} skipped.`, "warning");
       } else {
         addToast?.("Attendance records saved.", "success");
       }
       await loadHistory(timeRange);
-    } catch {
-      addToast?.("Failed to save records.", "error");
+    } catch (err) {
+      // Nothing is kept in the browser as a fallback — the edits stay on
+      // screen so the user can retry, but they are NOT saved until the server
+      // confirms it.
+      const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were saved before the error.` : "";
+      addToast?.(`Attendance was NOT saved: ${describeAttendanceSaveError(err)}${partial}`, "error");
     } finally {
       setSaving(false);
     }
@@ -760,36 +844,23 @@ export default function AttendancePage() {
         return;
       }
 
-      // Clear the date range from localStorage first, then insert new records
-      const local = getLocalRecords(orgId);
-      const dateSet = new Set(toSave.map((r) => r.date));
-      dateSet.forEach((d) => { delete local[d]; });
-      toSave.forEach((rec) => {
-        if (!local[rec.date]) local[rec.date] = [];
-        local[rec.date].push(rec);
-      });
-      setLocalRecords(local, orgId);
-
-      // Merge with existing backend records so we don't create duplicates
+      // Server only, in batches. The backend upserts on (employee, date), so
+      // only the generated rows are sent — re-sending the range's existing
+      // rows (as this used to) just inflated the request past the proxy's
+      // size limit. Nothing is written to the browser as a fallback: a row
+      // only counts as attendance once the server has it.
       try {
-        const existingBackend = await getAttendanceHistory(bulkStartDate, bulkEndDate);
-        const merged = new Map();
-        (Array.isArray(existingBackend) ? existingBackend : []).forEach((rec) => {
-          merged.set(recordKey(rec), rec);
-        });
-        toSave.forEach((rec) => {
-          merged.set(recordKey(rec), rec);
-        });
-        const result = await saveAttendanceRecords([...merged.values()]);
-        const savedCount = result?.saved ?? toSave.length;
-        const skippedCount = result?.skipped ?? 0;
+        const result = await saveAttendanceRecordsInBatches(toSave);
+        const savedCount = result.saved;
+        const skippedCount = result.skipped;
         if (skippedCount > 0) {
           addToast?.(`Created ${savedCount} attendance record(s). ${skippedCount} skipped.`, "warning");
         } else {
           addToast?.(`Created ${savedCount} attendance record(s).`, "success");
         }
-      } catch {
-        addToast?.("Backend save failed, but data saved locally.", "warning");
+      } catch (err) {
+        const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were saved before the error.` : " Nothing was saved.";
+        addToast?.(`Bulk attendance failed: ${describeAttendanceSaveError(err)}${partial}`, "error");
       }
       setBulkPreview([]);
       await loadRecords();
@@ -1401,41 +1472,28 @@ export default function AttendancePage() {
   async function performUploadSave(validRows) {
     setUploadSaving(true);
     try {
-      const local = getLocalRecords(orgId);
-      const dateGroups = {};
-      validRows.forEach((rec) => {
-        const d = rec.date;
-        if (!dateGroups[d]) dateGroups[d] = [];
-        dateGroups[d].push(rec);
-      });
-      for (const [d, recs] of Object.entries(dateGroups)) {
-        if (!local[d]) local[d] = [];
-        const existingIds = new Set(local[d].map((r) => recordKey(r)));
-        recs.forEach((rec) => {
-          if (existingIds.has(recordKey(rec))) {
-            local[d] = local[d].map((r) => recordKey(r) === recordKey(rec) ? { ...r, ...rec } : r);
-          } else {
-            local[d].push(rec);
-            existingIds.add(recordKey(rec));
-          }
-        });
-      }
-      setLocalRecords(local, orgId);
-
-      let backendResult = null;
+      let backendResult;
       try {
         const merged = new Map();
         for (const rec of validRows) {
           merged.set(recordKey(rec), rec);
         }
-        backendResult = await saveAttendanceRecords([...merged.values()]);
-      } catch {
-        addToast?.("Backend save failed, but data saved locally.", "warning");
+        backendResult = await saveAttendanceRecordsInBatches([...merged.values()]);
+      } catch (err) {
+        // Report the failure as a failure — the old fallback claimed
+        // "Imported N record(s)" even when the server had saved none.
+        const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were saved before the error.` : " Nothing was saved.";
+        addToast?.(`Upload failed: ${describeAttendanceSaveError(err)}${partial}`, "error");
+        if (err?.savedCount) {
+          await loadHistory(timeRange);
+          await loadSummary(0, employeeSearch);
+        }
+        return;
       }
 
-      const savedCount = backendResult?.saved ?? validRows.length;
-      const skippedCount = backendResult?.skipped ?? 0;
-      const skippedDetails = backendResult?.skippedDetails ?? [];
+      const savedCount = backendResult.saved;
+      const skippedCount = backendResult.skipped;
+      const skippedDetails = backendResult.skippedDetails;
 
       if (skippedCount > 0) {
         const reasons = skippedDetails.slice(0, 5).map((s) => {
@@ -1508,9 +1566,13 @@ export default function AttendancePage() {
     }
     setShowClockChoice(false);
 
+    // Active employees only — the upload skips inactive ones anyway.
+    // (getEmployees was used here without being imported from 2026-08-17
+    // until 2026-10-06; the ReferenceError was swallowed by this catch and
+    // surfaced as "No employees found", so the template never downloaded.)
     let templateEmployees = [];
     try {
-      const data = await getEmployees();
+      const data = await getEmployees({ status: "Active" });
       const list = data?.items || data || [];
       templateEmployees = list.map((e) => ({
         name: e.name || `Employee ${e.employeeCode || e.id}`,
@@ -1518,11 +1580,12 @@ export default function AttendancePage() {
         code: e.employeeCode || "",
         dept: e.department || "",
       }));
-    } catch {
-      templateEmployees = [];
+    } catch (err) {
+      addToast?.(`Couldn't build the template: ${err?.message || "the employee list failed to load"}.`, "error");
+      return;
     }
     if (templateEmployees.length === 0) {
-      addToast?.("No employees found. Add employees before downloading the template.", "error");
+      addToast?.("No active employees found (or the employee list couldn't be loaded). Add active employees before downloading the template.", "error");
       return;
     }
 
@@ -1830,6 +1893,32 @@ export default function AttendancePage() {
       <p className="text-[11px] font-medium text-foreground-muted -mt-3">
         Tip: pick a future date above (or use the shortcuts) to pre-schedule attendance for upcoming days — it saves the same way, and won't count toward "Working Days" until that day actually arrives.
       </p>
+
+      {localOnly && localOnly.records.length > 0 && (
+        <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[13px] text-foreground">
+            <strong>{localOnly.records.length} attendance record(s)</strong> ({localOnly.firstDate} to {localOnly.lastDate}) were saved only in this browser and never reached the server. Payroll can{"'"}t see them until they are synced.
+          </p>
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={handleSyncLocalOnly}
+              disabled={localOnlySyncing}
+              className="rounded-[12px] bg-primary px-4 py-2 text-[13px] font-bold text-white transition-all hover:bg-primary-hover disabled:opacity-50"
+            >
+              {localOnlySyncing ? "Syncing…" : "Sync to server"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardLocalOnly}
+              disabled={localOnlySyncing}
+              className="rounded-[12px] border border-border bg-surface px-4 py-2 text-[13px] font-semibold text-foreground-muted transition-all hover:border-error hover:text-error disabled:opacity-50"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-surface-muted rounded-[14px] p-1 w-fit flex flex-wrap">
         {tabs.map((t) => (
@@ -2184,13 +2273,24 @@ export default function AttendancePage() {
             Please make sure to add attendance details only for <strong>Active Employees</strong>. Inactive employees present in the upload will be skipped by the system.
           </div>
           <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h3 className="text-base font-bold text-foreground mb-2 flex items-center gap-2">
-              <Upload size={18} className="text-info" />
-              Upload Attendance Sheet
-            </h3>
-            <p className="text-[13px] text-foreground-muted mb-5">
-              Upload an Excel (.xlsx) file with attendance data. Columns are auto-mapped by header name — matching records merge with existing data.
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-5">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-foreground mb-2 flex items-center gap-2">
+                  <Upload size={18} className="text-info" />
+                  Upload Attendance Sheet
+                </h3>
+                <p className="text-[13px] text-foreground-muted">
+                  Step 1: download the template for the period below. Step 2: fill it in and upload it here. Columns are auto-mapped by header name — matching records merge with existing data.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => downloadAttendanceTemplate()}
+                className="inline-flex flex-shrink-0 items-center justify-center gap-2 rounded-[12px] bg-info px-4 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:opacity-90"
+              >
+                <Download size={15} />Download template
+              </button>
+            </div>
 
             <div className="flex items-center gap-3 flex-wrap mb-5">
               <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1">
@@ -2311,7 +2411,7 @@ export default function AttendancePage() {
                   <div className="mt-4 pt-4 border-t border-border">
                     <button type="button" onClick={() => downloadAttendanceTemplate()}
                       className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-info hover:text-info transition-colors duration-200"
-                    ><Download size={14} />Download template</button>
+                    ><Download size={14} />{"Don't have the template? Download it"}</button>
                   </div>
                 </div>
 

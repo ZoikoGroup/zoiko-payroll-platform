@@ -534,6 +534,28 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^(YES|NO)$", "example": "NO", "primary": False, "options": ["YES", "NO"]},
         ],
     },
+    # Switzerland — schema only. Deliberately NOT in REGISTRATION_COUNTRIES:
+    # live Swiss payroll stays disabled until gates G1+ are evidenced (the
+    # canonical CH packs are Draft and every value is needs-g1) and the
+    # registry row leaves PLANNED. UID = the CH-prefixed Swiss business
+    # identification number; the AHV employer number is issued by the
+    # compensation office (Ausgleichskasse) — formats only, never synthesised
+    # (the AHV/AVS number itself is a 13-digit EAN-13 verified at employee
+    # level, see employee_validation.CHEmployeeValidation). The compensation
+    # office is kept here (not only on a statutory profile) so onboarding can
+    # capture it before a profile exists, mirroring Sweden's residence code.
+    "CH": {
+        "label": "UID / AHV Employer Number",
+        "currency": "CHF",
+        "fields": [
+            {"key": "uid", "label": "UID (Swiss business identification number)",
+             "pattern": r"^CHE-\d{3}\.\d{3}\.\d{3}$", "example": "CHE-123.456.789", "primary": True},
+            {"key": "ahv_employer_number", "label": "AHV employer number (compensation office)",
+             "pattern": r"^\d{7,12}$", "example": "1234567", "primary": False},
+            {"key": "compensation_office", "label": "Compensation office (Ausgleichskasse)",
+             "pattern": r"^[A-Za-z][A-Za-z0-9 ,.'&()-]{1,98}$", "example": "SVA Aargau", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -567,6 +589,8 @@ COUNTRY_NAME_TO_CODE = {
     "hong kong, china": "HK",
     "italy": "IT",
     "italia": "IT",
+    "switzerland": "CH",
+    "swiss confederation": "CH",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -589,6 +613,7 @@ CODE_TO_COUNTRY_NAME = {
     "SG": "Singapore",
     "HK": "Hong Kong",
     "IT": "Italy",
+    "CH": "Switzerland",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

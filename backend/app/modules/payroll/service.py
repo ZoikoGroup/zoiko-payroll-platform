@@ -34,7 +34,7 @@ from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func as sa_func, tuple_, or_, and_, case as sa_case, and_ as sa_and_
+from sqlalchemy import func as sa_func, tuple_, or_, and_, case as sa_case, and_ as sa_and_, true
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
@@ -64,6 +64,7 @@ from app.modules.payroll.models import (
     EmployerFranceProfile, FranceEstablishment, FranceEstablishmentRatePack, FrancePASRate,
     FranceDsnSubmission, FranceDsnOutboxItem,
     IrelandRpnSnapshot, IrelandMyFutureFundStatus,
+    ItalyFilingOutboxItem, ItalyF24Line, ItalyF24Causale, ItalyLulEntry, ItalyTfrLedgerEntry,
     IrelandStatutorySickLeaveRecord,
     CollectiveAgreement, SwedenSickEpisode, SwedenLeaveLedger,
 )
@@ -1105,7 +1106,15 @@ def _pack_to_tax_snapshot(rates, slabs, pack) -> dict:
                 "rateLabel": s.rate_label, "taxFormula": s.tax_formula, "sortOrder": s.sort_order,
                 "jurisdictionCountry": s.jurisdiction_country, "jurisdictionState": s.jurisdiction_state,
                 "jurisdictionLocality": s.jurisdiction_locality, "taxRegime": s.tax_regime,
-                "filingStatus": s.filing_status, "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
+                "filingStatus": s.filing_status, "ruleType": s.rule_type,
+                # Additive (2026-10-06): Italy's surtax ladder tables (§5 addregionale/
+                # addcomunale) and Sweden's municipality/local income-tax tables are
+                # keyed by TaxSlab.tax_table_number (italy.py _rows, sweden.py) — without
+                # it a replay could not tell which locality's bracket table to apply.
+                # Absent on snapshots taken before this field existed, where replay
+                # degrades exactly as it always did.
+                "taxTableNumber": s.tax_table_number,
+                "formulaExpression": s.formula_expression,
                 "flatAmount": _dec(s.flat_amount), "adjustmentAmount": _dec(s.adjustment_amount),
                 "niCategory": s.ni_category, "employerRatePct": _dec(s.employer_rate_pct),
                 # Additive (2026-09-23): the row's formula/assessment basis —
@@ -1258,7 +1267,7 @@ class _ReplayTaxSlab:
     __slots__ = (
         "min_amount", "max_amount", "rate_pct", "rate_label", "tax_formula",
         "sort_order", "jurisdiction_country", "jurisdiction_state", "jurisdiction_locality",
-        "tax_regime", "filing_status", "rule_type", "formula_expression",
+        "tax_regime", "filing_status", "rule_type", "tax_table_number", "formula_expression",
         "flat_amount", "adjustment_amount", "ni_category", "employer_rate_pct",
         "assessment_basis",
     )
@@ -1312,7 +1321,8 @@ def _reconstruct_rate_map_and_slabs_from_snapshot(snapshot: Optional[dict]) -> t
             rate_label=s.get("rateLabel"), tax_formula=s.get("taxFormula"), sort_order=s.get("sortOrder"),
             jurisdiction_country=s.get("jurisdictionCountry"), jurisdiction_state=s.get("jurisdictionState"),
             jurisdiction_locality=s.get("jurisdictionLocality"), tax_regime=s.get("taxRegime"),
-            filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
+            filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), tax_table_number=s.get("taxTableNumber"),
+            formula_expression=s.get("formulaExpression"),
             flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
             ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
             # .get(): None for snapshots taken before assessmentBasis was
@@ -1363,7 +1373,8 @@ def _reconstruct_overlay_from_snapshot(snapshot: Optional[dict]):
                 rate_label=s.get("rateLabel"), tax_formula=s.get("taxFormula"), sort_order=s.get("sortOrder"),
                 jurisdiction_country=s.get("jurisdictionCountry"), jurisdiction_state=s.get("jurisdictionState"),
                 jurisdiction_locality=s.get("jurisdictionLocality"), tax_regime=s.get("taxRegime"),
-                filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
+                filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), tax_table_number=s.get("taxTableNumber"),
+                formula_expression=s.get("formulaExpression"),
                 flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
                 ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
                 # .get(): None for snapshots taken before assessmentBasis was
@@ -1882,6 +1893,9 @@ def get_taxability_classification(
             or_(TaxabilityRule.organization_id.is_(None), TaxabilityRule.organization_id == organization_id),
             or_(TaxabilityRule.effective_from.is_(None), TaxabilityRule.effective_from <= as_of),
             or_(TaxabilityRule.effective_to.is_(None), TaxabilityRule.effective_to >= as_of),
+            # CH Step 5: a Swiss classification governs only once Approved.
+            # Every other country keeps reading its legacy rows (status NULL).
+            (TaxabilityRule.status == "Approved") if country == "CH" else true(),
         )
         .all()
     )
@@ -2019,6 +2033,14 @@ def get_au_taxability_rules_bundle(db: Session, organization_id: int = None, as_
 # this is Super-Admin-owned platform configuration, same trust model as
 # ContributionRate/TaxSlab's canonical rows.
 
+def _refuse_ch_legacy_taxability_write(country: Optional[str]) -> None:
+    # CH classifications are governed (Draft -> Approved, four-eyes, never
+    # edited or deleted): only the /compliance/switzerland/taxability-rules
+    # routes may write them.
+    if (country or "").upper() == "CH":
+        raise BadRequestException("Swiss taxability rules are governed — use /compliance/switzerland/taxability-rules.")
+
+
 def list_taxability_rules(db: Session, country: Optional[str] = None, tax_component: Optional[str] = None) -> List[TaxabilityRule]:
     query = db.query(TaxabilityRule).filter(TaxabilityRule.organization_id.is_(None))
     if country:
@@ -2032,6 +2054,7 @@ def upsert_taxability_rule(
     db: Session, country: str, tax_component: str, earning_type: str, is_taxable: bool,
     state: Optional[str] = None, effective_from=None, effective_to=None,
 ) -> TaxabilityRule:
+    _refuse_ch_legacy_taxability_write(country)
     row = (
         db.query(TaxabilityRule)
         .filter(
@@ -2059,6 +2082,7 @@ def delete_taxability_rule(db: Session, rule_id: int) -> None:
     row = db.query(TaxabilityRule).filter(TaxabilityRule.id == rule_id, TaxabilityRule.organization_id.is_(None)).first()
     if not row:
         raise NotFoundException(f"Taxability rule {rule_id} not found.")
+    _refuse_ch_legacy_taxability_write(row.jurisdiction_country)
     db.delete(row)
     db.commit()
 
@@ -21439,6 +21463,75 @@ def upsert_ie_rpn_snapshot(
     return row
 
 
+def record_ie_rpn_snapshot(
+    db: Session,
+    organization_id: int,
+    data,
+) -> "IrelandRpnSnapshot":
+    """Ingest one frozen RPN through the API (IE-005/IE-022).
+
+    Ownership is checked here rather than in the router so the guard cannot be
+    bypassed by another caller of the snapshot writer. `data` is an
+    IrelandRpnSnapshotUpsert; the caller-supplied organizationId on the body is
+    deliberately ignored in favour of the authenticated tenant, so a body can
+    never name another organization.
+    """
+    employee = get_employee_by_id(db, data.employeeId, organization_id)
+    if _normalize_country(getattr(employee, "country_code", None)) != "IE":
+        raise BadRequestException(
+            "RPN snapshots can only be recorded for an Ireland employee."
+        )
+    return upsert_ie_rpn_snapshot(
+        db,
+        organization_id,
+        employee.id,
+        data.rpnNumber,
+        data.issuedAt,
+        data.taxYear,
+        data.calculationBasis,
+        data.ppsnSupplied,
+        data.standardRateBand,
+        data.taxCredit,
+        data.standardRateBandPeriod,
+        data.taxCreditPeriod,
+        data.previousTaxablePayYtd,
+        data.previousPayYtd,
+        data.periodsElapsed,
+        data.lptInstructed,
+        data.lptRatePct,
+        data.emergencyTaxCreditWeekly,
+        data.rawHash,
+        data.rawPayload,
+        data.statutoryProfileId,
+    )
+
+
+def list_ie_rpn_snapshots(
+    db: Session,
+    organization_id: int,
+    employee_id: Optional[int] = None,
+    tax_year: Optional[str] = None,
+) -> List["IrelandRpnSnapshot"]:
+    """Every frozen RPN snapshot for this organization, newest authority issue
+    first (IE-033/IE-045).
+
+    Snapshots are immutable history, so this is the audit view rather than a
+    current-state read: a re-issued RPN appears as an additional row and the
+    engine keeps consuming the latest one. `tax_year` is the Irish tax year
+    ("2026") as stored, never a date.
+    """
+    query = db.query(IrelandRpnSnapshot).filter(
+        IrelandRpnSnapshot.organization_id == organization_id
+    )
+    if employee_id is not None:
+        query = query.filter(IrelandRpnSnapshot.employee_id == employee_id)
+    if tax_year is not None:
+        query = query.filter(IrelandRpnSnapshot.tax_year == str(tax_year))
+    return query.order_by(
+        IrelandRpnSnapshot.issued_at.desc(), IrelandRpnSnapshot.id.desc()
+    ).all()
+
+
 def _load_ie_myfuturefund_status(db: Session, employee_id: int, pay_date) -> dict:
     """The NAERSA-notified MyFutureFund status in force on pay_date (IE-018).
 
@@ -25381,28 +25474,50 @@ def _post_payslip_ytd(db: Session, run: PayrollRun, employee, item: PayslipItem,
         _upsert_jm_heart_ytd(db, run.organization_id, run.pay_date, r["jm_heart_increment"], payslip_id=item.id)
 
 
-def _refresh_ytd_after_correction(db: Session, run: PayrollRun, employee, item: PayslipItem, country: str,
-                                  r: dict, old_postings) -> list:
-    """Correction = reverse this payslip's employee-level (ABSOLUTE) postings
-    and re-post them from the recalculated result. The correction path never
-    recomputes employer-level increments (org levies) or CA Option 2 (see
-    regenerate_employee_payslip), so ADDITIVE postings are carried over
-    untouched, and an absolute row whose family the correction did not
-    recompute is put back to its original value. If a LATER payslip already
-    built on these totals, the correction may only proceed when its YTD
-    effect is unchanged (nothing is touched); a changed effect is refused —
-    never silently applied under the later payslip. Returns the postings to
-    store on the payslip."""
+def _begin_ytd_correction(db: Session, item: PayslipItem, old_postings) -> dict:
+    """Correction, part 1 — reverse this payslip's employee-level (ABSOLUTE)
+    postings BEFORE the recompute, not after. Ireland and Italy resolve their
+    YTD inputs by reading the LIVE accumulator inside _compute_payslip_values
+    (see _resolve_ie_calc_inputs / _italy_service.resolve_it_calc_inputs):
+    with this payslip's own prior posting still in place, that read already
+    includes it, so the recalculated absolute totals (and every LATER
+    payslip that reads them) would double-count this period. Reversing first
+    gives them the same true pre-this-payslip base the other YTD
+    jurisdictions get from their frozen ytd_inputs. The correction path
+    never recomputes employer-level increments (org levies) or CA Option 2
+    (see regenerate_employee_payslip), so ADDITIVE postings are carried over
+    untouched by the finish phase.
+
+    The caller restores ctx["state"] if the recompute raises; the finish
+    phase restores it if a LATER payslip already built on these totals and
+    the correction's YTD effect changed (YtdPostingConflict)."""
     old_abs = [p for p in old_postings if p["mode"] == "absolute"]
     old_add = [p for p in old_postings if p["mode"] != "absolute"]
     state = _ytd_capture_state(db, item.employee_id, item.organization_id)
     later = any(state.get((p["table"], p["rowId"]), (None, None, item.id))[2] != item.id for p in old_abs)
     _ytd_reverse_postings(db, item, old_abs, require_latest=False, delete_created=False)
     pre = _ytd_capture_state(db, item.employee_id, item.organization_id)
+    return {"old_postings": old_postings, "old_abs": old_abs, "old_add": old_add,
+            "state": state, "later": later, "pre": pre}
+
+
+def _finish_ytd_correction(db: Session, run: PayrollRun, employee, item: PayslipItem, country: str,
+                           r: dict, ctx: dict) -> list:
+    """Correction, part 2 — after the recompute, re-post the recalculated
+    ABSOLUTE totals and settle the correction begun by _begin_ytd_correction.
+    An absolute row whose family the correction did not recompute is put back
+    to its original value. If a LATER payslip already built on these totals,
+    the correction may only proceed when its YTD effect is unchanged (nothing
+    is touched); a changed effect is refused — never silently applied under
+    the later payslip. Returns the postings to store on the payslip."""
+    old_abs = ctx["old_abs"]
+    old_add = ctx["old_add"]
+    state = ctx["state"]
+    later = ctx["later"]
     _post_payslip_ytd(db, run, employee, item, country, {**r, "org_levy_result": None,
                                                          "uk_org_levy_increment": None, "jm_heart_increment": None})
     # after the reversal only the rows just re-posted point at this payslip
-    new_abs = [p for p in _ytd_collect_postings(db, item, pre) if p["mode"] == "absolute"]
+    new_abs = [p for p in _ytd_collect_postings(db, item, ctx["pre"]) if p["mode"] == "absolute"]
     new_keys = {(p["table"], p["taxYear"], p["component"]) for p in new_abs}
     models = dict(_ytd_models())
     kept = []
@@ -25424,7 +25539,7 @@ def _refresh_ytd_after_correction(db: Session, run: PayrollRun, employee, item: 
                 "this correction changes year-to-date totals that a later payslip has already built on — "
                 "remove or correct the later payslip(s) first"
             )
-        return old_postings
+        return ctx["old_postings"]
     return new_abs + kept + old_add
 
 
@@ -26279,6 +26394,10 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             detail="This employee doesn't have a payslip in this run yet — add them to the run instead of recalculating.",
         )
 
+    # Same attendance gate as run creation — skipped when the run was
+    # created under a recorded override.
+    enforce_attendance_readiness(db, organization_id, run.period_start, run.period_end, [employee.id], run=run)
+
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
     country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
@@ -26322,6 +26441,18 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         replay_rates, replay_slabs = _reconstruct_rate_map_and_slabs_from_snapshot(existing_tax_snapshot)
         if replay_rates or replay_slabs:
             rate_map = {_normalize_engine_component_key(r.component_key): r for r in replay_rates}
+            if country == "IT" and replay_rates:
+                # Mirror the live resolution path (see
+                # _resolve_effective_rate_inputs): the §7 INPS matrix row
+                # set carries many rows per component_key — one per CSC and
+                # worker class — so keying by family alone would replay only
+                # the LAST class's rates (that collision is exactly the
+                # "§7 INPS matrix ... one class's rates for everyone" note
+                # written above the live path's own italy_rate_map call).
+                # AC-32 historical replay must reproduce the ORIGINAL class
+                # matrix, so an Italy correction behaves the same against a
+                # replayed snapshot as against the live pack.
+                rate_map = _italy_service.italy_rate_map(replay_rates)
             slabs = replay_slabs
             replaying_from_snapshot = True
             # Hong Kong: the period-split rows (minimum-wage segments etc.) the
@@ -26429,15 +26560,35 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         if whm_before is not None:
             ytd_inputs["ytd_whm_earnings_before"] = Decimal(whm_before)
 
-    values = _compute_payslip_values(
-        db, run, employee, rate_map, slabs, country, calculation_mode,
-        allowance_components=allowance_components, resolved_pack=resolved_pack,
-        state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-        reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs or None,
-        poe_snapshot=poe_snapshot,
-    )
+    # Phase 4A (reversal-integrity fix): the correction reverses this
+    # payslip's posted YTD BEFORE the recompute — not after. Ireland and
+    # Italy resolve their YTD inputs by reading the LIVE accumulator inside
+    # _compute_payslip_values (see _resolve_ie_calc_inputs /
+    # _italy_service.resolve_it_calc_inputs); with the payslip's own prior
+    # posting still present that read already includes it, so the
+    # recalculated absolute totals — and every LATER payslip that reads
+    # them — would double-count this period. Reversing first gives IE/IT the
+    # same pre-this-payslip "frozen" base the other YTD jurisdictions get
+    # from the ytd_inputs built above. On a failed compute the reversal is
+    # undone (a recalculation never leaves the accumulator half-reversed).
+    old_ytd_postings = _ytd_postings_of(existing_item)
+    ytd_correction_ctx = None
+    if old_ytd_postings is not None:
+        ytd_correction_ctx = _begin_ytd_correction(db, existing_item, old_ytd_postings)
+    try:
+        values = _compute_payslip_values(
+            db, run, employee, rate_map, slabs, country, calculation_mode,
+            allowance_components=allowance_components, resolved_pack=resolved_pack,
+            state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+            reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs or None,
+            poe_snapshot=poe_snapshot,
+        )
+    except BaseException:
+        if ytd_correction_ctx is not None:
+            _ytd_restore_state(db, ytd_correction_ctx["state"], existing_item.employee_id, existing_item.organization_id)
+        raise
     # Phase 4A: the correction now RE-POSTS year-to-date totals from these
-    # results (see _refresh_ytd_after_correction below) instead of the
+    # results (see _begin_ytd_correction/_finish_ytd_correction below) instead of the
     # former never-write contract, which left YTD stale after a
     # value-changing correction. Payslips without posting records keep the
     # former behaviour.
@@ -26450,8 +26601,8 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     sg_cpf_ytd_result = values.pop("_sg_cpf_ytd_result", None)
     # Ireland / Puerto Rico: re-posted through the same Phase 4A lifecycle
-    # (_refresh_ytd_after_correction reverses this payslip's absolute postings
-    # first), so a correction REPLACES their year-to-date rather than advancing it.
+    # (_begin_ytd_correction reversed this payslip's absolute postings before
+    # the recompute above), so a correction REPLACES their year-to-date rather than advancing it.
     ie_ytd_result = values.pop("_ie_ytd_result", None)
     it_ytd_result = values.pop("_it_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
@@ -26501,17 +26652,16 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             "ytd_snapshot to reproduce from — figures may differ from the original run.",
             existing_item.id,
         )
-    old_ytd_postings = _ytd_postings_of(existing_item)
     new_ytd_postings = None
     if old_ytd_postings is not None:
         try:
-            new_ytd_postings = _refresh_ytd_after_correction(db, run, employee, existing_item, country, dict(
+            new_ytd_postings = _finish_ytd_correction(db, run, employee, existing_item, country, dict(
                 ytd_result=ytd_result, us_ytd_result=us_ytd_result, au_sg_ytd_result=au_sg_ytd_result,
                 au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
                 gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
                 ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
                 uk_director_ytd_result=uk_director_ytd_result,
-            ), old_ytd_postings)
+            ), ytd_correction_ctx)
         except YtdPostingConflict as exc:
             db.rollback()
             raise BadRequestException(f"Cannot recalculate this payslip: {exc}")
@@ -26781,17 +26931,47 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         errors.extend(jurisdiction_hooks.call("HK", "statutory_profile_errors", data))
     if country_code == "SE":
         errors.extend(_se_profile_field_errors(data))
+    if country_code == "IT":
+        errors.extend(_it_profile_field_errors(data))
 
     if errors:
         raise BadRequestException("; ".join(errors))
 
 
+def _it_profile_field_errors(data) -> list:
+    """Italy (ZP-IT-ENG-001 §18) — refuse at write time the values
+    engine/countries/italy.py would only ever block on at calculation time.
+    The vocabularies are the engine's own constants, so they cannot drift."""
+    from app.modules.payroll.engine.countries import italy as _it_engine
+    from app.modules.payroll.engine.countries import italy_content as _it_content
 
+    def upper(value):
+        return (value or "").strip().upper() or None
 
-
-
-
-
+    errors = []
+    contracts = _it_engine.CONTRACT_PERMANENT + _it_engine.CONTRACT_FIXED_TERM
+    if upper(data.it_contract_type) and upper(data.it_contract_type) not in contracts:
+        errors.append(f"it_contract_type must be one of {', '.join(contracts)}.")
+    if upper(data.it_tfr_destination) and upper(data.it_tfr_destination) not in _it_engine.TFR_DESTINATIONS:
+        errors.append(f"it_tfr_destination must be one of {', '.join(_it_engine.TFR_DESTINATIONS)}.")
+    if upper(data.it_tfr_destination) == _it_engine.TFR_DESTINATION_FUND and not data.it_pension_fund:
+        errors.append("A FONDO_PENSIONE TFR destination needs it_pension_fund named (§13).")
+    if (upper(data.it_contributory_cap_cohort)
+            and upper(data.it_contributory_cap_cohort) not in _it_engine.CAP_COHORTS):
+        errors.append(f"it_contributory_cap_cohort must be one of {', '.join(_it_engine.CAP_COHORTS)} "
+                      "— the ceiling is never applied without recognised cohort evidence (IT-017).")
+    # IT-013: tax domicile is stored as codes — ISTAT region code and the
+    # comune's cadastral code (e.g. F205 = Milano) — never a free-text name.
+    regions = {code for code, _name in _it_content.IT_REGIONS}
+    if data.it_tax_domicile_region and data.it_tax_domicile_region.strip() not in regions:
+        errors.append("it_tax_domicile_region must be a two-digit ISTAT region code (e.g. 03 = Lombardia).")
+    if data.it_tax_domicile_comune and not re.fullmatch(r"[A-Z][0-9]{3}", upper(data.it_tax_domicile_comune)):
+        errors.append("it_tax_domicile_comune must be a cadastral code: a letter and three digits (e.g. F205 = Milano).")
+    if bool(data.it_tax_domicile_region) != bool(data.it_tax_domicile_comune):
+        errors.append("Tax domicile needs both it_tax_domicile_region and it_tax_domicile_comune (IT-013).")
+    if data.it_contractual_weekly_hours is not None and not (0 < data.it_contractual_weekly_hours <= 48):
+        errors.append("it_contractual_weekly_hours must be greater than 0 and at most 48.")
+    return errors
 
 
 # Sweden worker-profile vocabularies (ZP-SE-ENG-001 §2/§5/§9/§11) — the exact
@@ -27003,6 +27183,24 @@ def create_employee_statutory_profile_version(
         se_monthly_gross=data.se_monthly_gross,
         se_taxable_benefits=data.se_taxable_benefits,
         se_annual_income=data.se_annual_income,
+        # Italy (ZP-IT-ENG-001 §18) — vocabularies validated above; codes stored
+        # upper-case, exactly as italy.py compares them.
+        it_cnel_code=data.it_cnel_code,
+        it_cnel_level=data.it_cnel_level,
+        it_worker_class=(data.it_worker_class or '').strip().upper() or None,
+        it_contract_type=(data.it_contract_type or '').strip().upper() or None,
+        it_cigs_applies=data.it_cigs_applies,
+        it_contributory_cap_cohort=(data.it_contributory_cap_cohort or '').strip().upper() or None,
+        it_employer_contrib_opted=data.it_employer_contrib_opted,
+        it_tfr_destination=(data.it_tfr_destination or '').strip().upper() or None,
+        it_pension_fund=data.it_pension_fund,
+        it_tfr_destination_from=data.it_tfr_destination_from,
+        it_tax_domicile_comune=(data.it_tax_domicile_comune or '').strip().upper() or None,
+        it_tax_domicile_region=(data.it_tax_domicile_region or '').strip() or None,
+        it_tax_domicile_from=data.it_tax_domicile_from,
+        it_fringe_child_declared=data.it_fringe_child_declared,
+        it_contractual_weekly_hours=data.it_contractual_weekly_hours,
+        it_termination_reason=data.it_termination_reason,
     )
     if country_code == "HK":
         latest = previous_open or (
@@ -30093,6 +30291,182 @@ def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id:
 
 # ── Payroll Runs ────────────────────────────────────────────────────────
 
+# ── Attendance gate (2026-10-06 fix plan, Phase 1) ─────────────────────────
+# Payroll is deduct-on-absence (_count_unpaid_leave_days): a day with no
+# attendance row is silently paid as present. So a run must not start until
+# every in-scope employee has a row (any status — present/absent/leave) for
+# every expected working day of the period. Expected = days the employee was
+# employed in the period, minus the policy's weekly off days and the org's
+# holidays. Approved leave already writes attendance rows
+# (_sync_leave_to_attendance), so leave days count as recorded.
+_ATTENDANCE_DEFAULT_WEEKLY_OFF_DAYS = (5, 6)   # Sat, Sun — Python weekday()
+_ATTENDANCE_REPORT_MAX_EMPLOYEES = 500
+_ATTENDANCE_REPORT_MAX_DATES = 62
+_ATTENDANCE_OVERRIDE_MIN_REASON = 10
+
+
+def _attendance_policy_settings(db: Session, organization_id: int) -> dict:
+    from app.modules.payroll.policy.service import get_active_policy
+    policy = get_active_policy(db, organization_id)
+    required = getattr(policy, "attendance_required", None)
+    employment_types = getattr(policy, "attendance_required_employment_types", None)
+    off_days = getattr(policy, "attendance_weekly_off_days", None)
+    if isinstance(off_days, list) and all(isinstance(d, int) and 0 <= d <= 6 for d in off_days):
+        weekly_off = sorted(set(off_days))
+    else:
+        weekly_off = list(_ATTENDANCE_DEFAULT_WEEKLY_OFF_DAYS)
+    return {
+        "required": True if required is None else bool(required),
+        "employmentTypes": list(employment_types) if isinstance(employment_types, list) and employment_types else None,
+        "weeklyOffDays": weekly_off,
+    }
+
+
+def check_attendance_readiness(db: Session, organization_id: int, period_start, period_end,
+                               employee_ids: Optional[List[int]] = None) -> dict:
+    """Read-only per-employee attendance coverage report for a pay period.
+
+    employee_ids None = every Active employee (what a full run generates for).
+    `ready` is False only when the org's policy requires attendance AND at
+    least one in-scope employee is missing an expected day. The report is
+    JSON-safe (dates as ISO strings) — it doubles as the
+    AttendanceIncompleteException trace."""
+    settings = _attendance_policy_settings(db, organization_id)
+    report = {
+        "required": settings["required"],
+        "ready": True,
+        "periodStart": period_start.isoformat() if period_start else None,
+        "periodEnd": period_end.isoformat() if period_end else None,
+        "weeklyOffDays": settings["weeklyOffDays"],
+        "employmentTypes": settings["employmentTypes"],
+        "totalEmployees": 0,
+        "exemptEmployees": 0,
+        "completeEmployees": 0,
+        "incompleteEmployees": 0,
+        "missing": [],
+        "missingTruncated": False,
+    }
+    if not period_start or not period_end or period_end < period_start:
+        return report
+
+    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    if employee_ids is not None:
+        if not employee_ids:
+            return report
+        query = query.filter(PayrollEmployee.id.in_(list(employee_ids)))
+    else:
+        query = query.filter(PayrollEmployee.status == EmployeeStatus.ACTIVE)
+    employees = query.order_by(PayrollEmployee.name).all()
+    report["totalEmployees"] = len(employees)
+    if not employees:
+        return report
+
+    holiday_countries: Dict[date, set] = {}
+    for h_date, h_country in db.query(PayrollHoliday.date, PayrollHoliday.country).filter(
+        PayrollHoliday.organization_id == organization_id,
+        PayrollHoliday.date >= period_start,
+        PayrollHoliday.date <= period_end,
+    ).all():
+        holiday_countries.setdefault(h_date, set()).add((h_country or "").strip().upper())
+
+    recorded: Dict[int, set] = {}
+    for emp_id, rec_date in db.query(PayrollAttendanceRecord.employee_id, PayrollAttendanceRecord.date).filter(
+        PayrollAttendanceRecord.organization_id == organization_id,
+        PayrollAttendanceRecord.employee_id.in_([e.id for e in employees]),
+        PayrollAttendanceRecord.date >= period_start,
+        PayrollAttendanceRecord.date <= period_end,
+    ).all():
+        recorded.setdefault(emp_id, set()).add(rec_date)
+
+    org_country = (_resolve_org_country(db, organization_id) or "").strip().upper()
+    weekly_off = set(settings["weeklyOffDays"])
+    in_scope_types = set(settings["employmentTypes"]) if settings["employmentTypes"] else None
+
+    missing_rows = []
+    for emp in employees:
+        if in_scope_types is not None and (emp.employment_type or "") not in in_scope_types:
+            report["exemptEmployees"] += 1
+            continue
+        start = max(period_start, emp.date_of_joining) if emp.date_of_joining else period_start
+        end = min(period_end, emp.date_of_leaving) if emp.date_of_leaving else period_end
+        emp_country = (emp.country_code or org_country or "").strip().upper()
+        expected = []
+        day = start
+        while day <= end:
+            if day.weekday() not in weekly_off:
+                countries = holiday_countries.get(day)
+                is_holiday = bool(countries) and ("" in countries or not emp_country or emp_country in countries)
+                if not is_holiday:
+                    expected.append(day)
+            day += timedelta(days=1)
+        have = recorded.get(emp.id, set())
+        missing = [d for d in expected if d not in have]
+        if not missing:
+            report["completeEmployees"] += 1
+            continue
+        missing_rows.append({
+            "employeeId": emp.id,
+            "employeeName": emp.name,
+            "employeeCode": emp.employee_code,
+            "expectedDays": len(expected),
+            "recordedDays": len(expected) - len(missing),
+            "missingDays": len(missing),
+            "missingDates": [d.isoformat() for d in missing[:_ATTENDANCE_REPORT_MAX_DATES]],
+        })
+
+    missing_rows.sort(key=lambda r: (-r["missingDays"], r["employeeName"] or ""))
+    report["incompleteEmployees"] = len(missing_rows)
+    report["missing"] = missing_rows[:_ATTENDANCE_REPORT_MAX_EMPLOYEES]
+    report["missingTruncated"] = len(missing_rows) > _ATTENDANCE_REPORT_MAX_EMPLOYEES
+    report["ready"] = not (settings["required"] and missing_rows)
+    return report
+
+
+def enforce_attendance_readiness(db: Session, organization_id: int, period_start, period_end,
+                                 employee_ids: Optional[List[int]] = None, *,
+                                 override_reason: Optional[str] = None,
+                                 run: Optional[PayrollRun] = None) -> Optional[str]:
+    """Raise AttendanceIncompleteException unless attendance is complete.
+
+    Returns the override reason when the operator deliberately proceeds with
+    incomplete attendance (the caller records it on the run via
+    _record_attendance_override), else None. A run that already carries an
+    override keeps honouring it for later generate/recalculate calls."""
+    from app.core.exceptions import AttendanceIncompleteException
+
+    if run is not None and getattr(run, "attendance_override_reason", None):
+        return None
+    report = check_attendance_readiness(db, organization_id, period_start, period_end, employee_ids)
+    if report["ready"]:
+        return None
+    reason = (override_reason or "").strip()
+    if reason:
+        if len(reason) < _ATTENDANCE_OVERRIDE_MIN_REASON:
+            raise BadRequestException(
+                f"An attendance override reason must be at least {_ATTENDANCE_OVERRIDE_MIN_REASON} characters."
+            )
+        return reason
+    count = report["incompleteEmployees"]
+    raise AttendanceIncompleteException(
+        f"Attendance is incomplete for {count} employee(s) in this pay period. Payroll can't run until "
+        "attendance is recorded for every working day, or an admin overrides with a reason.",
+        trace=report,
+    )
+
+
+def _record_attendance_override(db: Session, run: PayrollRun, reason: str, actor_id: Optional[int]) -> None:
+    """Persist the override audit on the run. log_activity commits it."""
+    from datetime import timezone as _tz
+    run.attendance_override_reason = reason
+    run.attendance_override_by = actor_id
+    run.attendance_override_at = datetime.now(_tz.utc)
+    log_activity(
+        db, run.organization_id,
+        f"Payroll run '{run.period_label}' proceeded with incomplete attendance (override). Reason: {reason}",
+        ActivityStatus.INFO, actor_id=actor_id,
+    )
+
+
 def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, organization_id: int = None) -> PayrollRun:
     # Resolve and store the calculation mode on the run for auditing
     calculation_mode = _resolve_calculation_mode(db, organization_id, data.calculation_mode)
@@ -30140,17 +30514,15 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
                 detail=f"Payroll Run for this payroll period already exists. See run '{existing_run.period_label}' (ID {existing_run.id}).",
             )
 
-        att_count = db.query(PayrollAttendanceRecord).filter(
-            PayrollAttendanceRecord.organization_id == organization_id,
-            PayrollAttendanceRecord.employee_id.in_(new_employee_ids),
-            PayrollAttendanceRecord.date >= data.period_start,
-            PayrollAttendanceRecord.date <= data.period_end,
-        ).count()
-        if att_count == 0:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail="No attendance records found for the selected period and employees. Please record attendance before creating a payroll run.",
-            )
+        # Per-employee attendance gate (replaces the old "any record at all
+        # across every selected employee" count, which let one employee's
+        # attendance carry everyone else's run).
+        override = enforce_attendance_readiness(
+            db, organization_id, data.period_start, data.period_end, list(new_employee_ids),
+            override_reason=data.attendance_override_reason, run=existing_run,
+        )
+        if override:
+            _record_attendance_override(db, existing_run, override, created_by)
 
         run = generate_payslips_for_run(db, existing_run, organization_id, employee_ids=list(new_employee_ids))
         log_activity(
@@ -30161,18 +30533,15 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
         return run
 
     # ── No run exists for this period yet — create a fresh one ──
-    if data.employeeIds:
-        att_count = db.query(PayrollAttendanceRecord).filter(
-            PayrollAttendanceRecord.organization_id == organization_id,
-            PayrollAttendanceRecord.employee_id.in_(data.employeeIds),
-            PayrollAttendanceRecord.date >= data.period_start,
-            PayrollAttendanceRecord.date <= data.period_end,
-        ).count()
-        if att_count == 0:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail="No attendance records found for the selected period and employees. Please record attendance before creating a payroll run.",
-            )
+    # Attendance gate only when payslips are generated now; a bare Draft run
+    # is gated later by the generate-payslips endpoint instead.
+    override = None
+    if data.auto_generate_payslips:
+        override = enforce_attendance_readiness(
+            db, organization_id, data.period_start, data.period_end,
+            list(data.employeeIds) if data.employeeIds else None,
+            override_reason=data.attendance_override_reason,
+        )
 
     # Upfront jurisdiction-config guard — refuse to create the run row at
     # all if this org's country has opted into fail-fast validation and
@@ -30193,7 +30562,8 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
             bad_key = readiness["missingKeys"][0]["key"] if readiness["missingKeys"] else "tax slabs"
             raise MissingComplianceConfigurationError(bad_key, org_country, organization_id)
 
-    payload = data.model_dump(exclude={"auto_generate_payslips", "schedule", "employeeIds", "totals", "calculation_mode"})
+    payload = data.model_dump(exclude={"auto_generate_payslips", "schedule", "employeeIds", "totals", "calculation_mode",
+                                       "attendance_override_reason"})
     run = PayrollRun(created_by=created_by, calculation_mode=calculation_mode, **payload)
     if organization_id is not None:
         run.organization_id = organization_id
@@ -30202,6 +30572,8 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
     db.add(run)
     db.commit()
     db.refresh(run)
+    if override:
+        _record_attendance_override(db, run, override, created_by)
 
     if data.auto_generate_payslips:
         run = generate_payslips_for_run(db, run, organization_id, employee_ids=data.employeeIds)
@@ -30821,6 +31193,27 @@ def advance_payroll_run_status(
     return run
 
 
+def _reverse_run_ytd_postings(db: Session, run: PayrollRun) -> None:
+    """Reverse every payslip's posted YTD within a run before the run itself
+    is deleted — DELETE-payroll-run integrity. Iterated newest-first so the
+    ADDITIVE employer-level rows rewind their last_updated_payslip_id
+    ownership chain back to the run's predecessor (or NULL) instead of a
+    payslip this deletion is about to cascade-remove; rows are only left with
+    a previous writer that still exists. Fail-closed (YtdPostingConflict) on
+    an ABSOLUTE row a later payslip — in another run — already built on,
+    exactly like delete_payslip: deleting the run would silently abandon
+    that total's provenance."""
+    items = (db.query(PayslipItem)
+             .filter(PayslipItem.payroll_run_id == run.id)
+             .order_by(PayslipItem.id.desc()).all())
+    for item in items:
+        postings = _ytd_postings_of(item)
+        if postings is not None:
+            _ytd_reverse_postings(db, item, postings, require_latest=True, delete_created=True)
+        else:
+            _ytd_reverse_legacy(db, item)
+
+
 def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if run.status != PayrollStatus.DRAFT:
@@ -30830,6 +31223,16 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
             "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))
     _deleted_run_period = run.period_label
     _deleted_run_code = run.run_code
+    # Year-to-date accumulators (every YTD jurisdiction): reverse what every
+    # payslip in this run posted before the run itself is deleted — never
+    # leave a stale total or a dangling last_updated_payslip_id pointing at a
+    # cascade-removed payslip. Refused (fail-closed) when a later payslip
+    # already built on one of this run's absolute totals.
+    try:
+        _reverse_run_ytd_postings(db, run)
+    except YtdPostingConflict as exc:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payroll run: {exc}")
     db.delete(run)
     db.commit()
     _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id, run_id=run_id)
@@ -33739,9 +34142,18 @@ def bulk_save_attendance(db: Session, data: BulkAttendanceRequest, organization_
             _maybe_remove_leave_request(db, rec.leave_request_id, organization_id)
             rec.leave_request_id = None
 
+    # Ids are assigned by the flush above; read them before commit expires
+    # the objects, then reload everything in a few batched queries instead of
+    # one db.refresh() round trip per row (thousands of rows on a bulk save
+    # against a remote database used to run past the proxy timeout).
+    result_ids = [r.id for r in results]
     db.commit()
-    for r in results:
-        db.refresh(r)
+    fresh: dict[int, PayrollAttendanceRecord] = {}
+    for i in range(0, len(result_ids), 1000):
+        chunk = result_ids[i:i + 1000]
+        for row in db.query(PayrollAttendanceRecord).filter(PayrollAttendanceRecord.id.in_(chunk)).all():
+            fresh[row.id] = row
+    results = [fresh[i] for i in result_ids if i in fresh]
 
     # ── 4. Batch-enrich employee details (single query instead of N) ──
     all_emp_ids = list({r.employee_id for r in results})
@@ -38098,6 +38510,1420 @@ def transition_france_dsn_outbox_item(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Italy filing outbox (ZP-IT-ENG-001 §15/§16, IT-044/IT-048)
+#
+# Delivery state ONLY. Filing status, receipt_id, correction lineage and schema
+# version live on the linked StatutoryFiling, exactly as France's outbox defers
+# to FranceDsnSubmission. Nothing here generates a UniEmens/F24/LUL/CU/770
+# document or talks to INPS/INAIL/Agenzia delle Entrate: this is the durable,
+# idempotent queue a future transport worker drains, so a calculation can never
+# fail because a government endpoint is down (IT-044).
+# ═══════════════════════════════════════════════════════════════════════════
+
+_IT_FILING_OUTBOX_ACTIONS = {
+    "UNIEMENS_TRANSMIT", "F24_SUBMIT", "LUL_REGISTER",
+    "CU_TRANSMIT", "770_TRANSMIT", "CORRECTION",
+}
+_IT_FILING_OUTBOX_STATUSES = ("PENDING", "SENT", "UNKNOWN", "ACKNOWLEDGED", "FAILED")
+
+# Transport states (IT-048). UNKNOWN is a first-class status: a timeout yields
+# UNKNOWN plus reconciliation, never a blind replay, so it can only leave via
+# ACKNOWLEDGED or a FAILED proven not to have landed. Same graph as France's.
+_IT_FILING_OUTBOX_TRANSITIONS = {
+    "PENDING": {"SENT", "UNKNOWN", "FAILED"},
+    "SENT": {"ACKNOWLEDGED", "UNKNOWN", "FAILED"},
+    "UNKNOWN": {"ACKNOWLEDGED", "FAILED"},
+    "FAILED": {"SENT"},
+    "ACKNOWLEDGED": set(),
+}
+
+
+def create_italy_filing_outbox_item(
+    db: Session, organization_id: int, data, actor_id: Optional[int] = None,
+) -> ItalyFilingOutboxItem:
+    """Enqueue one outbound Italian filing action (IT-044).
+
+    The idempotency key is the (organization, action, statutory filing, period)
+    IDENTITY — not the payload — so retrying with a corrected payload still
+    resolves to the one existing row instead of queueing a second transmission
+    of the same action. A CORRECTION is a distinct action precisely because it
+    must queue separately from the original filing it corrects.
+    """
+    if data.action not in _IT_FILING_OUTBOX_ACTIONS:
+        raise BadRequestException(
+            f"action must be one of {sorted(_IT_FILING_OUTBOX_ACTIONS)}, got {data.action!r}.")
+
+    # A linked filing must belong to THIS tenant; ownership is never taken from
+    # the request body.
+    if data.statutoryFilingId is not None:
+        filing = (db.query(StatutoryFiling)
+                  .filter(StatutoryFiling.id == data.statutoryFilingId,
+                          StatutoryFiling.organization_id == organization_id).first())
+        if not filing:
+            raise NotFoundException("StatutoryFiling", data.statutoryFilingId)
+        if (filing.jurisdiction or "").upper() not in {"IT", "ITALY"}:
+            raise BadRequestException(
+                f"StatutoryFiling {filing.id} is jurisdiction {filing.jurisdiction!r}, not Italy.")
+
+    idempotency_key = hashlib.sha256(
+        json.dumps({
+            "org": organization_id,
+            "action": data.action,
+            "filing": data.statutoryFilingId,
+            "period": data.periodKey,
+        }, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:64]
+
+    existing = (db.query(ItalyFilingOutboxItem)
+                .filter(ItalyFilingOutboxItem.idempotency_key == idempotency_key).first())
+    if existing:
+        return existing
+
+    item = ItalyFilingOutboxItem(
+        organization_id=organization_id,
+        action=data.action,
+        statutory_filing_id=data.statutoryFilingId,
+        period_key=data.periodKey,
+        payload=data.payload or {},
+        idempotency_key=idempotency_key,
+        status="PENDING",
+    )
+    db.add(item)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two concurrent enqueues of the same action: the UNIQUE key is what
+        # makes that safe, so resolve to the winner instead of failing.
+        db.rollback()
+        existing = (db.query(ItalyFilingOutboxItem)
+                    .filter(ItalyFilingOutboxItem.idempotency_key == idempotency_key).first())
+        if existing:
+            return existing
+        raise
+    db.refresh(item)
+    record_tax_audit(db, actor_id=actor_id, action="create",
+                     entity_type="italy_filing_outbox_item", entity_id=item.id,
+                     legal_reference="IT-044",
+                     new_value={"action": item.action, "period": item.period_key,
+                                "statutory_filing_id": item.statutory_filing_id})
+    return item
+
+
+def list_italy_filing_outbox_items(
+    db: Session, organization_id: int,
+    statutory_filing_id: Optional[int] = None,
+    action: Optional[str] = None,
+) -> List[ItalyFilingOutboxItem]:
+    query = db.query(ItalyFilingOutboxItem).filter(
+        ItalyFilingOutboxItem.organization_id == organization_id)
+    if statutory_filing_id is not None:
+        query = query.filter(ItalyFilingOutboxItem.statutory_filing_id == statutory_filing_id)
+    if action:
+        query = query.filter(ItalyFilingOutboxItem.action == action)
+    return query.order_by(ItalyFilingOutboxItem.created_at.desc(),
+                          ItalyFilingOutboxItem.id.desc()).all()
+
+
+def transition_italy_filing_outbox_item(
+    db: Session, organization_id: int, item_id: int, status: str,
+    last_error: Optional[str] = None, actor_id: Optional[int] = None,
+) -> ItalyFilingOutboxItem:
+    """Transport-side transition (IT-048) — see _IT_FILING_OUTBOX_TRANSITIONS.
+
+    Recording an UNKNOWN item as FAILED requires the reconciliation result
+    (last_error), so "we never got a receipt" can never be written as a silent
+    failure that invites a duplicate transmission.
+    """
+    if status not in _IT_FILING_OUTBOX_STATUSES:
+        raise BadRequestException(
+            f"Outbox status must be one of {_IT_FILING_OUTBOX_STATUSES}, got {status!r}.")
+    item = (db.query(ItalyFilingOutboxItem)
+            .filter(ItalyFilingOutboxItem.id == item_id,
+                    ItalyFilingOutboxItem.organization_id == organization_id).first())
+    if not item:
+        raise NotFoundException("ItalyFilingOutboxItem", item_id)
+    if status not in _IT_FILING_OUTBOX_TRANSITIONS.get(item.status, set()):
+        raise BadRequestException(
+            f"Cannot move an Italy filing outbox item from {item.status} to {status}.")
+    if item.status == "UNKNOWN" and status == "FAILED" and not (last_error or "").strip():
+        raise BadRequestException(
+            "Declaring an UNKNOWN transmission FAILED requires the reconciliation result (last_error).")
+    old_status = item.status
+    item.status = status
+    if status == "SENT":
+        item.attempts += 1
+    item.last_error = last_error
+    if status in {"SENT", "ACKNOWLEDGED"}:
+        item.sent_at = item.sent_at or datetime.utcnow()
+    if status == "ACKNOWLEDGED":
+        item.acknowledged_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    record_tax_audit(db, actor_id=actor_id, action="update",
+                     entity_type="italy_filing_outbox_item", entity_id=item.id,
+                     legal_reference="IT-048",
+                     old_value={"status": old_status}, new_value={"status": status})
+    return item
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Italy F24 (§16, IT-043/IT-046/IT-047) — the governed causale catalog and the
+# derivation of payable F24 lines from COMMITTED payroll.
+#
+# The rule this whole section is built around: IT-043 forbids inventing an F24
+# causale. A causale is a real code in the Agenzia delle Entrate catalog, and a
+# guessed one is not a broken feature, it is a wrong payment instruction. So
+# there is no fallback code anywhere below, the catalog ships empty, and the
+# builder REFUSES any component that has no governed causale rather than
+# emitting a plausible-looking line.
+#
+# Second rule: IT-046/IT-047 — a F24 is built from COMMITTED payroll only. The
+# builder rejects a draft run outright instead of estimating, because paying a
+# liability computed from a run that may still be recalculated is worse than not
+# paying it yet. Payment STATE (authorised/settled/…) deliberately lives on
+# StatutoryFiling, never on the line, so a code correction can never rewrite the
+# fact that money already moved (IT-045).
+# ═══════════════════════════════════════════════════════════════════════════
+
+_IT_F24_SECTIONS = {"ERARIO", "INPS", "REGIONI", "ENTI_LOCALI", "INAIL"}
+_IT_F24_DIRECTIONS = {"DEBIT", "CREDIT"}
+
+# The snapshot components that represent an actual remittance, and where each
+# one is read from PayslipItem.it_calculation_snapshot. Only components listed
+# here are ever asked of the catalog; the snapshot's other keys (contributory
+# bases, annual net, wedge tax-free sums, TFR accruals, fringe/meal taxable
+# values) are inputs to a computation or report-only, and none of them is a
+# liability owed to a tax authority.
+#
+# Membership here is a statement about this engine's own output, not about
+# statute: it says "the Italy engine computed a withholding on a payslip", and
+# the catalog supplies which code it settles. That split is what lets IT-046 be
+# satisfied without hardcoding a single causale.
+_IT_F24_COMPONENT_PATHS = {
+    "inps.employee":              ("inps", "employee"),
+    "inps.employer":              ("inps", "employer"),
+    "inps.additional1pct":        ("inps", "additional1pct"),
+    "irpef.withheld":             ("irpef", "withheld"),
+    "irpef.additionalDeduction":  ("irpef", "additionalDeduction"),
+    "wedge.recoveredNow":         ("wedge", "recoveredNow"),
+    "localTax.regionalSaldo":     ("localTax", "regionalSaldo"),
+    "localTax.municipalSaldo":    ("localTax", "municipalSaldo"),
+    "localTax.municipalAcconto":  ("localTax", "municipalAcconto"),
+    "localTax.terminationWithheld": ("localTax", "terminationWithheld"),
+}
+
+# Components whose value is a recovery FROM the employee are still settled by a
+# governed causale, and it is that catalog row's `direction` which decides
+# DEBIT vs CREDIT - NOT a rule inferred here.
+#
+# An earlier draft of this module defaulted wedge.recoveredNow to CREDIT, on the
+# reasoning that a recovery is money flowing back. That was wrong on two counts:
+# it hardcoded a statutory judgement the platform has no authority to make
+# (IT-043 is not limited to codes), and it silently overrode whatever the
+# administrator had recorded in the catalog, because the column's default made
+# `direction` always truthy. Whether a component offsets a liability on the F24
+# is a fact about that causale, so it is now required on the catalog row and
+# there is no inference left to get wrong.
+
+
+
+def _it_f24_sections_from_catalog(catalog_rows, on_date: date) -> dict:
+    """component_key -> catalog row, for the rows in force on `on_date`.
+
+    Later effective_from wins, and a Draft row is honoured: a Draft causale is
+    still a REAL code an administrator has recorded, and refusing to pay
+    because the entry has not yet been through second review would be safer for
+    nobody. Status matters for reporting, not for payability.
+    """
+    best: Dict[str, ItalyF24Causale] = {}
+    for row in catalog_rows:
+        if row.effective_from > on_date:
+            continue
+        if row.effective_to is not None and row.effective_to < on_date:
+            continue
+        current = best.get(row.component_key)
+        if current is None or row.effective_from > current.effective_from:
+            best[row.component_key] = row
+    return best
+
+
+def upsert_italy_f24_causale(
+    db: Session, organization_id: int, data, actor_id: Optional[int] = None,
+) -> ItalyF24Causale:
+    """Record one governed F24 causale (IT-043/IT-046).
+
+    This is an UPSERT BY IDENTITY, not a patch of the first row found: the
+    identity is (organization, section, component, effectiveFrom). Re-submitting
+    that same identity updates the existing row in place, so a typo in a causale
+    can be corrected. Changing the code for a period that has ALREADY been built
+    or filed is a different act, and is deliberately not offered here — that is a
+    supersession (close the old row with an effectiveTo and open a new one), so
+    the audit trail shows what code was in force when each F24 was produced.
+    """
+    section = (data.section or "").strip().upper()
+    if section not in _IT_F24_SECTIONS:
+        raise BadRequestException(
+            f"section must be one of {sorted(_IT_F24_SECTIONS)}, got {data.section!r}.")
+    direction = (data.direction or "").strip().upper()
+    if direction not in _IT_F24_DIRECTIONS:
+        raise BadRequestException(
+            f"direction must be one of {sorted(_IT_F24_DIRECTIONS)}, got {data.direction!r}.")
+    component_key = (data.componentKey or "").strip()
+    if component_key not in _IT_F24_COMPONENT_PATHS:
+        # Refusing an unknown component is the guard that stops this table
+        # becoming a place to park arbitrary codes that no derivation will ever
+        # read — a catalog entry nothing consumes looks like coverage but pays
+        # nothing.
+        raise BadRequestException(
+            f"componentKey {component_key!r} is not an F24-remittable snapshot component. "
+            f"Known components: {sorted(_IT_F24_COMPONENT_PATHS)}.")
+    if data.effectiveTo is not None and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException(
+            "effectiveTo cannot be earlier than effectiveFrom.")
+
+    existing = (db.query(ItalyF24Causale)
+                .filter(ItalyF24Causale.organization_id == organization_id,
+                        ItalyF24Causale.section == section,
+                        ItalyF24Causale.component_key == component_key,
+                        ItalyF24Causale.effective_from == data.effectiveFrom).first())
+    if existing:
+        old_tax_code = existing.tax_code
+        existing.tax_code = data.taxCode
+        existing.requires_region = bool(data.requiresRegion)
+        existing.requires_comune = bool(data.requiresComune)
+        existing.direction = direction
+        existing.effective_to = data.effectiveTo
+        existing.source_document_id = data.sourceDocumentId
+        existing.notes = data.notes
+        db.commit()
+        db.refresh(existing)
+        record_tax_audit(db, actor_id=actor_id, action="update",
+                         entity_type="italy_f24_causale", entity_id=existing.id,
+                         legal_reference="IT-043",
+                         old_value={"tax_code": old_tax_code}, new_value={"tax_code": data.taxCode})
+        return existing
+
+    row = ItalyF24Causale(
+        organization_id=organization_id,
+        section=section,
+        component_key=component_key,
+        tax_code=data.taxCode,
+        requires_region=bool(data.requiresRegion),
+        requires_comune=bool(data.requiresComune),
+        direction=direction,
+        effective_from=data.effectiveFrom,
+        effective_to=data.effectiveTo,
+        source_document_id=data.sourceDocumentId,
+        notes=data.notes,
+        status="Draft",
+        created_by_id=actor_id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent inserts of the same identity: the UNIQUE constraint makes
+        # the winner authoritative, so adopt it rather than failing.
+        db.rollback()
+        existing = (db.query(ItalyF24Causale)
+                    .filter(ItalyF24Causale.organization_id == organization_id,
+                            ItalyF24Causale.section == section,
+                            ItalyF24Causale.component_key == component_key,
+                            ItalyF24Causale.effective_from == data.effectiveFrom).first())
+        if existing:
+            return existing
+        raise
+    db.refresh(row)
+    record_tax_audit(db, actor_id=actor_id, action="create",
+                     entity_type="italy_f24_causale", entity_id=row.id,
+                     legal_reference="IT-043",
+                     new_value={"section": row.section, "component_key": row.component_key,
+                                "tax_code": row.tax_code, "effective_from": row.effective_from.isoformat()})
+    return row
+
+
+def list_italy_f24_causales(
+    db: Session, organization_id: int, section: Optional[str] = None,
+    component_key: Optional[str] = None, as_of: Optional[date] = None,
+) -> List[ItalyF24Causale]:
+    query = db.query(ItalyF24Causale).filter(ItalyF24Causale.organization_id == organization_id)
+    if section:
+        query = query.filter(ItalyF24Causale.section == section.strip().upper())
+    if component_key:
+        query = query.filter(ItalyF24Causale.component_key == component_key.strip())
+    if as_of is not None:
+        query = query.filter(ItalyF24Causale.effective_from <= as_of,
+                             or_(ItalyF24Causale.effective_to.is_(None),
+                                 ItalyF24Causale.effective_to >= as_of))
+    return query.order_by(ItalyF24Causale.section, ItalyF24Causale.component_key,
+                          ItalyF24Causale.effective_from).all()
+
+
+def _it_f24_snapshot_value(snapshot: Optional[dict], component_key: str) -> Decimal:
+    """The Decimal this component contributes, or 0 when the payslip did not
+    compute it. Snapshot values are stored as exact strings, never floats."""
+    path = _IT_F24_COMPONENT_PATHS.get(component_key)
+    if not path or not isinstance(snapshot, dict):
+        return Decimal("0")
+    node = snapshot
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return Decimal("0")
+        node = node[key]
+    if node is None or node == "":
+        return Decimal("0")
+    try:
+        return Decimal(str(node))
+    except Exception:
+        # A non-numeric snapshot value is a data-integrity problem upstream, not
+        # something to silently treat as zero: zero would quietly underpay.
+        raise BadRequestException(
+            f"Snapshot component {component_key!r} is not numeric: {node!r}.")
+
+
+def _it_f24_reference_date(reference_period: str) -> date:
+    """'MM/YYYY' -> the last day of that month.
+
+    Resolving to the period's END is deliberate. A causale that comes into force
+    on the 15th of the month is in force for a payment referenced to the whole
+    of that month, so testing the 15th would pick the wrong code for a liability
+    that spans it.
+    """
+    parts = (reference_period or "").split("/")
+    if len(parts) != 2 or len(parts[0]) != 2 or len(parts[1]) != 4:
+        raise BadRequestException(
+            f"referencePeriod must be MM/YYYY, got {reference_period!r}.")
+    try:
+        year, month = int(parts[1]), int(parts[0])
+    except ValueError:
+        raise BadRequestException(
+            f"referencePeriod must be MM/YYYY, got {reference_period!r}.")
+    if not 1 <= month <= 12:
+        raise BadRequestException(f"referencePeriod month must be 01-12, got {month!r}.")
+    if month == 12:
+        return date(year + 1, 1, 1) - timedelta(days=1)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
+def _it_f24_region_comune(db: Session, employee_id: int) -> Tuple[Optional[str], Optional[str]]:
+    """The employee's tax-domicile (region, comune) codes.
+
+    Read from the IT-031 statutory profile rather than from the employee's
+    address, because it is the tax domicile that decides which regional and
+    municipal authority the withholding is owed to.
+    """
+    from app.modules.payroll.models import EmployeeStatutoryProfile
+
+    profile = (db.query(EmployeeStatutoryProfile)
+               .filter(EmployeeStatutoryProfile.employee_id == employee_id).first())
+    if profile is None:
+        return None, None
+    return profile.it_tax_domicile_region, profile.it_tax_domicile_comune
+
+
+def build_italy_f24_lines(
+    db: Session, organization_id: int, data, actor_id: Optional[int] = None,
+) -> List[ItalyF24Line]:
+    """Derive the payable F24 lines for one committed run and period (IT-046).
+
+    Re-running this for the same (run, period) is safe and returns the same
+    lines: identity is the full tuple the new UNIQUE constraint enforces, so a
+    rebuild updates in place instead of appending a duplicate. That is what keeps
+    a retried build from becoming a second payment instruction (IT-044).
+
+    Raises rather than guessing. A component with no governed causale, a local
+    authority line whose region/comune is unknown, or a draft run all stop the
+    build, because each of those would otherwise produce a payable line that is
+    wrong in a way nobody would notice until the money was gone.
+    """
+    if data.statutoryFilingId is not None:
+        filing = (db.query(StatutoryFiling)
+                  .filter(StatutoryFiling.id == data.statutoryFilingId,
+                          StatutoryFiling.organization_id == organization_id).first())
+        if not filing:
+            raise NotFoundException("StatutoryFiling", data.statutoryFilingId)
+        if (filing.jurisdiction or "").upper() not in {"IT", "ITALY"}:
+            raise BadRequestException(
+                f"StatutoryFiling {filing.id} is jurisdiction {filing.jurisdiction!r}, not Italy.")
+
+    reference_period = data.referencePeriod.strip()
+    period_end = _it_f24_reference_date(reference_period)
+
+    run = (db.query(PayrollRun)
+           .filter(PayrollRun.id == data.payrollRunId,
+                   PayrollRun.organization_id == organization_id).first())
+    if not run:
+        raise NotFoundException("PayrollRun", data.payrollRunId)
+    if PAYROLL_STATUS_ORDER.index(run.status) < PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED):
+        raise BadRequestException(
+            f"Payroll run {run.id} is {run.status}; an F24 can only be built from a run "
+            f"that is {PayrollStatus.APPROVED} or later (IT-044).")
+
+    # Governed catalog in force for the period.
+    catalog = _it_f24_sections_from_catalog(
+        list_italy_f24_causales(db, organization_id, as_of=period_end), period_end)
+    if not catalog:
+        raise BadRequestException(
+            f"No governed F24 causale is in force for {reference_period}. IT-043 forbids "
+            f"inventing a causale, so this build refuses rather than emitting a guessed code. "
+            f"Record the catalog entries first (POST /payroll/italy/f24/causales).")
+
+    payslips = (db.query(PayslipItem)
+                .filter(PayslipItem.payroll_run_id == run.id,
+                        PayslipItem.organization_id == organization_id)
+                .order_by(PayslipItem.id).all())
+
+    # Aggregate by the line identity the UNIQUE constraint enforces.
+    totals: Dict[tuple, Dict] = {}
+    unmapped = set()
+    for payslip in payslips:
+        snapshot = payslip.it_calculation_snapshot or {}
+        if not snapshot:
+            continue
+        region_code, comune_code = _it_f24_region_comune(db, payslip.employee_id)
+        for component_key in _IT_F24_COMPONENT_PATHS:
+            amount = _it_f24_snapshot_value(snapshot, component_key)
+            if amount == 0:
+                continue
+            causale = catalog.get(component_key)
+            if causale is None:
+                # A non-zero withholding with no governed causale. Silently
+                # dropping it would underpay while looking like a clean build.
+                unmapped.add(component_key)
+                continue
+            if (causale.requires_region or causale.requires_comune) and not (region_code and comune_code):
+                raise BadRequestException(
+                    f"{component_key!r} is settled by causale {causale.tax_code} which requires the "
+                    f"employee's tax-domicile region AND comune codes, but employee "
+                    f"{payslip.employee_id} has none recorded (IT-031). Record the tax domicile; "
+                    f"the authority to pay cannot be determined without it.")
+            direction = causale.direction
+            key = (causale.section, causale.tax_code, region_code, comune_code, direction)
+            bucket = totals.setdefault(key, {"amount": Decimal("0"), "sources": []})
+            bucket["amount"] += amount
+            bucket["sources"].append({
+                "payslipItemId": payslip.id,
+                "employeeId": payslip.employee_id,
+                "componentKey": component_key,
+                "amount": str(amount),
+            })
+
+    if unmapped:
+        raise BadRequestException(
+            f"Committed payroll contains F24 liabilities with no governed causale: "
+            f"{sorted(unmapped)}. IT-043 forbids inventing a causale, so nothing was built. "
+            f"Record these components in the catalog first.")
+
+    # Lines already derived for this identity (a rebuild updates, never appends).
+    existing = {(row.section, row.tax_code, row.region_code, row.comune_code):
+                row for row in (db.query(ItalyF24Line)
+                                .filter(ItalyF24Line.payroll_run_id == run.id,
+                                        ItalyF24Line.organization_id == organization_id).all())}
+
+    created, updated = [], []
+    for (section, tax_code, region_code, comune_code, direction), bucket in totals.items():
+        debit = bucket["amount"] if direction == "DEBIT" else Decimal("0")
+        credit = bucket["amount"] if direction == "CREDIT" else Decimal("0")
+        match = existing.get((section, tax_code, region_code, comune_code))
+        if match is not None:
+            match.debit_amount = debit
+            match.credit_amount = credit
+            match.reference_period = reference_period
+            match.source_lines = bucket["sources"]
+            if data.statutoryFilingId is not None:
+                match.statutory_filing_id = data.statutoryFilingId
+            updated.append(match)
+            continue
+        line = ItalyF24Line(
+            organization_id=organization_id,
+            statutory_filing_id=data.statutoryFilingId,
+            payroll_run_id=run.id,
+            section=section,
+            tax_code=tax_code,
+            region_code=region_code,
+            comune_code=comune_code,
+            reference_period=reference_period,
+            debit_amount=debit,
+            credit_amount=credit,
+            source_lines=bucket["sources"],
+        )
+        db.add(line)
+        created.append(line)
+    db.commit()
+    for line in created:
+        db.refresh(line)
+    for line in updated:
+        db.refresh(line)
+    record_tax_audit(db, actor_id=actor_id, action="create" if created else "update",
+                     entity_type="italy_f24_line",
+                     entity_id=(created[0].id if created else updated[0].id) if (created or updated) else 0,
+                     legal_reference="IT-046",
+                     new_value={"payroll_run_id": run.id, "reference_period": reference_period,
+                                "lines": len(created) + len(updated)})
+    return created + updated
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Italy Libro Unico del Lavoro (§20, IT-058/IT-059/IT-060) — the sequential,
+# inalterable, retained registration ledger.
+#
+# IT-058 is emphatic that the LUL is "an auditable statutory record, not a PDF
+# theme", and names four things that are therefore engineering requirements
+# rather than formatting: SEQUENCE, INALTERABILITY, RETENTION, and the
+# AUTHORIZED METHOD. Each is implemented as a mechanism below rather than
+# asserted in a docstring:
+#
+#   SEQUENCE      - allocated per employer, contiguous, and never reused.
+#   INALTERABILITY- content_hash over the exact registered payload, plus a
+#                  verification pass that recomputes it. A correction is a NEW
+#                  entry pointing at the one it corrects; the original is never
+#                  rewritten, because "do not rewrite prior LUL evidence
+#                  invisibly" (spec §20, Correction) is the whole point.
+#   RETENTION     - five years from the LAST registration, so the horizon
+#                  ADVANCES on every new registration. A per-entry fixed date
+#                  would start expiring the earliest evidence exactly when the
+#                  employer's retention obligation is still live.
+#   METHOD        - snapshot of the employer's authorized method at
+#                  registration time, so a later change never rewrites history.
+#
+# Reconciliation (IT-059) is achieved by construction rather than by a
+# comparison: the registered payload is DERIVED from the committed payslip, so a
+# LUL line cannot disagree with the payslip it describes.
+#
+# No transmission here. The authorized method belongs to the employer or their
+# consultant; this ledger records what they registered. Delivery stays on the
+# /italy/filing-outbox queue.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Spec §20: retention is "five years from the last registration".
+_IT_LUL_RETENTION_YEARS = 5
+
+_IT_LUL_ENTRY_TYPES = {"ORIGINAL", "CORRECTION"}
+
+
+def _it_month_end(year: int, month: int) -> date:
+    """The last calendar day of a month, leap-year aware."""
+    return date(year + 1, 1, 1) - timedelta(days=1) if month == 12 \
+        else date(year, month + 1, 1) - timedelta(days=1)
+
+
+def _it_lul_reference_month(reference_month: str) -> date:
+    """'YYYY-MM' -> the last day of that month.
+
+    The deadline is "end of month following the reference month" (spec §20,
+    Timing), so the reference month is resolved to its end before that is
+    computed.
+    """
+    parts = (reference_month or "").split("-")
+    if len(parts) != 2 or len(parts[0]) != 4 or len(parts[1]) != 2:
+        raise BadRequestException(
+            f"referenceMonth must be YYYY-MM, got {reference_month!r}.")
+    try:
+        year, month = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise BadRequestException(
+            f"referenceMonth must be YYYY-MM, got {reference_month!r}.")
+    if not 1 <= month <= 12:
+        raise BadRequestException(f"referenceMonth month must be 01-12, got {month!r}.")
+    return _it_month_end(year, month)
+
+
+def _it_lul_deadline(reference_month: str) -> date:
+    """End of the month FOLLOWING the reference month (spec §20, Timing).
+
+    Resolved as a calendar step, never by adding a fixed number of days:
+    "end of month following" is a calendar instruction, and "+31 days" would
+    push a 31-day reference month into the month AFTER next (2026-03 would
+    deadline on 2026-05-02, a full month late and silently unlawful).
+    """
+    period_end = _it_lul_reference_month(reference_month)
+    if period_end.month == 12:
+        return _it_month_end(period_end.year + 1, 1)
+    return _it_month_end(period_end.year, period_end.month + 1)
+
+
+def _it_lul_payload(employee, payslip, event_kind: Optional[str]) -> dict:
+    """Exactly what gets registered for one employee-month.
+
+    Built from the COMMITTED payslip, which is what makes IT-059 reconciliation
+    true by construction: these figures are not re-derived from the employee
+    record or re-entered by hand, they are the payslip's own snapshot and totals.
+    """
+    snapshot = (payslip.it_calculation_snapshot or {}) if payslip else {}
+    return {
+        "employeeCode": getattr(employee, "employee_code", None),
+        "employeeName": getattr(employee, "name", None),
+        "referenceMonth": None,
+        "eventKind": event_kind,
+        # Gross pay, the statutory deductions the employee actually bore, and net
+        # pay - the same values the payslip shows, so a discrepancy between the
+        # two artifacts is impossible by construction.
+        "grossPay": str(payslip.gross_pay) if payslip and payslip.gross_pay is not None else None,
+        "totalDeductions": str(payslip.total_deductions) if payslip and payslip.total_deductions is not None else None,
+        "netPay": str(payslip.net_pay) if payslip and payslip.net_pay is not None else None,
+        # The Italy statutory breakdown, verbatim from the engine snapshot.
+        "it": snapshot,
+    }
+
+
+def _it_lul_content_hash(payload: dict) -> str:
+    """SHA-256 over the canonical JSON of what was registered.
+
+    sort_keys matters: the same content must hash identically regardless of dict
+    insertion order, or a verification pass would report drift on a record that
+    never changed.
+    """
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _it_lul_next_sequence(db: Session, organization_id: int) -> int:
+    """The next per-employer sequence number.
+
+    MAX+1 rather than COUNT+1: a gap left by a deleted or rolled-back entry must
+    not cause a later registration to reuse its number, because that number is
+    the identifier an auditor cites.
+    """
+    highest = (db.query(sa_func.max(ItalyLulEntry.sequence_number))
+               .filter(ItalyLulEntry.organization_id == organization_id).scalar())
+    return (highest or 0) + 1
+
+
+def _it_lul_apply_retention(db: Session, organization_id: int, registered_on: date) -> None:
+    """Advance the employer's whole retention horizon to five years out.
+
+    Spec §20 sets retention from the LAST registration, so every entry the
+    employer holds must survive that long - not just the newest one. Entries
+    registered years ago and never touched again are exactly the evidence the
+    obligation exists to preserve.
+    """
+    horizon = date(registered_on.year + _IT_LUL_RETENTION_YEARS, registered_on.month,
+                   registered_on.day)
+    for entry in (db.query(ItalyLulEntry)
+                  .filter(ItalyLulEntry.organization_id == organization_id)
+                  .all()):
+        if entry.retention_until is None or entry.retention_until < horizon:
+            entry.retention_until = horizon
+
+
+def _it_lul_authoritative_method(db: Session, organization_id: int) -> Optional[str]:
+    from app.modules.payroll.models import EmployerItalyProfile
+
+    profile = (db.query(EmployerItalyProfile)
+               .filter(EmployerItalyProfile.organization_id == organization_id).first())
+    return getattr(profile, "lul_method", None) if profile else None
+
+
+def build_italy_lul_entries(
+    db: Session, organization_id: int, data, actor_id: Optional[int] = None,
+) -> List[ItalyLulEntry]:
+    """Register the committed payroll for one reference month in the LUL ledger.
+
+    One entry per employee payslip, sequentially numbered for the employer, each
+    carrying the exact content registered and its hash. Re-running for the same
+    run and month is a NO-OP that returns the existing entries, so a retried
+    registration cannot consume sequence numbers and leave holes in a record the
+    auditor will read as contiguous.
+    """
+    reference_month = data.referenceMonth.strip()
+    _it_lul_reference_month(reference_month)   # validate shape before any write
+
+    if data.eventKind is not None and not data.eventKind.strip():
+        raise BadRequestException("eventKind cannot be blank when supplied.")
+
+    run = (db.query(PayrollRun)
+           .filter(PayrollRun.id == data.payrollRunId,
+                   PayrollRun.organization_id == organization_id).first())
+    if not run:
+        raise NotFoundException("PayrollRun", data.payrollRunId)
+    if PAYROLL_STATUS_ORDER.index(run.status) < PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED):
+        raise BadRequestException(
+            f"Payroll run {run.id} is {run.status}; the LUL records COMMITTED payroll, so the "
+            f"run must be {PayrollStatus.APPROVED} or later (IT-058).")
+
+    payslips = (db.query(PayslipItem)
+                .filter(PayslipItem.payroll_run_id == run.id,
+                        PayslipItem.organization_id == organization_id)
+                .order_by(PayslipItem.id).all())
+    if not payslips:
+        raise BadRequestException(
+            f"Payroll run {run.id} has no payslips, so there is nothing to register in the LUL.")
+
+    # Already registered for this run and month: idempotent, and deliberately
+    # checked BEFORE allocating sequence numbers.
+    existing = (db.query(ItalyLulEntry)
+                .filter(ItalyLulEntry.payroll_run_id == run.id,
+                        ItalyLulEntry.organization_id == organization_id,
+                        ItalyLulEntry.reference_month == reference_month,
+                        ItalyLulEntry.entry_type == "ORIGINAL")
+                .order_by(ItalyLulEntry.sequence_number).all())
+    if existing:
+        return existing
+
+    method = _it_lul_authoritative_method(db, organization_id)
+    if not method:
+        # IT-058 names the AUTHORIZED METHOD as part of the specification, not an
+        # optional attribute. Registering without one produces a record nobody
+        # can attest was made under a valid arrangement.
+        raise BadRequestException(
+            "This organization has no authorized LUL method recorded (§17G). Record it on the "
+            "Italy employer profile before registering.")
+
+    registered_on = date.today()
+    sequence = _it_lul_next_sequence(db, organization_id)
+    created = []
+    for payslip in payslips:
+        employee = (db.query(PayrollEmployee)
+                    .filter(PayrollEmployee.id == payslip.employee_id,
+                            PayrollEmployee.organization_id == organization_id).first())
+        if employee is None:
+            # The payslip names an employee outside this tenant. Registering it
+            # would publish another org's worker to a statutory registry.
+            raise BadRequestException(
+                f"Payslip {payslip.id} names employee {payslip.employee_id}, which does not "
+                f"resolve inside this organization.")
+        payload = _it_lul_payload(employee, payslip, data.eventKind)
+        payload["referenceMonth"] = reference_month
+        entry = ItalyLulEntry(
+            organization_id=organization_id,
+            employee_id=employee.id,
+            reference_month=reference_month,
+            sequence_number=sequence,
+            entry_type="ORIGINAL",
+            payslip_item_id=payslip.id,
+            payroll_run_id=run.id,
+            content_hash=_it_lul_content_hash(payload),
+            payload=payload,
+            event_kind=data.eventKind,
+            method=method,
+            registered_reference=reference_month,
+            registered_at=datetime.combine(registered_on, datetime.min.time()),
+            retention_until=registered_on,
+        )
+        db.add(entry)
+        created.append(entry)
+        sequence += 1
+
+    db.flush()
+    _it_lul_apply_retention(db, organization_id, registered_on)
+    db.commit()
+    for entry in created:
+        db.refresh(entry)
+    record_tax_audit(db, actor_id=actor_id, action="create",
+                     entity_type="italy_lul_entry", entity_id=created[0].id,
+                     legal_reference="IT-058",
+                     new_value={"payroll_run_id": run.id, "reference_month": reference_month,
+                                "entries": len(created), "method": method})
+    return created
+
+
+def correct_italy_lul_entry(
+    db: Session, organization_id: int, entry_id: int, data, actor_id: Optional[int] = None,
+) -> ItalyLulEntry:
+    """Register a CORRECTION to an existing LUL entry (spec §20, Correction).
+
+    The original row is never touched. A correction is a NEW, higher-sequence
+    entry carrying `corrects_entry_id`, because "do not rewrite prior LUL
+    evidence invisibly" means the original and the correction must both remain
+    readable - an auditor has to see what was first registered AND what changed.
+    Overwriting the row would destroy the very evidence that rule protects.
+    """
+    original = (db.query(ItalyLulEntry)
+                .filter(ItalyLulEntry.id == entry_id,
+                        ItalyLulEntry.organization_id == organization_id).first())
+    if not original:
+        raise NotFoundException("ItalyLulEntry", entry_id)
+    if original.entry_type == "CORRECTION":
+        # Corrections correct ORIGINALS. Allowing a chain makes "the current
+        # truth" ambiguous without a defined resolution rule.
+        raise BadRequestException(
+            f"LUL entry {entry_id} is itself a CORRECTION; a correction corrects an ORIGINAL entry.")
+
+    reason = (data.reason or "").strip()
+    if not reason:
+        raise BadRequestException(
+            "A LUL correction requires a reason — the correction record is the only "
+            "explanation an auditor will ever have of why an original was superseded.")
+
+    registered_on = date.today()
+    payload = dict(original.payload or {})
+    payload["correctsSequence"] = original.sequence_number
+    payload["correctionReason"] = reason
+    for field, value in (("eventKind", data.eventKind),):
+        if value is not None:
+            payload[field] = value
+
+    entry = ItalyLulEntry(
+        organization_id=organization_id,
+        employee_id=original.employee_id,
+        reference_month=original.reference_month,
+        sequence_number=_it_lul_next_sequence(db, organization_id),
+        entry_type="CORRECTION",
+        corrects_entry_id=original.id,
+        payslip_item_id=original.payslip_item_id,
+        payroll_run_id=original.payroll_run_id,
+        content_hash=_it_lul_content_hash(payload),
+        payload=payload,
+        event_kind=data.eventKind or original.event_kind,
+        method=original.method,          # the correction corrects THAT registration
+        registered_reference=original.registered_reference or original.reference_month,
+        registered_at=datetime.combine(registered_on, datetime.min.time()),
+        retention_until=registered_on,
+    )
+    db.add(entry)
+    db.flush()
+    _it_lul_apply_retention(db, organization_id, registered_on)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BadRequestException(
+            "A concurrent registration took this sequence number; the LUL ledger must be "
+            "numbered serially. Retry the correction.")
+    db.refresh(entry)
+    record_tax_audit(db, actor_id=actor_id, action="create",
+                     entity_type="italy_lul_entry", entity_id=entry.id,
+                     legal_reference="IT-058",
+                     new_value={"corrects_entry_id": original.id, "reason": reason})
+    return entry
+
+
+def verify_italy_lul_integrity(
+    db: Session, organization_id: int, reference_month: Optional[str] = None,
+) -> dict:
+    """Recompute every content hash and report drift, gaps and retention (IT-058).
+
+    Inalterability is only a real guarantee if something checks it. This is that
+    check: it re-derives each hash from the stored payload, so a payload edited
+    in the database outside the service shows up here rather than at an audit
+    three years later. It also reports sequence contiguity and the retention
+    horizon, because those are the other two mechanisms IT-058 names.
+    """
+    query = db.query(ItalyLulEntry).filter(ItalyLulEntry.organization_id == organization_id)
+    if reference_month:
+        query = query.filter(ItalyLulEntry.reference_month == reference_month.strip())
+    entries = query.order_by(ItalyLulEntry.sequence_number).all()
+
+    drifted = [e.sequence_number for e in entries
+               if e.payload is not None and _it_lul_content_hash(e.payload) != e.content_hash]
+    unhashed = [e.sequence_number for e in entries if e.payload is None]
+
+    numbers = [e.sequence_number for e in entries]
+    num_set = set(numbers)
+    gaps = [n for n in range(numbers[0], numbers[-1] + 1) if n not in num_set] \
+        if numbers and numbers[-1] > numbers[0] else []
+    retention = min((e.retention_until for e in entries), default=None)
+    return {
+        "entries": len(entries),
+        "firstSequence": numbers[0] if numbers else None,
+        "lastSequence": numbers[-1] if numbers else None,
+        "sequenceGaps": gaps,
+        "driftedSequenceNumbers": drifted,
+        "unverifiableSequenceNumbers": unhashed,
+        "earliestRetentionUntil": retention,
+        "verifiedAt": date.today().isoformat(),
+    }
+
+
+def list_italy_lul_entries(
+    db: Session, organization_id: int, reference_month: Optional[str] = None,
+    employee_id: Optional[int] = None, payroll_run_id: Optional[int] = None,
+    entry_type: Optional[str] = None, include_superseded: bool = True,
+) -> List[ItalyLulEntry]:
+    """List this employer's LUL ledger, newest registration last.
+
+    By default superseded entries are INCLUDED: an ORIGINAL that has been
+    corrected is still statutory evidence and hiding it would defeat IT-058.
+    Pass include_superseded=False for the current-truth view.
+    """
+    query = db.query(ItalyLulEntry).filter(ItalyLulEntry.organization_id == organization_id)
+    if reference_month:
+        query = query.filter(ItalyLulEntry.reference_month == reference_month.strip())
+    if employee_id is not None:
+        query = query.filter(ItalyLulEntry.employee_id == employee_id)
+    if payroll_run_id is not None:
+        query = query.filter(ItalyLulEntry.payroll_run_id == payroll_run_id)
+    if entry_type:
+        query = query.filter(ItalyLulEntry.entry_type == entry_type.strip().upper())
+    entries = query.order_by(ItalyLulEntry.sequence_number).all()
+    if not include_superseded:
+        superseded = {e.corrects_entry_id for e in entries if e.corrects_entry_id}
+        entries = [e for e in entries if e.id not in superseded]
+    return entries
+
+
+def get_italy_lul_deadline(db: Session, organization_id: int, reference_month: str) -> dict:
+    """The §20 registration deadline for a reference month, and whether it passed.
+
+    Reported rather than enforced. Refusing to record a registration that
+    legally happened would be worse than recording it late — the employer's
+    obligation is to register, and a late registration is still the truth. What
+    the platform owes is an accurate, visible answer to "was this in time".
+    """
+    reference_month = (reference_month or "").strip()
+    period_end = _it_lul_reference_month(reference_month)
+    deadline = _it_lul_deadline(reference_month)
+    registered = (db.query(ItalyLulEntry)
+                  .filter(ItalyLulEntry.organization_id == organization_id,
+                          ItalyLulEntry.reference_month == reference_month).all())
+    first = min((e.registered_at.date() for e in registered), default=None)
+    return {
+        "referenceMonth": reference_month,
+        "referencePeriodEnd": period_end.isoformat(),
+        "deadline": deadline.isoformat(),
+        "registered": bool(registered),
+        "firstRegisteredAt": first.isoformat() if first else None,
+        "metDeadline": (first <= deadline) if first else None,
+        "daysLate": max(0, (first - deadline).days) if first else None,
+        "entries": len(registered),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Italy TFR (§13, IT-037/IT-038/IT-039/IT-040/IT-041) — the dedicated liability
+# ledger for Trattamento di Fine Rapporto.
+#
+# IT-037: TFR is a LIABILITY, not a monthly bonus earning. Payroll journals
+# distinguish the employer expense, the employee TFR liability, and the amounts
+# transferred to pension fund / Fondo Tesoreria.
+# IT-038: Changing TFR destination redirects FUTURE funding flows; it never
+# erases accrued employee entitlement history. The ledger records the destination
+# in force for EACH entry.
+# IT-039: TFR taxation is the statutory separate-tax method (TUIR art. 17/19),
+# never the employee's current IRPEF marginal rate.
+# IT-040: Fondo Tesoreria obligation threshold is prior-calendar-year average
+# headcount >= 60 (2026-2027), falling to 50 (2028-2031), 40 (2032+).
+# IT-041: Transferred-worker exceptions to the Tesoreria threshold require
+# explicit evidence, never inferred.
+#
+# The engine (italy.py resolve_tfr) computes the monthly accrual:
+#   gross = qualifying_remuneration / 13.5
+#   offset = contributory_base * 0.5% (INPS)
+#   net = gross - offset
+# The service posts these to the ledger with the destination in force, and
+# provides annual revaluation and settlement operations.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_IT_TFR_ENTRY_TYPES = {
+    "ACCRUAL", "INPS_OFFSET", "REVALUATION", "REVALUATION_TAX",
+    "TRANSFER_PENSION_FUND", "TRANSFER_TESORERIA", "ADVANCE",
+    "SETTLEMENT", "SETTLEMENT_TAX",
+}
+
+_IT_TFR_DESTINATIONS = {"AZIENDA", "FONDO_PENSIONE", "FONDO_TESORERIA"}
+
+# Fondo Tesoreria headcount threshold (Budget Law 2026: 60 for 2026-2027).
+_IT_TESORERIA_THRESHOLD_2026_2027 = 60
+
+
+def _it_tfr_idempotency_key(organization_id: int, employee_id: int,
+                            entry_type: str, tax_year: int,
+                            source_ref: str) -> str:
+    """One payslip posts one accrual, forever.
+
+    The identity is the SOURCE (the payslip), not the date it was posted. An
+    earlier version keyed on the posting date, which meant re-running the
+    posting the next morning inserted a second ACCRUAL for the same payslip and
+    silently doubled the employee's provision — the exact failure an idempotent
+    ledger exists to prevent. source_ref is the payslip_item_id for an accrual.
+    """
+    return hashlib.sha256(
+        json.dumps({
+            "org": organization_id,
+            "emp": employee_id,
+            "type": entry_type,
+            "year": tax_year,
+            "source": str(source_ref),
+        }, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:64]
+
+
+def _it_tfr_employer_profile(db: Session, organization_id: int):
+    from app.modules.payroll.models import EmployerItalyProfile
+    return (db.query(EmployerItalyProfile)
+            .filter(EmployerItalyProfile.organization_id == organization_id).first())
+
+
+def post_italy_tfr_accrual(
+    db: Session, organization_id: int, payroll_run_id: int,
+    actor_id: Optional[int] = None,
+) -> List[ItalyTfrLedgerEntry]:
+    """Post TFR accruals for a COMMITTED payroll run (IT-037).
+
+    One entry per employee payslip, idempotent by (org, emp, ACCRUAL, year, date).
+    The destination (AZIENDA / FONDO_PENSIONE / FONDO_TESORERIA) is read from the
+    employee's statutory profile and validated against the Tesoreria headcount
+    rule (IT-040/IT-041). An absent destination leaves the routing unresolved —
+    the accrual is still posted, but a subsequent filing stage must settle it.
+    """
+    run = (db.query(PayrollRun)
+           .filter(PayrollRun.id == payroll_run_id,
+                   PayrollRun.organization_id == organization_id).first())
+    if not run:
+        raise NotFoundException("PayrollRun", payroll_run_id)
+    if PAYROLL_STATUS_ORDER.index(run.status) < PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED):
+        raise BadRequestException(
+            f"Payroll run {run.id} is {run.status}; TFR accruals are posted from "
+            f"{PayrollStatus.APPROVED} or later (IT-037).")
+
+    payslips = (db.query(PayslipItem)
+                .filter(PayslipItem.payroll_run_id == run.id,
+                        PayslipItem.organization_id == organization_id)
+                .order_by(PayslipItem.id).all())
+    if not payslips:
+        raise BadRequestException(
+            f"Payroll run {run.id} has no payslips; nothing to accrue.")
+
+    employer = _it_tfr_employer_profile(db, organization_id)
+    headcount = getattr(employer, "prior_year_avg_headcount", None)
+    threshold = _IT_TESORERIA_THRESHOLD_2026_2027
+
+    created = []
+    tax_year = run.period_start.year if run.period_start else date.today().year
+    entry_date = date.today()
+
+    for payslip in payslips:
+        snapshot = payslip.it_calculation_snapshot or {}
+        tfr_snap = snapshot.get("tfr", {})
+        gross = tfr_snap.get("accrual") or tfr_snap.get("gross")
+        offset = tfr_snap.get("inpsOffset") or tfr_snap.get("inps_offset")
+        net = tfr_snap.get("net")
+
+        if gross is None or net is None:
+            # The engine did not compute TFR for this payslip (e.g. non-Italian).
+            continue
+
+        # The destination is an ELECTION held on the employee's statutory
+        # profile, not a computed fact: the engine cannot know which of the
+        # three depositories an employee (or their employer) chose, so the
+        # snapshot may only echo what was already decided. Reading the snapshot
+        # first would let a stale or absent snapshot silently override the
+        # election on file, which is the opposite of what IT-038/IT-040 govern.
+        profile = (db.query(EmployeeStatutoryProfile)
+                   .filter(EmployeeStatutoryProfile.employee_id == payslip.employee_id,
+                           EmployeeStatutoryProfile.organization_id == organization_id)
+                   .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
+        elected = getattr(profile, "it_tfr_destination", None)
+        destination = (elected or tfr_snap.get("destination") or "").upper()
+
+        if destination not in _IT_TFR_DESTINATIONS:
+            destination = "UNRESOLVED"
+        elif destination == "FONDO_PENSIONE":
+            if not getattr(profile, "it_pension_fund", None):
+                raise BadRequestException(
+                    f"Employee {payslip.employee_id}: TFR destination is FONDO_PENSIONE "
+                    f"but no pension fund is recorded. An election to a complementary "
+                    f"pension fund is void without naming the fund (IT-038); record "
+                    f"it_pension_fund on the employee profile or change the destination.")
+        elif destination == "FONDO_TESORERIA":
+            if headcount is None or headcount < threshold:
+                raise BadRequestException(
+                    f"Employee {payslip.employee_id}: TFR destination is FONDO_TESORERIA "
+                    f"but prior-year avg headcount ({headcount}) is below the {threshold} "
+                    f"threshold (IT-040). Record the headcount or change the destination.")
+        elif destination == "AZIENDA":
+            if headcount is not None and headcount >= threshold:
+                raise BadRequestException(
+                    f"Employee {payslip.employee_id}: prior-year avg headcount {headcount} >= "
+                    f"{threshold} requires FONDO_TESORERIA, not AZIENDA (IT-040). "
+                    f"Record transferred-worker evidence (IT-041) or change the destination.")
+
+        idem = _it_tfr_idempotency_key(organization_id, payslip.employee_id,
+                                       "ACCRUAL", tax_year, payslip.id)
+        existing = (db.query(ItalyTfrLedgerEntry)
+                    .filter(ItalyTfrLedgerEntry.idempotency_key == idem).first())
+        if existing:
+            created.append(existing)
+            continue
+
+        entry = ItalyTfrLedgerEntry(
+            organization_id=organization_id,
+            employee_id=payslip.employee_id,
+            entry_type="ACCRUAL",
+            tax_year=tax_year,
+            entry_date=entry_date,
+            amount=Decimal(str(net)),
+            destination=destination if destination != "UNRESOLVED" else None,
+            pension_fund=getattr(profile, "it_pension_fund", None)
+            if destination == "FONDO_PENSIONE" else None,
+            payslip_item_id=payslip.id,
+            payroll_run_id=run.id,
+            evidence={
+                "grossAccrual": str(gross),
+                "inpsOffset": str(offset) if offset else "0",
+                "netAccrual": str(net),
+            },
+            idempotency_key=idem,
+        )
+        db.add(entry)
+        created.append(entry)
+
+    if created:
+        db.commit()
+        for e in created:
+            db.refresh(e)
+        record_tax_audit(db, actor_id=actor_id, action="create",
+                         entity_type="italy_tfr_ledger_entry",
+                         entity_id=created[0].id, legal_reference="IT-037",
+                         new_value={"payroll_run_id": run.id, "tax_year": tax_year,
+                                    "entries": len(created)})
+    return created
+
+
+def post_italy_tfr_revaluation(
+    db: Session, organization_id: int, tax_year: int,
+    istat_foi_increase_pct: Decimal, months: int = 12,
+    actor_id: Optional[int] = None,
+) -> List[ItalyTfrLedgerEntry]:
+    """Post the annual TFR revaluation on prior-year balances (IT-037/IT-038).
+
+    Called at 31 December (or termination). Revalues the TFR each employee accrued
+    up to the PREVIOUS 31 December — never the current year's quota. The
+    coefficient is:
+
+      coefficient = fixed_pct * months/12 + max(0, istat_increase) * istat_share / 100
+
+    revaluation = prior_balance * coefficient / 100
+    revaluation_tax = revaluation * tax_pct / 100  (substitute tax, employee side)
+
+    Both entries carry the same tax_year (the year the revaluation belongs to)
+    and the SAME employee_id, because a revaluation belongs to a person, not to
+    the employer's aggregate.
+    """
+    if not isinstance(months, int) or not 0 <= months <= 12:
+        raise BadRequestException("months must be an integer 0-12.")
+    if Decimal(str(istat_foi_increase_pct)) < 0:
+        raise BadRequestException("istat_foi_increase_pct must be non-negative (a fall in the index "
+                                  "does not reduce the fixed part below zero growth).")
+
+    rates = _load_italy_reval_rates(db, organization_id)
+    fixed_pct = rates["fixed_pct"]
+    istat_share = rates["istat_share"]
+    tax_pct = rates["tax_pct"]
+
+    istat = max(Decimal("0"), Decimal(str(istat_foi_increase_pct)))
+    coefficient = (fixed_pct * Decimal(months) / Decimal(12)
+                   + istat * istat_share / Decimal(100))
+
+    # Revaluation is PER EMPLOYEE, not an employer-level lump. Each employee's
+    # fund is their own accrued provision (art. 2120 c.c.), it is revalued on
+    # the quota THEY accrued, and it is theirs to receive. One aggregate row
+    # with employee_id=NULL would lose exactly that: which employee's fund was
+    # revalued, by how much, and what substitute tax was withheld from whom.
+    # A termination mid-year also revalues one person, not the whole employer.
+    carriers = ["ACCRUAL", "REVALUATION", "TRANSFER_PENSION_FUND", "TRANSFER_TESORERIA"]
+    balances = (db.query(
+        ItalyTfrLedgerEntry.employee_id,
+        sa_func.sum(ItalyTfrLedgerEntry.amount).label("prior"))
+        .filter(ItalyTfrLedgerEntry.organization_id == organization_id,
+                ItalyTfrLedgerEntry.tax_year < tax_year,
+                ItalyTfrLedgerEntry.entry_type.in_(carriers))
+        .group_by(ItalyTfrLedgerEntry.employee_id)
+        .all())
+    balances = [(row.employee_id, Decimal(str(row.prior or 0)))
+                for row in balances if Decimal(str(row.prior or 0)) > 0]
+
+    if not balances:
+        return []
+
+    entry_date = date(tax_year, 12, 31)
+    created = []
+
+    for employee_id, prior in balances:
+        revaluation = _round2(prior * coefficient / Decimal(100))
+        tax = _round2(revaluation * tax_pct / Decimal(100))
+
+        idem_base = hashlib.sha256(
+            json.dumps({"org": organization_id, "emp": employee_id,
+                        "year": tax_year, "type": "REVALUATION"},
+                       sort_keys=True).encode("utf-8")
+        ).hexdigest()[:48]
+
+        if revaluation > 0:
+            idem = idem_base + "R"
+            if not (db.query(ItalyTfrLedgerEntry)
+                    .filter(ItalyTfrLedgerEntry.idempotency_key == idem).first()):
+                e = ItalyTfrLedgerEntry(
+                    organization_id=organization_id,
+                    employee_id=employee_id,
+                    entry_type="REVALUATION",
+                    tax_year=tax_year,
+                    entry_date=entry_date,
+                    amount=revaluation,
+                    evidence={
+                        "priorBalance": str(prior),
+                        "fixedPct": str(fixed_pct),
+                        "istatIncrease": str(istat_foi_increase_pct),
+                        "istatShare": str(istat_share),
+                        "months": str(months),
+                        "coefficient": str(coefficient),
+                        "revaluation": str(revaluation),
+                    },
+                    idempotency_key=idem,
+                )
+                db.add(e)
+                created.append(e)
+
+        if tax > 0:
+            idem = idem_base + "T"
+            if not (db.query(ItalyTfrLedgerEntry)
+                    .filter(ItalyTfrLedgerEntry.idempotency_key == idem).first()):
+                e = ItalyTfrLedgerEntry(
+                    organization_id=organization_id,
+                    employee_id=employee_id,
+                    entry_type="REVALUATION_TAX",
+                    tax_year=tax_year,
+                    entry_date=entry_date,
+                    amount=tax,
+                    evidence={
+                        "revaluation": str(revaluation),
+                        "taxPct": str(tax_pct),
+                        "substituteTax": str(tax),
+                    },
+                    idempotency_key=idem,
+                )
+                db.add(e)
+                created.append(e)
+
+    if created:
+        db.commit()
+        for e in created:
+            db.refresh(e)
+        record_tax_audit(db, actor_id=actor_id, action="create",
+                         entity_type="italy_tfr_ledger_entry",
+                         entity_id=created[0].id, legal_reference="IT-037",
+                         new_value={"tax_year": tax_year, "employees": len(balances),
+                                    "coefficient": str(coefficient),
+                                    "entries": len(created)})
+    return created
+
+
+def _load_italy_reval_rates(db: Session, organization_id: int):
+    """Load TFR revaluation rates from ContributionRate for the org.
+
+    Returns a dict with keys: fixed_pct, istat_share, tax_pct (all Decimal).
+    All three are stored in ContributionRate: the first two as employer_rate_pct,
+    the tax_pct as employee_rate_pct (substitute tax on revaluation is employee-side).
+    """
+    from app.modules.payroll.models import ContributionRate
+
+    def _get_employer(key):
+        row = (db.query(ContributionRate)
+               .filter(ContributionRate.component_key == key,
+                       ContributionRate.organization_id.in_([organization_id, None]))
+               .order_by(ContributionRate.organization_id.desc().nullslast())
+               .first())
+        if row is None or row.employer_rate_pct is None:
+            raise BadRequestException(f"Missing revaluation rate: {key}")
+        return Decimal(str(row.employer_rate_pct))
+
+    def _get_employee(key):
+        row = (db.query(ContributionRate)
+               .filter(ContributionRate.component_key == key,
+                       ContributionRate.organization_id.in_([organization_id, None]))
+               .order_by(ContributionRate.organization_id.desc().nullslast())
+               .first())
+        if row is None or row.employee_rate_pct is None:
+            raise BadRequestException(f"Missing revaluation tax rate: {key}")
+        return Decimal(str(row.employee_rate_pct))
+
+    return {
+        "fixed_pct": _get_employer("it_tfr_revaluation_fixed_pct"),
+        "istat_share": _get_employer("it_tfr_revaluation_istat_share"),
+        "tax_pct": _get_employee("it_tfr_revaluation_tax_pct"),
+    }
+
+
+def _round2(d: Decimal) -> Decimal:
+    return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def list_italy_tfr_ledger(
+    db: Session, organization_id: int, employee_id: Optional[int] = None,
+    tax_year: Optional[int] = None, entry_type: Optional[str] = None,
+) -> List[ItalyTfrLedgerEntry]:
+    query = db.query(ItalyTfrLedgerEntry).filter(
+        ItalyTfrLedgerEntry.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(ItalyTfrLedgerEntry.employee_id == employee_id)
+    if tax_year is not None:
+        query = query.filter(ItalyTfrLedgerEntry.tax_year == tax_year)
+    if entry_type:
+        query = query.filter(ItalyTfrLedgerEntry.entry_type == entry_type.strip().upper())
+    return query.order_by(ItalyTfrLedgerEntry.tax_year, ItalyTfrLedgerEntry.entry_date,
+                          ItalyTfrLedgerEntry.id).all()
+
+
+def get_italy_tfr_balance(
+    db: Session, organization_id: int, employee_id: Optional[int] = None,
+    as_of_year: Optional[int] = None,
+) -> dict:
+    """Current TFR liability balance, broken down by destination.
+
+    Sums ACCRUAL + REVALUATION - ADVANCE - SETTLEMENT - TRANSFER_*,
+    grouped by destination (AZIENDA / FONDO_PENSIONE / FONDO_TESORERIA / UNRESOLVED / None).
+    """
+    query = db.query(ItalyTfrLedgerEntry).filter(
+        ItalyTfrLedgerEntry.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(ItalyTfrLedgerEntry.employee_id == employee_id)
+    if as_of_year is not None:
+        query = query.filter(ItalyTfrLedgerEntry.tax_year <= as_of_year)
+
+    entries = query.all()
+    by_dest: Dict[str, Decimal] = {}
+    for e in entries:
+        dest = e.destination or "UNRESOLVED"
+        sign = Decimal("1") if e.entry_type in (
+            "ACCRUAL", "REVALUATION", "INPS_OFFSET"
+        ) else Decimal("-1")
+        by_dest[dest] = by_dest.get(dest, Decimal("0")) + sign * e.amount
+
+    total = sum(by_dest.values())
+    return {
+        "total": str(total),
+        "byDestination": {k: str(v) for k, v in by_dest.items()},
+        "asOfYear": as_of_year,
+    }
+
+
+def verify_italy_tfr_idempotency(
+    db: Session, organization_id: int,
+) -> dict:
+    """Check for duplicate idempotency keys (should be impossible with the UNIQUE
+    constraint, but useful for auditing)."""
+    dupes = (db.query(ItalyTfrLedgerEntry.idempotency_key, sa_func.count(ItalyTfrLedgerEntry.id))
+             .filter(ItalyTfrLedgerEntry.organization_id == organization_id)
+             .group_by(ItalyTfrLedgerEntry.idempotency_key)
+             .having(sa_func.count(ItalyTfrLedgerEntry.id) > 1)
+             .all())
+    return {
+        "duplicateCount": len(dupes),
+        "duplicateKeys": [k for k, _ in dupes],
+        "checkedAt": date.today().isoformat(),
+    }
+
+
+def list_italy_f24_lines(
+    db: Session, organization_id: int, payroll_run_id: Optional[int] = None,
+    statutory_filing_id: Optional[int] = None, reference_period: Optional[str] = None,
+    section: Optional[str] = None,
+) -> List[ItalyF24Line]:
+    query = db.query(ItalyF24Line).filter(ItalyF24Line.organization_id == organization_id)
+    if payroll_run_id is not None:
+        query = query.filter(ItalyF24Line.payroll_run_id == payroll_run_id)
+    if statutory_filing_id is not None:
+        query = query.filter(ItalyF24Line.statutory_filing_id == statutory_filing_id)
+    if reference_period:
+        query = query.filter(ItalyF24Line.reference_period == reference_period.strip())
+    if section:
+        query = query.filter(ItalyF24Line.section == section.strip().upper())
+    return query.order_by(ItalyF24Line.section, ItalyF24Line.tax_code,
+                          ItalyF24Line.id).all()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Sweden (ZP-SE-ENG-001) — readiness, preview, collective-agreement registry,
 # sick-pay episodes and annual-leave ledgers.
 #
@@ -38259,6 +40085,8 @@ def upsert_collective_agreement(db: Session, data, actor_id: Optional[int] = Non
     """Create or edit a Draft agreement version. Refuses a NATIONAL/unknown
     type (spec §44: no Swedish national default CBA) and editing any version
     that has left Draft — a change to released content is a NEW version."""
+    if _normalize_country(data.jurisdictionCountry) == "CH":
+        raise BadRequestException("Swiss wage floors are governed — use /compliance/switzerland/wage-floors.")
     if data.agreementType not in _CBA_TYPES:
         raise BadRequestException(f"agreementType must be one of {list(_CBA_TYPES)} — there is no national "
                                   "default collective agreement (ZP-SE-ENG-001 §9).")
@@ -38323,6 +40151,8 @@ def set_collective_agreement_status(db: Session, agreement_id: int, status: str,
     row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == agreement_id).first()
     if row is None:
         raise NotFoundException("CollectiveAgreement", agreement_id)
+    if row.jurisdiction_country == "CH":
+        raise BadRequestException("Swiss wage floors are governed — use /compliance/switzerland/wage-floors.")
     if status not in _CBA_TRANSITIONS.get(row.status, ()):
         raise BadRequestException(f"Cannot move agreement from {row.status} to {status}.")
     if status == "Approved":

@@ -37,6 +37,14 @@ export const COUNTRIES = [
   // SEEmployeeValidation exactly. Tax status, table/column, SINK and CBA
   // facts live on the effective-dated statutory profile, not here.
   { code: "SE", name: "Sweden" },
+  // Italy (ZP-IT-ENG-001 §18) — identity only. INPS class, contract, tax
+  // domicile and TFR election are effective-dated calculation facts and live
+  // on the Italy statutory profile (employee detail → "Manage"), which is
+  // what the engine reads.
+  { code: "IT", name: "Italy" },
+  // Singapore (ZP-SG-ENG-001) — mirrors employee_validation.py's
+  // SGEmployeeValidation exactly.
+  { code: "SG", name: "Singapore" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {
@@ -240,6 +248,9 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "swedish_id_number", label: "Personnummer / coordination number", type: "text", placeholder: "YYYYMMDD-XXXX", upper: true, strip: " ", pattern: /^(\d{6}|\d{8})[-+]?\d{4}$/, error: "Swedish identity number must be YYMMDD or YYYYMMDD followed by 4 digits (personnummer or coordination number), optionally separated by - (or + for a person aged 100 or over)." },
     { key: "employer_reference", label: "Employer Reference", type: "text", upper: true, pattern: /^[A-Za-z0-9-]{3,32}$/, error: "Employer Reference must be 3-32 letters, digits or hyphens." },
     { key: "residence_municipality_code", label: "Residence municipality code", type: "text", placeholder: "0180", pattern: /^\d{4}$/, error: "Residence municipality must be the 4-digit Skatteverket municipality code (SE-002 — never derived from workplace location)." },
+  ],
+  IT: [
+    { key: "codice_fiscale", label: "Codice fiscale", type: "text", placeholder: "RSSMRA85M01H501Q", upper: true, strip: " ", pattern: /^[A-Za-z0-9]{16}$/, error: "Codice fiscale must be 16 letters and digits (the check character is verified on save, IT-052)." },
   ],
   SG: [
     { key: "nric_fin", label: "NRIC / FIN", type: "text", placeholder: "S1234567D", pattern: /^[STFGMstfgm]\d{7}[A-Za-z]$/, error: "NRIC/FIN must be a letter (S/T/F/G/M), 7 digits and a letter." },

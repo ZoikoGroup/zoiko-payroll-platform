@@ -1205,6 +1205,57 @@ export const saveAttendanceRecords = async (records) => {
   }
 };
 
+// Saves attendance in batches so a large range (employees × days) never hits
+// the proxy's request-size limit or timeout in a single request. Results are
+// aggregated into the same { saved, skipped, skippedDetails, records } shape
+// as one call. On failure the thrown error carries `savedCount` (rows the
+// server already confirmed in earlier batches) so callers can report partial
+// progress honestly.
+export const ATTENDANCE_SAVE_BATCH_SIZE = 500;
+
+export const saveAttendanceRecordsInBatches = async (records, { batchSize = ATTENDANCE_SAVE_BATCH_SIZE, onProgress } = {}) => {
+  const total = records.length;
+  const result = { saved: 0, skipped: 0, skippedDetails: [], records: [] };
+  for (let i = 0; i < total; i += batchSize) {
+    const batch = records.slice(i, i + batchSize);
+    let res;
+    try {
+      res = await saveAttendanceRecords(batch);
+    } catch (err) {
+      err.savedCount = result.saved;
+      err.totalCount = total;
+      throw err;
+    }
+    result.saved += res?.saved ?? 0;
+    result.skipped += res?.skipped ?? 0;
+    if (Array.isArray(res?.skippedDetails)) result.skippedDetails.push(...res.skippedDetails);
+    if (Array.isArray(res?.records)) result.records.push(...res.records);
+    onProgress?.(Math.min(i + batch.length, total), total);
+  }
+  return result;
+};
+
+// Human-readable reason for a failed attendance save — the server's own
+// message when it sent one, otherwise a plain explanation of the HTTP status.
+export const describeAttendanceSaveError = (err) => {
+  const status = err?.status;
+  if (status === 413) return "The upload is too large for the server to accept (HTTP 413). Try a smaller date range.";
+  if (status === 504 || status === 502) return `The server took too long to respond (HTTP ${status}). Try a smaller date range.`;
+  if (status === 403) return err?.message || "You don't have permission to save attendance (HTTP 403).";
+  if (status === 0 || err?.name === "TypeError") return "Could not reach the server. Check your connection and try again.";
+  return err?.message || "The server rejected the save.";
+};
+
+// Per-employee attendance coverage for a pay period — what the payroll run
+// gate checks. employeeIds omitted = every Active employee.
+export const getAttendanceReadiness = async (periodStart, periodEnd, employeeIds) => {
+  return await api.post("/api/payroll/attendance/readiness", {
+    periodStart,
+    periodEnd,
+    ...(employeeIds ? { employeeIds } : {}),
+  });
+};
+
 // Clear attendance records from the backend (optionally scoped to a date range)
 export const clearAttendanceRecords = async (startDate, endDate) => {
   try {
@@ -2254,6 +2305,24 @@ export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) =
     return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
       params: { status, last_error: lastError || null },
     });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Italy (ZP-IT-ENG-001 §17) — this organization's employer profile. The
+// readiness status in the response is recomputed server-side, never sent.
+export const getItalyEmployerProfile = async () => {
+  try {
+    return await api.get("/api/payroll/italy/employer-profile");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const saveItalyEmployerProfile = async (payload) => {
+  try {
+    return await api.put("/api/payroll/italy/employer-profile", payload);
   } catch (err) {
     throw err;
   }

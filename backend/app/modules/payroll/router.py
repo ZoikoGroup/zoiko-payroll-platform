@@ -52,7 +52,7 @@ import os
 import uuid
 from datetime import date
 from typing import Optional, List
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
@@ -74,7 +74,8 @@ from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
-    PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
+    IrelandRpnSnapshotUpsert, IrelandRpnSnapshotResponse,
+    PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse, GeneratePayslipsRequest, AttendanceReadinessResponse, AttendanceReadinessRequest,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,
     PayslipItemCreate, PayslipItemResponse,
     CompanyDetailsUpdate, ComplianceDataResponse,
@@ -160,6 +161,14 @@ from app.modules.payroll.schemas import (
     FrancePASRateUpsert, FranceEffectifRecord,
     FranceDsnSubmissionCreate, FranceDsnStatusUpdate, FranceDsnOutboxCreate,
     FranceDsnSubmissionResponse, FranceDsnOutboxItemResponse,
+    ItalyEmployerProfileUpsert, ItalyEmployerProfileResponse,
+    ItalyFilingOutboxCreate, ItalyFilingOutboxItemResponse,
+    ItalyF24CausaleUpsert, ItalyF24CausaleResponse,
+    ItalyF24BuildRequest, ItalyF24LineResponse,
+    ItalyLulBuildRequest, ItalyLulCorrectionRequest, ItalyLulEntryResponse,
+    ItalyLulIntegrityResponse,
+    ItalyTfrAccrualRequest, ItalyTfrRevaluationRequest, ItalyTfrLedgerEntryResponse,
+    ItalyTfrBalanceResponse, ItalyTfrIdempotencyResponse,
 )
 
 payroll_router = APIRouter(
@@ -445,6 +454,40 @@ def upsert_sweden_leave_ledger(
     current_user=Depends(get_current_user),
 ):
     return service.upsert_se_leave_ledger(db, current_user.organization_id, data, current_user.id)
+
+
+# ── Ireland RPN snapshots (ZP-IE-ENG-001 §5, IE-005/IE-022/IE-033/IE-045) ──
+# Fact capture only. The Revenue document is frozen here and READ by the engine;
+# the server never calls Revenue on the calculator's behalf (IE-022), so this
+# endpoint is how a snapshot gets in. Content-addressed by raw_hash: re-posting
+# the identical authority response returns the same row rather than duplicating
+# history, while a genuine re-issue adds an immutable row.
+
+@payroll_router.get(
+    "/ireland/rpn-snapshots", response_model=List[IrelandRpnSnapshotResponse], response_model_by_alias=True,
+    summary="List frozen Revenue Payroll Notification snapshots (audit history, newest authority issue first)",
+)
+def list_ireland_rpn_snapshots(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    tax_year: Optional[str] = Query(None, alias="taxYear"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_ie_rpn_snapshots(
+        db, current_user.organization_id, employee_id, tax_year)
+
+
+@payroll_router.post(
+    "/ireland/rpn-snapshots", response_model=IrelandRpnSnapshotResponse, response_model_by_alias=True,
+    summary="Ingest a frozen Revenue Payroll Notification — same raw_hash returns the existing snapshot",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_ireland_rpn_snapshot(
+    data: IrelandRpnSnapshotUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.record_ie_rpn_snapshot(db, current_user.organization_id, data)
 
 
 # ── Germany overtime/shift-premium work records (Phase 8AC) ─────────────
@@ -1174,6 +1217,7 @@ def add_item(
 def generate_run_payslips(
     run_id: int,
     async_dispatch: bool = Query(False, description="Dispatch asynchronously via Celery chord if configured"),
+    data: Optional[GeneratePayslipsRequest] = Body(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1185,6 +1229,15 @@ def generate_run_payslips(
     run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
     if run.status != PayrollStatus.DRAFT.value:
         raise BadRequestException(f"Payslips can only be generated for DRAFT runs (current status: {run.status})")
+
+    # Attendance gate — before either dispatch path, so the Celery route is
+    # covered too. Generation targets every Active employee (employee_ids None).
+    override = service.enforce_attendance_readiness(
+        db, current_user.organization_id, run.period_start, run.period_end, None,
+        override_reason=data.attendance_override_reason if data else None, run=run,
+    )
+    if override:
+        service._record_attendance_override(db, run, override, current_user.id)
 
     if async_dispatch and settings.REDIS_URL:
         from app.tasks.payroll_tasks import generate_payslips_for_run_task
@@ -2269,6 +2322,21 @@ def bulk_save_attendance(
     current_user=Depends(get_current_user),
 ):
     return service.bulk_save_attendance(db, data, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/attendance/readiness", response_model=AttendanceReadinessResponse,
+    summary="Per-employee attendance coverage for a pay period (read-only pre-run check)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def attendance_readiness(
+    data: AttendanceReadinessRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.check_attendance_readiness(
+        db, current_user.organization_id, data.period_start, data.period_end, data.employee_ids,
+    )
 
 
 @payroll_router.get(
@@ -4621,6 +4689,318 @@ def transition_france_dsn_outbox_item(
         db, current_user.organization_id, item_id, status, last_error=last_error, actor_id=current_user.id)
 
 
+# ── Italy (ZP-IT-ENG-001 §17) — employer profile ───────────────────────────
+@payroll_router.get(
+    "/italy/employer-profile", response_model=Optional[ItalyEmployerProfileResponse], response_model_by_alias=True,
+    summary="This organization's Italy employer profile and recomputed readiness (null if not captured yet)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_italy_employer_profile(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import italy_service
+
+    return italy_service.get_employer_profile(db, current_user.organization_id)
+
+
+@payroll_router.put(
+    "/italy/employer-profile", response_model=ItalyEmployerProfileResponse, response_model_by_alias=True,
+    summary="Create or edit this organization's Italy employer facts; readiness is recomputed, never set",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_italy_employer_profile(
+    data: ItalyEmployerProfileUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import italy_service
+
+    return italy_service.upsert_employer_profile(db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+# ── Italy filing outbox (§15/§16, IT-044/IT-048) ───────────────────────────
+# Queue only. This endpoint does not generate a UniEmens/F24/LUL/CU/770
+# document and does not reach INPS/INAIL/Agenzia delle Entrate: it records the
+# intent to deliver an already-committed filing, idempotently, so a calculation
+# never depends on a government endpoint being up.
+
+@payroll_router.post(
+    "/italy/filing-outbox", response_model=ItalyFilingOutboxItemResponse, response_model_by_alias=True,
+    summary="Enqueue a durable idempotent Italy filing outbox action (IT-044)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def create_italy_filing_outbox_item(
+    data: ItalyFilingOutboxCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_italy_filing_outbox_item(db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/italy/filing-outbox", response_model=List[ItalyFilingOutboxItemResponse], response_model_by_alias=True,
+    summary="List this organization's Italy filing outbox actions (delivery state only; filing status lives on the StatutoryFiling)",
+)
+def list_italy_filing_outbox_items(
+    statutory_filing_id: Optional[int] = Query(None, alias="statutoryFilingId"),
+    action: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_italy_filing_outbox_items(
+        db, current_user.organization_id, statutory_filing_id, action)
+
+
+@payroll_router.post(
+    "/italy/filing-outbox/{item_id}/status", response_model=ItalyFilingOutboxItemResponse,
+    response_model_by_alias=True,
+    summary="Record a transport-side outbox acknowledgement (IT-048); UNKNOWN triggers reconciliation, never blind replay",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def transition_italy_filing_outbox_item(
+    item_id: int,
+    status: str = Query(...),
+    last_error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_italy_filing_outbox_item(
+        db, current_user.organization_id, item_id, status, last_error=last_error, actor_id=current_user.id)
+
+
+# ── Italy F24 (§16, IT-043/IT-046) ─────────────────────────────────────────
+# Two separate resources, and keeping them separate is the point:
+#
+#   /italy/f24/causales  — the GOVERNED code catalog (Super Admin, IT-043).
+#   /italy/f24/lines     — DERIVED payable lines for a committed run.
+#
+# There is deliberately no endpoint that generates an F24 document or transmits
+# one. This phase makes the liability legible and payable-ready; delivery stays
+# on the /italy/filing-outbox queue, which is idempotent and reconcilable.
+# Nothing here may be wired to an automatic payment path while the causale
+# catalog is still empty — an F24 built from guessed codes is a wrong
+# instruction, not a rough draft.
+
+@payroll_router.get(
+    "/italy/f24/causales", response_model=List[ItalyF24CausaleResponse], response_model_by_alias=True,
+    summary="List governed Italy F24 causales (the real codice tributo catalog — ships empty, IT-043)",
+)
+def list_italy_f24_causales(
+    section: Optional[str] = Query(None),
+    component_key: Optional[str] = Query(None, alias="componentKey"),
+    as_of: Optional[date] = Query(None, alias="asOf"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_italy_f24_causales(
+        db, current_user.organization_id, section, component_key, as_of)
+
+
+@payroll_router.post(
+    "/italy/f24/causales", response_model=ItalyF24CausaleResponse, response_model_by_alias=True,
+    summary="Record a governed Italy F24 causale for one snapshot component (never invented — IT-043)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_italy_f24_causale(
+    data: ItalyF24CausaleUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.upsert_italy_f24_causale(
+        db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/italy/f24/lines", response_model=List[ItalyF24LineResponse], response_model_by_alias=True,
+    summary="List derived Italy F24 payable lines (payment STATE lives on the StatutoryFiling, IT-047)",
+)
+def list_italy_f24_lines(
+    payroll_run_id: Optional[int] = Query(None, alias="payrollRunId"),
+    statutory_filing_id: Optional[int] = Query(None, alias="statutoryFilingId"),
+    reference_period: Optional[str] = Query(None, alias="referencePeriod"),
+    section: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_italy_f24_lines(
+        db, current_user.organization_id, payroll_run_id, statutory_filing_id,
+        reference_period, section)
+
+
+@payroll_router.post(
+    "/italy/f24/lines/build", response_model=List[ItalyF24LineResponse], response_model_by_alias=True,
+    summary="Derive Italy F24 payable lines from one APPROVED-or-later run (idempotent rebuild, IT-046)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def build_italy_f24_lines(
+    data: ItalyF24BuildRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.build_italy_f24_lines(
+        db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+# ── Italy Libro Unico del Lavoro (§20, IT-058/IT-059/IT-060) ───────────────
+# The employer-registrated ledger: sequence, inalterability, retention and the
+# authorized method (§17G). A correction is a FURTHER entry, never an overwrite,
+# so both the original and the correction stay readable — hiding the original
+# would defeat the rule that protects it.
+#
+# No transmission endpoint here by design. The authorized method belongs to the
+# employer or their consultant; this records what they registered. Submission
+# stays on the /italy/filing-outbox queue.
+
+@payroll_router.get(
+    "/italy/lul/entries", response_model=List[ItalyLulEntryResponse], response_model_by_alias=True,
+    summary="List this employer's Italy LUL registrations (superseded entries included by default)",
+)
+def list_italy_lul_entries(
+    reference_month: Optional[str] = Query(None, alias="referenceMonth"),
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    payroll_run_id: Optional[int] = Query(None, alias="payrollRunId"),
+    entry_type: Optional[str] = Query(None, alias="entryType"),
+    include_superseded: bool = Query(True, alias="includeSuperseded"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_italy_lul_entries(
+        db, current_user.organization_id, reference_month, employee_id, payroll_run_id,
+        entry_type, include_superseded)
+
+
+@payroll_router.post(
+    "/italy/lul/entries/build", response_model=List[ItalyLulEntryResponse], response_model_by_alias=True,
+    summary="Register one committed run in the Italy LUL ledger (idempotent; sequence allocated server-side)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def build_italy_lul_entries(
+    data: ItalyLulBuildRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.build_italy_lul_entries(
+        db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.post(
+    "/italy/lul/entries/{entry_id}/correction",
+    response_model=ItalyLulEntryResponse, response_model_by_alias=True,
+    summary="Register a CORRECTION to a LUL entry — appends, never rewrites the original (IT-058)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def correct_italy_lul_entry(
+    entry_id: int,
+    data: ItalyLulCorrectionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.correct_italy_lul_entry(
+        db, current_user.organization_id, entry_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/italy/lul/integrity", response_model=ItalyLulIntegrityResponse, response_model_by_alias=True,
+    summary="Verify LUL inalterability: recompute every content hash and report sequence gaps (IT-058)",
+)
+def verify_italy_lul_integrity(
+    reference_month: Optional[str] = Query(None, alias="referenceMonth"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.verify_italy_lul_integrity(
+        db, current_user.organization_id, reference_month)
+
+
+@payroll_router.get(
+    "/italy/lul/deadline",
+    summary="The §20 next-month registration deadline for a reference month, and whether it was met",
+)
+def get_italy_lul_deadline(
+    reference_month: str = Query(..., alias="referenceMonth"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_italy_lul_deadline(
+        db, current_user.organization_id, reference_month)
+
+
+# ── Italy TFR (§13, IT-037/IT-038/IT-039/IT-040/IT-041) ───────────────────
+# The TFR liability ledger: accrual, INPS offset, annual revaluation with
+# substitute tax, transfers to pension fund/Tesoreria, and settlement.
+# Destination (AZIENDA / FONDO_PENSIONE / FONDO_TESORERIA) is recorded per
+# entry (IT-038). Revaluation is on prior-year balances only, with its own
+# substitute tax (IT-039). Fondo Tesoreria threshold is prior-year avg headcount
+# >= 60 (2026-2027) (IT-040/IT-041).
+
+@payroll_router.post(
+    "/italy/tfr/accrual", response_model=List[ItalyTfrLedgerEntryResponse], response_model_by_alias=True,
+    summary="Post TFR accruals for one APPROVED-or-later run (idempotent per employee/month)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def post_italy_tfr_accrual(
+    data: ItalyTfrAccrualRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.post_italy_tfr_accrual(
+        db, current_user.organization_id, data.payrollRunId, actor_id=current_user.id)
+
+
+@payroll_router.post(
+    "/italy/tfr/revaluation", response_model=List[ItalyTfrLedgerEntryResponse], response_model_by_alias=True,
+    summary="Post annual TFR revaluation on prior-year balances (31 Dec) — ISTAT FOI increase required",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def post_italy_tfr_revaluation(
+    data: ItalyTfrRevaluationRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.post_italy_tfr_revaluation(
+        db, current_user.organization_id, data.taxYear,
+        data.istatFoiIncreasePct, data.months, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/italy/tfr/ledger", response_model=List[ItalyTfrLedgerEntryResponse], response_model_by_alias=True,
+    summary="List this employer's TFR ledger entries (filter by employee, year, type)",
+)
+def list_italy_tfr_ledger(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    tax_year: Optional[int] = Query(None, alias="taxYear"),
+    entry_type: Optional[str] = Query(None, alias="entryType"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_italy_tfr_ledger(
+        db, current_user.organization_id, employee_id, tax_year, entry_type)
+
+
+@payroll_router.get(
+    "/italy/tfr/balance", response_model=ItalyTfrBalanceResponse, response_model_by_alias=True,
+    summary="Current TFR liability balance by destination (AZIENDA / FONDO_PENSIONE / FONDO_TESORERIA)",
+)
+def get_italy_tfr_balance(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    as_of_year: Optional[int] = Query(None, alias="asOfYear"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_italy_tfr_balance(
+        db, current_user.organization_id, employee_id, as_of_year)
+
+
+@payroll_router.get(
+    "/italy/tfr/idempotency", response_model=ItalyTfrIdempotencyResponse, response_model_by_alias=True,
+    summary="Audit check: duplicate idempotency keys in the TFR ledger (should be zero)",
+)
+def verify_italy_tfr_idempotency(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.verify_italy_tfr_idempotency(
+        db, current_user.organization_id)
+
+
 @payroll_router.get(
     "/france/readiness",
     summary="France launch readiness for this organization (FR §11 gate H + FR-031 dry-run for the open period)",
@@ -4632,3 +5012,135 @@ def france_readiness(
     current_user=Depends(get_current_user),
 ):
     return service.get_france_readiness(db, current_user.organization_id, for_period=for_period)
+
+
+# ── Switzerland (CH Step 5) — entity profile + employer scheme assignments ──
+# org_admin / payroll_admin. Every write needs an Idempotency-Key header
+# (X-Correlation-ID optional, echoed) and is committed through ch_write so
+# the write, its audit entry and its idempotency record are one transaction.
+from app.modules.payroll.switzerland_http import ChWriteContext, ch_write, ch_write_headers  # noqa: E402
+from app.modules.payroll.switzerland_schemas import (  # noqa: E402
+    ChEntityProfileUpsert, ChReasonBody, ChSchemeCreate, ChSchemeUpdate,
+)
+
+
+def _ch_org(current_user) -> int:
+    if current_user.organization_id is None:
+        raise BadRequestException("Switzerland employer settings need an organization context.")
+    return current_user.organization_id
+
+
+@payroll_router.get("/switzerland/entity-profile", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="CH employer profile in force (readiness re-derived now) plus every version")
+def get_ch_entity_profile(on: Optional[date] = Query(None), db: Session = Depends(get_db),
+                          current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_entity_profile(db, _ch_org(current_user), on)
+
+
+@payroll_router.put("/switzerland/entity-profile",
+                    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                    summary="Save a NEW CH employer-profile version (the previous one is closed; readiness is "
+                            "computed server-side)")
+def save_ch_entity_profile(payload: ChEntityProfileUpsert, ctx: ChWriteContext = Depends(ch_write_headers),
+                           db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation="entity_profile.save", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.save_entity_profile(
+                        db, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.get("/switzerland/schemes", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="The employer's own CH scheme profiles plus the platform catalog")
+def list_ch_schemes(scheme_type: Optional[str] = Query(None, alias="schemeType"),
+                    status_filter: Optional[str] = Query(None, alias="status"),
+                    db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_schemes(db, _ch_org(current_user), scheme_type=scheme_type, status=status_filter)
+
+
+@payroll_router.get("/switzerland/schemes/{scheme_id}", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="One CH scheme profile (own or catalog)")
+def get_ch_scheme(scheme_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_scheme(db, scheme_id, _ch_org(current_user))
+
+
+@payroll_router.post("/switzerland/schemes",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Create a DRAFT CH scheme profile version (rules validated per scheme type)")
+def create_ch_scheme(payload: ChSchemeCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation="scheme.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_scheme(
+                        db, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.put("/switzerland/schemes/{scheme_id}",
+                    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                    summary="Edit a DRAFT CH scheme profile (APPROVED / LIVE / RETIRED versions are immutable)")
+def update_ch_scheme(scheme_id: int, payload: ChSchemeUpdate, ctx: ChWriteContext = Depends(ch_write_headers),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.update:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json", exclude_unset=True),
+                    perform=lambda: switzerland_service.update_scheme(
+                        db, scheme_id, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.delete("/switzerland/schemes/{scheme_id}",
+                       dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                       summary="Delete an unreferenced DRAFT CH scheme profile")
+def delete_ch_scheme(scheme_id: int, ctx: ChWriteContext = Depends(ch_write_headers),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.delete:{scheme_id}", actor_id=current_user.id,
+                    request={}, perform=lambda: switzerland_service.delete_scheme(
+                        db, scheme_id, org_id, current_user.id, correlation_id=ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/schemes/{scheme_id}/approve",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Approve a DRAFT CH scheme (a user other than its author / editors)")
+def approve_ch_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
+                      ctx: ChWriteContext = Depends(ch_write_headers),
+                      db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.approve:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.approve_scheme(
+                        db, scheme_id, org_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/schemes/{scheme_id}/activate",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Activate an APPROVED CH scheme (a user other than its approver); overlapping LIVE "
+                             "versions of the same scheme code are RETIRED")
+def activate_ch_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
+                       ctx: ChWriteContext = Depends(ch_write_headers),
+                       db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.activate:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.activate_scheme(
+                        db, scheme_id, org_id, current_user.id, payload.reason, ctx.correlation_id))

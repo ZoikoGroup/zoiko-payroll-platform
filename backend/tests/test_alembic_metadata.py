@@ -125,11 +125,34 @@ def test_alembic_heads_is_single_head():
     # 917a54ed2347 (ZP-IT-ENG-001 P2): Italy ledgers — CCNL level terms, TFR
     # ledger, F24 lines, LUL entries + it_contractual_weekly_hours; single child
     # of 7a1b2c3d4e5f, so no new branchpoint.
+# c9d8e7f6a5b4 (ZP-IT-ENG-001 3A): Italy F24 causale catalog
+    # (payroll_it_f24_causales, seeded EMPTY — IT-043 forbids inventing causali)
+    # plus uq_it_f24_line_identity on payroll_it_f24_lines; re-parented onto
+    # cd62503afe26 (Hong Kong) when venu merged main (2026-10-06), so the chain
+    # is linear: 917a54ed2347 -> cd62503afe26 -> c9d8e7f6a5b4 -> d7e6f5a4b3c2.
+    # d7e6f5a4b3c2 (ZP-IT-ENG-001 3C): Italy LUL registered content — payload,
+    # event_kind, method, registered_reference on payroll_it_lul_entries; single
+    # child of c9d8e7f6a5b4, so no new branchpoint.
+    # 3baddbaa011a (CH jurisdiction support): Switzerland data model — seven
+    # payroll_ch_* tables, 29 nullable ch_* profile columns, five taxability-rule
+    # lifecycle columns, CollectiveAgreement.jurisdiction_state,
+    # payslip_items.ch_calculation_snapshot; single child of d7e6f5a4b3c2, so no
+    # new branchpoint.
+    # 376bb8637603 (CH Step 5): payroll_ch_entity_profiles versioned (unique
+    # per organization + effective_from instead of per organization) and
+    # payroll_ch_idempotency_records; single child of 3baddbaa011a, so no new
+    # branchpoint.
+    # c5981cbcbe13 (2026-10-06, attendance gate): payroll_policies attendance
+    # settings + payroll_runs attendance override audit; single child of
+    # 376bb8637603, so no new branchpoint.
     # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001), re-parented onto
     # 917a54ed2347 (Italy ledgers) when nikhil integrated main — linear, single head.
     # 2d0cdeeeecc4 (2026-10-05, Hong Kong remediation gap 6): partial unique
     # indexes on the hk_ tenant workflows, single child of cd62503afe26.
-    assert heads == ["2d0cdeeeecc4"]
+    # f898189cb4e3 (2026-10-06): merge of main's 2d0cdeeeecc4 (HK convergence)
+    # with venu's c5981cbcbe13 (Italy 3A/3C -> CH -> attendance gate); both
+    # chains grow from cd62503afe26. Pure graph merge, no schema change.
+    assert heads == ["f898189cb4e3"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -141,7 +164,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["2d0cdeeeecc4"]
+    assert list(script.get_heads()) == ["f898189cb4e3"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -164,6 +187,10 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
         "998877665544",
         "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        # cd62503afe26: main's 2d0cdeeeecc4 (HK convergence) and venu's
+        # c9d8e7f6a5b4 (Italy F24 causale) both grow from it; rejoined by
+        # merge f898189cb4e3.
+        "cd62503afe26",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
         "f0b1c2d3e4f5", "f1b78410d568", "fbfe6d7eeb2e",
     ]
@@ -172,7 +199,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 173   # + 917a54ed2347 (Italy P2 ledgers) + cd62503afe26 (Hong Kong) + 2d0cdeeeecc4 (HK uniqueness)
+    assert len(revs) == 179   # + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
 
 
 def test_germany_head_chain_wiring_is_intact():

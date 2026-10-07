@@ -319,6 +319,25 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     se_taxable_benefits:        Optional[Decimal] = Field(None, validation_alias="seTaxableBenefits")
     se_annual_income:           Optional[Decimal] = Field(None, validation_alias="seAnnualIncome")
 
+    # ── Italy (ZP-IT-ENG-001 §18) — worker-owned facts; see models.py's it_*
+    # block. Vocabularies are validated by _it_profile_field_errors.
+    it_cnel_code:                 Optional[str] = Field(None, validation_alias="itCnelCode")
+    it_cnel_level:                Optional[str] = Field(None, validation_alias="itCnelLevel")
+    it_worker_class:              Optional[str] = Field(None, validation_alias="itWorkerClass")
+    it_contract_type:             Optional[str] = Field(None, validation_alias="itContractType")
+    it_cigs_applies:              Optional[bool] = Field(None, validation_alias="itCigsApplies")
+    it_contributory_cap_cohort:   Optional[str] = Field(None, validation_alias="itContributoryCapCohort")
+    it_employer_contrib_opted:    Optional[bool] = Field(None, validation_alias="itEmployerContribOpted")
+    it_tfr_destination:           Optional[str] = Field(None, validation_alias="itTfrDestination")
+    it_pension_fund:              Optional[str] = Field(None, validation_alias="itPensionFund")
+    it_tfr_destination_from:      Optional[date] = Field(None, validation_alias="itTfrDestinationFrom")
+    it_tax_domicile_comune:       Optional[str] = Field(None, validation_alias="itTaxDomicileComune")
+    it_tax_domicile_region:       Optional[str] = Field(None, validation_alias="itTaxDomicileRegion")
+    it_tax_domicile_from:         Optional[date] = Field(None, validation_alias="itTaxDomicileFrom")
+    it_fringe_child_declared:     Optional[bool] = Field(None, validation_alias="itFringeChildDeclared")
+    it_contractual_weekly_hours:  Optional[Decimal] = Field(None, validation_alias="itContractualWeeklyHours")
+    it_termination_reason:        Optional[str] = Field(None, validation_alias="itTerminationReason")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -427,6 +446,24 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     seMonthlyGross:            Optional[Decimal] = Field(None, validation_alias="se_monthly_gross", serialization_alias="seMonthlyGross")
     seTaxableBenefits:         Optional[Decimal] = Field(None, validation_alias="se_taxable_benefits", serialization_alias="seTaxableBenefits")
     seAnnualIncome:            Optional[Decimal] = Field(None, validation_alias="se_annual_income", serialization_alias="seAnnualIncome")
+
+    # ── Italy (ZP-IT-ENG-001 §18) — see Create schema above ─────────────────
+    itCnelCode:                  Optional[str] = Field(None, validation_alias="it_cnel_code", serialization_alias="itCnelCode")
+    itCnelLevel:                 Optional[str] = Field(None, validation_alias="it_cnel_level", serialization_alias="itCnelLevel")
+    itWorkerClass:               Optional[str] = Field(None, validation_alias="it_worker_class", serialization_alias="itWorkerClass")
+    itContractType:              Optional[str] = Field(None, validation_alias="it_contract_type", serialization_alias="itContractType")
+    itCigsApplies:               Optional[bool] = Field(None, validation_alias="it_cigs_applies", serialization_alias="itCigsApplies")
+    itContributoryCapCohort:     Optional[str] = Field(None, validation_alias="it_contributory_cap_cohort", serialization_alias="itContributoryCapCohort")
+    itEmployerContribOpted:      Optional[bool] = Field(None, validation_alias="it_employer_contrib_opted", serialization_alias="itEmployerContribOpted")
+    itTfrDestination:            Optional[str] = Field(None, validation_alias="it_tfr_destination", serialization_alias="itTfrDestination")
+    itPensionFund:               Optional[str] = Field(None, validation_alias="it_pension_fund", serialization_alias="itPensionFund")
+    itTfrDestinationFrom:        Optional[date] = Field(None, validation_alias="it_tfr_destination_from", serialization_alias="itTfrDestinationFrom")
+    itTaxDomicileComune:         Optional[str] = Field(None, validation_alias="it_tax_domicile_comune", serialization_alias="itTaxDomicileComune")
+    itTaxDomicileRegion:         Optional[str] = Field(None, validation_alias="it_tax_domicile_region", serialization_alias="itTaxDomicileRegion")
+    itTaxDomicileFrom:           Optional[date] = Field(None, validation_alias="it_tax_domicile_from", serialization_alias="itTaxDomicileFrom")
+    itFringeChildDeclared:       Optional[bool] = Field(None, validation_alias="it_fringe_child_declared", serialization_alias="itFringeChildDeclared")
+    itContractualWeeklyHours:    Optional[Decimal] = Field(None, validation_alias="it_contractual_weekly_hours", serialization_alias="itContractualWeeklyHours")
+    itTerminationReason:         Optional[str] = Field(None, validation_alias="it_termination_reason", serialization_alias="itTerminationReason")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses
@@ -848,6 +885,9 @@ class PayrollRunCreate(BaseModel):
     # If true (default), payslip items are generated for every Active
     # employee in the org as soon as the run is created.
     auto_generate_payslips: bool = True
+    # Proceed despite incomplete attendance — recorded on the run and in the
+    # activity log. Ignored when attendance is complete.
+    attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -971,6 +1011,10 @@ class PayrollRunResponse(BaseModel):
     authorizedAt:          Optional[datetime] = Field(None, validation_alias="authorized_at", serialization_alias="authorizedAt")
     paidBy:                Optional[str] = Field(None, validation_alias="paid_by_name", serialization_alias="paidBy")
     processedAt:           Optional[datetime] = Field(None, validation_alias="processed_at", serialization_alias="processedAt")
+    # Set only when the run was deliberately created with incomplete
+    # attendance (see service.enforce_attendance_readiness).
+    attendanceOverrideReason: Optional[str] = Field(None, validation_alias="attendance_override_reason", serialization_alias="attendanceOverrideReason")
+    attendanceOverrideAt:  Optional[datetime] = Field(None, validation_alias="attendance_override_at", serialization_alias="attendanceOverrideAt")
     approvalStatus:        str = ""
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -982,6 +1026,48 @@ class PayrollRunResponse(BaseModel):
         }
         self.approvalStatus = "Approved" if self.status in approved_states else "Pending"
         return self
+
+
+class GeneratePayslipsRequest(BaseModel):
+    """Optional body for POST /runs/{id}/generate-payslips."""
+    attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AttendanceReadinessMissing(BaseModel):
+    employeeId:    int
+    employeeName:  Optional[str] = None
+    employeeCode:  Optional[str] = None
+    expectedDays:  int
+    recordedDays:  int
+    missingDays:   int
+    missingDates:  List[str] = Field(default_factory=list)
+
+
+class AttendanceReadinessResponse(BaseModel):
+    """Per-employee attendance coverage for a pay period (see
+    service.check_attendance_readiness)."""
+    required:            bool
+    ready:               bool
+    periodStart:         Optional[str] = None
+    periodEnd:           Optional[str] = None
+    weeklyOffDays:       List[int] = Field(default_factory=list)
+    employmentTypes:     Optional[List[str]] = None
+    totalEmployees:      int = 0
+    exemptEmployees:     int = 0
+    completeEmployees:   int = 0
+    incompleteEmployees: int = 0
+    missing:             List[AttendanceReadinessMissing] = Field(default_factory=list)
+    missingTruncated:    bool = False
+
+
+class AttendanceReadinessRequest(BaseModel):
+    period_start: date = Field(..., alias="periodStart")
+    period_end:   date = Field(..., alias="periodEnd")
+    employee_ids: Optional[List[int]] = Field(None, alias="employeeIds")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 # ── Payslip Items ──────────────────────────────────────────────────────
@@ -4458,6 +4544,228 @@ class EmployerFranceProfileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+# ── Italy F24 (§16, IT-043/IT-046) ─────────────────────────────────────────
+# A F24 is a PAYMENT INSTRUCTION. Every one of its rows must name a real
+# "codice tributo / causale" and the right section, or the instruction is not
+# merely incomplete, it is wrong. That single fact drives the whole shape of
+# this API:
+#
+#   * There is no default, fallback, or "best guess" causale anywhere in this
+#     module. `taxCode` is required and must already exist in the governed
+#     catalog, because IT-043 forbids inventing one.
+#   * The catalog ships empty and is populated only from the Agenzia delle
+#     Entrate catalogs by a Super Admin, so `build` is expected to refuse until
+#     it has been. Refusing loudly is the correct behaviour, not a gap to fill.
+#   * Lines are derived from COMMITTED payroll only (IT-044). A draft run is
+#     rejected rather than estimated, since an F24 built from a draft pays money
+#     that may never be owed.
+
+class ItalyF24CausaleUpsert(BaseModel):
+    """Record a governed F24 causale for one snapshot component.
+
+    `componentKey` addresses a path this platform already computed and stored on
+    PayslipItem.it_calculation_snapshot - "inps.employer", "irpef.withheld",
+    "localTax.regionalSaldo" and so on. Binding the causale to a fact we
+    actually computed means the F24 line cannot drift from the payslip it
+    settles; inventing a parallel re-derivation is exactly the failure mode
+    IT-043 exists to prevent.
+
+    Creating a new row for an existing (section, component) does NOT overwrite
+    the old one. Supply `effectiveTo` on the outgoing row and open a new
+    `effectiveFrom`: F24 causali change over time, and retroactively editing the
+    code that was in force for a period already filed would corrupt the audit
+    trail the archived filing depends on (IT-060).
+    """
+    organizationId:     Optional[int] = None   # never trusted; tenancy comes from the caller
+    section:            str = Field(..., min_length=1, max_length=20)
+    componentKey:       str = Field(..., min_length=1, max_length=40)
+    taxCode:            str = Field(..., min_length=1, max_length=10)
+    requiresRegion:     bool = False
+    requiresComune:     bool = False
+    # Required, and deliberately not defaulted. Whether a component increases or
+    # offsets the amount due on its F24 line is a fact about that causale, so it
+    # has to be stated by whoever records the code rather than inferred from the
+    # component's name. A default here would let a missing decision become a
+    # silent DEBIT.
+    direction:          str
+    effectiveFrom:      date
+    effectiveTo:        Optional[date] = None
+    sourceDocumentId:   Optional[int] = None
+    notes:              Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyF24CausaleResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    section:            str
+    componentKey:       str = Field(..., validation_alias="component_key", serialization_alias="componentKey")
+    taxCode:            str = Field(..., validation_alias="tax_code", serialization_alias="taxCode")
+    requiresRegion:     bool = Field(..., validation_alias="requires_region", serialization_alias="requiresRegion")
+    requiresComune:     bool = Field(..., validation_alias="requires_comune", serialization_alias="requiresComune")
+    direction:          str
+    effectiveFrom:      date = Field(..., validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:        Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    sourceDocumentId:   Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    status:             str  # Draft | Approved | Superseded
+    notes:              Optional[str] = None
+    createdById:        Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:       Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ItalyF24BuildRequest(BaseModel):
+    """Derive the payable F24 lines for one committed run and reference period.
+
+    `referencePeriod` is the F24 "periodo di riferimento" (MM/YYYY). The caller
+    supplies it rather than the server inferring it, because the period and the
+    run are two independent facts and silently deriving one from the other is
+    how a December liability lands in the wrong month.
+    """
+    organizationId:     Optional[int] = None   # never trusted
+    payrollRunId:       int
+    referencePeriod:    str = Field(..., min_length=7, max_length=7)  # MM/YYYY
+    statutoryFilingId:  Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyF24LineResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    statutoryFilingId:  Optional[int] = Field(None, validation_alias="statutory_filing_id", serialization_alias="statutoryFilingId")
+    payrollRunId:       Optional[int] = Field(None, validation_alias="payroll_run_id", serialization_alias="payrollRunId")
+    section:            str
+    taxCode:            str = Field(..., validation_alias="tax_code", serialization_alias="taxCode")
+    regionCode:         Optional[str] = Field(None, validation_alias="region_code", serialization_alias="regionCode")
+    comuneCode:         Optional[str] = Field(None, validation_alias="comune_code", serialization_alias="comuneCode")
+    referencePeriod:    str = Field(..., validation_alias="reference_period", serialization_alias="referencePeriod")
+    debitAmount:        Decimal = Field(..., validation_alias="debit_amount", serialization_alias="debitAmount")
+    creditAmount:       Decimal = Field(..., validation_alias="credit_amount", serialization_alias="creditAmount")
+    sourceLines:        Optional[list] = Field(None, validation_alias="source_lines", serialization_alias="sourceLines")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Italy Libro Unico del Lavoro (§20, IT-058/IT-059/IT-060) ───────────────
+# IT-058: "an auditable statutory record, not a PDF theme" — sequence,
+# inalterability, retention and the authorized method are engineering
+# requirements. These schemas keep the caller from supplying any of the four:
+# the service allocates the sequence, hashes the content, advances the retention
+# horizon, and reads the authorized method off the employer profile. A request
+# body that could set a sequence number or a retention date would let a caller
+# forge the audit trail from outside it.
+
+class ItalyLulBuildRequest(BaseModel):
+    """Register one committed run's payslips in the LUL for a reference month.
+
+    `eventKind` is the statutory event and is deliberately NOT validated against
+    a closed list: spec source S10 (the official LUL catalog) is not yet
+    available, and inventing the vocabulary would be the same error as inventing
+    an F24 causale (IT-043). It is recorded as governed data instead.
+    """
+    organizationId:     Optional[int] = None   # never trusted
+    payrollRunId:       int
+    referenceMonth:     str = Field(..., min_length=7, max_length=7, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")  # YYYY-MM
+    eventKind:          Optional[str] = Field(None, max_length=40)
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyLulCorrectionRequest(BaseModel):
+    """Correct a registered LUL entry. Required `reason` — see the schema note."""
+    organizationId:     Optional[int] = None
+    reason:             str = Field(..., min_length=1, max_length=500)
+    eventKind:          Optional[str] = Field(None, max_length=40)
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyLulEntryResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    employeeId:         int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    referenceMonth:     str = Field(..., validation_alias="reference_month", serialization_alias="referenceMonth")
+    sequenceNumber:     int = Field(..., validation_alias="sequence_number", serialization_alias="sequenceNumber")
+    entryType:          str = Field(..., validation_alias="entry_type", serialization_alias="entryType")
+    correctsEntryId:    Optional[int] = Field(None, validation_alias="corrects_entry_id", serialization_alias="correctsEntryId")
+    payslipItemId:      Optional[int] = Field(None, validation_alias="payslip_item_id", serialization_alias="payslipItemId")
+    payrollRunId:       Optional[int] = Field(None, validation_alias="payroll_run_id", serialization_alias="payrollRunId")
+    contentHash:        str = Field(..., validation_alias="content_hash", serialization_alias="contentHash")
+    payload:            Optional[dict] = Field(None)
+    eventKind:          Optional[str] = Field(None, validation_alias="event_kind", serialization_alias="eventKind")
+    method:             Optional[str] = None
+    registeredReference: Optional[str] = Field(None, validation_alias="registered_reference", serialization_alias="registeredReference")
+    registeredAt:       Optional[datetime] = Field(None, validation_alias="registered_at", serialization_alias="registeredAt")
+    retentionUntil:     Optional[date] = Field(None, validation_alias="retention_until", serialization_alias="retentionUntil")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ItalyLulIntegrityResponse(BaseModel):
+    """IT-058 inalterability, made checkable rather than merely asserted."""
+    entries:                      int
+    firstSequence:                Optional[int] = None
+    lastSequence:                 Optional[int] = None
+    sequenceGaps:                 List[int] = Field(default_factory=list)
+    driftedSequenceNumbers:       List[int] = Field(default_factory=list)
+    unverifiableSequenceNumbers:  List[int] = Field(default_factory=list)
+    earliestRetentionUntil:       Optional[date] = None
+    verifiedAt:                   str
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Italy TFR (§13, IT-037/IT-038/IT-039/IT-040/IT-041) ───────────────────
+# TFR is a LIABILITY ledger (IT-037), not an earning. The destination in force
+# for each entry is recorded (IT-038), revaluation is annual on prior balances
+# with a substitute tax (IT-039), and the Fondo Tesoreria threshold depends on
+# prior-year average headcount (IT-040/IT-041).
+
+class ItalyTfrAccrualRequest(BaseModel):
+    """Post TFR accruals for one committed run (APPROVED or later)."""
+    organizationId:     Optional[int] = None   # never trusted
+    payrollRunId:       int
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyTfrRevaluationRequest(BaseModel):
+    """Post annual TFR revaluation on prior-year balances."""
+    organizationId:         Optional[int] = None
+    taxYear:                int
+    istatFoiIncreasePct:    Decimal
+    months:                 int = 12
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyTfrLedgerEntryResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    employeeId:         Optional[int] = Field(None, validation_alias="employee_id", serialization_alias="employeeId")
+    entryType:          str = Field(..., validation_alias="entry_type", serialization_alias="entryType")
+    taxYear:            int = Field(..., validation_alias="tax_year", serialization_alias="taxYear")
+    entryDate:          date = Field(..., validation_alias="entry_date", serialization_alias="entryDate")
+    amount:             Decimal
+    destination:        Optional[str] = None
+    pensionFund:        Optional[str] = Field(None, validation_alias="pension_fund", serialization_alias="pensionFund")
+    payslipItemId:      Optional[int] = Field(None, validation_alias="payslip_item_id", serialization_alias="payslipItemId")
+    payrollRunId:       Optional[int] = Field(None, validation_alias="payroll_run_id", serialization_alias="payrollRunId")
+    reversesEntryId:    Optional[int] = Field(None, validation_alias="reverses_entry_id", serialization_alias="reversesEntryId")
+    evidence:           Optional[dict] = None
+    idempotencyKey:     str = Field(..., validation_alias="idempotency_key", serialization_alias="idempotencyKey")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ItalyTfrBalanceResponse(BaseModel):
+    total:              str
+    byDestination:      Dict[str, str]
+    asOfYear:           Optional[int] = None
+
+
+class ItalyTfrIdempotencyResponse(BaseModel):
+    duplicateCount:     int
+    duplicateKeys:      List[str] = Field(default_factory=list)
+    checkedAt:          str
+
+
 class FranceEstablishmentRatePackResponse(BaseModel):
     id:                 int
     organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
@@ -4528,9 +4836,12 @@ class IrelandRpnSnapshotUpsert(BaseModel):
     full authority JSON response. If the same raw_hash is submitted again for
     the same employee/tax_year, the existing snapshot is returned (no
     duplicate). A genuine change in the authority response creates a new
-    immutable row — the historical payroll must always be reproducible from
-    the exact snapshot that was in force (IE-045)."""
-    organizationId:           int
+immutable row — the historical payroll must always be reproducible from the
+    exact snapshot that was in force (IE-045)."""
+    # Optional and NEVER trusted: tenancy comes from the authenticated caller,
+    # so a body can never name another organization. Required-but-ignored would
+    # only invite a caller to believe the value did something.
+    organizationId:           Optional[int] = None
     employeeId:               int
     rpnNumber:                str
     issuedAt:                 str   # ISO-8601 datetime
@@ -4788,3 +5099,135 @@ class SwedenCalculationPreviewRequest(BaseModel):
     pensionCostBase: Optional[Decimal] = None
     employeePensionShare: Optional[Decimal] = None
     employerPensionShare: Optional[Decimal] = None
+
+
+# ── Italy (ZP-IT-ENG-001) — employer profile, readiness, preview ────────────
+class ItalyEmployerProfileUpsert(BaseModel):
+    """§17 B-G employer facts. readinessStatus is deliberately absent: it is
+    RECOMPUTED by italy_service.evaluate_employer_readiness, never set."""
+    matricolaInps: Optional[str] = Field(None, max_length=20)
+    cscCode: Optional[str] = Field(None, max_length=10)
+    caCode: Optional[str] = Field(None, max_length=10)
+    atecoCode: Optional[str] = Field(None, max_length=10)
+    inpsOffice: Optional[str] = Field(None, max_length=50)
+    cnelCode: Optional[str] = Field(None, max_length=20)
+    # {"fund": "FIS" | "CIG" | "SECTOR_FUND", "fisBand": "UP_TO_5" | "OVER_5"}
+    fundStatus: Optional[dict] = None
+    priorYearAvgHeadcount: Optional[int] = None
+    tesoreriaStatus: Optional[str] = Field(None, max_length=20)
+    f24OperatingModel: Optional[str] = Field(None, max_length=30)
+    lulMethod: Optional[str] = Field(None, max_length=30)
+
+
+class ItalyEmployerProfileResponse(BaseModel):
+    id: int
+    organizationId: int = Field(validation_alias="organization_id", serialization_alias="organizationId")
+    matricolaInps: Optional[str] = Field(None, validation_alias="matricola_inps", serialization_alias="matricolaInps")
+    cscCode: Optional[str] = Field(None, validation_alias="csc_code", serialization_alias="cscCode")
+    caCode: Optional[str] = Field(None, validation_alias="ca_code", serialization_alias="caCode")
+    atecoCode: Optional[str] = Field(None, validation_alias="ateco_code", serialization_alias="atecoCode")
+    inpsOffice: Optional[str] = Field(None, validation_alias="inps_office", serialization_alias="inpsOffice")
+    cnelCode: Optional[str] = Field(None, validation_alias="cnel_code", serialization_alias="cnelCode")
+    fundStatus: Optional[dict] = Field(None, validation_alias="fund_status", serialization_alias="fundStatus")
+    priorYearAvgHeadcount: Optional[int] = Field(None, validation_alias="prior_year_avg_headcount",
+                                                 serialization_alias="priorYearAvgHeadcount")
+    tesoreriaStatus: Optional[str] = Field(None, validation_alias="tesoreria_status", serialization_alias="tesoreriaStatus")
+    f24OperatingModel: Optional[str] = Field(None, validation_alias="f24_operating_model",
+                                             serialization_alias="f24OperatingModel")
+    lulMethod: Optional[str] = Field(None, validation_alias="lul_method", serialization_alias="lulMethod")
+    readinessStatus: str = Field(validation_alias="readiness_status", serialization_alias="readinessStatus")
+    readinessEvidence: Optional[dict] = Field(None, validation_alias="readiness_evidence",
+                                              serialization_alias="readinessEvidence")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ItalyReadinessItem(BaseModel):
+    key: str
+    label: str
+    required: bool
+    complete: bool
+    detail: Optional[str] = None
+
+
+class ItalyReadinessResponse(BaseModel):
+    """§27 release gates G1-G8: Italy must NOT become production-active
+    because its content exists."""
+    packId: Optional[int] = None
+    packVersion: Optional[str] = None
+    packStatus: Optional[str] = None
+    ready: bool
+    items: List[ItalyReadinessItem] = []
+    blockers: List[str] = []
+
+
+class ItalyCalculationPreviewRequest(BaseModel):
+    """Read-only Super Admin preview of one Italian pack. Every worker and
+    employer fact is supplied inline; nothing is read from or written to an
+    employee or organization. Defaults describe one ordinary full month for a
+    permanent worker employed all year with nothing paid yet."""
+    jurisdictionPackId: Optional[int] = None
+    payDate: date
+    gross: Decimal = Field(gt=0)
+    workerClass: str
+    contractType: str = "INDETERMINATO"
+    cigsApplies: bool = False
+    capCohort: Optional[str] = None
+    tfrDestination: Optional[str] = None
+    pensionFund: Optional[str] = None
+    taxDomicileRegion: str
+    taxDomicileComune: str
+    fringeChildDeclared: bool = False
+    cscCode: str
+    caCode: Optional[str] = None
+    fund: str = "CIG"
+    fisBand: Optional[str] = None
+    priorYearAvgHeadcount: Optional[int] = None
+    mensilita: Optional[int] = None
+    mensilitaPaidPrior: int = 0
+    ytdTaxablePrior: Decimal = Decimal("0")
+    ytdIrpefWithheldPrior: Decimal = Decimal("0")
+    ytdContributoryBasePrior: Decimal = Decimal("0")
+    workDaysInYear: int = 365
+    ytdFringePrior: Decimal = Decimal("0")
+    ytdWedgePaidPrior: Decimal = Decimal("0")
+    # IT-011 wedge-sum recovery plan; 0/0 = nothing is being recovered.
+    wedgeRecoveryOutstanding: Decimal = Decimal("0")
+    wedgeRecoveryInstalment: Decimal = Decimal("0")
+    # §5 determined local-surtax amounts for the year; absent = not recorded,
+    # which the engine blocks on exactly as a real run would.
+    addregSaldoDue: Optional[Decimal] = None
+    addcomSaldoDue: Optional[Decimal] = None
+    addcomAccontoDue: Optional[Decimal] = None
+
+
+# ── Italy filing outbox (§15/§16, IT-044/IT-048) ───────────────────────────
+# Delivery state only. Filing status, receipt, correction lineage and schema
+# version live on the linked StatutoryFiling, never duplicated here.
+
+class ItalyFilingOutboxCreate(BaseModel):
+    """Enqueue one outbound Italian filing action. Built from COMMITTED payroll
+    by a caller, never transmitted from inside the calculator (IT-044)."""
+    action: str  # UNIEMENS_TRANSMIT | F24_SUBMIT | LUL_REGISTER | CU_TRANSMIT | 770_TRANSMIT | CORRECTION
+    statutoryFilingId: Optional[int] = None
+    periodKey: Optional[str] = Field(None, max_length=20)
+    payload: Optional[dict] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ItalyFilingOutboxItemResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    action:             str
+    statutoryFilingId:  Optional[int] = Field(None, validation_alias="statutory_filing_id", serialization_alias="statutoryFilingId")
+    periodKey:          Optional[str] = Field(None, validation_alias="period_key", serialization_alias="periodKey")
+    payload:            Optional[dict] = None
+    idempotencyKey:     str = Field(..., validation_alias="idempotency_key", serialization_alias="idempotencyKey")
+    status:             str  # PENDING|SENT|UNKNOWN|ACKNOWLEDGED|FAILED
+    attempts:           int
+    lastError:          Optional[str] = Field(None, validation_alias="last_error", serialization_alias="lastError")
+    sentAt:             Optional[datetime] = Field(None, validation_alias="sent_at", serialization_alias="sentAt")
+    acknowledgedAt:     Optional[datetime] = Field(None, validation_alias="acknowledged_at", serialization_alias="acknowledgedAt")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)

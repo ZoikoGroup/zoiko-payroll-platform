@@ -108,6 +108,17 @@ class BadRequestException(ZoikoException):
         super().__init__(status_code=400, error_code="BAD_REQUEST", message=message)
 
 
+class AttendanceIncompleteException(ZoikoException):
+    """Payroll refused because in-scope employees are missing attendance for
+    expected working days of the period (400, error ATTENDANCE_INCOMPLETE).
+    `trace` carries the readiness report (see
+    payroll/service.py check_attendance_readiness) so the frontend can list
+    exactly who is missing which days."""
+    def __init__(self, message: str, trace: dict):
+        super().__init__(status_code=400, error_code="ATTENDANCE_INCOMPLETE", message=message)
+        self.trace = trace
+
+
 class GermanyCalculationBlockedException(ZoikoException):
     """Use when a Germany payroll calculation cannot safely produce a
     compliant result (400) — e.g. no PUBLISHED BMF PAP asset, no effective
