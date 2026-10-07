@@ -7935,18 +7935,26 @@ def _ch_changed_columns(target) -> set:
     return {a.key for a in state.attrs if a.history.has_changes()}
 
 
-def _ch_previous_value(target, key):
-    from sqlalchemy import inspect as _sa_inspect
+def _ch_previous_value(connection, target, key):
+    # The value as STORED. In-memory history only knows the old value when the
+    # attribute was loaded before it changed; on an expired instance (e.g.
+    # after a commit) it is empty, so the database row is read instead.
+    from sqlalchemy import inspect as _sa_inspect, select as _sa_select
 
     history = _sa_inspect(target).attrs[key].history
-    return history.deleted[0] if history.deleted else getattr(target, key)
+    if history.deleted:
+        return history.deleted[0]
+    if not history.added:
+        return getattr(target, key)
+    table = type(target).__table__
+    return connection.execute(_sa_select(table.c[key]).where(table.c.id == target.id)).scalar()
 
 
 def _refuse_released_scheme_mutation(mapper, connection, target):
     # A LIVE scheme profile is frozen content: the only permitted change is
     # its retirement (LIVE -> RETIRED); a RETIRED one never changes again.
     # A changed scheme is a NEW version row.
-    before = _ch_previous_value(target, "status")
+    before = _ch_previous_value(connection, target, "status")
     if before not in ("LIVE", "RETIRED"):
         return
     changed = _ch_changed_columns(target) - {"updated_at"}

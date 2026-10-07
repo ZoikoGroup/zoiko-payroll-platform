@@ -971,3 +971,453 @@ def activate_ch_wage_floor(db: Session, agreement_id: int, actor_id: Optional[in
               new={"status": "Active", "supersededIds": [p.id for p in superseded]}, reason=reason,
               correlation_id=correlation_id)
     return _floor_view(row)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# CH Step 6 — calculation-input resolver (read-only).
+#
+# resolve_ch_calc_inputs gathers every fact a Swiss payslip needs, in the
+# order the CH plan fixes, and FAILS CLOSED: each missing or ungoverned item
+# becomes a structured {key, reason} entry in `blocked` instead of a default.
+# All blocks are collected (the resolver does not stop at the first), so one
+# call tells an operator everything that must be fixed. Cantons come ONLY
+# from the explicit ch_* profile fields — work_state, addresses and the
+# entity's seat canton are never used to infer a worker's canton.
+# ════════════════════════════════════════════════════════════════════════
+
+from app.modules.payroll.engine.countries.switzerland_content import (  # noqa: E402
+    CH_QST_ANNUAL_MODEL_CANTONS, CH_QST_MODELS, CH_YTD_COMPONENTS,
+)
+from app.modules.payroll.models import (  # noqa: E402
+    ChAbsenceBenefitEvent, ChFamilyAllowanceEntitlement, ContributionRate, JurisdictionPack, PayrollYtdAccumulator,
+)
+
+CH_QST_SUBJECT_VALUES = ("YES", "NO", "REVIEW_REQUIRED")
+CH_MARRIED_STATUSES = ("MARRIED", "REGISTERED_PARTNERSHIP")
+# Residence countries with a cross-border taxation agreement that can move
+# the taxing right away from Swiss source tax — VERIFY AGAINST ESTV / the
+# agreements before relying on this list; it only ever yields REVIEW_REQUIRED.
+CH_CROSS_BORDER_AGREEMENT_COUNTRIES = ("FR", "IT", "DE", "AT")
+ZERO_CHF = Decimal("0")
+
+
+def ch_tax_year_key(year: int) -> str:
+    """PayrollYtdAccumulator.tax_year for a Swiss calendar year (the
+    "IT-CY-2026" / "US-CY-2026" convention)."""
+    return f"CH-CY-{year}"
+
+
+def _in_force(row_from, row_to, on: date) -> bool:
+    return (row_from is None or row_from <= on) and (row_to is None or on <= row_to)
+
+
+def _active_pack(db: Session, canton: Optional[str], on: date) -> Optional[JurisdictionPack]:
+    """The Active CH pack in force on `on` for exactly this canton (None =
+    the federal pack). Never falls back from a canton to the federal pack."""
+    q = db.query(JurisdictionPack).filter(
+        JurisdictionPack.jurisdiction_country == "CH", JurisdictionPack.status == "Active",
+        JurisdictionPack.jurisdiction_locality.is_(None),
+        JurisdictionPack.jurisdiction_state.is_(None) if canton is None
+        else JurisdictionPack.jurisdiction_state == canton,
+        (JurisdictionPack.effective_from.is_(None)) | (JurisdictionPack.effective_from <= on),
+        (JurisdictionPack.effective_to.is_(None)) | (JurisdictionPack.effective_to >= on),
+    )
+    return q.order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first()
+
+
+def _pack_params(db: Session, pack: Optional[JurisdictionPack], on: date) -> Dict[str, ContributionRate]:
+    if pack is None:
+        return {}
+    rows = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).all()
+    return {r.component_key: r for r in rows if _in_force(r.effective_from, r.effective_to, on)}
+
+
+def _param_view(row: ContributionRate) -> dict:
+    return {"employeePct": row.employee_rate_pct, "employerPct": row.employer_rate_pct,
+            "amount": row.flat_amount, "text": row.text_value}
+
+
+def _pack_summary(db: Session, pack: Optional[JurisdictionPack], on: date) -> Optional[dict]:
+    if pack is None:
+        return None
+    return {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "canton": pack.jurisdiction_state,
+            "effectiveFrom": _iso(pack.effective_from), "effectiveTo": _iso(pack.effective_to),
+            "parameters": {k: _param_view(r) for k, r in sorted(_pack_params(db, pack, on).items())}}
+
+
+def _live_scheme(db: Session, scheme_id: Optional[int], organization_id: int, scheme_type: str,
+                 on: date) -> Tuple[Optional[ChSchemeProfile], Optional[str]]:
+    if scheme_id is None:
+        return None, "not assigned"
+    s = db.get(ChSchemeProfile, scheme_id)
+    if s is None or s.organization_id not in (None, organization_id):
+        return None, f"scheme {scheme_id} does not exist for this employer"
+    if s.scheme_type != scheme_type:
+        return None, f"scheme {scheme_id} is a {s.scheme_type}, not a {scheme_type}"
+    if s.status != "LIVE":
+        return None, f"{s.scheme_code} v{s.version} is {s.status}, not LIVE"
+    if not _in_force(s.effective_from, s.effective_to, on):
+        return None, f"{s.scheme_code} v{s.version} is not in force on {on.isoformat()}"
+    return s, None
+
+
+def _active_floor(db: Session, agreement_id: int, on: date) -> Tuple[Optional[CollectiveAgreement], Optional[str]]:
+    a = db.get(CollectiveAgreement, agreement_id)
+    if a is None or a.jurisdiction_country != "CH" or a.agreement_type not in CH_WAGE_FLOOR_TYPES:
+        return None, f"agreement {agreement_id} is not a CH wage floor"
+    if a.status != "Active":
+        return None, f"{a.agreement_code} v{a.version} is {a.status}, not Active"
+    if not _in_force(a.effective_from, a.effective_to, on):
+        return None, f"{a.agreement_code} v{a.version} is not in force on {on.isoformat()}"
+    return a, None
+
+
+def _canton_minimums(db: Session, canton: str, on: date) -> List[CollectiveAgreement]:
+    rows = db.query(CollectiveAgreement).filter(
+        CollectiveAgreement.jurisdiction_country == "CH", CollectiveAgreement.agreement_type == "CH_CANTON_MINIMUM",
+        CollectiveAgreement.jurisdiction_state == canton, CollectiveAgreement.status == "Active").all()
+    return [r for r in rows if _in_force(r.effective_from, r.effective_to, on)]
+
+
+def _ytd(db: Session, employee_id: int, year: int) -> dict:
+    """Running totals per CH component; a component with no row has had no
+    CH payroll this year at this employer, so its total is a true zero."""
+    rows = {r.tax_component: r for r in db.query(PayrollYtdAccumulator).filter(
+        PayrollYtdAccumulator.employee_id == employee_id,
+        PayrollYtdAccumulator.tax_year == ch_tax_year_key(year)).all()}
+    out = {}
+    for component in CH_YTD_COMPONENTS:
+        row = rows.get(component)
+        out[component] = {
+            "wages": Decimal(str(row.ytd_taxable_wages)) if row is not None else ZERO_CHF,
+            "withheld": Decimal(str(row.ytd_tax_withheld)) if row is not None else ZERO_CHF,
+            "recorded": row is not None,
+        }
+    return out
+
+
+def _bvg_eligibility(employee, federal_params: dict, on: date, blocked: list) -> Optional[bool]:
+    """BVG mandatory insurance: annual salary at or above the entry threshold
+    and from 1 January after the 17th birthday (BVG Art. 2 / 7 — VERIFY the
+    age rule against the G1 statutory review). None = cannot be determined
+    (blocked)."""
+    threshold_row = federal_params.get("ch_bvg_entry_threshold")
+    threshold = threshold_row.flat_amount if threshold_row is not None else None
+    dob = getattr(employee, "date_of_birth", None)
+    annual = getattr(employee, "ctc", None)
+    if threshold is None:
+        _block(blocked, "ch_bvg_entry_threshold", "the Active federal pack has no BVG entry threshold")
+    if dob is None:
+        _block(blocked, "ch_date_of_birth", "date of birth is needed to decide BVG insurance")
+    if annual is None or Decimal(str(annual)) <= 0:
+        _block(blocked, "ch_annual_salary", "annual salary (ctc) is needed to decide BVG insurance")
+    if threshold is None or dob is None or annual is None or Decimal(str(annual)) <= 0:
+        return None
+    return Decimal(str(annual)) >= Decimal(str(threshold)) and on.year - dob.year > 17
+
+
+def _block(blocked: list, key: str, reason: str) -> None:
+    blocked.append({"key": key, "reason": reason})
+
+
+def _valid_canton(value) -> bool:
+    return value in CH_CANTON_CODES
+
+
+def resolve_ch_calc_inputs(db: Session, organization_id: int, employee, payroll_date: date,
+                           period_start: Optional[date] = None, period_end: Optional[date] = None) -> dict:
+    """{"ready", "blocked": [{key, reason}], "inputs"} for one CH employee on
+    `payroll_date`. Read-only — never writes, never defaults a missing fact."""
+    from app.modules.payroll.service import get_taxability_classification, resolve_employee_statutory_profile
+
+    on = payroll_date
+    period_start = period_start or on.replace(day=1)
+    period_end = period_end or on
+    blocked: list = []
+    inputs: dict = {"employeeId": employee.id, "payrollDate": on.isoformat(),
+                    "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()}
+
+    # 1. entity profile
+    entity = _profile_in_force(db, organization_id, on)
+    if entity is None:
+        _block(blocked, "ch_entity_profile", f"no CH employer profile is in force on {on.isoformat()}")
+    inputs["entityProfileId"] = entity.id if entity else None
+
+    # 2. worker profile
+    profile = resolve_employee_statutory_profile(db, employee.id, organization_id, as_of=on)
+    if profile is None or profile.country_code != "CH":
+        _block(blocked, "ch_worker_profile", f"no CH statutory profile is in force on {on.isoformat()}")
+        profile = None
+    get = (lambda attr: getattr(profile, attr, None)) if profile is not None else (lambda attr: None)
+    inputs["workerProfileId"] = profile.id if profile else None
+
+    # 3. cantons — explicit ch_* fields only
+    work, residence, residence_country = get("ch_work_canton"), get("ch_residence_canton"), get("ch_residence_country")
+    qst_subject, qst_canton = get("ch_qst_subject"), get("ch_qst_canton")
+    if profile is not None:
+        if not _valid_canton(work):
+            _block(blocked, "ch_work_canton", "work canton is missing or not a CH-XX code "
+                                              "(work_state and addresses are never used to infer it)")
+        if not residence_country:
+            _block(blocked, "ch_residence_country", "residence country is missing")
+        elif residence_country == "CH" and not _valid_canton(residence):
+            _block(blocked, "ch_residence_canton", "a Swiss resident needs a CH-XX residence canton")
+        elif residence_country != "CH" and residence is not None:
+            _block(blocked, "ch_residence_canton",
+                   f"a residence canton is set although the residence country is {residence_country}")
+        if qst_subject is None or qst_subject not in CH_QST_SUBJECT_VALUES:
+            _block(blocked, "ch_qst_subject", "QST liability (YES / NO / REVIEW_REQUIRED) is not recorded")
+        elif qst_subject == "REVIEW_REQUIRED":
+            _block(blocked, "ch_qst_subject_review", "QST liability is under review — it is never inferred")
+        if qst_subject == "YES":
+            if not _valid_canton(qst_canton):
+                _block(blocked, "ch_qst_canton", "a QST-liable worker needs a CH-XX QST canton")
+            if not get("ch_qst_tariff_code"):
+                _block(blocked, "ch_qst_tariff_code", "a QST-liable worker needs a tariff code")
+            if get("ch_children_count") is None:
+                _block(blocked, "ch_children_count", "children count is needed for the QST tariff")
+            if get("ch_church_tax") is None:
+                _block(blocked, "ch_church_tax", "church-tax liability is needed for the QST tariff")
+    inputs["cantons"] = {"work": work, "residence": residence, "residenceCountry": residence_country,
+                         "qst": qst_canton if qst_subject == "YES" else None}
+    inputs["qstSubject"] = qst_subject
+
+    # 4. federal pack
+    federal = _active_pack(db, None, on)
+    if federal is None:
+        _block(blocked, "ch_federal_pack", f"no Active federal CH pack is in force on {on.isoformat()}")
+    federal_params = _pack_params(db, federal, on)
+    inputs["federalPack"] = _pack_summary(db, federal, on)
+
+    # 5. work-canton pack (FAK, floor)
+    work_pack = None
+    if _valid_canton(work):
+        work_pack = _active_pack(db, work, on)
+        if work_pack is None:
+            _block(blocked, "ch_work_canton_pack", f"no Active {work} pack is in force on {on.isoformat()}")
+    inputs["workCantonPack"] = _pack_summary(db, work_pack, on)
+
+    # 6. QST-canton pack + its ACTIVE tariff file
+    inputs["qst"] = None
+    if qst_subject == "YES" and _valid_canton(qst_canton):
+        qst_pack = _active_pack(db, qst_canton, on)
+        if qst_pack is None:
+            _block(blocked, "ch_qst_canton_pack", f"no Active {qst_canton} pack is in force on {on.isoformat()}")
+        else:
+            params = _pack_params(db, qst_pack, on)
+            model_row, file_row = params.get("ch_qst_model"), params.get("ch_qst_tariff_file_id")
+            model = (model_row.text_value or "").strip().upper() if model_row is not None else ""
+            if model not in CH_QST_MODELS:
+                _block(blocked, "ch_qst_model", f"the {qst_canton} pack does not set the QST model (MONTHLY | ANNUAL)")
+            raw_id = (file_row.text_value or "").strip() if file_row is not None else ""
+            tariff = db.get(ChQstTariffFile, int(raw_id)) if raw_id.isdigit() else None
+            reason = None
+            if tariff is None:
+                reason = f"the {qst_canton} pack does not point to a QST tariff file"
+            elif tariff.canton != qst_canton:
+                reason = f"tariff file {tariff.id} belongs to {tariff.canton}, not {qst_canton}"
+            elif tariff.status != "ACTIVE":
+                reason = f"tariff file {tariff.id} is {tariff.status}, not ACTIVE"
+            elif not _in_force(tariff.effective_from, tariff.effective_to, on):
+                reason = f"tariff file {tariff.id} is not in force on {on.isoformat()}"
+            if reason:
+                _block(blocked, "ch_qst_tariff_file", reason)
+            inputs["qst"] = {"packId": qst_pack.id, "model": model or None,
+                             "tariffFileId": tariff.id if tariff is not None and not reason else None,
+                             "tariffCode": get("ch_qst_tariff_code"), "children": get("ch_children_count"),
+                             "churchTax": get("ch_church_tax")}
+
+    # 7. schemes LIVE on the date
+    schemes: dict = {}
+    if entity is not None:
+        for key, attr, scheme_type, label in (
+                ("ch_compensation_office", "compensation_office_scheme_id", "COMPENSATION_OFFICE", "compensation office"),
+                ("ch_fak_scheme", "fak_scheme_id", "FAK", "FAK fund")):
+            s, why = _live_scheme(db, getattr(entity, attr), organization_id, scheme_type, on)
+            if s is None:
+                _block(blocked, key, f"{label}: {why}")
+            schemes[scheme_type] = s.id if s else None
+    bvg_eligible = _bvg_eligibility(employee, federal_params, on, blocked) if federal is not None else None
+    inputs["bvgEligible"] = bvg_eligible
+    if profile is not None:
+        if bvg_eligible:
+            s, why = _live_scheme(db, get("ch_bvg_plan_scheme_id"), organization_id, "BVG_PLAN", on)
+            if s is None:
+                _block(blocked, "ch_bvg_plan", f"BVG-insured worker — BVG plan: {why}")
+            schemes["BVG_PLAN"] = s.id if s else None
+        s, why = _live_scheme(db, get("ch_uvg_policy_scheme_id"), organization_id, "UVG_POLICY", on)
+        if s is None:
+            _block(blocked, "ch_uvg_policy", f"UVG policy (always required): {why}")
+        else:
+            codes = {rc.get("code") for rc in (s.rules or {}).get("risk_classes", [])}
+            if get("ch_uvg_risk_class") not in codes:
+                _block(blocked, "ch_uvg_risk_class",
+                       f"risk class {get('ch_uvg_risk_class')!r} is not in UVG policy {s.scheme_code}")
+        schemes["UVG_POLICY"] = s.id if s else None
+        if get("ch_ktg_policy_scheme_id") is not None:
+            s, why = _live_scheme(db, get("ch_ktg_policy_scheme_id"), organization_id, "KTG_POLICY", on)
+            if s is None:
+                _block(blocked, "ch_ktg_policy", f"KTG policy: {why}")
+            schemes["KTG_POLICY"] = s.id if s else None
+    inputs["schemes"] = schemes
+
+    # 8. wage floor
+    floor_id = get("ch_wage_floor_agreement_id")
+    if floor_id is not None:
+        floor, why = _active_floor(db, floor_id, on)
+        if floor is None:
+            _block(blocked, "ch_wage_floor", f"assigned wage floor: {why}")
+        inputs["wageFloorAgreementId"] = floor.id if floor else None
+    inputs["cantonMinimumIds"] = [a.id for a in _canton_minimums(db, work, on)] if _valid_canton(work) else []
+
+    # 9. CH earning classification (Approved rules only)
+    needed = [CH_AHV, CH_IV, CH_EO, CH_ALV, CH_UVG]
+    if bvg_eligible:
+        needed.append(CH_BVG)
+    if get("ch_ktg_policy_scheme_id") is not None:
+        needed.append(CH_KTG)
+    if qst_subject == "YES":
+        needed.append(CH_QST)
+    classification = {}
+    for component in needed:
+        classification[component] = get_taxability_classification(db, "CH", component, organization_id, as_of=on)
+        if not classification[component]:
+            _block(blocked, f"ch_taxability:{component}", f"no Approved CH earning classification for {component}")
+    inputs["taxability"] = classification
+
+    # 10. approved FAK entitlements overlapping the period
+    entitlements = db.query(ChFamilyAllowanceEntitlement).filter(
+        ChFamilyAllowanceEntitlement.employee_id == employee.id,
+        ChFamilyAllowanceEntitlement.organization_id == organization_id,
+        ChFamilyAllowanceEntitlement.status == "APPROVED").all()
+    inputs["fakEntitlementIds"] = [e.id for e in entitlements
+                                   if (e.period_from is None or e.period_from <= period_end)
+                                   and (e.period_to is None or e.period_to >= period_start)]
+
+    # 11. absence-benefit events in the period
+    events = db.query(ChAbsenceBenefitEvent).filter(
+        ChAbsenceBenefitEvent.employee_id == employee.id, ChAbsenceBenefitEvent.organization_id == organization_id,
+        ChAbsenceBenefitEvent.period_from <= period_end,
+        (ChAbsenceBenefitEvent.period_to.is_(None)) | (ChAbsenceBenefitEvent.period_to >= period_start)).all()
+    inputs["absenceEventIds"] = [e.id for e in events]
+
+    # 12. YTD accumulators
+    inputs["ytd"] = _ytd(db, employee.id, on.year)
+
+    # 13. pay frequency
+    frequency = getattr(employee, "pay_frequency", None)
+    if frequency != "Monthly":
+        _block(blocked, "ch_pay_frequency", f"Swiss payroll runs Monthly only (this employee is {frequency!r})")
+    return {"ready": not blocked, "blocked": blocked, "inputs": inputs}
+
+
+# ── QST applicability (read-only, advisory) ─────────────────────────────
+
+def qst_resolve(db: Session, organization_id: int, facts: dict) -> dict:
+    """What the facts say about Swiss source tax for one worker — ADVISORY.
+    The authoritative value stays the profile's ch_qst_subject, which is
+    recorded by a person and never inferred. Writes nothing.
+
+    Applicability (VERIFY AGAINST ESTV before relying on it):
+      * Swiss nationals — NOT_SUBJECT (ordinary assessment);
+      * resident in CH with a C permit — NOT_SUBJECT;
+      * resident in CH, foreign, married to a Swiss national / C-permit
+        holder — NOT_SUBJECT (spouse status unknown -> REVIEW_REQUIRED);
+      * other foreign residents in CH — SUBJECT;
+      * resident abroad — SUBJECT, or REVIEW_REQUIRED where a cross-border
+        agreement may move the taxing right.
+    """
+    on = facts.get("on_date") or date.today()
+    nationality, residence_country = facts.get("nationality"), facts.get("residence_country")
+    permit, marital = facts.get("permit_type"), facts.get("marital_status")
+    missing: list = []
+    for key in ("nationality", "residence_country"):
+        if not facts.get(key):
+            missing.append(key)
+
+    applicability, reason = "UNDETERMINED", "facts missing"
+    if not missing:
+        if nationality == "CH":
+            applicability, reason = "NOT_SUBJECT", "Swiss nationals are taxed by ordinary assessment"
+        elif residence_country == "CH":
+            if not permit:
+                missing.append("permit_type")
+            elif permit == "C":
+                applicability, reason = "NOT_SUBJECT", "C-permit holders resident in Switzerland are not taxed at source"
+            elif marital in CH_MARRIED_STATUSES and facts.get("spouse_swiss_or_permit_c") is True:
+                applicability, reason = "NOT_SUBJECT", "married to a Swiss national or C-permit holder"
+            elif marital in CH_MARRIED_STATUSES and facts.get("spouse_swiss_or_permit_c") is None:
+                applicability, reason = "REVIEW_REQUIRED", "married — the spouse's nationality / permit decides"
+                missing.append("spouse_swiss_or_permit_c")
+            else:
+                applicability, reason = "SUBJECT", f"foreign resident with a {permit} permit"
+        elif residence_country in CH_CROSS_BORDER_AGREEMENT_COUNTRIES:
+            applicability, reason = "REVIEW_REQUIRED", (f"resident in {residence_country}: a cross-border agreement "
+                                                        "may change who taxes this income")
+        else:
+            applicability, reason = "SUBJECT", f"resident abroad ({residence_country})"
+
+    required = []
+    if applicability in ("SUBJECT", "REVIEW_REQUIRED"):
+        required = ["qst_canton", "marital_status", "children_count", "church_tax"]
+        if marital in CH_MARRIED_STATUSES:
+            required.append("spouse_employed")
+        missing += [k for k in required if facts.get(k) is None and k not in missing]
+
+    canton = facts.get("qst_canton")
+    model = None
+    if canton is not None and not _valid_canton(canton):
+        missing.append("qst_canton")
+        canton = None
+    if canton:
+        reference = "ANNUAL" if canton in CH_QST_ANNUAL_MODEL_CANTONS else "MONTHLY"
+        pack = _active_pack(db, canton, on)
+        row = _pack_params(db, pack, on).get("ch_qst_model") if pack else None
+        configured = (row.text_value or "").strip().upper() if row is not None and row.text_value else None
+        model = {"value": configured or reference,
+                 "source": f"{pack.pack_id} v{pack.version}" if configured else "reference list (S9) — no Active "
+                                                                             "canton pack sets it",
+                 "authoritative": bool(configured),
+                 "conflict": bool(configured and configured != reference)}
+    return {"applicability": applicability, "reason": reason, "advisory": True, "model": model,
+            "requiredTariffFacts": required, "missingFacts": sorted(set(missing)), "onDate": on.isoformat()}
+
+
+# ── what is in force (read-only) ────────────────────────────────────────
+
+def rules_effective(db: Session, organization_id: int, on: Optional[date] = None,
+                    canton: Optional[str] = None) -> dict:
+    """Everything governed that is in force on `on` for this employer and a
+    canton (default: the seat canton of the entity profile in force)."""
+    from app.modules.payroll.service import get_taxability_classification
+
+    on = on or date.today()
+    entity = _profile_in_force(db, organization_id, on)
+    if canton is not None and not _valid_canton(canton):
+        raise BadRequestException(f"canton must be one of the CH-XX codes, got {canton!r}")
+    canton = canton or (entity.seat_canton if entity else None)
+    tariffs = []
+    if canton:
+        tariffs = [tariff_file_view(t) for t in db.query(ChQstTariffFile).filter(
+            ChQstTariffFile.canton == canton, ChQstTariffFile.status == "ACTIVE").order_by(ChQstTariffFile.id)
+            if _in_force(t.effective_from, t.effective_to, on)]
+    schemes = [scheme_view(s) for s in db.query(ChSchemeProfile).filter(
+        (ChSchemeProfile.organization_id == organization_id) | ChSchemeProfile.organization_id.is_(None),
+        ChSchemeProfile.status == "LIVE").order_by(ChSchemeProfile.scheme_type, ChSchemeProfile.id)
+        if _in_force(s.effective_from, s.effective_to, on)]
+    floors = [_floor_view(a) for a in db.query(CollectiveAgreement).filter(
+        CollectiveAgreement.jurisdiction_country == "CH", CollectiveAgreement.agreement_type.in_(CH_WAGE_FLOOR_TYPES),
+        CollectiveAgreement.status == "Active").order_by(CollectiveAgreement.id)
+        if _in_force(a.effective_from, a.effective_to, on)
+        and (a.jurisdiction_state is None or a.jurisdiction_state == canton)]
+    return {
+        "onDate": on.isoformat(), "canton": canton,
+        "entityProfile": _profile_view(entity) if entity else None,
+        "federalPack": _pack_summary(db, _active_pack(db, None, on), on),
+        "cantonPack": _pack_summary(db, _active_pack(db, canton, on), on) if canton else None,
+        "qstTariffFiles": tariffs,
+        "schemes": schemes,
+        "taxability": {c: get_taxability_classification(db, "CH", c, organization_id, as_of=on)
+                       for c in CH_TAXABILITY_COMPONENTS},
+        "wageFloors": floors,
+    }

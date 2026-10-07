@@ -619,3 +619,19 @@ def test_migration_is_the_single_head_on_top_of_switzerland_support():
     heads = list(script.get_heads())
     assert len(heads) == 1
     assert "376bb8637603" in {rev.revision for rev in script.walk_revisions("base", heads[0])}
+
+
+def test_guard_reads_the_stored_status_on_an_expired_row(db, orgs):
+    """Regression (found in Step 6): after a commit the instance is expired, so
+    in-memory history cannot tell the old status - the guard must read the
+    stored row, not mistake the new value for the old one."""
+    from app.modules.payroll.models import ChSchemeProfile
+
+    sid = _live_org_scheme(db, orgs, "FAK")
+    db.commit()                                              # expire every loaded attribute
+    db.get(ChSchemeProfile, sid).status = "RETIRED"         # legitimate retirement
+    db.commit()
+    db.get(ChSchemeProfile, sid).status = "LIVE"            # never back from RETIRED
+    with pytest.raises(ValueError, match="RETIRED and immutable"):
+        db.flush()
+    db.rollback()

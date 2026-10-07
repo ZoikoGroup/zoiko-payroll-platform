@@ -272,3 +272,24 @@ class ChWageFloorCreate(_Strict):
         if self.effectiveTo is not None and self.effectiveTo < self.effectiveFrom:
             raise ValueError("effectiveTo is before effectiveFrom")
         return self
+
+
+class ChQstResolveRequest(_Strict):
+    """Facts for the advisory QST check (POST /switzerland/qst/resolve)."""
+    nationality: Optional[str] = Field(default=None, min_length=2, max_length=2)
+    residenceCountry: Optional[str] = Field(default=None, min_length=2, max_length=2)
+    permitType: Optional[str] = Field(default=None, max_length=10)
+    maritalStatus: Optional[str] = Field(default=None, max_length=20)
+    spouseSwissOrPermitC: Optional[bool] = None
+    spouseEmployed: Optional[bool] = None
+    childrenCount: Optional[int] = Field(default=None, ge=0, le=30)
+    churchTax: Optional[bool] = None
+    qstCanton: Optional[str] = None
+    onDate: Optional[date] = None
+
+    def as_facts(self) -> dict:
+        return {"nationality": self.nationality, "residence_country": self.residenceCountry,
+                "permit_type": self.permitType, "marital_status": self.maritalStatus,
+                "spouse_swiss_or_permit_c": self.spouseSwissOrPermitC, "spouse_employed": self.spouseEmployed,
+                "children_count": self.childrenCount, "church_tax": self.churchTax,
+                "qst_canton": self.qstCanton, "on_date": self.onDate}

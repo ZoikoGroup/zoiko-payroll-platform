@@ -5020,7 +5020,7 @@ def france_readiness(
 # the write, its audit entry and its idempotency record are one transaction.
 from app.modules.payroll.switzerland_http import ChWriteContext, ch_write, ch_write_headers  # noqa: E402
 from app.modules.payroll.switzerland_schemas import (  # noqa: E402
-    ChEntityProfileUpsert, ChReasonBody, ChSchemeCreate, ChSchemeUpdate,
+    ChEntityProfileUpsert, ChQstResolveRequest, ChReasonBody, ChSchemeCreate, ChSchemeUpdate,
 )
 
 
@@ -5144,3 +5144,23 @@ def activate_ch_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
                     request=payload.model_dump(mode="json"),
                     perform=lambda: switzerland_service.activate_scheme(
                         db, scheme_id, org_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/qst/resolve", dependencies=[Depends(get_current_payroll_operator)],
+                     summary="Read-only, ADVISORY: QST applicability, model, required tariff facts and missing facts "
+                             "(the profile's ch_qst_subject stays the authoritative, human-recorded value)")
+def resolve_ch_qst(payload: ChQstResolveRequest, db: Session = Depends(get_db),
+                   current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.qst_resolve(db, _ch_org(current_user), payload.as_facts())
+
+
+@payroll_router.get("/switzerland/rules/effective", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="Read-only: the CH packs, QST tariff, LIVE schemes, Approved classification and Active "
+                            "wage floors in force on a date (canton defaults to the entity seat canton)")
+def ch_rules_effective(on: Optional[date] = Query(None), canton: Optional[str] = Query(None),
+                       db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.rules_effective(db, _ch_org(current_user), on, canton)
