@@ -24,16 +24,24 @@ Calculation order (each step consumes the one before it):
      A missing policy / risk class BLOCKS.
   5. KTG (sickness): only when a LIVE KTG_POLICY scheme is assigned — the
      policy's rate/split charged on KTG's own classified earnings base.
-  6. Compensation-office admin cost as employer-only line from the scheme rules.
-  7. Snapshot builder: lines[] {obligation, side, base, rate_or_rule, cap, scope_id,
+  6. QST (Quellensteuer — source tax): the canton pack's ch_qst_model selects
+     the MONTHLY or ANNUAL strategy. Determination income comes from
+     CH_QST-classified earnings, split into PERIODIC and APERIODIC (bonus,
+     13th month) by TaxabilityRule.treatment. The tariff ROW (rate_pct /
+     min_tax / row_id) is researched by the service (lookup_qst_rate on the
+     ACTIVE canton file) and passed in context — the engine never reads a
+     canton file. Annual-model arithmetic is PENDING G1 SIGN-OFF.
+  7. Compensation-office admin cost as employer-only line from the scheme rules.
+  8. Snapshot builder: lines[] {obligation, side, base, rate_or_rule, cap, scope_id,
      scope_version, source_label, rule_version}, bases, accumulators before/after,
      resolved versions, input_hash, rule_hash (sha256 of canonical JSON).
 
 Out of scope (separate strategies/ledgers, never approximated here):
-  - Quellensteuer (source tax) — canton tariff lookup, separate module
   - FAK (family allowances) — canton top-ups + federal minimums, separate
   - Lohnausweis declaration — reporting, not calculation
   - Wage floor — CollectiveAgreement driven
+  - General tax declaration (Bezüger/Veranlagung) — falls back to the
+    Quellensteuer tariff as the default and is outside the engine either way
 
 Switzerland joins shared._VALIDATION_ENABLED_COUNTRIES on day one and defines
 NO hardcoded statutory figure: every rate, threshold and band is a configured row
@@ -50,6 +58,7 @@ from app.modules.payroll.engine.countries.shared import MissingComplianceConfigu
 from app.modules.payroll.engine.countries.switzerland_content import (
     CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_LA, CH_QST, CH_UVG, CH_WAGE_FLOOR,
     CH_YTD_COMPONENTS, CH_OBLIGATIONS, CH_QST_ANNUAL_MODEL_CANTONS, CH_CANTON_CODES,
+    CH_QST_MONTHS_PER_YEAR, CH_QST_PCT_DIVISOR,
 )
 
 # Federal obligations only — the ones this federal calculator handles.
@@ -467,6 +476,196 @@ def _calculate_ktg(ctx: PayrollContext, pack: _Pack, ktg_base: Decimal) -> dict 
             "base": ktg_base, "ee_pct": ee_pct, "er_pct": er_pct}
 
 
+# ── QST (Quellensteuer — source tax) — canton model + tariff row in ctx ──────
+# QST is employee-only. The canton pack's ch_qst_model (content vocabulary
+# CH_QST_MODELS) selects the strategy: MONTHLY (Monatsmodell, tariff keyed on
+# the monthly determination income) or ANNUAL (Jahresmodell: FR/GE/TI/VD/VS,
+# annual determination income tariffed, monthly withholding back-apportioned).
+# Determination income is CH_QST-classified earnings split into PERIODIC and
+# APERIODIC (bonus/13th) by TaxabilityRule.treatment; the tariff ROW itself
+# (rate_pct / min_tax / row_id) is researched service-side by lookup_qst_rate
+# against the ACTIVE canton file and passed in context — this module never
+# touches a canton tariff file. A missing or contradictory fact BLOCKS; a
+# worker recorded NO is skipped; a review state never calculates.
+
+def _field(obj, name, default=None):
+    """dict-or-object accessor: engine context facts arrive as attribute pairs
+    (ch_qst_rate as a dict), so stay symmetric for both shapes."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _require_qst_rate(ctx: PayrollContext, pack: _Pack, aperiodic: bool = False):
+    """The tariff row the service researched for this payslip (lookup_qst_rate
+    on the ACTIVE file — a SUPERSEDED file replays identically by id). Returns
+    (rate_pct, min_tax, row_id). Nothing is defaulted: a missing row BLOCKS."""
+    attr = "ch_qst_aperiodic_rate" if aperiodic else "ch_qst_rate"
+    row = getattr(ctx, attr, None)
+    if not row:
+        pack.block(attr, "no QST tariff row was passed in context (service lookup_qst_rate)")
+    rate_pct = _field(row, "rate_pct")
+    if rate_pct is None:
+        pack.block(attr, "the QST tariff row has no rate_pct")
+    row_id = _field(row, "row_id")
+    if row_id is None:
+        pack.block(attr, "the QST tariff row has no row_id (replay identity of the tariff file)")
+    min_tax = _field(row, "min_tax")
+    return _dec(rate_pct), (_dec(min_tax) if min_tax is not None else None), row_id
+
+
+def _qst_determination_incomes(ctx: PayrollContext, pack: _Pack):
+    """(periodic, aperiodic) CH_QST determination income. The included earning
+    types come from the Approved CH_QST classification (ch_classification), and
+    PERIODIC vs APERIODIC from TaxabilityRule.treatment. A non-zero included
+    earning without a treatment BLOCKS — the split is never guessed."""
+    periodic = aperiodic = ZERO
+    classification = (getattr(ctx, "ch_classification", {}) or {}).get(CH_QST, {})
+    treatments = getattr(ctx, "ch_qst_treatment", {}) or {}
+    for earning_type, amount in (getattr(ctx, "earnings", {}) or {}).items():
+        if _dec(amount) == ZERO:
+            continue
+        included = classification.get(earning_type)
+        if included is None:
+            pack.block(f"ch_classification:{CH_QST}:{earning_type}",
+                       f"no earning classification for {earning_type} under {CH_QST}")
+        if not included:
+            continue
+        treatment = _upper(treatments.get(earning_type))
+        if treatment not in ("PERIODIC", "APERIODIC"):
+            pack.block(f"ch_qst_treatment:{earning_type}",
+                       f"QST-classified earning {earning_type} has no PERIODIC/APERIODIC treatment")
+        if treatment == "PERIODIC":
+            periodic += _dec(amount)
+        else:
+            aperiodic += _dec(amount)
+    return _round2(periodic), _round2(aperiodic)
+
+
+def _qst_combined_income(ctx: PayrollContext, pack: _Pack, periodic_base: Decimal):
+    """Multiple employment (KS 45): each employer withholds on the salary it
+    pays at the rate determined on the worker's TOTAL determination income.
+    ch_other_employment_pct is the recorded share earned elsewhere, so the
+    combined base is a proportional gross-up of this employer's base. Returns
+    (combined, own, other_pct); combined == own when not multiple employment."""
+    if not getattr(ctx, "ch_multiple_employment", False):
+        return periodic_base, periodic_base, None
+    other_value = getattr(ctx, "ch_other_employment_pct", None)
+    if other_value is None:
+        pack.block("ch_other_employment_pct", "multiple employment is flagged — the share of income from "
+                                              "other employment (ch_other_employment_pct) is required")
+    other_pct = _dec(other_value)
+    if not (ZERO < other_pct < Decimal("1")):
+        pack.block("ch_other_employment_pct",
+                   f"the share of other-employment income must be between 0 and 1, got {other_pct}")
+    own_pct = Decimal("1") - other_pct
+    return _round2(periodic_base / own_pct), _round2(periodic_base), other_pct
+
+
+def _qst_apply_rate(base: Decimal, rate_pct: Decimal, min_tax) -> Decimal:
+    """QST = determination income * tariff rate (the percentage applies to the
+    whole bracket income, an ESTV variant) floored by the row's minimum tax
+    when the bracket sets one. Arithmetic parameters come from content."""
+    tax = base * rate_pct / CH_QST_PCT_DIVISOR
+    if min_tax is not None and tax < min_tax:
+        tax = min_tax
+    return tax
+
+
+def _qst_monthly(ctx: PayrollContext, pack: _Pack, periodic_base: Decimal, aperiodic_base: Decimal,
+                 periodic_rate: Decimal, periodic_min_tax, aperiodic_rate: Decimal, aperiodic_min_tax) -> dict:
+    """MONTHLY model (Monatsmodell, the default). The tariff is keyed on the
+    monthly determination income: QST = income * rate (min_tax floor). An
+    aperiodic payment is taxed separately on its own amount with its own row."""
+    periodic_tax = _round_chf(_qst_apply_rate(periodic_base, periodic_rate, periodic_min_tax))
+    aperiodic_tax = ZERO
+    if aperiodic_base > ZERO:
+        aperiodic_tax = _round_chf(_qst_apply_rate(aperiodic_base, aperiodic_rate, aperiodic_min_tax))
+    return {"periodic_tax": periodic_tax, "aperiodic_tax": aperiodic_tax,
+            "annual_income": None, "annual_tax": None}
+
+
+def _qst_annual(ctx: PayrollContext, pack: _Pack, periodic_base: Decimal, aperiodic_base: Decimal,
+                periodic_rate: Decimal, periodic_min_tax, aperiodic_rate: Decimal, aperiodic_min_tax) -> dict:
+    """ANNUAL model (Jahresmodell: canton packs CH-FR / CH-GE / CH-TI / CH-VD / CH-VS).
+
+    PENDING G1 SIGN-OFF — the annual-model ARITHMETIC below (annualise the
+    monthly determination income by CH_QST_MONTHS_PER_YEAR, apply the annual
+    tariff with its min_tax floor, then back-apportion the annual tax into the
+    monthly withholding by the same divisor) is implemented from the ESTV
+    Jahresmodell description as understood at build time and has NOT been
+    confirmed by the G1 statutory review. It must be re-verified against the
+    published annual tariff files before any real annual-model canton payslip
+    is calculated. The aperiodic part is taxed directly on the payment with its
+    own row in both models (withheld in the payment month)."""
+    annual_income = periodic_base * CH_QST_MONTHS_PER_YEAR
+    annual_tax = _qst_apply_rate(annual_income, periodic_rate, periodic_min_tax)
+    periodic_tax = _round_chf(annual_tax / CH_QST_MONTHS_PER_YEAR)
+    aperiodic_tax = ZERO
+    if aperiodic_base > ZERO:
+        aperiodic_tax = _round_chf(_qst_apply_rate(aperiodic_base, aperiodic_rate, aperiodic_min_tax))
+    return {"periodic_tax": periodic_tax, "aperiodic_tax": aperiodic_tax,
+            "annual_income": annual_income, "annual_tax": annual_tax}
+
+
+_QST_STRATEGIES = {"MONTHLY": _qst_monthly, "ANNUAL": _qst_annual}
+
+
+def _calculate_qst(ctx: PayrollContext, pack: _Pack) -> dict | None:
+    """Quellensteuer for the period; None when the worker is recorded NOT
+    QST-liable (ch_qst_subject == NO). A YES subject without the canton / model /
+    tariff facts, a review state, or an aperiodic payment without its own rate
+    row all BLOCK. The canton pack's ch_qst_model picks the strategy."""
+    subject = _upper(getattr(ctx, "ch_qst_subject", None))
+    if subject == "NO":
+        return None
+    if subject != "YES":
+        pack.block("ch_qst_subject_review", f"ch_qst_subject is {subject!r} — a review state never calculates")
+
+    canton = getattr(ctx, "ch_qst_canton", None)
+    if not canton:
+        pack.block("ch_qst_canton", "a QST-liable worker needs a CH-XX QST canton")
+    model = _upper(getattr(ctx, "ch_qst_model", None))
+    strategy = _QST_STRATEGIES.get(model)
+    if strategy is None:
+        pack.block("ch_qst_model", f"the canton pack does not set a known QST model (got {model!r})")
+    tariff_code = getattr(ctx, "ch_qst_tariff_code", None)
+    if not tariff_code:
+        pack.block("ch_qst_tariff_code", "a QST-liable worker needs a tariff code")
+    tariff_file_id = getattr(ctx, "ch_qst_tariff_file_id", None)
+    if tariff_file_id is None:
+        pack.block("ch_qst_tariff_file", "no QST tariff file id was passed in context")
+    if getattr(ctx, "ch_qst_children", None) is None:
+        pack.block("ch_qst_children", "the children count is needed for the QST tariff")
+    church = getattr(ctx, "ch_qst_church_tax", None)
+    if church is None:
+        pack.block("ch_qst_church_tax", "church-tax liability is needed for the QST tariff")
+
+    periodic_base, aperiodic_base = _qst_determination_incomes(ctx, pack)
+    combined, own_base, other_pct = _qst_combined_income(ctx, pack, periodic_base)
+
+    periodic_rate, periodic_min_tax, row_id = _require_qst_rate(ctx, pack)
+    aperiodic_rate = aperiodic_min_tax = aperiodic_row_id = None
+    if aperiodic_base > ZERO:
+        aperiodic_rate, aperiodic_min_tax, aperiodic_row_id = _require_qst_rate(ctx, pack, aperiodic=True)
+
+    result = strategy(ctx, pack, own_base, aperiodic_base, periodic_rate, periodic_min_tax,
+                      aperiodic_rate, aperiodic_min_tax)
+    result.update({
+        "model": model, "canton": canton, "tariff_file_id": tariff_file_id,
+        "file_sha256": getattr(ctx, "ch_qst_tariff_file_sha256", None),
+        "tariff_code": tariff_code,
+        "children": getattr(ctx, "ch_qst_children", None),
+        "church_tax": bool(church),
+        "row_id": row_id, "aperiodic_row_id": aperiodic_row_id,
+        "rate_pct": periodic_rate, "min_tax": periodic_min_tax,
+        "aperiodic_rate_pct": aperiodic_rate, "aperiodic_min_tax": aperiodic_min_tax,
+        "periodic_base": own_base, "aperiodic_base": aperiodic_base,
+        "combined_income": combined, "other_employment_pct": other_pct,
+    })
+    return result
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """Swiss federal payroll calculation — pure function, no DB, no network,
     no date.today(). Returns a dict with deductions, snapshots, and CH fields
@@ -572,13 +771,21 @@ def calculate(ctx: PayrollContext) -> dict:
     ktg_employee = ktg["employee"] if ktg else ZERO
     ktg_employer = ktg["employer"] if ktg else ZERO
 
-    # 9. Compensation office admin cost (employer-only)
+    # 9. QST (Quellensteuer) — employee-only, canton model + tariff row from ctx.
+    #    None when the worker is recorded NOT QST-liable (subject NO); a review
+    #    state or a missing canton fact BLOCKS.
+    qst = _calculate_qst(ctx, pack)
+    qst_periodic = qst["periodic_tax"] if qst else ZERO
+    qst_aperiodic = qst["aperiodic_tax"] if qst else ZERO
+    qst_total = qst_periodic + qst_aperiodic
+
+    # 10. Compensation office admin cost (employer-only)
     admin_cost_pct = _read_scheme_admin_cost(ctx, pack)
     admin_cost_base = bases.get(CH_AHV, ZERO)  # Admin cost on AHV base per convention
     admin_cost = _round_chf(admin_cost_base * admin_cost_pct / HUNDRED)
 
-    # 10. Totals
-    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee + uvg_employee + ktg_employee
+    # 11. Totals
+    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee + uvg_employee + ktg_employee + qst_total
     employer_total = ahv_er + iv_er + eo_er + alv_er + bvg_er + admin_cost + uvg_employer + ktg_employer
 
     # 11. Family allowances (FAK) — federal minimums; added to net (employee benefit)
@@ -646,6 +853,18 @@ def calculate(ctx: PayrollContext) -> dict:
                  ktg_scope, "1.0", "KTG_POLICY scheme", "1.0")
         add_line("ch_ktg", "employer", ktg_base, ktg["er_pct"] / HUNDRED, None,
                  ktg_scope, "1.0", "KTG_POLICY scheme", "1.0")
+    # QST — tariff-file-scoped lines (employee only; the source tax has no
+    # employer share). Scoped to the exact tariff file so a superseded file is
+    # never silently reused for a later period.
+    if qst is not None:
+        qst_scope = f"qst_tariff:{qst['tariff_file_id']}"
+        add_line("ch_qst_periodic", "employee", qst["periodic_base"],
+                 qst["rate_pct"] / CH_QST_PCT_DIVISOR, None,
+                 qst_scope, str(qst["row_id"]), "QST tariff file", "1.0")
+        if qst["aperiodic_base"] > ZERO:
+            add_line("ch_qst_aperiodic", "employee", qst["aperiodic_base"],
+                     (qst["aperiodic_rate_pct"] or ZERO) / CH_QST_PCT_DIVISOR, None,
+                     qst_scope, str(qst["aperiodic_row_id"]), "QST tariff file", "1.0")
     # Admin cost
     add_line("ch_admin", "employer", admin_cost_base, admin_cost_pct / HUNDRED, None,
              "scheme:compensation_office", "1.0", "CH-PAYROLL-2026", "1.0")
@@ -670,6 +889,10 @@ def calculate(ctx: PayrollContext) -> dict:
         elif comp == CH_KTG:
             after_w = before_w + ktg_base
             after_wh = before_wh + ktg_employee + ktg_employer
+        elif comp == CH_QST:
+            qst_wages = qst["periodic_base"] + qst["aperiodic_base"] if qst else ZERO
+            after_w = before_w + qst_wages
+            after_wh = before_wh + qst_total
         elif comp in (CH_AHV, CH_IV, CH_EO):
             base = bases.get(comp, ZERO)
             after_w = before_w + base
@@ -700,6 +923,8 @@ def calculate(ctx: PayrollContext) -> dict:
             "ch_uvg_nbu_er_pct": str(uvg["nbu_er_pct"]),
             "ch_ktg_ee_pct": str(ktg["ee_pct"]) if ktg else "0",
             "ch_ktg_er_pct": str(ktg["er_pct"]) if ktg else "0",
+            "ch_qst_rate_pct": str(qst["rate_pct"]) if qst else "0",
+            "ch_qst_aperiodic_rate_pct": str(qst["aperiodic_rate_pct"]) if qst and qst["aperiodic_base"] > ZERO else "0",
         },
     }
     rule_snapshot = {
@@ -711,6 +936,31 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_nbu_min_weekly_hours": str(uvg["min_weekly_hours"]),
         "ch_uvg_nbu_applicable": str(uvg_nbu_applies),
         "ch_ktg_elected": str(ktg is not None),
+        "ch_qst_model": qst["model"] if qst else None,
+        "ch_qst_canton": qst["canton"] if qst else None,
+    }
+
+    qst_trace = {
+        "applies": qst is not None,
+        "canton": qst["canton"] if qst else None,
+        "model": qst["model"] if qst else None,
+        "tariff_file_id": qst["tariff_file_id"] if qst else None,
+        "file_sha256": qst["file_sha256"] if qst else None,
+        "tariff_code": qst["tariff_code"] if qst else None,
+        "children": qst["children"] if qst else None,
+        "church_tax": qst["church_tax"] if qst else None,
+        "row_id": qst["row_id"] if qst else None,
+        "periodic_determination_income": str(qst["periodic_base"]) if qst else None,
+        "aperiodic_determination_income": str(qst["aperiodic_base"]) if qst else None,
+        "aperiodic_row_id": qst["aperiodic_row_id"] if qst else None,
+        "rate_pct": str(qst["rate_pct"]) if qst else None,
+        "min_tax": str(qst["min_tax"]) if qst and qst["min_tax"] is not None else None,
+        "aperiodic_rate_pct": str(qst["aperiodic_rate_pct"]) if qst and qst["aperiodic_rate_pct"] is not None else None,
+        "multiple_employment": bool(getattr(ctx, "ch_multiple_employment", False)),
+        "other_employment_pct": str(qst["other_employment_pct"]) if qst and qst["other_employment_pct"] is not None else None,
+        "combined_determination_income": str(qst["combined_income"]) if qst and qst["combined_income"] != qst["periodic_base"] else None,
+        "annual_determination_income": str(_round2(qst["annual_income"])) if qst and qst["annual_income"] is not None else None,
+        "annual_tax": str(_round2(qst["annual_tax"])) if qst and qst["annual_tax"] is not None else None,
     }
 
     return {
@@ -737,6 +987,12 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_uvg_insurable": uvg["insurable"],
         "ch_ktg_employee": ktg_employee,
         "ch_ktg_employer": ktg_employer,
+        "ch_qst_periodic": qst_periodic,
+        "ch_qst_aperiodic": qst_aperiodic,
+        "ch_qst_total": qst_total,
+        "ch_qst_model": qst["model"] if qst else None,
+        "ch_qst_determination_periodic": qst["periodic_base"] if qst else ZERO,
+        "ch_qst_determination_aperiodic": qst["aperiodic_base"] if qst else ZERO,
         "ch_admin_cost_employer": admin_cost,
         # Employee total (deducted from gross)
         "ch_employee_total": employee_total,
@@ -752,6 +1008,7 @@ def calculate(ctx: PayrollContext) -> dict:
             "bases": {k: str(v) for k, v in bases.items()},
             "accumulators_before": ytd_before,
             "accumulators_after": ytd_after,
+            "qst": qst_trace,
             "resolved_versions": {
                 "federal_pack_id": federal_pack_id,
                 "federal_pack_version": federal_pack_version,

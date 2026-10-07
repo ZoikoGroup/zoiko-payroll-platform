@@ -8,6 +8,11 @@ plans, extra-mandatory separation, no threshold retroactivity, employer <50%.
 CH Step 9 — UVG/NBU/KTG: BU employer-only at the policy risk-class rate, NBU
 only when weekly hours meet the pack minimum, CH_UVG ceiling accumulator,
 KTG on its own classified base at the policy rate/split, missing policy blocks.
+CH Step 10 — QST: canton model selects MONTHLY/ANNUAL strategy from content
+arithmetic, PERIODIC/APERIODIC split by treatment, tariff row passed in ctx
+(rate/min_tax/row_id), min_tax floor, canton/file change at boundary never
+blends rates, superseded file replayable but never reused, multiple employment
+flag path, review state and missing facts BLOCK (annual model is PENDING G1).
 """
 from datetime import date
 from decimal import Decimal
@@ -20,6 +25,7 @@ from app.modules.payroll.engine.countries.switzerland import (
     calculate, SwitzerlandCalculationBlockedError, CH_PARAMETER_KEYS, _round_chf,
     _validate_bvg_scheme_employer_share,
 )
+from app.modules.payroll.engine.countries import switzerland as sw
 from app.modules.payroll.engine.countries.switzerland_content import (
     CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_QST, CH_UVG, CH_YTD_COMPONENTS,
 )
@@ -129,6 +135,9 @@ def _full_ctx(earnings=None, ytd=None, scheme_rules={"admin_cost_pct": "1.0"}, c
     if ktg_rules is not None:
         ctx.ch_ktg_policy_scheme_id = ktg_policy_id
         ctx.ch_ktg_scheme_rules = ktg_rules
+    # QST — off by default: an unchosen worker is recorded NO, and the QST
+    # engine skips them. Only the STEP 10 contexts flip it to YES.
+    ctx.ch_qst_subject = "NO"
     return ctx
 
 
@@ -802,6 +811,246 @@ def test_ktg_assigned_without_share_blocks():
     with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
         calculate(ctx)
     assert "ch_ktg_policy:share_missing" in str(exc.value.key)
+
+
+# ── CH Step 10: QST (Quellensteuer) — canton model + tariff row from context ─
+
+def _qst_ctx(earnings=None, model="MONTHLY", rate=None, aperiodic_rate=None, subject="YES",
+             treatment=None, classification=None, extra_classification=None, canton="CH-ZH",
+             qst_children=1, church_tax=False, tariff_code="A0N", tariff_file_id=17,
+             file_sha256="sha-mont-test", multiple=False, other_pct=None, **kwargs):
+    """QST-liable context. All earnings are CH_QST-classified by default and
+    PERIODIC by default; the aperiodic test flips the treatment of the bonus /
+    13th so the engine sees an APERIODIC determination income. The tariff ROW
+    (rate_pct / min_tax / row_id) is passed in exactly as the service's
+    lookup_qst_rate hands it to the engine."""
+    earnings = earnings if earnings is not None else {"base_salary": Decimal("10000")}
+    if classification is None:
+        merged = dict(_BASE_CLASSIFICATION)
+        for obl in (CH_AHV, CH_IV, CH_EO, CH_ALV, CH_UVG):
+            merged.setdefault(obl, {}).update({etype: True for etype in earnings})
+    else:
+        merged = dict(classification)
+        merged.setdefault(CH_UVG, {"base_salary": True})
+    merged.setdefault(CH_QST, {etype: True for etype in earnings})
+    if extra_classification:
+        merged.update(extra_classification)
+    ctx = _uvg_ctx(earnings=earnings, classification=merged, **kwargs)
+    ctx.ch_qst_subject = subject
+    ctx.ch_qst_canton = canton
+    ctx.ch_qst_model = model
+    ctx.ch_qst_tariff_file_id = tariff_file_id
+    ctx.ch_qst_tariff_file_sha256 = file_sha256
+    ctx.ch_qst_tariff_code = tariff_code
+    ctx.ch_qst_children = qst_children
+    ctx.ch_qst_church_tax = church_tax
+    ctx.ch_qst_treatment = dict(treatment) if treatment else {etype: "PERIODIC" for etype in earnings}
+    ctx.ch_qst_rate = rate if rate is not None else {"rate_pct": "5.0", "min_tax": None, "row_id": 111}
+    if aperiodic_rate is not None:
+        ctx.ch_qst_aperiodic_rate = aperiodic_rate
+    ctx.ch_multiple_employment = multiple
+    ctx.ch_other_employment_pct = other_pct
+    return ctx
+
+
+def test_qst_not_subject_no_tax():
+    # ch_qst_subject NO (the default) means the worker is not QST-liable: the
+    # engine emits no QST line, no tax, and a trace that says it does not apply.
+    out = calculate(_uvg_ctx())
+    assert out["ch_qst_total"] == Decimal("0")
+    assert out["ch_qst_periodic"] == Decimal("0")
+    assert out["ch_qst_model"] is None
+    assert out["ch_qst_determination_periodic"] == Decimal("0")
+    trace = out["ch_calculation_trace"]
+    assert trace["qst"]["applies"] is False
+    assert trace["accumulators_after"][CH_QST]["wages"] == "0"
+    assert trace["accumulators_after"][CH_QST]["withheld"] == "0"
+
+
+def test_qst_monthly_periodic_tax():
+    # MONTHLY model: QST = 10000 monthly determination income * 5% tariff row.
+    ctx = _qst_ctx(rate={"rate_pct": "5.0", "min_tax": None, "row_id": 111})
+    out = calculate(ctx)
+    assert out["ch_qst_periodic"] == Decimal("500.00")
+    assert out["ch_qst_aperiodic"] == Decimal("0")
+    assert out["ch_qst_total"] == Decimal("500.00")
+    assert out["ch_qst_model"] == "MONTHLY"
+    assert out["ch_qst_determination_periodic"] == Decimal("10000.00")
+    # QST is an employee withholding — it lands in the employee total
+    assert out["ch_employee_total"] == Decimal("1185.00")   # 685 federal + 500 QST
+    trace = out["ch_calculation_trace"]
+    q = trace["qst"]
+    assert q["applies"] is True
+    assert q["canton"] == "CH-ZH"
+    assert q["model"] == "MONTHLY"
+    assert q["tariff_file_id"] == 17
+    assert q["file_sha256"] == "sha-mont-test"
+    assert q["tariff_code"] == "A0N"
+    assert q["children"] == 1
+    assert q["church_tax"] is False
+    assert q["row_id"] == 111
+    assert q["periodic_determination_income"] == "10000.00"
+    assert q["aperiodic_determination_income"] == "0.00"
+    assert q["min_tax"] is None
+    assert q["multiple_employment"] is False
+    assert q["combined_determination_income"] is None
+    assert q["annual_determination_income"] is None
+    acc = trace["accumulators_after"][CH_QST]
+    assert acc["wages"] == "10000.00"
+    assert acc["withheld"] == "500"
+    line = [l for l in trace["lines"] if l["obligation"] == "ch_qst_periodic"][0]
+    assert line["base"] == "10000.00"
+    assert line["rate_or_rule"] == "0.05"
+    assert line["cap"] is None
+    assert line["scope_id"] == "qst_tariff:17"
+
+
+def test_qst_min_tax_floor_applied():
+    # The tariff row sets a CHF 50 minimum: 2000 * 2% = 40 < 50, so the floor
+    # raises the withholding to the row's minimum tax.
+    ctx = _qst_ctx(earnings={"base_salary": Decimal("2000")},
+                   rate={"rate_pct": "2.0", "min_tax": "50", "row_id": 111})
+    out = calculate(ctx)
+    assert out["ch_qst_periodic"] == Decimal("50.00")
+    assert out["ch_calculation_trace"]["qst"]["min_tax"] == "50"
+
+
+def test_qst_bonus_and_thirteenth_aperiodic_separate_rate():
+    # Bonus + 13th month are APERIODIC (TaxabilityRule.treatment): taxed on
+    # their own combined amount with their OWN tariff row, separate from the
+    # periodic salary's row.
+    earnings = {"base_salary": Decimal("10000"), "bonus": Decimal("2000"), "thirteen": Decimal("1000")}
+    ctx = _qst_ctx(earnings=earnings,
+                   treatment={"base_salary": "PERIODIC", "bonus": "APERIODIC", "thirteen": "APERIODIC"},
+                   rate={"rate_pct": "5.0", "min_tax": None, "row_id": 111},
+                   aperiodic_rate={"rate_pct": "8.0", "min_tax": None, "row_id": 222})
+    out = calculate(ctx)
+    assert out["ch_qst_periodic"] == Decimal("500.00")      # 10000 * 5%
+    assert out["ch_qst_aperiodic"] == Decimal("240.00")     # (2000 + 1000) * 8%
+    assert out["ch_qst_total"] == Decimal("740.00")
+    trace = out["ch_calculation_trace"]
+    obligations = {l["obligation"] for l in trace["lines"]}
+    assert "ch_qst_periodic" in obligations
+    assert "ch_qst_aperiodic" in obligations
+    ap = [l for l in trace["lines"] if l["obligation"] == "ch_qst_aperiodic"][0]
+    assert ap["base"] == "3000.00"
+    assert ap["rate_or_rule"] == "0.08"
+    assert ap["scope_id"] == "qst_tariff:17"
+    q = trace["qst"]
+    assert q["aperiodic_row_id"] == 222
+    assert q["aperiodic_rate_pct"] == "8.0"
+    assert q["aperiodic_determination_income"] == "3000.00"
+
+
+def test_qst_annual_model_arithmetic():
+    # ANNUAL (Jahresmodell): the 10000 monthly determination income annualises
+    # to 120000; 4% annual tariff = 4800 annual tax; back-apportioned /12 = 400
+    # monthly withholding. Arithmetic parameters come from content, not the engine.
+    ctx = _qst_ctx(model="ANNUAL", canton="CH-VD", tariff_file_id=18, file_sha256="sha-annual-test",
+                   rate={"rate_pct": "4.0", "min_tax": None, "row_id": 333})
+    out = calculate(ctx)
+    assert out["ch_qst_periodic"] == Decimal("400.00")
+    assert out["ch_qst_model"] == "ANNUAL"
+    assert out["ch_qst_determination_periodic"] == Decimal("10000.00")
+    q = out["ch_calculation_trace"]["qst"]
+    assert q["canton"] == "CH-VD"
+    assert q["annual_determination_income"] == "120000.00"
+    assert q["annual_tax"] == "4800.00"
+
+
+def test_qst_annual_model_pending_g1_sign_off():
+    # The annual-model arithmetic is not yet confirmed by the statutory review —
+    # the marker lives in the strategy docstring so the gap stays visible.
+    assert sw._qst_annual.__doc__ is not None
+    assert "PENDING G1 SIGN-OFF" in sw._qst_annual.__doc__
+
+
+def test_qst_canton_change_at_boundary_no_blended_rate():
+    # January under CH-ZH (MONTHLY, file 10, 3.0%) is tariffed by ITS row; the
+    # worker moves to CH-VD (ANNUAL, file 11, 4.0%) in February. The February
+    # result must come ONLY from the new canton's model/rate row — the old
+    # canton's rate is never blended or carried over.
+    jan = _qst_ctx(canton="CH-ZH", model="MONTHLY", tariff_file_id=10, file_sha256="sha-z",
+                   rate={"rate_pct": "3.0", "min_tax": None, "row_id": 1001})
+    feb = _qst_ctx(canton="CH-VD", model="ANNUAL", tariff_file_id=11, file_sha256="sha-vd",
+                   rate={"rate_pct": "4.0", "min_tax": None, "row_id": 2002})
+    out_jan = calculate(jan)
+    out_feb = calculate(feb)
+    assert out_jan["ch_qst_periodic"] == Decimal("300.00")   # 10000 * 3%
+    assert out_feb["ch_qst_periodic"] == Decimal("400.00")   # annualised 4% -> 400/mo
+    q_feb = out_feb["ch_calculation_trace"]["qst"]
+    assert q_feb["model"] == "ANNUAL"
+    assert q_feb["canton"] == "CH-VD"
+    assert q_feb["tariff_file_id"] == 11
+    assert q_feb["row_id"] == 2002
+    assert q_feb["file_sha256"] == "sha-vd"
+
+
+def test_qst_superseded_file_not_used_new_period_but_replayable():
+    # April runs against ACTIVE file 20 (sha-a, 3.0%). The canton then activates
+    # file 21 (sha-b, 3.5%) which SUPERSEDES 20. May must use ONLY the new
+    # file's row; April stays replayable because its trace pins file_sha256 and
+    # row_id (the engine replays a payslip by those, never by 'latest').
+    apr = _qst_ctx(tariff_file_id=20, file_sha256="sha-a", rate={"rate_pct": "3.0", "min_tax": None, "row_id": 401})
+    may = _qst_ctx(tariff_file_id=21, file_sha256="sha-b", rate={"rate_pct": "3.5", "min_tax": None, "row_id": 501})
+    out_apr = calculate(apr)
+    out_may = calculate(may)
+    assert out_apr["ch_qst_periodic"] == Decimal("300.00")
+    assert out_may["ch_qst_periodic"] == Decimal("350.00")
+    for out, f, rid in ((out_apr, "sha-a", 401), (out_may, "sha-b", 501)):
+        q = out["ch_calculation_trace"]["qst"]
+        assert q["file_sha256"] == f
+        assert q["row_id"] == rid
+
+
+def test_qst_missing_tariff_code_blocks():
+    ctx = _qst_ctx(tariff_code=None)
+    with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
+        calculate(ctx)
+    assert "ch_qst_tariff_code" in str(exc.value.key)
+
+
+@pytest.mark.parametrize("subject", ["REVIEW_REQUIRED", None, ""])
+def test_qst_review_required_or_unknown_subject_blocks(subject):
+    # A review state (or missing) subject never calculates: it BLOCKS with the
+    # same key the resolver's ch_qst_subject_review check would raise.
+    ctx = _qst_ctx(subject=subject)
+    with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
+        calculate(ctx)
+    assert "ch_qst_subject_review" in str(exc.value.key)
+
+
+def test_qst_multiple_employment_flag_path():
+    # Multiple employment (KS 45): the tariff is determined on the worker's
+    # TOTAL determination income (combined = own salary / (1 - other share)),
+    # while this employer withholds on the salary IT pays. 10000/0.5 = 20000
+    # combined for the record; tax stays 10000 * 4% = 400 on the own base.
+    ctx = _qst_ctx(rate={"rate_pct": "4.0", "min_tax": None, "row_id": 601},
+                   multiple=True, other_pct="0.5")
+    out = calculate(ctx)
+    assert out["ch_qst_periodic"] == Decimal("400.00")
+    q = out["ch_calculation_trace"]["qst"]
+    assert q["multiple_employment"] is True
+    assert q["other_employment_pct"] == "0.5"
+    assert q["combined_determination_income"] == "20000.00"
+
+
+def test_qst_multiple_employment_missing_share_blocks():
+    ctx = _qst_ctx(multiple=True, other_pct=None)
+    with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
+        calculate(ctx)
+    assert "ch_other_employment_pct" in str(exc.value.key)
+
+
+def test_qst_aperiodic_without_rate_row_blocks():
+    # A bonus classified APERIODIC needs its OWN tariff row in context — a
+    # missing aperiodic row BLOCKS rather than reusing the periodic rate.
+    ctx = _qst_ctx(earnings={"base_salary": Decimal("10000"), "bonus": Decimal("1000")},
+                   treatment={"base_salary": "PERIODIC", "bonus": "APERIODIC"},
+                   rate={"rate_pct": "5.0", "min_tax": None, "row_id": 111})
+    with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
+        calculate(ctx)
+    assert "ch_qst_aperiodic_rate" in str(exc.value.key)
 
 
 def test_ktg_assigned_without_rules_blocks():

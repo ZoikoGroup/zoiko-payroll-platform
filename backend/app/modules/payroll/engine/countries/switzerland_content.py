@@ -20,7 +20,13 @@ tariff is entered), canton FAK top-ups (the federal minimums are here; canton
 rates are scaffolds), and the KTG loss-of-earnings daily allowance (canton-
 configured, scaffold). These live on the per-canton packs seeded by
 scripts/seed_switzerland_canonical_packs.py, never computed.
+
+The only QST figures at this level are the ARITHMETIC parameters the two named
+engine strategies read (CH_QST_MONTHS_PER_YEAR / CH_QST_PCT_DIVISOR): the tax
+figures themselves are canton tariff rows, never content.
 """
+from decimal import Decimal  # noqa: E402
+
 _STATUS = "Draft"
 
 # ── Statutory references (cited on the seeded packs, S1-S10) ──────────────
@@ -56,6 +62,16 @@ CH_SOURCES = (
 # ── Scheme / plan vocabulary read by onboarding and the readiness gates ────
 CH_SCHEME_TYPES = ("COMPENSATION_OFFICE", "FAK", "BVG_PLAN", "UVG_POLICY", "KTG_POLICY")
 CH_QST_MODELS = ("MONTHLY", "ANNUAL")
+
+# QST ARITHMETIC parameters — the two named engine strategies read these from
+# content instead of hardcoding figures in the calculator: the ANNUAL
+# (Jahresmodell) strategy annualises the monthly determination income by
+# CH_QST_MONTHS_PER_YEAR, applies the annual tariff, then back-apportions the
+# annual tax into each month by the same divisor; CH_QST_PCT_DIVISOR turns a
+# tariff PERCENT into its fraction. The TAX figures themselves are canton
+# tariff rows (ChQstTariffRow), never content.
+CH_QST_MONTHS_PER_YEAR = Decimal("12")
+CH_QST_PCT_DIVISOR = Decimal("100")
 
 # ── Component / obligation constants ───────────────────────────────────────
 CH_AHV = "ch_ahv"                 # AHV/AVS — old-age and survivors insurance
