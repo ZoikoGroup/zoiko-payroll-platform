@@ -17,15 +17,19 @@ Calculation order (each step consumes the one before it):
      the Active federal pack.
   3. ALV: insured base = min(base, max(0, ceiling - ytd_alv_before)). Separate
      accumulator; proration method read from content rule (blocks if missing).
-  4. Compensation-office admin cost as employer-only line from the scheme rules.
-  5. Snapshot builder: lines[] {obligation, side, base, rate_or_rule, cap, scope_id,
+  4. UVG (accident): compulsory for every employee. BU is employer-only at the
+     LIVE UVG_POLICY scheme's risk-class rate; NBU splits the risk-class's NBU
+     rate only when ch_weekly_hours meets the pack minimum. Both insured
+     earnings are capped by the statutory ceiling via the CH_UVG accumulator.
+     A missing policy / risk class BLOCKS.
+  5. KTG (sickness): only when a LIVE KTG_POLICY scheme is assigned — the
+     policy's rate/split charged on KTG's own classified earnings base.
+  6. Compensation-office admin cost as employer-only line from the scheme rules.
+  7. Snapshot builder: lines[] {obligation, side, base, rate_or_rule, cap, scope_id,
      scope_version, source_label, rule_version}, bases, accumulators before/after,
      resolved versions, input_hash, rule_hash (sha256 of canonical JSON).
 
 Out of scope (separate strategies/ledgers, never approximated here):
-  - UVG/UVG policy (accident) — policy-driven, not a single federal rate
-  - UVG/UVG policy (accident) — policy-driven, not a single federal rate
-  - KTG (sickness) — canton-configured, not federal
   - Quellensteuer (source tax) — canton tariff lookup, separate module
   - FAK (family allowances) — canton top-ups + federal minimums, separate
   - Lohnausweis declaration — reporting, not calculation
@@ -382,6 +386,87 @@ def _calculate_bvg(ctx: PayrollContext, pack: _Pack):
     }
 
 
+# ── UVG (accident insurance) — policy-driven BU + NBU, statutory ceiling ────
+# UVG is compulsory for every employee, so a missing policy or risk class BLOCKS
+# (never a default). BU (Berufsunfall) is employer-only at the risk class's BU
+# rate. NBU (Nichtberufsunfall) is split employee/employer from the risk
+# class's NBU rate, and applies only when the weekly working time meets the
+# pack minimum (S5). Both sit under the statutory ceiling, tracked period-over-
+# period by the CH_UVG accumulator exactly like ALV.
+
+def _calculate_uvg(ctx: PayrollContext, pack: _Pack, uvg_base: Decimal) -> dict:
+    """UVG BU + NBU for the period. Returns the split amounts, the capped
+    insured base and the policy/pack facts used to derive them; anything
+    missing (policy, risk class, weekly hours, statutory figures) BLOCKS."""
+    scheme_id = getattr(ctx, "ch_uvg_policy_scheme_id", None)
+    if scheme_id is None:
+        pack.block("ch_uvg_policy:not_assigned", "no LIVE UVG_POLICY scheme is assigned")
+    scheme_rules = getattr(ctx, "ch_uvg_scheme_rules", None)
+    if scheme_rules is None:
+        pack.block("ch_uvg_policy:rules_missing", "UVG policy rules not resolved in context")
+    risk_classes = scheme_rules.get("risk_classes") or []
+    wanted = _upper(getattr(ctx, "ch_uvg_risk_class", None))
+    risk_class = next((rc for rc in risk_classes if _upper(rc.get("code")) == wanted), None)
+    if risk_class is None:
+        pack.block("ch_uvg_risk_class:not_found",
+                   f"risk class {getattr(ctx, 'ch_uvg_risk_class', None)!r} is not in UVG policy {scheme_id}")
+    bu_pct = risk_class.get("bu_employer_pct")
+    if bu_pct is None:
+        pack.block("ch_uvg_risk_class:bu_rate_missing", "risk class has no BU employer rate")
+
+    ceiling = pack.require_amount("ch_uvg_ceiling")
+    ytd_before = _read_ytd_before(ctx, CH_UVG)
+    insurable = min(uvg_base, max(ZERO, ceiling - ytd_before))
+    bu_employer = _round_chf(insurable * _dec(bu_pct) / HUNDRED)
+
+    min_hours = pack.require_amount("ch_nbu_min_weekly_hours")
+    weekly_hours = getattr(ctx, "ch_weekly_hours", None)
+    if weekly_hours is None:
+        pack.block("ch_weekly_hours", "weekly working time is required to decide NBU applicability")
+    nbu_employee = nbu_employer = ZERO
+    nbu_ee_pct = nbu_er_pct = ZERO
+    if _dec(weekly_hours) >= _dec(min_hours):
+        nbu_pct = risk_class.get("nbu_pct")
+        nbu_ee_share = risk_class.get("nbu_employee_share_pct")
+        if nbu_pct is None or nbu_ee_share is None:
+            pack.block("ch_uvg_risk_class:nbu_rate_missing", "risk class has no NBU rate / employee share")
+        nbu_ee_pct = _dec(nbu_ee_share)
+        nbu_er_pct = _dec(nbu_pct) - nbu_ee_pct
+        nbu_employee = _round_chf(insurable * nbu_ee_pct / HUNDRED)
+        nbu_employer = _round_chf(insurable * nbu_er_pct / HUNDRED)
+
+    return {"bu_employer": bu_employer, "nbu_employee": nbu_employee, "nbu_employer": nbu_employer,
+            "insurable": insurable, "ceiling": ceiling, "min_weekly_hours": _dec(min_hours),
+            "bu_pct": _dec(bu_pct), "nbu_ee_pct": nbu_ee_pct, "nbu_er_pct": nbu_er_pct}
+
+
+# ── KTG (sickness daily allowance) — scheme-elected, its own classified base ─
+# KTG has no federal rate: it contributes only when a LIVE KTG_POLICY scheme is
+# assigned, charging the policy's total rate split by its employee share on
+# KTG's own classified earnings base. No policy -> no KTG line, no base demand.
+
+def _calculate_ktg(ctx: PayrollContext, pack: _Pack, ktg_base: Decimal) -> dict | None:
+    """KTG contributions when the worker is covered by a LIVE KTG_POLICY
+    scheme; None when no policy is assigned. A policy without its rules,
+    rate or employee share BLOCKS."""
+    if getattr(ctx, "ch_ktg_policy_scheme_id", None) is None:
+        return None
+    scheme_rules = getattr(ctx, "ch_ktg_scheme_rules", None)
+    if scheme_rules is None:
+        pack.block("ch_ktg_policy:rules_missing", "KTG policy rules not resolved in context")
+    rate_pct = scheme_rules.get("rate_pct")
+    if rate_pct is None:
+        pack.block("ch_ktg_policy:rate_missing", "KTG policy has no rate_pct")
+    employee_share_pct = scheme_rules.get("employee_share_pct")
+    if employee_share_pct is None:
+        pack.block("ch_ktg_policy:share_missing", "KTG policy has no employee_share_pct")
+    ee_pct = _dec(employee_share_pct)
+    er_pct = _dec(rate_pct) - ee_pct
+    return {"employee": _round_chf(ktg_base * ee_pct / HUNDRED),
+            "employer": _round_chf(ktg_base * er_pct / HUNDRED),
+            "base": ktg_base, "ee_pct": ee_pct, "er_pct": er_pct}
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """Swiss federal payroll calculation — pure function, no DB, no network,
     no date.today(). Returns a dict with deductions, snapshots, and CH fields
@@ -393,6 +478,17 @@ def calculate(ctx: PayrollContext) -> dict:
 
     # 1. Obligation bases
     bases = _compute_obligation_bases(ctx, pack, FEDERAL_OBLIGATIONS)
+
+    # UVG base is compulsory (accident insurance covers every employee); KTG
+    # base is only demanded when a LIVE KTG_POLICY scheme is assigned — both on
+    # their own classified earnings, exactly as the Step 6 resolver resolves.
+    uvg_base = _compute_obligation_bases(ctx, pack, (CH_UVG,)).get(CH_UVG, ZERO)
+    bases[CH_UVG] = uvg_base
+    if getattr(ctx, "ch_ktg_policy_scheme_id", None) is not None:
+        ktg_base = _compute_obligation_bases(ctx, pack, (CH_KTG,)).get(CH_KTG, ZERO)
+        bases[CH_KTG] = ktg_base
+    else:
+        ktg_base = ZERO
 
     # 2. Federal rates (AHV, IV, EO, ALV from federal pack)
     ahv_ee_pct = pack.require_pct("ch_ahv", "employee")
@@ -463,16 +559,29 @@ def calculate(ctx: PayrollContext) -> dict:
     bvg_insurable = (_round_chf((bvg_result["mandatory"]["annual_subject"] + bvg_result["extra"]["annual_subject"]) / Decimal("12"))
                      if bvg_result else ZERO)
 
-    # 6. Compensation office admin cost (employer-only)
+    # 7. UVG (accident) — BU employer-only + NBU split, capped by the CH_UVG
+    #    accumulator's statutory ceiling. Mandatory for every employee.
+    uvg = _calculate_uvg(ctx, pack, uvg_base)
+    uvg_nbu_applies = (uvg["nbu_employee"] + uvg["nbu_employer"]) > ZERO
+    uvg_employee = uvg["nbu_employee"]  # BU has no employee share
+    uvg_employer = uvg["bu_employer"] + uvg["nbu_employer"]
+
+    # 8. KTG (sickness) — only when a LIVE KTG_POLICY scheme is assigned; the
+    #    policy's rate/split on KTG's own classified base.
+    ktg = _calculate_ktg(ctx, pack, ktg_base)
+    ktg_employee = ktg["employee"] if ktg else ZERO
+    ktg_employer = ktg["employer"] if ktg else ZERO
+
+    # 9. Compensation office admin cost (employer-only)
     admin_cost_pct = _read_scheme_admin_cost(ctx, pack)
     admin_cost_base = bases.get(CH_AHV, ZERO)  # Admin cost on AHV base per convention
     admin_cost = _round_chf(admin_cost_base * admin_cost_pct / HUNDRED)
 
-    # 7. Totals
-    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee
-    employer_total = ahv_er + iv_er + eo_er + alv_er + bvg_er + admin_cost
+    # 10. Totals
+    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee + uvg_employee + ktg_employee
+    employer_total = ahv_er + iv_er + eo_er + alv_er + bvg_er + admin_cost + uvg_employer + ktg_employer
 
-    # 8. Family allowances (FAK) — federal minimums; added to net (employee benefit)
+    # 11. Family allowances (FAK) — federal minimums; added to net (employee benefit)
     fak_child_min = pack.require_amount("ch_fak_child_min")
     fak_education_min = pack.require_amount("ch_fak_education_min")
     children = _dec(getattr(ctx, "ch_children_count", 0))
@@ -481,7 +590,7 @@ def calculate(ctx: PayrollContext) -> dict:
     fak_education_total = _round_chf(fak_education_min * students)
     family_allowance_total = fak_child_total + fak_education_total
 
-    # 9. Build lines for snapshot (AHV/IV/EO/ALV/Admin lines)
+    # 12. Build lines for snapshot (AHV/IV/EO/ALV/Admin lines)
 
     # AHV
     add_line(CH_AHV, "employee", ahv_base, ahv_ee_pct / HUNDRED, None,
@@ -521,11 +630,27 @@ def calculate(ctx: PayrollContext) -> dict:
             add_line("ch_bvg_extra_mandatory", "employer", extra_monthly,
                      _dec(bvg_result["extra"]["band"]["employer_pct"]) / HUNDRED, None,
                      bvg_scope, "1.0", "BVG_PLAN scheme", "1.0")
+    # UVG — policy-scoped lines (BU employer-only; NBU split when it applies)
+    uvg_scope = f"scheme:uvg_policy:{getattr(ctx, 'ch_uvg_policy_scheme_id', None)}"
+    add_line("ch_uvg_bu", "employer", uvg["insurable"], uvg["bu_pct"] / HUNDRED, uvg["ceiling"],
+             uvg_scope, "1.0", "UVG_POLICY scheme", "1.0")
+    if uvg_nbu_applies:
+        add_line("ch_uvg_nbu", "employee", uvg["insurable"], uvg["nbu_ee_pct"] / HUNDRED, uvg["ceiling"],
+                 uvg_scope, "1.0", "UVG_POLICY scheme", "1.0")
+        add_line("ch_uvg_nbu", "employer", uvg["insurable"], uvg["nbu_er_pct"] / HUNDRED, uvg["ceiling"],
+                 uvg_scope, "1.0", "UVG_POLICY scheme", "1.0")
+    # KTG — policy-scoped lines (only when a LIVE KTG_POLICY scheme is assigned)
+    if ktg is not None:
+        ktg_scope = f"scheme:ktg_policy:{getattr(ctx, 'ch_ktg_policy_scheme_id', None)}"
+        add_line("ch_ktg", "employee", ktg_base, ktg["ee_pct"] / HUNDRED, None,
+                 ktg_scope, "1.0", "KTG_POLICY scheme", "1.0")
+        add_line("ch_ktg", "employer", ktg_base, ktg["er_pct"] / HUNDRED, None,
+                 ktg_scope, "1.0", "KTG_POLICY scheme", "1.0")
     # Admin cost
     add_line("ch_admin", "employer", admin_cost_base, admin_cost_pct / HUNDRED, None,
              "scheme:compensation_office", "1.0", "CH-PAYROLL-2026", "1.0")
 
-    # 8. Accumulators before/after
+    # 13. Accumulators before/after
     ytd_before = {}
     ytd_after = {}
     for comp in CH_YTD_COMPONENTS:
@@ -539,6 +664,12 @@ def calculate(ctx: PayrollContext) -> dict:
         elif comp == CH_BVG:
             after_w = before_w + bvg_insurable
             after_wh = before_wh + bvg_ee + bvg_er
+        elif comp == CH_UVG:
+            after_w = before_w + uvg["insurable"]
+            after_wh = before_wh + uvg_employee + uvg_employer
+        elif comp == CH_KTG:
+            after_w = before_w + ktg_base
+            after_wh = before_wh + ktg_employee + ktg_employer
         elif comp in (CH_AHV, CH_IV, CH_EO):
             base = bases.get(comp, ZERO)
             after_w = before_w + base
@@ -548,11 +679,11 @@ def calculate(ctx: PayrollContext) -> dict:
             after_wh = before_wh
         ytd_after[comp] = {"wages": str(after_w), "withheld": str(after_wh)}
 
-    # 9. Resolved versions
+    # 14. Resolved versions
     federal_pack_id = getattr(ctx, "ch_federal_pack_id", None)
     federal_pack_version = getattr(ctx, "ch_federal_pack_version", None)
 
-    # 10. Hashes
+    # 15. Hashes
     input_snapshot = {
         "gross": str(ctx.gross),
         "basic": str(ctx.basic),
@@ -564,6 +695,11 @@ def calculate(ctx: PayrollContext) -> dict:
             "ch_eo_ee": str(eo_ee_pct), "ch_eo_er": str(eo_er_pct),
             "ch_alv_ee": str(alv_ee_pct), "ch_alv_er": str(alv_er_pct),
             "ch_admin_pct": str(admin_cost_pct),
+            "ch_uvg_bu_pct": str(uvg["bu_pct"]),
+            "ch_uvg_nbu_ee_pct": str(uvg["nbu_ee_pct"]),
+            "ch_uvg_nbu_er_pct": str(uvg["nbu_er_pct"]),
+            "ch_ktg_ee_pct": str(ktg["ee_pct"]) if ktg else "0",
+            "ch_ktg_er_pct": str(ktg["er_pct"]) if ktg else "0",
         },
     }
     rule_snapshot = {
@@ -571,6 +707,10 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_alv_ceiling": str(alv_ceiling),
         "ch_scheme_admin_cost_pct": str(admin_cost_pct),
         "ch_bvg_eligible": str(bvg_result is not None),
+        "ch_uvg_ceiling": str(uvg["ceiling"]),
+        "ch_nbu_min_weekly_hours": str(uvg["min_weekly_hours"]),
+        "ch_uvg_nbu_applicable": str(uvg_nbu_applies),
+        "ch_ktg_elected": str(ktg is not None),
     }
 
     return {
@@ -589,11 +729,18 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_bvg_extra_mandatory_employer": bvg_extra_er,
         "ch_bvg_employee": bvg_ee,
         "ch_bvg_employer": bvg_er,
+        "ch_uvg_bu_employer": uvg["bu_employer"],
+        "ch_uvg_nbu_employee": uvg["nbu_employee"],
+        "ch_uvg_nbu_employer": uvg["nbu_employer"],
+        "ch_uvg_employee": uvg_employee,
+        "ch_uvg_employer": uvg_employer,
+        "ch_uvg_insurable": uvg["insurable"],
+        "ch_ktg_employee": ktg_employee,
+        "ch_ktg_employer": ktg_employer,
         "ch_admin_cost_employer": admin_cost,
         # Employee total (deducted from gross)
         "ch_employee_total": employee_total,
         # Employer total (cost to employer)
-        "ch_employer_total": employer_total,
         "ch_employer_total": employer_total,
         # Family allowances — added to net pay
         "ch_family_allowance_total": family_allowance_total,
