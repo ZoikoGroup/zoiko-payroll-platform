@@ -23,7 +23,7 @@ Calculation order (each step consumes the one before it):
      resolved versions, input_hash, rule_hash (sha256 of canonical JSON).
 
 Out of scope (separate strategies/ledgers, never approximated here):
-  - BVG (pension) — handled by engine/countries/switzerland_bvg.py (future)
+  - UVG/UVG policy (accident) — policy-driven, not a single federal rate
   - UVG/UVG policy (accident) — policy-driven, not a single federal rate
   - KTG (sickness) — canton-configured, not federal
   - Quellensteuer (source tax) — canton tariff lookup, separate module
@@ -220,6 +220,168 @@ def _read_alv_proration_rule(ctx: PayrollContext, pack: _Pack) -> str:
     return rule
 
 
+# ── BVG (Berufliche Vorsorge) — occupational pension ──────────────────────
+# All BVG logic driven by the LIVE BVG_PLAN scheme rules from ctx.ch_scheme_rules.
+# The scheme provides bands (age-based and/or salary-based) with employee/employer
+# rates and MANDATORY/EXTRA_MANDATORY types. Pack provides statutory guardrails:
+# entry threshold, coordination deduction, upper salary, min coordinated salary.
+
+def _check_bvg_eligibility(ctx: PayrollContext, pack: _Pack) -> bool:
+    """BVG mandatory insurance (Art. 2 BVG): age 17+ and annual salary at or
+    above the entry threshold from the Active federal pack. The contract-duration
+    determination is the resolver's job (employment profile, not re-derived here)."""
+    entry_threshold = pack.require_amount("ch_bvg_entry_threshold")
+    payroll_date = getattr(ctx, "payroll_date", None)
+    if payroll_date is None:
+        pack.block("ch_payroll_date", "payroll date is required for BVG eligibility")
+    dob = getattr(ctx, "ch_date_of_birth", None)
+    if dob is None:
+        pack.block("ch_date_of_birth", "date of birth is required for BVG eligibility")
+    annual_salary = _dec(getattr(ctx, "ch_annual_salary", None))
+    if annual_salary is None or annual_salary <= ZERO:
+        pack.block("ch_annual_salary", "annual salary (ctc) is required for BVG eligibility")
+    if getattr(ctx, "ch_bvg_exempt", False):
+        return False
+    # Age check: 17+ (BVG Art. 2/7 — VERIFY AGAINST G1 STATUTORY REVIEW)
+    age = payroll_date.year - dob.year - ((payroll_date.month, payroll_date.day) < (dob.month, dob.day))
+    if age < 17:
+        return False
+    # Annual salary threshold
+    if annual_salary < entry_threshold:
+        return False
+    return True
+
+
+def _bvg_age(ctx: PayrollContext) -> int:
+    """Whole years completed at the payroll date. -1 when the facts are absent."""
+    payroll_date = getattr(ctx, "payroll_date", None)
+    dob = getattr(ctx, "ch_date_of_birth", None)
+    if payroll_date is None or dob is None:
+        return -1
+    return payroll_date.year - dob.year - ((payroll_date.month, payroll_date.day) < (dob.month, dob.day))
+
+
+def _calculate_coordinated_salary(annual_salary: Decimal, pack: _Pack) -> Decimal:
+    """BVG coordinated (insured) salary with statutory guardrails.
+    Formula: max(min_coordinated, min(annual_salary - coordination_deduction, upper_salary)).
+    Statutory figures come only from the Active federal pack."""
+    coordination_deduction = pack.require_amount("ch_bvg_coordination_deduction")
+    upper_salary = pack.require_amount("ch_bvg_upper_salary")
+    min_coordinated = pack.require_amount("ch_bvg_min_coordinated")
+    raw = annual_salary - coordination_deduction
+    coordinated = min(max(raw, min_coordinated), upper_salary)
+    return _round_chf(coordinated)
+
+
+def _select_bvg_band(scheme_rules: dict, component: str, age: int, subject: Decimal):
+    """The plan band for a component ('MANDATORY' or 'EXTRA_MANDATORY') matching
+    the worker's age and — when the band defines one — the subject-salary window.
+    A MANDATORY band is legally required and its absence blocks; an absent
+    EXTRA_MANDATORY band simply means no extra-mandatory cover is elected.
+    Bands come from the LIVE BVG_PLAN scheme rules (BvgBand: component,
+    age_from/age_to, optional salary_from/salary_to for EXTRA_MANDATORY)."""
+    bands = scheme_rules.get("bands") or []
+    if not bands:
+        raise SwitzerlandCalculationBlockedError(
+            "ch_bvg_plan:bands_missing", "BVG_PLAN scheme has no bands configured", organization_id=None)
+    for band in bands:
+        if band.get("component") != component:
+            continue
+        age_from = band.get("age_from")
+        age_to = band.get("age_to")
+        if age_from is None or age_to is None:
+            continue
+        if not (age_from <= age <= age_to):
+            continue
+        salary_from = band.get("salary_from")
+        salary_to = band.get("salary_to")
+        if salary_from is not None and subject < _dec(salary_from):
+            continue
+        if salary_to is not None and subject > _dec(salary_to):
+            continue
+        employee_pct = band.get("employee_pct")
+        employer_pct = band.get("employer_pct")
+        if employee_pct is None or employer_pct is None:
+            raise SwitzerlandCalculationBlockedError(
+                "ch_bvg_plan:band_rate_missing",
+                f"{component} band ages {age_from}-{age_to} missing employee/employer rate",
+                organization_id=None)
+        okay, idx = _validate_bvg_scheme_employer_share({"bands": [band]})
+        if not okay:
+            raise SwitzerlandCalculationBlockedError(
+                "ch_bvg_plan:employer_share_invalid",
+                f"{component} band {idx} employer share below 50%", organization_id=None)
+        return band
+    if component == "MANDATORY":
+        raise SwitzerlandCalculationBlockedError(
+            "ch_bvg_plan:no_matching_band",
+            f"no MANDATORY BVG band matches age {age} and subject salary {subject}",
+            organization_id=None)
+    return None
+
+
+def _validate_bvg_scheme_employer_share(scheme_rules: dict):
+    """Employer pays at least half of each band's total premium. Enforced at
+    scheme validation (BvgBand._shape) and re-checked here so a band that ever
+    bypassed schema validation can never slip through a calculation."""
+    for idx, band in enumerate(scheme_rules.get("bands", [])):
+        employee = band.get("employee_pct")
+        if employee is None:
+            employee = band.get("employee_amount")
+        employer = band.get("employer_pct")
+        if employer is None:
+            employer = band.get("employer_amount")
+        if _dec(employer) < _dec(employee):
+            return False, idx
+    return True, -1
+
+
+def _calculate_bvg(ctx: PayrollContext, pack: _Pack):
+    """BVG contributions for the pay period. Every contribution is a monthly
+    proportion of its annual subject: MANDATORY insures the coordinated salary,
+    EXTRA_MANDATORY (when elected) insures the plan band's own salary slice.
+    Returns a dict with per-band monthly employee/employer amounts and the
+    annual subject, or None when the worker is not BVG-insured."""
+    if not _check_bvg_eligibility(ctx, pack):
+        return None
+
+    scheme_id = getattr(ctx, "ch_bvg_plan_scheme_id", None)
+    if scheme_id is None:
+        pack.block("ch_bvg_plan:not_assigned", "BVG-eligible worker has no BVG_PLAN scheme assigned")
+    scheme_rules = getattr(ctx, "ch_bvg_scheme_rules", None)
+    if scheme_rules is None:
+        pack.block("ch_bvg_plan:rules_missing", "BVG_PLAN scheme rules not resolved in context")
+
+    age = _bvg_age(ctx)
+    annual_salary = _dec(getattr(ctx, "ch_annual_salary", ZERO))
+    coordinated = _calculate_coordinated_salary(annual_salary, pack)
+
+    mandatory_band = _select_bvg_band(scheme_rules, "MANDATORY", age, coordinated)
+    extra_band = _select_bvg_band(scheme_rules, "EXTRA_MANDATORY", age, annual_salary)
+
+    def _monthly(annual_subject: Decimal, band: dict):
+        ee = _round_chf(annual_subject / Decimal("12") * _dec(band["employee_pct"]) / HUNDRED)
+        er = _round_chf(annual_subject / Decimal("12") * _dec(band["employer_pct"]) / HUNDRED)
+        return ee, er
+
+    mandatory_ee, mandatory_er = _monthly(coordinated, mandatory_band)
+    if extra_band is not None:
+        floor = _dec(extra_band.get("salary_from", ZERO))
+        ceiling = extra_band.get("salary_to")
+        extra_subject = max(annual_salary - floor, ZERO)
+        if ceiling is not None:
+            extra_subject = min(extra_subject, max(_dec(ceiling) - floor, ZERO))
+        extra_ee, extra_er = _monthly(extra_subject, extra_band)
+    else:
+        extra_subject = ZERO
+        extra_ee = extra_er = ZERO
+
+    return {
+        "mandatory": {"ee": mandatory_ee, "er": mandatory_er, "annual_subject": coordinated, "band": mandatory_band},
+        "extra": {"ee": extra_ee, "er": extra_er, "annual_subject": extra_subject, "band": extra_band},
+    }
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """Swiss federal payroll calculation — pure function, no DB, no network,
     no date.today(). Returns a dict with deductions, snapshots, and CH fields
@@ -271,27 +433,7 @@ def calculate(ctx: PayrollContext) -> dict:
     alv_ee = _round_chf(alv_insurable * alv_ee_pct / HUNDRED)
     alv_er = _round_chf(alv_insurable * alv_er_pct / HUNDRED)
 
-    # 5. Compensation office admin cost (employer-only)
-    admin_cost_pct = _read_scheme_admin_cost(ctx, pack)
-    admin_cost_base = bases.get(CH_AHV, ZERO)  # Admin cost on AHV base per convention
-    admin_cost = _round_chf(admin_cost_base * admin_cost_pct / HUNDRED)
-
-    # 6. Totals
-    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee
-    employer_total = ahv_er + iv_er + eo_er + alv_er + admin_cost
-
-    # 7. Family allowances (FAK) — federal minimums; added to net (employee benefit)
-    # These are NOT deductions; they are added to net pay like Italy's it_wedge_tax_free_sum.
-    fak_child_min = pack.require_amount("ch_fak_child_min")
-    fak_education_min = pack.require_amount("ch_fak_education_min")
-    # The number of children / students comes from ctx (worker profile)
-    children = _dec(getattr(ctx, "ch_children_count", 0))
-    students = _dec(getattr(ctx, "ch_students_count", 0))
-    fak_child_total = _round_chf(fak_child_min * children)
-    fak_education_total = _round_chf(fak_education_min * students)
-    family_allowance_total = fak_child_total + fak_education_total
-
-    # 8. Build lines for snapshot
+    # 5. BVG (occupational pension) — from LIVE BVG_PLAN scheme rules
     lines = []
     def add_line(obligation, side, base, rate_or_rule, cap, scope_id, scope_version, source_label, rule_version):
         lines.append({
@@ -305,6 +447,41 @@ def calculate(ctx: PayrollContext) -> dict:
             "source_label": source_label,
             "rule_version": rule_version,
         })
+
+    # BVG (occupational pension) — from BVG_PLAN scheme. Skipped entirely when
+    # the worker is not BVG-insured (salary below entry threshold, under 17, or
+    # exempt); an eligible worker without a live plan BLOCKS (fail-closed).
+    bvg_result = _calculate_bvg(ctx, pack)
+    bvg_mand_ee = bvg_result["mandatory"]["ee"] if bvg_result else ZERO
+    bvg_mand_er = bvg_result["mandatory"]["er"] if bvg_result else ZERO
+    bvg_extra_ee = bvg_result["extra"]["ee"] if bvg_result else ZERO
+    bvg_extra_er = bvg_result["extra"]["er"] if bvg_result else ZERO
+    bvg_ee = bvg_mand_ee + bvg_extra_ee
+    bvg_er = bvg_mand_er + bvg_extra_er
+    # Monthly insured wage fed to the CH_BVG YTD accumulator (no catch-up on a
+    # mid-year threshold crossing — only the current period's approach applies).
+    bvg_insurable = (_round_chf((bvg_result["mandatory"]["annual_subject"] + bvg_result["extra"]["annual_subject"]) / Decimal("12"))
+                     if bvg_result else ZERO)
+
+    # 6. Compensation office admin cost (employer-only)
+    admin_cost_pct = _read_scheme_admin_cost(ctx, pack)
+    admin_cost_base = bases.get(CH_AHV, ZERO)  # Admin cost on AHV base per convention
+    admin_cost = _round_chf(admin_cost_base * admin_cost_pct / HUNDRED)
+
+    # 7. Totals
+    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee
+    employer_total = ahv_er + iv_er + eo_er + alv_er + bvg_er + admin_cost
+
+    # 8. Family allowances (FAK) — federal minimums; added to net (employee benefit)
+    fak_child_min = pack.require_amount("ch_fak_child_min")
+    fak_education_min = pack.require_amount("ch_fak_education_min")
+    children = _dec(getattr(ctx, "ch_children_count", 0))
+    students = _dec(getattr(ctx, "ch_students_count", 0))
+    fak_child_total = _round_chf(fak_child_min * children)
+    fak_education_total = _round_chf(fak_education_min * students)
+    family_allowance_total = fak_child_total + fak_education_total
+
+    # 9. Build lines for snapshot (AHV/IV/EO/ALV/Admin lines)
 
     # AHV
     add_line(CH_AHV, "employee", ahv_base, ahv_ee_pct / HUNDRED, None,
@@ -326,6 +503,24 @@ def calculate(ctx: PayrollContext) -> dict:
              "federal", "1.0", "CH-PAYROLL-2026", "1.0")
     add_line(CH_ALV, "employer", alv_insurable, alv_er_pct / HUNDRED, alv_ceiling,
              "federal", "1.0", "CH-PAYROLL-2026", "1.0")
+    # BVG (mandatory, and extra-mandatory when elected) — scheme-scoped lines
+    if bvg_result is not None:
+        bvg_scope = f"scheme:bvg_plan:{getattr(ctx, 'ch_bvg_plan_scheme_id', None)}"
+        mand_monthly = _round_chf(bvg_result["mandatory"]["annual_subject"] / Decimal("12"))
+        add_line("ch_bvg_mandatory", "employee", mand_monthly,
+                 _dec(bvg_result["mandatory"]["band"]["employee_pct"]) / HUNDRED, None,
+                 bvg_scope, "1.0", "BVG_PLAN scheme", "1.0")
+        add_line("ch_bvg_mandatory", "employer", mand_monthly,
+                 _dec(bvg_result["mandatory"]["band"]["employer_pct"]) / HUNDRED, None,
+                 bvg_scope, "1.0", "BVG_PLAN scheme", "1.0")
+        if bvg_result["extra"]["band"] is not None:
+            extra_monthly = _round_chf(bvg_result["extra"]["annual_subject"] / Decimal("12"))
+            add_line("ch_bvg_extra_mandatory", "employee", extra_monthly,
+                     _dec(bvg_result["extra"]["band"]["employee_pct"]) / HUNDRED, None,
+                     bvg_scope, "1.0", "BVG_PLAN scheme", "1.0")
+            add_line("ch_bvg_extra_mandatory", "employer", extra_monthly,
+                     _dec(bvg_result["extra"]["band"]["employer_pct"]) / HUNDRED, None,
+                     bvg_scope, "1.0", "BVG_PLAN scheme", "1.0")
     # Admin cost
     add_line("ch_admin", "employer", admin_cost_base, admin_cost_pct / HUNDRED, None,
              "scheme:compensation_office", "1.0", "CH-PAYROLL-2026", "1.0")
@@ -341,6 +536,9 @@ def calculate(ctx: PayrollContext) -> dict:
         if comp == CH_ALV:
             after_w = before_w + alv_insurable
             after_wh = before_wh + alv_ee + alv_er
+        elif comp == CH_BVG:
+            after_w = before_w + bvg_insurable
+            after_wh = before_wh + bvg_ee + bvg_er
         elif comp in (CH_AHV, CH_IV, CH_EO):
             base = bases.get(comp, ZERO)
             after_w = before_w + base
@@ -372,6 +570,7 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_alv_proration": _read_alv_proration_rule(ctx, pack),
         "ch_alv_ceiling": str(alv_ceiling),
         "ch_scheme_admin_cost_pct": str(admin_cost_pct),
+        "ch_bvg_eligible": str(bvg_result is not None),
     }
 
     return {
@@ -384,10 +583,17 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_eo_employer": eo_er,
         "ch_alv_employee": alv_ee,
         "ch_alv_employer": alv_er,
+        "ch_bvg_mandatory_employee": bvg_mand_ee,
+        "ch_bvg_mandatory_employer": bvg_mand_er,
+        "ch_bvg_extra_mandatory_employee": bvg_extra_ee,
+        "ch_bvg_extra_mandatory_employer": bvg_extra_er,
+        "ch_bvg_employee": bvg_ee,
+        "ch_bvg_employer": bvg_er,
         "ch_admin_cost_employer": admin_cost,
         # Employee total (deducted from gross)
         "ch_employee_total": employee_total,
         # Employer total (cost to employer)
+        "ch_employer_total": employer_total,
         "ch_employer_total": employer_total,
         # Family allowances — added to net pay
         "ch_family_allowance_total": family_allowance_total,

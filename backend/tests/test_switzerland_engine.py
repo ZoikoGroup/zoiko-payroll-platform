@@ -1,9 +1,12 @@
 """
 tests/test_switzerland_engine.py
---------------------------------
+-------------------------------
 CH Step 7 — federal calculator: split components, ALV cap, admin cost not in
 employee total, missing rate blocks, determinism, NO hardcoded literals.
+CH Step 8 — BVG engine: eligibility, coordination guardrails, age bands, two
+plans, extra-mandatory separation, no threshold retroactivity, employer <50%.
 """
+from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -12,7 +15,12 @@ import pytest
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries.switzerland import (
     calculate, SwitzerlandCalculationBlockedError, CH_PARAMETER_KEYS, _round_chf,
+    _validate_bvg_scheme_employer_share,
 )
+from app.modules.payroll.engine.countries.switzerland_content import (
+    CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_QST, CH_UVG, CH_YTD_COMPONENTS,
+)
+from app.modules.payroll.switzerland_schemas import validate_scheme_rules
 from app.modules.payroll.engine.countries.switzerland_content import (
     CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_QST, CH_UVG, CH_YTD_COMPONENTS,
 )
@@ -69,6 +77,10 @@ def _full_ctx(earnings=None, ytd=None, scheme_rules=None, classification=None, p
         "ch_eo": _rate_row("0.25", "0.25"),
         "ch_alv": _rate_row("1.10", "1.10"),
         "ch_alv_ceiling": _amount_row("148200"),
+        "ch_bvg_entry_threshold": _amount_row("22680"),
+        "ch_bvg_coordination_deduction": _amount_row("26460"),
+        "ch_bvg_upper_salary": _amount_row("90720"),
+        "ch_bvg_min_coordinated": _amount_row("3780"),
         "ch_fak_child_min": _amount_row("215"),
         "ch_fak_education_min": _amount_row("268"),
         "ch_rounding_rule": _amount_row("0.05"),
@@ -84,6 +96,9 @@ def _full_ctx(earnings=None, ytd=None, scheme_rules=None, classification=None, p
     ctx.ch_children_count = 2
     ctx.ch_students_count = 1
     ctx.ch_alv_proration_rule = proration_rule
+    ctx.payroll_date = date(2026, 3, 31)
+    ctx.ch_annual_salary = Decimal("20000")  # Below BVG threshold (22680) -> not eligible
+    ctx.ch_date_of_birth = date(1990, 5, 1)
     if classification is not None:
         ctx.ch_classification = classification
     if scheme_rules is not None:
@@ -401,3 +416,168 @@ def test_employee_total_excludes_employer_shares():
     assert out["ch_employee_total"] == Decimal("640.00")
     # Employer total includes admin cost
     assert out["ch_employer_total"] == Decimal("740.00")
+
+
+# ── CH Step 8: BVG (occupational pension) engine ─────────────────────────────
+
+def _bvg_scheme(bands):
+    return {"entry_rules": {}, "insured_salary_def": "annual",
+            "coordination": {"mode": "STATUTORY"}, "bands": bands}
+
+
+def _bvg_ctx(annual_salary="100000", bands=None, scheme_id=5, dob=None, exempt=False):
+    ctx = _full_ctx(earnings={"base_salary": Decimal("10000")},
+                    classification={CH_AHV: {"base_salary": True},
+                                    CH_IV: {"base_salary": True},
+                                    CH_EO: {"base_salary": True},
+                                    CH_ALV: {"base_salary": True}},
+                    scheme_rules={"admin_cost_pct": "1.0"})
+    ctx.ch_annual_salary = Decimal(annual_salary)
+    if dob is not None:
+        ctx.ch_date_of_birth = dob
+    if scheme_id is not None:
+        ctx.ch_bvg_plan_scheme_id = scheme_id
+    if bands is not None:
+        ctx.ch_bvg_scheme_rules = _bvg_scheme(bands)
+    if exempt:
+        ctx.ch_bvg_exempt = True
+    return ctx
+
+
+_STD_BANDS = [
+    {"component": "MANDATORY", "age_from": 25, "age_to": 44, "employee_pct": "5.0", "employer_pct": "5.0"},
+]
+
+
+def test_bvg_below_entry_threshold_no_contribution():
+    ctx = _bvg_ctx(annual_salary="20000", bands=_STD_BANDS, scheme_id=5)
+    out = calculate(ctx)
+    assert out["ch_bvg_mandatory_employee"] == Decimal("0")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("0")
+    assert out["ch_bvg_employee"] == Decimal("0")
+    assert out["ch_bvg_employer"] == Decimal("0")
+
+
+def test_bvg_exempt_skips_contributions():
+    ctx = _bvg_ctx(annual_salary="100000", bands=_STD_BANDS, scheme_id=5, exempt=True)
+    out = calculate(ctx)
+    assert out["ch_bvg_mandatory_employee"] == Decimal("0")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("0")
+
+
+def test_bvg_eligible_without_plan_blocks():
+    ctx = _bvg_ctx(annual_salary="100000", bands=_STD_BANDS, scheme_id=None)
+    with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
+        calculate(ctx)
+    assert "ch_bvg_plan:not_assigned" in str(exc.value.key)
+
+
+def test_bvg_threshold_crossing_no_retroactive_ytd():
+    # Annual salary crossed the entry threshold mid-year: the CH_BVG accumulator
+    # starts this period with only the current month's insured wage — no catch-up
+    # for the earlier, under-threshold months and no annualised backfill.
+    ctx = _bvg_ctx(annual_salary="100000", bands=_STD_BANDS, scheme_id=5)
+    out = calculate(ctx)
+    # coordinated = min(max(100000 - 26460, 3780), 90720) = 73540; monthly 6128.35
+    assert out["ch_bvg_mandatory_employee"] == Decimal("306.40")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("306.40")
+    trace = out["ch_calculation_trace"]
+    assert trace["accumulators_before"][CH_BVG]["wages"] == "0"
+    assert trace["accumulators_after"][CH_BVG]["wages"] == "6128.35"
+    assert trace["accumulators_after"][CH_BVG]["withheld"] == "612.8"
+    mandatory_lines = [l for l in trace["lines"] if l["obligation"] == "ch_bvg_mandatory"]
+    assert len(mandatory_lines) == 2
+    for line in mandatory_lines:
+        assert line["base"] == "6128.35"
+
+
+def test_bvg_age_band_change_applies_new_rates():
+    bands = [
+        {"component": "MANDATORY", "age_from": 25, "age_to": 34, "employee_pct": "6.0", "employer_pct": "8.0"},
+        {"component": "MANDATORY", "age_from": 35, "age_to": 44, "employee_pct": "7.0", "employer_pct": "9.5"},
+    ]
+    # born 1991-05-01 -> age 34 on 2026-03-31 -> applies the 25-34 band
+    ctx34 = _bvg_ctx(annual_salary="100000", bands=bands, scheme_id=5, dob=date(1991, 5, 1))
+    out34 = calculate(ctx34)
+    assert out34["ch_bvg_mandatory_employee"] == Decimal("367.70")   # 6128.35 * 6%
+    assert out34["ch_bvg_mandatory_employer"] == Decimal("490.25")   # 6128.35 * 8%
+    # born 1990-05-01 -> age 35 on 2026-03-31 -> applies the 35-44 band
+    ctx35 = _bvg_ctx(annual_salary="100000", bands=bands, scheme_id=5, dob=date(1990, 5, 1))
+    out35 = calculate(ctx35)
+    assert out35["ch_bvg_mandatory_employee"] == Decimal("429.00")   # 6128.35 * 7%
+    assert out35["ch_bvg_mandatory_employer"] == Decimal("582.20")   # 6128.35 * 9.5%
+
+
+def test_bvg_two_different_plans_different_rates():
+    plan_a = [{"component": "MANDATORY", "age_from": 25, "age_to": 44, "employee_pct": "5.0", "employer_pct": "5.0"}]
+    plan_b = [{"component": "MANDATORY", "age_from": 25, "age_to": 44, "employee_pct": "6.5", "employer_pct": "8.0"}]
+    out_a = calculate(_bvg_ctx(annual_salary="100000", bands=plan_a, scheme_id=5))
+    out_b = calculate(_bvg_ctx(annual_salary="100000", bands=plan_b, scheme_id=6))
+    assert out_a["ch_bvg_mandatory_employee"] == Decimal("306.40")   # 6128.35 * 5%
+    assert out_a["ch_bvg_mandatory_employer"] == Decimal("306.40")
+    assert out_b["ch_bvg_mandatory_employee"] == Decimal("398.35")   # 6128.35 * 6.5%
+    assert out_b["ch_bvg_mandatory_employer"] == Decimal("490.25")   # 6128.35 * 8%
+
+
+def test_bvg_coordination_floor():
+    # annual 25000 >= entry threshold, but 25000 - 26460 < 0 -> floored at
+    # the statutory minimum coordinated salary (3780), never negative/zero.
+    bands = [{"component": "MANDATORY", "age_from": 25, "age_to": 64, "employee_pct": "5.0", "employer_pct": "5.0"}]
+    ctx = _bvg_ctx(annual_salary="25000", bands=bands, scheme_id=5)
+    out = calculate(ctx)
+    # monthly insured = 3780 / 12 = 315.00; 5% each side = 15.75
+    assert out["ch_bvg_mandatory_employee"] == Decimal("15.75")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("15.75")
+    bvg_lines = [l for l in out["ch_calculation_trace"]["lines"] if l["obligation"] == "ch_bvg_mandatory"]
+    assert len(bvg_lines) == 2
+    for line in bvg_lines:
+        assert line["base"] == "315.00"
+
+
+def test_bvg_extra_mandatory_separate_line():
+    bands = [
+        {"component": "MANDATORY", "age_from": 25, "age_to": 44, "employee_pct": "5.0", "employer_pct": "5.0"},
+        {"component": "EXTRA_MANDATORY", "age_from": 25, "age_to": 44,
+         "salary_from": "90720", "salary_to": "150000", "employee_pct": "7.0", "employer_pct": "9.0"},
+    ]
+    ctx = _bvg_ctx(annual_salary="100000", bands=bands, scheme_id=5)
+    out = calculate(ctx)
+    # mandatory on coordinated salary 73540/12 = 6128.35 @ 5%
+    assert out["ch_bvg_mandatory_employee"] == Decimal("306.40")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("306.40")
+    # extra-mandatory on the slice (100000 - 90720) = 9280/12 = 773.35 @ 7%/9%
+    assert out["ch_bvg_extra_mandatory_employee"] == Decimal("54.15")
+    assert out["ch_bvg_extra_mandatory_employer"] == Decimal("69.60")
+    assert out["ch_bvg_employee"] == out["ch_bvg_mandatory_employee"] + out["ch_bvg_extra_mandatory_employee"]
+    assert out["ch_bvg_employer"] == out["ch_bvg_mandatory_employer"] + out["ch_bvg_extra_mandatory_employer"]
+    obligations = {l["obligation"] for l in out["ch_calculation_trace"]["lines"]}
+    assert "ch_bvg_mandatory" in obligations
+    assert "ch_bvg_extra_mandatory" in obligations
+    extra_lines = [l for l in out["ch_calculation_trace"]["lines"] if l["obligation"] == "ch_bvg_extra_mandatory"]
+    assert len(extra_lines) == 2
+    for line in extra_lines:
+        assert line["base"] == "773.35"
+
+
+def test_bvg_employer_share_below_50_rejected():
+    bad = {"bands": [{"component": "MANDATORY", "age_from": 25, "age_to": 64,
+                      "employee_pct": "60.0", "employer_pct": "40.0"}]}
+    okay, idx = _validate_bvg_scheme_employer_share(bad)
+    assert okay is False and idx == 0
+    # The real enforcement is at scheme validation (create/update): the payload
+    # is refused, so a below-50% plan can never reach a calculation.
+    with pytest.raises(Exception) as exc:
+        validate_scheme_rules("BVG_PLAN", {
+            "entry_rules": {}, "insured_salary_def": "annual",
+            "coordination": {"mode": "STATUTORY"},
+            "bands": [{"component": "MANDATORY", "age_from": 25, "age_to": 64,
+                       "employee_pct": "60.0", "employer_pct": "40.0"}],
+        })
+    assert "employer share" in str(exc.value)
+    # A compliant band (employer >= employee) validates cleanly.
+    validate_scheme_rules("BVG_PLAN", {
+        "entry_rules": {}, "insured_salary_def": "annual",
+        "coordination": {"mode": "STATUTORY"},
+        "bands": [{"component": "MANDATORY", "age_from": 25, "age_to": 64,
+                   "employee_pct": "5.0", "employer_pct": "5.0"}],
+    })
