@@ -4168,7 +4168,8 @@ def activate_switzerland_qst_tariff(tariff_file_id: int, reason: Optional[str] =
 # X-Correlation-ID echoed, one transaction per write (ch_write).
 from app.modules.payroll.switzerland_http import ChWriteContext, ch_write, ch_write_headers  # noqa: E402
 from app.modules.payroll.switzerland_schemas import (  # noqa: E402
-    ChReasonBody, ChSchemeCreate, ChSchemeUpdate, ChTaxabilityRuleCreate, ChWageFloorCreate,
+    ChCalculationPreviewRequest, ChReasonBody, ChSchemeCreate, ChSchemeUpdate, ChTaxabilityRuleCreate,
+    ChWageFloorCreate,
 )
 
 
@@ -4333,3 +4334,31 @@ def activate_switzerland_wage_floor(agreement_id: int, payload: Optional[ChReaso
                     actor_id=current_user.id, request=payload.model_dump(mode="json"),
                     perform=lambda: switzerland_service.activate_ch_wage_floor(
                         db, agreement_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@router.get("/compliance/switzerland/readiness",
+            summary="Read-only: Switzerland release gates G1-G7 plus the per-canton status (re-derived on every read)")
+def get_switzerland_readiness(on: Optional[date] = Query(None), current_user=Depends(get_current_super_admin),
+                              db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_ch_readiness(db, on)
+
+
+@router.post("/compliance/switzerland/calculation-preview",
+             summary="Read-only: run the production resolver + Swiss engine for one employee — writes nothing")
+def preview_switzerland_calculation(data: ChCalculationPreviewRequest, current_user=Depends(get_current_super_admin),
+                                    db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.preview_ch_calculation(db, data)
+
+
+@router.get("/compliance/switzerland/qst-tariffs/{tariff_file_id}/affected-payslips",
+            summary="Read-only: the payslips / months calculated on a QST tariff file (a tariff correction lists "
+                    "them for deliberate correction — nothing is recalculated)")
+def switzerland_qst_tariff_affected_payslips(tariff_file_id: int, current_user=Depends(get_current_super_admin),
+                                             db: Session = Depends(get_db)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.qst_tariff_affected_payslips(db, tariff_file_id)

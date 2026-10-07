@@ -1478,6 +1478,11 @@ class PayrollResult:
     it_ytd_after: dict = None
     it_employee_total: Decimal = Decimal("0")
     it_calculation_trace: dict = None
+    # Switzerland (CH spec): the whole dict countries/switzerland.py returns
+    # (lines, totals, ch_calculation_trace) — one field rather than ~40, read
+    # by switzerland_service.ch_payslip_snapshot / post_ch_payslip_ytd. None
+    # for every other country.
+    ch_result: dict = None
 
     # ── Switzerland (CH spec) ──────────────────────────────────────────────────
     # Federal social insurance contributions (AHV/IV/EO/ALV).

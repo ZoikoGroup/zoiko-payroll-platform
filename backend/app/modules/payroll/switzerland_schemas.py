@@ -293,3 +293,115 @@ class ChQstResolveRequest(_Strict):
                 "spouse_swiss_or_permit_c": self.spouseSwissOrPermitC, "spouse_employed": self.spouseEmployed,
                 "children_count": self.childrenCount, "church_tax": self.churchTax,
                 "qst_canton": self.qstCanton, "on_date": self.onDate}
+
+
+# ── Step 11: family-allowance entitlements + absence-benefit events ──────
+
+class ChFamilyAllowanceCreate(_Strict):
+    employeeId: int
+    allowanceType: Literal["CHILD", "EDUCATION", "BIRTH", "ADOPTION"]
+    childReference: Optional[str] = Field(default=None, max_length=50)
+    childBirthDate: Optional[date] = None
+    trainingStatus: Optional[str] = Field(default=None, max_length=30)
+    entitlementBasis: Literal["PRIMARY", "DIFFERENTIAL"] = "PRIMARY"
+    # DIFFERENTIAL only: what the PRIMARY fund elsewhere pays per month — the
+    # proof that this employer owes only the difference.
+    primaryFundAmount: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    primaryFundReference: Optional[str] = Field(default=None, max_length=100)
+    canton: Optional[str] = None
+    fakSchemeId: Optional[int] = None
+    periodFrom: date
+    periodTo: Optional[date] = None
+    fundDecisionReference: Optional[str] = Field(default=None, max_length=100)
+    sourceDocumentId: Optional[int] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    _canton = field_validator("canton")(classmethod(lambda cls, v: _check_canton(v)))
+
+    @model_validator(mode="after")
+    def _shape(self):
+        if self.periodTo is not None and self.periodTo < self.periodFrom:
+            raise ValueError("periodTo is before periodFrom")
+        if self.entitlementBasis == "DIFFERENTIAL" and self.primaryFundAmount is None:
+            raise ValueError("a DIFFERENTIAL entitlement needs primaryFundAmount (what the primary fund pays)")
+        if self.entitlementBasis == "PRIMARY" and (self.primaryFundAmount is not None or self.primaryFundReference):
+            raise ValueError("primaryFundAmount / primaryFundReference apply only to a DIFFERENTIAL entitlement")
+        return self
+
+
+class ChFamilyAllowanceUpdate(_Strict):
+    """Edit of a REQUESTED entitlement only (an APPROVED one is the fund's
+    decision of record and never edited)."""
+    childReference: Optional[str] = Field(default=None, max_length=50)
+    childBirthDate: Optional[date] = None
+    trainingStatus: Optional[str] = Field(default=None, max_length=30)
+    primaryFundAmount: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    primaryFundReference: Optional[str] = Field(default=None, max_length=100)
+    canton: Optional[str] = None
+    fakSchemeId: Optional[int] = None
+    periodFrom: Optional[date] = None
+    periodTo: Optional[date] = None
+    fundDecisionReference: Optional[str] = Field(default=None, max_length=100)
+    sourceDocumentId: Optional[int] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    _canton = field_validator("canton")(classmethod(lambda cls, v: _check_canton(v)))
+
+
+class ChAbsenceEventCreate(_Strict):
+    employeeId: int
+    eventType: Literal["MATERNITY", "OTHER_PARENT", "ADOPTION", "ILLNESS_CO", "ILLNESS_KTG", "ACCIDENT_UVG",
+                       "PREGNANCY_PROTECTION"]
+    periodFrom: date
+    periodTo: Optional[date] = None
+    dailyAllowanceRate: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    insuredSalaryBasis: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    insurerClaimReference: Optional[str] = Field(default=None, max_length=100)
+    benefitAmountExpected: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    benefitAmountReceived: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    employerTopupAmount: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    evidenceDocumentId: Optional[int] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _shape(self):
+        if self.periodTo is not None and self.periodTo < self.periodFrom:
+            raise ValueError("periodTo is before periodFrom")
+        if self.eventType in ("ILLNESS_CO", "PREGNANCY_PROTECTION") and self.dailyAllowanceRate is not None:
+            raise ValueError(f"{self.eventType} carries no insurer daily allowance")
+        return self
+
+
+class ChAbsenceEventUpdate(_Strict):
+    """Edit of an OPEN event; status CLOSED freezes it."""
+    periodTo: Optional[date] = None
+    dailyAllowanceRate: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    insuredSalaryBasis: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    insurerClaimReference: Optional[str] = Field(default=None, max_length=100)
+    benefitAmountExpected: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    benefitAmountReceived: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    employerTopupAmount: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    evidenceDocumentId: Optional[int] = None
+    status: Optional[Literal["OPEN", "CLOSED"]] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class ChCalculationPreviewRequest(_Strict):
+    """Super Admin preview for one real CH employee (read-only)."""
+    organizationId: int
+    employeeId: int
+    payDate: date
+    periodStart: Optional[date] = None
+    periodEnd: Optional[date] = None
+    # {earning_type: monthly amount}; default {"base_salary": ctc / 12}
+    earnings: Optional[Dict[str, Decimal]] = None
+
+
+class ChCorrectionCreate(_Strict):
+    """Append-only correction of a finalized CH payslip (Step 13)."""
+    originalPayslipId: int
+    reason: str = Field(min_length=3, max_length=500)
+    affectedObligations: List[str] = Field(min_length=1)
+    # restated inputs only (earnings, worker facts, QST tariff facts) —
+    # see switzerland_service.CH_CORRECTABLE_INPUTS
+    correctedInputs: Dict[str, Any] = Field(default_factory=dict)

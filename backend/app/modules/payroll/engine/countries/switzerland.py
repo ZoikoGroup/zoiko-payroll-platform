@@ -49,6 +49,7 @@ NO hardcoded statutory figure: every rate, threshold and band is a configured ro
 SwitzerlandCalculationBlockedError.
 """
 
+import copy
 from decimal import Decimal
 from hashlib import sha256
 import json
@@ -59,6 +60,8 @@ from app.modules.payroll.engine.countries.switzerland_content import (
     CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_LA, CH_QST, CH_UVG, CH_WAGE_FLOOR,
     CH_YTD_COMPONENTS, CH_OBLIGATIONS, CH_QST_ANNUAL_MODEL_CANTONS, CH_CANTON_CODES,
     CH_QST_MONTHS_PER_YEAR, CH_QST_PCT_DIVISOR,
+    CH_ABSENCE_ALLOWANCE_EARNING, CH_ABSENCE_EARNING_TYPES, CH_EARNING_EMPLOYER_TOPUP,
+    CH_FAK_AMOUNT_KEYS, CH_MONTHS_PER_YEAR, CH_WAGE_FLOOR_BASES,
 )
 
 # Federal obligations only — the ones this federal calculator handles.
@@ -403,6 +406,16 @@ def _calculate_bvg(ctx: PayrollContext, pack: _Pack):
 # pack minimum (S5). Both sit under the statutory ceiling, tracked period-over-
 # period by the CH_UVG accumulator exactly like ALV.
 
+def _split_premium(pack: _Pack, key: str, rate_pct: Decimal, employee_share_pct: Decimal):
+    """(employee rate, employer rate) in salary percent: the employee pays
+    `employee_share_pct` percent OF the premium rate, the employer the rest.
+    A share outside 0..100 BLOCKS (it would make one side negative)."""
+    if not (ZERO <= employee_share_pct <= HUNDRED):
+        pack.block(key, f"employee share {employee_share_pct} must be a percentage of the premium (0-100)")
+    employee = rate_pct * employee_share_pct / HUNDRED
+    return employee, rate_pct - employee
+
+
 def _calculate_uvg(ctx: PayrollContext, pack: _Pack, uvg_base: Decimal) -> dict:
     """UVG BU + NBU for the period. Returns the split amounts, the capped
     insured base and the policy/pack facts used to derive them; anything
@@ -439,8 +452,11 @@ def _calculate_uvg(ctx: PayrollContext, pack: _Pack, uvg_base: Decimal) -> dict:
         nbu_ee_share = risk_class.get("nbu_employee_share_pct")
         if nbu_pct is None or nbu_ee_share is None:
             pack.block("ch_uvg_risk_class:nbu_rate_missing", "risk class has no NBU rate / employee share")
-        nbu_ee_pct = _dec(nbu_ee_share)
-        nbu_er_pct = _dec(nbu_pct) - nbu_ee_pct
+        # nbu_employee_share_pct is the employee's SHARE of the NBU premium
+        # (0-100, Step 5 contract — commonly 100: NBU may be charged to the
+        # employee in full), never a rate in salary percentage points.
+        nbu_ee_pct, nbu_er_pct = _split_premium(pack, "ch_uvg_risk_class:nbu_share", _dec(nbu_pct),
+                                                _dec(nbu_ee_share))
         nbu_employee = _round_chf(insurable * nbu_ee_pct / HUNDRED)
         nbu_employer = _round_chf(insurable * nbu_er_pct / HUNDRED)
 
@@ -469,8 +485,8 @@ def _calculate_ktg(ctx: PayrollContext, pack: _Pack, ktg_base: Decimal) -> dict 
     employee_share_pct = scheme_rules.get("employee_share_pct")
     if employee_share_pct is None:
         pack.block("ch_ktg_policy:share_missing", "KTG policy has no employee_share_pct")
-    ee_pct = _dec(employee_share_pct)
-    er_pct = _dec(rate_pct) - ee_pct
+    # employee_share_pct is the employee's SHARE of the policy premium (0-100)
+    ee_pct, er_pct = _split_premium(pack, "ch_ktg_policy:share", _dec(rate_pct), _dec(employee_share_pct))
     return {"employee": _round_chf(ktg_base * ee_pct / HUNDRED),
             "employer": _round_chf(ktg_base * er_pct / HUNDRED),
             "base": ktg_base, "ee_pct": ee_pct, "er_pct": er_pct}
@@ -611,6 +627,28 @@ def _qst_annual(ctx: PayrollContext, pack: _Pack, periodic_base: Decimal, aperio
 _QST_STRATEGIES = {"MONTHLY": _qst_monthly, "ANNUAL": _qst_annual}
 
 
+def qst_lookup_incomes(ctx) -> dict:
+    """The incomes the service must look the QST tariff rows up on, derived
+    with the engine's OWN determination logic so the row the service passes
+    in context always matches the income the strategy taxes:
+      periodic  — the (combined, for multiple employment) monthly
+                  determination income; annualised by the content divisor
+                  for the ANNUAL model, whose tariff is annual;
+      aperiodic — the aperiodic payment itself (its own row), or None.
+    Blocks exactly as the calculation would."""
+    pack = _Pack(getattr(ctx, "rate_map", None) or {}, getattr(ctx, "organization_id", None))
+    # absence allowances can be QST-classified too: the same earnings the
+    # calculation will see
+    ctx, _applied = _with_absence_earnings(ctx, pack)
+    model = _upper(getattr(ctx, "ch_qst_model", None))
+    if model not in _QST_STRATEGIES:
+        pack.block("ch_qst_model", f"the canton pack does not set a known QST model (got {model!r})")
+    periodic_base, aperiodic_base = _qst_determination_incomes(ctx, pack)
+    combined, _own, _other = _qst_combined_income(ctx, pack, periodic_base)
+    periodic = combined * CH_QST_MONTHS_PER_YEAR if model == "ANNUAL" else combined
+    return {"model": model, "periodic": periodic, "aperiodic": aperiodic_base if aperiodic_base > ZERO else None}
+
+
 def _calculate_qst(ctx: PayrollContext, pack: _Pack) -> dict | None:
     """Quellensteuer for the period; None when the worker is recorded NOT
     QST-liable (ch_qst_subject == NO). A YES subject without the canton / model /
@@ -666,6 +704,203 @@ def _calculate_qst(ctx: PayrollContext, pack: _Pack) -> dict | None:
     return result
 
 
+# ── Step 11: absence-benefit earnings ─────────────────────────────────────
+# Each absence event's insurer daily allowance (EO / UVG / KTG) and the
+# employer's top-up enter the calculation as their OWN earning types, so the
+# per-obligation TaxabilityRule classification decides each one separately
+# (a missing classification blocks exactly as for any other earning). The
+# per-period amounts are prepared service-side from the event rows.
+
+def _with_absence_earnings(ctx: PayrollContext, pack: _Pack):
+    events = getattr(ctx, "ch_absence_earnings", None) or []
+    if not events:
+        return ctx, []
+    earnings = dict(getattr(ctx, "earnings", {}) or {})
+    for earning_type in CH_ABSENCE_EARNING_TYPES:
+        if _dec(earnings.get(earning_type)) != ZERO:
+            pack.block(f"ch_absence_earning:{earning_type}",
+                       "absence earnings come only from absence events, never as a manual earning")
+    applied = []
+    for event in events:
+        event_id, event_type = _field(event, "event_id"), _upper(_field(event, "event_type"))
+        if event_type not in CH_ABSENCE_ALLOWANCE_EARNING:
+            pack.block(f"ch_absence_event:{event_id}", f"unknown absence event type {event_type!r}")
+        allowance, topup = _dec(_field(event, "allowance")), _dec(_field(event, "topup"))
+        if allowance < ZERO or topup < ZERO:
+            pack.block(f"ch_absence_event:{event_id}", "absence amounts cannot be negative")
+        earning_type = CH_ABSENCE_ALLOWANCE_EARNING[event_type]
+        if allowance > ZERO:
+            if earning_type is None:
+                pack.block(f"ch_absence_event:{event_id}", f"{event_type} carries no insurer allowance")
+            earnings[earning_type] = _dec(earnings.get(earning_type)) + allowance
+        if topup > ZERO:
+            earnings[CH_EARNING_EMPLOYER_TOPUP] = _dec(earnings.get(CH_EARNING_EMPLOYER_TOPUP)) + topup
+        applied.append({"event_id": event_id, "event_type": event_type, "earning_type": earning_type,
+                        "allowance": str(_round2(allowance)), "topup": str(_round2(topup))})
+    # never mutate the caller's context: calculate() stays a pure function
+    merged = copy.copy(ctx)
+    merged.earnings = earnings
+    return merged, applied
+
+
+# ── Step 11: family allowances (FAK) ─────────────────────────────────────
+# Paid ONLY per APPROVED entitlement (the service passes those overlapping the
+# period) at the CANTON pack amount. A canton amount below the federal
+# minimum BLOCKS — the federal minimum is never substituted. A child recorded
+# on the profile without an approved entitlement is paid nothing.
+
+def _canton_param(ctx: PayrollContext, canton, key):
+    maps = getattr(ctx, "ch_canton_rate_maps", None) or {}
+    return (maps.get(canton) or {}).get(key)
+
+
+def _calculate_fak_allowances(ctx: PayrollContext, pack: _Pack):
+    totals = {allowance_type: ZERO for allowance_type in CH_FAK_AMOUNT_KEYS}
+    paid = []
+    for ent in getattr(ctx, "ch_fak_entitlements", None) or []:
+        ent_id = _field(ent, "id")
+        allowance_type = _upper(_field(ent, "allowance_type"))
+        basis = _upper(_field(ent, "entitlement_basis")) or "PRIMARY"
+        keys = CH_FAK_AMOUNT_KEYS.get(allowance_type)
+        if keys is None:
+            pack.block(f"ch_fak_{allowance_type.lower() or 'type'}",
+                       f"entitlement {ent_id}: no configured amount for {allowance_type or 'an unknown'} allowances")
+        canton_key, minimum_key = keys
+        canton = _field(ent, "canton") or getattr(ctx, "ch_work_canton", None)
+        if canton not in CH_CANTON_CODES:
+            pack.block("ch_fak_canton", f"entitlement {ent_id}: no CH-XX canton to pay it from")
+        row = _canton_param(ctx, canton, canton_key)
+        amount = getattr(row, "flat_amount", None) if row is not None else None
+        if amount is None:
+            pack.block(f"{canton_key}:{canton}", f"the {canton} pack has no {allowance_type} allowance amount")
+        amount = _dec(amount)
+        minimum = pack.require_amount(minimum_key)
+        if amount < minimum:
+            pack.block("ch_fak_below_federal_minimum",
+                       f"{canton} {allowance_type} allowance {amount} is below the federal minimum {minimum} "
+                       "(the federal minimum is never substituted — correct the canton pack)")
+        if basis == "PRIMARY":
+            due = amount
+        elif basis == "DIFFERENTIAL":
+            primary = _field(ent, "primary_amount")
+            if primary is None:
+                pack.block(f"ch_fak_differential:{ent_id}",
+                           "a differential entitlement needs the amount the primary fund pays")
+            due = max(ZERO, amount - _dec(primary))
+        else:
+            pack.block(f"ch_fak_basis:{ent_id}", f"unknown entitlement basis {basis!r}")
+        due = _round_chf(due)
+        totals[allowance_type] += due
+        paid.append({"entitlement_id": ent_id, "allowance_type": allowance_type, "basis": basis, "canton": canton,
+                     "canton_amount": str(amount), "federal_minimum": str(minimum),
+                     "primary_amount": str(_dec(_field(ent, "primary_amount"))) if basis == "DIFFERENTIAL" else None,
+                     "paid": str(due)})
+    return totals, paid
+
+
+def _calculate_fak_contributions(ctx: PayrollContext, pack: _Pack, ahv_base: Decimal) -> dict:
+    """Employer FAK contribution at the LIVE FAK scheme's employer_pct on the
+    AHV base. An employee share exists ONLY where the work canton's pack
+    configures ch_fak_employee_pct (Valais) — never from the scheme alone."""
+    rules = getattr(ctx, "ch_fak_scheme_rules", None)
+    if rules is None:
+        pack.block("ch_fak_scheme", "no LIVE FAK scheme rules")
+    employer_pct = rules.get("employer_pct")
+    if employer_pct is None:
+        pack.block("ch_fak_scheme", "the FAK scheme has no employer_pct")
+    canton = getattr(ctx, "ch_work_canton", None)
+    row = _canton_param(ctx, canton, "ch_fak_employee_pct")
+    employee_pct = getattr(row, "employee_rate_pct", None) if row is not None else None
+    employer_pct = _dec(employer_pct)
+    employee_pct = _dec(employee_pct) if employee_pct is not None else None
+    return {
+        "employer_pct": employer_pct, "employee_pct": employee_pct, "canton": canton,
+        "employer": _round_chf(ahv_base * employer_pct / HUNDRED),
+        "employee": _round_chf(ahv_base * employee_pct / HUNDRED) if employee_pct is not None else ZERO,
+    }
+
+
+# ── Step 11: wage floor ───────────────────────────────────────────────────
+# Switzerland has no federal statutory minimum wage. A floor applies only by
+# SCOPE: a canton minimum only where the worker's work canton is that canton;
+# a GAV / NAV only when assigned to the worker. Countable pay is the
+# CH_WAGE_FLOOR-classified earnings; a shortfall BLOCKS (no automatic top-up).
+
+def _floor_amount(ctx: PayrollContext, pack: _Pack, agreement) -> Decimal:
+    code = _field(agreement, "agreement_code")
+    floor = _field(agreement, "wage_floor") or {}
+    scales = floor.get("scales") or []
+    occupation, grade = getattr(ctx, "ch_occupation", None), getattr(ctx, "ch_grade", None)
+    experience = getattr(ctx, "ch_experience_years", None)
+    matches = []
+    for scale in scales:
+        if scale.get("occupation") is not None and scale["occupation"] != occupation:
+            continue
+        if scale.get("grade") is not None and scale["grade"] != grade:
+            continue
+        needed = scale.get("experience_years_from")
+        if needed is not None and (experience is None or _dec(experience) < _dec(needed)):
+            continue
+        matches.append(scale)
+    if matches:
+        best = max(matches, key=lambda s: (_dec(s.get("experience_years_from")),
+                                           s.get("grade") is not None, s.get("occupation") is not None))
+        return _dec(best["amount"])
+    if floor.get("amount") is not None:
+        return _dec(floor["amount"])
+    pack.block(f"ch_wage_floor_scale:{code}",
+               f"no {code} scale row matches occupation {occupation!r} / grade {grade!r} / experience {experience}")
+
+
+def _check_wage_floor(ctx: PayrollContext, pack: _Pack) -> dict:
+    work = getattr(ctx, "ch_work_canton", None)
+    applicable, skipped = [], []
+    for a in getattr(ctx, "ch_wage_floor_agreements", None) or []:
+        code, kind, canton = _field(a, "agreement_code"), _field(a, "agreement_type"), _field(a, "canton")
+        if kind == "CH_CANTON_MINIMUM":
+            in_scope = canton is not None and canton == work
+            why = f"canton minimum for {canton}; the worker works in {work}"
+        elif kind in ("CH_GAV", "CH_NAV"):
+            in_scope = bool(_field(a, "assigned")) and (canton is None or canton == work)
+            why = "not assigned to this worker" if not _field(a, "assigned") else f"{canton} agreement; work canton {work}"
+        else:
+            pack.block(f"ch_wage_floor_type:{code}", f"unknown wage-floor agreement type {kind!r}")
+        (applicable if in_scope else skipped).append(a if in_scope else {"agreement_code": code, "reason": why})
+    if not applicable:
+        return {"rule": "NO_MANDATORY_FLOOR",
+                "basis": f"no federal statutory minimum wage; no Active canton minimum in scope for {work}; "
+                         "no GAV / NAV assigned to this worker",
+                "skipped": skipped, "checks": []}
+    countable = _compute_obligation_bases(ctx, pack, (CH_WAGE_FLOOR,))[CH_WAGE_FLOOR]
+    checks = []
+    for a in applicable:
+        code = _field(a, "agreement_code")
+        basis = _upper((_field(a, "wage_floor") or {}).get("basis"))
+        if basis not in CH_WAGE_FLOOR_BASES:
+            pack.block(f"ch_wage_floor_basis:{code}", f"unknown wage-floor basis {basis!r}")
+        floor = _floor_amount(ctx, pack, a)
+        if basis == "HOURLY":
+            hours = getattr(ctx, "ch_period_hours", None)
+            if hours is None or _dec(hours) <= ZERO:
+                pack.block("ch_period_hours", f"{code} is an hourly floor: the hours paid this period are needed")
+            denominator = _dec(hours)
+            rate = countable / denominator
+        elif basis == "MONTHLY":
+            denominator, rate = None, countable
+        else:
+            denominator, rate = None, countable * CH_MONTHS_PER_YEAR
+        check = {"agreement_id": _field(a, "id"), "agreement_code": code, "agreement_type": _field(a, "agreement_type"),
+                 "version": _field(a, "version"), "basis": basis, "countable_pay": str(countable),
+                 "denominator": str(denominator) if denominator is not None else None,
+                 "pay_rate": str(_round2(rate)), "floor": str(floor)}
+        if rate < floor:
+            pack.block("ch_wage_floor_shortfall",
+                       f"{code}: {basis.lower()} pay {_round2(rate)} is below the floor {floor} "
+                       "(no automatic top-up — correct the pay)")
+        checks.append(check)
+    return {"rule": "CHECKED", "basis": None, "skipped": skipped, "checks": checks}
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """Swiss federal payroll calculation — pure function, no DB, no network,
     no date.today(). Returns a dict with deductions, snapshots, and CH fields
@@ -674,6 +909,10 @@ def calculate(ctx: PayrollContext) -> dict:
 
     org_id = getattr(ctx, "organization_id", None)
     pack = _Pack(ctx.rate_map, org_id)
+
+    # 0. Absence-benefit allowances / top-ups join the earnings as their own
+    #    earning types (classified per obligation like any other earning).
+    ctx, absence_applied = _with_absence_earnings(ctx, pack)
 
     # 1. Obligation bases
     bases = _compute_obligation_bases(ctx, pack, FEDERAL_OBLIGATIONS)
@@ -784,18 +1023,26 @@ def calculate(ctx: PayrollContext) -> dict:
     admin_cost_base = bases.get(CH_AHV, ZERO)  # Admin cost on AHV base per convention
     admin_cost = _round_chf(admin_cost_base * admin_cost_pct / HUNDRED)
 
-    # 11. Totals
-    employee_total = ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee + uvg_employee + ktg_employee + qst_total
-    employer_total = ahv_er + iv_er + eo_er + alv_er + bvg_er + admin_cost + uvg_employer + ktg_employer
+    # 10b. FAK contribution (employer from the FAK scheme; employee share only
+    #      where the work canton's pack configures one) on the AHV base.
+    fak_contrib = _calculate_fak_contributions(ctx, pack, bases.get(CH_AHV, ZERO))
 
-    # 11. Family allowances (FAK) — federal minimums; added to net (employee benefit)
-    fak_child_min = pack.require_amount("ch_fak_child_min")
-    fak_education_min = pack.require_amount("ch_fak_education_min")
-    children = _dec(getattr(ctx, "ch_children_count", 0))
-    students = _dec(getattr(ctx, "ch_students_count", 0))
-    fak_child_total = _round_chf(fak_child_min * children)
-    fak_education_total = _round_chf(fak_education_min * students)
+    # 11. Totals
+    employee_total = (ahv_ee + iv_ee + eo_ee + alv_ee + bvg_ee + uvg_employee + ktg_employee + qst_total
+                      + fak_contrib["employee"])
+    employer_total = (ahv_er + iv_er + eo_er + alv_er + bvg_er + admin_cost + uvg_employer + ktg_employer
+                      + fak_contrib["employer"])
+
+    # 11b. Family allowances (FAK) — per APPROVED entitlement at the canton
+    #      amount; added to net (employee benefit), never deducted.
+    fak_totals, fak_paid = _calculate_fak_allowances(ctx, pack)
+    fak_child_total = fak_totals["CHILD"]
+    fak_education_total = fak_totals["EDUCATION"]
     family_allowance_total = fak_child_total + fak_education_total
+
+    # 11c. Wage floor — a blocking validation, never a top-up.
+    wage_floor = _check_wage_floor(ctx, pack)
+    absence_total = sum((_dec(ctx.earnings.get(t)) for t in CH_ABSENCE_EARNING_TYPES), ZERO)
 
     # 12. Build lines for snapshot (AHV/IV/EO/ALV/Admin lines)
 
@@ -868,6 +1115,20 @@ def calculate(ctx: PayrollContext) -> dict:
     # Admin cost
     add_line("ch_admin", "employer", admin_cost_base, admin_cost_pct / HUNDRED, None,
              "scheme:compensation_office", "1.0", "CH-PAYROLL-2026", "1.0")
+    # FAK contribution (employer; employee only where the canton configures it)
+    fak_scope = f"scheme:fak:{getattr(ctx, 'ch_fak_scheme_id', None)}"
+    add_line("ch_fak", "employer", bases.get(CH_AHV, ZERO), fak_contrib["employer_pct"] / HUNDRED, None,
+             fak_scope, "1.0", "FAK scheme", "1.0")
+    if fak_contrib["employee_pct"] is not None:
+        add_line("ch_fak", "employee", bases.get(CH_AHV, ZERO), fak_contrib["employee_pct"] / HUNDRED, None,
+                 f"canton:{fak_contrib['canton']}", "1.0", "canton pack ch_fak_employee_pct", "1.0")
+    # Wage floor — an explicit line either way: the floor checked, or why none applies
+    if wage_floor["rule"] == "NO_MANDATORY_FLOOR":
+        add_line(CH_WAGE_FLOOR, "check", ZERO, "NO_MANDATORY_FLOOR", None,
+                 f"canton:{getattr(ctx, 'ch_work_canton', None)}", "1.0", wage_floor["basis"], "1.0")
+    for check in wage_floor["checks"]:
+        add_line(CH_WAGE_FLOOR, "check", _dec(check["countable_pay"]), f"{check['basis']} floor {check['floor']}",
+                 None, f"agreement:{check['agreement_id']}", str(check["version"]), check["agreement_code"], "1.0")
 
     # 13. Accumulators before/after
     ytd_before = {}
@@ -1002,6 +1263,10 @@ def calculate(ctx: PayrollContext) -> dict:
         "ch_family_allowance_total": family_allowance_total,
         "ch_fak_child_total": fak_child_total,
         "ch_fak_education_total": fak_education_total,
+        "ch_fak_employer": fak_contrib["employer"],
+        "ch_fak_employee": fak_contrib["employee"],
+        # Absence-benefit earnings (part of gross, each its own earning type)
+        "ch_absence_earnings_total": absence_total,
         # Snapshot / trace
         "ch_calculation_trace": {
             "lines": lines,
@@ -1009,6 +1274,10 @@ def calculate(ctx: PayrollContext) -> dict:
             "accumulators_before": ytd_before,
             "accumulators_after": ytd_after,
             "qst": qst_trace,
+            "fak": {"entitlements": fak_paid, "employer_pct": str(fak_contrib["employer_pct"]),
+                    "employee_pct": str(fak_contrib["employee_pct"]) if fak_contrib["employee_pct"] is not None else None},
+            "wage_floor": wage_floor,
+            "absence": absence_applied,
             "resolved_versions": {
                 "federal_pack_id": federal_pack_id,
                 "federal_pack_version": federal_pack_version,

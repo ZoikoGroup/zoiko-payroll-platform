@@ -81,13 +81,13 @@ def _text_row(val):
 
 _DEFAULT_UVG_RULES = {
     "insurer": "TEST-UVR-INSURER",
-    "risk_classes": [{"code": "A1", "bu_employer_pct": "0.3", "nbu_pct": "0.9", "nbu_employee_share_pct": "0.45"}],
+    "risk_classes": [{"code": "A1", "bu_employer_pct": "0.3", "nbu_pct": "0.9", "nbu_employee_share_pct": "50"}],
 }
 
 
 def _full_ctx(earnings=None, ytd=None, scheme_rules={"admin_cost_pct": "1.0"}, classification=None,
               proration_rule="monthly", uvg_rules=None, uvg_policy_id=3, uvg_risk_class="A1",
-              weekly_hours="9", ktg_rules=None, ktg_policy_id=4):
+              weekly_hours="9", ktg_rules=None, ktg_policy_id=4, fak_rules=None, work_canton="CH-ZH"):
     rate_map = {
         "ch_ahv": _rate_row("4.35", "4.35"),
         "ch_iv": _rate_row("0.70", "0.70"),
@@ -138,6 +138,12 @@ def _full_ctx(earnings=None, ytd=None, scheme_rules={"admin_cost_pct": "1.0"}, c
     # QST — off by default: an unchosen worker is recorded NO, and the QST
     # engine skips them. Only the STEP 10 contexts flip it to YES.
     ctx.ch_qst_subject = "NO"
+    # FAK — every employer is affiliated to a family-allowance fund (Step 11):
+    # a LIVE FAK scheme's employer_pct on the AHV base; no employee share
+    # unless the work canton's pack configures one (Valais).
+    ctx.ch_work_canton = work_canton
+    ctx.ch_fak_scheme_id = 2
+    ctx.ch_fak_scheme_rules = fak_rules if fak_rules is not None else {"employer_pct": "1.2"}
     return ctx
 
 
@@ -186,7 +192,7 @@ def test_components_are_separate_lines():
     assert out["ch_employee_total"] == Decimal("685.00")
     # Employer total includes admin cost + BU + NBU employer
     assert out["ch_admin_cost_employer"] == Decimal("100.00")
-    assert out["ch_employer_total"] == Decimal("815.00")
+    assert out["ch_employer_total"] == Decimal("935.00")   # + FAK employer 120 (Step 11)
 
 
 # ── ALV cap reached mid-year: ALV stops, AHV continues ──────────────────────
@@ -241,7 +247,7 @@ def test_admin_cost_employer_only_not_in_employee_total():
     assert out["ch_employer_total"] == out["ch_ahv_employer"] + out["ch_iv_employer"] + \
                                        out["ch_eo_employer"] + out["ch_alv_employer"] + \
                                        out["ch_uvg_employer"] + out["ch_ktg_employer"] + \
-                                       out["ch_admin_cost_employer"]
+                                       out["ch_admin_cost_employer"] + out["ch_fak_employer"]
     # Employee total does NOT include admin cost or employer shares
     assert out["ch_employee_total"] == out["ch_ahv_employee"] + out["ch_iv_employee"] + \
                                        out["ch_eo_employee"] + out["ch_alv_employee"] + \
@@ -255,7 +261,8 @@ def test_admin_cost_employer_only_not_in_employee_total():
 @pytest.mark.parametrize("missing_key", [
     "ch_ahv", "ch_iv", "ch_eo", "ch_alv", "ch_alv_ceiling",
     "ch_uvg_ceiling", "ch_nbu_min_weekly_hours",
-    "ch_fak_child_min", "ch_fak_education_min",
+    # ch_fak_child_min / ch_fak_education_min are only read for an APPROVED
+    # entitlement (Step 11) — covered in test_fak_federal_minimum_required_for_an_entitlement
 ])
 def test_missing_rate_blocks(missing_key):
     ctx = _full_ctx(earnings={"base_salary": Decimal("10000")},
@@ -351,10 +358,12 @@ def test_family_allowances_added_to_net():
                                     CH_ALV: {"base_salary": True}},
                     scheme_rules={"admin_cost_pct": "1.0"})
     out = calculate(ctx)
-    # 2 children * 215 + 1 student * 268 = 430 + 268 = 698
-    assert out["ch_fak_child_total"] == Decimal("430.00")
-    assert out["ch_fak_education_total"] == Decimal("268.00")
-    assert out["ch_family_allowance_total"] == Decimal("698.00")
+    # Step 11 replaced the Step 7 behaviour (federal minimum x profile children
+    # count): the helper's profile says 2 children + 1 student, but with no
+    # APPROVED entitlement nothing is paid — see the Step 11 FAK tests below.
+    assert out["ch_fak_child_total"] == Decimal("0")
+    assert out["ch_fak_education_total"] == Decimal("0")
+    assert out["ch_family_allowance_total"] == Decimal("0")
     # Family allowance is NOT in employee_total
     assert out["ch_employee_total"] == Decimal("685.00")
 
@@ -377,8 +386,9 @@ def test_snapshot_structure():
     assert "resolved_versions" in trace
     assert "input_hash" in trace
     assert "rule_hash" in trace
-    # AHV ee/er, IV ee/er, EO ee/er, ALV ee/er, UVG BU er, UVG NBU ee/er, admin
-    assert len(trace["lines"]) == 12
+    # AHV ee/er, IV ee/er, EO ee/er, ALV ee/er, UVG BU er, UVG NBU ee/er, admin,
+    # FAK employer, and the explicit NO_MANDATORY_FLOOR wage-floor line (Step 11)
+    assert len(trace["lines"]) == 14
     for line in trace["lines"]:
         assert "obligation" in line
         assert "side" in line
@@ -460,7 +470,7 @@ def test_employee_total_excludes_employer_shares():
     # employee share 0.45% (45.00) = 685
     assert out["ch_employee_total"] == Decimal("685.00")
     # Employer total includes BU (30.00) + NBU employer (45.00) + admin cost
-    assert out["ch_employer_total"] == Decimal("815.00")
+    assert out["ch_employer_total"] == Decimal("935.00")   # + FAK employer 120 (Step 11)
 
 
 # ── CH Step 8: BVG (occupational pension) engine ─────────────────────────────
@@ -683,9 +693,9 @@ def test_uvg_insurer_specific_risk_rates():
     # Two policies from different insurers, same base (10000) and risk class
     # code, different rates: the amounts follow the assigned policy only.
     policy_a = {"insurer": "INSTITUTION-A", "risk_classes": [
-        {"code": "A1", "bu_employer_pct": "0.2", "nbu_pct": "0.6", "nbu_employee_share_pct": "0.3"}]}
+        {"code": "A1", "bu_employer_pct": "0.2", "nbu_pct": "0.6", "nbu_employee_share_pct": "50"}]}
     policy_b = {"insurer": "INSTITUTION-B", "risk_classes": [
-        {"code": "A1", "bu_employer_pct": "0.5", "nbu_pct": "1.4", "nbu_employee_share_pct": "0.7"}]}
+        {"code": "A1", "bu_employer_pct": "0.5", "nbu_pct": "1.4", "nbu_employee_share_pct": "50"}]}
     out_a = calculate(_uvg_ctx(uvg_rules=policy_a))
     out_b = calculate(_uvg_ctx(uvg_rules=policy_b))
     assert out_a["ch_uvg_bu_employer"] == Decimal("20.00")   # 10000 * 0.2%
@@ -759,13 +769,13 @@ def test_ktg_not_elected_no_contribution():
 
 
 def test_ktg_elected_contribution_and_split():
-    # KTG on its own classified base (10000): employee 0.4%, employer 0.8% of
-    # the 1.2% total policy rate.
-    ctx = _uvg_ctx(ktg_classified=True, ktg_rules={"rate_pct": "1.2", "employee_share_pct": "0.4",
+    # KTG on its own classified base (10000): the employee pays 25% of the
+    # 1.2% policy premium (0.3%), the employer the other 0.9%.
+    ctx = _uvg_ctx(ktg_classified=True, ktg_rules={"rate_pct": "1.2", "employee_share_pct": "25",
                               "base_def": "AHV base"})
     out = calculate(ctx)
-    assert out["ch_ktg_employee"] == Decimal("40.00")
-    assert out["ch_ktg_employer"] == Decimal("80.00")
+    assert out["ch_ktg_employee"] == Decimal("30.00")
+    assert out["ch_ktg_employer"] == Decimal("90.00")
     ktg_lines = [l for l in out["ch_calculation_trace"]["lines"] if l["obligation"] == "ch_ktg"]
     assert len(ktg_lines) == 2
     assert {l["scope_id"] for l in ktg_lines} == {"scheme:ktg_policy:4"}
@@ -787,7 +797,7 @@ def test_ktg_base_differs_from_uvg():
     }
     ctx = _full_ctx(earnings={"base_salary": Decimal("10000"), "overtime": Decimal("1000")},
                     classification=classification,
-                    ktg_rules={"rate_pct": "1.0", "employee_share_pct": "0.5", "base_def": "base salary"})
+                    ktg_rules={"rate_pct": "1.0", "employee_share_pct": "50", "base_def": "base salary"})
     out = calculate(ctx)
     assert out["ch_uvg_insurable"] == Decimal("11000.00")
     assert out["ch_ktg_employee"] == Decimal("50.00")    # 10000 * 0.5%
@@ -1054,8 +1064,26 @@ def test_qst_aperiodic_without_rate_row_blocks():
 
 
 def test_ktg_assigned_without_rules_blocks():
-    ctx = _uvg_ctx(ktg_classified=True, ktg_rules={"rate_pct": "1.2", "employee_share_pct": "0.4"})
+    ctx = _uvg_ctx(ktg_classified=True, ktg_rules={"rate_pct": "1.2", "employee_share_pct": "25"})
     ctx.ch_ktg_scheme_rules = None
     with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
         calculate(ctx)
     assert "ch_ktg_policy:rules_missing" in str(exc.value.key)
+
+
+@pytest.mark.parametrize("share", ["150", "-1"])
+def test_premium_share_outside_0_100_blocks(share):
+    # Step 12 fix: the NBU / KTG employee share is a percentage OF the premium;
+    # a share above 100 used to drive the employer side negative.
+    rules = {"insurer": "T", "risk_classes": [{"code": "A1", "bu_employer_pct": "0.3", "nbu_pct": "0.9",
+                                               "nbu_employee_share_pct": share}]}
+    with pytest.raises(SwitzerlandCalculationBlockedError) as exc:
+        calculate(_uvg_ctx(uvg_rules=rules))
+    assert exc.value.key == "ch_uvg_risk_class:nbu_share"
+
+
+def test_nbu_fully_charged_to_the_employee():
+    rules = {"insurer": "T", "risk_classes": [{"code": "A1", "bu_employer_pct": "0.3", "nbu_pct": "0.9",
+                                               "nbu_employee_share_pct": "100"}]}
+    out = calculate(_uvg_ctx(uvg_rules=rules))
+    assert out["ch_uvg_nbu_employee"] == Decimal("90.00") and out["ch_uvg_nbu_employer"] == Decimal("0")

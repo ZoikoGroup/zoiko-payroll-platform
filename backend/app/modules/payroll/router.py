@@ -5164,3 +5164,178 @@ def ch_rules_effective(on: Optional[date] = Query(None), canton: Optional[str] =
     from app.modules.payroll import switzerland_service
 
     return switzerland_service.rules_effective(db, _ch_org(current_user), on, canton)
+
+
+# ── Switzerland (CH Step 11) — family-allowance entitlements + absence events ──
+# Same write contract as the other CH routes (Idempotency-Key required,
+# X-Correlation-ID echoed, one transaction per write via ch_write).
+from app.modules.payroll.switzerland_schemas import (  # noqa: E402
+    ChAbsenceEventCreate, ChAbsenceEventUpdate, ChFamilyAllowanceCreate, ChFamilyAllowanceUpdate,
+)
+
+
+@payroll_router.get("/switzerland/family-allowances", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="CH family-allowance entitlements (REQUESTED / APPROVED / ...)")
+def list_ch_family_allowances(employee_id: Optional[int] = Query(None, alias="employeeId"),
+                              status_filter: Optional[str] = Query(None, alias="status"),
+                              db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_family_allowances(db, _ch_org(current_user), employee_id, status_filter)
+
+
+@payroll_router.get("/switzerland/family-allowances/{entitlement_id}",
+                    dependencies=[Depends(get_current_payroll_operator)], summary="One CH family-allowance entitlement")
+def get_ch_family_allowance(entitlement_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_family_allowance(db, _ch_org(current_user), entitlement_id)
+
+
+@payroll_router.post("/switzerland/family-allowances",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Record a REQUESTED family-allowance entitlement (paid only once APPROVED)")
+def create_ch_family_allowance(payload: ChFamilyAllowanceCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                               db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation="family_allowance.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_family_allowance(
+                        db, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.put("/switzerland/family-allowances/{entitlement_id}",
+                    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                    summary="Edit a REQUESTED entitlement (an APPROVED one is the fund's decision, never edited)")
+def update_ch_family_allowance(entitlement_id: int, payload: ChFamilyAllowanceUpdate,
+                               ctx: ChWriteContext = Depends(ch_write_headers),
+                               db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"family_allowance.update:{entitlement_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json", exclude_unset=True),
+                    perform=lambda: switzerland_service.update_family_allowance(
+                        db, org_id, entitlement_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.delete("/switzerland/family-allowances/{entitlement_id}",
+                       dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                       summary="Delete a REQUESTED entitlement")
+def delete_ch_family_allowance(entitlement_id: int, ctx: ChWriteContext = Depends(ch_write_headers),
+                               db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"family_allowance.delete:{entitlement_id}",
+                    actor_id=current_user.id, request={},
+                    perform=lambda: switzerland_service.delete_family_allowance(
+                        db, org_id, entitlement_id, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/family-allowances/{entitlement_id}/approve",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Approve an entitlement (a user other than its author / editors; fund decision "
+                             "reference required)")
+def approve_ch_family_allowance(entitlement_id: int, payload: Optional[ChReasonBody] = None,
+                                ctx: ChWriteContext = Depends(ch_write_headers),
+                                db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"family_allowance.approve:{entitlement_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.approve_family_allowance(
+                        db, org_id, entitlement_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@payroll_router.get("/switzerland/absence-events", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="CH absence-benefit events (maternity, accident, sickness, ...)")
+def list_ch_absence_events(employee_id: Optional[int] = Query(None, alias="employeeId"),
+                           db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_absence_events(db, _ch_org(current_user), employee_id)
+
+
+@payroll_router.get("/switzerland/absence-events/{event_id}", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="One CH absence-benefit event")
+def get_ch_absence_event(event_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_absence_event(db, _ch_org(current_user), event_id)
+
+
+@payroll_router.post("/switzerland/absence-events",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Record an absence-benefit event (OPEN)")
+def create_ch_absence_event(payload: ChAbsenceEventCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                            db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation="absence_event.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_absence_event(
+                        db, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.put("/switzerland/absence-events/{event_id}",
+                    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                    summary="Edit an OPEN absence event (status CLOSED freezes it)")
+def update_ch_absence_event(event_id: int, payload: ChAbsenceEventUpdate,
+                            ctx: ChWriteContext = Depends(ch_write_headers),
+                            db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"absence_event.update:{event_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json", exclude_unset=True),
+                    perform=lambda: switzerland_service.update_absence_event(
+                        db, org_id, event_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.delete("/switzerland/absence-events/{event_id}",
+                       dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                       summary="Delete an OPEN absence event")
+def delete_ch_absence_event(event_id: int, ctx: ChWriteContext = Depends(ch_write_headers),
+                            db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"absence_event.delete:{event_id}",
+                    actor_id=current_user.id, request={},
+                    perform=lambda: switzerland_service.delete_absence_event(
+                        db, org_id, event_id, current_user.id, ctx.correlation_id))
+
+
+# ── Switzerland (CH Step 13) — append-only payslip corrections ──
+from app.modules.payroll.switzerland_schemas import ChCorrectionCreate  # noqa: E402
+
+
+@payroll_router.post("/switzerland/corrections",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Correct a finalized Swiss payslip: replay its frozen context with restated inputs and "
+                             "book the per-obligation delta in a correction run (the original is never modified)")
+def create_ch_correction(payload: ChCorrectionCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                         db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"correction.create:{payload.originalPayslipId}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_ch_correction(
+                        db, org_id, payload.originalPayslipId, payload.reason, payload.affectedObligations,
+                        payload.correctedInputs, current_user.id, ctx.idempotency_key, ctx.correlation_id))
+
+
+@payroll_router.get("/switzerland/payslips/{payslip_id}/corrections",
+                    dependencies=[Depends(get_current_payroll_operator)],
+                    summary="The correction chain of a Swiss payslip")
+def list_ch_corrections(payslip_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_ch_corrections(db, _ch_org(current_user), payslip_id)

@@ -269,6 +269,9 @@ class StandardStrategy(PayrollStrategy):
             # added below, never a negative deduction (IT-009). Absent -> 0
             # everywhere else, same additive mechanism as ie_/fr_/sgp_/se_ above.
             + deductions.get("it_employee_total", Decimal("0"))
+            # Switzerland employee-side total (AHV/IV/EO/ALV, BVG, UVG NBU,
+            # KTG, QST, FAK employee share). Absent -> 0 everywhere else.
+            + deductions.get("ch_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -279,6 +282,13 @@ class StandardStrategy(PayrollStrategy):
         it_wedge_tax_free_sum = deductions.get("it_wedge_tax_free_sum", Decimal("0"))
         if it_wedge_tax_free_sum:
             net_pay = max(_round2(net_pay + it_wedge_tax_free_sum), Decimal("0"))
+        # Switzerland: family allowances (per APPROVED entitlement) and the
+        # absence-benefit allowances / top-ups are paid to the employee on
+        # top of salary — never negative deductions. 0 for every other country.
+        ch_paid_on_top = (deductions.get("ch_family_allowance_total", Decimal("0"))
+                          + deductions.get("ch_absence_earnings_total", Decimal("0")))
+        if ch_paid_on_top:
+            net_pay = max(_round2(net_pay + ch_paid_on_top), Decimal("0"))
         # Phase 8BU: a PARTIAL Germany result (wage_tax/soli/church_tax
         # genuinely unavailable, RV/ALV/GKV/PV genuinely computed) must
         # NEVER present a net_pay computed as if the missing tax were
@@ -515,6 +525,7 @@ class StandardStrategy(PayrollStrategy):
             it_ytd_after=deductions.get("it_ytd_after"),
             it_employee_total=deductions.get("it_employee_total", Decimal("0")),
             it_calculation_trace=deductions.get("it_calculation_trace"),
+            ch_result=deductions if "ch_calculation_trace" in deductions else None,
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

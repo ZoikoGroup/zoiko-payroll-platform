@@ -1680,7 +1680,7 @@
       "effectIfDifferent": "ALL_COUNTRIES widens the opt-in control sets to every jurisdiction — a separate cross-jurisdiction change with its own review",
       "evidenceRecorded": [],
       "evidenceTag": "SG-DECISION-D3",
-      "inForce": "SG_ONLY (plus per-country opt-ins: HK, SE)",
+      "inForce": "SG_ONLY (plus per-country opt-ins: CH, HK, SE)",
       "inForceValue": "SG_ONLY",
       "key": "D3",
       "label": "Scope of the Singapore-only governance controls",

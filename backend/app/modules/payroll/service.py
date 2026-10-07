@@ -77,6 +77,7 @@ from app.modules.payroll.employee_validation import (
 from app.modules.payroll import bank_routing
 # Italy (ZP-IT-ENG-001) service layer — input resolver, YTD posting, snapshot.
 from app.modules.payroll import italy_service as _italy_service
+from app.modules.payroll import switzerland_service as _switzerland_service
 from app.modules.payroll import jurisdiction_hooks, retention_service
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
@@ -1436,6 +1437,12 @@ def _check_missing_required_keys(rate_map: dict, slabs: list, country: str) -> L
     return missing
 
 
+# Countries whose income tax never comes from TaxSlab rows, so an empty slab
+# list is not "unconfigured": Switzerland's tax at source is read from the
+# canton's ACTIVE QST tariff FILE (switzerland_service.lookup_qst_rate).
+_NO_TAX_SLAB_COUNTRIES = ("CH",)
+
+
 def _assert_jurisdiction_ready(rate_map: dict, slabs: list, country: str, organization_id: Optional[int]) -> None:
     """Dormant enforcement — raises only when `country` has been
     explicitly opted into fail-fast validation
@@ -1451,7 +1458,7 @@ def _assert_jurisdiction_ready(rate_map: dict, slabs: list, country: str, organi
     if country not in _VALIDATION_ENABLED_COUNTRIES:
         return
     missing = _check_missing_required_keys(rate_map, slabs, country)
-    if missing or not slabs:
+    if missing or (not slabs and country not in _NO_TAX_SLAB_COUNTRIES):
         bad_key = missing[0]["key"] if missing else "tax slabs"
         raise MissingComplianceConfigurationError(bad_key, country, organization_id)
 
@@ -1565,6 +1572,11 @@ def _resolve_effective_rate_inputs(
     rows written by apply_extracted_rate). No Active pack with rows ->
     MissingComplianceConfigurationError (fail closed). The numbers and the
     pinned pack therefore always name the same, governed version."""
+    if country == "CH":
+        # Switzerland: the FEDERAL pack only. Cantons come exclusively from the
+        # worker's explicit ch_* profile fields (switzerland_service), never
+        # from a legacy work_state that could select a canton pack here.
+        state = None
     if country in _CANONICAL_PACK_ONLY_COUNTRIES:
         from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
         from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
@@ -1595,6 +1607,10 @@ def _resolve_effective_rate_inputs(
                 # The §7 INPS matrix has many rows per family; keying by
                 # family alone would keep one class's rates for everyone.
                 canonical_rate_map = _italy_service.italy_rate_map(canonical_rates)
+            if country == "CH":
+                # Federal-pack rows only; canton rows reach the engine per
+                # canton through switzerland_service.ch_calc_context.
+                canonical_rate_map = _switzerland_service.ch_rate_map(canonical_rates)
             _assert_jurisdiction_ready(canonical_rate_map, canonical_slabs, country, organization_id)
             return canonical_rate_map, canonical_slabs, canonical_rates, pack
     # India's Old and New regime bracket tables are two complete,
@@ -8480,23 +8496,24 @@ def se_activation_blockers(db: Session, pack) -> list:
 
 
 # Display names for the per-country opt-in activation gates below.
-_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong"}
+_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
+                             "CH": "Switzerland"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -9239,7 +9256,7 @@ def list_pack_hotfix_activations(db: Session, reviewed: Optional[bool] = None) -
 # ran the hotfix, and a completed review is final (never replaced). Same
 # per-country opt-in pattern as F2; other countries keep their existing
 # review behaviour (hotfix mode exists for single-Super-Admin sessions).
-_HOTFIX_DISTINCT_REVIEWER_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_HOTFIX_DISTINCT_REVIEWER_COUNTRIES = ("SG", "SE", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
 
 # Singapore hotfix policy — OWNER DECISION D2 (docs/SINGAPORE_FINAL_
 # IMPLEMENTATION_STATUS.md §20). The default reproduces the behaviour in force
@@ -17371,6 +17388,81 @@ def _sg_verify_run_approval(db: Session, run: PayrollRun, actor_id=None) -> None
         "Review; recalculate if needed and approve again."))
 
 
+def _ch_refuse_locked_run(run: PayrollRun, country: Optional[str]) -> None:
+    """CH payslips are frozen once their run is Approved: no manual add and
+    no recalculation (a correction is a new run, never an edit)."""
+    if country != "CH":
+        return
+    if PAYROLL_STATUS_ORDER.index(run.status) >= PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED):
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            f"This run is {PayrollStatus(run.status).value}: Swiss payslips cannot be added or recalculated "
+            "once a run is Approved."))
+
+
+def _ch_before_run_transition(db: Session, run: PayrollRun, next_status, actor_id) -> None:
+    """CH-gated hook of advance_payroll_run_status (a run without CH payslips
+    is untouched). APPROVED: the approver is not the preparer and every
+    resolver check passes again now. AUTHORIZED / PAID: the approval was a
+    four-eyes one and nothing it was bound to has changed (fingerprint)."""
+    if not _run_has_country_payslips(db, run, "CH"):
+        return
+    if next_status == PayrollStatus.APPROVED:
+        if run.created_by is None or actor_id is None or actor_id == run.created_by:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                "Swiss payroll approval needs a user other than the run's preparer."))
+        blocks = _switzerland_service.ch_run_preflight(db, run)
+        if blocks:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                "Swiss preflight blocks approval: " + "; ".join(
+                    f"{b['key']} (employee {b['employeeId']})" for b in blocks[:10])))
+        return
+    if next_status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
+        if run.approved_by is None or run.approved_by == run.created_by:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                "Swiss payroll cannot be authorized or paid: its approver must differ from its preparer."))
+        _ch_verify_run_approval(db, run, actor_id)
+
+
+def _ch_after_run_approved(db: Session, run: PayrollRun, actor_id) -> None:
+    if not _run_has_country_payslips(db, run, "CH"):
+        return
+    fp = _switzerland_service.ch_approval_fingerprint(db, run)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type=_switzerland_service.CH_APPROVAL_ENTITY,
+                     entity_id=run.id, legal_reference="CH spec - Step 12 run approval", new_value=fp,
+                     reason="Swiss approval bound to its inputs / rule hashes / scheme versions / payslip values",
+                     auto_commit=False)
+    db.commit()
+
+
+def _ch_verify_run_approval(db: Session, run: PayrollRun, actor_id=None) -> None:
+    """Refuses - and invalidates the approval, returning the run to Review -
+    when anything the CH approval fingerprint covers changed after approval,
+    or when no approval fingerprint was ever recorded."""
+    stored = _switzerland_service.ch_stored_approval(db, run)
+    if stored is None:
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "No Swiss approval fingerprint is recorded for this run - return it to Review and approve it again."))
+    current = _switzerland_service.ch_approval_fingerprint(db, run)
+    if current["fingerprint"] == stored.get("fingerprint"):
+        return
+    changed = sorted(k for k, v in current["components"].items() if (stored.get("components") or {}).get(k) != v)
+    run.status = PayrollStatus.REVIEW
+    run.approved_by = None
+    run.approved_at = None
+    run.authorized_by = None
+    run.authorized_at = None
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type=_switzerland_service.CH_APPROVAL_ENTITY,
+                     entity_id=run.id, legal_reference="CH spec - Step 12 run approval",
+                     old_value={"fingerprint": stored.get("fingerprint")},
+                     new_value={"fingerprint": current["fingerprint"], "changed": changed},
+                     reason="Swiss approval invalidated - " + ", ".join(changed) + " changed after approval",
+                     auto_commit=False)
+    db.commit()
+    raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+        f"Swiss approval invalidated: {', '.join(changed)} changed after approval - the run is back in Review; "
+        "recalculate if needed and approve again."))
+
+
 def record_sg_cessation(db: Session, organization_id: int, employee_id: int, date_of_leaving: date,
                         actor_id: Optional[int] = None) -> dict:
     """Singapore termination: records the last day of employment (audited)
@@ -19787,6 +19879,16 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                 period_start=period_start, period_end=period_end)
             if emp_country == "IT" else None
         )
+        # Switzerland (CH spec): every resolver check, read-only; a blocked
+        # worker raises SwitzerlandCalculationBlockedError (same surfacing as
+        # Italy's blocks). Applied to ctx after it is built.
+        switzerland_attrs = (
+            _switzerland_service.ch_calc_context(
+                db, organization_id, emp, period_end or date.today(), period_start, period_end,
+                _switzerland_service.ch_earnings(basic, hra, special, overtime, additional_compensation,
+                                                 allowance_items))
+            if emp_country == "CH" else None
+        )
         germany_kwargs = {}
         if emp_country == "DE":
             resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
@@ -19932,6 +20034,8 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                      attendance_by_employee.get(emp.id, []) if period_start and period_end else None)
                if emp_country == "SG" else {}),
         )
+        if switzerland_attrs is not None:
+            _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
         try:
             calc = calculate_payroll(ctx, calculation_mode)
         except FranceCalculationBlockedError as exc:
@@ -20033,6 +20137,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "employerQcLabourStandards": float(calc.employer_qc_labour_standards),
             "taxSlabRate": _get_slab_label(calc.gross * MONTHS_PER_YEAR, emp_slabs, emp_country, annual_tax=calc.annual_tax),
         })
+        if emp_country == "CH":
+            # Swiss lines/totals/trace (only CH rows carry the key)
+            results[-1]["switzerland"] = _switzerland_service.ch_payslip_snapshot(calc)
 
         totals["count"] += 1
         totals["totalGross"] += calc.gross
@@ -24838,6 +24945,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
         if country == "IT" else None
     )
+    # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
+    # raises SwitzerlandCalculationBlockedError, same surfacing as Italy.
+    switzerland_attrs = (
+        _switzerland_service.ch_calc_context(
+            db, run.organization_id, employee, run.pay_date, run.period_start, run.period_end,
+            _switzerland_service.ch_earnings(basic, hra, special, overtime, additional_compensation,
+                                             allowance_items))
+        if country == "CH" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -24932,6 +25048,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     for key, column in _SG_STATUTORY_FACTS:
         if column and key in sg_month_facts:
             setattr(ctx, column, sg_month_facts[key])
+    switzerland_frozen = None
+    if switzerland_attrs is not None:
+        _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
+        # the complete context a CH correction replays (Step 13)
+        switzerland_frozen = _switzerland_service.ch_freeze_context(ctx, switzerland_attrs, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25077,6 +25198,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # is only satisfiable because the RPN actually applied is frozen here.
         "ie_calculation_snapshot": _ie_payslip_snapshot(result),
         "it_calculation_snapshot": _italy_service.it_payslip_snapshot(result),
+        "ch_calculation_snapshot": _switzerland_service.ch_payslip_snapshot(result, frozen=switzerland_frozen),
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -25152,6 +25274,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Italy (ZP-IT-ENG-001): the engine's post-period running totals,
         # persisted by italy_service.post_it_payslip_ytd.
         "_it_ytd_result": result if result.it_ytd_after else None,
+        # Switzerland: the engine's accumulators_after, persisted by
+        # switzerland_service.post_ch_payslip_ytd (absolute writes).
+        "_ch_ytd_result": result if result.ch_result else None,
         # Same splat-then-pop contract as "_ytd_result" above, for
         # Cayman Islands mandatory-pension CI$87,000 annual-cap tracking
         # (KY-008) — a separate key since it's gated on ITS OWN result
@@ -25458,6 +25583,9 @@ def _post_payslip_ytd(db: Session, run: PayrollRun, employee, item: PayslipItem,
         _upsert_pr_ytd_accumulator(db, employee.id, run.pay_date, r["pr_ytd_result"], payslip_id=item.id)
     if r.get("it_ytd_result") is not None:
         _italy_service.post_it_payslip_ytd(db, employee.id, r["it_ytd_result"], payslip_id=item.id)
+    if r.get("ch_ytd_result") is not None:
+        _switzerland_service.post_ch_payslip_ytd(db, employee.id, r["ch_ytd_result"], run.pay_date.year,
+                                                 payslip_id=item.id)
     if r.get("option2_ytd_result") is not None:
         _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, r["option2_ytd_result"], payslip_id=item.id)
     if r.get("uk_director_ytd_result") is not None:
@@ -25590,6 +25718,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
     ie_ytd_result = values.pop("_ie_ytd_result", None)
     it_ytd_result = values.pop("_it_ytd_result", None)
+    ch_ytd_result = values.pop("_ch_ytd_result", None)
     ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
@@ -25628,6 +25757,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
         gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
         ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
+                ch_ytd_result=ch_ytd_result,
         option2_ytd_result=option2_ytd_result, uk_director_ytd_result=uk_director_ytd_result,
         org_levy_result=org_levy_result, uk_org_levy_increment=uk_org_levy_increment,
         jm_heart_increment=jm_heart_increment,
@@ -26376,6 +26506,9 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     if _sg_is_correction_run(run):
         raise BadRequestException("A Singapore correction delta is not recalculated — create a further correction of the "
                                   "original payslip instead (SG-044).")
+    if _switzerland_service.is_ch_correction_run(run):
+        raise BadRequestException("A Swiss correction delta is not recalculated — create a further correction of the "
+                                  "original payslip instead.")
     if run.status not in (PayrollStatus.DRAFT, PayrollStatus.REVIEW):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -26383,6 +26516,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         )
 
     employee = get_employee_by_id(db, employee_id, organization_id)
+    _ch_refuse_locked_run(run, _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None)))
 
     existing_item = db.query(PayslipItem).filter(
         PayslipItem.payroll_run_id == run.id,
@@ -26605,6 +26739,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # the recompute above), so a correction REPLACES their year-to-date rather than advancing it.
     ie_ytd_result = values.pop("_ie_ytd_result", None)
     it_ytd_result = values.pop("_it_ytd_result", None)
+    ch_ytd_result = values.pop("_ch_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
@@ -26660,6 +26795,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
                 au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
                 gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
                 ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
+                ch_ytd_result=ch_ytd_result,
                 uk_director_ytd_result=uk_director_ytd_result,
             ), ytd_correction_ctx)
         except YtdPostingConflict as exc:
@@ -31152,6 +31288,9 @@ def advance_payroll_run_status(
     # Singapore (SG-gated): preflight blocks approval; a later step re-verifies
     # the approval fingerprint (SG-032). Runs without SG payslips skip this.
     _sg_before_run_transition(db, run, next_status, approver_id)
+    # Switzerland (CH-gated): preflight + preparer/approver separation at
+    # approval; fingerprint re-verification at authorize / pay.
+    _ch_before_run_transition(db, run, next_status, approver_id)
     # Jurisdiction statutory modules (Hong Kong): the preflight's BLOCK checks
     # are statutory exceptions, so they refuse approval. A run without that
     # jurisdiction's payslips never reaches its module.
@@ -31175,6 +31314,7 @@ def advance_payroll_run_status(
     db.refresh(run)
     if next_status == PayrollStatus.APPROVED:
         _sg_after_run_approved(db, run, approver_id)
+        _ch_after_run_approved(db, run, approver_id)
 
     log_activity(db, organization_id, f"Payroll run '{run.period_label}' advanced to {next_status.value}.",
                  ActivityStatus.SUCCESS, actor_id=approver_id)
@@ -31317,6 +31457,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # at the org's compliance details, silently ignoring an employee's own
     # country_code override for manually-added payslips specifically.
     country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    _ch_refuse_locked_run(run, country)
 
     # Same canonical-pack substitution generate_payslips_for_run uses (see
     # _resolve_effective_rate_inputs) — a manually-added payslip should be
@@ -31401,6 +31542,14 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
             db, organization_id, employee, run.pay_date,
             period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
         if country == "IT" else None
+    )
+    switzerland_attrs = (
+        _switzerland_service.ch_calc_context(
+            db, organization_id, employee, run.pay_date, run.period_start, run.period_end,
+            _switzerland_service.ch_earnings(data.basic_salary, data.hra or Decimal("0"),
+                                             data.special_allowance or Decimal("0"), data.overtime or Decimal("0"),
+                                             Decimal("0")))
+        if country == "CH" else None
     )
     germany_kwargs = {}
     if country == "DE":
@@ -31529,6 +31678,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         **option2_inputs,
         **pr_certificate_inputs,
     )
+    switzerland_frozen = None
+    if switzerland_attrs is not None:
+        _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
+        switzerland_frozen = _switzerland_service.ch_freeze_context(ctx, switzerland_attrs, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -31567,6 +31720,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         ifsc=getattr(employee, "ifsc", None),
         country_code=country,
         compliance_fields=dict(getattr(employee, "compliance_fields", None) or {}),
+        ch_calculation_snapshot=_switzerland_service.ch_payslip_snapshot(calc, frozen=switzerland_frozen),
         **tax_snapshot,
         basic_salary=calc.basic,
         hra=calc.hra,
