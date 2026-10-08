@@ -17,21 +17,20 @@ export { default as SGStatutoryPage } from "./SGStatutoryPage";
 export { default as HKStatutoryPage } from "./HKStatutoryPage";
 export { default as SEStatutoryPage } from "./SEStatutoryPage";
 
-// Same six countries, same route slugs as Compliance — reused directly
-// rather than re-declared here, so the two feature areas can never drift
-// apart on naming.
 // Same countries, same route slugs as Compliance, reused directly rather
 // than re-declared here, so the two feature areas can never drift apart on
-// naming. One deliberate exception: France (FR). Statutory Rates (canonical
-// TaxSlab/ContributionRate quick-edit via StatutoryRatesLayout.jsx) does
-// not exist for France yet -- France's mandatory contributions are the
-// engine's content-as-data rate_map, resolved from the France authority
-// artifacts (DGFiP PAS rates, URSSAF establishment rate packs) inside
-// France's own Compliance workspace, so StatutoryRates must NOT render a
-// France card pointing at a route that doesn't exist. Filtering keeps every
-// shared name identical and leaves only France out.
+// naming. Deliberate exceptions: France (FR) and Switzerland (CH).
+// Statutory Rates (canonical TaxSlab/ContributionRate quick-edit via
+// StatutoryRatesLayout.jsx) does not exist for those two yet — France's and
+// Switzerland's mandatory contributions are the engine's content-as-data
+// rate_map, resolved from the authority artifacts inside each jurisdiction's
+// OWN Compliance workspace (DGFiP PAS rates / URSSAF establishment rate packs
+// for France; QST tariff files / scheme catalog / canton wage floors for
+// Switzerland), so StatutoryRates must NOT render a France or Switzerland
+// card pointing at a route that doesn't exist. Filtering keeps every shared
+// name identical and leaves only those two out.
 import { COUNTRY_CODE_TO_ROUTE as COMPLIANCE_COUNTRY_CODE_TO_ROUTE } from "../JurisdictionCompliance";
 
 export const COUNTRY_CODE_TO_ROUTE = Object.fromEntries(
-  Object.entries(COMPLIANCE_COUNTRY_CODE_TO_ROUTE).filter(([code]) => code !== "FR"),
+  Object.entries(COMPLIANCE_COUNTRY_CODE_TO_ROUTE).filter(([code]) => !["FR", "CH"].includes(code)),
 );

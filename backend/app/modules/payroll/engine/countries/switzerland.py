@@ -278,14 +278,21 @@ def _bvg_age(ctx: PayrollContext) -> int:
 
 
 def _calculate_coordinated_salary(annual_salary: Decimal, pack: _Pack) -> Decimal:
-    """BVG coordinated (insured) salary with statutory guardrails.
-    Formula: max(min_coordinated, min(annual_salary - coordination_deduction, upper_salary)).
-    Statutory figures come only from the Active federal pack."""
+    """BVG coordinated (insured) salary, BVG Art. 8: the part of the annual
+    salary from the coordination deduction UP TO the upper salary limit, i.e.
+    min(annual_salary, upper_salary) - coordination_deduction, raised to the
+    minimum coordinated salary (Art. 8 para. 2). The maximum is therefore
+    upper_salary - coordination_deduction, never upper_salary itself.
+    Statutory figures come only from the Active federal pack.
+
+    CH Step 16: corrected. The earlier form capped the COORDINATED salary at
+    upper_salary (min(max(salary - deduction, minimum), upper)), which over-
+    insured every salary above upper_salary - ... e.g. 96,000 -> 69,540 instead
+    of 64,260. Found by the independent golden calculator."""
     coordination_deduction = pack.require_amount("ch_bvg_coordination_deduction")
     upper_salary = pack.require_amount("ch_bvg_upper_salary")
     min_coordinated = pack.require_amount("ch_bvg_min_coordinated")
-    raw = annual_salary - coordination_deduction
-    coordinated = min(max(raw, min_coordinated), upper_salary)
+    coordinated = max(min(annual_salary, upper_salary) - coordination_deduction, min_coordinated)
     return _round_chf(coordinated)
 
 

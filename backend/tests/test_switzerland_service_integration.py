@@ -310,9 +310,11 @@ def test_readiness_reports_gates_and_per_canton_status(db, ch):
         out = c.get("/api/super-admin/compliance/switzerland/readiness", params={"on": "2026-03-31"}).json()
     gates = {g["key"]: g for g in out["gates"]}
     assert list(gates) == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"] and out["ready"] is False
-    assert gates["G2"]["complete"] is False and "approved" in gates["G2"]["detail"]   # no distinct approver yet
-    assert gates["G4"]["complete"] is False and "VERIFY AGAINST ESTV SPEC" in gates["G4"]["detail"]
-    assert gates["G5"]["complete"] is False and gates["G5"]["detail"] == "Missing: ch_ktg"   # no KTG rule here
+    # Step 16 gates: each needs reviewed CH-GATE-Gn evidence; none exists here
+    assert all(g["complete"] is False and g["state"] == "EVIDENCE_REQUIRED" for g in gates.values())
+    assert "VERIFY AGAINST ESTV SPEC" in gates["G2"]["detail"]
+    g1_checks = {c["key"]: c for c in gates["G1"]["checks"]}
+    assert g1_checks["classification_coverage"]["detail"] == "No Approved classification for: ch_ktg"
     zh = next(c for c in out["cantons"] if c["canton"] == "CH-ZH")
     assert zh["packId"] == ch.zh.id and zh["qstModel"] == "MONTHLY" and zh["tariffFileStatus"] == "ACTIVE"
     assert zh["ready"] is False and zh["fak"]["child"]["amount"] is None              # FAK amounts unset
@@ -330,3 +332,18 @@ def test_super_admin_calculation_preview_is_read_only(db, ch):
         blocked = c.post("/api/super-admin/compliance/switzerland/calculation-preview", json=body).json()
     assert blocked["blocked"] is True and blocked["blockedKey"] == "ch_taxability:ch_alv"
     assert db.query(PayslipItem).count() == 0 and db.query(PayrollYtdAccumulator).count() == 0
+
+
+def test_the_snapshot_reaches_the_api_for_the_trace_drawer(db, ch):
+    """Step 15: PayslipItemResponse declares chCalculationSnapshot — before it
+    did, response_model silently stripped what _serialize_payslip emitted, so
+    the run-detail / payslip trace drawer would never have received it."""
+    run = _run(db, ch.org, 3)
+    service.generate_payslips_for_run(db, run, ch.org.id)
+    admin = SimpleNamespace(id=PREPARER, organization_id=ch.org.id, role="org_admin", is_active=True)
+    with _http(db, admin) as c:
+        items = c.get(f"/api/payroll/runs/{run.id}/items").json()
+        payslips = c.get("/api/payroll/payslips").json()
+    for rows in (items, payslips):
+        snap = rows[0]["chCalculationSnapshot"]
+        assert snap["trace"]["lines"] and snap["totalsAll"]["ch_qst_total"] and "frozenContext" in snap

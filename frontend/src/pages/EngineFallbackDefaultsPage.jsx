@@ -28,6 +28,9 @@ const COUNTRIES = [
   // entry Ireland's catalog would be invisible and uneditable on the very
   // page that owns it.
   { code: "IE", name: "Ireland" },
+  // Switzerland — every CH registry row is "NO FALLBACK" (the engine blocks
+  // instead of defaulting); this shows those rows and where each value comes from.
+  { code: "CH", name: "Switzerland" },
 ];
 
 function toNumber(v) {

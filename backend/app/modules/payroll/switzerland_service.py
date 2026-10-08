@@ -2034,60 +2034,105 @@ def _canton_status(db: Session, canton: str, name: str, on: date, federal_params
             "fak": fak, "ready": ready}
 
 
+CH_GATES = {
+    "G1": "Statutory content — a Swiss payroll specialist signs off every federal value (needs_g1), the QST "
+          "annual-model arithmetic and the earning classification",
+    "G2": "Authority data — the published ESTV QST tariff files (on a verified ESTV record layout) and the "
+          "canton data (FAK amounts, QST model) for every canton in scope",
+    "G3": "Employer scheme evidence — compensation office, FAK fund, BVG plan, UVG and KTG policy documents "
+          "for each launch employer",
+    "G4": "Swissdec — certification of the ELM / Lohnausweis output and a certified transmission channel",
+    "G5": "Parallel payroll — representative parallel runs reconciled with no unexplained variance",
+    "G6": "Security / privacy — encryption, RBAC and retention reviewed and approved",
+    "G7": "Operations — filing / payment responsibilities, maker-checker, reconciliation and runbooks approved",
+}
+
+
+def ch_gate_state(db: Session, gate: str) -> str:
+    """EVIDENCE_REQUIRED / SUBMITTED / PASS for a CH-GATE-Gn source artifact —
+    the Hong Kong convention: PASS only when a DIFFERENT Super Admin reviewed an
+    uploaded document that has not been superseded."""
+    rows = (db.query(SourceArtifact).filter(SourceArtifact.form_number == f"CH-GATE-{gate}",
+                                            SourceArtifact.superseded_by_id.is_(None)).all())
+    if not rows:
+        return "EVIDENCE_REQUIRED"
+    for r in rows:
+        if r.reviewer_id and r.file_path and r.created_by_id and r.reviewer_id != r.created_by_id:
+            return "PASS"
+    return "SUBMITTED"
+
+
 def get_ch_readiness(db: Session, on: Optional[date] = None) -> dict:
-    """Super Admin release gates G1-G7 for Switzerland, plus the per-canton
-    status — read-only and re-derived from the database on every call.
+    """Super Admin release gates G1-G7 for Switzerland plus the per-canton
+    status — read-only, re-derived from the database on every call.
+
+    A gate passes ONLY on reviewed evidence (a CH-GATE-Gn source artifact
+    reviewed by a second Super Admin) AND, where the platform can check it,
+    its automated checks. Nothing the platform produces itself — content
+    rows, synthetic golden cases, a certification run — can pass a gate:
     Switzerland is never ready because content merely exists."""
     from app.modules.payroll.service import _check_missing_required_keys
 
     on = on or date.today()
-    gates = []
-
-    def add(key, label, complete, detail):
-        gates.append({"key": key, "label": label, "complete": bool(complete), "detail": detail})
-
     federal = _active_pack(db, None, on)
     candidate = federal or (db.query(JurisdictionPack).filter(
         JurisdictionPack.jurisdiction_country == "CH", JurisdictionPack.jurisdiction_state.is_(None))
         .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first())
     source = db.get(SourceArtifact, candidate.source_document_id) if candidate and candidate.source_document_id else None
-    reviewed = bool(source and source.reviewer_approved_at)
-    add("G1", "G1 — federal statutory content independently reviewed (every value needs_g1)", reviewed,
-        "Reviewed." if reviewed else ("Link and review the federal pack's source evidence."
-                                      if candidate else "No CH federal pack exists."))
     federal_params = _pack_params(db, federal, on)
     missing = [m["key"] for m in _check_missing_required_keys(federal_params, [], "CH")] if federal else []
-    add("G2", "G2 — federal pack Active, approved by a distinct Super Admin, every required parameter set",
-        federal is not None and federal.approved_by_id is not None and not missing,
-        ("No Active federal pack in force." if federal is None else
-         "Missing: " + ", ".join(missing) if missing else
-         "Not approved by a distinct Super Admin." if federal.approved_by_id is None else
-         f"{federal.pack_id} v{federal.version} Active."))
     cantons = [_canton_status(db, code, name, on, federal_params) for code, name in CH_CANTONS]
     not_ready = [c["canton"] for c in cantons if not c["ready"]]
-    add("G3", "G3 — every canton pack Active: QST model, ACTIVE tariff file, FAK amounts >= federal minimum",
-        not not_ready, "All 26 cantons ready." if not not_ready else f"Not ready: {', '.join(not_ready)}")
     annual_in_use = sorted(c["canton"] for c in cantons if c["qstModel"] == "ANNUAL")
-    add("G4", "G4 — QST tariff ingestion verified (ESTV layout confirmed; annual model G1-signed)",
-        ESTV_FIXED_WIDTH_V1_VERIFIED and not annual_in_use,
-        ("ESTV_FIXED_WIDTH_V1 field positions are unverified (VERIFY AGAINST ESTV SPEC). "
-         if not ESTV_FIXED_WIDTH_V1_VERIFIED else "")
-        + (f"Annual-model arithmetic is PENDING G1 SIGN-OFF for {', '.join(annual_in_use)}."
-           if annual_in_use else "No annual-model canton configured yet."))
     unclassified = [c for c in CH_TAXABILITY_COMPONENTS if c != CH_WAGE_FLOOR
                     and not db.query(TaxabilityRule).filter(
                         TaxabilityRule.jurisdiction_country == "CH", TaxabilityRule.tax_component == c,
                         TaxabilityRule.organization_id.is_(None), TaxabilityRule.status == "Approved").first()]
-    add("G5", "G5 — Approved earning classification for every CH obligation", not unclassified,
-        "Missing: " + ", ".join(unclassified) if unclassified else "Every obligation classified.")
-    latest = (db.query(TestCertificationRun).filter(TestCertificationRun.jurisdiction_country == "CH")
-              .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc()).first())
-    add("G6", "G6 — golden-vector certification PASS", latest is not None and latest.status == "PASS",
-        f"Latest run #{latest.id}: {latest.status}" if latest else "No CH certification run recorded.")
-    add("G7", "G7 — ELM transmission and two reconciled parallel payroll cycles", False,
-        "ELM generation and envelope tracking are built (Step 14); transmission stays gated behind "
-        "CH_ELM_TRANSMIT_ENABLED = False, and the two reconciled parallel payroll cycles evidence is "
-        "still required from the implementation team.")
+    latest_cert = (db.query(TestCertificationRun).filter(TestCertificationRun.jurisdiction_country == "CH")
+                   .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc()).first())
+
+    def check(key, passed, detail):
+        return {"key": key, "passed": bool(passed), "detail": detail}
+
+    checks = {
+        "G1": [
+            check("federal_source_reviewed", source is not None and source.reviewer_approved_at,
+                  "Federal pack source evidence reviewed." if source and source.reviewer_approved_at else
+                  "The federal pack's source evidence is not linked / reviewed (every value is needs_g1)."),
+            check("classification_coverage", not unclassified,
+                  "Every CH obligation has an Approved classification." if not unclassified else
+                  "No Approved classification for: " + ", ".join(unclassified)),
+            check("annual_qst_model_signed", False, "Annual-model QST arithmetic is PENDING G1 SIGN-OFF."),
+        ],
+        "G2": [
+            check("estv_layout_verified", ESTV_FIXED_WIDTH_V1_VERIFIED,
+                  "ESTV layout verified." if ESTV_FIXED_WIDTH_V1_VERIFIED else
+                  "ESTV_FIXED_WIDTH_V1 field positions are unverified (VERIFY AGAINST ESTV SPEC)."),
+            check("federal_pack_active", federal is not None and not missing,
+                  "No Active federal pack in force." if federal is None else
+                  ("Missing: " + ", ".join(missing)) if missing else f"{federal.pack_id} v{federal.version} Active."),
+            check("cantons_ready", not not_ready,
+                  "All 26 cantons ready." if not not_ready else f"Not ready: {', '.join(not_ready)}"),
+        ],
+        "G4": [check("certified_channel", False, "No Swissdec-certified ELM channel exists; transmission is gated off.")],
+        "G5": [check("golden_certification", latest_cert is not None and latest_cert.status == "PASS",
+                     (f"Latest CH certification run #{latest_cert.id}: {latest_cert.status} (synthetic golden cases — "
+                      "supporting evidence only, never a substitute for parallel runs)") if latest_cert else
+                     "No CH certification run recorded.")],
+    }
+    gates = []
+    for key, label in CH_GATES.items():
+        state = ch_gate_state(db, key)
+        gate_checks = checks.get(key, [])
+        complete = state == "PASS" and all(c["passed"] for c in gate_checks if key in ("G1", "G2", "G4"))
+        detail = {"EVIDENCE_REQUIRED": f"No reviewed CH-GATE-{key} evidence has been uploaded.",
+                  "SUBMITTED": f"CH-GATE-{key} evidence uploaded; awaiting review by a second Super Admin.",
+                  "PASS": f"CH-GATE-{key} evidence reviewed."}[state]
+        failing = [c["detail"] for c in gate_checks if not c["passed"]]
+        if failing and key in ("G1", "G2", "G4"):
+            detail += " " + " ".join(failing)
+        gates.append({"key": key, "label": f"{key} — {label}", "complete": complete, "state": state,
+                      "evidenceTag": f"CH-GATE-{key}", "detail": detail, "checks": gate_checks})
     blockers = [f"{g['label']}: {g['detail']}" for g in gates if not g["complete"]]
     return {"onDate": on.isoformat(), "ready": not blockers, "gates": gates, "cantons": cantons,
             "blockers": blockers}

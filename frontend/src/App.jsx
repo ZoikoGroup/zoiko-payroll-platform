@@ -26,6 +26,7 @@ import {
   BBCompliancePage, KYCompliancePage, DOCompliancePage,
   GYCompliancePage, JMCompliancePage, BSCompliancePage, TTCompliancePage, SGCompliancePage,
 PRCompliancePage, FRCompliancePage, IECompliancePage, SECompliancePage, ITCompliancePage, HKCompliancePage,
+  CHCompliancePage,
 } from "./pages/JurisdictionCompliance";
 import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
@@ -45,6 +46,7 @@ import {
   BSReportTemplatesPage, TTReportTemplatesPage, SGReportTemplatesPage,
   PRReportTemplatesPage,
   IEReportTemplatesPage, SEReportTemplatesPage, HKReportTemplatesPage,
+  CHReportTemplatesPage,
 } from "./pages/ReportTemplates";
 import FundingPaymentsPage from "./pages/SuperAdmin/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -193,6 +195,8 @@ export default function App() {
       <Route path="/super-admin/compliance/sweden/:jurisdiction" element={<SuperAdminShell><SECompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/italy" element={<SuperAdminShell><ITCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/italy/:jurisdiction" element={<SuperAdminShell><ITCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/switzerland" element={<SuperAdminShell><CHCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/switzerland/:jurisdiction" element={<SuperAdminShell><CHCompliancePage /></SuperAdminShell>} />
         {/* Caribbean production jurisdictions (2026-09-21) — each is
             country-level only, so no :jurisdiction sub-route is needed. */}
         <Route path="/super-admin/compliance/barbados" element={<SuperAdminShell><BBCompliancePage /></SuperAdminShell>} />
@@ -293,6 +297,8 @@ export default function App() {
       <Route path="/super-admin/report-templates/ireland/:jurisdiction" element={<SuperAdminShell><IEReportTemplatesPage /></SuperAdminShell>} />
       <Route path="/super-admin/report-templates/sweden" element={<SuperAdminShell><SEReportTemplatesPage /></SuperAdminShell>} />
       <Route path="/super-admin/report-templates/sweden/:jurisdiction" element={<SuperAdminShell><SEReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/switzerland" element={<SuperAdminShell><CHReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/switzerland/:jurisdiction" element={<SuperAdminShell><CHReportTemplatesPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={

@@ -533,17 +533,18 @@ def test_bvg_threshold_crossing_no_retroactive_ytd():
     # for the earlier, under-threshold months and no annualised backfill.
     ctx = _bvg_ctx(annual_salary="100000", bands=_STD_BANDS, scheme_id=5)
     out = calculate(ctx)
-    # coordinated = min(max(100000 - 26460, 3780), 90720) = 73540; monthly 6128.35
-    assert out["ch_bvg_mandatory_employee"] == Decimal("306.40")
-    assert out["ch_bvg_mandatory_employer"] == Decimal("306.40")
+    # BVG Art. 8: coordinated = min(100000, 90720) - 26460 = 64260; monthly 5355.00
+    # (CH Step 16 — was 73540 / 6128.35 under the earlier, wrong cap)
+    assert out["ch_bvg_mandatory_employee"] == Decimal("267.75")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("267.75")
     trace = out["ch_calculation_trace"]
-    assert trace["accumulators_before"][CH_BVG]["wages"] == "0"
-    assert trace["accumulators_after"][CH_BVG]["wages"] == "6128.35"
-    assert trace["accumulators_after"][CH_BVG]["withheld"] == "612.8"
+    assert Decimal(trace["accumulators_before"][CH_BVG]["wages"]) == 0
+    assert Decimal(trace["accumulators_after"][CH_BVG]["wages"]) == Decimal("5355")
+    assert Decimal(trace["accumulators_after"][CH_BVG]["withheld"]) == Decimal("535.50")
     mandatory_lines = [l for l in trace["lines"] if l["obligation"] == "ch_bvg_mandatory"]
     assert len(mandatory_lines) == 2
     for line in mandatory_lines:
-        assert line["base"] == "6128.35"
+        assert Decimal(line["base"]) == Decimal("5355")
 
 
 def test_bvg_age_band_change_applies_new_rates():
@@ -554,13 +555,13 @@ def test_bvg_age_band_change_applies_new_rates():
     # born 1991-05-01 -> age 34 on 2026-03-31 -> applies the 25-34 band
     ctx34 = _bvg_ctx(annual_salary="100000", bands=bands, scheme_id=5, dob=date(1991, 5, 1))
     out34 = calculate(ctx34)
-    assert out34["ch_bvg_mandatory_employee"] == Decimal("367.70")   # 6128.35 * 6%
-    assert out34["ch_bvg_mandatory_employer"] == Decimal("490.25")   # 6128.35 * 8%
+    assert out34["ch_bvg_mandatory_employee"] == Decimal("321.30")   # 5355 * 6%
+    assert out34["ch_bvg_mandatory_employer"] == Decimal("428.40")   # 5355 * 8%
     # born 1990-05-01 -> age 35 on 2026-03-31 -> applies the 35-44 band
     ctx35 = _bvg_ctx(annual_salary="100000", bands=bands, scheme_id=5, dob=date(1990, 5, 1))
     out35 = calculate(ctx35)
-    assert out35["ch_bvg_mandatory_employee"] == Decimal("429.00")   # 6128.35 * 7%
-    assert out35["ch_bvg_mandatory_employer"] == Decimal("582.20")   # 6128.35 * 9.5%
+    assert out35["ch_bvg_mandatory_employee"] == Decimal("374.85")   # 5355 * 7%
+    assert out35["ch_bvg_mandatory_employer"] == Decimal("508.75")   # 5355 * 9.5% = 508.725 -> 0.05
 
 
 def test_bvg_two_different_plans_different_rates():
@@ -568,10 +569,10 @@ def test_bvg_two_different_plans_different_rates():
     plan_b = [{"component": "MANDATORY", "age_from": 25, "age_to": 44, "employee_pct": "6.5", "employer_pct": "8.0"}]
     out_a = calculate(_bvg_ctx(annual_salary="100000", bands=plan_a, scheme_id=5))
     out_b = calculate(_bvg_ctx(annual_salary="100000", bands=plan_b, scheme_id=6))
-    assert out_a["ch_bvg_mandatory_employee"] == Decimal("306.40")   # 6128.35 * 5%
-    assert out_a["ch_bvg_mandatory_employer"] == Decimal("306.40")
-    assert out_b["ch_bvg_mandatory_employee"] == Decimal("398.35")   # 6128.35 * 6.5%
-    assert out_b["ch_bvg_mandatory_employer"] == Decimal("490.25")   # 6128.35 * 8%
+    assert out_a["ch_bvg_mandatory_employee"] == Decimal("267.75")   # 5355 * 5%
+    assert out_a["ch_bvg_mandatory_employer"] == Decimal("267.75")
+    assert out_b["ch_bvg_mandatory_employee"] == Decimal("348.10")   # 5355 * 6.5% = 348.075 -> 0.05
+    assert out_b["ch_bvg_mandatory_employer"] == Decimal("428.40")   # 5355 * 8%
 
 
 def test_bvg_coordination_floor():
@@ -597,9 +598,9 @@ def test_bvg_extra_mandatory_separate_line():
     ]
     ctx = _bvg_ctx(annual_salary="100000", bands=bands, scheme_id=5)
     out = calculate(ctx)
-    # mandatory on coordinated salary 73540/12 = 6128.35 @ 5%
-    assert out["ch_bvg_mandatory_employee"] == Decimal("306.40")
-    assert out["ch_bvg_mandatory_employer"] == Decimal("306.40")
+    # mandatory on coordinated salary min(100000, 90720) - 26460 = 64260 / 12 = 5355 @ 5%
+    assert out["ch_bvg_mandatory_employee"] == Decimal("267.75")
+    assert out["ch_bvg_mandatory_employer"] == Decimal("267.75")
     # extra-mandatory on the slice (100000 - 90720) = 9280/12 = 773.35 @ 7%/9%
     assert out["ch_bvg_extra_mandatory_employee"] == Decimal("54.15")
     assert out["ch_bvg_extra_mandatory_employer"] == Decimal("69.60")
@@ -1087,3 +1088,19 @@ def test_nbu_fully_charged_to_the_employee():
                                                "nbu_employee_share_pct": "100"}]}
     out = calculate(_uvg_ctx(uvg_rules=rules))
     assert out["ch_uvg_nbu_employee"] == Decimal("90.00") and out["ch_uvg_nbu_employer"] == Decimal("0")
+
+
+
+@pytest.mark.parametrize("annual, coordinated", [
+    ("25000", "3780"),      # below the minimum -> raised to 3780 (Art. 8 para 2)
+    ("60000", "33540"),     # 60000 - 26460
+    ("90720", "64260"),     # exactly the upper limit
+    ("96000", "64260"),     # above it: the SALARY is capped, not the coordinated salary
+    ("250000", "64260"),
+])
+def test_bvg_coordinated_salary_is_bvg_art_8(annual, coordinated):
+    # CH Step 16 regression: coordinated = min(salary, upper) - deduction, >= minimum.
+    pack = sw._Pack({"ch_bvg_coordination_deduction": _amount_row("26460"),
+                     "ch_bvg_upper_salary": _amount_row("90720"),
+                     "ch_bvg_min_coordinated": _amount_row("3780")}, None)
+    assert sw._calculate_coordinated_salary(Decimal(annual), pack) == Decimal(coordinated)

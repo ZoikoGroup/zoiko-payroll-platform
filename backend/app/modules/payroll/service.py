@@ -19218,7 +19218,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden"}
 
 
 def run_golden_test_certification(
@@ -32357,6 +32357,15 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # are otherwise indistinguishable by value alone).
         "germanyUnavailableComponents": (item.germany_calculation_snapshot or {}).get("unavailableComponents") if country == "DE" else None,
         "calculationStatus": (item.germany_calculation_snapshot or {}).get("calculationStatus") if country == "DE" else None,
+        # Phase 8CH: Switzerland quotite/payline trace (ZP-CH-PAYROLL-001) —
+        # unlike Germany, the CH snapshot itself is the designed-to-be-public
+        # artifact (the trace drawer renders it verbatim: quotite line items
+        # and per-component employer-cost breakouts), so the whole snapshot
+        # travels on payslips/run-output lines, gated to CH like every other
+        # country-specific field above. Exposed on the same
+        # PayslipItem.ch_calculation_snapshot column that payslip output and
+        # PDF generation already read.
+        "chCalculationSnapshot": item.ch_calculation_snapshot if (item.country_code or country) == "CH" else None,
     }
 
 

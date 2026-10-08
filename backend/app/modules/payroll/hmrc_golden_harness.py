@@ -190,6 +190,14 @@ def _build_slabs(raw: Optional[list]) -> list:
 
 
 def build_context(case_context: dict) -> PayrollContext:
+    # Switzerland (CH Step 16): a case carries the COMPLETE frozen calculation
+    # context — the same JSON shape every CH payslip stores for replay — and is
+    # rebuilt by the one CH thaw path (switzerland_service.ch_thaw_context), so
+    # the harness never keeps a second, divergent way of building a Swiss context.
+    if case_context.get("country") == "CH" and case_context.get("ch_frozen_context"):
+        from app.modules.payroll.switzerland_service import ch_thaw_context
+
+        return ch_thaw_context(case_context["ch_frozen_context"])
     gross = _to_decimal(case_context["gross"])
     return PayrollContext(
         gross=gross,
@@ -321,12 +329,31 @@ def run_golden_case(case: dict) -> None:
     the first) if any expected figure doesn't match exactly. Passes
     silently otherwise."""
     ctx = build_context(case["context"])
+    blocked_key = case.get("expected_blocked_key")
+    if blocked_key:
+        # a case whose correct outcome is a fail-closed BLOCK (e.g. a wage floor
+        # shortfall): it passes only when the engine refuses with exactly that key
+        from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+
+        try:
+            calculate_payroll(ctx, "standard")
+        except MissingComplianceConfigurationError as exc:
+            if getattr(exc, "key", None) == blocked_key:
+                return
+            raise GoldenCaseMismatch(case.get("description", "(no description)"),
+                                     [{"field": "blocked_key", "expected": blocked_key, "actual": exc.key}])
+        raise GoldenCaseMismatch(case.get("description", "(no description)"),
+                                 [{"field": "blocked_key", "expected": blocked_key, "actual": None}])
     result = calculate_payroll(ctx, "standard")
+    country_result = getattr(result, "ch_result", None) or {}
 
     diffs = []
     for field_name, expected_raw in case["expected"].items():
         expected = _to_decimal(expected_raw)
-        actual = getattr(result, field_name, None)
+        if field_name.startswith("ch_") and field_name in country_result:
+            actual = country_result[field_name]          # the Swiss engine's own dict (PayrollResult.ch_result)
+        else:
+            actual = getattr(result, field_name, None)
         if actual is None:
             diffs.append({"field": field_name, "expected": expected, "actual": None})
             continue

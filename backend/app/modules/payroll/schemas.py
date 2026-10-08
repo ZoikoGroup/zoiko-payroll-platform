@@ -1201,6 +1201,10 @@ class PayslipItemResponse(BaseModel):
     # reportable) and the payslip's IR56G legal-hold line, if any.
     hkgCalculationTrace: Optional[dict] = None
     hkTaxClearanceHold: Optional[dict] = None
+    # Switzerland: the payslip's ch_calculation_snapshot (lines / totals /
+    # trace, read by the statutory trace drawer). _serialize_payslip emits it
+    # for CH only; declared here so response_model does not strip it.
+    chCalculationSnapshot: Optional[dict] = None
     # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
     # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
     # amount; informational only, never affects employeePension/

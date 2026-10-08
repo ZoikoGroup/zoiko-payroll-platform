@@ -201,6 +201,13 @@ _COUNTRY_CALC = {
 }
 
 
+# PayrollResult's flat Switzerland fields (engine/base.py) — copied from the
+# countries/switzerland.py dict when present; absent for every other country.
+_CH_RESULT_FIELDS = tuple(
+    name for name in PayrollResult.__dataclass_fields__ if name.startswith("ch_") and name != "ch_result"
+)
+
+
 # ── Strategy class ─────────────────────────────────────────────────────────
 
 class StandardStrategy(PayrollStrategy):
@@ -526,6 +533,9 @@ class StandardStrategy(PayrollStrategy):
             it_employee_total=deductions.get("it_employee_total", Decimal("0")),
             it_calculation_trace=deductions.get("it_calculation_trace"),
             ch_result=deductions if "ch_calculation_trace" in deductions else None,
+            # the flat ch_* PayrollResult fields (declared in base.py, previously
+            # never populated — every one read 0): filled from the same CH dict
+            **{k: deductions[k] for k in _CH_RESULT_FIELDS if k in deductions},
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

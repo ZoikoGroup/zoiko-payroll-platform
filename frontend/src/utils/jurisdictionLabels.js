@@ -30,6 +30,10 @@ const INCOME_TAX_LABELS = {
   // Sweden's preliminary tax (preliminär skatt) — table/column, 30%
   // supplementary, one-time or SINK, per the frozen se_calculation_snapshot.
   SE: "Preliminary Tax",
+  // Switzerland — source tax (Quellensteuer), employee-only; the canton
+  // tariffs are ingested as QST tariff files (ZP-CH-PAYROLL-001). Matches
+  // the backend's own PDF wording "Source tax (Quellensteuer) withheld".
+  CH: "Source Tax (QST)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -126,6 +130,7 @@ const TAX_ID_LABELS = {
   DE: "Tax Registration No. (Steuernummer / USt-IdNr.)",
   CA: "Business Number (BN)",
   HK: "Business Registration No. / IRD Employer's File No.",
+  CH: "UID (Business Identification No.)",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only
@@ -172,6 +177,8 @@ const IDENTITY_FIELD = {
   IE: { label: "PPSN", get: (p) => p.complianceFields?.ppsn },
   SE: { label: "Personnummer", get: (p) => p.complianceFields?.swedish_id_number },
   IT: { label: "Codice fiscale", get: (p) => p.complianceFields?.codice_fiscale },
+  // Masked server-side (SENSITIVE_FIELDS), same as HKID above.
+  CH: { label: "AHV No.", get: (p) => p.complianceFields?.ahv_number },
 };
 
 export function getIdentityField(payslip) {

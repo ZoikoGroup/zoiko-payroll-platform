@@ -12,6 +12,8 @@ import CAWsdrfPanel from "./CAWsdrfPanel";
 import USForm941Panel from "./USForm941Panel";
 import USForm940Panel from "./USForm940Panel";
 import USNewHireReportingPanel from "./USNewHireReportingPanel";
+import CHElmSubmissionsPanel from "./CHElmSubmissionsPanel";
+import { normalizeCountryCode } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const BASE_TABS = [
@@ -35,6 +37,7 @@ const IN_FORM_138_TAB = { id: "in-form-138", label: "India Form 138", icon: File
 // remittance-period, employer-wide statement, never tied to a single
 // PayrollRun — same reasoning as the India Form 138 tab above.
 const CA_PD7A_TAB = { id: "ca-pd7a", label: "Canada PD7A", icon: Landmark };
+const CH_ELM_TAB = { id: "ch-elm", label: "Swiss ELM submissions", icon: Landmark };
 // Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
 // reasoning as the PD7A tab above.
 const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark };
@@ -65,6 +68,7 @@ export default function ReportsPage() {
   const isCanada = jurisdictionCountry === "CA";
   const isUs = jurisdictionCountry === "US";
   const isPr = jurisdictionCountry === "PR";
+  const isSwitzerland = normalizeCountryCode(jurisdictionCountry) === "CH";
   const tabs = [
     ...BASE_TABS,
     ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
@@ -72,6 +76,7 @@ export default function ReportsPage() {
     ...(isCanada ? [CA_PD7A_TAB, CA_WSDRF_TAB] : []),
     ...(isUs ? [US_941_TAB, US_940_TAB, US_NEW_HIRE_TAB] : []),
     ...(isPr ? [PR_ASUME_TAB] : []),
+    ...(isSwitzerland ? [CH_ELM_TAB] : []),
   ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
@@ -313,6 +318,7 @@ export default function ReportsPage() {
       {isUk && activeTab === "uk-employer-charges" && <UKEmployerChargesPanel />}
       {isIndia && activeTab === "in-form-138" && <INForm138Panel />}
       {isCanada && activeTab === "ca-pd7a" && <CAPd7aPanel />}
+      {isSwitzerland && activeTab === "ch-elm" && <CHElmSubmissionsPanel />}
       {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
       {isUs && activeTab === "us-941" && <USForm941Panel />}
       {isUs && activeTab === "us-940" && <USForm940Panel />}

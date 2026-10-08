@@ -19,6 +19,7 @@ export { default as SGCompliancePage } from "./SGCompliancePage";
 export { default as HKCompliancePage } from "./HKCompliancePage";
 export { default as SECompliancePage } from "./SECompliancePage";
 export { default as ITCompliancePage } from "./ITCompliancePage";
+export { default as CHCompliancePage } from "./CHCompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -44,4 +45,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   HK: "hong-kong",
   SE: "sweden",
   IT: "italy",
+  CH: "switzerland",
 };

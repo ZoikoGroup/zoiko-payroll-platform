@@ -12,6 +12,8 @@ import EnterpriseJurisdictionsTab from "./EnterpriseOnboarding/EnterpriseJurisdi
 import SGComplianceCentreTab from "./SGComplianceCentreTab";
 import ITEmployerProfileTab from "./ITEmployerProfileTab";
 import HKComplianceCentreTab from "./HKComplianceCentreTab";
+import CHEmployerProfileTab from "./CHEmployerProfileTab";
+import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
   updateCompanyDetails,
@@ -104,17 +106,29 @@ export default function CompliancePage() {
   const IT_EMPLOYER_TAB = "Italy Employer Profile";
   // Hong Kong-only tab (Compliance Centre, with IRD inside), same pattern.
   const HK_TAB = "Hong Kong Compliance Centre";
+  // Switzerland's org-level statutory facts live in one CH-only tab (QST daily
+  // rate cards/tariff files are platform data managed by Super Admin, not per
+  // organization), so the US-centric "Tax Configuration" and generic "Documents"
+  // base tabs are omitted for CH rather than left hitting the US fallback.
+  const CH_EMPLOYER_TAB = "Swiss Employer Profile";
+  // stored as a code or a name ("CH" / "Switzerland") — normalized either way
+  const isSwitzerland = normalizeCountryCode(companyDetails.jurisdictionCountry) === "CH";
+  const baseTabs = isSwitzerland
+    ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
+    : BASE_TABS;
   const tabs = [
-    ...(showEnterpriseTab ? [...BASE_TABS, "Enterprise Jurisdictions"] : BASE_TABS),
+    ...(showEnterpriseTab ? [...baseTabs, "Enterprise Jurisdictions"] : baseTabs),
     ...(companyDetails.jurisdictionCountry === "SG" ? [IR21_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "IT" ? [IT_EMPLOYER_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "HK" ? [HK_TAB] : []),
+    ...(isSwitzerland ? [CH_EMPLOYER_TAB] : []),
   ];
+  const currentTab = tabs[activeTab];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
 
   useEffect(() => {
-    if (arrivedForOnboarding) setActiveTab(BASE_TABS.length);
-  }, [arrivedForOnboarding]);
+    if (arrivedForOnboarding) setActiveTab(baseTabs.length);
+  }, [arrivedForOnboarding, baseTabs.length]);
 
   const handleUpdate = (field, value) => {
     setCompanyDetails((prev) => {
@@ -203,7 +217,7 @@ export default function CompliancePage() {
         })}
       </div>
 
-      {activeTab === 0 && (
+      {currentTab === "Overview" && (
         <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between mb-5">
             <h3 className="text-[15px] font-bold text-foreground">Compliance Overview</h3>
@@ -240,7 +254,7 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {activeTab === 1 && (
+      {currentTab === "Company Details" && (
         <div className="space-y-4">
           <ComplianceForm
             companyDetails={companyDetails}
@@ -263,10 +277,10 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {activeTab === 2 && calcMode !== "simple" && (
+      {currentTab === "Contribution Rates" && calcMode !== "simple" && (
         <ContributionRatesTable documents={documents} country={companyDetails.jurisdictionCountry} />
       )}
-      {activeTab === 2 && calcMode === "simple" && (
+      {currentTab === "Contribution Rates" && calcMode === "simple" && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
           <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
             <Lock size={24} className="text-foreground-muted" />
@@ -276,14 +290,14 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {activeTab === 3 && calcMode !== "simple" && (
+      {currentTab === "Tax Configuration" && calcMode !== "simple" && (
         <TaxConfigurationTab
           documents={documents}
           country={companyDetails.jurisdictionCountry}
           jurisdictionState={companyDetails.jurisdictionState}
         />
       )}
-      {activeTab === 3 && calcMode === "simple" && (
+      {currentTab === "Tax Configuration" && calcMode === "simple" && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
           <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
             <Lock size={24} className="text-foreground-muted" />
@@ -293,7 +307,7 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {activeTab === 4 && calcMode !== "simple" && (
+      {currentTab === "Documents" && calcMode !== "simple" && (
         <ComplianceDocumentUpload
           country={companyDetails.jurisdictionCountry}
           addToast={addToast}
@@ -301,7 +315,7 @@ export default function CompliancePage() {
           setDocuments={setDocuments}
         />
       )}
-      {activeTab === 4 && calcMode === "simple" && (
+      {currentTab === "Documents" && calcMode === "simple" && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
           <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
             <Lock size={24} className="text-foreground-muted" />
@@ -311,17 +325,18 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {tabs[activeTab] === IR21_TAB && <SGComplianceCentreTab />}
-{tabs[activeTab] === IT_EMPLOYER_TAB && <ITEmployerProfileTab />}
-      {tabs[activeTab] === HK_TAB && <HKComplianceCentreTab />}
+      {currentTab === IR21_TAB && <SGComplianceCentreTab />}
+      {currentTab === IT_EMPLOYER_TAB && <ITEmployerProfileTab />}
+      {currentTab === HK_TAB && <HKComplianceCentreTab />}
+      {currentTab === CH_EMPLOYER_TAB && <CHEmployerProfileTab />}
 
-      {showEnterpriseTab && activeTab === BASE_TABS.length && (calcMode === "enterprise" || arrivedForOnboarding) && (
+      {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab
           enterpriseStatus={enterpriseStatus}
           onEnterpriseChanged={refreshEnterpriseState}
         />
       )}
-      {showEnterpriseTab && activeTab === BASE_TABS.length && !(calcMode === "enterprise" || arrivedForOnboarding) && (
+      {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && !(calcMode === "enterprise" || arrivedForOnboarding) && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
           <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
             <Lock size={24} className="text-foreground-muted" />

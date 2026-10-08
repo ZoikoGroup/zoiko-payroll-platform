@@ -22,6 +22,10 @@ const JURISDICTIONS = [
   // make "0 real cases" look like a missing feature rather than a real
   // constraint.
   { value: "IE", label: "Ireland (Revenue)", fixturesPath: "backend/tests/fixtures/ie_golden/README.md" },
+  // Switzerland — 12 golden cases whose expected values come from an
+  // independent reference calculator on SYNTHETIC data (ch_golden/README.md).
+  // A PASS here is supporting information only, never release-gate evidence.
+  { value: "CH", label: "Switzerland (BSV / ESTV / cantons)", fixturesPath: "backend/tests/fixtures/ch_golden/README.md" },
 ];
 
 export default function TestCertificationPage() {
