@@ -8077,6 +8077,7 @@ class ChElmSubmission(Base):
     canton                     = Column(String(5), nullable=True)
     schema_version             = Column(String(30), nullable=True)
     period_key                 = Column(String(50), nullable=True)
+    payload_xml                = Column(Text, nullable=True)
     payload_sha256             = Column(String(64), nullable=True)
     payload_ref                = Column(String(255), nullable=True)
     transport_status           = Column(String(30), nullable=True)

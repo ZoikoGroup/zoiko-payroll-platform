@@ -100,6 +100,12 @@ def ch(db, organization, monkeypatch):
         db.add(TaxabilityRule(jurisdiction_country="CH", earning_type="base_salary", tax_component=component,
                               is_taxable=True, status="Approved", effective_from=date(2026, 1, 1),
                               treatment="PERIODIC" if component == "ch_qst" else None))
+    # CH Step 14: the Lohnausweis (ch_la) is a statutory declaration in its own
+    # right — classify it (BOX_1) so G5 stays complete for ch_la and the
+    # reporting suite can generate certificates from this fixture.
+    db.add(TaxabilityRule(jurisdiction_country="CH", earning_type="base_salary", tax_component="ch_la",
+                          is_taxable=True, status="Approved", effective_from=date(2026, 1, 1),
+                          treatment="BOX_1"))
     db.add(CompanyComplianceDetails(organization_id=org.id, jurisdiction_country="Switzerland",
                                     active_pack_id=federal.id))
     emp = PayrollEmployee(organization_id=org.id, employee_code="CH-001", name="Test Worker", country_code="CH",

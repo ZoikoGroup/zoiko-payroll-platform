@@ -5339,3 +5339,139 @@ def list_ch_corrections(payslip_id: int, db: Session = Depends(get_db), current_
     from app.modules.payroll import switzerland_service
 
     return switzerland_service.list_ch_corrections(db, _ch_org(current_user), payslip_id)
+
+
+# ── Switzerland (CH Step 14) — Reporting: Lohnausweis + ELM ──
+from app.modules.payroll.switzerland_schemas import (  # noqa: E402
+    ChElmBuildRequest, ChElmTransition, ChElmXsdRegister, ChLohnausweisAmend, ChLohnausweisGenerate,
+)
+
+
+@payroll_router.post("/switzerland/lohnausweis/generate",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Generate a per-employee CH Lohnausweis for a calendar year (Active template only; "
+                             "committed payslips only; exact values stored, whole francs at render)")
+def generate_ch_lohnausweis(payload: ChLohnausweisGenerate, ctx: ChWriteContext = Depends(ch_write_headers),
+                            db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id,
+                    operation=f"lohnausweis.generate:{payload.employeeId}:{payload.year}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.generate_ch_lohnausweis(
+                        db, org_id, payload.templateId, payload.employeeId, payload.year, current_user.id,
+                        ctx.correlation_id))
+
+
+@payroll_router.get("/switzerland/lohnausweis/certificates",
+                    dependencies=[Depends(get_current_payroll_operator)],
+                    summary="List CH Lohnausweis certificates (live reports by default)")
+def list_ch_lohnausweis(year: Optional[int] = Query(None, alias="year"),
+                        employee_id: Optional[int] = Query(None, alias="employeeId"),
+                        include_superseded: bool = Query(True, alias="includeSuperseded"),
+                        db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_ch_lohnausweis(db, _ch_org(current_user), year, employee_id,
+                                                   include_superseded)
+
+
+@payroll_router.get("/switzerland/lohnausweis/{report_id}/certificate",
+                    dependencies=[Depends(get_current_payroll_operator)],
+                    summary="One rendered CH Lohnausweis (whole-franc boxes)")
+def get_ch_lohnausweis_certificate(report_id: int, db: Session = Depends(get_db),
+                                   current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.ch_lohnausweis_certificate(db, _ch_org(current_user), report_id)
+
+
+@payroll_router.post("/switzerland/lohnausweis/{report_id}/amend",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Re-issue a Lohnausweis with a manual amendment (reason + second approver required; "
+                             "the new version supersedes the previous one)")
+def amend_ch_lohnausweis(report_id: int, payload: ChLohnausweisAmend, ctx: ChWriteContext = Depends(ch_write_headers),
+                         db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"lohnausweis.amend:{report_id}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.amend_ch_lohnausweis(
+                        db, org_id, report_id, payload.amendments, payload.reason, current_user.id,
+                        payload.secondApproverId, ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/elm/xsd",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Register the preserved authority XSD for one ELM domain (CH-ELM:<domain>)")
+def register_ch_elm_xsd(payload: ChElmXsdRegister, ctx: ChWriteContext = Depends(ch_write_headers),
+                        db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"elm.xsd.register:{payload.domain.upper()}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.register_ch_elm_xsd(
+                        db, payload.domain, payload.path, current_user.id))
+
+
+@payroll_router.post("/switzerland/elm/submissions",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Build the ELM envelopes for a period from committed payslips only (never a network "
+                             "call)")
+def build_ch_elm_submissions(payload: ChElmBuildRequest, ctx: ChWriteContext = Depends(ch_write_headers),
+                             db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"elm.build:{payload.year}:{payload.month or 'year'}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.build_ch_elm_submissions(
+                        db, org_id, payload.year, payload.month, payload.domain, current_user.id,
+                        ctx.correlation_id))
+
+
+@payroll_router.get("/switzerland/elm/submissions",
+                    dependencies=[Depends(get_current_payroll_operator)],
+                    summary="List ELM submissions (filter by domain / period / receiver)")
+def list_ch_elm_submissions(domain: Optional[str] = Query(None),
+                            period_key: Optional[str] = Query(None, alias="periodKey"),
+                            receiver_id: Optional[str] = Query(None, alias="receiverId"),
+                            db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_ch_elm_submissions(db, _ch_org(current_user), domain, period_key, receiver_id)
+
+
+@payroll_router.post("/switzerland/elm/submissions/{submission_id}/transition",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Record authority RECEIVE/REJECT for an ELM submission (a rejection never touches "
+                             "payroll)")
+def transition_ch_elm_submission(submission_id: int, payload: ChElmTransition,
+                                 ctx: ChWriteContext = Depends(ch_write_headers),
+                                 db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"elm.transition:{submission_id}:{payload.action}",
+                    actor_id=current_user.id, request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.transition_ch_elm_submission(
+                        db, org_id, submission_id, payload.action, payload.reason, payload.receiptReference,
+                        current_user.id, ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/elm/submissions/{submission_id}/transmit",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Transmit an ELM submission (refuses while CH_ELM_TRANSMIT_ENABLED=False; the platform "
+                             "has no network transmitter)")
+def transmit_ch_elm_submission(submission_id: int, ctx: ChWriteContext = Depends(ch_write_headers),
+                               db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"elm.transmit:{submission_id}",
+                    actor_id=current_user.id, request={},
+                    perform=lambda: switzerland_service.transmit_ch_elm_submission(
+                        db, org_id, submission_id, current_user.id, ctx.correlation_id))

@@ -11774,6 +11774,20 @@ def generate_report_from_template(
         # publishes and activates it.
         raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
                                   "a Hong Kong report is generated only from the Active version.")
+    if template.jurisdiction_country == "CH":
+        # Switzerland Step 14: the Lohnausweis's subject is a per-employee,
+        # per-calendar-year statutory certificate (exact stored boxes, whole-
+        # franc render), not a payslip-column list — only its own generator
+        # (switzerland_service.generate_ch_lohnausweis) renders it.
+        if template.report_type == _switzerland_service.CH_LOHNAUSWEIS_REPORT_TYPE:
+            raise BadRequestException(
+                f"{template.template_key} has a dedicated Switzerland generator "
+                "(/api/payroll/switzerland/lohnausweis/generate); the generic payslip-column generator "
+                "cannot render it."
+            )
+        if template.status != "Active":
+            raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
+                                      "a Switzerland report is generated only from the Active version.")
     run = (
         db.query(PayrollRun)
         .filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id)

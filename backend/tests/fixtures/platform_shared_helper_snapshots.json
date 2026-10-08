@@ -1,5 +1,5 @@
 {
- "__recorded_on__": "2026-10-05",
+ "__recorded_on__": "2026-10-08",
  "hk_activation_evidence_refusal": {
   "audits": [],
   "result": "HK-PAYROLL-2026 v1.0 still holds values that are not source-verified: 1 SOURCE_HASH_REQUIRED (eo_week_start_day); 27 UNVERIFIED — G1 (HK_EARNING_CLASS, eo_average_wage_days_per_year, eo_overtime_aw_test_share_pct, mpf_partial_month_threshold_basis). Link each to a reviewed, hashed source in a Draft version before activating."
@@ -419,7 +419,7 @@
   "audits": [],
   "result": {
    "activationReadiness": {
-    "asOf": "2026-10-05",
+    "asOf": "2026-10-08",
     "canOpen": false,
     "met": 1,
     "registry": "PLANNED",
@@ -467,7 +467,7 @@
       "met": false
      },
      {
-      "detail": "none in force on 2026-10-05",
+      "detail": "none in force on 2026-10-08",
       "key": "ACTIVE_PACK",
       "label": "an Active HK rule pack in force today",
       "met": false
@@ -1554,11 +1554,11 @@
       "availability": "PLANNED",
       "country": "SG"
      },
-     "reason": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['f898189cb4e3']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
+     "reason": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['6b5a4c3d2e1f']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
     }
    ],
    "error": "BadRequestException",
-   "message": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['f898189cb4e3']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
+   "message": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['6b5a4c3d2e1f']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
   }
  },
  "sg_statutory_summary": {
@@ -1917,7 +1917,7 @@
      },
      {
       "basis": "runtime",
-      "evidence": "database [] vs code ['f898189cb4e3']",
+      "evidence": "database [] vs code ['6b5a4c3d2e1f']",
       "key": "migration",
       "label": "Migration",
       "status": "BLOCKED"
@@ -2009,7 +2009,7 @@
        "met": true
       },
       {
-       "detail": "database [] vs code ['f898189cb4e3']",
+       "detail": "database [] vs code ['6b5a4c3d2e1f']",
        "key": "migration",
        "label": "Database at the code's Alembic head",
        "met": false

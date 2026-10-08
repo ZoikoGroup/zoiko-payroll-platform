@@ -402,6 +402,60 @@ class ChCorrectionCreate(_Strict):
     originalPayslipId: int
     reason: str = Field(min_length=3, max_length=500)
     affectedObligations: List[str] = Field(min_length=1)
-    # restated inputs only (earnings, worker facts, QST tariff facts) —
+    # restated inputs only (earnings, worker facts, QST tariff facts) -
     # see switzerland_service.CH_CORRECTABLE_INPUTS
     correctedInputs: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ChLohnausweisGenerate(_Strict):
+    """Generate a per-employee CH Lohnausweis for a calendar year (Step 14)."""
+    employeeId: int
+    year: int = Field(ge=2000, le=2100)
+    # resolved to the Active CH_LOHNAUSWEIS template when absent
+    templateId: Optional[int] = None
+
+
+class ChLohnausweisBoxAmend(_Strict):
+    """One manual box override on a generated certificate."""
+    boxCode: str = Field(min_length=1, max_length=40)
+    value: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    note: Optional[str] = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if self.value is None and not (self.note or "").strip():
+            raise ValueError("amend a box with a value, a note, or both")
+        return self
+
+
+class ChLohnausweisAmend(_Strict):
+    """Manual amendment = a maker-checker re-issue of a certificate (Step 14)."""
+    amendments: List[ChLohnausweisBoxAmend] = Field(min_length=1)
+    reason: str = Field(min_length=3, max_length=500)
+    secondApproverId: int
+
+
+class ChElmBuildRequest(_Strict):
+    """Build the ELM envelopes for a period from committed payslips only."""
+    year: int = Field(ge=2000, le=2100)
+    month: Optional[int] = Field(default=None, ge=1, le=12)
+    domain: Optional[str] = Field(default=None, min_length=2, max_length=10)
+
+
+class ChElmXsdRegister(_Strict):
+    """Register the preserved authority XSD for one ELM domain (CH-ELM:<domain>)."""
+    domain: str = Field(min_length=2, max_length=10)
+    path: str = Field(min_length=1, max_length=500)
+
+
+class ChElmTransition(_Strict):
+    """Manual authority receipt/rejection of an ELM envelope (Step 14)."""
+    action: Literal["RECEIVE", "REJECT"]
+    receiptReference: Optional[str] = Field(default=None, max_length=100)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _context(self):
+        if self.action == "REJECT" and not (self.reason or "").strip():
+            raise ValueError("rejecting an ELM submission needs a reason")
+        return self

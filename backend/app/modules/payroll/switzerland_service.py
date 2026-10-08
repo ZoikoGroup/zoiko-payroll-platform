@@ -432,7 +432,7 @@ from datetime import timedelta  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 from app.modules.payroll.engine.countries.switzerland_content import (  # noqa: E402
-    CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_QST, CH_UVG, CH_WAGE_FLOOR,
+    CH_AHV, CH_ALV, CH_BVG, CH_EO, CH_IV, CH_KTG, CH_LA, CH_QST, CH_UVG, CH_WAGE_FLOOR,
 )
 from app.modules.payroll.models import (  # noqa: E402
     ChEntityProfile, ChSchemeProfile, CollectiveAgreement, EmployeeStatutoryProfile, SourceArtifact,
@@ -441,8 +441,11 @@ from app.modules.payroll.models import (  # noqa: E402
 from app.modules.payroll.switzerland_schemas import validate_scheme_rules  # noqa: E402
 
 CH_UID_RE = re.compile(r"^CHE-\d{3}\.\d{3}\.\d{3}$")
-# CH_WAGE_FLOOR classifies which earnings count toward a wage floor (Step 11).
-CH_TAXABILITY_COMPONENTS = (CH_AHV, CH_IV, CH_EO, CH_ALV, CH_UVG, CH_BVG, CH_KTG, CH_QST, CH_WAGE_FLOOR)
+# CH_WAGE_FLOOR classifies which earnings count toward a wage floor (Step 11);
+# CH_LA (Step 14) classifies which earnings land in which Lohnausweis box
+# (TaxabilityRule.treatment carries the box code).
+CH_TAXABILITY_COMPONENTS = (CH_AHV, CH_IV, CH_EO, CH_ALV, CH_UVG, CH_BVG, CH_KTG, CH_QST,
+                            CH_WAGE_FLOOR, CH_LA)
 CH_WAGE_FLOOR_TYPES = ("CH_CANTON_MINIMUM", "CH_GAV", "CH_NAV")
 
 
@@ -2082,7 +2085,9 @@ def get_ch_readiness(db: Session, on: Optional[date] = None) -> dict:
     add("G6", "G6 — golden-vector certification PASS", latest is not None and latest.status == "PASS",
         f"Latest run #{latest.id}: {latest.status}" if latest else "No CH certification run recorded.")
     add("G7", "G7 — ELM transmission and two reconciled parallel payroll cycles", False,
-        "ELM generation is not built; parallel-run evidence is required from the implementation team.")
+        "ELM generation and envelope tracking are built (Step 14); transmission stays gated behind "
+        "CH_ELM_TRANSMIT_ENABLED = False, and the two reconciled parallel payroll cycles evidence is "
+        "still required from the implementation team.")
     blockers = [f"{g['label']}: {g['detail']}" for g in gates if not g["complete"]]
     return {"onDate": on.isoformat(), "ready": not blockers, "gates": gates, "cantons": cantons,
             "blockers": blockers}
@@ -2168,8 +2173,8 @@ CH_CORRECTION_OBLIGATIONS = {
     "ch_absence": ("ch_absence_earnings_total", None),
 }
 _CH_DELTA_COLUMNS = ("gross_pay", "total_deductions", "net_pay")
-# ELM domain an obligation is declared under (VERIFY against the ELM 5.x
-# domain list when ELM generation is built).
+# ELM domain an obligation is declared under (the Step 14 builder groups each
+# domain by receiver; see CH_ELM_DOMAIN_KEYS / CH_ELM_DOMAINS further down).
 _CH_ELM_DOMAINS = {"ch_ahv": "AHV", "ch_iv": "AHV", "ch_eo": "AHV", "ch_alv": "AHV", "ch_qst": "QST",
                    "ch_fak": "FAK", "ch_family_allowance": "FAK", "ch_uvg": "UVG", "ch_ktg": "KTG"}
 
@@ -2512,3 +2517,908 @@ def qst_tariff_affected_payslips(db: Session, tariff_file_id: int) -> dict:
     return {"tariffFileId": tariff.id, "canton": tariff.canton, "status": tariff.status,
             "months": sorted({a["month"] for a in affected if a["month"]}), "payslipCount": len(affected),
             "affected": affected, "autoRecalculated": False}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CH Step 14 — Reporting: Lohnausweis + ELM
+#
+# The Lohnausweis is a per-employee, per-calendar-year income certificate: a
+# ReportTemplate (report_type CH_LOHNAUSWEIS, only the Active version may
+# generate) whose boxes come from the Approved CH_LA earning classification
+# (TaxabilityRule.treatment holds the box code) and from the obligation totals
+# of every COMMITTED (Approved/Authorized/Paid/Closed) CH payslip of the year.
+# Values are stored exact (Decimal strings); the whole-franc rounding shown to
+# the employee happens only at render time. Regenerating supersedes the
+# previous version of the same scope (supersede_live_reports — the exact
+# function the Singapore/Hong Kong generators use) and links the corrections
+# the new issue absorbed, never replaying them.
+#
+# ELM is the Swiss universal-statements exchange: one envelope per
+# (domain, receiver, period), built ONLY from committed payslips and kept on
+# ChElmSubmission under its four authority statuses (transport, receiver
+# validation, authority ack, settlement). The payload XML is validated against
+# the XSD registered as the CH-ELM:<domain> SourceArtifact when one is
+# registered (mirror of the HK-IRD-SCHEMA hook); without one the envelope is
+# SCHEMA_UNAVAILABLE, never blindly "valid". Transmitting is gated behind
+# CH_ELM_TRANSMIT_ENABLED = False, so this module NEVER opens a network
+# connection to any authority, and receipt/rejection are manual records of
+# authority state — a REJECTION never changes a single payroll figure, so the
+# committed correction path stays exactly as it was.
+# ═════════════════════════════════════════════════════════════════════════
+
+CH_LOHNAUSWEIS_REPORT_TYPE = "CH_LOHNAUSWEIS"
+CH_LOHNAUSWEIS_TEMPLATE_KEY = "CH-LOHNAUSWEIS"
+CH_LA_SCOPE_KEY = "EMPLOYEE:{}:{}"          # EMPLOYEE:<payroll_employee_id>:<calendar year>
+CH_ELM_SCHEMA_VERSION = "ELM_5.0"
+CH_ELM_TRANSMIT_ENABLED = False
+
+# Domains a Step 14 builder can produce an envelope for (a subset of the
+# ChElmSubmission domain vocabulary). BFS is the federal statistics headcount
+# statement and needs no obligation totals at all.
+CH_ELM_DOMAINS = ("AHV", "QST", "FAK", "UVG", "KTG", "BFS")
+# domain -> the engine result keys aggregated into the envelope (BFS = headcount).
+CH_ELM_DOMAIN_KEYS = {
+    "AHV": ("ch_ahv_employee", "ch_ahv_employer", "ch_iv_employee", "ch_iv_employer",
+            "ch_eo_employee", "ch_eo_employer", "ch_alv_employee", "ch_alv_employer"),
+    "QST": ("ch_qst_total",),
+    "FAK": ("ch_fak_employee", "ch_fak_employer", "ch_family_allowance_total"),
+    "UVG": ("ch_uvg_employee", "ch_uvg_employer"),
+    "KTG": ("ch_ktg_employee", "ch_ktg_employer"),
+    "BFS": (),
+}
+
+# Obligation totals always surfaced as declared Lohnausweis boxes when nonzero.
+CH_LA_CONTRIBUTION_BOXES = (
+    ("ch_ahv_employee", "BOX_EE_AHV_IV_EO_ALV", "Employee AHV/IV/EO/ALV contributions"),
+    ("ch_ahv_employer", "BOX_ER_AHV_IV_EO_ALV", "Employer AHV/IV/EO/ALV contributions"),
+    ("ch_uvg_employee", "BOX_EE_UVG", "Employee UVG contributions"),
+    ("ch_uvg_employer", "BOX_ER_UVG", "Employer UVG contributions"),
+    ("ch_bvg_employee", "BOX_EE_BVG", "Employee BVG contributions"),
+    ("ch_bvg_employer", "BOX_ER_BVG", "Employer BVG contributions"),
+    ("ch_fak_employee", "BOX_EE_FAK", "Employee FAK contributions"),
+    ("ch_fak_employer", "BOX_ER_FAK", "Employer FAK contributions"),
+    ("ch_ktg_employee", "BOX_EE_KTG", "Employee KTG contributions"),
+    ("ch_ktg_employer", "BOX_ER_KTG", "Employer KTG contributions"),
+    ("ch_qst_total", "BOX_QST_WITHHELD", "Source tax (Quellensteuer) withheld"),
+)
+CH_LA_BOX_LABELS = {box: label for _, box, label in CH_LA_CONTRIBUTION_BOXES}
+
+_ELM_MAX_XML_BYTES = 20 * 1024 * 1024        # resource guard, same discipline as HK
+_ELM_AGENCY = "CH-ELM"
+
+
+def _ch14_audit(db, actor_id, action, entity_type, entity_id, old=None, new=None, reason=None,
+               correlation_id=None):
+    from app.modules.payroll.service import record_tax_audit
+
+    if correlation_id:
+        new = {**(new or {}), "correlationId": correlation_id}
+    record_tax_audit(db, actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id,
+                     legal_reference="CH spec — Step 14", old_value=old, new_value=new, reason=reason,
+                     auto_commit=False)
+
+
+def _exact(value) -> str:
+    return format(Decimal(str(value or 0)), "f")
+
+
+def _francs(value) -> int:
+    from decimal import ROUND_HALF_UP
+
+    dec = Decimal(str(value or 0))
+    return int(dec.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _ch_committed_rows(db: Session, organization_id: int, employee_id: Optional[int] = None,
+                       year: Optional[int] = None) -> list:
+    """(item, run) pairs of CH payslips whose run is FINAL (Approved/Authorized/
+    Paid/Closed) and — when year is given — paid during that year. ELM and the
+    Lohnausweis read ONLY these; a Draft/Review run never contributes."""
+    from app.modules.payroll.models import PayrollRun, PayslipItem
+
+    q = (db.query(PayslipItem, PayrollRun).join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+         .filter(PayslipItem.organization_id == organization_id, PayslipItem.country_code == "CH",
+                 PayrollRun.status.in_(_CH_FINALIZED_RUN_STATUSES)))
+    if employee_id is not None:
+        q = q.filter(PayslipItem.employee_id == employee_id)
+    if year is not None:
+        q = q.filter(PayrollRun.pay_date >= date(year, 1, 1), PayrollRun.pay_date <= date(year, 12, 31))
+    return q.order_by(PayrollRun.pay_date, PayrollRun.id, PayslipItem.id).all()
+
+
+def _ch_effective_periods(rows: list) -> list:
+    """Latest-wins snapshot per (employee, period): a period with correction
+    deltas takes the LAST delta's snapshot (its totalsAll and frozenContext
+    earnings are absolute AFTER the correction) and the original is carried for
+    metadata only; without deltas the original stands. Originals and deltas are
+    never summed, so a correction can never double-count a period."""
+    latest: dict = {}
+    for item, run in rows:
+        if run.period_start is None:
+            continue
+        snapshot = item.ch_calculation_snapshot or {}
+        corr = (snapshot or {}).get("correction") or {}
+        seq = corr.get("sequence") or 0
+        key = (item.employee_id, run.period_start.isoformat())
+        if key not in latest or seq > latest[key][0]:
+            latest[key] = (seq, item, run, snapshot, bool(corr))
+    out = []
+    for (employee_id, period_start), (seq, item, run, snapshot, is_corr) in sorted(
+            latest.items(), key=lambda kv: kv[0]):
+        out.append({"employeeId": employee_id, "periodStart": period_start, "item": item, "run": run,
+                    "snapshot": snapshot, "isCorrection": is_corr,
+                    "sequence": seq if is_corr else None})
+    return out
+
+
+def _ch_year_effective(db: Session, organization_id: int, employee_id: int, year: int) -> list:
+    return _ch_effective_periods(_ch_committed_rows(db, organization_id, employee_id, year))
+
+
+def _ch_snapshot_earnings(snapshot: dict) -> dict:
+    attrs = ((snapshot or {}).get("frozenContext") or {}).get("attrs") or {}
+    earnings = attrs.get("earnings") or {}
+    return {k: Decimal(str(v)) for k, v in earnings.items()}
+
+
+def _ch_snapshot_totals(snapshot: dict) -> dict:
+    return {k: Decimal(str(v)) for k, v in ((snapshot or {}).get("totalsAll") or {}).items()}
+
+
+# ── Lohnausweis ─────────────────────────────────────────────────────────
+
+def ch_lohnausweis_box_map(db: Session, on: Optional[date] = None) -> dict:
+    """Approved CH_LA earning classification -> box code (treatment) governing on
+    `on`. Canonical rows only (organization_id NULL) — the same discipline G5
+    applies to every other CH duty, never an unapproved draft."""
+    on = on or date.today()
+    rows = (db.query(TaxabilityRule).filter(
+        TaxabilityRule.jurisdiction_country == "CH", TaxabilityRule.organization_id.is_(None),
+        TaxabilityRule.tax_component == CH_LA, TaxabilityRule.status == "Approved",
+        (TaxabilityRule.effective_from.is_(None)) | (TaxabilityRule.effective_from <= on),
+        (TaxabilityRule.effective_to.is_(None)) | (TaxabilityRule.effective_to >= on),
+    ).order_by(TaxabilityRule.effective_from.desc()).all())
+    return {r.earning_type: r.treatment for r in rows if r.earning_type and r.treatment}
+
+
+def generate_ch_lohnausweis(db: Session, organization_id: int, template_id: Optional[int],
+                            employee_id: int, year: int, actor_id: Optional[int],
+                            correlation_id: Optional[str] = None) -> dict:
+    """Generate the year's Lohnausweis for one employee from committed payslips
+    only. The Active template is resolved when template_id is None. Values are
+    stored EXACT; rendering to whole francs happens in the certificate view."""
+    from app.modules.organizations.models import Organization
+    from app.modules.payroll.models import GeneratedReport, PayrollEmployee, ReportTemplate
+    from app.modules.payroll.service import get_applicable_report_template, supersede_live_reports
+
+    if not (2000 <= year <= 2100):
+        raise BadRequestException("A Lohnausweis is generated for a single calendar year.")
+    if template_id is None:
+        template = get_applicable_report_template(db, "CH", None, str(year), CH_LOHNAUSWEIS_REPORT_TYPE)
+        if template is None:
+            raise BadRequestException("No Active CH Lohnausweis template covers this year yet "
+                                      "(publish and activate one first).")
+    else:
+        template = db.get(ReportTemplate, template_id)
+        if template is None:
+            raise NotFoundException("ReportTemplate", template_id)
+    if (template.jurisdiction_country or "").upper() != "CH" or template.report_type != CH_LOHNAUSWEIS_REPORT_TYPE:
+        raise BadRequestException("The template is not a Switzerland Lohnausweis template.")
+    if template.status != "Active":
+        raise BadRequestException(f"A Lohnausweis is generated only from the Active template version "
+                                  f"({template.template_key} v{template.version} is {template.status}).")
+
+    employee = db.get(PayrollEmployee, employee_id)
+    if employee is None or employee.organization_id != organization_id:
+        raise NotFoundException("PayrollEmployee", employee_id)
+
+    effective = _ch_year_effective(db, organization_id, employee_id, year)
+    if not effective:
+        raise BadRequestException("No committed Swiss payslips for this employee in the given year — "
+                                  "approve the payroll runs before generating the certificate.")
+
+    box_map = ch_lohnausweis_box_map(db, date(year, 12, 31))
+    earning_totals: dict = {}
+    unmapped: dict = {}
+    for e in effective:
+        for name, amount in _ch_snapshot_earnings(e["snapshot"]).items():
+            box = box_map.get(name)
+            if box:
+                earning_totals[box] = earning_totals.get(box, ZERO_CHF) + amount
+            elif amount:
+                unmapped[name] = unmapped.get(name, ZERO_CHF) + amount
+    contribution_totals: dict = {}
+    for e in effective:
+        total = _ch_snapshot_totals(e["snapshot"])
+        for key, box, _label in CH_LA_CONTRIBUTION_BOXES:
+            value = total.get(key, ZERO_CHF)
+            if value:
+                contribution_totals[box] = contribution_totals.get(box, ZERO_CHF) + value
+    all_boxes: dict = dict(earning_totals)
+    for box, value in contribution_totals.items():
+        all_boxes[box] = all_boxes.get(box, ZERO_CHF) + value
+    boxes = [{"boxCode": box, "label": CH_LA_BOX_LABELS.get(box, box), "valueExact": _exact(value)}
+             for box, value in sorted(all_boxes.items())]
+
+    corrections = []
+    for e in effective:
+        corr = (e["snapshot"] or {}).get("correction") or {}
+        if corr:
+            corrections.append({
+                "periodStart": e["periodStart"], "correctionPayslipId": e["item"].id,
+                "correctionRunId": e["run"].id, "sequence": corr.get("sequence"),
+                "originalPayslipId": corr.get("originalPayslipId"), "reason": corr.get("reason")})
+
+    org = db.get(Organization, organization_id)
+    worker_profile = _ch_worker_profile(db, employee_id, organization_id, date(year, 12, 31))
+    canton = None
+    if worker_profile is not None:
+        canton = getattr(worker_profile, "ch_residence_canton", None) or getattr(worker_profile, "ch_qst_canton", None)
+    employee_snapshot = {
+        "id": employee_id,
+        "name": effective[0]["item"].employee_name or employee.name,
+        "canton": canton,
+        "registrationNumber": (employee.ch_ahv_number if hasattr(employee, "ch_ahv_number") else None),
+    }
+    scope_key = CH_LA_SCOPE_KEY.format(employee_id, year)
+    superseded = supersede_live_reports(db, organization_id, CH_LOHNAUSWEIS_REPORT_TYPE, scope_key=scope_key,
+                                        jurisdiction_country="CH", reporting_year=str(year))
+    rendered_data = _json_safe({
+        "certificateKind": "LOHNAUSWEIS", "templateKey": template.template_key,
+        "templateVersion": template.version, "templateId": template.id,
+        "jurisdictionCountry": "CH", "jurisdictionState": None,
+        "year": year, "periodLabel": f"CH Lohnausweis {year}",
+        "employer": {"organizationId": organization_id,
+                     "name": (getattr(org, "name", None) or getattr(org, "organization_name", None))},
+        "employee": employee_snapshot,
+        "configurationLineage": {
+            "templateId": template.id, "templateVersion": template.version,
+            "templateStatus": template.status, "schemaVersion": CH_ELM_SCHEMA_VERSION,
+            "taxabilityRules": [{"earningType": etype, "boxCode": box}
+                                for etype, box in sorted(box_map.items())]},
+        "monthsDeclared": [e["periodStart"] for e in effective],
+        "payslipCount": len(effective),
+        "boxes": boxes,
+        "unmappedEarnings": {k: _exact(v) for k, v in sorted(unmapped.items())},
+        "corrections": corrections,
+        "supersedesReportIds": superseded,
+        "amendments": [],
+    })
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=CH_LOHNAUSWEIS_REPORT_TYPE, payroll_run_id=None, employee_id=employee_id,
+        scope_key=scope_key, jurisdiction_country="CH", jurisdiction_state=None,
+        reporting_year=str(year), reporting_period=str(year), status="Generated",
+        generated_by_id=actor_id, rendered_data=rendered_data,
+    )
+    db.add(row)
+    db.flush()
+    _ch14_audit(db, actor_id, "create", "generated_report", row.id,
+                old={"supersedesReportIds": superseded} if superseded else None,
+                new={"reportType": row.report_type, "templateKey": template.template_key,
+                     "templateVersion": row.template_version, "scopeKey": scope_key,
+                     "employeeId": employee_id, "year": year, "boxCount": len(boxes)},
+                reason=f"Generated {template.template_key} v{template.version} for {year}",
+                correlation_id=correlation_id)
+    return _ch_lohnausweis_view(db, row)
+
+
+def _ch_lohnausweis_view(db: Session, row) -> dict:
+    """Certificate view: whole-franc rendering of the exact stored boxes.
+    Amendments (recorded by amend_ch_lohnausweis) overlay a box's exact value
+    at render time; the stored history is never rewritten."""
+    data = row.rendered_data or {}
+    overrides = {}
+    for am in data.get("amendments") or []:
+        # a later amendment for the same box REPLACES only the fields it
+        # carries: a note-only change keeps the value a prior amendment set
+        for change in am.get("changes") or []:
+            entry = overrides.setdefault(change["boxCode"], {})
+            if change.get("value") is not None:
+                entry["value"] = change["value"]
+            if "note" in change and change.get("note") is not None:
+                entry["note"] = change["note"]
+    boxes = []
+    for box in data.get("boxes") or []:
+        override = overrides.get(box["boxCode"])
+        exact = (override.get("value") if (override and override.get("value") is not None)
+                 else box.get("valueExact"))
+        note = override.get("note") if (override and "note" in override) else box.get("note")
+        entry = {"boxCode": box["boxCode"], "label": box.get("label", box["boxCode"]),
+                 "valueExact": _exact(exact)}
+        if note:
+            entry["note"] = note
+        entry["valueFrancs"] = _francs(entry["valueExact"])
+        boxes.append(entry)
+    employee = data.get("employee") or {}
+    return {
+        "reportId": row.id, "status": row.status, "reportType": row.report_type,
+        "templateKey": data.get("templateKey"), "templateVersion": data.get("templateVersion"),
+        "reportingYear": row.reporting_year, "reportingPeriod": row.reporting_period,
+        "organizationId": row.organization_id, "employeeId": employee.get("id"),
+        "employeeName": employee.get("name"), "employeeCanton": employee.get("canton"),
+        "monthsDeclared": data.get("monthsDeclared") or [], "payslipCount": data.get("payslipCount") or 0,
+        "boxes": boxes,
+        "unmappedEarnings": data.get("unmappedEarnings") or {},
+        "corrections": data.get("corrections") or [],
+        "supersedesReportIds": data.get("supersedesReportIds") or [],
+        "amendments": data.get("amendments") or [],
+        "configurationLineage": data.get("configurationLineage") or {},
+        "generatedAt": _iso(row.generated_at.date()) if row.generated_at else None,
+    }
+
+
+def ch_lohnausweis_certificate(db: Session, organization_id: int, report_id: int) -> dict:
+    from app.modules.payroll.models import GeneratedReport
+
+    row = db.get(GeneratedReport, report_id)
+    if row is None or row.organization_id != organization_id or row.report_type != CH_LOHNAUSWEIS_REPORT_TYPE:
+        raise NotFoundException("GeneratedReport", report_id)
+    return _ch_lohnausweis_view(db, row)
+
+
+def list_ch_lohnausweis(db: Session, organization_id: int, year: Optional[int] = None,
+                        employee_id: Optional[int] = None, include_superseded: bool = True) -> list:
+    from app.modules.payroll.models import GeneratedReport
+
+    q = (db.query(GeneratedReport).filter(
+        GeneratedReport.organization_id == organization_id, GeneratedReport.jurisdiction_country == "CH",
+        GeneratedReport.report_type == CH_LOHNAUSWEIS_REPORT_TYPE))
+    if year is not None:
+        q = q.filter(GeneratedReport.reporting_year == str(year))
+    if employee_id is not None:
+        q = q.filter(GeneratedReport.employee_id == employee_id)
+    if not include_superseded:
+        q = q.filter(GeneratedReport.status == "Generated")
+    return [_ch_lohnausweis_view(db, row) for row in q.order_by(GeneratedReport.id.desc()).all()]
+
+
+def amend_ch_lohnausweis(db: Session, organization_id: int, report_id: int, amendments: list, reason: str,
+                         actor_id: Optional[int], second_approver_id: Optional[int],
+                         correlation_id: Optional[str] = None) -> dict:
+    """Manual amendment of a generated certificate = a RE-ISSUE that supersedes
+    the previous version (exactly like regeneration) and carries the recorded
+    justification + second approver. GeneratedReport stays immutable: the
+    amended copy is a NEW row whose rendered_data links the superseded ids."""
+    from app.modules.auth.models import User
+    from app.modules.payroll.models import GeneratedReport
+    from app.modules.payroll.service import supersede_live_reports
+
+    row = db.get(GeneratedReport, report_id)
+    if row is None or row.organization_id != organization_id or row.report_type != CH_LOHNAUSWEIS_REPORT_TYPE:
+        raise NotFoundException("GeneratedReport", report_id)
+    reason = (reason or "").strip()
+    if len(reason) < 3:
+        raise BadRequestException("A manual amendment needs a written reason.")
+    if second_approver_id is None:
+        raise BadRequestException("A manual amendment needs a second approver (maker-checker).")
+    if second_approver_id == actor_id:
+        raise BadRequestException("The second approver must be a different user than the person amending.")
+    approver = db.get(User, second_approver_id)
+    if approver is None or not getattr(approver, "is_active", True):
+        raise BadRequestException("The second approver is not an active user.")
+    if not amendments:
+        raise BadRequestException("An amendment needs at least one box change.")
+
+    declared = {b["boxCode"] for b in (row.rendered_data or {}).get("boxes") or []}
+    changes = []
+    for item in amendments:
+        box = (item.boxCode or "").strip().upper()
+        if box not in declared:
+            raise BadRequestException(f"boxCode {box!r} is not a declared Lohnausweis box.")
+        if item.value is None and not (item.note or "").strip():
+            raise BadRequestException(f"box {box}: amend with a value or a note.")
+        changes.append({"boxCode": box,
+                        "value": _exact(item.value) if item.value is not None else None,
+                        "note": (item.note or "").strip() or None})
+
+    superseded = supersede_live_reports(db, organization_id, row.report_type, scope_key=row.scope_key,
+                                        jurisdiction_country="CH", reporting_year=row.reporting_year)
+    data = _json_safe(row.rendered_data or {})
+    data["amendments"] = list(data.get("amendments") or []) + [{
+        "at": datetime.utcnow().replace(microsecond=0).isoformat(), "by": actor_id,
+        "secondApproverId": second_approver_id, "reason": reason, "changes": changes}]
+    data["amendedBy"] = actor_id
+    data["amendmentReason"] = reason
+    data["secondApproverId"] = second_approver_id
+    data["supersedesReportIds"] = sorted(set(superseded or ()) | set(data.get("supersedesReportIds") or ()))
+    new_row = GeneratedReport(
+        organization_id=organization_id, report_template_id=row.report_template_id,
+        template_version=row.template_version, report_type=row.report_type, payroll_run_id=None,
+        employee_id=row.employee_id, scope_key=row.scope_key, jurisdiction_country=row.jurisdiction_country,
+        jurisdiction_state=row.jurisdiction_state, reporting_year=row.reporting_year,
+        reporting_period=row.reporting_period, applicable_tax_pack_id=row.applicable_tax_pack_id,
+        applicable_tax_pack_version=row.applicable_tax_pack_version, status="Generated",
+        generated_by_id=actor_id, rendered_data=data, notes=f"Manual amendment: {reason[:500]}")
+    db.add(new_row)
+    db.flush()
+    _ch14_audit(db, actor_id, "amend", "generated_report", new_row.id,
+                old={"supersedesReportIds": superseded}, new={"reportType": row.report_type,
+                                                              "scopeKey": row.scope_key,
+                                                              "reason": reason,
+                                                              "secondApproverId": second_approver_id,
+                                                              "changes": changes},
+                reason=reason, correlation_id=correlation_id)
+    return _ch_lohnausweis_view(db, new_row)
+
+
+# ── ELM ──────────────────────────────────────────────────────────────────
+
+def _ch_elm_form_number(domain: str) -> str:
+    return f"CH-ELM:{domain.upper()}"
+
+
+def ch_elm_registered_schema(db: Session, domain: str):
+    """The CH-ELM:<domain> XSD SourceArtifact currently in force (unsuperseded)."""
+    from app.modules.payroll.models import SourceArtifact
+
+    return (db.query(SourceArtifact)
+            .filter(SourceArtifact.form_number == _ch_elm_form_number(domain),
+                    SourceArtifact.superseded_by_id.is_(None))
+            .order_by(SourceArtifact.id.desc()).first())
+
+
+def register_ch_elm_xsd(db: Session, domain: str, path: str, actor_id: Optional[int] = None) -> dict:
+    """Register the authority XSD for one ELM domain as a preserved source
+    artifact (CH-ELM:<domain>). A re-registration with the same digest is
+    idempotent; a different file supersedes the previous artifact. Flushes
+    only — the CH write route commits."""
+    from pathlib import Path
+
+    from app.modules.payroll.models import SourceArtifact
+
+    domain = (domain or "").upper()
+    if domain not in CH_ELM_DOMAINS:
+        raise BadRequestException(f"unknown ELM domain {domain!r} (expected one of {', '.join(CH_ELM_DOMAINS)})")
+    file = Path(path)
+    if not file.is_file():
+        raise BadRequestException(f"schema file not found: {path}")
+    digest = hashlib.sha256(file.read_bytes()).hexdigest()
+    current = ch_elm_registered_schema(db, domain)
+    if current is not None and current.checksum_sha256 == digest:
+        return {"artifactId": current.id, "formNumber": current.form_number, "domain": domain,
+                "registered": True, "supersedesId": None}
+    artifact = SourceArtifact(agency=_ELM_AGENCY, title=f"ELM {domain} XSD (registered, unreviewed)",
+                              form_number=_ch_elm_form_number(domain), checksum_sha256=digest,
+                              file_path=str(file), original_filename=file.name, created_by_id=actor_id)
+    db.add(artifact)
+    db.flush()
+    supersedes_id = None
+    if current is not None:
+        current.superseded_by_id = artifact.id
+        supersedes_id = current.id
+    _ch14_audit(db, actor_id, "create", "source_artifact", artifact.id,
+                old={"supersedesId": supersedes_id} if supersedes_id else None,
+                new={"formNumber": artifact.form_number, "domain": domain, "checksumSha256": digest,
+                     "title": artifact.title})
+    return {"artifactId": artifact.id, "formNumber": artifact.form_number, "domain": domain,
+            "registered": True, "supersedesId": supersedes_id}
+
+
+def _ch_elm_xml_parser():
+    from lxml import etree
+
+    return etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False)
+
+
+def _ch_validate_elm_xml(xml_bytes: bytes, schema_path: str) -> list:
+    """Validation errors of an ELM payload against its XSD ([] = valid). Mirrors
+    the HK IRD schema hook incl. its hardened parser: no DOCTYPE / entities."""
+    from lxml import etree
+
+    if len(xml_bytes or b"") > _ELM_MAX_XML_BYTES:
+        return [f"document exceeds the {_ELM_MAX_XML_BYTES // (1024 * 1024)} MB limit — refused before parsing"]
+    parser = _ch_elm_xml_parser()
+    schema = etree.XMLSchema(etree.parse(schema_path, parser))
+    try:
+        doc = etree.fromstring(xml_bytes, parser)
+    except etree.XMLSyntaxError as exc:
+        return [f"not well-formed XML: {exc}"]
+    docinfo = doc.getroottree().docinfo
+    if docinfo.internalDTD is not None or docinfo.doctype:
+        return ["a DOCTYPE / entity declaration is not accepted in an ELM submission"]
+    try:
+        if schema.validate(doc):
+            return []
+    except etree.XMLSchemaValidateError as exc:
+        return [f"schema validation failed: {exc}"]
+    return [f"line {e.line}: {e.message}" for e in schema.error_log]
+
+
+def _ch_validate_elm_payload(db: Session, domain: str, xml_text: str) -> tuple:
+    """(receiver_validation_status, [errors]). The XSD is the registered
+    CH-ELM:<domain> SourceArtifact's preserved file; without one the envelope
+    is SCHEMA_UNAVAILABLE — never assumed valid."""
+    from pathlib import Path
+
+    art = ch_elm_registered_schema(db, domain)
+    if art is None or not art.file_path:
+        return "SCHEMA_UNAVAILABLE", []
+    path = Path(art.file_path)
+    if not path.is_file():
+        return "SCHEMA_UNAVAILABLE", ["registered XSD file is missing"]
+    errors = _ch_validate_elm_xml(xml_text.encode("utf-8"), str(path))
+    return ("VALID" if not errors else "INVALID"), errors
+
+
+def _xml_escape(value) -> str:
+    return (str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;").replace("'", "&apos;"))
+
+
+def _ch_elm_scheme_code(db: Session, scheme_id: Optional[int]) -> Optional[str]:
+    if scheme_id is None:
+        return None
+    scheme = db.get(ChSchemeProfile, scheme_id)
+    return scheme.scheme_code if scheme is not None else None
+
+
+def _ch_entity_profile_row(db: Session, organization_id: int, on: Optional[date] = None):
+    from app.modules.payroll.models import ChEntityProfile
+
+    on = on or date.today()
+    return (db.query(ChEntityProfile)
+            .filter(ChEntityProfile.organization_id == organization_id, ChEntityProfile.effective_from <= on,
+                    (ChEntityProfile.effective_to.is_(None)) | (ChEntityProfile.effective_to >= on))
+            .order_by(ChEntityProfile.effective_from.desc()).first())
+
+
+def _ch_worker_profile(db: Session, employee_id: int, organization_id: int, on: Optional[date] = None):
+    """The in-force CH EmployeeStatutoryProfile — the same source the engine's
+    resolve_ch_calc_inputs reads (cantons, QST tariff, policy schemes)."""
+    from app.modules.payroll.service import resolve_employee_statutory_profile
+
+    on = on or date.today()
+    return resolve_employee_statutory_profile(db, employee_id, organization_id, as_of=on)
+
+
+def _ch_elm_receiver(db: Session, organization_id: int, entity_profile, worker_profile, domain: str) -> str:
+    """The receiver (authority office) an employee's domain contributions go to.
+    QST groups by the worker's canton, AHV/FAK by the employer's assigned
+    scheme, UVG/KTG by the worker policy scheme; BFS is the single federal
+    statistics receiver."""
+    from app.modules.payroll.models import ChFamilyAllowanceEntitlement
+
+    if domain == "QST":
+        canton = (getattr(worker_profile or object(), "ch_qst_canton", None)
+                  or getattr(worker_profile or object(), "ch_residence_canton", None) or "UNKNOWN")
+        return f"CANTON:{canton.upper()}"
+    if domain == "AHV":
+        scheme_id = entity_profile.compensation_office_scheme_id if entity_profile else None
+        return _ch_elm_scheme_code(db, scheme_id) or f"ORG:{organization_id}:AHV"
+    if domain == "FAK":
+        employee_id = getattr(worker_profile, "employee_id", None)
+        entitlement = None
+        if employee_id is not None:
+            entitlement = (db.query(ChFamilyAllowanceEntitlement)
+                           .filter(ChFamilyAllowanceEntitlement.employee_id == employee_id,
+                                   ChFamilyAllowanceEntitlement.status == "APPROVED",
+                                   ChFamilyAllowanceEntitlement.fak_scheme_id.isnot(None))
+                           .order_by(ChFamilyAllowanceEntitlement.id.desc()).first())
+        if entitlement is not None:
+            return _ch_elm_scheme_code(db, entitlement.fak_scheme_id) or f"FAK:{entitlement.id}"
+        scheme_id = entity_profile.fak_scheme_id if entity_profile else None
+        return _ch_elm_scheme_code(db, scheme_id) or f"ORG:{organization_id}:FAK"
+    if domain in ("UVG", "KTG"):
+        attribute = "ch_uvg_policy_scheme_id" if domain == "UVG" else "ch_ktg_policy_scheme_id"
+        scheme_id = getattr(worker_profile or object(), attribute, None)
+        return _ch_elm_scheme_code(db, scheme_id) or f"EMP:{getattr(worker_profile, 'employee_id', organization_id)}:{domain}"
+    return "CH-BFS"
+
+
+def _ch_elm_groups(db: Session, organization_id: int, profile, effective: list, domain: str) -> dict:
+    """Per-receiver aggregation of the effective period rows for one domain."""
+    from app.modules.payroll.models import PayrollEmployee
+
+    employee_ids = sorted({e["employeeId"] for e in effective})
+    employees = {e.id: e for e in db.query(PayrollEmployee).filter(PayrollEmployee.id.in_(employee_ids)).all()}
+    groups: dict = {}
+    for e in effective:
+        emp = employees.get(e["employeeId"])
+        if emp is None:
+            continue
+        worker_profile = _ch_worker_profile(db, e["employeeId"], organization_id, e["run"].pay_date)
+        receiver = _ch_elm_receiver(db, organization_id, profile, worker_profile, domain)
+        group = groups.setdefault(receiver, {"employees": {}, "totals": {}, "headcount": 0, "canton": None})
+        if e["employeeId"] in group["employees"]:
+            continue
+        canton = (getattr(worker_profile or object(), "ch_residence_canton", None)
+                  or getattr(worker_profile or object(), "ch_qst_canton", None) or None)
+        row_emp = {"employeeId": e["item"].employee_id, "name": e["item"].employee_name or emp.name,
+                   "canton": canton, "amounts": {}}
+        totals = _ch_snapshot_totals(e["snapshot"])
+        if domain == "BFS":
+            group["totals"]["wages"] = group["totals"].get("wages", ZERO_CHF) + totals.get("ch_employee_total",
+                                                                                           ZERO_CHF)
+        else:
+            for key in CH_ELM_DOMAIN_KEYS[domain]:
+                value = totals.get(key, ZERO_CHF)
+                if value:
+                    row_emp["amounts"][key] = value
+                    group["totals"][key] = group["totals"].get(key, ZERO_CHF) + value
+        group["employees"][e["employeeId"]] = row_emp
+        group["headcount"] += 1
+        if group["canton"] is None:
+            group["canton"] = canton
+    return groups
+
+
+def _ch_elm_payload_xml(organization_id: int, domain: str, receiver: str, period_key: str,
+                        group: dict) -> str:
+    lines = [f'<?xml version="1.0" encoding="utf-8"?>',
+             f'<ELMSubmission schemaVersion="{CH_ELM_SCHEMA_VERSION}" domain="{domain}" '
+             f'period="{period_key}" employerId="{organization_id}" receptor="{_xml_escape(receiver)}">']
+    for employee_id in sorted(group["employees"]):
+        emp = group["employees"][employee_id]
+        attrs = [f'employeeId="{emp["employeeId"]}" name="{_xml_escape(emp["name"])}"']
+        if emp.get("canton"):
+            attrs.append(f'canton="{_xml_escape(emp["canton"])}"')
+        for key, value in sorted(emp["amounts"].items()):
+            attrs.append(f'{key}="{_exact(value)}"')
+        lines.append("  <EmployeeELM " + " ".join(attrs) + "/>")
+    totals = ["  <Totals"]
+    for key, value in sorted(group["totals"].items()):
+        totals.append(f'{key}="{_exact(value)}"')
+    totals.append(f'headcount="{group["headcount"]}"/>')
+    lines.append(" ".join(totals))
+    lines.append("</ELMSubmission>")
+    return "\n".join(lines)
+
+
+def _ch_elm_statutory_filing(db: Session, organization_id: int, domain: str, period_key: str,
+                             authority_ack_status: str, requeue_rejected: bool = False):
+    from app.modules.payroll.models import StatutoryFiling
+
+    filing_type, label = f"ELM:{domain}", f"CH ELM {domain} — {period_key}"
+    row = (db.query(StatutoryFiling)
+           .filter(StatutoryFiling.organization_id == organization_id, StatutoryFiling.jurisdiction == "CH",
+                   StatutoryFiling.filing_type == filing_type, StatutoryFiling.period_label == label)
+           .order_by(StatutoryFiling.id.desc()).first())
+    if row is not None:
+        if requeue_rejected and row.submission_status == "REJECTED":
+            row.status, row.submission_status = "IN_PROGRESS", "PENDING"
+            row.blocked_reason = None
+        return row
+    row = StatutoryFiling(organization_id=organization_id, jurisdiction="CH", filing_type=filing_type,
+                          period_label=label, status="IN_PROGRESS", submission_status=authority_ack_status,
+                          schema_version=CH_ELM_SCHEMA_VERSION, validation_status="SCHEMA_UNAVAILABLE")
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _ch_elm_view(sub) -> dict:
+    return {
+        "submissionId": sub.id, "organizationId": sub.organization_id,
+        "statutoryFilingId": sub.statutory_filing_id, "domain": sub.domain,
+        "receiverId": sub.receiver_id, "canton": sub.canton, "schemaVersion": sub.schema_version,
+        "periodKey": sub.period_key, "payloadSha256": sub.payload_sha256,
+        "payloadRef": sub.payload_ref, "payload": sub.payload_xml,
+        "transportStatus": sub.transport_status,
+        "receiverValidationStatus": sub.receiver_validation_status,
+        "authorityAckStatus": sub.authority_ack_status,
+        "settlementStatus": sub.settlement_status, "receiptReference": sub.receipt_reference,
+        "rejectionDetail": sub.rejection_detail, "correctionOfId": sub.correction_of_id,
+        "idempotencyKey": sub.idempotency_key, "correlationId": sub.correlation_id,
+        "createdAt": _iso(sub.created_at.date()) if sub.created_at else None,
+    }
+
+
+def build_ch_elm_submissions(db: Session, organization_id: int, year: int, month: Optional[int] = None,
+                             domain_filter: Optional[str] = None, actor_id: Optional[int] = None,
+                             correlation_id: Optional[str] = None) -> dict:
+    """Build the ELM envelopes for a period from COMMITTED payslips only. One
+    submission per (domain, receiver, period_key); building again is idempotent
+    (the live original is returned, never a duplicate) unless the authority
+    rejected it, in which case a correction_of_id-linked envelope is created.
+    No network is ever opened: transport stays NOT_SENT until transmit_ch_elm_
+    submission is called, and that refuses while CH_ELM_TRANSMIT_ENABLED=False."""
+    from calendar import monthrange
+
+    from app.modules.payroll.models import ChElmSubmission
+
+    if not (2000 <= year <= 2100):
+        raise BadRequestException("ELM submissions are built for a single calendar year.")
+    if month is None:
+        period_key, on_from, on_to = str(year), date(year, 1, 1), date(year, 12, 31)
+    else:
+        if not 1 <= month <= 12:
+            raise BadRequestException("month must be between 1 and 12.")
+        last_day = monthrange(year, month)[1]
+        period_key = f"{year}-{month:02d}"
+        on_from, on_to = date(year, month, 1), date(year, month, last_day)
+    if domain_filter is not None and domain_filter.upper() not in CH_ELM_DOMAINS:
+        raise BadRequestException(f"unknown ELM domain {domain_filter!r} "
+                                  f"(expected one of {', '.join(CH_ELM_DOMAINS)})")
+
+    rows = [(item, run) for item, run in _ch_committed_rows(db, organization_id, year=year)
+            if on_from <= (run.pay_date or on_from) <= on_to]
+    effective = _ch_effective_periods(rows)
+    if not effective:
+        raise BadRequestException("No committed Swiss payslips in this period — nothing to file yet. "
+                                  "Draft/Review runs are deliberately excluded.")
+    profile = _ch_entity_profile_row(db, organization_id)
+    emissions = []
+    for domain in CH_ELM_DOMAINS:
+        if domain_filter is not None and domain != domain_filter.upper():
+            continue
+        groups = _ch_elm_groups(db, organization_id, profile, effective, domain)
+        if not groups:
+            continue
+        if domain != "BFS":
+            # a domain with no obligation totals at all (e.g. an uninsured KTG
+            # employee) gets no envelope — never a misleading all-zero filing
+            groups = {receiver: g for receiver, g in groups.items()
+                      if any(v for v in g["totals"].values())}
+            if not groups:
+                continue
+        for receiver, group in sorted(groups.items()):
+            payload_xml = _ch_elm_payload_xml(organization_id, domain, receiver, period_key, group)
+            digest = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
+            idem_salt = f"ch-elm:{organization_id}:{domain}:{receiver}:{period_key}"
+            existing = (db.query(ChElmSubmission)
+                        .filter(ChElmSubmission.organization_id == organization_id,
+                                ChElmSubmission.domain == domain, ChElmSubmission.period_key == period_key,
+                                ChElmSubmission.receiver_id == receiver,
+                                ChElmSubmission.correction_of_id.is_(None))
+                        .order_by(ChElmSubmission.id.desc()).first())
+            if existing is not None and existing.authority_ack_status != "REJECTED":
+                from pathlib import Path
+
+                registered = ch_elm_registered_schema(db, domain)
+                schema_now_available = (registered is not None and bool(registered.file_path)
+                                        and Path(registered.file_path).is_file())
+                changed = (existing.payload_xml != payload_xml or existing.payload_sha256 != digest
+                           or not existing.payload_xml
+                           or (schema_now_available and existing.receiver_validation_status == "SCHEMA_UNAVAILABLE"))
+                if changed:
+                    existing.payload_xml = payload_xml
+                    existing.payload_sha256 = digest
+                    existing.payload_ref = f"ch-elm:{domain}:{period_key}"
+                    existing.schema_version = CH_ELM_SCHEMA_VERSION
+                    validation_status, _errors = _ch_validate_elm_payload(db, domain, payload_xml)
+                    existing.receiver_validation_status = validation_status
+                    _ch14_audit(db, actor_id, "rebuild", "ch_elm_submission", existing.id,
+                                new={"payloadSha256": digest, "receiverValidationStatus": validation_status},
+                                reason=f"ELM {domain} {period_key} rebuilt", correlation_id=correlation_id)
+                emissions.append(existing)
+                continue
+
+            validation_status, validation_errors = _ch_validate_elm_payload(db, domain, payload_xml)
+            filing = _ch_elm_statutory_filing(db, organization_id, domain, period_key,
+                                              authority_ack_status="PENDING", requeue_rejected=True)
+            idem = hashlib.sha256((idem_salt + (f":{existing.id}" if existing is not None else "")).encode()).hexdigest()
+            sub = ChElmSubmission(
+                organization_id=organization_id, statutory_filing_id=filing.id, domain=domain,
+                receiver_id=receiver, canton=group["canton"], schema_version=CH_ELM_SCHEMA_VERSION,
+                period_key=period_key, payload_xml=payload_xml, payload_sha256=digest,
+                payload_ref=f"ch-elm:{domain}:{period_key}", transport_status="NOT_SENT",
+                receiver_validation_status=validation_status, authority_ack_status="PENDING",
+                settlement_status="NOT_SETTLED", correction_of_id=existing.id if existing is not None else None,
+                idempotency_key=idem, actor_id=actor_id, correlation_id=correlation_id)
+            db.add(sub)
+            db.flush()
+            _ch14_audit(db, actor_id, "create", "ch_elm_submission", sub.id,
+                        old={"correctionOfId": existing.id} if existing is not None else None,
+                        new={"domain": domain, "receiverId": receiver, "periodKey": period_key,
+                             "payloadSha256": digest, "headcount": group["headcount"],
+                             "receiverValidationStatus": validation_status,
+                             "authorityAckStatus": "PENDING", "settlementStatus": "NOT_SETTLED",
+                             "schemaVersion": CH_ELM_SCHEMA_VERSION,
+                             "validationErrors": validation_errors or None},
+                        reason=f"ELM {domain} {period_key} envelope for {receiver}",
+                        correlation_id=correlation_id)
+            emissions.append(sub)
+    return {"organizationId": organization_id, "periodKey": period_key, "year": year, "month": month,
+            "submissions": [_ch_elm_view(s) for s in emissions], "transmitEnabled": CH_ELM_TRANSMIT_ENABLED}
+
+
+def list_ch_elm_submissions(db: Session, organization_id: int, domain: Optional[str] = None,
+                            period_key: Optional[str] = None, receiver_id: Optional[str] = None) -> list:
+    from app.modules.payroll.models import ChElmSubmission
+
+    q = db.query(ChElmSubmission).filter(ChElmSubmission.organization_id == organization_id)
+    if domain:
+        q = q.filter(ChElmSubmission.domain == domain.upper())
+    if period_key:
+        q = q.filter(ChElmSubmission.period_key == period_key)
+    if receiver_id:
+        q = q.filter(ChElmSubmission.receiver_id == receiver_id)
+    return [_ch_elm_view(s) for s in q.order_by(ChElmSubmission.id.desc()).all()]
+
+
+def transition_ch_elm_submission(db: Session, organization_id: int, submission_id: int, action: str,
+                                 reason: Optional[str] = None, receipt_reference: Optional[str] = None,
+                                 actor_id: Optional[int] = None,
+                                 correlation_id: Optional[str] = None) -> dict:
+    """Manual receipt/rejection of an ELM submission. RECEIVE marks the envelope
+    received + settlement DUE (refusing a duplicate settlement for the domain/
+    period); REJECT records rejection_detail WITHOUT touching payroll — a
+    rejection never adjusts a payslip/YTD figure, the committed correction path
+    (create_ch_correction / correction envelopes) is the only way back."""
+    from app.modules.payroll.models import ChElmSubmission
+
+    sub = (db.query(ChElmSubmission)
+           .filter(ChElmSubmission.id == submission_id, ChElmSubmission.organization_id == organization_id)
+           .with_for_update().first())
+    if sub is None:
+        raise NotFoundException("ChElmSubmission", submission_id)
+    action = (action or "").upper()
+    if action not in ("RECEIVE", "REJECT"):
+        raise BadRequestException("action must be RECEIVE or REJECT.")
+    previous = sub.authority_ack_status
+    if (action == "RECEIVE" and previous == "RECEIVED") or (action == "REJECT" and previous == "REJECTED"):
+        already = "RECEIVED" if action == "RECEIVE" else "REJECTED"
+        raise BadRequestException(f"This submission is already {already}.")
+    if action == "RECEIVE":
+        if previous == "REJECTED":
+            raise BadRequestException("A rejected submission cannot be received — build a corrected envelope.")
+        duplicate = (db.query(ChElmSubmission)
+                     .filter(ChElmSubmission.organization_id == organization_id,
+                             ChElmSubmission.domain == sub.domain, ChElmSubmission.period_key == sub.period_key,
+                             ChElmSubmission.id != sub.id, ChElmSubmission.authority_ack_status == "RECEIVED")
+                     .first())
+        if duplicate is not None:
+            raise BadRequestException(f"No duplicate settlement: domain {sub.domain} period {sub.period_key} "
+                                      f"is already RECEIVED (submission {duplicate.id}).")
+        sub.authority_ack_status, sub.settlement_status = "RECEIVED", "DUE"
+        sub.receipt_reference = (receipt_reference or "").strip() or None
+        _ch_elm_update_filing(db, sub, incoming="RECEIVED", receipt=sub.receipt_reference)
+        _ch14_audit(db, actor_id, "receive", "ch_elm_submission", sub.id,
+                    old={"authorityAckStatus": previous}, new={"authorityAckStatus": "RECEIVED",
+                                                               "settlementStatus": "DUE",
+                                                               "receiptReference": sub.receipt_reference},
+                    reason=reason, correlation_id=correlation_id)
+    else:
+        sub.authority_ack_status, sub.settlement_status = "REJECTED", "NOT_SETTLED"
+        sub.rejection_detail = {"reason": (reason or "").strip() or None,
+                                "receiptReference": receipt_reference or None,
+                                "actorId": actor_id, "at": datetime.utcnow().replace(microsecond=0).isoformat()}
+        sub.receipt_reference = None
+        _ch_elm_update_filing(db, sub, incoming="REJECTED", reason=reason)
+        _ch14_audit(db, actor_id, "reject", "ch_elm_submission", sub.id,
+                    old={"authorityAckStatus": previous},
+                    new={"authorityAckStatus": "REJECTED", "settlementStatus": "NOT_SETTLED",
+                         "rejectionDetail": sub.rejection_detail},
+                    reason=reason, correlation_id=correlation_id)
+    return _ch_elm_view(sub)
+
+
+def _ch_elm_update_filing(db: Session, sub, incoming: str, receipt: Optional[str] = None,
+                          reason: Optional[str] = None) -> None:
+    from app.modules.payroll.models import StatutoryFiling
+
+    if sub.statutory_filing_id is None:
+        return
+    filing = db.get(StatutoryFiling, sub.statutory_filing_id)
+    if filing is None:
+        return
+    if incoming == "RECEIVED":
+        filing.status, filing.submission_status = "FILED", "RECEIVED"
+        filing.receipt_id = receipt
+        filing.validation_status = (filing.validation_status or sub.receiver_validation_status
+                                    or "SCHEMA_UNAVAILABLE")
+    else:
+        filing.status, filing.submission_status = "BLOCKED", "REJECTED"
+        filing.blocked_reason = (reason or sub.rejection_detail.get("reason") or "Submission rejected").strip()[:300]
+    db.add(filing)
+
+
+def transmit_ch_elm_submission(db: Session, organization_id: int, submission_id: int,
+                               actor_id: Optional[int] = None, correlation_id: Optional[str] = None) -> dict:
+    """Transmission is deliberately a NO-OP stub: there is no certified authority
+    channel in this codebase, and the platform must never claim one. Gated
+    behind CH_ELM_TRANSMIT_ENABLED (False) so the production default is safe."""
+    from app.modules.payroll.models import ChElmSubmission
+
+    sub = (db.query(ChElmSubmission)
+           .filter(ChElmSubmission.id == submission_id, ChElmSubmission.organization_id == organization_id)
+           .first())
+    if sub is None:
+        raise NotFoundException("ChElmSubmission", submission_id)
+    if not CH_ELM_TRANSMIT_ENABLED:
+        raise BadRequestException("ELM transmission is disabled (CH_ELM_TRANSMIT_ENABLED is False). The "
+                                  "platform opens no network connection to any Swiss authority; file through "
+                                  "the authority's own channel and record RECEIVE/REJECT manually.")
+    raise BadRequestException("No ELM transmitter implementation is wired yet — leave CH_ELM_TRANSMIT_ENABLED "
+                              "False.")
