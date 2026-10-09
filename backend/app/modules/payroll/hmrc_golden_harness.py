@@ -132,6 +132,10 @@ class GoldenSlab:
     # Sweden SE_TAX_TABLE / SE_ONE_TIME_PAYMENT bands. None elsewhere.
     tax_table_number: Optional[str] = None
     tax_column: Optional[str] = None
+    # Row-level legal dating (Saudi Arabia SA_GOSI_BRANCH rows select by
+    # contribution month). None for every existing case, unaffected.
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
 
 
 def _to_decimal(value):
@@ -184,6 +188,8 @@ def _build_slabs(raw: Optional[list]) -> list:
             rate_label=s.get("rate_label", ""),
             tax_table_number=s.get("tax_table_number"),
             tax_column=s.get("tax_column"),
+            effective_from=_to_date(s.get("effective_from")),
+            effective_to=_to_date(s.get("effective_to")),
         )
         for s in raw
     ]
@@ -292,6 +298,12 @@ def build_context(case_context: dict) -> PayrollContext:
         # insurance profile sweden.py resolves, the youth-threshold month
         # accumulator and the SLP pension-cost base. None elsewhere.
         **_sweden_context(case_context),
+        # Saudi Arabia (ZP-SA-ENG-001 §17 golden payroll): the worker's GOSI
+        # facts countries/saudi_arabia.py resolves — worker class, pension
+        # cohort + its evidence, and the registered contributory wage. A case
+        # normally supplies these directly (or a sa_statutory_profile dict,
+        # rebuilt here as a SimpleNamespace like Sweden's). None elsewhere.
+        **_saudi_context(case_context),
     )
 
 
@@ -324,6 +336,41 @@ class GoldenCaseMismatch(AssertionError):
         super().__init__(f"HMRC golden-test mismatch — {description}:\n{lines}")
 
 
+def _saudi_context(case_context: dict) -> dict:
+    # A real Saudi run always has an effective-dated statutory profile; the
+    # golden case supplies either an explicit sa_statutory_profile dict or the
+    # same facts flat, and this GLUES them into one SimpleNamespace (the
+    # service's own assembly), so countries/saudi_arabia.py sees exactly what
+    # production gives it.
+    if case_context.get("country") != "SA" and case_context.get("sa_statutory_profile") is None:
+        return {}
+    from types import SimpleNamespace
+
+    profile = dict(case_context.get("sa_statutory_profile") or {})
+    for key in ("sa_worker_class", "sa_cohort", "sa_cohort_evidence_ref",
+                "sa_contributory_wage", "sa_special_category", "sa_in_kind_housing_value"):
+        if profile.get(key) is None and case_context.get(key) is not None:
+            profile[key] = case_context[key]
+    for key in ("sa_contributory_wage", "sa_in_kind_housing_value"):
+        if profile.get(key) is not None:
+            profile[key] = _to_decimal(profile[key])
+    evidence_ref = case_context.get("sa_cohort_evidence_ref") or profile.get("sa_cohort_evidence_ref")
+    return {
+        "sa_statutory_profile": SimpleNamespace(**profile) if profile else None,
+        "sa_organization_id": case_context.get("sa_organization_id"),
+        "sa_employee_id": case_context.get("sa_employee_id"),
+        "sa_worker_class": case_context.get("sa_worker_class"),
+        "sa_cohort": case_context.get("sa_cohort"),
+        "sa_cohort_evidence_ref": evidence_ref,
+        "sa_contributory_wage": _to_decimal(case_context.get("sa_contributory_wage")),
+        "sa_deduction_orders": case_context.get("sa_deduction_orders"),
+        "sa_overtime_hours": _to_decimal(case_context.get("sa_overtime_hours")),
+        "sa_ramadan": bool(case_context.get("sa_ramadan")),
+        "sa_work_hours_records": case_context.get("sa_work_hours_records"),
+        "sa_overtime_comp_leave_consented": bool(case_context.get("sa_overtime_comp_leave_consented")),
+    }
+
+
 def run_golden_case(case: dict) -> None:
     """Raises GoldenCaseMismatch (with every mismatched field, not just
     the first) if any expected figure doesn't match exactly. Passes
@@ -345,13 +392,20 @@ def run_golden_case(case: dict) -> None:
         raise GoldenCaseMismatch(case.get("description", "(no description)"),
                                  [{"field": "blocked_key", "expected": blocked_key, "actual": None}])
     result = calculate_payroll(ctx, "standard")
+    # Each fail-closed jurisdiction stores its own breakdown dict on
+    # PayrollResult (Switzerland ch_result, Saudi Arabia sa_result); a golden
+    # case asserts a jurisdiction's own field from there, and every other
+    # field from the PayrollResult itself.
     country_result = getattr(result, "ch_result", None) or {}
+    sa_result = getattr(result, "sa_result", None) or {}
 
     diffs = []
     for field_name, expected_raw in case["expected"].items():
         expected = _to_decimal(expected_raw)
         if field_name.startswith("ch_") and field_name in country_result:
             actual = country_result[field_name]          # the Swiss engine's own dict (PayrollResult.ch_result)
+        elif field_name.startswith("sa_") and field_name in sa_result:
+            actual = sa_result[field_name]               # the Saudi engine's own dict (PayrollResult.sa_result)
         else:
             actual = getattr(result, field_name, None)
         if actual is None:

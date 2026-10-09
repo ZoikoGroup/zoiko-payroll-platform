@@ -13,6 +13,7 @@ import SGComplianceCentreTab from "./SGComplianceCentreTab";
 import ITEmployerProfileTab from "./ITEmployerProfileTab";
 import HKComplianceCentreTab from "./HKComplianceCentreTab";
 import CHEmployerProfileTab from "./CHEmployerProfileTab";
+import SAComplianceCentreTab from "./SAComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -111,6 +112,8 @@ export default function CompliancePage() {
   // organization), so the US-centric "Tax Configuration" and generic "Documents"
   // base tabs are omitted for CH rather than left hitting the US fallback.
   const CH_EMPLOYER_TAB = "Swiss Employer Profile";
+  // Saudi Arabia-only tab (Compliance Centre, with GOSI inside), same pattern.
+  const SA_TAB = "Saudi Arabia Compliance Centre";
   // stored as a code or a name ("CH" / "Switzerland") — normalized either way
   const isSwitzerland = normalizeCountryCode(companyDetails.jurisdictionCountry) === "CH";
   const baseTabs = isSwitzerland
@@ -121,6 +124,7 @@ export default function CompliancePage() {
     ...(companyDetails.jurisdictionCountry === "SG" ? [IR21_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "IT" ? [IT_EMPLOYER_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "HK" ? [HK_TAB] : []),
+    ...(companyDetails.jurisdictionCountry === "SA" ? [SA_TAB] : []),
     ...(isSwitzerland ? [CH_EMPLOYER_TAB] : []),
   ];
   const currentTab = tabs[activeTab];
@@ -328,6 +332,7 @@ export default function CompliancePage() {
       {currentTab === IR21_TAB && <SGComplianceCentreTab />}
       {currentTab === IT_EMPLOYER_TAB && <ITEmployerProfileTab />}
       {currentTab === HK_TAB && <HKComplianceCentreTab />}
+      {currentTab === SA_TAB && <SAComplianceCentreTab />}
       {currentTab === CH_EMPLOYER_TAB && <CHEmployerProfileTab />}
 
       {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (

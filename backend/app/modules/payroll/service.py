@@ -1503,7 +1503,7 @@ def check_jurisdiction_readiness(
 
 # Countries whose statutory rows come ONLY from the Active canonical pack
 # (never an org's cached copy) — see _resolve_effective_rate_inputs.
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -8497,23 +8497,23 @@ def se_activation_blockers(db: Session, pack) -> list:
 
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
-                             "CH": "Switzerland"}
+                             "CH": "Switzerland", "SA": "Saudi Arabia"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -8656,7 +8656,9 @@ def _set_jurisdiction_pack_status(
         # stays disabled until the release gates are evidenced).
         # SE opted in 2026-09-30 (ZP-SE-ENG-001 §16: primary-source statutory
         # pack approved before activation) — the SG gate, verbatim.
-        if row.jurisdiction_country in ("US", "SG", "SE", "HK"):
+        # SA opted in alongside ZP-SA-ENG-001 (fail-closed from day one): the
+        # SG gate verbatim — evidenced, effective-dated, golden-passing content.
+        if row.jurisdiction_country in ("US", "SG", "SE", "HK", "SA"):
             if not row.source_document_id:
                 raise BadRequestException(
                     "This pack needs a linked Source Evidence artifact before it can go Active — "
@@ -8699,7 +8701,7 @@ def _set_jurisdiction_pack_status(
             # pass — the spec requires golden vectors passing before
             # activation (SG-003/SG-049). US keeps its existing, more
             # lenient behavior above unchanged.
-            if row.jurisdiction_country in ("SG", "SE", "HK") and (latest_run is None or latest_run.status != "PASS"):
+            if row.jurisdiction_country in ("SG", "SE", "HK", "SA") and (latest_run is None or latest_run.status != "PASS"):
                 name = _GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]
                 raise BadRequestException(
                     f"{name} packs need a passing golden-vector certification run before they can go Active — "
@@ -8772,11 +8774,11 @@ def _set_jurisdiction_pack_status(
             refusal = _sg_activation_evidence_refusal(db, row)
             if refusal:
                 raise BadRequestException(refusal)
-        # Hong Kong (ZP-HK-ENG-001 §16): G1 statutory-content evidence
+        # Jurisdiction statutory-content evidence (Hong Kong, Saudi Arabia):
         # accepted by a second Super Admin, and the golden vectors re-run
         # against THIS pack's own rows — on the hotfix path too.
-        if row.jurisdiction_country == "HK":
-            refusal = jurisdiction_hooks.call("HK", "pack_activation_refusal", db, row)
+        if jurisdiction_hooks.has_module(row.jurisdiction_country):
+            refusal = jurisdiction_hooks.call(row.jurisdiction_country, "pack_activation_refusal", db, row)
             if refusal:
                 raise BadRequestException(refusal)
         # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
@@ -8899,11 +8901,11 @@ def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Opti
                    "a different Super Admin must approve (maker-checker).")
         _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
         raise BadRequestException(message)
-    # Hong Kong statutory rows are edited one by one through the governed
-    # editor (hong_kong_service.update_row): the approver must have made NONE of
-    # this version's edits — not only the last one.
-    if row.jurisdiction_country == "HK" and row.pack_type == "tax" and actor_id is not None:
-        if actor_id in jurisdiction_hooks.call("HK", "statutory_editors", db, row):
+    # Jurisdiction statutory rows are edited one by one through the governed
+    # editor (hong_kong_service.update_row / saudi_arabia_service): the approver
+    # must have made NONE of this version's edits — not only the last one.
+    if jurisdiction_hooks.has_module(row.jurisdiction_country) and row.pack_type == "tax" and actor_id is not None:
+        if actor_id in jurisdiction_hooks.call(row.jurisdiction_country, "statutory_editors", db, row):
             message = ("You edited statutory rows of this pack version — a Super Admin who made none of its edits "
                        "must approve it (maker-checker).")
             _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
@@ -9461,6 +9463,9 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "employer_social_security": ("Social Security (Employer)", "currency", True),
     "employer_medicare": ("Medicare (Employer)", "currency", True),
     "employer_pension": ("Pension (Employer)", "currency", True),
+    # Saudi Arabia (ZP-SA-ENG-001): the employer-only Occupational Hazards GOSI
+    # branch — its own PayslipItem column, not a reuse of employer_social_security.
+    "employer_occupational_hazard": ("Occupational Hazards (Employer)", "currency", True),
     "employer_ni": ("National Insurance (Employer)", "currency", True),
     "employer_futa": ("FUTA (Employer)", "currency", True),
     "employer_sui": ("SUI (Employer)", "currency", True),
@@ -9786,6 +9791,14 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     # architecture lock). MPF reuses the employee/employer pension slots.
     "HK": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "employee_pension", "total_deductions", "employer_pension", "net_pay"],
+    # Saudi Arabia — no `tds` (no monthly income-tax withholding; ZP-SA-ENG-001
+    # architecture lock, same as SG/HK). The GOSI Pension branch reuses the
+    # employee/employer pension slots, SANED (unemployment) reuses the
+    # social-security slots, and the employer-only Occupational Hazards branch
+    # has its own employer_occupational_hazard column.
+    "SA": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "employee_pension", "social_security", "total_deductions",
+           "employer_pension", "employer_social_security", "employer_occupational_hazard", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -9868,6 +9881,16 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
     "HK": {
         "employee_pension": "MPF Mandatory Contribution (Employee)",
         "employer_pension": "MPF Mandatory Contribution (Employer)",
+    },
+    # Saudi Arabia — the generic pension/social-security slots carry GOSI
+    # branch figures; show them under their real branch names (the catalog
+    # originals belong to India/UK/US). Labels only, never which column is read.
+    "SA": {
+        "employee_pension": "GOSI Pension (Employee)",
+        "employer_pension": "GOSI Pension (Employer)",
+        "social_security": "GOSI SANED / Unemployment (Employee)",
+        "employer_social_security": "GOSI SANED / Unemployment (Employer)",
+        "employer_occupational_hazard": "GOSI Occupational Hazards (Employer)",
     },
 }
 
@@ -10922,10 +10945,11 @@ def _set_report_template_status(
                 "This template needs a distinct approver before it can be Published/Activated — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
             )
-    if status == "Active" and row.jurisdiction_country == "HK":
-        # Hong Kong only (final completion program): reviewed source evidence
-        # and an activator other than the approver. Other countries unchanged.
-        refusal = jurisdiction_hooks.call("HK", "template_activation_refusal", db, row, actor_id)
+    if status == "Active" and jurisdiction_hooks.has_module(row.jurisdiction_country):
+        # Jurisdiction report templates (Hong Kong, Saudi Arabia): reviewed
+        # source evidence and an activator other than the approver. Other
+        # countries unchanged.
+        refusal = jurisdiction_hooks.call(row.jurisdiction_country, "template_activation_refusal", db, row, actor_id)
         if refusal:
             raise BadRequestException(refusal)
     if status == "Active":
@@ -19218,7 +19242,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden"}
 
 
 def run_golden_test_certification(
@@ -19893,6 +19917,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                 period_start=period_start, period_end=period_end)
             if emp_country == "IT" else None
         )
+        # Saudi Arabia (ZP-SA-ENG-001): the effective-dated statutory profile in
+        # force on the period end. Read-only — a preview never advances anything.
+        saudi_inputs = (
+            jurisdiction_hooks.call("SA", "calc_inputs", db, None, emp, None,
+                                    as_of=period_end or date.today())
+            if emp_country == "SA" else None
+        )
         # Switzerland (CH spec): every resolver check, read-only; a blocked
         # worker raises SwitzerlandCalculationBlockedError (same surfacing as
         # Italy's blocks). Applied to ctx after it is built.
@@ -20037,6 +20068,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         ireland_inputs=ireland_inputs,
             sweden_inputs=sweden_inputs,
             italy_inputs=italy_inputs,
+            saudi_inputs=saudi_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -20379,10 +20411,10 @@ def _seed_holidays_for_country(db: Session, organization_id: int, country: str, 
         for row in rows:
             db.refresh(row)
         return rows
-    if country == "HK":
-        rows = [PayrollHoliday(organization_id=organization_id, country="HK", category="Statutory",
+    if jurisdiction_hooks.has_module(country):
+        rows = [PayrollHoliday(organization_id=organization_id, country=country, category="Statutory",
                                date=date.fromisoformat(h["date"]), name=h["name"])
-                for h in jurisdiction_hooks.call("HK", "pack_holidays", db, year)]
+                for h in jurisdiction_hooks.call(country, "pack_holidays", db, year)]
         for row in rows:
             db.add(row)
         db.commit()
@@ -24959,6 +24991,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
         if country == "IT" else None
     )
+    # Saudi Arabia (ZP-SA-ENG-001): the effective-dated statutory profile in
+    # force on the pay date (the engine reads the worker class / cohort /
+    # contributory wage from it, never inferred). Read-only here; the GOSI
+    # snapshot is frozen onto the payslip below.
+    saudi_inputs = (
+        jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "SA" else None
+    )
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
     # raises SwitzerlandCalculationBlockedError, same surfacing as Italy.
     switzerland_attrs = (
@@ -25047,6 +25087,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         ireland_inputs=ireland_inputs,
         sweden_inputs=sweden_inputs,
         italy_inputs=italy_inputs,
+        saudi_inputs=saudi_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -25152,6 +25193,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "employer_social_security": result.employer_social_security,
         "employer_medicare": result.employer_medicare,
         "employer_pension": result.employer_pension,
+        # Saudi Arabia: Occupational Hazards is an employer-only GOSI branch
+        # with its own PayslipItem column (never folded into
+        # employer_social_security).
+        "employer_occupational_hazard": result.employer_occupational_hazard,
         "employer_ni": result.employer_ni,
         # UK: Apprenticeship Levy — computed by uk.py's calculate() and
         # carried on PayrollResult, but never actually written into a
@@ -25213,6 +25258,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "ie_calculation_snapshot": _ie_payslip_snapshot(result),
         "it_calculation_snapshot": _italy_service.it_payslip_snapshot(result),
         "ch_calculation_snapshot": _switzerland_service.ch_payslip_snapshot(result, frozen=switzerland_frozen),
+        # Saudi Arabia (ZP-SA-ENG-001): the frozen GOSI picture (worker class,
+        # cohort, rate basis, per-branch amounts + trace) — JSON-safe, replayed
+        # from the payslip exactly as computed (never reconstructed).
+        "sa_calculation_snapshot": result.sa_result,
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -27077,8 +27126,8 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         if data.de_grundlohn_hourly is not None and data.de_grundlohn_hourly <= 0:
             errors.append("de_grundlohn_hourly must be greater than 0.")
 
-    if country_code == "HK":
-        errors.extend(jurisdiction_hooks.call("HK", "statutory_profile_errors", data))
+    if jurisdiction_hooks.has_module(country_code):
+        errors.extend(jurisdiction_hooks.call(country_code, "statutory_profile_errors", data))
     if country_code == "SE":
         errors.extend(_se_profile_field_errors(data))
     if country_code == "IT":
@@ -27352,12 +27401,12 @@ def create_employee_statutory_profile_version(
         it_contractual_weekly_hours=data.it_contractual_weekly_hours,
         it_termination_reason=data.it_termination_reason,
     )
-    if country_code == "HK":
+    if jurisdiction_hooks.has_module(country_code):
         latest = previous_open or (
             db.query(EmployeeStatutoryProfile).filter(EmployeeStatutoryProfile.employee_id == employee_id,
                                                       EmployeeStatutoryProfile.effective_from < data.effective_from)
             .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
-        for col, value in jurisdiction_hooks.call("HK", "statutory_profile_values", db, employee, data, latest).items():
+        for col, value in jurisdiction_hooks.call(country_code, "statutory_profile_values", db, employee, data, latest).items():
             setattr(row, col, value)
     db.add(row)
     db.commit()
@@ -31557,6 +31606,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
             period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
         if country == "IT" else None
     )
+    saudi_inputs = (
+        jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, None)
+        if country == "SA" else None
+    )
     switzerland_attrs = (
         _switzerland_service.ch_calc_context(
             db, organization_id, employee, run.pay_date, run.period_start, run.period_end,
@@ -31687,6 +31740,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         ireland_inputs=ireland_inputs,
         sweden_inputs=sweden_inputs,
         italy_inputs=italy_inputs,
+        saudi_inputs=saudi_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -32073,16 +32127,21 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
                 "before any file is produced; a restored database is never permission to pay again."))
         _sg_verify_run_approval(db, run)              # SG-032: bank data / payslips unchanged since approval
 
-    # Hong Kong IR56G: payslips under an active tax-clearance hold (or final
-    # pay whose IR56G filing is unresolved) are left out of the payment file;
-    # their net pay stays owed and is traced on the hold's ledger lines.
-    hk_holds = {}
-    if organization_id and any((i.country_code or "").upper() == "HK" for i in items):
-        hk_holds = jurisdiction_hooks.call("HK", "payment_treatment", db, organization_id, run, items)
-        db.commit()
+    # Jurisdiction payment holds (Hong Kong IR56G tax-clearance, Saudi Arabia):
+    # payslips under a hold are left out of the payment file; their net pay
+    # stays owed and is traced on the hold's own ledger lines. A jurisdiction
+    # with no hold (Saudi Arabia) contributes nothing.
+    payment_holds = {}
+    if organization_id:
+        for _hold_country in jurisdiction_hooks.countries():
+            if any((i.country_code or "").upper() == _hold_country for i in items):
+                payment_holds.update(
+                    jurisdiction_hooks.call(_hold_country, "payment_treatment", db, organization_id, run, items))
+        if payment_holds:
+            db.commit()
     rows = []
     for item in items:
-        if item.id in hk_holds:
+        if item.id in payment_holds:
             continue
         treatment, released = ir21.get(item.id, (None, None))
         if treatment in ("HELD", "COVERED") or (treatment == "RELEASE" and not released):
@@ -32283,6 +32342,8 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "employerSs": item.employer_social_security or z,
         "employerMedicare": item.employer_medicare or z,
         "employerPension": item.employer_pension or z,
+        # Saudi Arabia: Occupational Hazards — employer-only GOSI branch.
+        "employerOccupationalHazard": item.employer_occupational_hazard or z,
         # UK: employer-side National Insurance — same "computed, persisted,
         # never serialized" gap as studyLoanDeduction above.
         "employerNi": item.employer_ni or z,
@@ -32312,8 +32373,8 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "auCalculationTrace": item.au_calculation_trace,
         "sgpCalculationTrace": item.sgp_calculation_trace,
         "hkgCalculationTrace": item.hk_calculation_trace,
-        "hkTaxClearanceHold": (jurisdiction_hooks.call("HK", "payslip_hold_view", item)
-                               if (item.country_code or "").upper() == "HK" else None),
+        "hkTaxClearanceHold": (jurisdiction_hooks.call((item.country_code or "").upper(), "payslip_hold_view", item)
+                               if jurisdiction_hooks.has_module(item.country_code) else None),
         # UK: Automatic Enrolment assessment (gap-closure Part 3) —
         # informational classification, not a monetary field.
         "autoEnrolmentStatus": item.auto_enrolment_status,
@@ -32366,6 +32427,10 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # PayslipItem.ch_calculation_snapshot column that payslip output and
         # PDF generation already read.
         "chCalculationSnapshot": item.ch_calculation_snapshot if (item.country_code or country) == "CH" else None,
+        # Saudi Arabia (ZP-SA-ENG-001): the frozen GOSI snapshot (worker class,
+        # cohort, rate basis, per-branch amounts + trace), gated to SA like the
+        # other country-specific snapshot above. Replayed, never reconstructed.
+        "saCalculationSnapshot": item.sa_calculation_snapshot if (item.country_code or country) == "SA" else None,
     }
 
 

@@ -556,6 +556,26 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^[A-Za-z][A-Za-z0-9 ,.'&()-]{1,98}$", "example": "SVA Aargau", "primary": False},
         ],
     },
+    # Saudi Arabia — schema only. Deliberately NOT in REGISTRATION_COUNTRIES:
+    # live Saudi payroll stays disabled until release gates G1–G5 are evidenced
+    # and the registry row leaves PLANNED. CR = Commercial Registration; GOSI
+    # employer number issued by General Organization for Social Insurance; MHRSD
+    # establishment number from Ministry of Human Resources; Mudad ID for
+    # wage protection system. Formats only — never synthesised.
+    "SA": {
+        "label": "CR / GOSI Employer No. / MHRSD Establishment / Mudad ID",
+        "currency": "SAR",
+        "fields": [
+            {"key": "cr_number", "label": "Commercial Registration (CR)", "pattern": r"^\d{10}$",
+             "example": "1010123456", "primary": True},
+            {"key": "gosi_employer_number", "label": "GOSI Employer Number", "pattern": r"^\d{6,10}$",
+             "example": "1234567", "primary": False},
+            {"key": "mhrsd_establishment_number", "label": "MHRSD Establishment Number", "pattern": r"^\d{6,12}$",
+             "example": "12345678", "primary": False},
+            {"key": "mudad_id", "label": "Mudad ID", "pattern": r"^[A-Za-z0-9-]{8,30}$",
+             "example": "MUDAD-001234", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -591,6 +611,9 @@ COUNTRY_NAME_TO_CODE = {
     "italia": "IT",
     "switzerland": "CH",
     "swiss confederation": "CH",
+    "saudi arabia": "SA",
+    "saudi": "SA",
+    "ksa": "SA",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -614,6 +637,7 @@ CODE_TO_COUNTRY_NAME = {
     "HK": "Hong Kong",
     "IT": "Italy",
     "CH": "Switzerland",
+    "SA": "Saudi Arabia",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

@@ -30,7 +30,10 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, hong_kong, india, singapore, sweden, switzerland, uk, us
+from app.modules.payroll.engine.countries import (
+    australia, canada, germany, hong_kong, india, italy, saudi_arabia,
+    singapore, sweden, switzerland, uk, us,
+)
 from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
@@ -45,6 +48,11 @@ _MODULES = {
     "hong_kong": hong_kong,
     "sweden": sweden,
     "switzerland": switzerland,
+    # Italy was referenced by the IT registry rows below but never listed here,
+    # which would make get_engine_fallback_inventory() raise KeyError on the
+    # Super Admin viewer. Added alongside SA (same one-line fix).
+    "italy": italy,
+    "saudi_arabia": saudi_arabia,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -349,6 +357,37 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "QST Model (MONTHLY/ANNUAL)", "resolverKey": "N/A — ch_qst_model (not a federal-pack row: read from the QST canton pack; enforced by switzerland_service.resolve_ch_calc_inputs / the engine)", "side": "employee", "note": "NO FALLBACK — canton pack ch_qst_model picks the MONTHLY or ANNUAL strategy the QST engine uses; a missing/unknown model BLOCKS."},
     {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "QST Tariff File (ACTIVE canton file)", "resolverKey": "N/A — ch_qst_tariff_file_id (not a federal-pack row: read from the QST canton pack; enforced by switzerland_service.resolve_ch_calc_inputs / the engine)", "side": "employee", "note": "NO FALLBACK — the service research lookup_qst_rate against the canton's ACTIVE tariff file and passes the row (rate/min_tax/row_id) in ctx; a SUPERSEDED file replays by id but is never used for a new period."},
     {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Swiss Rounding Rule", "resolverKey": "ch_rounding_rule", "note": "NO FALLBACK — nearest CHF 0.05 (5 Rappen) from Active federal pack."},
+
+    # ── Saudi Arabia ─────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-SA-ENG-001 §30 + shared.py's
+    # _VALIDATION_ENABLED_COUNTRIES): every constant is None — listed so the
+    # readiness check knows which scalar keys a Saudi pack must configure. The
+    # GOSI branch rows (rule_type="SA_GOSI_BRANCH") and may not be represented
+    # by a scalar key: saudi_arabia.py validates them at calculation time (an
+    # unconfigured worker class / branch / cohort BLOCKS — SA-002), so a
+    # national-key requirement would invite the generic fallback SA forbids.
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_RATE_SELECTION_BASIS", "label": "GOSI Rate Selection in a Contribution Month (SA-007)", "resolverKey": "sa_rate_selection_basis", "note": "NO FALLBACK — PENDING_G1 until signed; a month in which a branch rate changes BLOCKS while unsigned."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_GOSI_BELOW_MIN_BEHAVIOUR", "label": "GOSI Wage Below Branch Minimum (BLOCK/FLOOR)", "resolverKey": "sa_gosi_below_min_behaviour", "note": "NO FALLBACK — SA-010; a missing row BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "SA_PARAMETER_KEYS", "label": "SAR Rounding Mode (HALF_UP/DOWN/UP)", "resolverKey": "sa_rounding_mode", "note": "NO FALLBACK — SA-009 per-branch rounding; a missing row BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "SA_PARAMETER_KEYS", "label": "SAR Rounding Precision (decimals)", "resolverKey": "sa_rounding_precision", "note": "NO FALLBACK — SA-009 per-branch rounding; a missing row BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_NORMAL_HOURS_DAILY", "label": "Normal Daily Working Hours", "resolverKey": "sa_normal_hours_daily", "required": False, "note": "NO FALLBACK — spec §11; consumed by the hours check."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_NORMAL_HOURS_WEEKLY", "label": "Normal Weekly Working Hours", "resolverKey": "sa_normal_hours_weekly", "required": False, "note": "NO FALLBACK — spec §11; consumed by the hours check."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_RAMADAN_HOURS_DAILY", "label": "Ramadan Daily Working Hours", "resolverKey": "sa_ramadan_hours_daily", "required": False, "note": "NO FALLBACK — spec §11 reduced-hours window."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_RAMADAN_HOURS_WEEKLY", "label": "Ramadan Weekly Working Hours", "resolverKey": "sa_ramadan_hours_weekly", "required": False, "note": "NO FALLBACK — spec §11 reduced-hours window."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_OVERTIME_BASIC_PREMIUM_PCT", "label": "Overtime Premium (% of basic hourly wage)", "resolverKey": "sa_overtime_basic_premium_pct", "side": "employee", "required": False, "note": "NO FALLBACK — spec §11; approved overtime BLOCKS while missing."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_MONTHLY_HOURS_DIVISOR", "label": "Monthly Hours Divisor for Hourly Wage", "resolverKey": "sa_monthly_hours_divisor", "required": False, "note": "NO FALLBACK — PENDING_G1 (not stated by the spec); approved overtime BLOCKS while missing."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_LOAN_CAP_PCT", "label": "Employer Loan Recovery Cap (% of wage)", "resolverKey": "sa_loan_cap_pct", "side": "employee", "note": "NO FALLBACK — spec §11 (10%); a LOAN deduction BLOCKS while missing."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_DAMAGE_CAP_PCT", "label": "Damage Recovery Monthly Cap (% of wage)", "resolverKey": "sa_damage_cap_pct", "side": "employee", "required": False, "note": "NO FALLBACK — spec §11 special limit, value not stated — a DAMAGE deduction BLOCKS until G1 supplies it."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_AGGREGATE_DEDUCTION_CAP_PCT", "label": "Total Deductions Cap (% of due wage)", "resolverKey": "sa_aggregate_deduction_cap_pct", "side": "employee", "note": "NO FALLBACK — spec §11 (50%); a breach BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_GOSI_DUE_DAY", "label": "GOSI Payment Due Day of Following Month", "resolverKey": "sa_gosi_due_day", "required": False, "note": "NO FALLBACK — SA-022 remittance schedule, not a monthly-engine read."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_FIRST_5_YEARS_MONTHS", "label": "EOS — Months per Year, First 5 Years", "resolverKey": "sa_eos_first_5_years_months", "required": False, "note": "NO FALLBACK — spec §13 (0.5); consumed by eos.eos_award."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_AFTER_5_YEARS_MONTHS", "label": "EOS — Months per Year, After 5 Years", "resolverKey": "sa_eos_after_5_years_months", "required": False, "note": "NO FALLBACK — spec §13 (1.0); consumed by eos.eos_award."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_UNDER_2", "label": "EOS on Resignation — Under 2 Years", "resolverKey": "sa_eos_resign_frac_under_2", "required": False, "note": "NO FALLBACK — spec §13 (0); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_2_TO_5", "label": "EOS on Resignation — 2 to 5 Years", "resolverKey": "sa_eos_resign_frac_2_to_5", "required": False, "note": "NO FALLBACK — spec §13 (1/3); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_5_TO_10", "label": "EOS on Resignation — Over 5, Under 10 Years", "resolverKey": "sa_eos_resign_frac_5_to_10", "required": False, "note": "NO FALLBACK — spec §13 (2/3); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_10_PLUS", "label": "EOS on Resignation — 10+ Years", "resolverKey": "sa_eos_resign_frac_10_plus", "required": False, "note": "NO FALLBACK — spec §13 (1); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_SETTLEMENT_DEADLINE_TERMINATION_DAYS", "label": "Final Settlement Deadline — Employer Termination (days)", "resolverKey": "sa_settlement_deadline_termination_days", "required": False, "note": "NO FALLBACK — spec §13 (7)."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_SETTLEMENT_DEADLINE_RESIGNATION_DAYS", "label": "Final Settlement Deadline — Worker Termination (days)", "resolverKey": "sa_settlement_deadline_resignation_days", "required": False, "note": "NO FALLBACK — spec §13 (14)."},
 ]
 
 

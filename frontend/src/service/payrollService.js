@@ -2760,6 +2760,7 @@ export const createSgIr8aModification = async (reportId, { method, reason }) =>
 // Every rule (MPF, IR56G hold, IRD, eMPF, entitlements, SP/LSP, four-eyes)
 // is enforced server-side; these calls only fetch or submit operator input.
 const HK = "/api/payroll/hong-kong";
+const SA = "/api/payroll/saudi-arabia";
 export const recordHkWorkHours = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/work-hours`, payload);
 export const getHkContinuousContract = (employeeId, asOf) =>
   api.get(`${HK}/employees/${employeeId}/continuous-contract`, { params: { as_of: asOf } });
@@ -2797,7 +2798,29 @@ export const prepareHkEmpfSubmission = (contributionPeriod) => api.post(`${HK}/e
 export const transitionHkEmpfSubmission = (id, payload) => api.post(`${HK}/empf/submissions/${id}/transition`, payload);
 export const estimateHkSalariesTax = (payload) => api.post(`${HK}/salaries-tax/estimate`, payload);
 export const getHkRunPreflight = (runId) => api.get(`${HK}/runs/${runId}/preflight`);
+export const getSaRunPreflight = (runId) => api.get(`${SA}/runs/${runId}/preflight`);
+export const getSaRunFingerprint = (runId) => api.get(`${SA}/runs/${runId}/fingerprint`);
+export const createSaCorrection = (payslipId, payload) => api.post(`${SA}/payslips/${payslipId}/correction`, payload);
+export const listSaCorrections = (payslipId, organizationId) => api.get(`${SA}/payslips/${payslipId}/corrections`, { params: { organizationId } });
 export const getHkEmployerReadiness = () => api.get(`${HK}/readiness`);
+export const getSaEmployerReadiness = () => api.get(`${SA}/readiness`);
+export const previewSaudiArabiaCalculation = (payload) => api.post(`${SA}/calculation-preview`, payload);
+
+// SA ledger operations (org-scoped)
+export const listSaGosiLiabilities = (organizationId) => api.get(`${SA}/gosi-liabilities`, { params: { organizationId } });
+export const buildSaGosiLiability = (runId) => api.post(`${SA}/runs/${runId}/gosi-liability`, {});
+export const listSaEosLedger = (organizationId, employeeId) => api.get(`${SA}/eos-ledger`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+export const accrueSaEos = (runId) => api.post(`${SA}/runs/${runId}/eos-accrual`, {});
+export const listSaFinalSettlements = (organizationId, employeeId) => api.get(`${SA}/final-settlements`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+export const createSaFinalSettlement = (payload) => api.post(`${SA}/final-settlements`, payload);
+export const approveSaFinalSettlement = (settlementId) => api.post(`${SA}/final-settlements/${settlementId}/approve`, {});
+export const paySaFinalSettlement = (settlementId, paymentReference) => api.post(`${SA}/final-settlements/${settlementId}/pay`, { paymentReference });
+export const listSaWpsFiles = (organizationId) => api.get(`${SA}/wps-files`, { params: { organizationId } });
+export const buildSaWpsFile = (runId) => api.post(`${SA}/runs/${runId}/wps-file`, {});
+export const listSaWpsObservations = (organizationId, wpsFileId) => api.get(`${SA}/wps-files/${wpsFileId}/observations`, { params: { organizationId } });
+export const acceptSaWpsFile = (wpsFileId) => api.post(`${SA}/wps-files/${wpsFileId}/accepted`, {});
+export const rejectSaWpsFile = (wpsFileId, reason) => api.post(`${SA}/wps-files/${wpsFileId}/rejected`, { reason });
+
 export const recordHkEmployeeCopy = (caseId, evidenceRef) => api.post(`${HK}/ird/cases/${caseId}/employee-copy`, { evidenceRef });
 // HK statutory reports (GeneratedReport from an Active template). Bodies are
 // snake_case exactly as the server's request schemas declare them.

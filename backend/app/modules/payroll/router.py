@@ -169,6 +169,7 @@ from app.modules.payroll.schemas import (
     ItalyLulIntegrityResponse,
     ItalyTfrAccrualRequest, ItalyTfrRevaluationRequest, ItalyTfrLedgerEntryResponse,
     ItalyTfrBalanceResponse, ItalyTfrIdempotencyResponse,
+    SaudiArabiaCalculationPreviewRequest,
 )
 
 payroll_router = APIRouter(
@@ -3757,6 +3758,166 @@ def get_hk_payroll_preflight(
 )
 def get_hk_employer_readiness(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     return hong_kong_service.hk_employer_readiness(db, current_user.organization_id)
+
+
+# ── Saudi Arabia (ZP-SA-ENG-001) — org-scoped readiness, preflight, fingerprint, corrections, preview ──
+
+@payroll_router.get(
+    "/saudi-arabia/readiness",
+    summary="Saudi Arabia payroll readiness dashboard (GOSI registration, pack, workforce, checks) — read-only",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sa_employer_readiness(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.sa_employer_readiness(db, current_user.organization_id)
+
+
+@payroll_router.get(
+    "/saudi-arabia/runs/{run_id}/preflight",
+    summary="Saudi Arabia preflight + exceptions for a payroll run (read-only re-check of resolver blocks)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sa_payroll_preflight(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    from app.modules.payroll.models import PayrollRun
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id, PayrollRun.organization_id == current_user.organization_id).first()
+    if run is None:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Payroll run not found")
+    return saudi_arabia_service.sa_run_preflight(db, run)
+
+
+@payroll_router.get(
+    "/saudi-arabia/runs/{run_id}/fingerprint",
+    summary="Saudi Arabia approval fingerprint for a payroll run",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sa_approval_fingerprint(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    from app.modules.payroll.models import PayrollRun
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id, PayrollRun.organization_id == current_user.organization_id).first()
+    if run is None:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Payroll run not found")
+    return saudi_arabia_service.sa_approval_fingerprint(db, run)
+
+
+@payroll_router.post(
+    "/saudi-arabia/payslips/{payslip_id}/correction",
+    summary="Create a correction for a finalized Saudi payslip — restates inputs, books delta, posts YTD",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sa_correction(
+    payslip_id: int,
+    organization_id: int = Body(..., alias="organizationId"),
+    reason: str = Body(...),
+    affected_obligations: list = Body(..., alias="affectedObligations"),
+    corrected_inputs: Optional[dict] = Body(None, alias="correctedInputs"),
+    idempotency_key: Optional[str] = Body(None, alias="idempotencyKey"),
+    correlation_id: Optional[str] = Body(None, alias="correlationId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if organization_id != current_user.organization_id:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Organization mismatch")
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.create_sa_correction(
+        db, organization_id, payslip_id, reason, affected_obligations,
+        corrected_inputs, current_user.id if hasattr(current_user, "id") else None,
+        idempotency_key, correlation_id,
+    )
+
+
+@payroll_router.get(
+    "/saudi-arabia/payslips/{payslip_id}/corrections",
+    summary="List the correction chain for a Saudi payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_corrections(
+    payslip_id: int,
+    organization_id: int = Query(..., alias="organizationId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if organization_id != current_user.organization_id:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Organization mismatch")
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_corrections(db, organization_id, payslip_id)
+
+
+@payroll_router.post(
+    "/saudi-arabia/payslips/{payslip_id}/correction-preview",
+    summary="Read-only: preview a Saudi correction delta before committing — replays frozen context with restated inputs",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def preview_sa_correction(
+    payslip_id: int,
+    data: SaudiArabiaCalculationPreviewRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Preview the per-obligation delta a correction would produce.
+    Does NOT write anything; returns {deltas, totalsAll} for the corrected inputs."""
+    if data.organizationId is not None and data.organizationId != current_user.organization_id:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Organization mismatch")
+    from app.modules.payroll import saudi_arabia_service
+    from app.modules.payroll.models import PayslipItem
+    item = db.query(PayslipItem).filter(PayslipItem.id == payslip_id,
+                                        PayslipItem.organization_id == current_user.organization_id).first()
+    if item is None or (item.country_code or "").upper() != SA:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Saudi payslip not found")
+    snapshot = item.sa_calculation_snapshot or {}
+    frozen = snapshot.get("frozenContext")
+    if not frozen:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_409_CONFLICT,
+                            detail="Payslip has no frozen context — cannot preview correction")
+    effective = (snapshot.get("correction") or {}).get("totalsAll", {}) or snapshot.get("totalsAll", {})
+    # Merge the preview's corrected_inputs into the frozen context
+    corrected = data.dict(exclude_unset=True, exclude={"organizationId", "jurisdictionPackId"})
+    # Only correctable inputs allowed
+    allowed = {"workerClass", "cohort", "cohortEvidenceRef", "contributoryWage",
+               "deductionOrders", "overtimeHours", "ramadan", "workHoursRecords"}
+    corrected = {k: v for k, v in corrected.items() if k in allowed}
+    if corrected:
+        new_frozen = saudi_arabia_service._apply_sa_corrected_inputs(db, frozen, corrected, current_user.organization_id)
+    else:
+        new_frozen = frozen
+    baseline = effective.get("totalsAll") or effective
+    preview = saudi_arabia_service.sa_replay(new_frozen, baseline_totals=baseline)
+    return preview
+
+
+@payroll_router.post(
+    "/saudi-arabia/calculation-preview",
+    summary="Read-only: simulate a Saudi Arabia calculation against the active SA pack (or explicit packId) — writes nothing",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def preview_saudi_arabia_calculation_org(
+    data: SaudiArabiaCalculationPreviewRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Same production engine as a payroll run (engine/countries/saudi_arabia.py);
+    the frontend never computes statutory figures itself."""
+    if data.organizationId is not None and data.organizationId != current_user.organization_id:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Organization mismatch")
+    from app.modules.payroll import saudi_arabia_service
+    from app.modules.payroll.schemas import SaudiArabiaCalculationPreviewRequest  # noqa: F401
+    return saudi_arabia_service.preview_saudi_arabia_calculation(db, data)
 
 
 @payroll_router.post(

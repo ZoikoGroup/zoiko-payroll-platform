@@ -38,8 +38,11 @@ const INCOME_TAX_LABELS = {
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
 // shows no income-tax line (not even a zero one). Hong Kong Salaries Tax is
-// employee-assessed by the IRD (ZP-HK-ENG-001 architecture lock).
-const NO_PAYROLL_INCOME_TAX = new Set(["HK"]);
+// employee-assessed by the IRD (ZP-HK-ENG-001 architecture lock). Saudi Arabia
+// has no monthly income-tax withholding: its statutory payroll liability is
+// GOSI (pension/SANED/occupational hazard), never a `tds` line
+// (ZP-SA-ENG-001 — the engine NEVER returns a `tds` key and tds stays 0.00).
+const NO_PAYROLL_INCOME_TAX = new Set(["HK", "SA"]);
 
 const PF_LABELS = { DE: "Pension Insurance" };
 const ESI_LABELS = { DE: "Social Insurance (Health / Unemployment / Care)", CA: "Employment Insurance (EI)" };

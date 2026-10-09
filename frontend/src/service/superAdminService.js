@@ -918,3 +918,55 @@ export const approveSwissWageFloor = (id, reason) =>
   _chRequest(`${CH_SA}/wage-floors/${id}/approve`, { body: { reason: reason || null } });
 export const activateSwissWageFloor = (id, reason) =>
   _chRequest(`${CH_SA}/wage-floors/${id}/activate`, { body: { reason: reason || null } });
+
+// ── Saudi Arabia ledgers (ZP-SA-ENG-001 §7/§12) ─────────────────────────────
+// Employer GOSI registration, employee contracts, the monthly GOSI liability,
+// the EOS accrual ledger, final settlement and the WPS SIE extract. Every one
+// builds server-side from committed payroll + configured content.
+const SA_SA = "/api/super-admin/compliance/saudi-arabia";
+
+export const listSaEmployerProfiles = (organizationId) =>
+  apiFetch(`${SA_SA}/employer-profiles`, { params: { organizationId } });
+export const createSaEmployerProfile = (organizationId, payload) =>
+  apiFetch(`${SA_SA}/employer-profiles`, { method: "POST", params: { organizationId }, body: payload });
+export const approveSaEmployerProfile = (organizationId, profileId) =>
+  apiFetch(`${SA_SA}/employer-profiles/${profileId}/approve`, { method: "POST", params: { organizationId } });
+
+export const listSaContractVersions = (organizationId, employeeId) =>
+  apiFetch(`${SA_SA}/employees/${employeeId}/contracts`, { params: { organizationId } });
+export const createSaContractVersion = (organizationId, employeeId, payload) =>
+  apiFetch(`${SA_SA}/employees/${employeeId}/contracts`, { method: "POST", params: { organizationId }, body: payload });
+export const approveSaContractVersion = (organizationId, employeeId, contractId) =>
+  apiFetch(`${SA_SA}/employees/${employeeId}/contracts/${contractId}/approve`, { method: "POST", params: { organizationId } });
+
+export const listSaGosiLiabilities = (organizationId) =>
+  apiFetch(`${SA_SA}/gosi-liabilities`, { params: { organizationId } });
+export const buildSaGosiLiability = (organizationId, runId) =>
+  apiFetch(`${SA_SA}/runs/${runId}/gosi-liability`, { method: "POST", params: { organizationId } });
+export const markSaGosiLiabilityPaid = (organizationId, liabilityId, paymentReference) =>
+  apiFetch(`${SA_SA}/gosi-liabilities/${liabilityId}/paid`, { method: "POST", params: { organizationId }, body: { paymentReference } });
+
+export const accrueSaEos = (organizationId, runId) =>
+  apiFetch(`${SA_SA}/runs/${runId}/eos-accrual`, { method: "POST", params: { organizationId } });
+export const listSaEosLedger = (organizationId, employeeId) =>
+  apiFetch(`${SA_SA}/eos-ledger`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+
+export const listSaFinalSettlements = (organizationId, employeeId) =>
+  apiFetch(`${SA_SA}/final-settlements`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+export const createSaFinalSettlement = (organizationId, payload) =>
+  apiFetch(`${SA_SA}/final-settlements`, { method: "POST", params: { organizationId }, body: payload });
+export const approveSaFinalSettlement = (organizationId, settlementId) =>
+  apiFetch(`${SA_SA}/final-settlements/${settlementId}/approve`, { method: "POST", params: { organizationId } });
+export const paySaFinalSettlement = (organizationId, settlementId, paymentReference) =>
+  apiFetch(`${SA_SA}/final-settlements/${settlementId}/pay`, { method: "POST", params: { organizationId }, body: { paymentReference } });
+
+export const listSaWpsFiles = (organizationId) =>
+  apiFetch(`${SA_SA}/wps-files`, { params: { organizationId } });
+export const buildSaWpsFile = (organizationId, runId) =>
+  apiFetch(`${SA_SA}/runs/${runId}/wps-file`, { method: "POST", params: { organizationId } });
+export const listSaWpsObservations = (organizationId, wpsFileId) =>
+  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/observations`, { params: { organizationId } });
+export const acceptSaWpsFile = (organizationId, wpsFileId) =>
+  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/accepted`, { method: "POST", params: { organizationId } });
+export const rejectSaWpsFile = (organizationId, wpsFileId, reason) =>
+  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/rejected`, { method: "POST", params: { organizationId }, body: { reason } });

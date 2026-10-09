@@ -25,8 +25,8 @@ import {
   AUCompliancePage, CACompliancePage, DECompliancePage,
   BBCompliancePage, KYCompliancePage, DOCompliancePage,
   GYCompliancePage, JMCompliancePage, BSCompliancePage, TTCompliancePage, SGCompliancePage,
-PRCompliancePage, FRCompliancePage, IECompliancePage, SECompliancePage, ITCompliancePage, HKCompliancePage,
-  CHCompliancePage,
+  PRCompliancePage, FRCompliancePage, IECompliancePage, SECompliancePage, ITCompliancePage, HKCompliancePage,
+  CHCompliancePage, SACompliancePage,
 } from "./pages/JurisdictionCompliance";
 import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
@@ -197,6 +197,8 @@ export default function App() {
       <Route path="/super-admin/compliance/italy/:jurisdiction" element={<SuperAdminShell><ITCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/switzerland" element={<SuperAdminShell><CHCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/switzerland/:jurisdiction" element={<SuperAdminShell><CHCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/saudi-arabia" element={<SuperAdminShell><SACompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/saudi-arabia/:jurisdiction" element={<SuperAdminShell><SACompliancePage /></SuperAdminShell>} />
         {/* Caribbean production jurisdictions (2026-09-21) — each is
             country-level only, so no :jurisdiction sub-route is needed. */}
         <Route path="/super-admin/compliance/barbados" element={<SuperAdminShell><BBCompliancePage /></SuperAdminShell>} />

@@ -338,6 +338,33 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     it_contractual_weekly_hours:  Optional[Decimal] = Field(None, validation_alias="itContractualWeeklyHours")
     it_termination_reason:        Optional[str] = Field(None, validation_alias="itTerminationReason")
 
+    # ── Saudi Arabia (ZP-SA-ENG-001 §3/§4) — worker-owned GOSI facts; see
+    # models.py's sa_* block. Worker class + cohort are validated by
+    # saudi_arabia_service._sa_statutory_profile_errors; fields not sent carry
+    # forward from the previous SA version (each version is a full snapshot).
+    sa_worker_class:              Optional[str] = Field(None, validation_alias="saWorkerClass")
+    sa_cohort:                    Optional[str] = Field(None, validation_alias="saCohort")
+    sa_cohort_evidence_ref:       Optional[str] = Field(None, validation_alias="saCohortEvidenceRef")
+    sa_cohort_source_document_id: Optional[int] = Field(None, validation_alias="saCohortSourceDocumentId")
+    sa_cohort_verified_by_id:     Optional[int] = Field(None, validation_alias="saCohortVerifiedById")
+    sa_cohort_verified_at:        Optional[datetime] = Field(None, validation_alias="saCohortVerifiedAt")
+    sa_identity_document_type:    Optional[str] = Field(None, validation_alias="saIdentityDocumentType")
+    sa_identity_token:            Optional[str] = Field(None, validation_alias="saIdentityToken")
+    sa_identity_expiry:           Optional[date] = Field(None, validation_alias="saIdentityExpiry")
+    sa_gosi_registration_status:  Optional[str] = Field(None, validation_alias="saGosiRegistrationStatus")
+    sa_gosi_registration_date:    Optional[date] = Field(None, validation_alias="saGosiRegistrationDate")
+    sa_gosi_registration_token:   Optional[str] = Field(None, validation_alias="saGosiRegistrationToken")
+    sa_contributory_wage:         Optional[Decimal] = Field(None, validation_alias="saContributoryWage")
+    sa_contributory_wage_effective_from: Optional[date] = Field(None, validation_alias="saContributoryWageEffectiveFrom")
+    sa_contributory_wage_gosi_ref: Optional[str] = Field(None, validation_alias="saContributoryWageGosiRef")
+    sa_in_kind_housing_value:     Optional[Decimal] = Field(None, validation_alias="saInKindHousingValue")
+    sa_contract_type:             Optional[str] = Field(None, validation_alias="saContractType")
+    sa_occupation:                Optional[str] = Field(None, validation_alias="saOccupation")
+    sa_special_category:          Optional[str] = Field(None, validation_alias="saSpecialCategory")
+    sa_reduced_ramadan_hours:     Optional[bool] = Field(None, validation_alias="saReducedRamadanHours")
+    sa_service_start_date:        Optional[date] = Field(None, validation_alias="saServiceStartDate")
+    sa_eos_exclusions:            Optional[str] = Field(None, validation_alias="saEosExclusions")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -464,6 +491,30 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     itFringeChildDeclared:       Optional[bool] = Field(None, validation_alias="it_fringe_child_declared", serialization_alias="itFringeChildDeclared")
     itContractualWeeklyHours:    Optional[Decimal] = Field(None, validation_alias="it_contractual_weekly_hours", serialization_alias="itContractualWeeklyHours")
     itTerminationReason:         Optional[str] = Field(None, validation_alias="it_termination_reason", serialization_alias="itTerminationReason")
+
+    # ── Saudi Arabia (ZP-SA-ENG-001 §3/§4) — see Create schema above. The
+    # identity token is privileged and is never returned by this response.
+    saWorkerClass:              Optional[str] = Field(None, validation_alias="sa_worker_class", serialization_alias="saWorkerClass")
+    saCohort:                   Optional[str] = Field(None, validation_alias="sa_cohort", serialization_alias="saCohort")
+    saCohortEvidenceRef:        Optional[str] = Field(None, validation_alias="sa_cohort_evidence_ref", serialization_alias="saCohortEvidenceRef")
+    saCohortSourceDocumentId:   Optional[int] = Field(None, validation_alias="sa_cohort_source_document_id", serialization_alias="saCohortSourceDocumentId")
+    saCohortVerifiedById:       Optional[int] = Field(None, validation_alias="sa_cohort_verified_by_id", serialization_alias="saCohortVerifiedById")
+    saCohortVerifiedAt:         Optional[datetime] = Field(None, validation_alias="sa_cohort_verified_at", serialization_alias="saCohortVerifiedAt")
+    saIdentityDocumentType:     Optional[str] = Field(None, validation_alias="sa_identity_document_type", serialization_alias="saIdentityDocumentType")
+    saIdentityExpiry:           Optional[date] = Field(None, validation_alias="sa_identity_expiry", serialization_alias="saIdentityExpiry")
+    saGosiRegistrationStatus:   Optional[str] = Field(None, validation_alias="sa_gosi_registration_status", serialization_alias="saGosiRegistrationStatus")
+    saGosiRegistrationDate:     Optional[date] = Field(None, validation_alias="sa_gosi_registration_date", serialization_alias="saGosiRegistrationDate")
+    saGosiRegistrationToken:    Optional[str] = Field(None, validation_alias="sa_gosi_registration_token", serialization_alias="saGosiRegistrationToken")
+    saContributoryWage:         Optional[Decimal] = Field(None, validation_alias="sa_contributory_wage", serialization_alias="saContributoryWage")
+    saContributoryWageEffectiveFrom: Optional[date] = Field(None, validation_alias="sa_contributory_wage_effective_from", serialization_alias="saContributoryWageEffectiveFrom")
+    saContributoryWageGosiRef:  Optional[str] = Field(None, validation_alias="sa_contributory_wage_gosi_ref", serialization_alias="saContributoryWageGosiRef")
+    saInKindHousingValue:       Optional[Decimal] = Field(None, validation_alias="sa_in_kind_housing_value", serialization_alias="saInKindHousingValue")
+    saContractType:             Optional[str] = Field(None, validation_alias="sa_contract_type", serialization_alias="saContractType")
+    saOccupation:               Optional[str] = Field(None, validation_alias="sa_occupation", serialization_alias="saOccupation")
+    saSpecialCategory:          Optional[str] = Field(None, validation_alias="sa_special_category", serialization_alias="saSpecialCategory")
+    saReducedRamadanHours:      Optional[bool] = Field(None, validation_alias="sa_reduced_ramadan_hours", serialization_alias="saReducedRamadanHours")
+    saServiceStartDate:         Optional[date] = Field(None, validation_alias="sa_service_start_date", serialization_alias="saServiceStartDate")
+    saEosExclusions:            Optional[str] = Field(None, validation_alias="sa_eos_exclusions", serialization_alias="saEosExclusions")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses
@@ -5235,3 +5286,258 @@ class ItalyFilingOutboxItemResponse(BaseModel):
     createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Saudi Arabia (ZP-SA-ENG-001) — readiness, preview ───────────────────────
+class SaudiArabiaReadinessItem(BaseModel):
+    key: str
+    label: str
+    required: bool
+    complete: bool
+    detail: Optional[str] = None
+
+
+class SaudiArabiaReadinessResponse(BaseModel):
+    """§16/§17 activation-readiness checklist for one Saudi tax pack —
+    Saudi Arabia must NOT become production-active merely because the
+    country record exists."""
+    packId: Optional[int] = Field(None, serialization_alias="packId")
+    packVersion: Optional[str] = Field(None, serialization_alias="packVersion")
+    packStatus: Optional[str] = Field(None, serialization_alias="packStatus")
+    ready: bool
+    items: List[SaudiArabiaReadinessItem] = []
+    blockers: List[str] = []
+
+
+class SaudiArabiaCalculationPreviewRequest(BaseModel):
+    """Read-only Super Admin preview of one Saudi pack (ZP-SA-ENG-001 §13
+    "simulation before activation"). Worker facts are supplied inline —
+    nothing is read from or written to an employee."""
+    jurisdictionPackId: Optional[int] = Field(None, alias="jurisdictionPackId")
+    payDate: date
+    gross: Decimal = Field(gt=0)
+    basic: Optional[Decimal] = None
+    payFrequency: str = "Monthly"
+    organizationId: Optional[int] = Field(None, alias="organizationId")
+    employeeId: Optional[int] = Field(None, alias="employeeId")
+    workerClass: str
+    cohort: str
+    cohortEvidenceRef: Optional[str] = Field(None, alias="cohortEvidenceRef")
+    contributoryWage: Optional[Decimal] = Field(None, alias="contributoryWage")
+    deductionOrders: Optional[List[dict]] = Field(None, alias="deductionOrders")
+    overtimeHours: Optional[Decimal] = Field(None, alias="overtimeHours")
+    ramadan: bool = False
+    workHoursRecords: Optional[List[dict]] = Field(None, alias="workHoursRecords")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+# ── Saudi Arabia ledgers (ZP-SA-ENG-001 §7/§12) — employer, contract, ────────
+#    GOSI liability, EOS accrual, final settlement, WPS SIE ─────────────────
+class SaEmployerProfileCreateRequest(BaseModel):
+    effectiveFrom: date
+    gosiEmployerCode: str
+    branchCode: Optional[str] = None
+    activityCode: Optional[str] = None
+    riskCategory: Optional[str] = None
+    occupationalHazardRatePct: Optional[Decimal] = None
+    sanedEmployerRatePct: Optional[Decimal] = None
+    pensionEmployerRatePct: Optional[Decimal] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SaEmployerProfileResponse(BaseModel):
+    id: int
+    organizationId: int = Field(alias="organization_id")
+    effectiveFrom: date = Field(alias="effective_from")
+    effectiveTo: Optional[date] = Field(default=None, alias="effective_to")
+    gosiEmployerCode: str = Field(alias="gosi_employer_code")
+    branchCode: Optional[str] = Field(default=None, alias="branch_code")
+    activityCode: Optional[str] = Field(default=None, alias="activity_code")
+    riskCategory: Optional[str] = Field(default=None, alias="risk_category")
+    status: str
+    previousVersionId: Optional[int] = Field(default=None, alias="previous_version_id")
+    approvedById: Optional[int] = Field(default=None, alias="approved_by_id")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: Optional[datetime] = Field(default=None, alias="updated_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaContractVersionCreateRequest(BaseModel):
+    effectiveFrom: date = Field(alias="effective_from")
+    contractType: str = Field(alias="contract_type")
+    occupation: Optional[str] = None
+    basicWage: Optional[Decimal] = Field(default=None, alias="basic_wage")
+    housingAllowance: Optional[Decimal] = Field(default=None, alias="housing_allowance")
+    transportAllowance: Optional[Decimal] = Field(default=None, alias="transport_allowance")
+    otherAllowances: Optional[Decimal] = Field(default=None, alias="other_allowances")
+    inKindHousingValue: Optional[Decimal] = Field(default=None, alias="in_kind_housing_value")
+    probationEndDate: Optional[date] = Field(default=None, alias="probation_end_date")
+    contractEndDate: Optional[date] = Field(default=None, alias="contract_end_date")
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SaContractVersionResponse(BaseModel):
+    id: int
+    employeeId: int = Field(alias="employee_id")
+    organizationId: int = Field(alias="organization_id")
+    effectiveFrom: date = Field(alias="effective_from")
+    effectiveTo: Optional[date] = Field(default=None, alias="effective_to")
+    contractType: str = Field(alias="contract_type")
+    occupation: Optional[str] = None
+    basicWage: Optional[Decimal] = Field(default=None, alias="basic_wage")
+    housingAllowance: Optional[Decimal] = Field(default=None, alias="housing_allowance")
+    transportAllowance: Optional[Decimal] = Field(default=None, alias="transport_allowance")
+    otherAllowances: Optional[Decimal] = Field(default=None, alias="other_allowances")
+    inKindHousingValue: Optional[Decimal] = Field(default=None, alias="in_kind_housing_value")
+    status: str
+    previousVersionId: Optional[int] = Field(default=None, alias="previous_version_id")
+    approvedById: Optional[int] = Field(default=None, alias="approved_by_id")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: Optional[datetime] = Field(default=None, alias="updated_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaGosiLiabilityResponse(BaseModel):
+    id: int
+    organizationId: int = Field(alias="organization_id")
+    contributionMonth: date = Field(alias="contribution_month")
+    totalWages: Decimal = Field(alias="total_wages")
+    contributoryWages: Decimal = Field(alias="contributory_wages")
+    pensionEmployee: Decimal = Field(alias="pension_employee")
+    pensionEmployer: Decimal = Field(alias="pension_employer")
+    sanedEmployee: Decimal = Field(alias="saned_employee")
+    sanedEmployer: Decimal = Field(alias="saned_employer")
+    occupationalHazardEmployer: Decimal = Field(alias="occupational_hazard_employer")
+    totalDue: Decimal = Field(alias="total_due")
+    status: str
+    paidAt: Optional[datetime] = Field(default=None, alias="paid_at")
+    paymentReference: Optional[str] = Field(default=None, alias="payment_reference")
+    sourceRunId: Optional[int] = Field(default=None, alias="source_run_id")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: Optional[datetime] = Field(default=None, alias="updated_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaGosiLiabilityPaidRequest(BaseModel):
+    paymentReference: Optional[str] = Field(default=None, alias="payment_reference")
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SaEosLedgerEntryResponse(BaseModel):
+    id: int
+    employeeId: int = Field(alias="employee_id")
+    organizationId: int = Field(alias="organization_id")
+    periodFrom: date = Field(alias="period_from")
+    periodTo: date = Field(alias="period_to")
+    basicWage: Decimal = Field(alias="basic_wage")
+    housingAllowance: Decimal = Field(alias="housing_allowance")
+    eosBase: Decimal = Field(alias="eos_base")
+    daysWorked: int = Field(alias="days_worked")
+    accrualMonths: Decimal = Field(alias="accrual_months")
+    eosAwardAccrued: Decimal = Field(alias="eos_award_accrued")
+    cumulativeAward: Decimal = Field(alias="cumulative_award")
+    status: str
+    sourceRunId: Optional[int] = Field(default=None, alias="source_run_id")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: Optional[datetime] = Field(default=None, alias="updated_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaEosAccrualResponse(BaseModel):
+    entries: List[SaEosLedgerEntryResponse] = []
+    skipped: List[dict] = []
+
+
+class SaFinalSettlementCreateRequest(BaseModel):
+    employeeId: int = Field(alias="employee_id")
+    terminationDate: date = Field(alias="termination_date")
+    terminationType: str = Field(alias="termination_type")  # TERMINATION | RESIGNATION
+    noticeGiven: bool = Field(default=False, alias="notice_given")
+    noticePeriodDays: Optional[int] = Field(default=None, alias="notice_period_days")
+    unusedLeaveDays: Optional[int] = Field(default=None, alias="unused_leave_days")
+    unusedLeavePay: Optional[Decimal] = Field(default=None, alias="unused_leave_pay")
+    noticePay: Optional[Decimal] = Field(default=None, alias="notice_pay")
+    repatriationPay: Optional[Decimal] = Field(default=None, alias="repatriation_pay")
+    otherDues: Optional[Decimal] = Field(default=None, alias="other_dues")
+    deductions: Optional[Decimal] = Field(default=None, alias="deductions")
+    excluded: bool = Field(default=False, alias="excluded")  # a recorded Art. 80 exclusion
+    settlementDeadlineDays: Optional[int] = Field(default=None, alias="settlement_deadline_days")
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SaFinalSettlementResponse(BaseModel):
+    id: int
+    employeeId: int = Field(alias="employee_id")
+    organizationId: int = Field(alias="organization_id")
+    terminationDate: date = Field(alias="termination_date")
+    terminationType: str = Field(alias="termination_type")
+    noticeGiven: bool = Field(alias="notice_given")
+    noticePeriodDays: Optional[int] = Field(default=None, alias="notice_period_days")
+    eosAward: Decimal = Field(alias="eos_award")
+    unusedLeaveDays: int = Field(alias="unused_leave_days")
+    unusedLeavePay: Decimal = Field(alias="unused_leave_pay")
+    noticePay: Decimal = Field(alias="notice_pay")
+    repatriationPay: Decimal = Field(alias="repatriation_pay")
+    otherDues: Decimal = Field(alias="other_dues")
+    totalDue: Decimal = Field(alias="total_due")
+    deductions: Decimal
+    netPayable: Decimal = Field(alias="net_payable")
+    deadlineDate: date = Field(alias="deadline_date")
+    paidAt: Optional[datetime] = Field(default=None, alias="paid_at")
+    paymentReference: Optional[str] = Field(default=None, alias="payment_reference")
+    status: str
+    approvedById: Optional[int] = Field(default=None, alias="approved_by_id")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: Optional[datetime] = Field(default=None, alias="updated_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaFinalSettlementPayRequest(BaseModel):
+    paymentReference: Optional[str] = Field(default=None, alias="payment_reference")
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SaWpsFileResponse(BaseModel):
+    id: int
+    organizationId: int = Field(alias="organization_id")
+    payrollRunId: Optional[int] = Field(default=None, alias="payroll_run_id")
+    fileName: str = Field(alias="file_name")
+    fileSha256: str = Field(alias="file_sha256")
+    employeeCount: int = Field(alias="employee_count")
+    totalAmount: Decimal = Field(alias="total_amount")
+    status: str
+    submittedAt: Optional[datetime] = Field(default=None, alias="submitted_at")
+    acceptedAt: Optional[datetime] = Field(default=None, alias="accepted_at")
+    rejectedAt: Optional[datetime] = Field(default=None, alias="rejected_at")
+    rejectionReason: Optional[str] = Field(default=None, alias="rejection_reason")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: Optional[datetime] = Field(default=None, alias="updated_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaWpsObservationResponse(BaseModel):
+    id: int
+    wpsFileId: int = Field(alias="wps_file_id")
+    employeeId: int = Field(alias="employee_id")
+    observationCode: str = Field(alias="observation_code")
+    observationDescription: Optional[str] = Field(default=None, alias="observation_description")
+    expectedAmount: Optional[Decimal] = Field(default=None, alias="expected_amount")
+    reportedAmount: Optional[Decimal] = Field(default=None, alias="reported_amount")
+    resolved: bool
+    resolvedById: Optional[int] = Field(default=None, alias="resolved_by_id")
+    resolvedAt: Optional[datetime] = Field(default=None, alias="resolved_at")
+    createdAt: datetime = Field(alias="created_at")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SaWpsFileBuildResponse(BaseModel):
+    file: SaWpsFileResponse
+    records: List[dict] = []
+    observations: List[dict] = []
+    sha256: str
+
+
+class SaWpsRejectRequest(BaseModel):
+    reason: str
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
