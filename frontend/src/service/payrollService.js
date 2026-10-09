@@ -2337,6 +2337,285 @@ export const getFranceReadinessForOrg = async (forPeriod) => {
     throw err;
   }
 };
+
+// ── Switzerland (ZP-CH-PAYROLL-001) — this organization's CH data ─────────
+// Every CH WRITE needs an Idempotency-Key header (switzerland_http.py refuses
+// writes without one) — baked into these wrappers so callers never worry; a
+// retry with the same key replays the stored response instead of writing
+// twice. Readiness everywhere is recomputed server-side, never client-sent.
+function chIdempotencyKey() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `ch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const chWriteHeaders = () => ({ "Idempotency-Key": chIdempotencyKey() });
+
+// Employer profile (ChEntityProfileUpsert: uid, seatCanton,
+// cantonRegistrations, compensationOfficeSchemeId, fakSchemeId, effectiveFrom,
+// reason). Returns { current, readinessNow, versions }.
+export const getSwissEntityProfile = async (on) => {
+  try {
+    return await api.get("/api/payroll/switzerland/entity-profile", { params: on ? { on } : {} });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const saveSwissEntityProfile = async (payload) => {
+  try {
+    return await api.put("/api/payroll/switzerland/entity-profile", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Employer scheme profiles + the platform catalog (org's own rows first).
+export const listSwissSchemes = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/switzerland/schemes", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getSwissScheme = async (schemeId) => {
+  try {
+    return await api.get(`/api/payroll/switzerland/schemes/${schemeId}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createSwissScheme = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/schemes", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const updateSwissScheme = async (schemeId, payload) => {
+  try {
+    return await api.put(`/api/payroll/switzerland/schemes/${schemeId}`, payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const deleteSwissScheme = async (schemeId) => {
+  try {
+    return await api.delete(`/api/payroll/switzerland/schemes/${schemeId}`, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const approveSwissScheme = async (schemeId, reason) => {
+  try {
+    return await api.post(`/api/payroll/switzerland/schemes/${schemeId}/approve`, { reason: reason || null }, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const activateSwissScheme = async (schemeId, reason) => {
+  try {
+    return await api.post(`/api/payroll/switzerland/schemes/${schemeId}/activate`, { reason: reason || null }, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Read-only, ADVISORY QST check (ChQstResolveRequest) — the profile's
+// human-recorded ch_qst_subject stays authoritative.
+export const resolveSwissQst = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/qst/resolve", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Read-only: CH packs / QST tariff / LIVE schemes / Approved classification /
+// Active wage floors in force on a date (canton defaults to the seat canton).
+export const getSwissRulesEffective = async (on, canton) => {
+  try {
+    return await api.get("/api/payroll/switzerland/rules/effective", {
+      params: { on: on || undefined, canton: canton || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Family-allowance entitlements (REQUESTED / APPROVED).
+export const listSwissFamilyAllowances = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/switzerland/family-allowances", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getSwissFamilyAllowance = async (entitlementId) => {
+  try {
+    return await api.get(`/api/payroll/switzerland/family-allowances/${entitlementId}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createSwissFamilyAllowance = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/family-allowances", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const updateSwissFamilyAllowance = async (entitlementId, payload) => {
+  try {
+    return await api.put(`/api/payroll/switzerland/family-allowances/${entitlementId}`, payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const deleteSwissFamilyAllowance = async (entitlementId) => {
+  try {
+    return await api.delete(`/api/payroll/switzerland/family-allowances/${entitlementId}`, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const approveSwissFamilyAllowance = async (entitlementId, reason) => {
+  try {
+    return await api.post(`/api/payroll/switzerland/family-allowances/${entitlementId}/approve`, { reason: reason || null }, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Absence-benefit events (maternity, accident, sickness, ...).
+export const listSwissAbsenceEvents = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/switzerland/absence-events", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getSwissAbsenceEvent = async (eventId) => {
+  try {
+    return await api.get(`/api/payroll/switzerland/absence-events/${eventId}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createSwissAbsenceEvent = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/absence-events", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const updateSwissAbsenceEvent = async (eventId, payload) => {
+  try {
+    return await api.put(`/api/payroll/switzerland/absence-events/${eventId}`, payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const deleteSwissAbsenceEvent = async (eventId) => {
+  try {
+    return await api.delete(`/api/payroll/switzerland/absence-events/${eventId}`, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Append-only payslip corrections (Step 13) — the original payer record is
+// never modified; the correction books the per-obligation delta.
+export const createSwissCorrection = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/corrections", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listSwissCorrections = async (payslipId) => {
+  try {
+    return await api.get(`/api/payroll/switzerland/payslips/${payslipId}/corrections`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Lohnausweis (Step 14): { employeeId, year, templateId? } generates the
+// certificate; only committed payslips feed it.
+export const generateSwissLohnausweis = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/lohnausweis/generate", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listSwissLohnausweis = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/switzerland/lohnausweis/certificates", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getSwissLohnausweisCertificate = async (reportId) => {
+  try {
+    return await api.get(`/api/payroll/switzerland/lohnausweis/${reportId}/certificate`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ELM submissions: build envelopes (idempotent, from committed payslips only
+// — never a network call), list them, and record the authority RECEIVE/REJECT.
+export const buildSwissElmSubmissions = async (payload) => {
+  try {
+    return await api.post("/api/payroll/switzerland/elm/submissions", payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listSwissElmSubmissions = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/switzerland/elm/submissions", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionSwissElmSubmission = async (submissionId, payload) => {
+  try {
+    return await api.post(`/api/payroll/switzerland/elm/submissions/${submissionId}/transition`, payload, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transmitSwissElmSubmission = async (submissionId) => {
+  try {
+    return await api.post(`/api/payroll/switzerland/elm/submissions/${submissionId}/transmit`, undefined, { headers: chWriteHeaders() });
+  } catch (err) {
+    throw err;
+  }
+};
 // ── Singapore IR21 tax clearance (hold / clearance / release) ──────────
 // Tenant-scoped on the server (the caller's own organization only);
 // lifting a hold needs a distinct approver, enforced server-side.
@@ -2481,6 +2760,7 @@ export const createSgIr8aModification = async (reportId, { method, reason }) =>
 // Every rule (MPF, IR56G hold, IRD, eMPF, entitlements, SP/LSP, four-eyes)
 // is enforced server-side; these calls only fetch or submit operator input.
 const HK = "/api/payroll/hong-kong";
+const SA = "/api/payroll/saudi-arabia";
 export const recordHkWorkHours = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/work-hours`, payload);
 export const getHkContinuousContract = (employeeId, asOf) =>
   api.get(`${HK}/employees/${employeeId}/continuous-contract`, { params: { as_of: asOf } });
@@ -2518,7 +2798,29 @@ export const prepareHkEmpfSubmission = (contributionPeriod) => api.post(`${HK}/e
 export const transitionHkEmpfSubmission = (id, payload) => api.post(`${HK}/empf/submissions/${id}/transition`, payload);
 export const estimateHkSalariesTax = (payload) => api.post(`${HK}/salaries-tax/estimate`, payload);
 export const getHkRunPreflight = (runId) => api.get(`${HK}/runs/${runId}/preflight`);
+export const getSaRunPreflight = (runId) => api.get(`${SA}/runs/${runId}/preflight`);
+export const getSaRunFingerprint = (runId) => api.get(`${SA}/runs/${runId}/fingerprint`);
+export const createSaCorrection = (payslipId, payload) => api.post(`${SA}/payslips/${payslipId}/correction`, payload);
+export const listSaCorrections = (payslipId, organizationId) => api.get(`${SA}/payslips/${payslipId}/corrections`, { params: { organizationId } });
 export const getHkEmployerReadiness = () => api.get(`${HK}/readiness`);
+export const getSaEmployerReadiness = () => api.get(`${SA}/readiness`);
+export const previewSaudiArabiaCalculation = (payload) => api.post(`${SA}/calculation-preview`, payload);
+
+// SA ledger operations (org-scoped)
+export const listSaGosiLiabilities = (organizationId) => api.get(`${SA}/gosi-liabilities`, { params: { organizationId } });
+export const buildSaGosiLiability = (runId) => api.post(`${SA}/runs/${runId}/gosi-liability`, {});
+export const listSaEosLedger = (organizationId, employeeId) => api.get(`${SA}/eos-ledger`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+export const accrueSaEos = (runId) => api.post(`${SA}/runs/${runId}/eos-accrual`, {});
+export const listSaFinalSettlements = (organizationId, employeeId) => api.get(`${SA}/final-settlements`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+export const createSaFinalSettlement = (payload) => api.post(`${SA}/final-settlements`, payload);
+export const approveSaFinalSettlement = (settlementId) => api.post(`${SA}/final-settlements/${settlementId}/approve`, {});
+export const paySaFinalSettlement = (settlementId, paymentReference) => api.post(`${SA}/final-settlements/${settlementId}/pay`, { paymentReference });
+export const listSaWpsFiles = (organizationId) => api.get(`${SA}/wps-files`, { params: { organizationId } });
+export const buildSaWpsFile = (runId) => api.post(`${SA}/runs/${runId}/wps-file`, {});
+export const listSaWpsObservations = (organizationId, wpsFileId) => api.get(`${SA}/wps-files/${wpsFileId}/observations`, { params: { organizationId } });
+export const acceptSaWpsFile = (wpsFileId) => api.post(`${SA}/wps-files/${wpsFileId}/accepted`, {});
+export const rejectSaWpsFile = (wpsFileId, reason) => api.post(`${SA}/wps-files/${wpsFileId}/rejected`, { reason });
+
 export const recordHkEmployeeCopy = (caseId, evidenceRef) => api.post(`${HK}/ird/cases/${caseId}/employee-copy`, { evidenceRef });
 // HK statutory reports (GeneratedReport from an Active template). Bodies are
 // snake_case exactly as the server's request schemas declare them.

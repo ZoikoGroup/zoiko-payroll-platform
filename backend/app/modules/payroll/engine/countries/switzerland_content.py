@@ -20,7 +20,13 @@ tariff is entered), canton FAK top-ups (the federal minimums are here; canton
 rates are scaffolds), and the KTG loss-of-earnings daily allowance (canton-
 configured, scaffold). These live on the per-canton packs seeded by
 scripts/seed_switzerland_canonical_packs.py, never computed.
+
+The only QST figures at this level are the ARITHMETIC parameters the two named
+engine strategies read (CH_QST_MONTHS_PER_YEAR / CH_QST_PCT_DIVISOR): the tax
+figures themselves are canton tariff rows, never content.
 """
+from decimal import Decimal  # noqa: E402
+
 _STATUS = "Draft"
 
 # ── Statutory references (cited on the seeded packs, S1-S10) ──────────────
@@ -57,6 +63,16 @@ CH_SOURCES = (
 CH_SCHEME_TYPES = ("COMPENSATION_OFFICE", "FAK", "BVG_PLAN", "UVG_POLICY", "KTG_POLICY")
 CH_QST_MODELS = ("MONTHLY", "ANNUAL")
 
+# QST ARITHMETIC parameters — the two named engine strategies read these from
+# content instead of hardcoding figures in the calculator: the ANNUAL
+# (Jahresmodell) strategy annualises the monthly determination income by
+# CH_QST_MONTHS_PER_YEAR, applies the annual tariff, then back-apportions the
+# annual tax into each month by the same divisor; CH_QST_PCT_DIVISOR turns a
+# tariff PERCENT into its fraction. The TAX figures themselves are canton
+# tariff rows (ChQstTariffRow), never content.
+CH_QST_MONTHS_PER_YEAR = Decimal("12")
+CH_QST_PCT_DIVISOR = Decimal("100")
+
 # ── Component / obligation constants ───────────────────────────────────────
 CH_AHV = "ch_ahv"                 # AHV/AVS — old-age and survivors insurance
 CH_IV = "ch_iv"                   # IV/AI — invalidity insurance
@@ -68,6 +84,50 @@ CH_KTG = "ch_ktg"                 # KTG — canton-configured daily allowance in
 CH_QST = "ch_qst"                 # Quellensteuer — source tax (non-residents / cross-border)
 CH_LA = "ch_la"                   # Lohnausweis — statutory declaration, NOT a contribution
 CH_WAGE_FLOOR = "ch_wage_floor"   # No federal statutory minimum wage — floor only where a CBA/canton sets one
+
+# ── Step 11: earning types produced by absence-benefit events ──────────────
+# Each insurer daily allowance and the employer's top-up is its OWN earning
+# type, so TaxabilityRule classifies it separately per obligation (an EO
+# allowance is AHV-liable, a UVG daily allowance is not, ...). Never folded
+# into base salary.
+CH_EARNING_EO_ALLOWANCE = "CH_EO_ALLOWANCE"
+CH_EARNING_UVG_DAILY = "CH_UVG_DAILY"
+CH_EARNING_KTG_DAILY = "CH_KTG_DAILY"
+CH_EARNING_EMPLOYER_TOPUP = "CH_EMPLOYER_TOPUP"
+CH_ABSENCE_EARNING_TYPES = (CH_EARNING_EO_ALLOWANCE, CH_EARNING_UVG_DAILY, CH_EARNING_KTG_DAILY,
+                            CH_EARNING_EMPLOYER_TOPUP)
+# ChAbsenceBenefitEvent.event_type -> the earning type of its insurer allowance.
+# ILLNESS_CO (the employer's own Art. 324a CO salary continuation) and
+# PREGNANCY_PROTECTION carry no insurer allowance — only a top-up, if any.
+CH_ABSENCE_ALLOWANCE_EARNING = {
+    "MATERNITY": CH_EARNING_EO_ALLOWANCE,
+    "OTHER_PARENT": CH_EARNING_EO_ALLOWANCE,
+    "ADOPTION": CH_EARNING_EO_ALLOWANCE,
+    "ACCIDENT_UVG": CH_EARNING_UVG_DAILY,
+    "ILLNESS_KTG": CH_EARNING_KTG_DAILY,
+    "ILLNESS_CO": None,
+    "PREGNANCY_PROTECTION": None,
+}
+CH_ABSENCE_EVENT_TYPES = tuple(CH_ABSENCE_ALLOWANCE_EARNING)
+
+# ── Step 11: family allowances + wage floors ───────────────────────────────
+# Allowance type -> (canton pack key, federal-minimum key). BIRTH / ADOPTION
+# lump sums have no configured key yet, so an entitlement of that type BLOCKS
+# rather than paying an invented amount.
+CH_FAK_AMOUNT_KEYS = {
+    "CHILD": ("ch_fak_child", "ch_fak_child_min"),
+    "EDUCATION": ("ch_fak_education", "ch_fak_education_min"),
+}
+CH_FAK_ALLOWANCE_TYPES = ("CHILD", "EDUCATION", "BIRTH", "ADOPTION")
+CH_WAGE_FLOOR_BASES = ("HOURLY", "MONTHLY", "ANNUAL")
+CH_MONTHS_PER_YEAR = CH_QST_MONTHS_PER_YEAR
+
+# ALV ceiling tracking (Step 12: the content rule the engine's
+# _read_alv_proration_rule reads). "annual" = the annual ceiling is applied
+# cumulatively across the calendar year through the CH_ALV accumulator, which
+# is exactly what the engine does. Pro-rating the ceiling for a mid-year entry
+# or exit is NOT applied — PENDING G1 SIGN-OFF.
+CH_ALV_PRORATION_RULE = "annual"
 
 # Running totals the YTD accumulator keeps per Swiss component (the outreach
 # convention of Italy's ledgers: what (ytd_taxable_wages, ytd_tax_withheld)

@@ -45,6 +45,9 @@ export const COUNTRIES = [
   // Singapore (ZP-SG-ENG-001) — mirrors employee_validation.py's
   // SGEmployeeValidation exactly.
   { code: "SG", name: "Singapore" },
+  // Switzerland (ZP-CH-PAYROLL-001) — mirrors employee_validation.py's
+  // CHEmployeeValidation exactly. AHV number is SENSITIVE and EAN-13-validated.
+  { code: "CH", name: "Switzerland" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {
@@ -283,6 +286,19 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "statutory_change_effective_date", label: "Effective date of this statutory change (residency / work pass / EA status / SHG / class)", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Effective date must be in YYYY-MM-DD format." },
     { key: "pwm_group", label: "PWM group", type: "text", placeholder: "e.g. G1, OUTSOURCED, ALL", upper: true, showWhen: (cf) => !["", "NONE"].includes((cf?.pwm_sector || "").toUpperCase()) },
     { key: "pwm_job_level", label: "PWM job level", type: "text", placeholder: "e.g. GENERAL_INDOOR, OFFICER", upper: true, showWhen: (cf) => !["", "NONE"].includes((cf?.pwm_sector || "").toUpperCase()) },
+  ],
+  // Switzerland (ZP-CH-PAYROLL-001) — mirrors backend CHEmployeeValidation (AHV number EAN-13).
+  CH: [
+    {
+      key: "ahv_number",
+      label: "AHV/AVS number",
+      type: "text",
+      required: true,
+      placeholder: "756.XXXX.XXXX.XX",
+      strip: ". ",
+      pattern: /^756\d{10}$/,
+      error: "AHV number must be the 13-digit AHV/AVS number 756.XXXX.XXXX.XX from the AHV insurance card.",
+    },
   ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).

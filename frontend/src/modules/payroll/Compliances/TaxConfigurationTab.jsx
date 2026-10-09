@@ -581,9 +581,12 @@ function getVisibleItems(group, jurisdictionState) {
 
 // Hong Kong has no per-organisation slab/rate rows (the calculator resolves
 // the platform pack in force), so it gets its own read-only view. Every other
-// country renders the unchanged generic tab below.
+// country renders the unchanged generic tab below. Switzerland is managed
+// through the "Swiss Employer Profile" tab (QST tariff files and taxability
+// are platform data) — the generic US-fallback tab must never render for CH.
 export default function TaxConfigurationTab(props) {
   if (props.country === "HK") return <HKTaxConfigurationPanel />;
+  if (props.country === "CH") return null;
   return <GenericTaxConfigurationTab {...props} />;
 }
 

@@ -82,6 +82,8 @@ export default function JurisdictionLayout({
   // straight away. Applied only while nothing is selected; every other
   // country leaves it unset and is unchanged.
   autoSelectPack = null,
+  // Called when the selected pack changes (for org picker updates, etc.)
+  onPackChange = () => {},
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -169,7 +171,8 @@ export default function JurisdictionLayout({
     getCompliancePolicyEligibleOrganizations(selectedPack.id).then(setEligibleOrgs);
     getCompliancePolicyVersions(selectedPack.packId).then(setVersions);
     getTaxConfigurationAudit({ jurisdictionPackId: selectedPack.id }).then(setAudit);
-  }, [selectedPack]);
+    onPackChange(selectedPack);
+  }, [selectedPack, onPackChange]);
 
   useEffect(() => { loadPackDetail(); }, [loadPackDetail]);
 

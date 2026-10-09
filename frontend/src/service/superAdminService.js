@@ -791,3 +791,190 @@ export const loadFranceStatutoryDefaults = (packId) =>
 
 export const setFranceLive = (payload, params) =>
   apiFetch("/api/super-admin/compliance/france/go-live", { method: "POST", body: payload, params });
+
+// ————— Switzerland (ZP-CH-PAYROLL-001) ————
+// Super-Admin-owned authority data for the Switzerland Compliance workspace:
+// QST tariff file registry (import/validate/approve/activate), the platform
+// scheme catalog, earning classification rules and canton wage floors, plus
+// the release-gate readiness G1-G7 and the read-only engine preview.
+//
+// Every CH WRITE carries an Idempotency-Key header (switzerland_http.py
+// refuses writes without one) — apiFetch can't send headers, so JSON writes
+// go through _chRequest below (same raw-fetch + JSON-encode convention as
+// ingestPapAsset) and the tariff-file import through its own FormData fetch.
+const CH_SA = "/api/super-admin/compliance/switzerland";
+
+function nextIdempotencyKey() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `ch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function _chRequest(path, { method = "POST", body } = {}) {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Idempotency-Key": nextIdempotencyKey(),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.detail;
+    const msg = Array.isArray(detail) ? detail.map((d) => d.msg).join("; ") : detail;
+    const err = new Error(msg || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.errorCode = data?.error || data?.error_code || null;
+    throw err;
+  }
+  return data;
+}
+
+// Release gates G1-G7 + per-canton status, re-derived server-side on every
+// read (Switzerland is only ever gated live after staff make it so — this
+// endpoint never fabricates a "ready").
+export const getSwissReadiness = (on) =>
+  apiFetch(`${CH_SA}/readiness`, { params: on ? { on } : {} });
+
+// Read-only: run the production resolver + Swiss engine for one real CH
+// employee (organizationId + employeeId, an `on` payDate) — writes nothing.
+export const previewSwissCalculation = (payload) =>
+  apiFetch(`${CH_SA}/calculation-preview`, { method: "POST", body: payload });
+
+// QST tariff files (statuses: IMPORTED/VALIDATED/APPROVED/ACTIVE/REJECTED/
+// SUPERSEDED; every status stays readable for replay).
+export const listSwissQstTariffFiles = (params) => apiFetch(`${CH_SA}/qst-tariffs`, { params });
+export const getSwissQstTariffFile = (id) => apiFetch(`${CH_SA}/qst-tariffs/${id}`);
+
+// Import one canton's preserved authority tariff file (SHA-256 identity —
+// an identical import is refused; audited). Same multipart raw-fetch
+// convention as ingestPapAsset above.
+export async function importSwissQstTariffFile({ canton, formatVersion, effectiveFrom, effectiveTo,
+  taxYear, publicationDate, sourceDocumentId, file }) {
+  const form = new FormData();
+  form.append("canton", canton);
+  form.append("formatVersion", formatVersion);
+  form.append("effectiveFrom", effectiveFrom || "");
+  if (effectiveTo) form.append("effectiveTo", effectiveTo);
+  if (taxYear) form.append("taxYear", String(taxYear));
+  if (publicationDate) form.append("publicationDate", publicationDate);
+  if (sourceDocumentId) form.append("sourceDocumentId", String(sourceDocumentId));
+  form.append("file", file);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${CH_SA}/qst-tariffs`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Idempotency-Key": nextIdempotencyKey(),
+    },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+// Maker-checker lifecycle: validate (structural) -> approve (a different
+// Super Admin than the importer) -> activate (a different one than the
+// approver; the canton's overlapping ACTIVE files are superseded).
+export const validateSwissQstTariffFile = (id) => _chRequest(`${CH_SA}/qst-tariffs/${id}/validate`);
+export const approveSwissQstTariffFile = (id, reason) =>
+  _chRequest(`${CH_SA}/qst-tariffs/${id}/approve`, { body: { reason: reason || null } });
+export const activateSwissQstTariffFile = (id, reason) =>
+  _chRequest(`${CH_SA}/qst-tariffs/${id}/activate`, { body: { reason: reason || null } });
+
+// Read-only: the payslips / months a payslip was calculated on a tariff file
+// (a tariff correction lists them for deliberate correction — never
+// recalculates anything itself).
+export const getSwissQstTariffAffectedPayslips = (id) =>
+  apiFetch(`${CH_SA}/qst-tariffs/${id}/affected-payslips`);
+
+// Platform scheme catalog (organization_id NULL definitions; the org-facing
+// payrollService.js listSwissSchemes returns these plus the tenant's own).
+export const listSwissCatalogSchemes = (params) => apiFetch(`${CH_SA}/schemes`, { params });
+export const getSwissCatalogScheme = (id) => apiFetch(`${CH_SA}/schemes/${id}`);
+export const createSwissCatalogScheme = (payload) => _chRequest(`${CH_SA}/schemes`, { body: payload });
+export const updateSwissCatalogScheme = (id, payload) =>
+  _chRequest(`${CH_SA}/schemes/${id}`, { method: "PUT", body: payload });
+export const deleteSwissCatalogScheme = (id) => _chRequest(`${CH_SA}/schemes/${id}`, { method: "DELETE" });
+export const approveSwissCatalogScheme = (id, reason) =>
+  _chRequest(`${CH_SA}/schemes/${id}/approve`, { body: { reason: reason || null } });
+export const activateSwissCatalogScheme = (id, reason) =>
+  _chRequest(`${CH_SA}/schemes/${id}/activate`, { body: { reason: reason || null } });
+
+// Earning classification rules (Draft + Approved; only Approved rows govern).
+export const listSwissTaxabilityRules = (params) => apiFetch(`${CH_SA}/taxability-rules`, { params });
+export const createSwissTaxabilityRule = (payload) => _chRequest(`${CH_SA}/taxability-rules`, { body: payload });
+export const approveSwissTaxabilityRule = (id, reason) =>
+  _chRequest(`${CH_SA}/taxability-rules/${id}/approve`, { body: { reason: reason || null } });
+
+// Canton wage floors (CH_CANTON_MINIMUM / CH_GAV / CH_NAV).
+export const listSwissWageFloors = (params) => apiFetch(`${CH_SA}/wage-floors`, { params });
+export const createSwissWageFloor = (payload) => _chRequest(`${CH_SA}/wage-floors`, { body: payload });
+export const approveSwissWageFloor = (id, reason) =>
+  _chRequest(`${CH_SA}/wage-floors/${id}/approve`, { body: { reason: reason || null } });
+export const activateSwissWageFloor = (id, reason) =>
+  _chRequest(`${CH_SA}/wage-floors/${id}/activate`, { body: { reason: reason || null } });
+
+// ── Saudi Arabia ledgers (ZP-SA-ENG-001 §7/§12) ─────────────────────────────
+// Employer GOSI registration, employee contracts, the monthly GOSI liability,
+// the EOS accrual ledger, final settlement and the WPS SIE extract. Every one
+// builds server-side from committed payroll + configured content.
+const SA_SA = "/api/super-admin/compliance/saudi-arabia";
+
+// Release gates for one SA tax pack (packId omitted = the pack in force) and a
+// read-only calculation preview against it — both server-side; used by
+// SAReadinessPreviewTab.
+export const getSaReadiness = (packId) =>
+  apiFetch(`${SA_SA}/readiness`, { params: packId ? { packId } : {} });
+export const previewSaudiArabiaCalculation = (payload) =>
+  apiFetch(`${SA_SA}/calculation-preview`, { method: "POST", body: payload });
+
+export const listSaEmployerProfiles = (organizationId) =>
+  apiFetch(`${SA_SA}/employer-profiles`, { params: { organizationId } });
+export const createSaEmployerProfile = (organizationId, payload) =>
+  apiFetch(`${SA_SA}/employer-profiles`, { method: "POST", params: { organizationId }, body: payload });
+export const approveSaEmployerProfile = (organizationId, profileId) =>
+  apiFetch(`${SA_SA}/employer-profiles/${profileId}/approve`, { method: "POST", params: { organizationId } });
+
+export const listSaContractVersions = (organizationId, employeeId) =>
+  apiFetch(`${SA_SA}/employees/${employeeId}/contracts`, { params: { organizationId } });
+export const createSaContractVersion = (organizationId, employeeId, payload) =>
+  apiFetch(`${SA_SA}/employees/${employeeId}/contracts`, { method: "POST", params: { organizationId }, body: payload });
+export const approveSaContractVersion = (organizationId, employeeId, contractId) =>
+  apiFetch(`${SA_SA}/employees/${employeeId}/contracts/${contractId}/approve`, { method: "POST", params: { organizationId } });
+
+export const listSaGosiLiabilities = (organizationId) =>
+  apiFetch(`${SA_SA}/gosi-liabilities`, { params: { organizationId } });
+export const buildSaGosiLiability = (organizationId, runId) =>
+  apiFetch(`${SA_SA}/runs/${runId}/gosi-liability`, { method: "POST", params: { organizationId } });
+export const markSaGosiLiabilityPaid = (organizationId, liabilityId, paymentReference) =>
+  apiFetch(`${SA_SA}/gosi-liabilities/${liabilityId}/paid`, { method: "POST", params: { organizationId }, body: { paymentReference } });
+
+export const accrueSaEos = (organizationId, runId) =>
+  apiFetch(`${SA_SA}/runs/${runId}/eos-accrual`, { method: "POST", params: { organizationId } });
+export const listSaEosLedger = (organizationId, employeeId) =>
+  apiFetch(`${SA_SA}/eos-ledger`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+
+export const listSaFinalSettlements = (organizationId, employeeId) =>
+  apiFetch(`${SA_SA}/final-settlements`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
+export const createSaFinalSettlement = (organizationId, payload) =>
+  apiFetch(`${SA_SA}/final-settlements`, { method: "POST", params: { organizationId }, body: payload });
+export const approveSaFinalSettlement = (organizationId, settlementId) =>
+  apiFetch(`${SA_SA}/final-settlements/${settlementId}/approve`, { method: "POST", params: { organizationId } });
+export const paySaFinalSettlement = (organizationId, settlementId, paymentReference) =>
+  apiFetch(`${SA_SA}/final-settlements/${settlementId}/pay`, { method: "POST", params: { organizationId }, body: { paymentReference } });
+
+export const listSaWpsFiles = (organizationId) =>
+  apiFetch(`${SA_SA}/wps-files`, { params: { organizationId } });
+export const buildSaWpsFile = (organizationId, runId) =>
+  apiFetch(`${SA_SA}/runs/${runId}/wps-file`, { method: "POST", params: { organizationId } });
+export const listSaWpsObservations = (organizationId, wpsFileId) =>
+  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/observations`, { params: { organizationId } });
+export const acceptSaWpsFile = (organizationId, wpsFileId) =>
+  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/accepted`, { method: "POST", params: { organizationId } });
+export const rejectSaWpsFile = (organizationId, wpsFileId, reason) =>
+  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/rejected`, { method: "POST", params: { organizationId }, body: { reason } });

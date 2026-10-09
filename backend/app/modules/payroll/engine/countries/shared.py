@@ -87,7 +87,10 @@ class MissingComplianceConfigurationError(Exception):
 # Italy is the same case (ZP-IT-ENG-001 §30): no Italian packs, rates, registry
 # row or payroll runs exist, so flipping IT on at landing makes readiness — not
 # a default — the thing that keeps payroll honest.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK"}
+# Saudi Arabia (ZP-SA-ENG-001) is the same case again: no Saudi packs, GOSI
+# rates, registry row or payroll runs exist, so flipping SA on at landing makes
+# readiness — not a default — the thing that keeps payroll honest.
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK", "CH", "SA"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
