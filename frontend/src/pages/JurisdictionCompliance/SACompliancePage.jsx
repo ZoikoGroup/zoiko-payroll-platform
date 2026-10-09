@@ -10,6 +10,10 @@ import { SAEosLedgerTab } from "../../components/jurisdiction/saudi_arabia/SAEos
 import { SAFinalSettlementTab } from "../../components/jurisdiction/saudi_arabia/SAFinalSettlementTab";
 import { SAWpsTab } from "../../components/jurisdiction/saudi_arabia/SAWpsTab";
 import { SAOrgPickerBar } from "../../components/jurisdiction/saudi_arabia/SAOrgPickerBar";
+import { SAGosiBranchesTab } from "../../components/jurisdiction/saudi_arabia/SAGosiBranchesTab";
+import { SAEarningClassesTab } from "../../components/jurisdiction/saudi_arabia/SAEarningClassesTab";
+import { SAParametersTab } from "../../components/jurisdiction/saudi_arabia/SAParametersTab";
+import { SAReadinessPreviewTab } from "../../components/jurisdiction/saudi_arabia/SAReadinessPreviewTab";
 import { getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations } from "../../service/superAdminService";
 import { useToast } from "../../context/ToastContext";
 

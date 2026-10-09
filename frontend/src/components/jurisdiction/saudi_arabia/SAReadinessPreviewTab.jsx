@@ -78,6 +78,7 @@ export function SAReadinessPreviewTab({ packId }) {
 
   return (
     <div className="space-y-4">
+      <Messages error={error} notice={notice} />
       <div className={card} aria-labelledby="sa-readiness">
         <h3 id="sa-readiness" className="mb-1 text-[14px] font-semibold text-foreground">Production Readiness Gates (SA-016/SA-017)</h3>
         <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">
@@ -125,7 +126,7 @@ export function SAReadinessPreviewTab({ packId }) {
         <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">
           Read-only simulation against the active SA pack — writes nothing. Same production engine as a payroll run.
         </p>
-        <form className={`${card} grid grid-cols-1 gap-3 sm:grid-cols-4`} onSubmit={(e) => { e.preventDefault(); act(() => previewSaudiArabiaCalculation(form).then(setPreview).catch(setPreviewError), "Preview calculated."); }}>
+        <form className={`${card} grid grid-cols-1 gap-3 sm:grid-cols-4`} onSubmit={(e) => { e.preventDefault(); setPreviewError(null); act(() => previewSaudiArabiaCalculation(form).then(setPreview).catch((err) => setPreviewError(err?.message || "Preview failed.")), "Preview calculated."); }}>
           <label className="text-[12px] text-foreground-secondary">Worker Class
             <select aria-label="Worker class" className={`${input} ml-1`} value={form.workerClass} onChange={(e) => setForm({ ...form, workerClass: e.target.value })}>
               <option value="SAUDI">Saudi</option>
@@ -183,7 +184,7 @@ export function SAReadinessPreviewTab({ packId }) {
               </>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

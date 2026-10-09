@@ -925,6 +925,14 @@ export const activateSwissWageFloor = (id, reason) =>
 // builds server-side from committed payroll + configured content.
 const SA_SA = "/api/super-admin/compliance/saudi-arabia";
 
+// Release gates for one SA tax pack (packId omitted = the pack in force) and a
+// read-only calculation preview against it — both server-side; used by
+// SAReadinessPreviewTab.
+export const getSaReadiness = (packId) =>
+  apiFetch(`${SA_SA}/readiness`, { params: packId ? { packId } : {} });
+export const previewSaudiArabiaCalculation = (payload) =>
+  apiFetch(`${SA_SA}/calculation-preview`, { method: "POST", body: payload });
+
 export const listSaEmployerProfiles = (organizationId) =>
   apiFetch(`${SA_SA}/employer-profiles`, { params: { organizationId } });
 export const createSaEmployerProfile = (organizationId, payload) =>

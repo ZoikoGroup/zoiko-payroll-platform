@@ -99,11 +99,9 @@ function GOSIRegistration({ employees }) {
   const [form, setForm] = useState({ employeeId: "", workerClass: "SAUDI", cohort: "NEW", cohortEvidenceRef: "", contributoryWage: "" });
   const [step, setStep] = useState({});
   const { run, messages } = useAction();
+  // `employees` comes from SAComplianceCentreTab (already SA-filtered); this
+  // used to re-fetch them into a setEmployees that does not exist here.
   const load = useCallback(() => {
-    getEmployees().then((res) => {
-      const rows = Array.isArray(res) ? res : res?.data || res?.items || [];
-      setEmployees(rows.filter((e) => (e.countryCode || "").toUpperCase() === "SA"));
-    }).catch(() => setEmployees([]));
     getSaEmployerReadiness().then((r) => setProfiles(r?.profiles || [])).catch(() => setProfiles([]));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -309,23 +307,60 @@ function SalariesTaxInfo() {
   );
 }
 
-export default function SAComplianceCentreTab() {
-  const [section, setSection] = useState(0);
-  const [employees, setEmployees] = useState([]);
-  useEffect(() => {
-    getEmployees().then((res) => {
-      const rows = Array.isArray(res) ? res : res?.data || res?.items || [];
-      setEmployees(rows.filter((e) => (e.countryCode || "").toUpperCase() === "SA"));
-    }).catch(() => setEmployees([]));
-  }, []);
+function GOSILiability() {
+  const [rows, setRows] = useState([]);
+  const [runId, setRunId] = useState("");
+  const { run, messages } = useAction();
 
-  function EOSLedger({ employees }) {
+  const load = useCallback(() => {
+    listSaGosiLiabilities().then((r) => setRows(Array.isArray(r) ? r : r?.data || r?.items || [])).catch(() => setRows([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const build = async () => {
+    if (await run(() => buildSaGosiLiability(Number(runId)), "GOSI liability built.")) load();
+  };
+
+  return (
+    <div className="space-y-4">
+      {messages}
+      <div className={card}>
+        <h3 className="mb-1 text-[14px] font-semibold text-foreground">GOSI Monthly Liability</h3>
+        <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">Employer GOSI liability per contribution month (pension, SANED, occupational hazards), built from a payroll run.</p>
+        <table className="w-full">
+          <thead><tr>{["Month", "Pension (Emp.)", "Pension (Er.)", "SANED (Emp.)", "SANED (Er.)", "Occ. Hazard (Er.)", "Total Due", "Status", "Source Run", "Paid Ref"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={10} className={td}>No GOSI liabilities yet.</td></tr>}
+            {rows.map((g) => (
+              <tr key={g.id} className="border-t border-border">
+                <td className={td}>{g.contributionMonth ? new Date(g.contributionMonth).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "—"}</td>
+                <td className={td}>SAR {g.pensionEmployee ?? "—"}</td>
+                <td className={td}>SAR {g.pensionEmployer ?? "—"}</td>
+                <td className={td}>SAR {g.sanedEmployee ?? "—"}</td>
+                <td className={td}>SAR {g.sanedEmployer ?? "—"}</td>
+                <td className={td}>SAR {g.occupationalHazardEmployer ?? "—"}</td>
+                <td className={td}>SAR {g.totalDue ?? "—"}</td>
+                <td className={td}>{g.status || "—"}</td>
+                <td className={td}>{g.sourceRunId ?? "—"}</td>
+                <td className={td}>{g.paymentReference || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="mt-3 flex items-end gap-2">
+          <input placeholder="Run ID" aria-label="Run ID" className={input} value={runId} onChange={(e) => setRunId(e.target.value)} style={{ width: "100px" }} />
+          <button type="button" className={btn} disabled={!runId} onClick={build}>Build from Run</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EOSLedger({ employees }) {
   const [ledger, setLedger] = useState([]);
   const [accrueRunId, setAccrueRunId] = useState("");
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
   const { run, messages } = useAction();
-  const act = async (fn, ok) => { setError(null); setNotice(null); try { await fn(); setNotice(ok); } catch (e) { setError(e?.message || "Refused."); } };
+  const act = (fn, ok) => run(fn, ok);
 
   useEffect(() => {
     listSaEosLedger().then((r) => setLedger(Array.isArray(r) ? r : r?.data || r?.items || [])).catch(() => setLedger([]));
@@ -372,10 +407,8 @@ export default function SAComplianceCentreTab() {
 function FinalSettlement({ employees }) {
   const [settlements, setSettlements] = useState([]);
   const [form, setForm] = useState({ employeeId: "", terminationType: "TERMINATION", terminationDate: new Date().toISOString().slice(0, 10), noticeDays: 0, unusedLeaveDays: 0, repatriationAmount: 0, otherDues: 0 });
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
   const { run, messages } = useAction();
-  const act = async (fn, ok) => { setError(null); setNotice(null); try { await fn(); setNotice(ok); } catch (e) { setError(e?.message || "Refused."); } };
+  const act = (fn, ok) => run(fn, ok);
 
   useEffect(() => {
     listSaFinalSettlements().then((r) => setSettlements(Array.isArray(r) ? r : r?.data || r?.items || [])).catch(() => setSettlements([]));
@@ -450,10 +483,8 @@ function WPSSection({ employees }) {
   const [buildRunId, setBuildRunId] = useState("");
   const [obsFileId, setObsFileId] = useState("");
   const [obs, setObs] = useState([]);
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
   const { run, messages } = useAction();
-  const act = async (fn, ok) => { setError(null); setNotice(null); try { await fn(); setNotice(ok); } catch (e) { setError(e?.message || "Refused."); } };
+  const act = (fn, ok) => run(fn, ok);
 
   useEffect(() => {
     listSaWpsFiles().then((r) => setFiles(Array.isArray(r) ? r : r?.data || r?.items || [])).catch(() => setFiles([]));
@@ -546,6 +577,8 @@ function WPSSection({ employees }) {
     </div>
   );
 }
+
+export default function SAComplianceCentreTab() {
   const [section, setSection] = useState(0);
   const [employees, setEmployees] = useState([]);
   useEffect(() => {
@@ -554,6 +587,7 @@ function WPSSection({ employees }) {
       setEmployees(rows.filter((e) => (e.countryCode || "").toUpperCase() === "SA"));
     }).catch(() => setEmployees([]));
   }, []);
+
   return (
     <div className="space-y-4">
       <div role="tablist" aria-label="Saudi Arabia compliance workspaces" className="flex flex-wrap gap-2">

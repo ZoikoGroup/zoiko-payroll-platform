@@ -100,6 +100,7 @@ export function SAParametersTab({ packId }) {
 
   return (
     <div className="space-y-4">
+      <Messages error={error} notice={notice} />
       {ratesLoading ? (
         <p className="text-center text-[12px] text-foreground-muted py-4">Loading…</p>
       ) : (
@@ -134,8 +135,9 @@ export function SAParametersTab({ packId }) {
                 </tbody>
               </table>
             </div>
+          </div>
 
-            <div className={card} aria-labelledby="sa-parameter-form">
+          <div className={card} aria-labelledby="sa-parameter-form">
               <h3 id="sa-parameter-form" className="mb-1 text-[14px] font-semibold text-foreground">{editingId ? "Edit Parameter" : "Create Parameter"}</h3>
               <form className={`${card} grid grid-cols-1 gap-3 sm:grid-cols-3`} onSubmit={(e) => { e.preventDefault(); act(editingId ? () => upsertCanonicalContributionRate(editingId, form) : () => upsertCanonicalContributionRate(packId, form), editingId ? "Parameter updated." : "Parameter created."); setEditingId(null); setForm({ componentKey: PARAM_KINDS[0].key, employeeRatePct: "", employerRatePct: "", flatAmount: "", textValue: "" }); }}>
                 <label className="text-[12px] text-foreground-secondary">Component Key
@@ -149,10 +151,9 @@ export function SAParametersTab({ packId }) {
                 <input aria-label="Text Value" placeholder="Text Value (e.g. BASIC/GROSS, HALF_UP, 1/3)" className={`${input} w-40`} value={form.textValue} onChange={(e) => setForm({ ...form, textValue: e.target.value })} />
                 <div className="flex items-end"><button type="submit" className={btn} disabled={!form.componentKey}>{editingId ? "Update" : "Create"}</button></div>
               </form>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
