@@ -91,6 +91,15 @@ const COMPLIANCE_SAMPLE_VALUES = {
   krankenkasse: "AOK",
   iban: "DE12345678901234567890",
   bic: "AARGDEFF",
+  tamis_tin: "123456789",
+  nis_number: "A1234567",
+  nib_member_number: "A1234567",
+  cedula: "001-1234567-8",
+  gra_tin: "1234567",
+  trn: "123456789",
+  nib_number: "A1234567",
+  bir_file_number: "123456789",
+  nibtt_number: "A1234567",
 };
 
 function templateHeadersFor(countryCode) {

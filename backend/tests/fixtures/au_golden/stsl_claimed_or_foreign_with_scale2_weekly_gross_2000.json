@@ -1,0 +1,25 @@
+{
+  "description": "Schedule 8 STSL, 'tax-free threshold claimed OR foreign resident' family, alongside ordinary Scale 2 PAYG on the same $2000/week gross -- proving AU-AC14 (PAYG and STSL independently calculated, not folded together). PAYG: x=2000.99 in [1282,2596) (a=0.32,b=181.7319) -> y=458.5849 -> 459. STSL: x=2000.99 in [1337,2494) (a=0.15,b=200.5615) -> y=99.587 -> 100.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (Scale 2) and Section 8 (NAT 3539, 'Tax-free threshold claimed OR foreign resident' family, effective 1 Jul 2026). Hand-computed, cross-checked by running the real engine at authoring time.",
+  "context": {
+    "gross": "2000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "study_loan_plan": "AU_HELP",
+    "study_loan_balance": "5000",
+    "slabs": [
+      {"min_amount": "1282", "max_amount": "2596", "rate_pct": "0.32", "flat_amount": "181.7319", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "0", "max_amount": "1337", "rate_pct": "0", "flat_amount": "0", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_CLAIMED_OR_FOREIGN"},
+      {"min_amount": "1337", "max_amount": "2494", "rate_pct": "0.15", "flat_amount": "200.5615", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_CLAIMED_OR_FOREIGN"},
+      {"min_amount": "2494", "max_amount": "3577", "rate_pct": "0.17", "flat_amount": "250.4527", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_CLAIMED_OR_FOREIGN"},
+      {"min_amount": "3577", "max_amount": null, "rate_pct": "0.1", "flat_amount": "0", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_CLAIMED_OR_FOREIGN"}
+    ]
+  },
+  "expected": {
+    "tds": "459",
+    "study_loan_deduction": "100"
+  }
+}

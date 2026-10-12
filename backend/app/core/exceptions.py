@@ -18,17 +18,40 @@ Standard error response format we use everywhere:
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.config import settings
+
+# Same allowlist main.py's real CORSMiddleware is configured with
+# (allow_credentials=True there too) -- computed independently here
+# rather than imported from main.py to avoid a circular import (main.py
+# imports these handlers from this module).
+_ALLOWED_ORIGINS = {
+    o.strip() for o in settings.PAYROLL_CORS_ORIGINS.split(",") if o.strip()
+}
+
 
 def _cors_headers(request: Request) -> dict:
-    """Return CORS headers that mirror the ForceCORSMiddleware logic."""
+    """Return CORS headers for an error response, matching the SAME
+    allowlist main.py's CORSMiddleware enforces for every successful
+    response.
+
+    Previously reflected any Origin header verbatim (falling back to
+    "*") paired with Allow-Credentials: true on every error path --
+    fixed 2026-09-18 (platform infrastructure fix plan) since that let
+    any origin whatsoever get a credentialed CORS pass specifically on
+    error responses, bypassing the real allowlist entirely. Now omits
+    the Allow-Origin/Allow-Credentials headers when the request's Origin
+    isn't on the allowlist, exactly like a disallowed origin is treated
+    by CORSMiddleware itself on the success path."""
     origin = request.headers.get("origin", "")
-    return {
-        "Access-Control-Allow-Origin": origin if origin else "*",
-        "Access-Control-Allow-Credentials": "true",
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "*",
         "Access-Control-Expose-Headers": "*",
     }
+    if origin and origin in _ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    return headers
 
 
 # ── Custom Exception Classes ──────────────────────────────────────────────────
@@ -66,9 +89,17 @@ class UnauthorizedException(ZoikoException):
 
 
 class ForbiddenException(ZoikoException):
-    """Use when user is logged in but doesn't have permission (403)."""
-    def __init__(self, message: str = "You do not have permission to perform this action."):
+    """Use when user is logged in but doesn't have permission (403).
+
+    `trace` is optional structured detail (e.g. billing/entitlements.py
+    passes {"plan_code": "CORE", "limit_value": 1, "resource": "max_entities"}
+    on a plan-limit block) surfaced via the same trace mechanism
+    GermanyCalculationBlockedException already uses — no new response-
+    serialization path needed (see zoiko_exception_handler)."""
+    def __init__(self, message: str = "You do not have permission to perform this action.", trace: dict | None = None):
         super().__init__(status_code=403, error_code="FORBIDDEN", message=message)
+        if trace:
+            self.trace = trace
 
 
 class BadRequestException(ZoikoException):
@@ -77,19 +108,75 @@ class BadRequestException(ZoikoException):
         super().__init__(status_code=400, error_code="BAD_REQUEST", message=message)
 
 
+class AttendanceIncompleteException(ZoikoException):
+    """Payroll refused because in-scope employees are missing attendance for
+    expected working days of the period (400, error ATTENDANCE_INCOMPLETE).
+    `trace` carries the readiness report (see
+    payroll/service.py check_attendance_readiness) so the frontend can list
+    exactly who is missing which days."""
+    def __init__(self, message: str, trace: dict):
+        super().__init__(status_code=400, error_code="ATTENDANCE_INCOMPLETE", message=message)
+        self.trace = trace
+
+
+class GermanyCalculationBlockedException(ZoikoException):
+    """Use when a Germany payroll calculation cannot safely produce a
+    compliant result (400) — e.g. no PUBLISHED BMF PAP asset, no effective
+    EmployeeStatutoryProfile, no resolvable Health Fund / Contribution
+    Ceiling / PV Configuration for the payroll date. `error_code` is one
+    of engine.germany_pap.core's GermanyCalculationError subclass
+    codes (e.g. "GERMANY_PAP_NOT_AVAILABLE"), not the generic
+    "BAD_REQUEST", so API/UI consumers can distinguish the specific
+    statutory blocker. `trace` is the (already-redacted)
+    GermanyCalculationTrace.to_dict() showing exactly what DID resolve
+    before the block — real diagnostic value, not just a bare failure."""
+    def __init__(self, error_code: str, message: str, trace: dict | None = None):
+        super().__init__(status_code=400, error_code=error_code, message=message)
+        self.trace = trace or {}
+
+
+class FranceCalculationBlockedException(GermanyCalculationBlockedException):
+    """France (ZP-FR-ENG-001) twin of GermanyCalculationBlockedException —
+    raised when engine/countries/france.py blocks (FR-027: missing PAS
+    rate, SIRET rate pack, mandatory pack content, SMIC/IDCC breach…).
+    Subclassing keeps every existing handler (400 response, FAILED payslip
+    per blocked employee in a run) working unchanged for France."""
+
+
+class GermanyPapGateBlockedException(ZoikoException):
+    """Phase 8G-1 — raised when an activation attempt against a
+    GermanyPapRelease fails the compound production-release gate (see
+    engine.germany_pap.production_gate). `failed_gates` lists exactly
+    which named dimensions were not satisfied, surfaced via the same
+    `trace` mechanism GermanyCalculationBlockedException already uses
+    (zoiko_exception_handler serializes any `trace` attribute) — no new
+    response-serialization path was added for this."""
+    def __init__(self, failed_gates: list):
+        super().__init__(
+            status_code=400,
+            error_code="GERMANY_PAP_PRODUCTION_GATE_BLOCKED",
+            message="This PAP release does not satisfy every required production gate.",
+        )
+        self.trace = {"failedGates": list(failed_gates)}
+
+
 # ── Global Exception Handlers ─────────────────────────────────────────────────
 # These are registered in main.py so every error returns our clean JSON format.
 
 async def zoiko_exception_handler(request: Request, exc: ZoikoException):
     """Handles all our custom ZoikoException errors."""
+    content = {
+        "success": False,
+        "error": exc.error_code,
+        "message": exc.message,
+        "detail": exc.message,
+    }
+    trace = getattr(exc, "trace", None)
+    if trace:
+        content["trace"] = trace
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "success": False,
-            "error": exc.error_code,
-            "message": exc.message,
-            "detail": exc.message,
-        },
+        content=content,
         headers=_cors_headers(request),
     )
 
@@ -97,13 +184,77 @@ async def zoiko_exception_handler(request: Request, exc: ZoikoException):
 async def generic_exception_handler(request: Request, exc: Exception):
     """Catches any unexpected server error and returns a clean message."""
     import logging
-    logging.getLogger("zoiko").error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    logging.getLogger("zoiko_payroll").error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    if settings.SENTRY_DSN:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={
             "success": False,
             "error": "INTERNAL_SERVER_ERROR",
             "message": "Something went wrong on the server. Please try again later.",
+        },
+        headers=_cors_headers(request),
+    )
+
+
+async def database_schema_error_handler(request: Request, exc: Exception):
+    """Registered for sqlalchemy.exc.ProgrammingError specifically —
+    FastAPI dispatches to the most specific matching handler class, so
+    this runs INSTEAD OF generic_exception_handler only for this one
+    exception type, never masking any other exception.
+
+    Narrowly inspects the underlying DBAPI error (`exc.orig`): only when
+    it is genuinely psycopg.errors.UndefinedTable/UndefinedColumn — i.e.
+    the database this environment is connected to is missing a
+    table/column a migration already in the repository would create — do
+    we return the clean, distinguishable 503 SCHEMA_UNAVAILABLE contract
+    (found during the Super Admin stabilization audit: several Germany
+    registry endpoints were surfacing this as a bare, unhandled 500).
+    Every other ProgrammingError (a genuine SQL/query defect) still logs
+    and returns the normal 500 — this handler never widens into a
+    broad `except Exception` and never swallows a real bug."""
+    import logging
+
+    from psycopg.errors import UndefinedTable, UndefinedColumn
+
+    schema_error_types = [UndefinedTable, UndefinedColumn]
+    # requirements.txt installs psycopg2-binary alongside psycopg 3, and a
+    # plain postgresql:// URL makes SQLAlchemy use psycopg2 — whose
+    # missing-table/column classes are distinct types. Without them a
+    # missing migration on such an environment surfaced as a bare 500
+    # (found on the France super-admin endpoints, whose tables' migration
+    # had not been applied).
+    try:
+        from psycopg2.errors import UndefinedTable as Pg2UndefinedTable, UndefinedColumn as Pg2UndefinedColumn
+        schema_error_types += [Pg2UndefinedTable, Pg2UndefinedColumn]
+    except ImportError:
+        pass
+
+    orig = getattr(exc, "orig", None)
+    if not isinstance(orig, tuple(schema_error_types)):
+        return await generic_exception_handler(request, exc)
+
+    logging.getLogger("zoiko_payroll").error(
+        "Schema unavailable on %s %s: %s", request.method, request.url.path, orig,
+    )
+    friendly_message = (
+        "This feature requires a database migration that has not been applied to this "
+        "environment yet. Please contact an administrator to run the pending deployment."
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "error": "SCHEMA_UNAVAILABLE",
+            # `detail` intentionally mirrors `message` (matching every other
+            # handler here) rather than the raw DB error text — the frontend's
+            # api.js picks `detail` first when present, and raw table/column
+            # names are a server-side diagnostic (already logged above), not
+            # something to surface to an authenticated client.
+            "message": friendly_message,
+            "detail": friendly_message,
         },
         headers=_cors_headers(request),
     )

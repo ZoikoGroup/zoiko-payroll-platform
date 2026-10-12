@@ -1226,21 +1226,39 @@ def _notify_handoff_created(db, org_id, user, handoff: AssistHandoff) -> None:
     block the handoff itself, which is already committed by this point."""
     requester_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email
     try:
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_handoff_confirmation_email
 
-        send_handoff_confirmation_email(
+        queue_email(
+            "assist", "assist.handoff_confirmation", None, user.email,
+            idempotency_key(org_id, "assist.handoff_confirmation", user.email, None, f"case:{handoff.case_id}"),
+            send_handoff_confirmation_email,
             user.email, requester_name, handoff.case_id, handoff.summary, handoff.destination,
-            sla_reference=handoff.sla_reference or "", organization_id=org_id, db=db,
+            send_kwargs={"sla_reference": handoff.sla_reference or "", "organization_id": org_id},
+            organization_id=org_id, actor_user_id=user.id, recipient_user_id=user.id, db=db,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[assist] Handoff confirmation email failed for case {handoff.case_id}: {exc}")
     try:
+        from app.config import settings
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_handoff_support_notification_email
 
-        send_handoff_support_notification_email(
-            requester_name, user.email, handoff.case_id, handoff.summary, handoff.destination,
-            handoff.reason_code, organization_id=org_id, db=db,
-        )
+        support_inbox = settings.ASSIST_SUPPORT_EMAIL or settings.SMTP_FROM_EMAIL
+        if not support_inbox:
+            logger.warning(f"[assist] No support-team inbox configured; skipping handoff notification for case {handoff.case_id}")
+        else:
+            queue_email(
+                "assist", "assist.handoff_support_notification", None, support_inbox,
+                idempotency_key(
+                    org_id, "assist.handoff_support_notification", support_inbox, None, f"case:{handoff.case_id}",
+                ),
+                send_handoff_support_notification_email,
+                requester_name, user.email, handoff.case_id, handoff.summary, handoff.destination,
+                handoff.reason_code,
+                send_kwargs={"organization_id": org_id},
+                organization_id=org_id, actor_user_id=user.id, db=db,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[assist] Handoff support notification email failed for case {handoff.case_id}: {exc}")
 

@@ -9,10 +9,20 @@ import { apiFetch, API_BASE, getAccessToken } from "../api/client";
 
 export const getComplianceJurisdictions = () => apiFetch("/api/super-admin/compliance/jurisdictions");
 
+// Full Caribbean jurisdiction master (region-grouped, includes Coming
+// Soon entries) — a display-only view, separate from
+// getComplianceJurisdictions above (which only ever lists jurisdictions
+// that already have real configured data).
+export const getCaribbeanJurisdictions = () => apiFetch("/api/super-admin/compliance/caribbean-jurisdictions");
+
 // One row per jurisdiction with real counts (active tax packs, active
 // policy packs, active statutory rates, orgs assigned) — powers the
 // jurisdiction card grid landing view.
 export const getJurisdictionSummary = () => apiFetch("/api/super-admin/compliance/jurisdiction-summary");
+
+// Read-only: every hardcoded fallback value the payroll engine uses when no
+// canonical/org rate exists — powers the "Engine Fallback Defaults" viewer.
+export const getEngineFallbackDefaults = () => apiFetch("/api/super-admin/compliance/engine-fallback-defaults");
 
 export const getCompliancePolicies = (params) => apiFetch("/api/super-admin/compliance/policies", { params });
 
@@ -46,8 +56,90 @@ export const assignCompliancePolicy = (id, organizationIds) =>
     body: { organizationIds },
   });
 
-export const hardDeleteCompliancePolicy = (id) =>
-  apiFetch(`/api/super-admin/compliance/policies/${id}`, { method: "DELETE" });
+// Hard-delete intentionally removed — production compliance packs should
+// never be permanently destroyable via the UI. Use
+// setCompliancePolicyStatus(id, "Retired") for normal lifecycle
+// retirement instead (see JurisdictionLayout.jsx's status dropdown).
+
+// ── Super Admin UI completion (§19 gap-closure Part 11, 2026-09-09) ──────
+
+export const getPackImpactPreview = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/impact-preview`);
+
+// Tax Year/Release Manager (gap-closure Plan Phase 4) — rate-level diff
+// between two versions of the same pack.
+export const getPackVersionDiff = (fromId, toId) =>
+  apiFetch(`/api/super-admin/compliance/policies/${fromId}/compare/${toId}`);
+
+// Emergency hotfix activation — bypasses the distinct-approver gate,
+// requires incident_id + justification, always flagged for mandatory
+// retrospective review (see HotfixActivateModal.jsx).
+export const hotfixActivatePack = (id, payload) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/hotfix-activate`, { method: "PUT", body: payload });
+
+export const getHotfixActivations = (params) =>
+  apiFetch("/api/super-admin/compliance/hotfix-activations", { params });
+
+export const reviewHotfixActivation = (id, payload) =>
+  apiFetch(`/api/super-admin/compliance/hotfix-activations/${id}/review`, { method: "PUT", body: payload });
+
+// Cross-org UK RTI filing summary (FPS/EPS/P45/P60) with submission
+// tracking status.
+export const getRtiFormsSummary = (params) =>
+  apiFetch("/api/super-admin/compliance/rti-forms", { params });
+
+// Golden-test certification (Part 10's harness, generalized to Canada
+// gap-closure Phase 8) — trigger a run for a jurisdiction, and read run
+// history. jurisdictionCountry defaults to "UK" for back-compat.
+// Singapore — read-only calculation preview against one SG pack's rows,
+// computed by the backend's production engine (the frontend never does
+// statutory payroll maths itself). Writes nothing server-side.
+export const previewSingaporeCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/singapore/calculation-preview", { method: "POST", body: payload });
+
+// Singapore — read-only statutory configuration summary (point-in-time,
+// from persisted pack rows only) and the paginated PWM overtime gross
+// schedule (global statutory reference data). Both tenant-independent.
+export const getSingaporeStatutorySummary = (params) =>
+  apiFetch("/api/super-admin/compliance/singapore/statutory-summary", { params });
+
+export const getSingaporePwmSchedules = (params) =>
+  apiFetch("/api/super-admin/compliance/singapore/pwm-schedules", { params });
+
+// Sweden (ZP-SE-ENG-001) — release-gate readiness checklist and a read-only
+// calculation preview computed by the backend's production engine (the
+// frontend never does statutory payroll maths itself).
+export const getSwedenReadiness = (packId) =>
+  apiFetch("/api/super-admin/compliance/sweden/readiness", { params: packId ? { packId } : {} });
+
+export const previewSwedenCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/sweden/calculation-preview", { method: "POST", body: payload });
+
+// Italy (ZP-IT-ENG-001) — release gates G1-G8 and a read-only calculation
+// preview run by the backend's production engine.
+export const getItalyReadiness = (packId) =>
+  apiFetch("/api/super-admin/compliance/italy/readiness", { params: packId ? { packId } : {} });
+
+export const previewItalyCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/italy/calculation-preview", { method: "POST", body: payload });
+
+// Governed collective-agreement registry (spec §9) — no national default.
+export const listCollectiveAgreements = (params) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { params });
+
+export const upsertCollectiveAgreement = (payload) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { method: "POST", body: payload });
+
+export const setCollectiveAgreementStatus = (id, status, reason) =>
+  apiFetch(`/api/super-admin/compliance/collective-agreements/${id}/status`, { method: "POST", body: { status, reason } });
+
+export const runTestCertification = (jurisdictionCountry = "UK") =>
+  apiFetch("/api/super-admin/compliance/test-certification/run", {
+    method: "POST", body: { jurisdiction_country: jurisdictionCountry },
+  });
+
+export const getTestCertificationRuns = (params) =>
+  apiFetch("/api/super-admin/compliance/test-certification/runs", { params });
 
 // Every organization's ACTUAL, currently-configured compliance setup (as
 // opposed to the abstract policy templates above) — used by the Compliance
@@ -97,6 +189,13 @@ export const upsertEmployerTaxProfile = (payload) =>
 export const deleteEmployerTaxProfile = (id) =>
   apiFetch(`/api/super-admin/compliance/employer-tax-profiles/${id}`, { method: "DELETE" });
 
+// Small organization picker for the Germany Employer Levies (Accident
+// Insurance) tab — EmployerTaxProfile is org-scoped (unlike every other
+// Germany registry, all global), so its Super Admin UI needs to let the
+// operator pick which employer they're configuring (Phase 8AJ).
+export const listOrganizationsForPicker = () =>
+  apiFetch("/api/organizations", { params: { limit: 200 } }).then((data) => data.organizations || []);
+
 // ── US: Cross-State Reciprocity ───────────────────────────────────────────
 
 export const getReciprocityRules = () =>
@@ -122,6 +221,44 @@ export const upsertLocalityRate = (payload) =>
 export const deleteLocalityRate = (id) =>
   apiFetch(`/api/super-admin/compliance/locality-rates/${id}`, { method: "DELETE" });
 
+// ── Locality Dataset Manager (ZP-TAX-US-2026-001 §10/§11.1) ────────────────
+// The full Draft/Staged/Active/Retired import/diff/stage/approve/activate/
+// rollback workflow, alongside (not replacing) the manual-entry endpoints
+// above — both operate on the same underlying LocalityDataset/LocalityRate
+// tables.
+
+export const getLocalityDatasets = (params) =>
+  apiFetch("/api/super-admin/compliance/locality-datasets", { params });
+
+export const getLocalityDatasetRates = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/rates`);
+
+export const importLocalityDataset = (payload) =>
+  apiFetch("/api/super-admin/compliance/locality-datasets/import", { method: "POST", body: payload });
+
+// "New State Import" bulk tooling (Production-Readiness Plan Phase 3) —
+// creates a brand-new Draft JurisdictionPack for a state, pre-populated
+// with its full bracket table + standard deduction, in one call instead
+// of hand-entering each row through USStateAccordionRow's one-at-a-time
+// component editor.
+export const bulkImportStateTaxPack = (payload) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/state-import", { method: "POST", body: payload });
+
+export const diffLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/diff`);
+
+export const stageLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/stage`, { method: "PUT" });
+
+export const approveLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/approve`, { method: "PUT" });
+
+export const activateLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/activate`, { method: "PUT" });
+
+export const rollbackLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/rollback`, { method: "PUT" });
+
 // ── Source Evidence ────────────────────────────────────────────────────────
 
 export const getSourceArtifacts = () =>
@@ -130,14 +267,304 @@ export const getSourceArtifacts = () =>
 export const createSourceArtifact = (payload) =>
   apiFetch("/api/super-admin/compliance/source-artifacts", { method: "POST", body: payload });
 
+// Real preserved-file storage (ZP-TAX-US-2026-001 §14.2, gap-closure Plan
+// Phase 4) — `apiFetch` above always JSON-encodes its body, so a real file
+// upload/binary download needs its own raw fetch call, same pattern
+// payrollService.js's downloadPayslip/downloadRunPayslips already use.
+export const uploadSourceArtifactFile = async (id, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/source-artifacts/${id}/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    let detail;
+    try { detail = (await res.json()).detail; } catch { /* ignore */ }
+    throw new Error(detail || "Upload failed.");
+  }
+  return res.json();
+};
+
+export const downloadSourceArtifactFile = async (id, filenameHint) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/source-artifacts/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("Failed to download file.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filenameHint || `source_artifact_${id}`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
+// Singapore gate / decision evidence: keep the old artifact, mark it superseded by a same-tag replacement.
+export const supersedeSourceArtifact = (id, replacementId) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/supersede`, { method: "PUT", body: { replacementId } });
+
+// Singapore gate / decision evidence review outcome: ACCEPTED (optional validUntil) or REJECTED (notes required).
+export const reviewSgEvidence = (id, { outcome, notes, validUntil }) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/sg-review`, {
+    method: "PUT", body: { outcome, notes: notes || null, validUntil: validUntil || null },
+  });
+
+// Singapore owner decision D1 / D2 / D3 — selected option + reason (counts after memo upload + second-admin review).
+export const recordSgDecision = ({ key, selectedValue, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/decisions", { method: "POST", body: { key, selectedValue, reason } });
+
+// Singapore registry step (Phase 6.10): AVAILABLE (gated server-side) or PLANNED; reason required, audited.
+export const transitionSgServiceRegistry = ({ availability, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/service-registry", { method: "POST", body: { availability, reason } });
+
+// ── India: state/local statutory readiness registry (§16) ─────────────────
+// One row per (state/UT, optional local authority, program) — informational
+// only, no calculation/onboarding path enforces it yet.
+
+export const getStateLocalReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/state-local-readiness", { params });
+
+export const upsertStateLocalReadiness = (payload) =>
+  apiFetch("/api/super-admin/compliance/state-local-readiness", { method: "POST", body: payload });
+
+// ── Taxability rules (India Code Wages classification, §7/§8) ─────────────
+// Backs engine/countries/india.py's _calculate_code_wages — which of an
+// employee's own named salary components count as "core included wages" vs.
+// "excluded, subject to the 50%-cap add-back test." Had NO admin UI at all
+// before this (only a read-only backend resolver existed).
+
+export const getTaxabilityRules = (params) =>
+  apiFetch("/api/super-admin/compliance/taxability-rules", { params });
+
+export const upsertTaxabilityRule = (payload) =>
+  apiFetch("/api/super-admin/compliance/taxability-rules", { method: "POST", body: payload });
+
+export const deleteTaxabilityRule = (id) =>
+  apiFetch(`/api/super-admin/compliance/taxability-rules/${id}`, { method: "DELETE" });
+
+// ── India: Salary TDS / Forms cross-org status (gap-closure Phase F) ──────
+// A Super Admin token has no organization_id of its own, so these call
+// dedicated cross-org endpoints (organizationId required) rather than the
+// org-facing payrollService.js versions of the same underlying data.
+
+export const getIndiaSalaryTdsDeclarationsForOrg = (organizationId, taxYear) =>
+  apiFetch("/api/super-admin/india/salary-tds-declarations", { params: { organizationId, taxYear } });
+
+export const getIndiaSalaryTdsClaimsForOrg = (organizationId, taxYear) =>
+  apiFetch("/api/super-admin/india/salary-tds-claims", { params: { organizationId, taxYear } });
+
+export const getIndiaFormsForOrg = (organizationId, reportType) =>
+  apiFetch("/api/super-admin/india/forms", { params: { organizationId, reportType } });
+
+// ── Germany statutory registries (Phase 8O) ─────────────────────────────
+// Every function below is a thin wrapper over a pre-existing Super-Admin-
+// only backend endpoint (Phases 3/4/5/6/8G-1) — this phase adds the
+// frontend client, not new backend surface, except getChurchTaxMatrix
+// (a genuinely new, read-only endpoint — see service.get_church_tax_matrix's
+// own docstring for why it has no create/approve/status counterpart).
+
+// PAP algorithm assets
+export const listPapAssets = (taxYear) =>
+  apiFetch("/api/super-admin/compliance/germany/pap-assets", { params: taxYear ? { taxYear } : {} });
+export const getPapAsset = (id) => apiFetch(`/api/super-admin/compliance/germany/pap-assets/${id}`);
+export const approvePapAsset = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-assets/${id}/approve`, { method: "PUT" });
+export const setPapAssetStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-assets/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// PAP asset ingestion is multipart (raw file + form fields) — apiFetch
+// always JSON-encodes its body, so this bypasses it with a raw fetch,
+// same auth/refresh-token convention as api/client.js's own rawFetch.
+export async function ingestPapAsset({ taxYear, papVersion, effectiveFrom, effectiveTo, sourceAgency, sourceTitle, sourceUrl, sourcePublicationDate, file }) {
+  const form = new FormData();
+  form.append("taxYear", taxYear);
+  form.append("papVersion", papVersion);
+  form.append("effectiveFrom", effectiveFrom);
+  if (effectiveTo) form.append("effectiveTo", effectiveTo);
+  form.append("sourceAgency", sourceAgency);
+  form.append("sourceTitle", sourceTitle);
+  if (sourceUrl) form.append("sourceUrl", sourceUrl);
+  if (sourcePublicationDate) form.append("sourcePublicationDate", sourcePublicationDate);
+  form.append("file", file);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/germany/pap-assets`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+// PAP release governance
+export const listPapReleases = (taxYear) =>
+  apiFetch("/api/super-admin/compliance/germany/pap-releases", { params: taxYear ? { taxYear } : {} });
+export const getPapRelease = (id) => apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}`);
+export const getPapReleaseGateStatus = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/gate-status`);
+export const createPapRelease = (papAssetId) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-assets/${papAssetId}/release`, { method: "POST" });
+export const recordPapReleaseSourceIdentity = (id, notes) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/source-identity`, { method: "PUT", body: { notes } });
+export const recordPapReleaseSourceHash = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/source-hash`, { method: "PUT" });
+export const recordPapReleaseSourceFinality = (id, body) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/source-finality`, { method: "PUT", body });
+export const recordPapReleaseLicensing = (id, body) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/licensing`, { method: "PUT", body });
+export const recordPapReleaseGoldenVectors = (id, body) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/golden-vectors`, { method: "PUT", body });
+export const recordPapReleaseSecurityCertification = (id, notes) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/security-certification`, { method: "PUT", body: { notes } });
+export const markPapReleaseReady = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/ready`, { method: "PUT" });
+export const approvePapRelease = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/approve`, { method: "PUT" });
+export const rejectPapRelease = (id, reason) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/reject`, { method: "PUT", body: { reason } });
+export const activatePapRelease = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/activate`, { method: "POST" });
+export const requestPapRollback = (id, reason, targetReleaseId) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/rollback/request`, { method: "POST", body: { reason, targetReleaseId } });
+export const rejectPapRollback = (id, reason) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/rollback/reject`, { method: "POST", body: { reason } });
+export const approvePapRollback = (id, reason, targetReleaseId) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/rollback/approve`, { method: "POST", body: { reason, targetReleaseId } });
+
+// Health funds
+export const listHealthFunds = (healthFundId) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds", { params: healthFundId ? { healthFundId } : {} });
+export const createHealthFund = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds", { method: "POST", body: payload });
+export const approveHealthFund = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/${id}/approve`, { method: "PUT" });
+export const setHealthFundStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Germany accident-insurance profiles (Phase 8AJ, 2nd pass) — maker-checker
+// workspace, organization-scoped (unlike health funds above, which are
+// global). Publishing one materializes it into the existing
+// EmployerTaxProfile mechanism the engine actually reads — see
+// models.GermanyAccidentInsuranceProfile's own docstring.
+export const listGermanyAccidentInsuranceProfiles = (organizationId) =>
+  apiFetch("/api/super-admin/compliance/germany/accident-insurance-profiles", { params: organizationId ? { organizationId } : {} });
+export const createGermanyAccidentInsuranceProfile = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/accident-insurance-profiles", { method: "POST", body: payload });
+export const approveGermanyAccidentInsuranceProfile = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/accident-insurance-profiles/${id}/approve`, { method: "PUT" });
+export const setGermanyAccidentInsuranceProfileStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/accident-insurance-profiles/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// U1 tariffs (sickness reimbursement) — child records of health funds
+export const listU1Tariffs = (healthFundId) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds/u1-tariffs", { params: healthFundId ? { healthFundId } : {} });
+export const createU1Tariff = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds/u1-tariffs", { method: "POST", body: payload });
+export const approveU1Tariff = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/u1-tariffs/${id}/approve`, { method: "PUT" });
+export const setU1TariffStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/u1-tariffs/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Contribution ceilings
+export const listContributionCeilings = (branch) =>
+  apiFetch("/api/super-admin/compliance/germany/contribution-ceilings", { params: branch ? { branch } : {} });
+export const createContributionCeiling = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/contribution-ceilings", { method: "POST", body: payload });
+export const approveContributionCeiling = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/contribution-ceilings/${id}/approve`, { method: "PUT" });
+export const setContributionCeilingStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/contribution-ceilings/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Germany Compliance Pack completeness (Phase 8DJ) — COMPLETE/PARTIAL/INVALID,
+// per-component PUBLISHED-row-linked-to-this-pack counts. Backend-authoritative:
+// this call surfaces exactly what service.assess_germany_pack_completeness()
+// computes — the frontend never invents or re-derives these counts itself.
+export const getGermanyPackCompleteness = (packId, asOf) =>
+  apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/completeness`, { params: asOf ? { asOf } : {} });
+
+// PV configurations
+export const listPvConfigurations = (childCategory, isSaxony) =>
+  apiFetch("/api/super-admin/compliance/germany/pv-configurations", {
+    params: { ...(childCategory ? { childCategory } : {}), ...(isSaxony !== undefined && isSaxony !== "" ? { isSaxony } : {}) },
+  });
+export const createPvConfiguration = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/pv-configurations", { method: "POST", body: payload });
+export const approvePvConfiguration = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pv-configurations/${id}/approve`, { method: "PUT" });
+export const setPvConfigurationStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/pv-configurations/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Church tax (16-Land matrix, read-only)
+export const getChurchTaxMatrix = () => apiFetch("/api/super-admin/compliance/germany/church-tax");
+
+// Church-tax exceptions (Phase 8AM) — sub-Land denomination/location
+// overrides with the same maker-checker + source-evidence lifecycle as
+// health funds. NOTE: the approve endpoint is POST here (not PUT).
+export const listGermanyChurchTaxExceptions = (landCode) =>
+  apiFetch("/api/super-admin/compliance/germany/church-tax-exceptions", { params: landCode ? { landCode } : {} });
+export const createGermanyChurchTaxException = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/church-tax-exceptions", { method: "POST", body: payload });
+export const approveGermanyChurchTaxException = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/church-tax-exceptions/${id}/approve`, { method: "POST" });
+export const setGermanyChurchTaxExceptionStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/church-tax-exceptions/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Earning/deduction taxability (Phase 8T, spec §15 four-dimension model)
+export const listEarningTaxabilityRules = (earningType) =>
+  apiFetch("/api/super-admin/compliance/germany/earning-taxability-rules", { params: earningType ? { earningType } : {} });
+export const createEarningTaxabilityRule = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/earning-taxability-rules", { method: "POST", body: payload });
+export const approveEarningTaxabilityRule = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/earning-taxability-rules/${id}/approve`, { method: "PUT" });
+export const setEarningTaxabilityRuleStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/earning-taxability-rules/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Germany overtime/shift-premium statutory registries (Phase 8AD)
+export const listOvertimePremiumCategories = (categoryCode) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-premium-categories", { params: categoryCode ? { categoryCode } : {} });
+export const createOvertimePremiumCategory = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-premium-categories", { method: "POST", body: payload });
+export const approveOvertimePremiumCategory = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-premium-categories/${id}/approve`, { method: "PUT" });
+export const setOvertimePremiumCategoryStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-premium-categories/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+export const listOvertimeGrundlohnCaps = (dimension) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-grundlohn-caps", { params: dimension ? { dimension } : {} });
+export const createOvertimeGrundlohnCap = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-grundlohn-caps", { method: "POST", body: payload });
+export const approveOvertimeGrundlohnCap = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-grundlohn-caps/${id}/approve`, { method: "PUT" });
+export const setOvertimeGrundlohnCapStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-grundlohn-caps/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Germany Minijob/Midijob statutory parameters (Phase 8BK) — same
+// effective-dated maker-checker lifecycle as contribution ceilings/PV
+// configuration above.
+export const listMinijobMidijobParameters = (parameterCode) =>
+  apiFetch("/api/super-admin/compliance/germany/minijob-midijob-parameters", { params: parameterCode ? { parameterCode } : {} });
+export const createMinijobMidijobParameter = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/minijob-midijob-parameters", { method: "POST", body: payload });
+export const approveMinijobMidijobParameter = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/minijob-midijob-parameters/${id}/approve`, { method: "PUT" });
+export const setMinijobMidijobParameterStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/minijob-midijob-parameters/${id}/status`, { method: "PUT", params: { status: statusValue } });
 
 // ── Finance ──────────────────────────────────────────────────────────────
 
 export const getFinanceOverview = (params) => apiFetch("/api/super-admin/finance/overview", { params });
 
 export const getFinanceSummary = (params) => apiFetch("/api/super-admin/finance/summary", { params });
+
+export const getFinanceByOrganization = (params) => apiFetch("/api/super-admin/finance/by-organization", { params });
 
 export const getOrganizationCurrencies = () => apiFetch("/api/super-admin/finance/organization-currencies");
 
@@ -190,3 +617,177 @@ export const getDashboardCharts = (params) => apiFetch("/api/super-admin/dashboa
 
 export const listAllOrganizationsBrief = () =>
   apiFetch("/api/organizations", { params: { limit: 200, include_inactive: true } });
+
+// ── Report Templates (jurisdiction-wide, Super Admin-authored statutory
+// report blueprints — separate from Compliance's JurisdictionPack, since a
+// report template has no rates/slabs/org-assignment) ────────────────────
+
+export const getReportTemplates = (params) => apiFetch("/api/super-admin/report-templates", { params });
+
+export const getReportTemplateDetail = (id) => apiFetch(`/api/super-admin/report-templates/${id}`);
+
+export const upsertReportTemplate = (payload) =>
+  apiFetch("/api/super-admin/report-templates", { method: "PUT", body: payload });
+
+export const getReportTemplateVersions = (templateKey) =>
+  apiFetch(`/api/super-admin/report-templates/by-key/${encodeURIComponent(templateKey)}/versions`);
+
+export const setReportTemplateStatus = (id, status) =>
+  apiFetch(`/api/super-admin/report-templates/${id}/status`, { method: "PUT", body: { status } });
+
+// Maker-checker: records the CALLING Super Admin as this template's
+// approver. Must be a different person than whoever last edited it before
+// the template can go Published/Active — enforced server-side.
+export const approveReportTemplate = (id) =>
+  apiFetch(`/api/super-admin/report-templates/${id}/approve`, { method: "PUT" });
+
+export const getReportTemplateAudit = (id) => apiFetch(`/api/super-admin/report-templates/${id}/audit`);
+
+export const hardDeleteReportTemplate = (id) =>
+  apiFetch(`/api/super-admin/report-templates/${id}`, { method: "DELETE" });
+
+// The enumerable, backend-owned component/data-field catalogs a template's
+// authoring UI must pick from — never a free-typed or generic-unrelated
+// dropdown; see get_available_report_components/get_available_report_data_fields.
+export const getAvailableReportComponents = (reportType) =>
+  apiFetch("/api/super-admin/report-templates/available-components", { params: { reportType } });
+
+export const getAvailableReportDataFields = (jurisdictionCountry) =>
+  apiFetch("/api/super-admin/report-templates/available-data-fields", { params: { jurisdictionCountry } });
+
+export const upsertReportTemplateComponent = (templateId, payload) =>
+  apiFetch(`/api/super-admin/report-templates/${templateId}/components`, { method: "PUT", body: payload });
+
+export const deleteReportTemplateComponent = (componentId) =>
+  apiFetch(`/api/super-admin/report-templates/components/${componentId}`, { method: "DELETE" });
+
+export const upsertReportTemplateField = (componentId, payload) =>
+  apiFetch(`/api/super-admin/report-templates/components/${componentId}/fields`, { method: "PUT", body: payload });
+
+export const deleteReportTemplateField = (fieldId) =>
+  apiFetch(`/api/super-admin/report-templates/fields/${fieldId}`, { method: "DELETE" });
+
+// ── Statutory Filing Calendar (jurisdiction-wide, Super Admin-authored) ──
+
+export const getFilingCalendarEntries = (params) =>
+  apiFetch("/api/super-admin/report-templates/filing-calendar", { params });
+
+export const upsertFilingCalendarEntry = (payload) =>
+  apiFetch("/api/super-admin/report-templates/filing-calendar", { method: "PUT", body: payload });
+
+export const setFilingCalendarEntryStatus = (id, status) =>
+  apiFetch(`/api/super-admin/report-templates/filing-calendar/${id}/status`, { method: "PUT", body: { status } });
+
+// ── Hong Kong (ZP-HK-ENG-001) — Super Admin, tenant-independent ────────
+export const getHongKongStatutorySummary = () => apiFetch("/api/super-admin/compliance/hong-kong/statutory-summary");
+export const previewHongKongCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/calculation-preview", { method: "POST", body: payload });
+// Hong Kong statutory configuration administration (governed; Super Admin only)
+const HK_CFG = "/api/super-admin/compliance/hong-kong/configuration";
+export const getHkConfigVersions = () => apiFetch(`${HK_CFG}/versions`);
+export const getHkConfigPack = (packRowId) => apiFetch(`${HK_CFG}/packs/${packRowId}`);
+export const getHkConfigResolution = (on) => apiFetch(`${HK_CFG}/resolution`, { params: { on } });
+export const compareHkConfig = (fromId, toId) => apiFetch(`${HK_CFG}/compare`, { params: { from: fromId, to: toId } });
+export const updateHkConfigRow = (kind, rowId, payload) =>
+  apiFetch(`${HK_CFG}/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const createHkConfigVersion = (packRowId, version, reason) =>
+  apiFetch(`${HK_CFG}/packs/${packRowId}/new-version`, { method: "POST", body: { version, reason } });
+// Hong Kong platform control records (Super Admin only)
+const HK_SA = "/api/super-admin/compliance/hong-kong";
+export const getHkSoftwareApproval = () => apiFetch(`${HK_SA}/ird-software-approval`);
+export const transitionHkSoftwareApproval = (payload) =>
+  apiFetch(`${HK_SA}/ird-software-approval/transition`, { method: "POST", body: payload });
+export const getHkEmpfConfiguration = () => apiFetch(`${HK_SA}/empf-configuration`);
+export const createHkEmpfConfiguration = (payload) => apiFetch(`${HK_SA}/empf-configuration`, { method: "POST", body: payload });
+export const activateHkEmpfConfiguration = (id, reason) =>
+  apiFetch(`${HK_SA}/empf-configuration/${id}/activate`, { method: "POST", body: { reason } });
+export const getHkRetentionPolicies = () => apiFetch(`${HK_SA}/retention-policies`);
+export const proposeHkRetentionPolicy = (payload) => apiFetch(`${HK_SA}/retention-policies`, { method: "POST", body: payload });
+export const approveHkRetentionPolicy = (id) => apiFetch(`${HK_SA}/retention-policies/${id}/approve`, { method: "POST" });
+export const getHkReadinessCenter = () => apiFetch(`${HK_SA}/readiness-center`);
+export const getHkMonitoring = () => apiFetch(`${HK_SA}/monitoring`);
+export const transitionHongKongServiceRegistry = (availability, reason) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/service-registry", { method: "POST", body: { availability, reason } });
+export const compareHongKongReportTemplates = (fromId, toId) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/report-templates/compare", { params: { from: fromId, to: toId } });
+export const getHongKongPackGoldenCheck = (packRowId) =>
+  apiFetch(`/api/super-admin/compliance/hong-kong/packs/${packRowId}/golden-check`);
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Super-Admin-owned authority data for the France Compliance workspace:
+// SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate
+// packs, DGFiP PAS rates, governed effectif, plus the read-only DSN/outbox
+// transport diagnostics and the launch-gate H readiness dry-run.
+//
+// Everything below is organization-scoped (organizationId travels as a
+// query param, the body stays the authority payload) — the org itself only
+// opens DSN filings via /payroll/france/* (see payrollService).
+export const getFranceReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/france/readiness", { params });
+
+export const getFranceEmployerProfile = async (params) => {
+  // 404 is a legitimate empty state — the org has no France profile
+  // configured yet ("SIREN identity missing" / "Not configured" in the
+  // overview) — never a hard failure that should blank the whole dashboard.
+  try {
+    return await apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
+  } catch (err) {
+    if (err && err.status === 404) return null;
+    throw err;
+  }
+};
+
+export const upsertFranceEmployerProfile = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/employer-profile", { method: "PUT", body: payload, params });
+
+export const recordFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif", { method: "POST", body: payload, params });
+
+export const upsertFranceEstablishmentRatePack = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { method: "PUT", body: payload, params });
+
+export const listFranceEstablishmentRatePacks = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { params });
+
+export const ingestFrancePASRate = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { method: "POST", body: payload, params });
+
+export const listFrancePASRates = (params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { params });
+
+export const listFranceDsnSubmissions = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-submissions", { params });
+
+export const listFranceDsnOutboxItems = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-outbox", { params });
+
+// France organizations only (the org's country resolves to FR) — the France
+// endpoints reject any other organization.
+export const listFranceOrganizations = () =>
+  apiFetch("/api/organizations", { params: { limit: 200, country_code: "FR" } }).then((data) => data.organizations || []);
+
+export const correctFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif/corrections", { method: "POST", body: payload, params });
+
+export const listFranceEstablishments = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { params });
+
+export const createFranceEstablishment = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { method: "POST", body: payload, params });
+
+export const updateFranceEstablishment = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishments/${id}`, { method: "PUT", body: payload, params });
+
+export const updateFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}`, { method: "PATCH", body: payload, params });
+
+export const closeFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}/close`, { method: "POST", body: payload, params });
+
+// Fill a France tax pack's missing statutory rows from the 2026 catalog
+// (insert-only; editable packs only).
+export const loadFranceStatutoryDefaults = (packId) =>
+  apiFetch(`/api/super-admin/compliance/france/packs/${packId}/load-statutory-defaults`, { method: "POST" });
+
+export const setFranceLive = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/go-live", { method: "POST", body: payload, params });

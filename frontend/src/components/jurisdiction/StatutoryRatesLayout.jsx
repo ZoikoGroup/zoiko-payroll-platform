@@ -214,11 +214,11 @@ function QuickEditRateModal({ rate, pack, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={`Edit "${rate.label}"`} onClose={onClose} maxWidth="max-w-sm">
-      <div className="grid grid-cols-2 gap-3">
+    <Modal title={`Edit "${rate.label}"`} onClose={onClose} maxWidth="max-w-lg">
+      <div className="grid grid-cols-3 gap-3">
         <div><label className={labelClass}>Employee Rate %</label><input className={inputClass} value={employeeSharePct} onChange={(e) => setEmployeeSharePct(e.target.value)} /></div>
         <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={employerSharePct} onChange={(e) => setEmployerSharePct(e.target.value)} /></div>
-        <div className="col-span-2"><label className={labelClass}>Flat Amount</label><input className={inputClass} value={flatAmount} onChange={(e) => setFlatAmount(e.target.value)} /></div>
+        <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={flatAmount} onChange={(e) => setFlatAmount(e.target.value)} /></div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>

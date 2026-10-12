@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Globe2, ChevronRight } from "lucide-react";
+import { Globe2, ChevronRight, Eye, FileText, ShieldCheck, Zap, Palmtree } from "lucide-react";
 import { getComplianceJurisdictions } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
@@ -23,25 +23,75 @@ export default function CompliancePage() {
   useEffect(() => {
     getComplianceJurisdictions()
       .then(setJurisdictions)
-      .finally(() => setLoading(false));
+      .finally(setLoading(false));
   }, []);
+
+  const unmapped = jurisdictions.filter((j) => !COUNTRY_CODE_TO_ROUTE[j.code]);
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Compliance</h1>
-        <p className="text-sm text-foreground-muted mt-0.5">
-          Select a jurisdiction to manage its tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
-        </p>
+      <div className="mb-6 flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Compliance</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
+            Select a jurisdiction to manage its tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/super-admin/compliance/caribbean"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <Palmtree size={14} /> Caribbean
+          </Link>
+          <Link
+            to="/super-admin/compliance/engine-defaults"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <Eye size={14} /> View Engine Fallback Defaults
+          </Link>
+          <Link
+            to="/super-admin/compliance/rti-forms"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <FileText size={14} /> RTI & Statutory Forms
+          </Link>
+          <Link
+            to="/super-admin/compliance/test-certification"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <ShieldCheck size={14} /> Test Certification
+          </Link>
+          <Link
+            to="/super-admin/compliance/hotfix-activations"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <Zap size={14} /> Hotfix Activations
+          </Link>
+        </div>
       </div>
 
       {loading ? (
         <p className="py-12 text-center text-sm text-foreground-disabled">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {unmapped.map((j) => (
+            <div
+              key={j.code}
+              className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-surface-muted p-5"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface">
+                <CountryFlag code={j.code} className="h-full w-full" fallback={<Globe2 size={18} className="text-foreground-disabled" />} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-foreground-muted">{j.name}</p>
+                <p className="text-xs text-foreground-disabled">No Compliance workspace yet</p>
+              </div>
+            </div>
+          ))}
           {jurisdictions.map((j) => {
             const slug = COUNTRY_CODE_TO_ROUTE[j.code];
-            if (!slug) return null; // a jurisdiction with no dedicated page yet — shouldn't happen for the six supported countries, but fails safe rather than a broken link
+            if (!slug) return null;
             return (
               <Link
                 key={j.code}

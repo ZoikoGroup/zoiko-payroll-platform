@@ -32,6 +32,122 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
+import app.modules.payroll.engine.countries.shared as _rollout_shared
+
+
+@pytest.fixture(autouse=True)
+def _reset_rollout_switches():
+    """Snapshot every per-country rollout switch (the module-level
+    `_..._ENABLED_COUNTRIES` sets in engine/countries/shared.py) before
+    each test and restore its exact prior contents after, regardless of
+    what the test itself does to it.
+
+    These sets are deliberately mutable global state so a test can flip
+    one on/off inline without touching a database - but many existing
+    tests call `.add("CA")` (or similar) with no matching cleanup,
+    historically relying on file ordering (a "dormant" test placed before
+    the test that flips a switch on) to avoid cross-test pollution within
+    one pytest session. That ordering trick stopped being enough the
+    moment any of these switches got a real default of `{"CA"}` instead
+    of `set()` (see CA gap-closure Phase 1, 2026-09-11, which flipped 9 of
+    them on) - a test running anywhere else in the suite could otherwise
+    observe whatever an earlier, unrelated test happened to leave behind.
+    This fixture makes every test's switch state isolated regardless of
+    order or another test's cleanup discipline, without changing any
+    module's actual default.
+    """
+    switch_names = [
+        name for name in dir(_rollout_shared)
+        if name.endswith("_ENABLED_COUNTRIES") and isinstance(getattr(_rollout_shared, name), set)
+    ]
+    snapshot = {name: set(getattr(_rollout_shared, name)) for name in switch_names}
+    yield
+    for name, original in snapshot.items():
+        current = getattr(_rollout_shared, name)
+        current.clear()
+        current.update(original)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "attendance_gate: run with the real payroll attendance gate (off by default in tests).",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _attendance_gate_off_by_default(request, monkeypatch):
+    """The payroll attendance gate (service.enforce_attendance_readiness,
+    2026-10-06) refuses any run whose employees lack attendance for every
+    working day. Production keeps it on by default; but hundreds of engine
+    tests (Germany/Singapore/HK/CA/...) create runs purely to exercise
+    calculations and never record attendance, so it is neutralised here
+    unless a test opts in with @pytest.mark.attendance_gate
+    (tests/test_attendance_gate.py). Patching the module attribute covers
+    every caller: service.py resolves the name from its module globals at
+    call time, and router.py calls it as service.enforce_attendance_readiness."""
+    if request.node.get_closest_marker("attendance_gate"):
+        yield
+        return
+    from app.modules.payroll import service as payroll_service
+
+    monkeypatch.setattr(payroll_service, "enforce_attendance_readiness", lambda *args, **kwargs: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_redis_cache():
+    """Start and end every test with no memoized Redis client and a closed
+    circuit breaker.
+
+    get_redis_client() memoizes its client in a module global, and a
+    connection failure opens a 30s breaker. Neither is undone by
+    monkeypatch: a test that sets REDIS_URL and reaches the cache (e.g. an
+    eager Celery task resolving tax config) would otherwise leave a real
+    client to a dead host, and an open breaker, for every test after it.
+    """
+    from app.core import cache as cache_module
+
+    cache_module.reset_redis_client()
+    yield
+    cache_module.reset_redis_client()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_smtp(monkeypatch):
+    """Guarantee no test ever opens a real SMTP connection.
+
+    backend/.env carries live SMTP credentials (info@zoikopayroll.com /
+    smtpout.secureserver.net:465) and the app reads them eagerly via
+    app.config at first import. Several auth flows (reset link, invite,
+    and now the notification sends) fire through email_service at normal
+    call sites; without this neutralizer a single unpatched test would
+    attempt — and routinely succeed at — delivering mail through the real
+    outbound server. Everyone's tests: forbid it, globally.
+
+    The mechanism: `_get_smtp_settings()` is the one chokepoint every
+    email_service send path resolves its SMTP endpoint through, and a
+    falsy `host` makes send_approval_email log "Mock sending email ..." and
+    return True without opening a socket. Patching it (not `settings`) keeps
+    `settings.SMTP_HOST` untouched, so tests that assert on the loaded
+    configuration still see the real env value. Tests that want to prove
+    delivery mechanics monkeypatch the service/auth-level `_send_*_email`
+    wrappers or `smtplib` directly on top of this."""
+
+    def _fake_get_smtp_settings(db=None) -> dict:
+        return {
+            "host": "",
+            "port": 0,
+            "username": "",
+            "password": "",
+            "from_email": "test@example.com",
+            "use_tls": False,
+        }
+
+    from app.services import email_service
+
+    monkeypatch.setattr(email_service, "_get_smtp_settings", _fake_get_smtp_settings)
+
 
 @pytest.fixture()
 def db():
@@ -69,6 +185,8 @@ def db():
     import app.modules.organizations.models  # noqa: F401
     import app.modules.auth.models  # noqa: F401
     import app.modules.payroll.models  # noqa: F401
+    import app.modules.billing.models  # noqa: F401
+    import app.modules.communications.models  # noqa: F401
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -94,3 +212,42 @@ def organization(db):
     db.commit()
     db.refresh(org)
     return org
+
+
+@pytest.fixture()
+def published_professional_plan(db):
+    """A PUBLISHED PROFESSIONAL plan version, so register_trial can attach a
+    TRIALING BillingSubscription to it. Mirrors scripts/seed_professional_plan.py
+    using the same service-layer functions."""
+    from app.core.security import hash_password
+    from app.modules.auth.models import User, UserRole
+    from app.modules.billing import plan_catalog
+
+    actor = User(
+        email="super-admin@example.com",
+        hashed_password=hash_password("a-strong-password-1"),
+        role=UserRole.SUPER_ADMIN,
+        first_name="Super",
+        last_name="Admin",
+        phone="",
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(actor)
+    db.flush()
+
+    plan = plan_catalog.create_plan(db, "PROFESSIONAL", "Professional", actor_user_id=actor.id)
+    version = plan_catalog.create_plan_version(
+        db,
+        plan_id=plan.id,
+        feature_set={"features": ["payroll_runs", "multi_entity"]},
+        scale_limits={"max_entities": 1},
+        actor_user_id=actor.id,
+    )
+    plan_catalog.add_entitlement_flag(
+        db, plan_version_id=version.id, feature_key="max_entities", limit_value=1, actor_user_id=actor.id
+    )
+    plan_catalog.approve_plan_version(db, version.id, actor_user_id=actor.id)
+    plan_catalog.publish_plan_version(db, version.id, published_by_user_id=actor.id)
+    db.refresh(version)
+    return version

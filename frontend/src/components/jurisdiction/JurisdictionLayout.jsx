@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Pencil, Trash2, History, ShieldCheck, Users, ScrollText } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, History, ShieldCheck, Users, ScrollText, Eye, Zap } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -8,12 +8,11 @@ import {
   getComplianceJurisdictions, getCompliancePolicies, upsertCompliancePolicy,
   getCompliancePolicyVersions, setCompliancePolicyStatus, approveCompliancePolicy,
   getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations, assignCompliancePolicy,
-  hardDeleteCompliancePolicy,
   getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab,
   getCanonicalContributionRates, upsertCanonicalContributionRate, deleteCanonicalContributionRate,
   getTaxConfigurationAudit,
 } from "../../service/superAdminService";
-import { STATUS_PILL_MAP, STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
+import { STATUS_PILL_MAP, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
 import Field from "./Field";
 import RatesTab from "./RatesTab";
 import SlabsTab from "./SlabsTab";
@@ -23,15 +22,31 @@ import EditOverviewModal from "./EditOverviewModal";
 import AssignOrgsModal from "./AssignOrgsModal";
 import RateFormModal from "./RateFormModal";
 import SlabFormModal from "./SlabFormModal";
+import ImpactPreviewModal from "./ImpactPreviewModal";
+import HotfixActivateModal from "./HotfixActivateModal";
 
 // The one shared pack-management surface every Jurisdiction Compliance
 // page renders — wires the already-built canonical JurisdictionPack/
 // ContributionRate/TaxSlab API surface to a real UI, no new endpoints.
 // `country` is fixed per page (chosen by routing, not a dropdown here —
 // that's the one thing that moved out compared to the old, single
-// monolithic CompliancePage.jsx). `extraTabs`/`slabsTabOverride` are the
-// only two country-specific extension points that exist anywhere in this
-// codebase today (both India-only) — every other country passes neither.
+// monolithic CompliancePage.jsx). `extraTabs`/`slabsTabOverride`/`overviewTabOverride`
+// are the only per-country extension points that exist anywhere in this
+// codebase today (`extraTabs` and `slabsTabOverride` are India-only;
+// `overviewTabOverride` is UK-only) — every other country passes none.
+// overviewTabOverride ({ isActive(pack), render({ pack, rates, slabs }) })
+// lets one country replace the built-in Overview field grid with its own
+// summary dashboard, without affecting any other country since only the
+// UK passes this prop.
+// Resolves a slabsTabOverride field that may be a plain value (every
+// existing override) or a function of the selected pack (lets one override
+// vary its label/restricted-tabs/delete-title by pack shape — e.g. India's
+// state-scoped PT pack vs. country-level TDS pack — without affecting any
+// other country, since only INCompliancePage.jsx populates this prop).
+function resolveOverride(value, pack) {
+  return typeof value === "function" ? value(pack) : value;
+}
+
 const BASE_TABS = [
   { key: "overview", label: "Overview", icon: ShieldCheck },
   { key: "rates", label: "Contribution Rates", icon: ScrollText },
@@ -43,9 +58,30 @@ const BASE_TABS = [
 
 export default function JurisdictionLayout({
   country, countryName, initialState = "", onStateChange,
-  extraTabs = [], slabsTabOverride,
+  extraTabs = [], slabsTabOverride, overviewTabOverride,
   hiddenTabs = [], slabsLabel = "Tax Slabs", countryLevelLabel = "Country-level (no state)",
   additionalStateOptions = [], slabsFilter = (s) => s,
+  // USA's own page (USACompliancePage.jsx) already renders a single,
+  // always-visible top-level Back button above its own section nav — this
+  // layout's own Back button, nested inside the "Federal" section's
+  // content area, was a confusing SECOND back affordance in an unexpected
+  // mid-page location (found via a live screenshot: it only ever showed
+  // up once you'd clicked into Federal, nowhere else on the USA page).
+  // Same suppress-the-duplicate pattern as hiddenTabs above — see
+  // config/jurisdictions/usaComplianceConfig.jsx, the only place this is
+  // ever set to true.
+  hideBackButton = false,
+  // Safe, purely-additive override for the "New Tax Pack" form — defaults
+  // to the shared NewPackModal used by every country. Only USA passes its
+  // own (USANewPackModal, which hides the India/UK-oriented Tax Regime
+  // field and uses a wider layout); every other country is unaffected
+  // since this prop is never passed for them.
+  newPackFormComponent: NewPackFormComponent = NewPackModal,
+  // Opt-in (Singapore final closure): (packs) => pack | null — opens the page
+  // on a pack instead of "Select a pack", so the country's tabs are visible
+  // straight away. Applied only while nothing is selected; every other
+  // country leaves it unset and is unchanged.
+  autoSelectPack = null,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -67,6 +103,8 @@ export default function JurisdictionLayout({
   const [showNewPack, setShowNewPack] = useState(false);
   const [showEditOverview, setShowEditOverview] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
+  const [showImpactPreview, setShowImpactPreview] = useState(false);
+  const [showHotfixActivate, setShowHotfixActivate] = useState(false);
   const [assignIds, setAssignIds] = useState(new Set());
   const [showNewRate, setShowNewRate] = useState(false);
   const [editingRate, setEditingRate] = useState(null);
@@ -74,7 +112,6 @@ export default function JurisdictionLayout({
   const [showNewSlab, setShowNewSlab] = useState(false);
   const [editingSlab, setEditingSlab] = useState(null);
   const [deletingSlab, setDeletingSlab] = useState(null);
-  const [deletingPack, setDeletingPack] = useState(null);
 
   function setState(next) {
     setStateRaw(next);
@@ -113,6 +150,13 @@ export default function JurisdictionLayout({
       .then(setPacks)
       .finally(() => setLoadingPacks(false));
   }, [country, state, packType]);
+  // autoSelectPack: picked once, when the packs first arrive and nothing is
+  // selected (React's "adjust state while rendering" pattern — no effect).
+  const [autoPicked, setAutoPicked] = useState(false);
+  if (autoSelectPack && !autoPicked && !selectedPack && packs.length > 0) {
+    setAutoPicked(true);
+    setSelectedPack(autoSelectPack(packs) || null);
+  }
 
   useEffect(() => { loadPacks(); setSelectedPack(null); }, [loadPacks]);
 
@@ -163,32 +207,20 @@ export default function JurisdictionLayout({
     }
   }
 
-  async function handleDeletePack() {
-    try {
-      const res = await hardDeleteCompliancePolicy(deletingPack.id);
-      addToast?.(res.message || "Deleted.", "success");
-      setDeletingPack(null);
-      setSelectedPack(null);
-      loadPacks();
-    } catch (err) {
-      addToast?.(err.message || "Failed to delete — it may have assigned organizations or payroll history.", "error");
-      setDeletingPack(null);
-    }
-  }
-
   function reloadRatesAndSlabs() {
     getCanonicalContributionRates({ jurisdictionPackId: selectedPack.id }).then(setRates);
     getCanonicalTaxSlabs({ jurisdictionPackId: selectedPack.id }).then(setSlabs);
   }
 
   const slabsOverrideActive = Boolean(selectedPack && slabsTabOverride?.isActive(selectedPack));
+  const overviewOverrideActive = Boolean(selectedPack && overviewTabOverride?.isActive(selectedPack));
   // A slabs override can also restrict the WHOLE tab set (India's
   // state-scoped PT packs show only Overview/PT Slabs/Organizations/Audit
   // — Contribution Rates and Versions don't apply to a single-purpose PT
   // pack). Every other country's tab set is untouched, always the full
   // base six plus any visible extra tabs.
   const visibleExtraTabs = selectedPack ? extraTabs.filter((t) => t.isVisible(selectedPack)) : [];
-  const restrictTo = slabsOverrideActive ? slabsTabOverride.restrictTabsTo : null;
+  const restrictTo = slabsOverrideActive ? resolveOverride(slabsTabOverride.restrictTabsTo, selectedPack) : null;
   // hiddenTabs drops base tabs unconditionally (not pack-dependent, unlike
   // restrictTabsTo above) — UK uses this to drop the generic "Contribution
   // Rates"/"Versions" tabs in favor of its own NI & Pension Rates /
@@ -208,6 +240,14 @@ export default function JurisdictionLayout({
   return (
     <div>
       <div className="mb-6">
+        {!hideBackButton && (
+          <button
+            onClick={() => navigate(-1)}
+            className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+        )}
         <h1 className="text-2xl font-bold text-foreground">{countryName} Compliance</h1>
         <p className="text-sm text-foreground-muted mt-0.5">
           Manage {countryName}'s tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
@@ -270,7 +310,17 @@ export default function JurisdictionLayout({
           )}
         </div>
 
-        <div className="rounded-xl border border-border bg-surface p-5">
+        {/* min-w-0 is load-bearing: this is a CSS Grid item in the
+            280px_1fr row above, and grid items default to min-width:auto,
+            not 0 — without this, a pack with enough tabs to overflow (UK's
+            8, vs. e.g. Canada's fewer) forces this track wider than its
+            fair share instead of letting the tab row's own overflow-x-auto
+            (below) scroll within its bounds, which pushes the WHOLE grid —
+            and therefore the page header above it — wider than the
+            viewport. Selecting a wide-tabbed pack is what makes this
+            content wide enough to trigger it in the first place; nothing
+            about pack selection itself moves or transforms anything. */}
+        <div className="min-w-0 rounded-xl border border-border bg-surface p-5">
           {!selectedPack ? (
             <div className="flex h-64 items-center justify-center">
               <p className="text-sm text-foreground-disabled">Select a pack from the list to view/edit it.</p>
@@ -290,6 +340,22 @@ export default function JurisdictionLayout({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowImpactPreview(true)}
+                    title="See which organizations/employees/scheduled runs would be affected"
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                  >
+                    <Eye size={13} /> Impact Preview
+                  </button>
+                  {selectedPack.status !== "Active" && selectedPack.packType === "tax" && (
+                    <button
+                      onClick={() => setShowHotfixActivate(true)}
+                      title="Emergency activation — bypasses the distinct-approver requirement, flagged for mandatory review"
+                      className="flex items-center gap-1.5 rounded-lg border border-error/40 px-3 py-2 text-xs font-semibold text-error hover:bg-error/5"
+                    >
+                      <Zap size={13} /> Hotfix Activate
+                    </button>
+                  )}
                   {selectedPack.packType === "tax" && (
                     <>
                       <button
@@ -327,15 +393,30 @@ export default function JurisdictionLayout({
                       >
                         <Plus size={13} /> New Version
                       </button>
+                      {/* Maker-checker gap closed 2026-09-18 (production-
+                          readiness fix plan): policy packs previously had
+                          NO approval gate at all, so activating one was a
+                          single unilateral action. A distinct Super Admin
+                          from whoever last edited the pack must now
+                          approve it before it can go Active — enforced
+                          server-side in set_jurisdiction_pack_status, same
+                          as tax packs above; this button just records "I
+                          approve this." */}
+                      <button
+                        onClick={handleApprove}
+                        title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <ShieldCheck size={13} /> Approve
+                      </button>
                     </>
                   )}
                   <select
                     className={inputClass + " w-auto"} value={selectedPack.status}
                     onChange={(e) => changeStatus(e.target.value)}
                   >
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {(selectedPack.packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <button onClick={() => setDeletingPack(selectedPack)} className="rounded-lg border border-border p-2 text-error hover:bg-error-light"><Trash2 size={14} /></button>
                 </div>
               </div>
 
@@ -347,26 +428,31 @@ export default function JurisdictionLayout({
                       tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
                     }`}
                   >
-                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? slabsTabOverride.label : slabsLabel) : t.label}
+                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label}
                   </button>
                 ))}
               </div>
 
               {tab === "overview" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <Field label="Regulatory Authority" value={selectedPack.regulatoryAuthority} />
-                  <Field label="Compliance Category" value={selectedPack.complianceCategory} />
-                  <Field label="Compliance Owner" value={selectedPack.complianceOwner} />
-                  <Field label="Engineering Owner" value={selectedPack.engineeringOwner} />
-                  <Field label="Tax Regime" value={selectedPack.taxRegime} />
-                  <Field label="Currency" value={selectedPack.currency} />
-                  <Field label="Next Review Date" value={selectedPack.nextReviewDate} />
-                  <Field label="Source References" value={selectedPack.sourceReferences} />
-                  <div className="sm:col-span-2">
-                    <p className="text-foreground-muted mb-1">Change Summary</p>
-                    <p className="font-medium text-foreground">{selectedPack.changeSummary || "—"}</p>
+                <>
+                  {overviewOverrideActive && (
+                    overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs })
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <Field label="Regulatory Authority" value={selectedPack.regulatoryAuthority} />
+                    <Field label="Compliance Category" value={selectedPack.complianceCategory} />
+                    <Field label="Compliance Owner" value={selectedPack.complianceOwner} />
+                    <Field label="Engineering Owner" value={selectedPack.engineeringOwner} />
+                    <Field label="Tax Regime" value={selectedPack.taxRegime} />
+                    <Field label="Currency" value={selectedPack.currency} />
+                    <Field label="Next Review Date" value={selectedPack.nextReviewDate} />
+                    <Field label="Source References" value={selectedPack.sourceReferences} />
+                    <div className="sm:col-span-2">
+                      <p className="text-foreground-muted mb-1">Change Summary</p>
+                      <p className="font-medium text-foreground">{selectedPack.changeSummary || "—"}</p>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
 
               {tab === "rates" && (
@@ -391,6 +477,13 @@ export default function JurisdictionLayout({
                       pack: selectedPack, rates, slabs, addToast,
                       onReload: reloadRatesAndSlabs,
                       onPublish: () => changeStatus("Active"),
+                      // Purely additive — lets one extraTab switch to a
+                      // sibling extraTab (e.g. USA's "Federal Income Tax"
+                      // picker entry jumping to the Income Tax Brackets
+                      // tab). No existing key changed; every extraTab that
+                      // doesn't use this (every country besides USA today)
+                      // is completely unaffected.
+                      onNavigateTab: setTab,
                       onAddRate: () => setShowNewRate(true),
                       onEditRate: setEditingRate,
                       onDeleteRate: setDeletingRate,
@@ -464,8 +557,8 @@ export default function JurisdictionLayout({
       </div>
 
       {showNewPack && (
-        <NewPackModal
-          country={country} state={state} packType={packType}
+        <NewPackFormComponent
+          country={country} state={state} packType={packType} stateOptions={stateOptions}
           onClose={() => setShowNewPack(false)}
           onCreated={(created) => {
             setShowNewPack(false);
@@ -483,6 +576,15 @@ export default function JurisdictionLayout({
         <EditOverviewModal
           pack={selectedPack} onClose={() => setShowEditOverview(false)}
           onSaved={(updated) => { setShowEditOverview(false); setSelectedPack(updated); loadPacks(); }}
+        />
+      )}
+      {showImpactPreview && (
+        <ImpactPreviewModal pack={selectedPack} onClose={() => setShowImpactPreview(false)} />
+      )}
+      {showHotfixActivate && (
+        <HotfixActivateModal
+          pack={selectedPack} onClose={() => setShowHotfixActivate(false)}
+          onActivated={(updated) => { setShowHotfixActivate(false); setSelectedPack(updated); loadPacks(); }}
         />
       )}
       {showAssign && (
@@ -542,7 +644,7 @@ export default function JurisdictionLayout({
       )}
       {deletingSlab && (
         <ConfirmDialog
-          title={slabsOverrideActive ? (slabsTabOverride.deleteTitle || "Delete Slab") : "Delete Tax Slab"}
+          title={slabsOverrideActive ? (resolveOverride(slabsTabOverride.deleteTitle, selectedPack) || "Delete Slab") : "Delete Tax Slab"}
           message={slabsOverrideActive ? slabsTabOverride.deleteMessage(deletingSlab) : `Delete the "${deletingSlab.rateLabel}" bracket? This cannot be undone.`}
           onConfirm={async () => {
             try { await deleteCanonicalTaxSlab(deletingSlab.id); addToast?.("Deleted.", "success"); }
@@ -551,12 +653,6 @@ export default function JurisdictionLayout({
             getCanonicalTaxSlabs({ jurisdictionPackId: selectedPack.id }).then(setSlabs);
           }}
           onClose={() => setDeletingSlab(null)}
-        />
-      )}
-      {deletingPack && (
-        <ConfirmDialog
-          title="Delete Pack" message={`Permanently delete "${deletingPack.packId}" v${deletingPack.version}? Only allowed with no assigned organizations and no payroll history.`}
-          onConfirm={handleDeletePack} onClose={() => setDeletingPack(null)}
         />
       )}
     </div>

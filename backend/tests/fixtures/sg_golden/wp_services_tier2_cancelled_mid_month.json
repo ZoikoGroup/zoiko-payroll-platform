@@ -1,0 +1,51 @@
+{
+  "description": "Work Permit CANCELLED on 15 Oct 2026: MOM levy stops 1 day before cancellation, so 1-14 Oct is levied: MOM daily rate S$19.73 x 14 days = S$276.22.",
+  "source": "MOM 'Cancel a Work Permit' (retrieved 2026-09-29, sha256 2bc8e148..., last updated 5 Aug 2026): \"Your worker's levy will be charged until 1 day before the pass cancellation\" / \"When levy stops: 1 day before cancellation\". MOM 'Services sector: Work Permit requirements' (sha256 191030a4..., last updated 16 Sep 2026): Tier 2 basic-skilled $600 monthly / $19.73 daily. Employer cost only - never deducted.",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1990-05-01",
+    "sgp_cpf_residency_status": "FOREIGN",
+    "sgp_work_pass_type": "WORK_PERMIT",
+    "sgp_shg_funds": "NONE",
+    "sgp_wp_sector": "SERVICES",
+    "sgp_wp_skill_level": "R2",
+    "sgp_wp_levy_tier": "TIER_2",
+    "gross": "2000.00",
+    "pay_date": "2026-10-31",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      },
+      "fwl_wp__SERVICES__TIER_2__R2": {
+        "flat_amount": "600"
+      },
+      "fwl_work_permit_cancellation_end_day_basis": {
+        "text_value": "EXCLUSIVE"
+      }
+    },
+    "slabs": [],
+    "sgp_work_pass_issue_date": "2024-01-01",
+    "sgp_work_pass_end_date": "2026-10-15",
+    "sgp_work_pass_end_reason": "CANCELLED"
+  },
+  "expected": {
+    "employer_eht": "276.22",
+    "net_pay": "2000.00"
+  }
+}

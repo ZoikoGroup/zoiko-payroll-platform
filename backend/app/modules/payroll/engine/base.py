@@ -12,13 +12,16 @@ Fixed 30-Day Payroll Model (applies to ALL strategies):
     PAYROLL_DAYS = 30
     Per Day Salary = Monthly Gross / 30
     Attendance Deduction = Unpaid Leave Days × Per Day Salary
-    Payable Days = 30 − Unpaid Leave Days
+    Payable Days = calendar days in the pay period − Unpaid Leave Days
+    (calendar_days = 28/29/30/31 for a calendar-month run; falls back to
+    30 when the caller doesn't supply a real period length)
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 PAYROLL_DAYS = 30
@@ -43,11 +46,87 @@ class PayrollContext:
     # Attendance (fixed 30-day model)
     unpaid_leave_days: int = 0
     payroll_days: int = PAYROLL_DAYS
+    # Actual length of this run's pay period — 28/29/30/31 for a calendar
+    # month, the raw span for semi-monthly/bi-weekly periods. Used ONLY
+    # for payable_days and total_working_days; per_day_salary always
+    # divides by payroll_days (30), so the attendance deduction is
+    # unchanged by month length. None (every direct/db-free caller that
+    # doesn't know its period) falls back to payroll_days.
+    calendar_days: int | None = None
 
     # Country / compliance
     country: str = "IN"
     rate_map: dict = field(default_factory=dict)   # component_key → ContributionRate
     slabs: list = field(default_factory=list)       # list[TaxSlab], country/national-level
+    # India Code Wages (ZP-TAX-IN-2026-27-001 §7/§8) per-earning-type
+    # classification — earning_type → is_taxable bool, where True means
+    # "core included wages" and False means "excluded, subject to the
+    # 50%-cap add-back test" (see india.py's _calculate_code_wages).
+    # Resolved by service.py's get_code_wages_classification (a plain
+    # dict, same convention as rate_map/slabs — this module stays
+    # DB/ORM-free). Empty dict (every jurisdiction/org today) means
+    # india.py falls back to its own hardcoded basic-vs-everything-else
+    # default, unchanged from before this field existed.
+    code_wages_rules: dict = field(default_factory=dict)
+
+    # India EPF/ESI/PT wage-base classification (ZP-TAX-IN-2026-27-001,
+    # gap-closure Phase G, 2026-09-11) — same {earning_type: is_included}
+    # shape/precedence as code_wages_rules above, resolved by service.py's
+    # get_epf_base_classification/get_esi_base_classification/
+    # get_pt_base_classification, but a SEPARATE axis from Code Wages: no
+    # 50%-cap add-back test, just a plain per-component sum (see
+    # engine/countries/india.py's _classify_wage_base). Empty dict (every
+    # org/state today) reproduces this engine's exact prior EPF/ESI/PT
+    # wage-base calculation — see india.py's calculate() for exactly
+    # where/how each is consumed.
+    epf_base_rules: dict = field(default_factory=dict)
+    esi_base_rules: dict = field(default_factory=dict)
+    pt_base_rules: dict = field(default_factory=dict)
+
+    # Canada: per-program (federal tax/provincial tax/CPP/EI) earning-
+    # component taxability (ZP-TAX-CA-2026-001 §17/AC-17, gap-closure
+    # Phase 5) — {tax_component: {earning_type: is_taxable}}, resolved by
+    # service.get_ca_taxability_rules_bundle, backed by the same
+    # TaxabilityRule model as code_wages_rules above. Empty dict (every
+    # jurisdiction/org today) means canada.py's _resolve_ca_taxability
+    # falls back to "every component counts," unchanged from before this
+    # field existed — see shared.py's _CA_TAXABILITY_MATRIX_ENABLED_
+    # COUNTRIES for the rollout switch this is additionally gated on.
+    ca_taxability_rules: dict = field(default_factory=dict)
+
+    # US: per-program (federal income tax/Social Security/Medicare/FUTA/
+    # state income tax) earning-component taxability (ZP-TAX-US-2026-001
+    # §9.1, gap-closure Phase 7) — same {tax_component: {earning_type:
+    # is_taxable}} shape as ca_taxability_rules above, resolved by
+    # service.get_us_taxability_rules_bundle, backed by the identical
+    # TaxabilityRule model. Empty dict (every jurisdiction/org today)
+    # means us.py's _resolve_us_taxability falls back to "every component
+    # counts," unchanged from before this field existed — see shared.py's
+    # _US_TAXABILITY_MATRIX_ENABLED_COUNTRIES for the rollout switch this
+    # is additionally gated on.
+    us_taxability_rules: dict = field(default_factory=dict)
+
+    # Australia: per-program (PAYG withholding/SG qualifying earnings)
+    # earning-component taxability (ZP-TAX-AU-2026-27-001 §11, Payday
+    # Super Phase 2) — same {tax_component: {earning_type: is_taxable}}
+    # shape as ca_taxability_rules/us_taxability_rules above, resolved by
+    # service.get_au_taxability_rules_bundle, backed by the identical
+    # TaxabilityRule model. Empty dict (every jurisdiction/org today) means
+    # engine/countries/australia.py's _resolve_au_taxability falls back to
+    # "every component counts," reproducing today's single-ctx.gross
+    # behavior exactly — see shared.py's _AU_TAXABILITY_MATRIX_ENABLED_
+    # COUNTRIES for the rollout switch this is additionally gated on.
+    au_taxability_rules: dict = field(default_factory=dict)
+
+    # India Forms 122/123/124 (§6.1/§6.2, gap-closure Phase E) — resolved
+    # by service.py's get_india_salary_tds_inputs from the employee's own
+    # Approved/Issued form rows. All default to 0, meaning india.py's
+    # salary TDS projection is byte-for-byte unaffected until these forms
+    # are actually used for a given employee.
+    other_income_for_tds: Decimal = Decimal("0")     # Form 122: net(prior-employer salary + other income - house-property loss)
+    tds_already_deducted: Decimal = Decimal("0")     # Form 122: prior-employer TDS credited against this year's liability
+    annual_claims_total: Decimal = Decimal("0")      # Form 124: sum of Approved Chapter VIII claims (Old regime only)
+    annual_perquisites_total: Decimal = Decimal("0")  # Form 123: sum of Issued perquisite valuations (both regimes)
 
     # Region (state/province/devolved-nation) — the employee's own
     # PayrollEmployee.work_state, threaded through so a country
@@ -85,6 +164,17 @@ class PayrollContext:
     # work_locality set through any admin-facing UI... until now — see
     # countryFieldSpecs.js's new "Work Locality Code" field).
     locality_rate: object = None
+    # US: the SAME kind of resolved LocalityRate object as locality_rate
+    # above, but for the employee's OWN residence_locality code instead
+    # of work_locality (gap-closure Plan Phase 3, ZP-TAX-US-2026-001
+    # §7.1) — a second, independent get_locality_rate lookup. Powers the
+    # generic "higher of resident vs. work locality rate" comparison for
+    # LocalityRate rows tagged locality_type="PSD_EIT_LST" (see
+    # engine/countries/us.py). None for every employee today (no
+    # residence-locality-scoped LocalityRate data is seeded anywhere
+    # yet — this is deliberately a mechanism-only build, real PSD data
+    # requires a source file that hasn't been supplied).
+    residence_locality_rate: object = None
 
     # Employee tax-profile fields — all opt-in (None/False means "not
     # set," never inferred), threaded from PayrollEmployee so a country
@@ -95,6 +185,13 @@ class PayrollContext:
     ni_category: str = None         # UK NI category letter, e.g. "A"
     study_loan_plan: str = None     # e.g. "UK_PLAN2", "UK_POSTGRAD", "AU_HELP" — shared UK/AU mechanism
     study_loan_balance: Decimal = None
+    # UK only: a Postgraduate Loan repaid CONCURRENTLY with study_loan_plan
+    # above (ZP-TAX-UK-2026-27-001 §10.2 — Plan + Postgraduate as two
+    # separate deduction lines). False for every employee today, and
+    # deliberately never combined with study_loan_plan=="UK_POSTGRAD"
+    # (that standalone case is already fully handled by study_loan_plan
+    # alone) — see engine/countries/uk.py's calculate() for the guard.
+    has_postgrad_loan: bool = False
     church_tax_liable: bool = False  # Germany Kirchensteuer opt-in
     tax_regime: str = None          # India's "Old"/"New" — None means "not set," same as every employee today
     # Generic across every country — "Monthly"/"Weekly"/"Fortnightly"/
@@ -104,6 +201,35 @@ class PayrollContext:
     # currently reads this.
     pay_frequency: str = "Monthly"
 
+    # Australia declarations driving ATO Schedule 1/8 scale selection
+    # (ZP-TAX-AU-2026-27-001 §5.1/§14) — mirrors
+    # models.PayrollEmployee.au_* columns' own docstrings verbatim. None
+    # for every non-AU employee, and for AU employees until explicitly
+    # entered — engine/countries/australia.py treats an unset value as
+    # the most conservative assumption, never a guess.
+    au_tfn_status: str = None                    # "PROVIDED" | "NOT_PROVIDED" | "EXEMPTION"
+    au_residency_status: str = None               # "RESIDENT" | "FOREIGN_RESIDENT" | "WORKING_HOLIDAY_MAKER"
+    au_tax_free_threshold_claimed: bool = None
+    au_medicare_levy_exemption: str = None        # "FULL" | "HALF" | None (standard)
+    au_withholding_variation_pct: Decimal = None
+    # §7's own "Extra-pay calendar" control (53 weekly pays / 27
+    # fortnightly pays in an income year) — None (the ordinary 52/26-pay
+    # calendar) for every employee until an org explicitly flags a
+    # payroll cycle as landing on the extra pay, per §7's own "only when
+    # that pay-calendar control is active" instruction. Never inferred
+    # from pay_date arithmetic — see engine/countries/australia.py's
+    # _resolve_au_extra_pay_withholding.
+    au_extra_pay_calendar: str = None             # "53_WEEK" | "27_FORTNIGHT" | None
+    # §5 step 4's SAPTO declaration (Phase 10, 2026-09-17) — an employee's
+    # own self-declared seniors/pensioners category, entirely separate
+    # from au_tax_free_threshold_claimed. None (no SAPTO applied) for
+    # every employee until explicitly declared — LITO, by contrast,
+    # applies automatically to every resident and needs no declaration
+    # field at all. All three categories (SINGLE/COUPLE/ILLNESS_SEPARATED_
+    # COUPLE) resolve to real figures as of 2026-09-18; see
+    # engine/countries/australia.py's _calculate_au_income_tax_offset.
+    au_sapto_category: str = None                 # "SINGLE" | "COUPLE" | "ILLNESS_SEPARATED_COUPLE" | None
+
     # US Form W-4: filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and form
     # vintage ("PRE_2020"/"2020_PLUS"). None for every non-US employee, and
     # for US employees until explicitly set — engine/countries/us.py falls
@@ -112,6 +238,687 @@ class PayrollContext:
     # now exist.
     w4_filing_status: str = None
     w4_form_vintage: str = None
+    # US Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox
+    # (ZP-TAX-US-2026-001 §3.3). False for every employee today —
+    # engine/countries/us.py falls back to the existing standard bracket
+    # table when False, so no existing calculation changes just because
+    # this field now exists.
+    w4_step2_checkbox: bool = False
+    # Federal W-4 §3.4 controls (ZP-TAX-US-2026-001, gap-closure Plan
+    # Phase 2d) — see models.PayrollEmployee's matching fields for the
+    # full docstring. All None/False for every employee today — each is
+    # an independent no-op in engine/countries/us.py until explicitly set.
+    w4_allowances_claimed: int = None
+    is_nonresident_alien: bool = False
+    w4_dependents_credit_annual: Decimal = None
+    w4_other_income_annual: Decimal = None
+    w4_extra_withholding_per_period: Decimal = None
+    # Connecticut CT-W4 Withholding Code ("A"/"B"/"C"/"D"/"F") — see
+    # models.PayrollEmployee.ct_withholding_code's own docstring. None for
+    # every employee today — engine/countries/us.py's CT-specific path
+    # only activates when this is set, resolving to $0 otherwise.
+    ct_withholding_code: str = None
+    # New Jersey NJ-W4 Rate Table letter ("A"/"B"/"C"/"D"/"E") — see
+    # models.PayrollEmployee.nj_rate_table's own docstring. None for
+    # every employee today — engine/countries/us.py's NJ-specific
+    # bracket lookup only activates when this is set, resolving to $0
+    # otherwise.
+    nj_rate_table: str = None
+    # Kansas Form K-4 certified dependent count — see
+    # models.PayrollEmployee.ks_k4_dependents' own docstring. None for
+    # every employee today — engine/countries/us.py's KS-specific
+    # deduction function treats None as 0 dependents, never a guess.
+    ks_k4_dependents: int = None
+    # City/local-level residence — see models.PayrollEmployee.residence_locality's
+    # own docstring. None for every employee today — engine/countries/us.py's
+    # Yonkers resident-surcharge path only activates when this equals
+    # "YONKERS"; every other value/None is a complete no-op.
+    residence_locality: str = None
+
+    # Employee's own elected state withholding percentage (currently only
+    # meaningful for Arizona Form A-4, ZP-TAX-US-2026-001 §4 Matrix — AZ's
+    # statutory range is 0.5%-3.5%, employee-elected). None for every
+    # employee today — engine/countries/us.py falls back to the existing
+    # hardcoded 2.0% AZ no-A-4-on-file default when None, so no existing
+    # calculation changes just because this field now exists.
+    state_income_tax_election_pct: Decimal = None
+
+    # Germany (Phase 7) — pre-resolved statutory configuration rows,
+    # threaded through exactly like rate_map/slabs above so
+    # engine/countries/germany.py stays a pure function of its context
+    # (no DB access from the engine layer, matching every other
+    # country's calculator). None/absent for every non-German employee —
+    # existing calculations for every other country are unaffected.
+    # Resolved per-employee, per-payroll-date by service.py (see
+    # service._resolve_germany_calc_inputs) since these are
+    # employee-specific (unlike rate_map/slabs, which can be cached
+    # across employees sharing a jurisdiction).
+    germany_statutory_profile: object = None    # EmployeeStatutoryProfile | None
+    germany_pap_asset: object = None            # PapAlgorithmAsset | None (PUBLISHED, resolved by payroll date)
+    germany_health_fund: object = None          # GermanyHealthFund | None (PUBLISHED, resolved by employee's fund code + date)
+    # Phase 8W — the employer's selected U1 tariff, resolved from
+    # EmployeeStatutoryProfile.de_u1_tariff_id against the fund's available
+    # GermanyHealthFundU1Tariff records. The calculation engine now reads
+    # U1 levy rates from this object's levy_rate_pct field, NOT from the
+    # deprecated GermanyHealthFund.u1_rate_pct column.
+    germany_u1_tariff: object = None            # GermanyHealthFundU1Tariff | None
+    germany_ceiling_gkv_pv: object = None       # GermanyContributionCeiling | None (branch="GKV_PV")
+    germany_ceiling_rv_alv: object = None       # GermanyContributionCeiling | None (branch="RV_ALV")
+    germany_pv_configuration: object = None     # GermanyPvConfiguration | None
+    # Phase 8AM — a documented sub-Land church-tax exception (e.g. Bad
+    # Wimpfen's Roman Catholic 9% rate within Baden-Württemberg's general
+    # 8%), resolved by (Land, denomination, municipality postal code) +
+    # payroll date against the PUBLISHED GermanyChurchTaxException
+    # registry. None (the overwhelming common case) means "no documented
+    # exception applies — use the ordinary Land rate" exactly as before
+    # this phase; this field NEVER causes the ordinary Land-rate path to
+    # change behavior when absent.
+    germany_church_tax_exception: object = None  # GermanyChurchTaxException | None
+    # Identity/date fields, for the calculation trace only (never used to
+    # query the DB from within the engine layer).
+    germany_employee_id: int = None
+    germany_organization_id: int = None
+    germany_payroll_date: object = None
+    # Phase 8T — the "Bonus / annual bonus" portion of this period's gross
+    # (spec §15's own "Other remuneration route" row), sourced from
+    # PayrollAttendanceRecord.bonus specifically (never rewards/other_
+    # compensation, which the spec does not classify as SONSTB-routed).
+    # Zero for every non-German employee and for every German employee
+    # this period had no bonus recorded (service._sum_attendance_bonus_only).
+    # Still part of `gross` above (the employee is still paid it, and it
+    # remains RV/ALV/GKV/PV-contributory per spec's own table) — this field
+    # only tells the Germany PAP-input boundary how much of gross to route
+    # via SONSTB instead of RE4, never changes net pay by itself.
+    germany_sonstb: object = None               # Decimal | None (None treated as 0)
+    # Phase 8X — the resolved four-dimension earning taxability
+    # (spec §15) for each earning type actually present in this run,
+    # keyed by earning_type -> GermanyEarningTaxabilityRule | None.
+    # Only REGULAR_SALARY (steady RE4 wage) and BONUS_ANNUAL_BONUS
+    # (SONSTB-routed bonus) are real inputs in the current engine, so only
+    # those two are resolved. Absent/published-None means NOT_CONFIGURED —
+    # the engine surfaces it in the trace and never invents a classification.
+    germany_earning_taxability: dict = None     # {earning_type: rule-or-None}
+    # Phase 8BK — the resolved Minijob/Midijob statutory parameter
+    # registry (service.resolve_all_minijob_midijob_parameters), keyed by
+    # parameter_code -> GermanyMinijobMidijobParameter | None. Absent/None
+    # for a given code means "no PUBLISHED record covers this payroll
+    # date" — engine/countries/germany.py falls back to the identical
+    # hardcoded 2026 constant it always used, so no existing calculation
+    # changes just because this field now exists.
+    germany_minijob_midijob_parameters: dict = None
+    # Canada TD1 federal total claim amount. None for every non-CA
+    # employee, and for CA employees until explicitly set —
+    # engine/countries/canada.py falls back to the dynamic income-tapered
+    # BPAF (Phase 2) when None, so no existing calculation changes just
+    # because this field now exists.
+    td1_claim_amount: Decimal = None
+    # Canada provincial/territorial TD1 claim amount — overrides the
+    # province's own dynamic provincial_bpa, same "None means no
+    # declaration on file" contract as td1_claim_amount above
+    # (ZP-TAX-CA-2026-001 §18). Never applies to a Quebec employee — see
+    # qc_tp1015_claim_amount below instead.
+    provincial_td1_claim_amount: Decimal = None
+    # Quebec TP-1015.3-V personal tax credit amount — Quebec's own
+    # declaration, legally distinct from federal/provincial TD1
+    # (ZP-TAX-CA-2026-001 §18). Overrides the canonical quebec_bpa when set.
+    qc_tp1015_claim_amount: Decimal = None
+    # Canada TD1X employee-requested additional per-pay-period
+    # withholding — additive on top of tds, never touching the statutory
+    # base calculation. None/0 for every employee until explicitly set.
+    td1_additional_tax: Decimal = None
+    # Canada labour-sponsored funds credit (LCF, §6) — the employee's
+    # declared LSVCC share purchase amount; None (every employee today)
+    # means "no purchase declared," changing nothing from existing
+    # behavior. See shared._CA_LSVCC_CREDIT_ENABLED_COUNTRIES and
+    # canada.py's _calculate_annual_tax_ca for the dormancy gate.
+    lsvcc_investment_amount: Decimal = None
+    # Canada CPT30 CPP/QPP election — "STOPPED" suppresses CPP/QPP (and
+    # CPP2/QPP2) entirely for this employee; None/"ACTIVE" (every
+    # employee today) changes nothing from existing behavior.
+    cpp_qpp_election_status: str = None
+    # ZP-TAX-CA-2026-001 §10/AC-16: "Age and CPP/QPP election status is
+    # effective-dated." The month a CPT30 STOPPED election actually took
+    # effect — canada.py only applies the STOPPED suppression once
+    # ctx.pay_date >= this date, so a stop filed mid-period doesn't
+    # retroactively zero CPP for periods before the employee actually
+    # filed it. None (every employee before this field existed) means
+    # "apply STOPPED immediately," the exact prior behavior — additive.
+    cpp_election_effective_date: date = None
+
+    # Canada CPP/CPP2/EI (and Quebec QPP/QPP2/QPIP) year-to-date state,
+    # as of BEFORE this pay period — read from PayrollYtdAccumulator by
+    # service.py's _load_ca_ytd, gated on
+    # engine/countries/shared.py's _YTD_ACCUMULATOR_ENABLED_COUNTRIES.
+    # None (every employee/country today) means "no YTD wired" —
+    # engine/countries/canada.py MUST fall back to its existing
+    # current-period-annualized cap logic when None, never treat None as
+    # 0. This is the calculation-layer dormancy switch; the rollout set
+    # above is the read-layer one.
+    ytd_pensionable_earnings: Decimal = None       # CPP/QPP first-layer
+    ytd_cpp2_pensionable_earnings: Decimal = None  # CPP2/QPP2
+    ytd_insurable_earnings: Decimal = None         # EI/QPIP
+    ytd_basic_exemption_used: Decimal = None       # CPP/QPP $3,500 exemption, YTD-consumed
+
+    # US Social Security wage base / FUTA wage base / Additional Medicare
+    # threshold (ZP-TAX-US-2026-001 §3.1, gap-closure Phase 2) — same
+    # "as of BEFORE this pay period, None means not wired" contract as
+    # Canada's ytd_pensionable_earnings etc. above: read from
+    # PayrollYtdAccumulator by service.py's _load_us_ytd, gated on
+    # shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES. engine/countries/us.py
+    # MUST fall back to its existing current-period-annualized estimate
+    # when any of these is None, never treat None as 0 — identical
+    # dormancy discipline to every other YTD field in this file.
+    ytd_ss_wages_before: Decimal = None
+    ytd_futa_wages_before: Decimal = None
+    ytd_medicare_wages_before: Decimal = None      # tracks cumulative Medicare wages for the Additional Medicare threshold, not a cap
+
+    # Australia Superannuation Guarantee Maximum Contribution Base tracking
+    # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2) — this employee's
+    # cumulative SG-qualifying-earnings for the current Australian
+    # financial year, as of BEFORE this pay period. None (every employee
+    # until Phase 2 engine wiring reads/writes it) means "not wired" —
+    # engine/countries/australia.py MUST fall back to its existing
+    # current-period-annualized MCB estimate when this is None, never
+    # treat None as 0 — identical dormancy discipline to every other YTD
+    # field in this file. Read from PayrollYtdAccumulator by service.py's
+    # _load_au_sg_ytd, gated on shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.
+    ytd_sg_qualifying_earnings_before: Decimal = None
+
+    # Cayman Islands mandatory pension — this employee's cumulative
+    # mandatory (non-AVC) pensionable earnings for the current calendar
+    # year, as of BEFORE this pay period, toward the CI$87,000 annual cap
+    # (KY-008). Same dormancy contract as ytd_sg_qualifying_earnings_before
+    # above: None means "no accumulator wired yet" — engine/countries/
+    # cayman_islands.py MUST fall back to a per-period pro-rated share of
+    # the annual cap (annual_cap / periods_per_year) rather than treat
+    # None as $0 already-used. Not yet wired to PayrollYtdAccumulator —
+    # Phase 2 work, same explicitly-deferred shape as AU's own WHM/SG
+    # accumulators above before their service.py wiring landed.
+    ytd_ky_mandatory_pensionable_earnings_before: Decimal = None
+
+    # Singapore CPF cohort facts (ZP-SG-ENG-001 §3/§10) — mirrors
+    # models.PayrollEmployee.sgp_* columns. None for every non-SG employee;
+    # engine/countries/singapore.py BLOCKS on a missing/contradictory fact
+    # rather than assuming one. `sgp_` prefix, not `sg_` — `sg_` already
+    # means Australian Super Guarantee throughout this engine.
+    sgp_cpf_residency_status: str = None           # "SC" | "SPR" | "FOREIGN"
+    sgp_spr_effective_date: date = None
+    sgp_cpf_contribution_arrangement: str = None   # "GG" | "FG" | "FF" (SPR years 1–2)
+    sgp_work_pass_type: str = None                 # "NONE" | "EP" | "S_PASS" | "WORK_PERMIT"
+    # Work pass validity — MOM: levy liability from the day the pass is
+    # issued until it is cancelled or expires. None = not captured.
+    sgp_work_pass_issue_date: date = None
+    sgp_work_pass_end_date: date = None
+    # Why the pass ends on sgp_work_pass_end_date: "CANCELLED" | "EXPIRED"
+    # (compliance_fields.work_pass_end_reason). None = not captured — a pass
+    # ending within the month then stays BLOCKED (no end-day rule is assumed).
+    sgp_work_pass_end_reason: str = None
+    sgp_shg_funds: str = None                      # "CDAC" | "MBMF,SINDA" | "NONE" ...
+    # Singapore CPF annual-ceiling accumulators, as of BEFORE this pay
+    # period (calendar year, per employee = per legal employer). Same
+    # dormancy contract as ytd_ky_mandatory_pensionable_earnings_before:
+    # None means "no accumulator loaded" — singapore.py then BLOCKS any
+    # Additional Wages rather than treat None as $0 already used.
+    ytd_cpf_ow_subject_before: Decimal = None
+    ytd_cpf_aw_subject_before: Decimal = None
+    # Total AW PAID this calendar year before this period (subject to CPF or
+    # not) — the AW-ceiling true-up (CPF Board method, Option A) needs it to
+    # know how much earlier AW is still owed contributions.
+    ytd_cpf_aw_paid_before: Decimal = None
+    # Per-AW-payment ledger for the year, rebuilt by service.py from prior
+    # payslips' persisted sgp_calculation_trace: [{"month": "2026-01",
+    # "awPaid", "awSubjected", "eePct", "totalPct", "formulaType", "rule"}].
+    # None = not loaded (the true-up then BLOCKS if earlier AW is owed).
+    sgp_aw_ledger: list = None
+    # Whether this employee's employer hires foreign workers (EP/S Pass/WP)
+    # — drives the LQS check only. None = not supplied (check not evaluated).
+    sgp_employer_hires_foreign_workers: bool = None
+    # Singapore CPF wage classification per earning component, from the
+    # shared TaxabilityRule primitive (service.get_taxability_classification,
+    # the same mechanism AU/CA/IN use): {"cpf_ordinary_wages": {component:
+    # bool}, "cpf_additional_wages": {component: bool}}. None/empty = the
+    # default mapping in singapore.py (salary/allowances OW, additional
+    # compensation AW) — every SG payroll before a rule is configured.
+    sgp_cpf_wage_classification: dict = None
+    # Singapore only: the payslip's named allowances ([{key, label, amount}],
+    # the same items persisted as PayslipAllowanceItem) so each allowance is
+    # classified on its own ("allowance:<key>") for CPF OW/AW and IRAS
+    # instead of one lump. None = lumped (every other country; manual payslips).
+    sgp_named_allowance_items: list = None
+    # Singapore Work Permit levy classification (payroll_employees columns,
+    # alembic a7c2e9f4b1d6): MOM sector, skill level R1/R2, levy tier.
+    sgp_wp_sector: str = None
+    sgp_wp_skill_level: str = None
+    sgp_wp_levy_tier: str = None
+    # Singapore overtime facts for the trace (hours, Part 4 status,
+    # statutory minimum, paid or not) — computed by service.py from
+    # attendance + policy + labour.py rule rows; the overtime AMOUNT itself
+    # arrives in ctx.overtime like any other earning component.
+    sgp_overtime_facts: dict = None
+    # Singapore Employment Act salary deductions in force for the period
+    # (CourtOrderedDeduction rows, jurisdiction "SINGAPORE"), as plain dicts.
+    sgp_deduction_orders: list = None
+    # Singapore incomplete-month facts (Phase 5.2): the employee's MOM work
+    # pattern ("5_DAY" | "5_5_DAY" | "6_DAY"), rest day, and the ISO dates of
+    # unpaid (no-pay) attendance in the period — service.py builds it from
+    # compliance_fields + attendance. None = no facts supplied.
+    sgp_employment_facts: dict = None
+    # Singapore IRAS Form IR8A item per earning component, from the shared
+    # TaxabilityRule primitive: {"iras_gross_salary": {component: bool}, ...}.
+    # None/empty = the default mapping in singapore.py.
+    sgp_iras_classification: dict = None
+    # Earlier payslips of THIS wage month for this employee (a salary run
+    # plus an off-cycle/backpay run), rebuilt by service.py from their
+    # persisted sgp_calculation_trace. CPF, SDL, SHG and the S Pass levy are
+    # all monthly amounts, so the month is recalculated on its combined
+    # wages and only the difference is booked. None/empty = first payment.
+    sgp_month_to_date: list = None
+    # Hong Kong (ZP-HK-ENG-001) — built by service._hk_calc_inputs; None for
+    # every non-HK calculation. The calculator (countries/hong_kong.py) is
+    # pure (HK-020): it never queries, never reads a live clock.
+    #   hk_worker_facts   — the effective-dated statutory-profile version in
+    #                        force (facts only) + employment dates + its id.
+    #   hk_hours          — verified daily hours for the wage period
+    #                        {"days": {iso_date: "8.00"}, "complete": bool}.
+    #   hk_rule_segments  — every row of the PINNED pack overlapping the wage
+    #                        period for period-split rules (SMW hourly rate,
+    #                        hours-record cap): {key: [{from, to, value, ref}]}
+    #                        — a period crossing 1 May 2026 sees both rates.
+    hk_worker_facts: dict = None
+    hk_hours: dict = None
+    hk_rule_segments: dict = None
+    # The payroll run's period (employment period). Read by Singapore only
+    # (SG-011: OW belongs to the employment month when payable by the 14th
+    # of the following month). None for callers without a run period.
+    period_start: date = None
+    period_end: date = None
+    # Generic employment facts, read straight off PayrollEmployee — used by
+    # Singapore only (AW ceiling months remaining, S Pass partial month,
+    # IR21 trigger, LQS full-/part-time). None for callers that don't set them.
+    date_of_joining: date = None
+    date_of_leaving: date = None
+    employment_type: str = None
+
+    # Guyana PAYE statutory credit (GY-010) — this employee's remaining
+    # unconsumed over-deduction credit balance BEFORE this period.
+    # DISCLOSED SCOPE: the spec's own worked scenario (Jan-Feb 2026
+    # over-withholding under pre-2026 thresholds, refunded from March
+    # 2026) has already passed relative to this platform's actual Guyana
+    # go-live (September 2026) — Zoiko never processed that period's
+    # payroll, so no historical over-deduction can be auto-derived from
+    # this platform's own PayrollYtdAccumulator history the way KY's
+    # pension accumulator above naturally starts at 0 and accumulates
+    # forward. This mechanism is built general-purpose (any future GRA
+    # rate-change/refund scenario of the same shape, not hardcoded to
+    # 2026 Jan-Feb), but there is no UI/API path yet to populate a real
+    # opening balance — only a direct PayrollYtdAccumulator row entry
+    # (component "gy_paye_refund_credit") would activate it today.
+    # None (every employee until such an entry exists) means "no credit
+    # to apply" — engine/countries/guyana.py's calculate() runs its
+    # ordinary, unaffected PAYE calculation, identical to before this
+    # field existed. Never guesses/backfills a starting value.
+    ytd_gy_paye_credit_before: Decimal = None
+
+    # Puerto Rico (ZP-PR-ENG-001) — this employee's cumulative wages
+    # toward each of PR's independent wage-base caps/thresholds, as of
+    # BEFORE this pay period. Same dormancy contract as every other YTD
+    # field in this file: None means "no accumulator wired yet" —
+    # engine/countries/puerto_rico.py MUST fall back to a per-period
+    # pro-rated cap share (Additional Medicare: $0) rather than treat
+    # None as $0 already-used. Read from PayrollYtdAccumulator by
+    # service.py's _load_pr_ytd, gated on shared.
+    # _YTD_ACCUMULATOR_ENABLED_COUNTRIES — entirely independent of the US
+    # ytd_ss_wages_before/ytd_futa_wages_before/ytd_medicare_wages_before
+    # fields above and their own PayrollYtdAccumulator component keys,
+    # per this module's "never import from or share state with us.py"
+    # doctrine.
+    ytd_pr_ss_wages_before: Decimal = None
+    ytd_pr_medicare_wages_before: Decimal = None
+    ytd_pr_futa_wages_before: Decimal = None
+    ytd_pr_unemployment_wages_before: Decimal = None
+    ytd_pr_sinot_wages_before: Decimal = None
+
+    # Puerto Rico Form 499 R-4/R-4.1 withholding certificate (PR-005) —
+    # resolved from the employee's currently-Approved
+    # PRWithholdingCertificate by service.get_pr_certificate_inputs.
+    # pr_certificate_personal_exemption is None when no certificate is on
+    # file (PR-006: engine/countries/puerto_rico.py falls back to its own
+    # _PR_PERSONAL_EXEMPTION constant) — every other field defaults to its
+    # own "no effect" value (0 / False) so a certificate that only sets
+    # SOME fields never silently zeroes out the ones it didn't touch.
+    pr_certificate_personal_exemption: Decimal = None
+    pr_certificate_dependents_count: int = 0
+    pr_certificate_dependent_exemption_per_dependent: Decimal = Decimal("0")
+    pr_certificate_deduction_allowance: Decimal = Decimal("0")
+    pr_certificate_additional_withholding: Decimal = Decimal("0")
+    pr_certificate_msrra_election: bool = False
+
+    # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
+    # $45,000 first-bracket test — this employee's cumulative WHM earnings
+    # for the current Australian financial year, as of BEFORE this pay
+    # period. Same "None means not wired, must fall back to the existing
+    # dormant flat-rate-every-period behavior" contract as
+    # ytd_sg_qualifying_earnings_before above. Read from
+    # PayrollYtdAccumulator by service.py's _load_au_whm_ytd, gated on
+    # shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES. Once wired (and the
+    # in-cap rate is the unmodified statutory 15% — see
+    # engine/countries/australia.py's SCALE_WHM branch for the one
+    # exception), the engine computes the REAL above-cap graduated
+    # withholding (30%/37%/45% at $45k/$135k/$190k, resolved 2026-09-18
+    # via web research — see hardcoded_defaults._AU_WHM_ABOVE_CAP_
+    # BRACKETS' own docstring for sourcing), not just a detection flag.
+    ytd_whm_earnings_before: Decimal = None
+
+    # Canada Option 2 cumulative-averaging income tax withholding
+    # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9) — this employee's
+    # own income-tax-specific YTD state, as of BEFORE this pay period,
+    # read from PayrollYtdAccumulator by service.py's
+    # _load_ca_option2_ytd, gated on engine/countries/shared.py's
+    # _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES. None (every employee/org
+    # today) means "Option 2 not in use for this employee" —
+    # engine/countries/canada.py MUST take its existing Option 1
+    # (annualization) branch, unchanged, whenever this is None; only a
+    # non-None value here switches an employee's calculation onto the
+    # cumulative-averaging method. Deliberately SEPARATE from the CPP/
+    # EI/QPP/QPIP YTD fields above — Option 2 is an income-tax-only
+    # methodology, it does not touch CPP/EI's own cap mechanics.
+    option2_cumulative_gross_before: Decimal = None
+    option2_periods_elapsed_before: int = None
+    option2_federal_tax_withheld_before: Decimal = None
+    option2_provincial_tax_withheld_before: Decimal = None
+
+    # Canada: the ORG's (not this employee's own) aggregate Ontario
+    # remuneration YTD, as of BEFORE this pay period — read from
+    # OrganizationYtdAccumulator by service.py's _load_ca_org_levy_ytd,
+    # gated on _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES. None (every
+    # employee/org today) means "not wired" — engine/countries/canada.py
+    # MUST resolve Ontario EHT to $0 when None, never treat None as 0.
+    on_eht_ytd_remuneration_before: Decimal = None
+    # Jamaica: the employer's aggregate MONTHLY emoluments across ALL its
+    # employees, as of BEFORE this employee's own period, for HEART
+    # (JM-008: "evaluate across all pay groups"). Reuses the SAME
+    # OrganizationYtdAccumulator table and _load_ca_org_levy_ytd/
+    # _upsert_ca_org_levy_ytd generic reader/writer as Ontario EHT above
+    # (see service.py's _load_jm_heart_ytd), but with a MONTHLY tax_year
+    # key instead of a calendar-year one — HEART's threshold is evaluated
+    # per calendar month, not per year. Same "None means not wired, must
+    # resolve exactly as Phase 1's per-employee-only check did" contract
+    # as on_eht_ytd_remuneration_before above.
+    jm_heart_ytd_remuneration_before: Decimal = None
+    # UK: the org's aggregate annual statutory pay bill YTD, for the
+    # Apprenticeship Levy (ZP-TAX-UK-2026-27-001 §14) — same "None means
+    # not wired, must resolve to £0" contract as on_eht_ytd_remuneration_before
+    # above, gated on the SAME shared _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.
+    appr_levy_ytd_pay_bill_before: Decimal = None
+    # UK: the org's cumulative employer_ni total YTD, for Employment
+    # Allowance's REPORTING-level calculation (never a per-payslip
+    # figure) — same "None means not wired" contract.
+    employer_ni_ytd_before: Decimal = None
+
+    # Canada: the same org-level YTD-remuneration contract as
+    # on_eht_ytd_remuneration_before above, for BC EHT, Manitoba HE Levy
+    # and NL HAPSET respectively — each independently None/wired.
+    bc_eht_ytd_remuneration_before: Decimal = None
+    mb_he_levy_ytd_remuneration_before: Decimal = None
+    nl_hapset_ytd_remuneration_before: Decimal = None
+    # BC EHT ordinary vs. registered-charity/nonprofit variant — read
+    # from CompanyComplianceDetails.bc_eht_employer_classification.
+    # "CHARITY_NONPROFIT" selects the charity thresholds/rates; anything
+    # else (including None, the default for every org today — no Super
+    # Admin/Org Admin UI sets this yet) is treated as ordinary.
+    bc_eht_employer_classification: str = None
+
+    # Quebec Health Services Fund — same org-level-accumulator contract
+    # as on_eht_ytd_remuneration_before above.
+    qc_hsf_ytd_remuneration_before: Decimal = None
+    # GENERAL | PRIMARY_MANUFACTURING | PUBLIC_SECTOR — read from
+    # CompanyComplianceDetails.qc_hsf_employer_category. None (no UI sets
+    # this yet, same disclosed gap as BC's classification) is treated as
+    # GENERAL, the most common case.
+    qc_hsf_employer_category: str = None
+
+    # Australia state/territory employer payroll tax (ZP-TAX-AU-2026-27-001
+    # §14-18, Phase 4) — the ORG's (not this employee's own) aggregate
+    # taxable-wages YTD for whichever state ctx.work_state resolves to, as
+    # of BEFORE this pay period. Same "None means not wired, must resolve
+    # to $0" contract as on_eht_ytd_remuneration_before above — ONE shared
+    # field across all 8 states (unlike CA's one-field-per-province
+    # pattern) because exactly one state applies per employee via
+    # ctx.work_state, and the org-level accumulator's own tax_component
+    # key (e.g. "au_payroll_tax_nsw") already disambiguates which state a
+    # given value belongs to — a per-state field set would just be 8
+    # fields that are never simultaneously non-None for the same org.
+    au_state_payroll_tax_ytd_remuneration_before: Decimal = None
+    # VIC regional-employer / QLD regional-discount eligibility — read
+    # from CompanyComplianceDetails.au_payroll_tax_regional_status.
+    # "REGIONAL" selects the reduced rate; anything else (including None,
+    # the default for every org today — no UI sets this yet) is treated
+    # as ordinary/metropolitan.
+    au_payroll_tax_regional_status: str = None
+    # §18 "Charity / public-benefit exemptions" — read from
+    # CompanyComplianceDetails.au_payroll_tax_charity_exempt. True short-
+    # circuits calculate_au_state_payroll_tax to $0; None/False (every org
+    # today) is ordinary, fully unaffected. See that column's own
+    # docstring for why this is a whole-org binary flag, not a per-
+    # activity partial exemption.
+    au_payroll_tax_charity_exempt: bool = None
+    # VIC/QLD national-payroll-banded surcharges (§17 follow-up, resolved
+    # 2026-09-17) — the org-GROUP's AUSTRALIA-WIDE (not state-specific)
+    # aggregate taxable wages YTD, as of BEFORE this pay period. A
+    # genuinely separate accumulator dimension from
+    # au_state_payroll_tax_ytd_remuneration_before above (that one is
+    # scoped to whichever single state ctx.work_state resolves to; this
+    # one sums across all 8 states' own accumulators for the org-group —
+    # see service._au_org_payroll_tax_read_inputs). None means not wired,
+    # same "must resolve to no surcharge, never a guess" contract as
+    # every other AU YTD field.
+    au_national_taxable_wages_ytd_before: Decimal = None
+    # Australia statutory deductions — child support/garnishee (§19,
+    # Phase 5). Raw, DB-free list of dicts (id/order_type/
+    # fixed_deduction_rate_pct/fixed_deduction_amount/
+    # protected_earnings_amount), already filtered to this employee's
+    # ACTIVE orders and sorted by priority by service.py's
+    # _load_au_active_court_orders — this engine module has zero DB
+    # access by design (see tax_resolver.py's own docstring on why), so
+    # the raw order facts must arrive pre-resolved. Empty list (every
+    # employee until an order exists) is a complete no-op.
+    au_statutory_deduction_orders: list = field(default_factory=list)
+
+    # Canada CPP/QPP age-gating (§10: "Age 18"/"Age 70" controls) — the
+    # employee's own date of birth, and the pay date to compute their
+    # age as of. Both None (every employee/country today, since no
+    # PayrollEmployee has ever had a date_of_birth column before this)
+    # means age-gating cannot run at all — see
+    # shared._CA_AGE_GATED_CPP_ENABLED_COUNTRIES and canada.py's
+    # _is_age_gated_cpp_stopped for the dormancy gate and the disclosed
+    # simplification (calendar-age comparison, not CRA's more granular
+    # month-boundary rule, which the source document itself doesn't
+    # spell out precisely).
+    date_of_birth: date = None
+    # India Maharashtra Professional Tax (ZP-TAX-IN-2026-27-001 §13.2) —
+    # the ONLY consumer today: Maharashtra's PT brackets are genuinely
+    # gender-differentiated by statute (a real legal fact, not a proxy for
+    # anything else). None for every employee until entered, same
+    # "generically useful HR fact, absent by default" convention as
+    # date_of_birth above.
+    gender: str = None
+    # India Old Regime senior/super-senior age bands (ZP-TAX-IN-2026-27-001
+    # §4.1/§4.2) — "RESIDENT" | "NON_RESIDENT" | None. Combined with
+    # date_of_birth above in india.py's _resolve_old_regime_age_category,
+    # gated on shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES. None
+    # (every employee until entered) resolves identically to NON_RESIDENT
+    # — ordinary non-senior bands, exactly today's behavior.
+    tax_residency_status: str = None
+    pay_date: date = None
+    # UK Directors NIC (ZP-TAX-UK-2026-27-001 §9.2) — False/None for every
+    # employee until entered, same "no behavior change until explicitly
+    # set" convention as every other new optional field above.
+    is_director: bool = False
+    director_ni_method: str = None  # "ANNUAL" | "ALTERNATIVE"
+    # Same YTD-accumulator contract as Canada's ytd_pensionable_earnings
+    # etc. above: None (not zero) means "not wired for this calculation" —
+    # the calculation runs its dormant, current-period-annualized path;
+    # once real accumulator data is loaded, these carry the cumulative
+    # figures needed for the annual/alternative methods' true-up.
+    ytd_director_ni_gross: Decimal = None
+    ytd_director_ni_employee_paid: Decimal = None
+    ytd_director_ni_employer_paid: Decimal = None
+    # Alternative method only (§9.2's "final annual reconciliation") —
+    # caller-supplied (not auto-derived from pay_date/frequency here);
+    # False for every payslip until the caller marks this employee's
+    # final NIC period of the tax year.
+    is_final_ni_period: bool = False
+
+    # France (ZP-FR-ENG-001, 2026-09-24) — pre-resolved France statutory
+    # inputs, threaded through exactly like rate_map/slabs so
+    # engine/countries/france.py stays a pure function of its context (no
+    # DB access from the engine layer, matching every other country's
+    # calculator). None/absent for every non-France calculation — existing
+    # calculations for every other country are unaffected. Resolved
+    # per-employee, per-payroll-date by service.py (the same shape as the
+    # Germany `germany_*` fields above).
+    france_payroll_date: date = None          # pay date — gates intrayear content (SMIC / PAS neutral grid)
+    france_pas: dict = field(default_factory=dict)
+    #     personalized DGFiP authority rate:
+    #     {rate_pct, rate_id, received_date, effective_from, effective_to, status} | {}
+    france_establishment: dict = field(default_factory=dict)
+    #     SIRET-scoped (FR-002/FR-013):
+    #     {siret, at_mp_rate_pct, at_mp_risk_code, vm_rate_pct, fnal_class,
+    #      cfp_class, effectif, commune_insee}
+    france_ytd: dict = field(default_factory=dict)
+    #     accumulators as of BEFORE this period (None-means-not-wired
+    #     contract, same as the ytd_* fields above):
+    #     {rgdu_remuneration, rgdu_smic_reference, pass_used,
+    #      agirc_t1_used, agirc_t2_used}
+    france_cadre: bool = False                 # cadre/non-cadre — drives Apec eligibility
+    france_idcc_minimum: Decimal = None        # IDCC conventional minimum for classification + period | None = no check
+    france_social_coverage: str = "GENERAL"    # "GENERAL" | unsupported special value → france.py BLOCKS
+    france_working_hours: Decimal = None       # hours worked in the period; None = full-time 151.67
+    france_overtime_hours: Decimal = None      # OT/CB hours in the period, for the RGDU SMIC add-back
+    france_employee_id: int = None
+    france_organization_id: int = None
+
+    ireland_pay_date: date = None
+    ireland_rpn: dict = field(default_factory=dict)
+    ireland_employee: dict = field(default_factory=dict)
+    ireland_myfuturefund: dict = field(default_factory=dict)
+    ireland_ytd: dict = field(default_factory=dict)
+    ireland_paye_payable: Decimal = None
+    ireland_usc_payable: Decimal = None
+    ireland_usc_paid_ytd: Decimal = None
+    ireland_prsi_reckonable: Decimal = None
+    ireland_mff_base: Decimal = None
+    ireland_employee_id: int = None
+    ireland_organization_id: int = None
+
+    # Sweden (ZP-SE-ENG-001 §2/§5/§6) — pre-resolved applicability facts.
+    # The service layer resolves these from the worker's effective-dated
+    # EmployeeStatutoryProfile (se_* columns) exactly the way ireland_*/
+    # france_* above are pre-resolved before dispatch; sweden.py BLOCKS
+    # rather than guesses any that are missing.
+    sweden_statutory_profile: object = None  # EmployeeStatutoryProfile | None
+    se_organization_id: int = None
+    se_employee_id: int = None
+    # Remuneration already paid for the same employer/person/calendar month
+    # BEFORE this payment — the youth SEK-threshold allocator's prior
+    # figure (spec §6 "Threshold allocation"); None = this is the month's
+    # first/only payment (previews, single-run calculation).
+    se_month_to_date_prior: Decimal = None
+    # Employer-contribution base override — None = ctx.gross (service
+    # assembles gross already net of contribution-ineligible earnings).
+    se_contribution_base: Decimal = None
+    # Cash actually available to withhold — the §5 cash-limit rule needs
+    # it separately from taxable gross (benefit-only payments have taxable
+    # income but no cash). None = ctx.gross.
+    se_cash_pay: Decimal = None
+    # SINK base override — None = taxable gross (se_sink_base is only set
+    # when service-side contribution exclusions apply to SINK too).
+    se_sink_base: Decimal = None
+    # Employer pension-cost LEDGER for the period (SE-007): the SLP base.
+    # Never employee gross; None = no ledger entries yet → SLP 0.
+    se_pension_cost_base: Decimal = None
+
+    # ── Italy (ZP-IT-ENG-001) — pre-resolved applicability facts ────────────
+    # Resolved by the service layer from the worker's effective-dated
+    # EmployeeStatutoryProfile (it_* columns) and the org's
+    # EmployerItalyProfile, exactly the way sweden_*/ireland_*/france_* above
+    # are pre-resolved before dispatch. italy.py BLOCKS rather than guesses
+    # any that are missing.
+    italy_statutory_profile: object = None   # EmployeeStatutoryProfile | None
+    italy_employer_profile: object = None     # EmployerItalyProfile | None
+    italy_organization_id: int = None
+    it_employee_id: int = None
+    # Italian "imponibile sociale" override — the wage base social
+    # contributions apply to, which is NOT ctx.gross. None = ctx.gross, which
+    # the service only uses when it has already assembled gross net of
+    # contribution-ineligible earnings.
+    it_contributory_base: Decimal = None
+    # Fringe-benefit amount in the period, for the §11 evidence check. None = 0.
+    it_fringe_amount: Decimal = None
+    # Year-to-date facts from COMMITTED payroll in the same calendar tax year
+    # (preview never writes them, IT-055). None = no prior payroll this year,
+    # a legitimate zero.
+    it_ytd_contributory_base_prior: Decimal = None   # IT-016 1% / IT-017 ceiling
+    it_ytd_taxable_prior: Decimal = None             # IT-005 annual forecast
+    it_ytd_irpef_withheld_prior: Decimal = None      # IT-005 cumulative withholding
+    it_mensilita_paid_prior: int = None
+    # Mensilità in THIS payment (2 when the tredicesima is paid with December).
+    # None = 1.
+    it_period_mensilita: int = None
+    # Total mensilità for the worker's year (CCNL; pro-rated by the service for
+    # a mid-year hire). None = the it_mensilita_default content row.
+    it_mensilita: int = None
+    # Days of employment in the tax year, for pro-rating the §4 deductions.
+    # Required — italy.py blocks when it is absent.
+    it_work_days_in_year: int = None
+    # Fallbacks used only when the employer profile has no CSC/CA captured —
+    # the service populates these from EmployerTaxProfile rows.
+    it_employer_csc: str = None
+    it_employer_ca: str = None
+    # §5 local-surtax withholding: each DETERMINED amount and how much of it is
+    # already withheld this year. None = not recorded, which BLOCKS; a worker
+    # with nothing owed carries an explicit 0.
+    it_addreg_saldo_due: Decimal = None              # prior-year regional balance
+    it_addreg_saldo_withheld_prior: Decimal = None
+    it_addcom_saldo_due: Decimal = None              # prior-year municipal balance
+    it_addcom_saldo_withheld_prior: Decimal = None
+    it_addcom_acconto_due: Decimal = None            # current-year municipal advance
+    it_addcom_acconto_withheld_prior: Decimal = None
+    # §22: a termination period withholds every outstanding amount at once.
+    it_is_termination_period: bool = False
+    # §6 / IT-018 INPS contributory minimum. Full-time: contributory days the
+    # period covers. Part-time: hours paid + CCNL weekly hours. One of the two
+    # must be supplied or italy.py blocks.
+    it_contributory_days: Decimal = None
+    # True when the period covers the whole month: the engine then uses the
+    # configured it_inps_full_month_days instead of a caller-supplied count.
+    it_contributory_full_month: bool = False
+    # True for a part-time worker (contractual hours below the CCNL week):
+    # it_part_time_hours is then required.
+    it_is_part_time: bool = False
+    it_part_time_hours: Decimal = None
+    it_ccnl_weekly_hours: Decimal = None
+    # §11 benefits. it_fringe_amount (above) is this period's fringe value;
+    # the year-to-date value is required whenever there is any.
+    it_ytd_fringe_prior: Decimal = None
+    # IT-006 conguaglio: True for the year-end settlement period (termination
+    # always settles too). The wedge sum paid this year is then required.
+    it_is_conguaglio_period: bool = False
+    it_ytd_wedge_paid_prior: Decimal = None
+    # IT-011 wedge-sum recovery plan opened at a previous conguaglio. None =
+    # not recorded, which BLOCKS; nothing being recovered is an explicit 0.
+    it_wedge_recovery_outstanding: Decimal = None
+    it_wedge_recovery_instalment: Decimal = None
+    it_meal_electronic_count: Decimal = None
+    it_meal_electronic_value: Decimal = None
+    it_meal_paper_count: Decimal = None
+    it_meal_paper_value: Decimal = None
+
+    # Correlation ID for this calculation, for log/debugging correlation
+    # only — never read by any country calculator, never persisted, never
+    # affects a figure. None means "caller didn't supply one," in which
+    # case engine/resolver.py's calculate_payroll() generates one.
+    trace_id: str = None
 
 
 @dataclass
@@ -120,7 +927,12 @@ class PayrollResult:
 
     # Attendance
     payroll_days: int = PAYROLL_DAYS
+    # Real pay-period length this run actually spans (see PayrollContext.
+    # calendar_days). Echoed back so service.py can persist it as
+    # total_working_days without recomputing it.
+    calendar_days: int = PAYROLL_DAYS
     unpaid_leave_days: int = 0
+    # calendar_days − unpaid_leave_days (floored at 0).
     payable_days: int = PAYROLL_DAYS
     per_day_salary: Decimal = Decimal("0")
     attendance_deduction: Decimal = Decimal("0")
@@ -137,6 +949,10 @@ class PayrollResult:
     employee_pf: Decimal = Decimal("0")
     employee_esi: Decimal = Decimal("0")
     professional_tax: Decimal = Decimal("0")
+    # India Labour Welfare Fund (ZP-TAX-IN-2026-27-001 §15) — genuinely
+    # separate from professional_tax above, not a breakdown of it.
+    employee_lwf: Decimal = Decimal("0")
+    employer_lwf: Decimal = Decimal("0")
     tds: Decimal = Decimal("0")
     annual_tax: Decimal = Decimal("0")
     # India: monthly breakdown of what's already folded into `tds` above
@@ -153,8 +969,175 @@ class PayrollResult:
     # country calculator explicitly sets it — no existing country's
     # output changes just because these fields now exist.
     study_loan_deduction: Decimal = Decimal("0")
+    # UK only: the concurrent Postgraduate Loan line — see PayrollContext.
+    # has_postgrad_loan above. Always 0 unless that flag is explicitly set.
+    postgrad_loan_deduction: Decimal = Decimal("0")
     church_tax: Decimal = Decimal("0")
+    # Germany: Solidaritätszuschlag — monthly amount from an executed BMF
+    # PAP run (germany_pap adapter's SOLZLZZ output), mirrored as its own
+    # field so service.py can persist it onto PayslipItem.soli. PURELY
+    # informational like surcharge/cess above: the Lohnsteuer+Soli are
+    # already folded into `tds` for every Germany payslip (see
+    # engine/countries/germany.py), so this is NEVER re-summed into
+    # total_employee_deductions/net_pay anywhere. Zero for every
+    # country/employee until a real PUBLISHED PapAlgorithmAsset is
+    # released AND a real PapExecutor computes it.
+    soli: Decimal = Decimal("0")
     cpp2: Decimal = Decimal("0")
+    # Canada: CPP/QPP first-layer BASE (4.95%) vs. FIRST-ADDITIONAL
+    # (1.00%) breakdown (AC-11) — PURELY informational, like surcharge/
+    # cess above: proportions the already-final social_security amount,
+    # never recomputes it. Zero until
+    # shared._CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES is flipped AND
+    # the two separate rate rows are configured — see
+    # engine/countries/canada.py's own comment at the computation site.
+    cpp_base_amount: Decimal = Decimal("0")
+    cpp_first_additional_amount: Decimal = Decimal("0")
+
+    # Canada: cumulative YTD figures AFTER this period, for service.py to
+    # persist into PayrollYtdAccumulator/PayslipItem.ytd_snapshot without
+    # recomputing. None (every country/employee until YTD is wired) means
+    # "not applicable" — see PayrollContext's matching ytd_* fields above.
+    ytd_pensionable_earnings: Decimal = None
+    ytd_cpp2_pensionable_earnings: Decimal = None
+    ytd_insurable_earnings: Decimal = None
+    ytd_basic_exemption_used: Decimal = None
+    # US: cumulative figures AFTER this period, same None-means-"not
+    # applicable" contract as the Canada fields above — see
+    # PayrollContext's matching ytd_*_before fields.
+    ytd_ss_wages_after: Decimal = None
+    ytd_futa_wages_after: Decimal = None
+    ytd_medicare_wages_after: Decimal = None
+    # Australia: cumulative SG-qualifying-earnings AFTER this period, same
+    # None-means-"not applicable" contract as the US fields above — see
+    # PayrollContext's matching ytd_sg_qualifying_earnings_before field.
+    ytd_sg_qualifying_earnings_after: Decimal = None
+    # Australia WHM Schedule 15 cumulative $45,000 test — cumulative WHM
+    # earnings AFTER this period, same None-means-"not applicable" contract
+    # as ytd_sg_qualifying_earnings_after above. See PayrollContext's
+    # matching ytd_whm_earnings_before field for the full explanation,
+    # including why crossing the cap sets au_whm_cap_exceeded below rather
+    # than computing a real above-cap withholding amount.
+    ytd_whm_earnings_after: Decimal = None
+    # Cayman Islands mandatory pension (KY-008) — cumulative mandatory
+    # (non-AVC) pensionable earnings AFTER this period, same
+    # None-means-"not applicable"/dormant contract as every YTD-adjacent
+    # field above. See PayrollContext's matching
+    # ytd_ky_mandatory_pensionable_earnings_before field.
+    ytd_ky_mandatory_pensionable_earnings_after: Decimal = None
+    # Singapore CPF (SG-010) — YTD OW / AW subject to CPF AFTER this period;
+    # None when no accumulator was loaded. See PayrollContext's matching
+    # ytd_cpf_ow_subject_before/ytd_cpf_aw_subject_before.
+    ytd_cpf_ow_subject_after: Decimal = None
+    ytd_cpf_aw_subject_after: Decimal = None
+    ytd_cpf_aw_paid_after: Decimal = None
+    # Singapore calculation trace (inputs, rules, rates, ceilings, AW
+    # estimate/true-up allocations, rounding, SDL/SHG/FWL/LQS/IR21 and row
+    # provenance) — persisted verbatim on PayslipItem.sgp_calculation_trace.
+    # None for every non-SG calculation.
+    sgp_calculation_trace: dict = None
+    # Hong Kong calculation trace (MPF coverage/threshold branch, SMW
+    # segments, classification, provenance) — persisted verbatim on
+    # PayslipItem.hk_calculation_trace; and the statutory-profile version
+    # the calculation used (pinned on PayslipItem.employee_statutory_profile_id).
+    hk_calculation_trace: dict = None
+    hk_statutory_profile_id: int = None
+
+    # Guyana PAYE statutory credit (GY-010) — remaining unconsumed credit
+    # balance AFTER this period (calculated liability minus whatever
+    # portion of the credit this period's calculation consumed, floored
+    # at 0). Same None-means-"not applicable"/dormant contract as every
+    # YTD-adjacent field above. See PayrollContext's matching
+    # ytd_gy_paye_credit_before field for the disclosed scope limitation.
+    ytd_gy_paye_credit_after: Decimal = None
+    # Puerto Rico (ZP-PR-ENG-001) — cumulative wages toward each of PR's
+    # independent wage-base caps/thresholds AFTER this period, same
+    # None-means-"not applicable"/dormant contract as every YTD-adjacent
+    # field above. See PayrollContext's matching ytd_pr_*_before fields.
+    ytd_pr_ss_wages_after: Decimal = None
+    ytd_pr_medicare_wages_after: Decimal = None
+    ytd_pr_futa_wages_after: Decimal = None
+    ytd_pr_unemployment_wages_after: Decimal = None
+    ytd_pr_sinot_wages_after: Decimal = None
+    # PR-018: whether a real employer-specific DTRH unemployment rate was
+    # configured this period — False means employer_sui was computed as
+    # $0 for a missing-rate reason, not a genuine 0% statutory rate; the
+    # Payroll Run Validation / Employee Trace Drawer surfaces this rather
+    # than silently showing $0 as if it were a real figure.
+    pr_unemployment_rate_configured: bool = True
+    # PR-021: whether a real employer-specific CFSE workers'-compensation
+    # rate was configured this period — False means
+    # au_workers_compensation_premium was computed as $0 for a
+    # missing-rate reason (never a fabricated policy premium), same
+    # contract as pr_unemployment_rate_configured above.
+    pr_cfse_rate_configured: bool = True
+    # True once ytd_whm_earnings_after crosses $45,000 for an employee
+    # whose WHM YTD tracking is wired — informational (the withholding
+    # itself is now genuinely computed using the real above-cap brackets
+    # in the normal case; see engine/countries/australia.py's SCALE_WHM
+    # branch). Only reverts to a pure "needs manual review, not computed"
+    # flag in the one disclosed exception: a custom whm_rate override on
+    # top of YTD tracking, since the above-cap base amounts are fixed
+    # figures anchored to the statutory 15% rate, not derived from an
+    # arbitrary configured one.
+    au_whm_cap_exceeded: bool = False
+    # Australia Payday Super (§10) — service.create_au_sg_liability's own
+    # inputs, computed once here (where the MCB cap/rate are already
+    # resolved) rather than re-derived in service.py from raw numbers.
+    # None whenever ytd_sg_qualifying_earnings_after is None (dormant) —
+    # same contract as every other YTD-adjacent field in this file.
+    sg_qualifying_earnings_period: Decimal = None
+    sg_rate_pct: Decimal = None
+    sg_mcb_reached: bool = None
+    # Canada Option 2 cumulative-averaging income tax withholding —
+    # cumulative figures AFTER this period, same None-means-"not
+    # applicable" contract as the ytd_* fields above. See PayrollContext's
+    # matching option2_* fields for the full explanation.
+    option2_cumulative_gross_after: Decimal = None
+    option2_periods_elapsed_after: int = None
+    option2_federal_tax_withheld_after: Decimal = None
+    option2_provincial_tax_withheld_after: Decimal = None
+    # UK: cumulative Directors NIC figures AFTER this period — same
+    # None-means-"not applicable" contract as Canada's fields above.
+    # Populated whenever ctx.is_director is True, REGARDLESS of which
+    # branch computed this period's ni_employee/employer_ni (annual
+    # method, alternative method's ordinary calc, or the fully-dormant
+    # fallback) — accumulation must continue correctly no matter which
+    # path priced this period.
+    ytd_director_ni_gross: Decimal = None
+    ytd_director_ni_employee_paid: Decimal = None
+    ytd_director_ni_employer_paid: Decimal = None
+
+    # Canada: the org's aggregate Ontario remuneration YTD AFTER this
+    # period, for service.py to persist into OrganizationYtdAccumulator
+    # without recomputing. None unless Ontario EHT was actually wired for
+    # this calculation — see PayrollContext.on_eht_ytd_remuneration_before.
+    on_eht_ytd_remuneration_after: Decimal = None
+    # Jamaica: the employer's aggregate MONTHLY emoluments AFTER this
+    # employee's own period, for service.py to persist into
+    # OrganizationYtdAccumulator (its own monthly tax_year key — see
+    # service.py's _upsert_jm_heart_ytd). None unless HEART's org-level
+    # accumulator was actually wired for this calculation — see
+    # PayrollContext.jm_heart_ytd_remuneration_before.
+    jm_heart_ytd_remuneration_after: Decimal = None
+    # Canada: the same after-period contract as on_eht_ytd_remuneration_after
+    # above, for BC EHT, Manitoba HE Levy and NL HAPSET respectively.
+    bc_eht_ytd_remuneration_after: Decimal = None
+    # Australia state/territory employer payroll tax — same after-period
+    # contract as on_eht_ytd_remuneration_after above. See
+    # PayrollContext.au_state_payroll_tax_ytd_remuneration_before for why
+    # this is one shared field across all 8 states.
+    au_state_payroll_tax_ytd_remuneration_after: Decimal = None
+    mb_he_levy_ytd_remuneration_after: Decimal = None
+    nl_hapset_ytd_remuneration_after: Decimal = None
+    qc_hsf_ytd_remuneration_after: Decimal = None
+    # UK: the org's aggregate annual statutory pay bill YTD AFTER this
+    # period, for the Apprenticeship Levy — same after-period contract as
+    # on_eht_ytd_remuneration_after above.
+    appr_levy_ytd_pay_bill_after: Decimal = None
+    # UK: the org's cumulative employer_ni total YTD AFTER this period —
+    # same after-period contract as appr_levy_ytd_pay_bill_after above.
+    employer_ni_ytd_after: Decimal = None
 
     # Employer-side contributions
     employer_pf: Decimal = Decimal("0")
@@ -164,10 +1147,106 @@ class PayrollResult:
     employer_pension: Decimal = Decimal("0")
     employer_ni: Decimal = Decimal("0")
     employer_futa: Decimal = Decimal("0")
+    # Canada: employer-side CPP2/QPP2 — see cpp2 above; distinct field
+    # because it is NOT an employee deduction and must never be summed
+    # into total_employee_deductions (engine/standard.py).
+    employer_cpp2: Decimal = Decimal("0")
+    # Canada: employer-side counterpart to cpp_base_amount/
+    # cpp_first_additional_amount above — same purely-informational
+    # contract, proportioning employer_social_security.
+    employer_cpp_base: Decimal = Decimal("0")
+    employer_cpp_first_additional: Decimal = Decimal("0")
+    # India: EPS diversion + residual — purely-informational breakdown of
+    # employer_pf (§9.1/§9.3), same contract as employer_cpp_base above:
+    # employer_eps + employer_pf_residual == employer_pf always, never an
+    # additional cost on top of it.
+    employer_eps: Decimal = Decimal("0")
+    employer_pf_residual: Decimal = Decimal("0")
+    # India: EDLI — a genuinely SEPARATE employer-only statutory liability
+    # (§9.1), additional to employer_pf, not a breakdown of it.
+    employer_edli: Decimal = Decimal("0")
+    # India: employer NPS contribution (§3.2) — same "genuinely separate,
+    # no hardcoded fallback" contract as employer_edli above. Also
+    # excluded from taxable salary, New Regime only — see india.py.
+    employer_nps: Decimal = Decimal("0")
     # US: State Unemployment Insurance, tenant/employer-specific (see
     # EmployerTaxProfile). Zero until an org has a configured profile —
     # every other country's output is unaffected.
     employer_sui: Decimal = Decimal("0")
+    # US: employer-side counterpart to state_program_deductions below (e.g.
+    # DC's Universal Paid Leave is entirely employer-funded).
+    employer_state_program_contributions: Decimal = Decimal("0")
+    # Canada: Ontario Employer Health Tax — banded on the ORG's aggregate
+    # Ontario remuneration, not this employee's own pay
+    # (ZP-TAX-CA-2026-001 §15/§16). Zero until the org-level accumulator
+    # is wired for this calculation (on_eht_ytd_remuneration_before is
+    # None otherwise) — see engine/countries/canada.py's calculate().
+    employer_eht: Decimal = Decimal("0")
+    # Australia state/territory employer payroll tax (ZP-TAX-AU-2026-27-001
+    # §14-18) — banded on the ORG's aggregate taxable wages for whichever
+    # state applies, not this employee's own pay. AU-D05: "must not reduce
+    # employee net pay" — an employer-liability field only, never summed
+    # into total_employee_deductions (see engine/standard.py). Zero until
+    # the org-level accumulator is wired (au_state_payroll_tax_ytd_
+    # remuneration_before is None otherwise).
+    employer_payroll_tax: Decimal = Decimal("0")
+    # Australia statutory deductions — child support/garnishee (§19,
+    # Phase 5). A real EMPLOYEE deduction (unlike employer_payroll_tax
+    # above) — summed into total_employee_deductions in engine/
+    # standard.py. `au_statutory_deductions_detail` is the per-order
+    # breakdown (order_id/eligible/reason/deduction_amount), purely
+    # informational for the calculation trace/payslip note, never
+    # re-summed independently of the total.
+    au_statutory_deductions_total: Decimal = Decimal("0")
+    au_statutory_deductions_detail: list = field(default_factory=list)
+    # Australia workers compensation premium (§18, employer overlay,
+    # ZP-TAX-AU-2026-27-001, Phase 9 follow-up 2026-09-17) — a
+    # tenant-specific, agency-assigned rate resolved from
+    # ctx.employer_tax_profiles["AU_WORKERS_COMP"] (see
+    # service.get_employer_tax_profiles), NEVER a statutory default (no
+    # such default exists — every real AU employer's premium is state-
+    # scheme/industry-classification/experience-rated, assigned by an
+    # insurer/authority notice, per §18's own "Why it is not a
+    # jurisdiction default" column). Zero unless a profile is configured.
+    # An employer-liability-only field, same AU-D05 contract as
+    # employer_payroll_tax above — never summed into
+    # total_employee_deductions.
+    au_workers_compensation_premium: Decimal = Decimal("0")
+    # Australia: §25 calculation trace (Phase 9 follow-up, 2026-09-17) —
+    # AU-only structured payload of how PAYG/STSL/MLS/SG/state-payroll-tax
+    # were each derived this period (scale, weekly-x, coefficient a/b,
+    # bands used, etc.), persisted verbatim onto PayslipItem.
+    # au_calculation_trace by service.add_payslip_item. None when
+    # australia.py's calculate() has nothing to report (e.g. non-AU
+    # employees never populate this at all).
+    au_calculation_trace: dict = None
+    # UK: Apprenticeship Levy — same org-level-accumulator-banded contract
+    # as employer_eht above (ZP-TAX-UK-2026-27-001 §14). Zero until the
+    # org-level accumulator is wired (appr_levy_ytd_pay_bill_before is
+    # None otherwise).
+    employer_apprenticeship_levy: Decimal = Decimal("0")
+    # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13 gap-
+    # closure Part 3) — "ELIGIBLE_JOBHOLDER"/"NON_ELIGIBLE_JOBHOLDER"/
+    # "ENTITLED_WORKER", or None (dormant switch, or date_of_birth
+    # unavailable). Purely informational — never changes employee_pension/
+    # employer_pension above.
+    auto_enrolment_status: str | None = None
+    # UK: HMRC tax week (1-53) / tax month (1-12) this payslip falls in
+    # (ZP-TAX-UK-2026-27-001 §18.1 gap-closure Part 6) — pure calendar
+    # metadata, computed unconditionally whenever pay_date is known.
+    tax_week: int | None = None
+    tax_month: int | None = None
+    # Canada: BC EHT, Manitoba HE Levy, NL HAPSET — same org-level-
+    # accumulator-banded contract as employer_eht above, each its own
+    # independent zero-until-wired field (ZP-TAX-CA-2026-001 §15).
+    employer_bc_eht: Decimal = Decimal("0")
+    employer_mb_he_levy: Decimal = Decimal("0")
+    employer_nl_hapset: Decimal = Decimal("0")
+    # Quebec: Health Services Fund (org-level-accumulator-banded, sliding
+    # rate) and labour standards contribution (per-employee capped, no
+    # accumulator) — see engine/countries/canada.py's module docstring.
+    employer_qc_hsf: Decimal = Decimal("0")
+    employer_qc_labour_standards: Decimal = Decimal("0")
     # UK: employee-side Workplace Pension deduction — distinct from
     # employer_pension above. Zero unless a country calculator explicitly
     # sets it (only uk.py does, and only when an employee-pension rate is
@@ -183,10 +1262,228 @@ class PayrollResult:
     federal_income_tax: Decimal = Decimal("0")
     state_income_tax: Decimal = Decimal("0")
     local_tax: Decimal = Decimal("0")
+    # US: state-level statutory payroll program (California SDI first;
+    # see engine/countries/us.py). A real employee-side deduction, NOT
+    # part of the informational federal/state/local income-tax breakdown
+    # above — it's summed into total_deductions like PF/ESI/professional_tax.
+    state_disability_insurance: Decimal = Decimal("0")
+    # US: every OTHER state-level statutory payroll program beyond SDI
+    # (Paid Leave/TDI/Universal Paid Leave/WA Cares/NJ's 4 programs/etc.,
+    # ZP-TAX-US-2026-001 §5) — one combined employee-side total; see
+    # us.py's calculate() and PayslipItem.state_program_deductions'
+    # comment for the "one field now, split later" reasoning.
+    state_program_deductions: Decimal = Decimal("0")
 
     # Totals
     total_deductions: Decimal = Decimal("0")
     net_pay: Decimal = Decimal("0")
+
+    # Germany (Phase 7) — statutory calculation provenance, carried through
+    # so service.py can freeze it onto the finalized PayslipItem
+    # (employee_statutory_profile_id / germany_calculation_snapshot).
+    # None for every non-German calculation and for any German calculation
+    # that doesn't reach this point (see engine/countries/germany.py —
+    # currently it never does, since PAP execution is unconditionally
+    # blocked; written correctly for when that changes).
+    germany_statutory_profile_id: int = None
+    germany_calculation_snapshot: dict = None
+    # Phase 8BU: non-empty ONLY for a PARTIAL Germany result (RV/ALV/GKV/
+    # PV/employer-levies genuinely computed; wage_tax/soli/church_tax
+    # genuinely unavailable for this specific employee/date — never
+    # fabricated as zero-because-complete). None/empty for every
+    # COMPLETE result and every non-German calculation.
+    germany_unavailable_components: list = None
+    # India: Code on Wages §8.3 aggregate-deduction cap ("authorized
+    # deductions during a wage period" limited to 50% of wages, AC-18) —
+    # a pure COMPLIANCE FLAG, never a recalculation: this engine must
+    # NEVER silently reduce a statutory levy to keep net pay positive, so
+    # exceeding the cap is surfaced here for a human/compliance workflow
+    # to resolve (excess-recovery-under-a-valid-rule is out of scope —
+    # this engine has no such carry-forward mechanism), not auto-fixed.
+    # False for every non-India country (this is India's own Labour Code,
+    # not a universal rule) and False whenever the cap genuinely isn't
+    # exceeded. See engine/standard.py's calculate() for the computation
+    # (total employee-side deductions EXCLUDING attendance/loss-of-pay,
+    # which isn't an "authorized deduction" in the Code's sense, against
+    # 50% of gross wages).
+    wage_deduction_cap_exceeded: bool = False
+
+    # France (ZP-FR-ENG-001, 2026-09-24) — net values and per-line
+    # contribution trace, additive/None for every non-France calculation.
+    # FR-042: net social, net imposable and net à payer are three SEPARATE
+    # values — never one "net". fr_employee_total / fr_employer_total are
+    # the combined France employee/employer totals (fr_employee_total is
+    # explicitly summed into total_deductions by engine/standard.py — the
+    # same mechanism au_statutory_deductions_total already uses).
+    fr_net_social: Decimal = None
+    fr_net_imposable: Decimal = None
+    fr_employee_total: Decimal = Decimal("0")
+    fr_employer_total: Decimal = Decimal("0")
+    fr_contributions: list = None              # per-line base→contribution trace (FR-040)
+    fr_bases: dict = None                      # independent statutory bases (FR-005)
+    fr_pas_withheld: Decimal = Decimal("0")
+    fr_pas_rate_type: str = None               # "PERSONALIZED" | "NEUTRAL"
+    fr_pas_rate_pct: Decimal = None
+    fr_pas_rate_id: str = None
+    fr_calculation_snapshot: dict = None
+    # RGDU/CSG accumulator state AFTER this period — the service persists
+    # it on commit so the next period accumulates (FR-023).
+    fr_ytd_after: dict = None
+    # Non-empty whenever a mandatory rate/base input is genuinely not
+    # configured — service.py turns this into a BLOCKED payroll (FR-027:
+    # unknown mandatory rate = NOT_READY, never zero-as-final).
+    fr_not_configured: list = None
+
+    ie_paye: Decimal = Decimal("0")
+    ie_employee_total: Decimal = Decimal("0")
+    ie_paye_basis: str = None
+    ie_paye_unrounded: Decimal = None
+    ie_standard_rate_pay: Decimal = Decimal("0")
+    ie_higher_rate_pay: Decimal = Decimal("0")
+    ie_tax_credit_applied: Decimal = Decimal("0")
+    ie_rpn_number: str = None
+    ie_rpn_snapshot_id: int = None
+    ie_rpn_hash: str = None
+    ie_rpn_issued_at: str = None
+    ie_usc: Decimal = Decimal("0")
+    ie_usc_unrounded: Decimal = None
+    ie_usc_payable_ytd_after: Decimal = None
+    ie_employee_prsi: Decimal = Decimal("0")
+    ie_employer_prsi: Decimal = Decimal("0")
+    ie_employer_prsi_total: Decimal = Decimal("0")
+    ie_prsi_class: str = None
+    ie_prsi_declaration: str = None
+    ie_prsi_ax_credit: Decimal = Decimal("0")
+    ie_prsi_contribution_weeks: Decimal = None
+    ie_prsi_weekly_reckonable: Decimal = None
+    ie_prsi_reckonable_ytd_after: Decimal = None
+    ie_mff_employee: Decimal = Decimal("0")
+    ie_mff_employer: Decimal = Decimal("0")
+    ie_mff_state_topup: Decimal = Decimal("0")
+    ie_mff_status: str = None
+    ie_mff_contributory: bool = False
+    ie_mff_ceased_reason: str = None
+    ie_mff_earnings_ytd_after: Decimal = None
+    ie_lpt: Decimal = Decimal("0")
+    ie_lpt_instructed: bool = False
+    ie_lpt_rate_pct: Decimal = None
+    ie_employee_pension: Decimal = Decimal("0")
+    ie_employer_pension: Decimal = Decimal("0")
+    ie_nmw_rate: Decimal = None
+    ie_nmw_band: str = None
+    ie_effective_hourly: Decimal = None
+    ie_tax_year: int = None
+    ie_calculation_trace: dict = None
+    ie_ytd_after: dict = None
+
+    # Sweden (ZP-SE-ENG-001) — returned by engine/countries/sweden.py and
+    # propagated by engine/standard.py, same additive pattern as the ie_*
+    # fields above. Every default keeps every other country's result
+    # byte-for-byte unchanged.
+    se_employer_contribution: Decimal = Decimal("0")
+    se_employer_contribution_rate: Decimal = None
+    se_employer_contribution_cohort: str = None      # STANDARD | OLDER | ZERO | YOUTH
+    se_employer_contribution_components: list = field(default_factory=list)
+    se_employer_contribution_base: Decimal = Decimal("0")
+    se_youth_applied: bool = False
+    se_month_compensation: Decimal = None
+    se_preliminary_tax: Decimal = Decimal("0")
+    se_tax_strategy: str = None                      # TAX_TABLE | SUPPLEMENTARY | ONE_TIME | SINK | DECISION_* | CASH_LIMIT
+    se_withholding_unrounded: Decimal = None
+    se_tax_table: str = None
+    se_tax_column: str = None
+    se_income_role: str = None
+    se_tax_status: str = None
+    se_occupational_pension_employee: Decimal = Decimal("0")
+    se_occupational_pension_employer: Decimal = Decimal("0")
+    se_pension_plan: str = None
+    se_slp: Decimal = Decimal("0")
+    se_employer_total: Decimal = Decimal("0")
+    se_employee_total: Decimal = Decimal("0")
+    se_calculation_trace: dict = None
+
+    # ── Italy (ZP-IT-ENG-001) ───────────────────────────────────────────────
+    # Employer side, split per IT-057: social security is what the employer
+    # REMITS to INPS; employer_contributions adds the TFR accrual, a reserve
+    # the employer funds but does not remit with the month's contributions.
+    it_employer_social_security: Decimal = Decimal("0")
+    it_employer_contributions: Decimal = Decimal("0")
+    # Employee side: INPS IVS + CIGS + other matrix families + FIS + the
+    # additional 1% IVS.
+    it_employee_contributions: Decimal = Decimal("0")
+    # The base IVS was charged on (after the cohort ceiling, IT-017).
+    it_contributory_base: Decimal = Decimal("0")
+    it_contributory_capped: bool = False
+    it_contributory_cap_cohort: str = None
+    it_contributory_cap_amount: Decimal = Decimal("0")   # base excluded by the ceiling
+    it_contributory_cap_note: str = None
+    # The INPS classification scope actually matched, e.g. "CSC_70501".
+    it_inps_scope: str = None
+    it_inps_components: list = field(default_factory=list)
+    it_ivs_additional: Decimal = Decimal("0")            # IT-016
+    # TFR accrual (net of the 0.50% INPS offset) and its routed destination.
+    it_tfr_amount: Decimal = Decimal("0")
+    it_tfr_gross_accrual: Decimal = Decimal("0")
+    it_tfr_inps_offset: Decimal = Decimal("0")
+    it_tfr_destination: str = None                   # AZIENDA | FONDO_PENSIONE | FONDO_TESORERIA
+    it_tfr_routing_complete: bool = False
+    # IRPEF: period withholding plus the annual figures it was derived from.
+    it_taxable_income: Decimal = Decimal("0")
+    it_irpef: Decimal = Decimal("0")
+    it_irpef_annual: Decimal = Decimal("0")          # net, after deductions
+    it_irpef_gross_annual: Decimal = Decimal("0")
+    it_detrazione_lavoro: Decimal = Decimal("0")
+    it_wedge_additional_deduction: Decimal = Decimal("0")
+    # FIS employee share (IT-020) — 1/3 of the fund's 0.50%/0.80% total, so
+    # it lands inside it_employee_contributions and is broken out here for
+    # the payslip. Already inside it_employee_contributions; never added
+    # again.
+    it_fis_employee: Decimal = Decimal("0")
+    # §4 non-taxable sum — ADDED to net pay, never netted into IRPEF (IT-009).
+    it_wedge_tax_free_sum: Decimal = Decimal("0")
+    it_wedge_band_pct: Decimal = Decimal("0")
+    # §5 this year's local surtax LIABILITY at the tax domicile, settled at the
+    # following year's conguaglio — traced, never withheld as such.
+    it_regional_tax_annual: Decimal = Decimal("0")
+    it_municipal_tax_annual: Decimal = Decimal("0")
+    it_local_tax_withheld: bool = False
+    # §5 what IS withheld this period: three distinct deductions, each an
+    # instalment of an already-determined amount (part of it_employee_total).
+    it_addreg_saldo_withheld: Decimal = Decimal("0")
+    it_addcom_saldo_withheld: Decimal = Decimal("0")
+    it_addcom_acconto_withheld: Decimal = Decimal("0")
+    it_local_tax_withheld_amount: Decimal = Decimal("0")
+    # §6: True when the contributory minimum raised the INPS base above pay.
+    it_contributory_minimum_applied: bool = False
+    it_tax_domicile_comune: str = None
+    it_tax_domicile_region: str = None
+    it_fringe_amount: Decimal = Decimal("0")
+    it_fringe_child_declared: bool = False
+    it_fringe_taxable: Decimal = Decimal("0")
+    it_fringe_ytd_after: Decimal = Decimal("0")
+    it_meal_voucher_taxable: Decimal = Decimal("0")
+    # IT-006 / IT-011 conguaglio outputs (for the year ledger).
+    it_conguaglio: bool = False
+    it_irpef_refund: Decimal = Decimal("0")
+    it_wedge_recovery_now: Decimal = Decimal("0")
+    it_wedge_recovery_new: Decimal = Decimal("0")
+    it_wedge_recovery_outstanding_after: Decimal = Decimal("0")
+    it_wedge_recovery_instalment_after: Decimal = Decimal("0")
+    it_addreg_saldo_determined: Decimal = Decimal("0")
+    it_addcom_saldo_determined: Decimal = Decimal("0")
+    it_addcom_credit_determined: Decimal = Decimal("0")
+    it_termination_surtax_withheld: Decimal = Decimal("0")
+    # Running totals after this period, keyed by IT_YTD_COMPONENTS (None for
+    # every other country). The service persists them on COMMIT only.
+    it_ytd_after: dict = None
+    it_employee_total: Decimal = Decimal("0")
+    it_calculation_trace: dict = None
+
+    # Echoes PayrollContext.trace_id back on the result — see that field's
+    # own docstring. None only if the caller never went through
+    # engine/resolver.py's calculate_payroll() (e.g. a strategy invoked
+    # directly in a test).
+    trace_id: str = None
 
 
 class PayrollStrategy(ABC):

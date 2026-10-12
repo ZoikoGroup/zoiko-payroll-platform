@@ -12,6 +12,10 @@ const statusConfig = {
   Paid:     { color: "bg-primary/10 text-primary", icon: CheckCircle2 },
   Pending:  { color: "bg-warning/10 text-warning", icon: Clock       },
   Failed:   { color: "bg-error/10 text-error", icon: AlertCircle },
+  // Phase 8BV: a Partial payslip has real components calculated but at least
+  // one other genuinely unavailable (see Phase 8BU), so it must not look Paid.
+  Partial:  { color: "bg-warning/10 text-warning", icon: AlertTriangle },
+  Unknown:  { color: "bg-surface-muted text-foreground-muted", icon: AlertTriangle },
 };
 
 const tabs = [
@@ -252,7 +256,7 @@ export default function PayslipsPage() {
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {payslips.map((p) => {
-                    const sc = statusConfig[p.status] || statusConfig.Paid;
+                    const sc = statusConfig[p.status] || statusConfig.Unknown;
                     const Icon = sc.icon;
                     return (
                       <tr key={p.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
@@ -413,7 +417,7 @@ export default function PayslipsPage() {
                   </thead>
                   <tbody className="divide-y divide-border/50">
                     {payslips.map((p) => {
-                      const sc = statusConfig[p.status] || statusConfig.Paid;
+                      const sc = statusConfig[p.status] || statusConfig.Unknown;
                       const Icon = sc.icon;
                       const isDeleting = deletingId === p.id;
                       return (

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     # ── JWT / Auth (own secret — never reuse the main platform's) ──────
     PAYROLL_SECRET_KEY: str = "change-me-payroll-platform-secret"
+    # Hong Kong identity-token key (D-19): HMAC key for the pseudonymous HKID /
+    # passport token. Unset → derived from PAYROLL_SECRET_KEY under a fixed
+    # domain label. Set a dedicated value in production.
+    HK_IDENTITY_TOKEN_KEY: str = ""
     ALGORITHM: str = "HS256"
     # Distinct issuer/token-namespace so tokens from this platform can
     # never be confused with (or accepted by) the main platform.
@@ -55,10 +59,19 @@ class Settings(BaseSettings):
                 return True
         return value
 
+    # ── Error tracking (Sentry) ─────────────────────────────────────────
+    # Empty by default -- Sentry init is a no-op until this is set (see
+    # main.py). Same "graceful when unconfigured" pattern as
+    # ASSIST_MODEL_PROVIDER below: no behavior change for any environment
+    # that hasn't opted in.
+    SENTRY_DSN: str = ""
+
     # ── CORS ──────────────────────────────────────────────────────────
     PAYROLL_CORS_ORIGINS: str = (
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
-        "http://127.0.0.1:5173,http://127.0.0.1:5174"
+        "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,"
+        "http://192.168.31.148:5173,http://192.168.31.148:5174,http://192.168.31.148:5175,"
+        "http://192.168.31.149:5173,http://192.168.31.149:5174,http://192.168.31.149:5175"
     )
 
     # ── Public-facing links (e.g. "Send Template" form-fill emails) ────
@@ -71,6 +84,15 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "no-reply@payroll.zoiko.example"
     SMTP_USE_TLS: str = "true"
+    # Optional public https URL of the email logo (a hosted copy of
+    # app/email_assets/zoikopayroll-logo-email.png). Empty (default): the logo
+    # is embedded in every message as an inline CID image, so it renders even
+    # when FRONTEND_URL is not publicly reachable.
+    EMAIL_LOGO_URL: str = ""
+
+    # ── Redis Cache ──────────────────────────────────────────────────────
+    REDIS_URL: str = ""
+    REDIS_TTL_SECONDS: int = 3600
 
     # ── Super Admin setup key ─────────────────────────────────────────
     # Required to run scripts/seed_super_admin.py and to create Super
@@ -101,5 +123,113 @@ class Settings(BaseSettings):
     # Live-toggleable via PlatformSetting, not just this startup default.
     ASSIST_KILL_SWITCH_ENABLED: bool = False
 
+    # ── Trial lifecycle (modules/billing/trial_lifecycle.py) ────────────
+    # GRACE_READONLY window length. Confirmed with product as the default;
+    # the sweep stamps grace_period_ends_at = current_period_end + this many
+    # days the first time it observes an expired trial.
+    TRIAL_GRACE_PERIOD_DAYS: int = 7
+    # Background sweep of expired trials (ACTIVE → GRACE_READONLY → CLOSED),
+    # mirroring the manual admin endpoint (POST /super-admin/billing/
+    # trial-expiry-run) on a timer — same pattern as ASSIST_SWEEP_ENABLED.
+    TRIAL_SWEEP_ENABLED: bool = True
+    TRIAL_SWEEP_INTERVAL_HOURS: int = 24
+
+    # ── Revoked-token cleanup (modules/auth/scheduler.py) ───────────────
+    # Deletes revoked_tokens rows once their own expires_at has passed --
+    # same pattern as ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED above.
+    TOKEN_CLEANUP_SWEEP_ENABLED: bool = True
+    TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS: int = 24
+
+    # ── Entitlement enforcement rollout (modules/billing/entitlements.py) ──
+    # "off": require_entitlement/require_scope_limit always pass — today's
+    # behavior, safe default. "warn": run the real check but only log +
+    # record a BillingCommercialAuditEvent (ENTITLEMENT_WOULD_HAVE_BLOCKED)
+    # instead of raising, so orgs already over a limit surface in the audit
+    # log before anything actually blocks them. "enforce": raise
+    # ForbiddenException as coded. Flipping "warn" -> "enforce" in
+    # production is a deliberate, separate follow-up — not bundled into the
+    # change that first wires these dependencies into routes.
+    BILLING_ENFORCEMENT_MODE: str = "off"
+
+    # ── Dunning (modules/billing/dunning.py) — Part 9 ───────────────────
+    # PLACEHOLDER defaults, not a confirmed Finance decision — the spec
+    # this was built from is explicit: "confirm exact timing with Finance,
+    # don't invent silently." Named settings, not a hardcoded number, so
+    # approving the real cadence is a config change, not a code change.
+    DUNNING_WARN_AFTER_DAYS: int = 1
+    DUNNING_RESTRICT_AFTER_DAYS: int = 7
+    DUNNING_SUSPEND_AFTER_DAYS: int = 21
+    DUNNING_SWEEP_ENABLED: bool = True
+    DUNNING_SWEEP_INTERVAL_HOURS: int = 24
+
+    # ── BWM aggregation (modules/billing/bwm.py) ─────────────────────────
+    # Materializes billing_worker_month_records (Compute-only — never calls
+    # a gateway), the persistence that feeds the Exceptions & Reconciliation
+    # bwm_invoice_mismatches view and future invoicing. Runs the same batch
+    # function the manual POST /super-admin/billing/aggregate-bwm admin
+    # endpoint calls, mirroring ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED.
+    BWM_AGGREGATION_ENABLED: bool = True
+    BWM_AGGREGATION_INTERVAL_HOURS: int = 24
+
+    # ── Self-service checkout (Stripe) ──────────────────────────────────
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_CHECKOUT_SUCCESS_URL: str = ""   # frontend route, e.g. .../checkout/success
+    STRIPE_CHECKOUT_CANCEL_URL: str = ""    # frontend route, e.g. .../checkout/cancelled
+    # Stripe Tax requires a configured account head-office address and tax
+    # registration. Keep it opt-in so Checkout still works in local/test
+    # accounts that have not completed that Stripe Dashboard setup.
+    STRIPE_AUTOMATIC_TAX_ENABLED: bool = True
+
+    # ── Assisted Access (SafeGuard — session takeover, time-boxed) ──────
+    # Hard cap on how long a single support-assist session may live. The
+    # spec treats indefinite access as unacceptable by construction: a
+    # session is created with a fixed expires_at and MUST be re-requested
+    # (new reason, new session, new token) once it lapses. The background
+    # sweep auto-ends anything past this cap even if nobody manually ends it.
+    ASSISTED_ACCESS_SESSION_MINUTES: int = 30
+    ASSISTED_ACCESS_SWEEP_ENABLED: bool = True
+    ASSISTED_ACCESS_SWEEP_INTERVAL_MINUTES: int = 60
+
+    # ── Staging/test billing isolation (Part 11) ────────────────────────
+    # When true: refuse to boot with a Stripe LIVE key, force seed/demo
+    # data to synthetic values, and sandbox outbound billing email. See
+    # the startup guard below and modules/billing/staging.py.
+    STAGING_MODE: bool = False
+    STAGING_SANDBOX_EMAIL: str = ""   # every outbound billing email is redirected here in staging
 
 settings = Settings()
+
+
+def _is_development_environment() -> bool:
+    # Deliberately NOT identical to app/database.py's same-named function:
+    # that one treats DEBUG's own default (True) as sufficient to count as
+    # "development" even when ENVIRONMENT is explicitly set to something
+    # else (e.g. "production") — fine for choosing a DB fallback, but it
+    # would make this fail-closed secret-key guard never actually fire in
+    # the most realistic misconfiguration (ENVIRONMENT set correctly,
+    # DEBUG's default left untouched). Here, an explicit ENVIRONMENT/APP_ENV
+    # value is authoritative; DEBUG is consulted only when neither is set.
+    import os
+    env_name = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").strip().lower()
+    if env_name:
+        return env_name == "development"
+    return bool(settings.DEBUG)
+
+
+if settings.PAYROLL_SECRET_KEY == "change-me-payroll-platform-secret" and not _is_development_environment():
+    raise RuntimeError(
+        "PAYROLL_SECRET_KEY is still the placeholder default. Refusing to start outside a "
+        "development environment — set a real PAYROLL_SECRET_KEY in your .env file."
+    )
+
+
+if settings.STAGING_MODE and settings.STRIPE_SECRET_KEY.startswith("sk_live_"):
+    # Part 11 — a simple prefix check, hard-failing rather than warning.
+    # A staging environment charging a real card (or a staging dunning
+    # sweep emailing a real customer) is exactly the failure this guard
+    # exists to make structurally impossible, not just logged.
+    raise RuntimeError(
+        "STAGING_MODE is enabled but STRIPE_SECRET_KEY is a LIVE key (sk_live_...). "
+        "Refusing to start — staging must only ever use a Stripe TEST key (sk_test_...)."
+    )

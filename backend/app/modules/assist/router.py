@@ -97,6 +97,8 @@ from app.database import get_db
 from app.core.dependencies import get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id
 from app.core.exceptions import NotFoundException
 from app.modules.assist import service
+from app.modules.billing.entitlements import require_entitlement
+from app.modules.billing.feature_keys import ASSIST
 from app.modules.assist.models import (
     AssistEvidenceItem,
     AssistNoticeAcknowledgment,
@@ -159,6 +161,13 @@ from app.modules.assist.schemas import (
 assist_router = APIRouter(
     prefix="/assist",
     tags=["Assist"],
+    # Every endpoint in this router requires ASSIST entitlement (Core: off,
+    # Professional: on) — applied once at router level rather than per
+    # endpoint so nothing is missed. Deliberately NOT applied to
+    # assist_public_router (public_router.py): that router has no
+    # organization_id at all (unauthenticated marketing-site chat widget),
+    # so there's no subscription to check entitlement against.
+    dependencies=[Depends(require_entitlement(ASSIST))],
 )
 
 
@@ -1200,7 +1209,27 @@ def set_kill_switch(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_super_admin),
 ):
-    return {"enabled": service.set_assist_kill_switch(db, payload.enabled, current_user)}
+    enabled = service.set_assist_kill_switch(db, payload.enabled, current_user)
+    toggled_by = getattr(current_user, "email", "") or ""
+    try:
+        from app.config import settings
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        from app.services.email_service import send_assist_kill_switch_alert_email
+        # Internal ops alert — same recipient resolution as the send function.
+        ops_inbox = settings.ASSIST_SUPPORT_EMAIL or settings.SMTP_FROM_EMAIL
+        queue_email(
+            "assist", "assist.kill_switch_toggled", None, ops_inbox,
+            repeatable_idempotency_key(
+                None, "assist.kill_switch_toggled", ops_inbox or "", None,
+                "assist:kill_switch", {"enabled": bool(payload.enabled)},
+            ),
+            send_assist_kill_switch_alert_email, payload.enabled, toggled_by,
+            actor_user_id=getattr(current_user, "id", None), db=db,
+        )
+    except Exception as exc:  # pragma: no cover — notifications never block the switch flip
+        import logging
+        logging.getLogger("zoiko").warning(f"[assist-kill-switch] alert email failed: {exc}")
+    return {"enabled": enabled}
 
 
 @assist_router.get(

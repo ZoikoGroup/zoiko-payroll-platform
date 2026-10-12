@@ -1,13 +1,60 @@
 # Zoiko Payroll Platform — GCP Deployment Requirements Document
 
-**Version:** 1.0
+**Version:** 1.1
 **Prepared for:** Zoiko Payroll Platform (standalone repo — `zoiko-payroll-platform`)
 **Target cloud:** Google Cloud Platform
-**Status:** Draft for infrastructure sign-off
+**Status:** §0 describes the CURRENT production deployment (verified against the
+repo's actual CI/deploy workflow). Everything from §1 onward is the ORIGINAL Cloud Run
+architecture proposal — kept as a future-state option, but it was never built; do not
+assume anything below §0 reflects how the app is deployed today.
 
 ---
 
-## 1. Purpose and Scope
+## 0. Current Actual Deployment (as of 2026-09-18)
+
+This section reflects what genuinely runs today, verified directly against
+`.github/workflows/backend-deploy.yml` and `scripts/deploy_migrate.sh` — not the
+aspirational architecture in §1 onward, which was drafted but never provisioned.
+
+- **Topology:** a single GCE VM running the backend directly under a Python venv
+  (no containers in production — `Dockerfile`/`docker-compose.yml`/`frontend/nginx.conf`
+  in the repo root are a **local dev convenience stack only**, using hardcoded
+  throwaway credentials (`zoiko:zoiko`) — they are not what's deployed).
+- **Backend deploy (`.github/workflows/backend-deploy.yml`):** on push to `main`
+  (after a `test` job runs the full backend `pytest` suite and gates on it), a
+  `deploy` job SSHes into the VM (`secrets.GCP_SSH_HOST/USER/KEY`) and runs, inside
+  `/var/www/zoiko-payroll/backend/backend`:
+  `git pull origin main` → `pip install -r requirements.txt` →
+  `bash ../scripts/deploy_migrate.sh` (Alembic — see below) →
+  `sudo systemctl restart zoiko-payroll-backend`. A follow-up step then runs
+  `python -m scripts.check_schema_drift` over SSH as a read-only post-deploy check.
+- **Schema migrations:** **Alembic is the real source of truth** (this contradicts
+  §6 below, which predates Alembic's introduction and is left unedited as a historical
+  artifact of the original proposal). `scripts/deploy_migrate.sh` runs
+  `alembic upgrade head`, then `python -m migrations.sync_schema` as a non-destructive
+  drift safety net, with a self-healing path for one specific known failure mode (an
+  orphaned `alembic_version` row pointing at a revision merged on another branch).
+  CI's own `test` job additionally enforces a single Alembic head before allowing a
+  deploy at all.
+- **Frontend:** built and verified in CI (`.github/workflows/frontend-build.yml`,
+  `npm ci && npm run build`) on every push/PR touching `frontend/**`, but that
+  workflow **only builds — it does not deploy anywhere**. How the built `frontend/dist`
+  reaches production (same VM via nginx, a separate step, or manually) is not captured
+  in version control and was not independently re-verified while writing this section —
+  confirm directly with whoever manages the VM before relying on this document for
+  frontend deployment steps.
+- **Secrets:** plain GitHub Actions repository secrets (`GCP_SSH_HOST`, `GCP_SSH_USER`,
+  `GCP_SSH_KEY`), not GCP Secret Manager. Application-level secrets
+  (`PAYROLL_SECRET_KEY`, `PAYROLL_DATABASE_URL`, etc.) live in a `.env` file on the VM
+  itself, read by the systemd service — not injected via any GCP-native mechanism.
+- **What does NOT exist today, despite being described below:** Cloud Run,
+  Cloud Storage + CDN for the frontend, Cloud Load Balancing, Artifact Registry,
+  Secret Manager, Cloud SQL (confirm the actual Postgres host/provider separately —
+  do not assume Cloud SQL from this document alone).
+
+---
+
+## 1. Purpose and Scope (original Cloud Run proposal — future-state only)
 
 This document defines the infrastructure, configuration, security, and operational
 requirements to deploy the Zoiko Payroll Platform to Google Cloud Platform. It covers
@@ -18,6 +65,9 @@ resolved before a production go-live.
 
 This document does not cover application-level functional requirements (see
 `docs/Zoiko_Payroll_Assist_PRD_*` and related specs in the repository).
+
+**This was a proposal for a Cloud Run-based re-platform, not a description of what's
+live — see §0 above for the current, verified production deployment.**
 
 ---
 
@@ -132,10 +182,11 @@ Cloud Run's native Secret Manager integration.
 ## 6. Database Requirements
 
 - **Engine:** PostgreSQL 14+ (repo tested against `psycopg[binary]>=3.1.18`).
-- **Schema bootstrap:** No Alembic migrations exist. Schema is created via
-  `Base.metadata.create_all` — either automatically on app startup
-  (`initialize_database()` in `lifespan`) or explicitly via
-  `python -m migrations.create_all.create_all`.
+- **Schema bootstrap — STALE, see §0:** this subsection was written before Alembic was
+  introduced to the project and no longer reflects reality. Alembic is now the real
+  source of truth for schema changes (`scripts/deploy_migrate.sh` runs
+  `alembic upgrade head` on every deploy); `Base.metadata.create_all` is only used for
+  hermetic test databases, not for any real environment.
 - **Production guardrail already in code:** if `PAYROLL_DATABASE_URL` is empty and the
   app is *not* in a recognized dev/DEBUG mode, `database.py` raises at startup rather
   than silently falling back to SQLite. **Confirm `DEBUG=false` (or `ENVIRONMENT` unset

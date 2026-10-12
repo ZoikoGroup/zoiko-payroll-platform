@@ -1,0 +1,14 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Dear {{employee_name}},</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your submission for <strong style="color:#0b1f3a;">{{form_name}}</strong> was
+  <strong style="color:#b91c1c;">rejected</strong>. Your employee record was
+  <strong>not</strong> changed by this submission.
+</p>
+{{#if notes}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Reviewer note: <em>{{notes}}</em>
+</p>
+{{/if}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  Contact your payroll administrator if you have any questions.
+</p>

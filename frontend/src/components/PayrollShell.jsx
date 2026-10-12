@@ -19,12 +19,16 @@ import {
   ChevronsRight,
   ChevronRight,
   Bell,
+  CreditCard,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useOrganization } from "../context/OrganizationContext";
 import { ROLE_LABELS, ROLES } from "../config/roles";
 import ThemeToggle from "./ThemeToggle";
 import AssistLauncher from "../modules/assist/AssistLauncher";
+import TrialBanner from "./TrialBanner";
+import DunningBanner from "./DunningBanner";
+import AssistedAccessBanner from "./AssistedAccessBanner";
 
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
 
@@ -48,6 +52,11 @@ function buildNavGroups(role) {
   if (role === ROLES.ORG_ADMIN) {
     overviewItems.push({ label: "Team", href: "/organization-admin/team", icon: Users, end: true });
   }
+  overviewItems.push({
+    label: "Subscription",
+    href: role === ROLES.PAYROLL_ADMIN ? "/hr-admin/subscription" : "/organization-admin/subscription",
+    icon: CreditCard,
+  });
   const groups = [
     {
       title: "Overview",
@@ -396,6 +405,9 @@ export default function PayrollShell({ children }) {
           collapsed={collapsed}
           menuButtonRef={menuButtonRef}
         />
+        <AssistedAccessBanner />
+        <TrialBanner />
+        <DunningBanner />
         <main className="w-full">{children}</main>
       </div>
 

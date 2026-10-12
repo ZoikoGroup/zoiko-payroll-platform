@@ -1,0 +1,9 @@
+# Files Claude should never read or access — contain real secrets
+# (database URLs/passwords, API keys, etc.), mirrors the root .gitignore's
+# own .env exclusion.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example

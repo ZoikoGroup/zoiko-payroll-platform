@@ -15,7 +15,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.database import get_db
-from app.core.dependencies import get_current_user, get_current_payroll_operator, require_active_subscription
+from app.core.dependencies import get_current_user, get_current_payroll_operator
+from app.modules.billing.entitlements import require_active_subscription
+from app.core.exceptions import NotFoundException
 from app.core.rate_limiter import limiter
 from app.modules.payroll.forms import service
 from app.modules.payroll.forms.schemas import (
@@ -27,7 +29,7 @@ from app.modules.payroll.forms.schemas import (
 forms_router = APIRouter(
     prefix="/employee-forms",
     tags=["Payroll — Send Template"],
-    dependencies=[Depends(require_active_subscription("payroll"))],
+    dependencies=[Depends(require_active_subscription)],
 )
 
 # Unauthenticated — reached by an employee's emailed link, no login/org context.

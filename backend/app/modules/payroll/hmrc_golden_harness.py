@@ -1,0 +1,338 @@
+"""
+app/modules/payroll/hmrc_golden_harness.py
+--------------------------------------------
+Runs one normalized golden-test case through the REAL production engine
+(via calculate_payroll) and compares the result against an authority's
+own expected figures, exactly — no tolerance, no rounding leniency
+(ZP-TAX-UK-2026-27-001 §7.2's own rule, extended to every jurisdiction
+this harness now supports).
+
+Originally UK/HMRC-only (hence the module's historical name — kept
+unchanged rather than renamed, to avoid a blast-radius rename across the
+existing tests/hmrc_golden/runner.py re-export shim and every existing
+fixture reference, for no functional benefit). Generalized to Canada
+(gap-closure Phase 8, 2026-09-11, ZP-TAX-CA-2026-001 §20's "Test Lab"
+module/AC-29): `country` is now read from the case JSON's own `context`
+(defaulting to "UK" for every existing fixture that predates this,
+unchanged) instead of hardcoded, and `work_state`/`state_rate_map`/
+`state_slabs`/`td1_claim_amount` are now accepted for jurisdictions
+(Canada) that need a province/state layer on top of the federal one.
+
+Lives in the app package (not under tests/) because Super Admin UI
+Part 11's "Test Certification" tab needs to trigger a real run of this
+harness from a live API call (service.py's run_golden_test_
+certification), not just from pytest — application code importing from
+the test tree would be backwards. tests/hmrc_golden/runner.py re-exports
+everything from here unchanged, so pytest usage is unaffected.
+
+Deliberately calls the SAME `calculate_payroll(ctx, "standard")` entry
+point a real payroll run uses, rather than reaching into uk.py's private
+helper functions — a golden test is only meaningful if it validates the
+actual assembled pipeline an employee's real payslip goes through, not
+an isolated internal function that could pass while the real pipeline
+still gets the answer wrong.
+
+Case JSON schema (see tests/fixtures/hmrc_golden/README.md for the full
+spec and tests/fixtures/hmrc_golden/_sample_student_loan.json for a
+worked, mechanically-verified example):
+
+{
+  "description": "free text — which HMRC scenario this reproduces",
+  "source": "e.g. income-tax-26-27.xlsx, sheet 'Tax Code L', row 12",
+  "context": {
+    "gross": "2500.00",            // required, this period's gross pay
+    "pay_frequency": "Monthly",     // Weekly | Fortnightly | FourWeekly | Monthly
+    "pay_date": "2026-06-30",       // optional, YYYY-MM-DD
+    "tax_code": "1257L",            // optional
+    "ni_category": "A",             // optional
+    "study_loan_plan": "UK_PLAN2",  // optional
+    "study_loan_balance": "1000",   // required alongside study_loan_plan —
+                                     // the engine gates the whole
+                                     // calculation on "balance > 0", not
+                                     // on study_loan_plan alone; the
+                                     // actual number never caps the
+                                     // deduction, only its presence matters
+    "has_postgrad_loan": false,     // optional
+    "is_director": false,           // optional
+    "date_of_birth": "1990-01-01",  // optional
+    "rate_map": {                   // optional — omit to use the engine's
+                                     // own real 2026-27 Python fallback
+                                     // constants (hardcoded_defaults.py)
+      "some_component_key": {"employee_rate_pct": "9", "flat_amount": null}
+    },
+    "slabs": [                      // optional — needed only for NI_BAND
+                                     // (per-category banded NI) cases
+      {"min_amount": "0", "max_amount": "12570", "rate_pct": "0",
+       "rule_type": "NI_BAND", "ni_category": "A", "employer_rate_pct": "0"}
+    ]
+  },
+  "expected": {
+    // any subset of calculate_payroll's PayrollResult fields, e.g.:
+    "tds": "391.60",
+    "ni_employee": "204.69",
+    "study_loan_deduction": "27.00"
+  }
+}
+"""
+from dataclasses import dataclass, field as dc_field
+from datetime import date
+from decimal import Decimal
+from typing import Optional
+
+from app.modules.payroll.engine.base import PayrollContext
+from app.modules.payroll.engine.resolver import calculate_payroll
+
+
+@dataclass
+class GoldenRate:
+    component_key: str = ""
+    employee_rate_pct: Optional[Decimal] = None
+    employer_rate_pct: Optional[Decimal] = None
+    flat_amount: Optional[Decimal] = None
+    # US state-program gating (ZP-TAX-US-2026-001 §5, gap-closure Phase 8):
+    # engine/countries/us.py's state-program loop checks THIS row's own
+    # jurisdiction_state against _US_STATE_PROGRAM_ENABLED_STATES, not
+    # ctx.work_state — same convention TaxSlab/GoldenSlab already uses.
+    # None (every existing UK/CA/India case) is unaffected; only a case
+    # that explicitly sets it activates a state program.
+    jurisdiction_state: Optional[str] = None
+    # Singapore `cpf_age_band_semantics` (ContributionRate.text_value).
+    # None for every existing case, unaffected.
+    text_value: Optional[str] = None
+    # Row-level dating (Sweden's temporary youth reduction is windowed on the
+    # row's own dates, SE-005). None for every existing case, unaffected.
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+
+
+@dataclass
+class GoldenSlab:
+    min_amount: Decimal = Decimal("0")
+    max_amount: Optional[Decimal] = None
+    rate_pct: Decimal = Decimal("0")
+    rule_type: str = "MARGINAL_RATE"
+    ni_category: Optional[str] = None
+    employer_rate_pct: Optional[Decimal] = None
+    formula_expression: Optional[str] = None
+    flat_amount: Optional[Decimal] = None
+    filing_status: Optional[str] = None
+    jurisdiction_state: Optional[str] = None
+    # India PT_FLAT brackets (gap-closure Phase F, 2026-09-11): the
+    # February-adjustment amount and the assessment-basis tag
+    # india.py's _resolve_state_pt_bracket reads off a real TaxSlab row
+    # (see models.py's own adjustment_amount/assessment_basis columns).
+    # Optional/None for every existing UK/CA case, unaffected.
+    adjustment_amount: Optional[Decimal] = None
+    assessment_basis: Optional[str] = None
+    # Singapore CPF_RATE_BAND rows: age band (tax_regime) and rule id
+    # (rate_label) — see engine/countries/singapore.py. None/"" for every
+    # existing case, unaffected.
+    tax_regime: Optional[str] = None
+    rate_label: str = ""
+    # Sweden SE_TAX_TABLE / SE_ONE_TIME_PAYMENT bands. None elsewhere.
+    tax_table_number: Optional[str] = None
+    tax_column: Optional[str] = None
+
+
+def _to_decimal(value):
+    if value is None:
+        return None
+    return Decimal(str(value))
+
+
+def _to_date(value):
+    if value is None:
+        return None
+    return date.fromisoformat(value)
+
+
+def _build_rate_map(raw: Optional[dict]) -> dict:
+    if not raw:
+        return {}
+    rate_map = {}
+    for key, spec in raw.items():
+        rate_map[key] = GoldenRate(
+            component_key=key,
+            employee_rate_pct=_to_decimal(spec.get("employee_rate_pct")),
+            employer_rate_pct=_to_decimal(spec.get("employer_rate_pct")),
+            flat_amount=_to_decimal(spec.get("flat_amount")),
+            jurisdiction_state=spec.get("jurisdiction_state"),
+            text_value=spec.get("text_value"),
+            effective_from=_to_date(spec.get("effective_from")),
+            effective_to=_to_date(spec.get("effective_to")),
+        )
+    return rate_map
+
+
+def _build_slabs(raw: Optional[list]) -> list:
+    if not raw:
+        return []
+    return [
+        GoldenSlab(
+            min_amount=_to_decimal(s.get("min_amount")) or Decimal("0"),
+            max_amount=_to_decimal(s.get("max_amount")),
+            rate_pct=_to_decimal(s.get("rate_pct")) or Decimal("0"),
+            rule_type=s.get("rule_type", "MARGINAL_RATE"),
+            ni_category=s.get("ni_category"),
+            employer_rate_pct=_to_decimal(s.get("employer_rate_pct")),
+            flat_amount=_to_decimal(s.get("flat_amount")),
+            filing_status=s.get("filing_status"),
+            jurisdiction_state=s.get("jurisdiction_state"),
+            adjustment_amount=_to_decimal(s.get("adjustment_amount")),
+            assessment_basis=s.get("assessment_basis"),
+            tax_regime=s.get("tax_regime"),
+            rate_label=s.get("rate_label", ""),
+            tax_table_number=s.get("tax_table_number"),
+            tax_column=s.get("tax_column"),
+        )
+        for s in raw
+    ]
+
+
+def build_context(case_context: dict) -> PayrollContext:
+    gross = _to_decimal(case_context["gross"])
+    return PayrollContext(
+        gross=gross,
+        # Singapore mixed-earning fixtures (Phase 5.1) may state the basic and
+        # the other components; every other fixture keeps basic = gross.
+        basic=_to_decimal(case_context["basic"]) if case_context.get("basic") is not None else gross,
+        hra=_to_decimal(case_context.get("hra")) or Decimal("0"),
+        special_allowance=_to_decimal(case_context.get("special_allowance")) or Decimal("0"),
+        overtime=_to_decimal(case_context.get("overtime")) or Decimal("0"),
+        unpaid_leave_days=int(case_context.get("unpaid_leave_days") or 0),
+        calendar_days=int(case_context["calendar_days"]) if case_context.get("calendar_days") else None,
+        country=case_context.get("country", "UK"),
+        pay_frequency=case_context.get("pay_frequency", "Monthly"),
+        pay_date=_to_date(case_context.get("pay_date")),
+        tax_code=case_context.get("tax_code"),
+        ni_category=case_context.get("ni_category"),
+        study_loan_plan=case_context.get("study_loan_plan"),
+        study_loan_balance=_to_decimal(case_context.get("study_loan_balance")),
+        has_postgrad_loan=case_context.get("has_postgrad_loan", False),
+        is_director=case_context.get("is_director", False),
+        date_of_birth=_to_date(case_context.get("date_of_birth")),
+        rate_map=_build_rate_map(case_context.get("rate_map")),
+        slabs=_build_slabs(case_context.get("slabs")),
+        # Canada (and any future province/state-layered jurisdiction):
+        # optional, default to the engine's own no-state-configured
+        # behavior when omitted (every UK case today).
+        work_state=case_context.get("work_state"),
+        state_rate_map=_build_rate_map(case_context.get("state_rate_map")),
+        state_slabs=_build_slabs(case_context.get("state_slabs")),
+        td1_claim_amount=_to_decimal(case_context.get("td1_claim_amount")),
+        provincial_td1_claim_amount=_to_decimal(case_context.get("provincial_td1_claim_amount")),
+        qc_tp1015_claim_amount=_to_decimal(case_context.get("qc_tp1015_claim_amount")),
+        # India (gap-closure Phase F, 2026-09-11): tax_regime ("New"/"Old"),
+        # gender (Maharashtra PT's gender-differentiated brackets — see
+        # india.py's _resolve_state_pt_bracket), and state_rate_map's own
+        # flat-amount rows (LWF/half-year-PT deduction months) are already
+        # covered by state_rate_map above via _build_rate_map. Optional/
+        # None for every existing UK/CA case, unaffected.
+        tax_regime=case_context.get("tax_regime"),
+        gender=case_context.get("gender"),
+        tax_residency_status=case_context.get("tax_residency_status"),
+        # Australia (ZP-TAX-AU-2026-27-001, Phase 7 golden tests, 2026-09-17):
+        # declaration/YTD fields engine/countries/australia.py reads.
+        # work_state/state_rate_map/state_slabs above are already generic
+        # and reused as-is for the 8-state payroll-tax layer.
+        au_tfn_status=case_context.get("au_tfn_status"),
+        au_residency_status=case_context.get("au_residency_status"),
+        au_tax_free_threshold_claimed=case_context.get("au_tax_free_threshold_claimed"),
+        au_medicare_levy_exemption=case_context.get("au_medicare_levy_exemption"),
+        au_withholding_variation_pct=_to_decimal(case_context.get("au_withholding_variation_pct")),
+        au_extra_pay_calendar=case_context.get("au_extra_pay_calendar"),
+        au_sapto_category=case_context.get("au_sapto_category"),
+        ytd_sg_qualifying_earnings_before=_to_decimal(case_context.get("ytd_sg_qualifying_earnings_before")),
+        au_state_payroll_tax_ytd_remuneration_before=_to_decimal(case_context.get("au_state_payroll_tax_ytd_remuneration_before")),
+        au_payroll_tax_regional_status=case_context.get("au_payroll_tax_regional_status"),
+        au_payroll_tax_charity_exempt=case_context.get("au_payroll_tax_charity_exempt"),
+        # Singapore (ZP-SG-ENG-001 §17 fixtures): CPF cohort facts, the
+        # Additional Wages split and the YTD CPF accumulators singapore.py
+        # reads. Optional/None for every existing UK/CA/IN/US/AU case.
+        additional_compensation=_to_decimal(case_context.get("additional_compensation")) or Decimal("0"),
+        sgp_cpf_residency_status=case_context.get("sgp_cpf_residency_status"),
+        sgp_spr_effective_date=_to_date(case_context.get("sgp_spr_effective_date")),
+        sgp_cpf_contribution_arrangement=case_context.get("sgp_cpf_contribution_arrangement"),
+        sgp_work_pass_type=case_context.get("sgp_work_pass_type"),
+        sgp_work_pass_issue_date=_to_date(case_context.get("sgp_work_pass_issue_date")),
+        sgp_work_pass_end_date=_to_date(case_context.get("sgp_work_pass_end_date")),
+        sgp_work_pass_end_reason=case_context.get("sgp_work_pass_end_reason"),
+        sgp_shg_funds=case_context.get("sgp_shg_funds"),
+        sgp_wp_sector=case_context.get("sgp_wp_sector"),
+        sgp_wp_skill_level=case_context.get("sgp_wp_skill_level"),
+        sgp_wp_levy_tier=case_context.get("sgp_wp_levy_tier"),
+        sgp_named_allowance_items=case_context.get("sgp_named_allowance_items"),
+        sgp_cpf_wage_classification=case_context.get("sgp_cpf_wage_classification"),
+        sgp_iras_classification=case_context.get("sgp_iras_classification"),
+        ytd_cpf_ow_subject_before=_to_decimal(case_context.get("ytd_cpf_ow_subject_before")),
+        ytd_cpf_aw_subject_before=_to_decimal(case_context.get("ytd_cpf_aw_subject_before")),
+        ytd_cpf_aw_paid_before=_to_decimal(case_context.get("ytd_cpf_aw_paid_before")),
+        sgp_aw_ledger=case_context.get("sgp_aw_ledger"),
+        sgp_employer_hires_foreign_workers=case_context.get("sgp_employer_hires_foreign_workers"),
+        date_of_joining=_to_date(case_context.get("date_of_joining")),
+        date_of_leaving=_to_date(case_context.get("date_of_leaving")),
+        employment_type=case_context.get("employment_type"),
+        period_start=_to_date(case_context.get("period_start")),
+        period_end=_to_date(case_context.get("period_end")),
+        sgp_employment_facts=case_context.get("sgp_employment_facts"),
+        # Hong Kong (ZP-HK-ENG-001 §16 fixtures): worker facts, verified hours
+        # and the period-overlapping SMW segments countries/hong_kong.py reads.
+        hk_worker_facts=case_context.get("hk_worker_facts"),
+        hk_hours=case_context.get("hk_hours"),
+        hk_rule_segments=case_context.get("hk_rule_segments"),
+        # Sweden (ZP-SE-ENG-001 §15 golden payroll): the worker tax/social-
+        # insurance profile sweden.py resolves, the youth-threshold month
+        # accumulator and the SLP pension-cost base. None elsewhere.
+        **_sweden_context(case_context),
+    )
+
+
+def _sweden_context(case_context: dict) -> dict:
+    profile = case_context.get("sweden_statutory_profile")
+    if profile is None and case_context.get("country") != "SE":
+        return {}
+    from types import SimpleNamespace
+
+    facts = dict(profile or {})
+    for key in ("se_decision_effective_from", "se_decision_effective_to"):
+        if facts.get(key):
+            facts[key] = _to_date(facts[key])
+    for key in ("se_decision_monthly_withholding", "se_decision_rate_pct", "se_annual_income",
+                "se_employee_pension_share", "se_employer_pension_share"):
+        if facts.get(key) is not None:
+            facts[key] = _to_decimal(facts[key])
+    return {
+        "sweden_statutory_profile": SimpleNamespace(**facts) if profile is not None else None,
+        "se_month_to_date_prior": _to_decimal(case_context.get("se_month_to_date_prior")),
+        "se_pension_cost_base": _to_decimal(case_context.get("se_pension_cost_base")),
+        "se_cash_pay": _to_decimal(case_context.get("se_cash_pay")),
+    }
+
+
+class GoldenCaseMismatch(AssertionError):
+    def __init__(self, description: str, diffs: list):
+        self.diffs = diffs
+        lines = "\n".join(f"  {d['field']}: expected {d['expected']!r}, got {d['actual']!r}" for d in diffs)
+        super().__init__(f"HMRC golden-test mismatch — {description}:\n{lines}")
+
+
+def run_golden_case(case: dict) -> None:
+    """Raises GoldenCaseMismatch (with every mismatched field, not just
+    the first) if any expected figure doesn't match exactly. Passes
+    silently otherwise."""
+    ctx = build_context(case["context"])
+    result = calculate_payroll(ctx, "standard")
+
+    diffs = []
+    for field_name, expected_raw in case["expected"].items():
+        expected = _to_decimal(expected_raw)
+        actual = getattr(result, field_name, None)
+        if actual is None:
+            diffs.append({"field": field_name, "expected": expected, "actual": None})
+            continue
+        actual_dec = Decimal(str(actual))
+        if actual_dec != expected:
+            diffs.append({"field": field_name, "expected": expected, "actual": actual_dec})
+
+    if diffs:
+        raise GoldenCaseMismatch(case.get("description", "(no description)"), diffs)

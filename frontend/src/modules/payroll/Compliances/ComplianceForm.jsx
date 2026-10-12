@@ -10,7 +10,7 @@ import { uploadOrganizationLogo } from "../../../service/orgAdminService";
 import { useOrganization } from "../../../context/OrganizationContext";
 
 function getBaseFields(country) {
-  return [
+  const fields = [
     { label: "Company Legal Name", field: "name", type: "text" },
     { label: "Company Type", field: "type", type: "text" },
     { label: "Employer ID / Registration No.", field: "employerId", type: "text" },
@@ -24,6 +24,48 @@ function getBaseFields(country) {
     { label: "Settlement Bank", field: "settlementBank", type: "text" },
     { label: "Settlement Account Number", field: "settlementAcc", type: "text" },
   ];
+  // ZP-TAX-CA-2026-001 §15/AC-20 — determines which BC Employer Health
+  // Tax thresholds/rates apply (ordinary vs. registered charity/
+  // nonprofit). Shown for any Canada org, not gated to jurisdictionState
+  // === "BC" specifically — the engine checks each EMPLOYEE's own work
+  // state, not the org's single default state, so an org whose default
+  // state is elsewhere can still have BC employees.
+  if (country === "CA") {
+    fields.push({
+      label: "BC Employer Health Tax — Employer Classification",
+      field: "bcEhtEmployerClassification",
+      type: "select",
+      options: [
+        { value: "", label: "Ordinary employer (default)" },
+        { value: "CHARITY_NONPROFIT", label: "Registered charity / non-profit" },
+      ],
+    });
+    // ZP-TAX-CA-2026-001 §13 — determines which Quebec Health Services
+    // Fund rate schedule applies. Same "shown for any CA org" reasoning
+    // as BC's classification above — the engine checks each employee's
+    // own work state, not the org's default state.
+    fields.push({
+      label: "Quebec HSF — Employer Category",
+      field: "qcHsfEmployerCategory",
+      type: "select",
+      options: [
+        { value: "", label: "General employer (default)" },
+        { value: "PRIMARY_MANUFACTURING", label: "Primary / manufacturing sector" },
+        { value: "PUBLIC_SECTOR", label: "Public sector" },
+      ],
+    });
+  }
+  // ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9 (2026-09-09) — every
+  // FPS/EPS filing needs both identifiers on the employer. Same "no UI
+  // yet" gap the CA fields above already closed for BC EHT/QC HSF, now
+  // closed the same way for UK RTI.
+  if (country === "UK") {
+    fields.push(
+      { label: "PAYE Reference", field: "payeReference", type: "text" },
+      { label: "Accounts Office Reference", field: "accountsOfficeReference", type: "text" },
+    );
+  }
+  return fields;
 }
 
 function CompanyLogoField({ addToast }) {
@@ -127,6 +169,18 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
               />
             )}
 
+            {f.type === "select" && (
+              <select
+                value={companyDetails?.[f.field] || ""}
+                onChange={(e) => handleChange(f.field, e.target.value)}
+                className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+              >
+                {f.options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            )}
+
             {(f.type === "readonly" || f.type === "readonly-country") && (
               <div className="w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-foreground">
                 {f.type === "readonly-country"
@@ -169,6 +223,19 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
                   <label className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5 flex items-center gap-1.5">
                     {f.label} {f.primary && <span className="text-error">*</span>}
                   </label>
+                  {Array.isArray(f.options) ? (
+                    // Enumerated registration setting (only Singapore's schema declares options today).
+                    <select
+                      id={`taxid-${f.key}`}
+                      aria-label={f.label}
+                      value={value}
+                      onChange={(e) => onTaxIdentifierChange?.(f.key, e.target.value)}
+                      className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:border-primary focus:ring-primary/20"
+                    >
+                      <option value="">Not set</option>
+                      {f.options.map((o) => <option key={o} value={o}>{o.replaceAll("_", " ")}</option>)}
+                    </select>
+                  ) : (
                   <input
                     type="text"
                     value={value}
@@ -180,6 +247,7 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
                         : "border-border focus:border-primary focus:ring-primary/20"
                     }`}
                   />
+                  )}
                   {invalid && (
                     <p className="text-[11px] text-error mt-1">
                       Invalid format — e.g. {f.example}.

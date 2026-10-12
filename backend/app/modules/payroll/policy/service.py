@@ -12,6 +12,7 @@ explicitly edits it.
 
 from typing import Optional
 from datetime import date, datetime, timezone
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.exceptions import NotFoundException, BadRequestException
@@ -82,7 +83,15 @@ def _resolve_policy_lock(db: Session, organization_id: int) -> dict:
     if not details or not details.active_pack_id:
         return {}
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == details.active_pack_id).first()
-    return (pack.policy_defaults or {}) if pack else {}
+    # Only an ACTIVE policy pack governs an organization's locks/inherited
+    # values. Since the policy lifecycle is now Draft | Active only, a pack
+    # that has been flipped back to Draft (unpublished) must stop governing
+    # immediately — otherwise an org assigned a demoted pack would stay
+    # bound by values that are no longer live. No-op for a non-policy pack
+    # ever being pointed at by active_pack_id.
+    if not pack or pack.pack_type != "policy" or pack.status != "Active":
+        return {}
+    return (pack.policy_defaults or {})
 
 
 def _check_field_lock(locks: dict, path: tuple, value) -> None:
@@ -355,7 +364,29 @@ def get_active_policy(db: Session, organization_id: int) -> PayrollPolicy:
 
     Called by generate_payslips_for_run() before every run (Step 3) — if this
     is the first time an org touches policy, it transparently gets a default
-    policy that reproduces today's exact behavior.
+    policy that reproduces today's exact behavior. Also reached from
+    regenerate_employee_payslip via _resolve_calculation_mode.
+
+    Phase 8AU: the SELECT-then-INSERT above is a defense-in-depth
+    convenience only, not the actual guarantee against a genuine two-
+    connection race for the SAME organization's first-ever policy access
+    (e.g. two concurrent payroll operations both finding "no default
+    policy yet"). The real guarantee is PayrollPolicy's own
+    uq_one_default_per_org unique constraint (models.py) — found for real
+    via a true DB-level concurrency test of regenerate_employee_payslip
+    (tests/test_germany_8au_regenerate_concurrency.py), where the SECOND
+    transaction to commit its own freshly-seeded policy hit an unhandled
+    IntegrityError. Same retry-by-refetch shape as
+    app/modules/payroll/service.py's
+    _attach_one_germany_overtime_premium_component allowance-item
+    get-or-create: whichever transaction loses the INSERT race simply
+    refetches and returns the WINNER's row — there is exactly one correct
+    default policy per organization regardless of which caller created it,
+    so the loser failing outright would be a spurious, unrelated error for
+    a caller that did nothing wrong. This is a genuinely shared (not
+    Germany-specific) code path — every country's first payroll run/
+    regeneration for a brand-new organization goes through it — fixed here
+    rather than only in a Germany-specific call site.
     """
     policy = (
         _policy_query(db)
@@ -363,7 +394,20 @@ def get_active_policy(db: Session, organization_id: int) -> PayrollPolicy:
         .first()
     )
     if not policy:
-        policy = _seed_default_policy(db, organization_id)
+        try:
+            policy = _seed_default_policy(db, organization_id)
+        except IntegrityError:
+            db.rollback()
+            policy = (
+                _policy_query(db)
+                .filter(PayrollPolicy.organization_id == organization_id, PayrollPolicy.is_default == True)  # noqa: E712
+                .first()
+            )
+            if not policy:
+                # Lost the race to something OTHER than a same-shape default
+                # policy insert (unexpected) — re-raise rather than silently
+                # returning None, since every caller assumes a real policy.
+                raise
     # In-memory only (not a mapped column) — lets PayrollPolicyResponse
     # surface which fields the org's compliance pack has locked, without
     # a second round trip from the frontend.
@@ -384,6 +428,10 @@ def get_policy_by_id(db: Session, policy_id: int, organization_id: int) -> Payro
 
 def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organization_id: int) -> PayrollPolicy:
     policy = get_policy_by_id(db, policy_id, organization_id)
+
+    old_scalars = _policy_curated_scalars(policy)
+    old_overtime = _policy_overtime_snapshot(policy)
+    old_allowances = _policy_allowances_snapshot(policy)
 
     updates = data.model_dump(exclude_unset=True, by_alias=False)
     category_updates = updates.pop("employee_categories", None)
@@ -476,6 +524,7 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
     db.refresh(policy)
     log_activity(db, organization_id, f"Payroll policy '{policy.name}' updated.", ActivityStatus.SUCCESS)
     policy.policy_locks = locks
+    _notify_policy_changed(db, policy, old_scalars, old_overtime, old_allowances, organization_id)
     return policy
 
 
@@ -497,6 +546,7 @@ def set_integration_enabled(
     if not row:
         raise NotFoundException("PolicyIntegration", f"{category}/{provider_key}")
 
+    old_enabled = bool(row.enabled)
     row.enabled = enabled
     db.commit()
     db.refresh(row)
@@ -506,4 +556,125 @@ def set_integration_enabled(
         f"Integration '{provider_key}' ({category}) {action} on policy '{policy.name}'.",
         ActivityStatus.SUCCESS,
     )
+    if old_enabled != bool(row.enabled):
+        _notify_integration_status_changed(db, policy, category, provider_key, bool(row.enabled), organization_id)
     return row
+
+
+# ── Curated-change snapshots & best-effort notifications ────────────────────
+
+_POLICY_CURATED_FIELDS = (
+    "name", "description", "status", "effective_date", "calculation_mode",
+    "basic_pct", "hra_pct", "bank_export_format", "attendance_required",
+)
+
+
+def _policy_curated_scalars(policy: PayrollPolicy) -> dict:
+    return {f: getattr(policy, f) for f in _POLICY_CURATED_FIELDS if hasattr(policy, f)}
+
+
+def _policy_overtime_snapshot(policy: PayrollPolicy) -> dict:
+    ot = policy.overtime_rule
+    if not ot:
+        return {}
+    return {
+        "enabled": bool(ot.enabled),
+        "minimum_overtime_minutes": ot.minimum_overtime_minutes,
+        "approval_required": bool(ot.approval_required),
+    }
+
+
+def _policy_allowances_snapshot(policy: PayrollPolicy) -> dict:
+    return {
+        c.key: {"label": c.label, "pct": c.pct, "flat_amount": c.flat_amount}
+        for c in (policy.allowance_components or [])
+    }
+
+
+def _policy_value_text(value) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _policy_curated_changes(policy: PayrollPolicy, old_scalars: dict, old_overtime: dict, old_allowances: dict) -> list:
+    changes = []
+    for field in _POLICY_CURATED_FIELDS:
+        if field not in old_scalars:
+            continue
+        old_val = old_scalars[field]
+        new_val = getattr(policy, field, None)
+        if _policy_value_text(old_val) != _policy_value_text(new_val):
+            changes.append((field.replace("_", " ").title(), _policy_value_text(old_val), _policy_value_text(new_val)))
+    for field, old_val in old_overtime.items():
+        new_val = getattr(policy.overtime_rule, field, None)
+        if _policy_value_text(old_val) != _policy_value_text(new_val):
+            changes.append((f"Overtime · {field.replace('_', ' ').title()}", _policy_value_text(old_val), _policy_value_text(new_val)))
+    for key, old_comp in old_allowances.items():
+        comp = next((c for c in (policy.allowance_components or []) if c.key == key), None)
+        if comp is None:
+            changes.append(("Allowance", key, "—"))
+            continue
+        for field, old_comp_val in old_comp.items():
+            new_comp_val = getattr(comp, field, None)
+            if _policy_value_text(old_comp_val) != _policy_value_text(new_comp_val):
+                changes.append((f"Allowance · {key} · {field.replace('_', ' ').title()}",
+                                f"{old_comp.get('label', key)}: {_policy_value_text(old_comp_val)}",
+                                f"{comp.label}: {_policy_value_text(new_comp_val)}"))
+    for comp in (policy.allowance_components or []):
+        if comp.key not in old_allowances:
+            changes.append(("Allowance", "—", f"{comp.label} ({comp.key})"))
+    return changes
+
+
+def _notify_policy_changed(db: Session, policy, old_scalars, old_overtime, old_allowances, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        changes = _policy_curated_changes(policy, old_scalars, old_overtime, old_allowances)
+        if not changes:
+            return
+        from app.services.email_service import _get_org_contact_email, send_payroll_policy_changed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        queue_email(
+            "payroll", "payroll.policy_changed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.policy_changed", org_email, None, f"policy:{policy.id}", changes,
+            ),
+            send_payroll_policy_changed_email, org_email, policy.name or "", list(changes),
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] policy-changed email failed for org {organization_id}: {exc}")
+
+
+def _notify_integration_status_changed(db: Session, policy, category, provider_key, enabled, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_integration_status_changed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        # Repeatable toggle: keyed on the integration + new state.
+        queue_email(
+            "payroll", "payroll.integration_status_changed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.integration_status_changed", org_email, None,
+                f"policy:{policy.id}:integration:{category}:{provider_key}", {"enabled": bool(enabled)},
+            ),
+            send_integration_status_changed_email, org_email, policy.name or "", provider_key, category, enabled,
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] integration-status email failed for org {organization_id}: {exc}")

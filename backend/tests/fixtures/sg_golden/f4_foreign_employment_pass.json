@@ -1,0 +1,51 @@
+{
+  "description": "F4 — Foreign employee on an Employment Pass, S$9,000 salary, not SPR. No CPF; SDL still applies (capped S$11.25); employer levy nil for EP; no tds.",
+  "source": "ZP-SG-ENG-001 v1.0 §17 worked fixtures; rates/ceilings/SDL from §2 (the same values scripts/seed_singapore_canonical_pack.py seeds). Supplied explicitly in this fixture — Singapore has no engine fallback. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "FOREIGN",
+    "sgp_work_pass_type": "EP",
+    "sgp_shg_funds": "NONE",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      }
+    ],
+    "gross": "9000.00",
+    "pay_date": "2026-06-30"
+  },
+  "expected": {
+    "employee_pension": "0",
+    "employer_pension": "0",
+    "employer_payroll_tax": "11.25",
+    "tds": "0",
+    "net_pay": "9000.00"
+  }
+}

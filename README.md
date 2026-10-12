@@ -92,6 +92,7 @@ Key variables (see `backend/.env.example` for the full list):
 | `ASSIST_MODEL_BASE_URL` / `ASSIST_MODEL_API_KEY` / `ASSIST_MODEL_NAME` | OpenAI-compatible provider settings. |
 
 ---
+> **Never run `alembic upgrade head` against the shared dev database from a branch that has not been pushed and reviewed.**
 
 ## 5. Database bootstrap
 

@@ -1,0 +1,33 @@
+INFO:     Started server process [13476]
+INFO:     Waiting for application startup.
+2026-09-22 11:08:57,883 [INFO] Existing tables detected — skipping schema creation.
+2026-09-22 11:08:59,612 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 11:08:59,621 [INFO] Added job "_sweep_all_organizations" to job store "default"
+2026-09-22 11:08:59,622 [INFO] Scheduler started
+2026-09-22 11:08:59,624 [INFO] [assist-sweep] Started, running every 24 hour(s).
+2026-09-22 11:08:59,625 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 11:08:59,626 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 11:08:59,627 [INFO] Scheduler started
+2026-09-22 11:08:59,627 [INFO] [trial-sweep] Started, running every 24 hour(s).
+2026-09-22 11:08:59,628 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 11:08:59,628 [INFO] Added job "_run_dunning_sweep" to job store "default"
+2026-09-22 11:08:59,628 [INFO] Scheduler started
+2026-09-22 11:08:59,629 [INFO] [dunning-sweep] Started, running every 24 hour(s).
+2026-09-22 11:08:59,629 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 11:08:59,629 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 11:08:59,630 [INFO] Scheduler started
+2026-09-22 11:08:59,630 [INFO] [assisted-access-sweep] Started, running every 60 minute(s).
+2026-09-22 11:08:59,631 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 11:08:59,631 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 11:08:59,631 [INFO] Scheduler started
+2026-09-22 11:08:59,632 [INFO] [token-cleanup] Started, running every 24 hour(s).
+2026-09-22 11:09:01,130 [INFO] Zoiko Payroll Platform backend is ready.
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+2026-09-22 11:09:01,137 [INFO] Scheduler has been shut down
+2026-09-22 11:09:01,139 [INFO] Scheduler has been shut down
+2026-09-22 11:09:01,140 [INFO] Scheduler has been shut down
+2026-09-22 11:09:01,141 [INFO] Scheduler has been shut down
+2026-09-22 11:09:01,142 [INFO] Scheduler has been shut down
+INFO:     Application shutdown complete.

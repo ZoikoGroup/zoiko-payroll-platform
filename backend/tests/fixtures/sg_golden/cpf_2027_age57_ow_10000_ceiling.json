@@ -1,0 +1,53 @@
+{
+  "description": "Citizen aged 57, OW S$10,000, January 2027: OW capped at S$8,000 \u2014 the 2027 table's published maxima total S$2,840, employee S$1,520 (employer S$1,320).",
+  "source": "CPF Board 'CPF Contribution Rate Table from 1 January 2027' (retrieved 2026-09-24, sha256 16ac89e7\u2026), Table 1, Above 55\u201360: [35.5% (OW)] max $2,840; employee [19% (OW)] max $1,520; OW ceiling $8,000.",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1969-06-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "NONE",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "19",
+        "employer_rate_pct": "16.5",
+        "rate_label": "CPF-2027-SC_SPR3-AGE_55_60-FULL"
+      }
+    ],
+    "gross": "10000.00",
+    "pay_date": "2027-01-31",
+    "ytd_cpf_ow_subject_before": "0",
+    "ytd_cpf_aw_subject_before": "0"
+  },
+  "expected": {
+    "employee_pension": "1520",
+    "employer_pension": "1320"
+  }
+}

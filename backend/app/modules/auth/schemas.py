@@ -32,16 +32,47 @@ class RegisterRequest(BaseModel):
     country: Optional[str] = None
     timezone: Optional[str] = "UTC"
     phone: Optional[str] = None
+    terms_accepted: bool = Field(..., description="Whether the registration terms were accepted")
     # Jurisdiction-aware tax/registration identifiers collected on the Register
     # Page once a country is selected — keyed by the field keys in
     # app/core/jurisdiction.py (gstin/pan/cin, ein/state_tax_id, crn/vat_number,
     # ust_idnr/steuernummer/hrb, abn/acn). Validated server-side against the
     # selected country's schema before persisting.
     tax_identifiers: Optional[dict] = None
+    # The plan chosen on RegisterPage.jsx's Stage 1 plan picker — checkout
+    # itself doesn't happen until PlanReviewPage (a later, separate call),
+    # so this is purely informational at registration time: it lets the
+    # welcome email name the actual plan the customer is signing up for,
+    # instead of every plan's email being byte-identical. Never used for
+    # billing/entitlement decisions here — POST /billing/checkout remains
+    # the only place a plan is actually committed.
+    plan_code: Optional[str] = None
+
+
+class TrialRegisterRequest(BaseModel):
+    """Minimal payload for the 30-day Professional Evaluation signup
+    (/auth/register-trial). Deliberately has no tax fields, and extra fields
+    are forbidden — a client sending tax_no / tax_identifiers / address data
+    is rejected at the schema level (422) rather than silently discarded, so
+    the evaluation path can never persist compliance data it does not own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    organization: str = Field(..., min_length=1, max_length=200)
+    name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    country: str = Field(..., min_length=1, max_length=100)
 
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    # Optional -- revoking the refresh token too is the frontend's choice
+    # (only possible if it still has the refresh token on hand to send).
+    refresh_token: Optional[str] = None
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -112,3 +143,23 @@ class UserUpdateRequest(BaseModel):
 class UserListResponse(BaseModel):
     users: list[UserResponse]
     total: int
+
+
+# ── Trial banner ────────────────────────────────────────────────────────────
+
+class TrialStatusResponse(BaseModel):
+    """GET /auth/me/trial-status — everything the frontend trial banner
+    needs, derived for the current user's organization.
+
+    - ``workspace_type`` is read live from Organization (never inferred from
+      the plan name — a real Professional-plan customer and an evaluation
+      one can share the same plan code, only the workspace type differs).
+    - ``trial_status`` is "ACTIVE"/"GRACE_READONLY"/"CLOSED"/None mapped from
+      the org's BillingSubscription as derived in auth.service.
+    - ``trial_expires_at`` comes from BillingSubscription.current_period_end
+      (single source of truth — no second date field exists)."""
+
+    workspace_type: str
+    trial_status: Optional[str] = None
+    trial_started_at: Optional[datetime] = None
+    trial_expires_at: Optional[datetime] = None

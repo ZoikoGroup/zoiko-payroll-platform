@@ -1,0 +1,55 @@
+{
+  "description": "F3 — AW ceiling. YTD OW subject to CPF including December = S$96,000 (S$88,000 before + S$8,000 December OW); December bonus S$20,000 AW. Remaining AW ceiling = 102,000 - 96,000 = S$6,000, so only S$6,000 AW is CPF-subject (spec figure). Derived by the engine, not stated in the spec: CPF base 8,000 + 6,000 = 14,000 -> total 37% = S$5,180, employee 20% = S$2,800, employer S$2,380.",
+  "source": "ZP-SG-ENG-001 v1.0 §17 worked fixtures; rates/ceilings/SDL from §2 (the same values scripts/seed_singapore_canonical_pack.py seeds). Supplied explicitly in this fixture — Singapore has no engine fallback. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "NONE",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      }
+    ],
+    "gross": "28000.00",
+    "additional_compensation": "20000.00",
+    "pay_date": "2026-12-31",
+    "ytd_cpf_ow_subject_before": "88000",
+    "ytd_cpf_aw_subject_before": "0"
+  },
+  "expected": {
+    "ytd_cpf_ow_subject_after": "96000",
+    "ytd_cpf_aw_subject_after": "6000",
+    "employee_pension": "2800",
+    "employer_pension": "2380",
+    "employer_payroll_tax": "11.25",
+    "tds": "0"
+  }
+}

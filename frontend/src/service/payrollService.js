@@ -29,6 +29,22 @@ export const COMPLIANCE_COUNTRIES = [
   { code: "AU", name: "Australia" },
   { code: "DE", name: "Germany" },
   { code: "CA", name: "Canada" },
+  // Caribbean production jurisdictions (2026-09-21). The ~25 other
+  // Caribbean jurisdictions ("Coming Soon") are NOT listed here — this
+  // array feeds the real, configurable Compliance jurisdiction picker;
+  // Coming Soon entries live only in utils/caribbeanJurisdictions.js's
+  // region-grouped master, which is a display-only view.
+  { code: "BB", name: "Barbados" },
+  { code: "KY", name: "Cayman Islands" },
+  { code: "DO", name: "Dominican Republic" },
+  { code: "GY", name: "Guyana" },
+  { code: "JM", name: "Jamaica" },
+  { code: "BS", name: "Bahamas" },
+  { code: "TT", name: "Trinidad and Tobago" },
+  // France (2026-09-24, ZP-FR-ENG-001) — Europe expansion.
+  { code: "FR", name: "France" },
+  // Ireland (2026-09-25, ZP-IE-ENG-001) — Europe expansion.
+  { code: "IE", name: "Ireland" },
 ];
 
 export const DEFAULT_COUNTRY = "IN";
@@ -44,54 +60,6 @@ export function getCountryMeta(country) {
   const code = normalizeCountryCode(country) || (country.length === 2 ? country.toUpperCase() : "");
   const name = getCountryNameFromCode(code) || country;
   return { name };
-}
-
-// Flat state/province list per country. This is intentionally NOT the
-// recursive country → state → city → district hierarchy the jurisdiction
-// pack spec calls for — that needs a real backend model. This is just
-// enough structure to stop jurisdictionState from being free text, so
-// values stay consistent with what the tax/contribution engine expects.
-const STATES_BY_COUNTRY = {
-  IN: [
-    "Andhra Pradesh", "Delhi", "Karnataka", "Kerala", "Maharashtra",
-    "Punjab", "Tamil Nadu", "Telangana", "Uttar Pradesh", "West Bengal",
-  ],
-  US: [
-    "California", "New York", "Texas", "Florida", "Illinois",
-    "Washington", "Massachusetts",
-  ],
-  UK: ["England", "Scotland", "Wales", "Northern Ireland"],
-  AU: [
-    "New South Wales", "Victoria", "Queensland", "Western Australia",
-    "South Australia", "Tasmania", "Australian Capital Territory", "Northern Territory",
-  ],
-  DE: [
-    "Baden-Württemberg", "Bavaria", "Berlin", "Brandenburg", "Bremen",
-    "Hamburg", "Hesse", "Lower Saxony", "Mecklenburg-Vorpommern",
-    "North Rhine-Westphalia", "Rhineland-Palatinate", "Saarland", "Saxony",
-    "Saxony-Anhalt", "Schleswig-Holstein", "Thuringia",
-  ],
-  CA: [
-    "Ontario", "Quebec", "British Columbia", "Alberta", "Manitoba",
-    "Saskatchewan", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador",
-    "Prince Edward Island", "Northwest Territories", "Yukon", "Nunavut",
-  ],
-};
-
-export function getStatesForCountry(country) {
-  if (!country) return [];
-  // jurisdictionCountry historically stored either a 2-letter code ("DE")
-  // or a full country name ("Germany"). A 2-letter code is used as-is —
-  // NOT run through normalizeCountryCode(), which maps "uk" -> "GB" for
-  // currency purposes while STATES_BY_COUNTRY's own key is "UK" (the
-  // same bug fixed in getContributionColumns above; this function has no
-  // current callers, so it wasn't live-breaking anything today, but it's
-  // the identical bug class). A full name still goes through
-  // normalizeCountryCode, translating its one "GB" result back to "UK".
-  if (country.length === 2) return STATES_BY_COUNTRY[country.toUpperCase()] || [];
-  const normalized = normalizeCountryCode(country);
-  const code = normalized === "GB" ? "UK" : normalized;
-  return STATES_BY_COUNTRY[code] || [];
 }
 
 export function getFieldPack(country) {
@@ -130,6 +98,27 @@ const RATES_BY_COUNTRY = {
       { id: "employer-pension", label: "Workplace Pension (Employer)", employee: "—", employer: "3% minimum", total: "3%" },
     ],
   },
+  // Explicit DE entry so a Germany org never inherits India's PF/ESI/PT
+  // rows via the DEFAULT_COUNTRY fallback below. Only the flat, non-
+  // conditional statutory rates already certified in the backend engine
+  // (backend/app/modules/payroll/hardcoded_defaults.py — RV/ALV/GKV general
+  // rate, backend/.../engine/germany_pap/core.py — church tax per Land) are
+  // shown here. PV and the GKV supplementary rate are genuinely registry-
+  // driven (vary by Land/Saxony/dependents/fund) — honestly labeled as
+  // varying rather than flattened into one invented number (Phase 8E-2 F1).
+  // Display-only duplicates of the backend engine's certified flat rates —
+  // NOT authoritative for computation. If a registry/DB override is later added
+  // for RV/ALV/GKV these labels must be sourced from the contribution-rates API
+  // instead. (2026-09-15 registry-readiness audit marker.)
+  DE: {
+    rows: [
+      { id: "rv", label: "Pension Insurance (Rentenversicherung)", employee: "9.30%", employer: "9.30%", total: "18.60%" },
+      { id: "alv", label: "Unemployment Insurance (Arbeitslosenversicherung)", employee: "1.30%", employer: "1.30%", total: "2.60%" },
+      { id: "gkv", label: "Health Insurance (Krankenversicherung, general rate)", employee: "7.30% + ½ fund supplement", employer: "7.30% + ½ fund supplement", total: "14.60% + fund supplement (registry-driven)" },
+      { id: "pv", label: "Long-Term Care Insurance (Pflegeversicherung)", employee: "Varies — Saxony & dependents", employer: "Varies — Saxony & dependents", total: "Registry-driven — see Germany calculation preview" },
+      { id: "church-tax", label: "Church Tax (Kirchensteuer)", employee: "8% (Bavaria, Baden-Württemberg) or 9% (other Länder) of income tax, if liable", employer: "—", total: "8–9% of income tax, if liable" },
+    ],
+  },
 };
 
 export function getComplianceRates(country) {
@@ -165,6 +154,24 @@ const SLABS_BY_COUNTRY = {
       { id: "uk-2", min: "£12,571", max: "£50,270", rate: "20%", tax: "20% over £12,570" },
       { id: "uk-3", min: "£50,271", max: "£125,140", rate: "40%", tax: "£7,540 + 40% over £50,270" },
       { id: "uk-4", min: "£125,141", max: "Above", rate: "45%", tax: "£37,488 + 45% over £125,140" },
+    ],
+  },
+  // Explicit DE entry (Phase 8E-2 F1) so Germany never inherits India's
+  // slab table via the DEFAULT_COUNTRY fallback below. Unlike IN/US/UK,
+  // German wage tax (Lohnsteuer) is not a published bracket table in this
+  // system — it is computed by the BMF Programmablaufplan (PAP) formula,
+  // and PAP execution is intentionally blocked (PAP_SOURCE_FINALITY=OPEN;
+  // see docs/PHASE_8D_GERMANY_PAP_PRODUCTION_GATE_ASSESSMENT_REPORT.md).
+  // No bracket values are invented here.
+  DE: {
+    slabs: [
+      {
+        id: "de-1",
+        min: "—",
+        max: "—",
+        rate: "Not specified",
+        tax: "NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION — Lohnsteuer is computed via the BMF Programmablaufplan (PAP) formula, not published brackets; PAP execution is intentionally not yet active.",
+      },
     ],
   },
 };
@@ -321,12 +328,422 @@ export const updateEmployee = async (id, payload) => {
   }
 };
 
+// ── Germany statutory profile / ELStAM boundary (Phase 8N) ──────────────
+// Never calls ELSTER/BZSt — these are plain CRUD/import calls against
+// Zoiko's own backend, exactly like every other function in this file.
+
+export const getEmployeeStatutoryProfile = async (employeeId, asOf) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile`, {
+      params: asOf ? { as_of: asOf } : {},
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getEmployeeStatutoryProfileHistory = async (employeeId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile/history`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createEmployeeStatutoryProfile = async (employeeId, payload) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/statutory-profile`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const importEmployeeElstamPayload = async (employeeId, payload) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/elstam-import`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getEmployeeElstamImportAttempts = async (employeeId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/elstam-imports`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany ELStAM change-list batches (Phase 8O Super Admin surface) ───
+// Metadata-only records (no live ELSTER polling, no auto-apply) — see
+// backend service.create_elstam_change_list_batch's own docstring.
+
+export const createElstamChangeListBatch = async (payload) => {
+  try {
+    return await api.post("/api/payroll/germany/elstam-change-list-batches", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listElstamChangeListBatches = async () => {
+  try {
+    return await api.get("/api/payroll/germany/elstam-change-list-batches");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getElstamChangeListBatch = async (id) => {
+  try {
+    return await api.get(`/api/payroll/germany/elstam-change-list-batches/${id}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const updateElstamChangeListBatchStatus = async (id, payload) => {
+  try {
+    return await api.patch(`/api/payroll/germany/elstam-change-list-batches/${id}/status`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8BF — read-only, org-independent (these registries are global):
+// whether Germany's statutory registries are published/effective today, so
+// the employee-creation form can warn BEFORE an org admin creates a DE
+// employee, instead of only failing closed at actual payroll-run time.
+export const getGermanyStatutoryConfigurationReadiness = async () => {
+  try {
+    return await api.get("/api/payroll/germany/statutory-configuration-readiness");
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8BI — Germany statutory payroll summary, aggregated from real,
+// persisted PayslipItem/PayrollRun rows (never a fabricated figure). Optional
+// periodStart/periodEnd (YYYY-MM-DD) filter by the owning run's period.
+export const getGermanyPayrollSummaryReport = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/germany/reports/summary", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany ELSTER transmission boundary (Phase 8BF) ─────────────────────
+// These calls only prepare/validate GermanyElsterTransmission records and
+// certificate-config references against Zoiko's own backend — they never
+// transmit to ELSTER/BZSt (the transmitter is BLOCKED_EXTERNAL and fails
+// closed by design). No Transferticket is ever fabricated.
+
+export const getGermanyElsterCertificateConfig = async () => {
+  try {
+    return await api.get("/api/payroll/germany/elster-certificate-config");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const setGermanyElsterCertificateConfig = async (payload) => {
+  try {
+    return await api.put("/api/payroll/germany/elster-certificate-config", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createGermanyElsterTransmission = async (payload) => {
+  try {
+    return await api.post("/api/payroll/germany/elster-transmissions", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listGermanyElsterTransmissions = async () => {
+  try {
+    return await api.get("/api/payroll/germany/elster-transmissions");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const validateGermanyElsterTransmission = async (id) => {
+  try {
+    return await api.post(`/api/payroll/germany/elster-transmissions/${id}/validate`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transmitGermanyElsterTransmission = async (id) => {
+  try {
+    return await api.post(`/api/payroll/germany/elster-transmissions/${id}/transmit`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany overtime/shift-premium (Phase 8AC-8AH backend; Phase 8AI
+// frontend) ──────────────────────────────────────────────────────────
+// Fact capture → statutory classification → wage-tax/SI calculation →
+// premium component → explicit payslip attachment. Never calls PAP/
+// ELStAM/ELSTER — plain CRUD/calculation-preview calls against Zoiko's
+// own backend, exactly like every other function in this file.
+
+export const listGermanyOvertimeWorkRecords = async (employeeId, { dateFrom, dateTo } = {}) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, {
+      params: { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createGermanyOvertimeWorkRecord = async (employeeId, payload) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const setGermanyOvertimeWorkRecordApproval = async (employeeId, recordId, hrApprovalStatus) => {
+  try {
+    return await api.post(
+      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/approval`,
+      { hrApprovalStatus },
+    );
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const classifyGermanyOvertimeWorkRecord = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimeClassification = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const calculateGermanyOvertimeWageTax = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimeWageTaxResult = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const calculateGermanyOvertimeSocialInsurance = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimeSocialInsuranceResult = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const buildGermanyOvertimePremiumComponents = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimePremiumComponents = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const attachGermanyOvertimePremiumComponentToPayslip = async (employeeId, recordId, componentId, payslipItemId) => {
+  try {
+    return await api.post(
+      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/attach-to-payslip`,
+      { payslipItemId },
+    );
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8AQ — explicit detach. Reverses attach; never deletes the
+// component or its attach history (see GermanyOvertimePanel.jsx).
+export const detachGermanyOvertimePremiumComponentFromPayslip = async (employeeId, recordId, componentId) => {
+  try {
+    return await api.post(
+      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/detach-from-payslip`,
+    );
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8AO — batch attach. Still explicit/operator-initiated (see
+// GermanyOvertimePanel.jsx's own docstring) — the caller supplies exact
+// (componentId, payslipItemId) pairs; every pair is re-validated
+// server-side regardless of what this UI believes about eligibility.
+export const listGermanyOvertimePremiumComponentsForBatchAttach = async ({ employeeId, workDateFrom, workDateTo, attachmentState } = {}) => {
+  try {
+    return await api.get("/api/payroll/germany-overtime-premium-components/eligible-for-batch-attach", {
+      params: {
+        employeeId: employeeId || undefined, workDateFrom: workDateFrom || undefined,
+        workDateTo: workDateTo || undefined, attachmentState: attachmentState || undefined,
+      },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const batchAttachGermanyOvertimePremiumComponentsToPayslips = async (items) => {
+  try {
+    return await api.post("/api/payroll/germany-overtime-premium-components/batch-attach", { items });
+  } catch (err) {
+    throw err;
+  }
+};
+
 export const deleteEmployee = async (id) => {
   try {
     return await api.delete(`/api/payroll/employees/${id}`);
   } catch (err) {
     throw err;
   }
+};
+
+// UK Statutory Sick Pay / Statutory Family Pay calculator (ZP-TAX-UK-
+// 2026-27-001 §11/§12 gap-closure Phase 5, 2026-09-09) — an on-demand
+// preview, not a payslip mutation. `payload` shape matches the backend's
+// UKStatutoryPayRequest: { employeeId, paymentType, eventStartDate,
+// weekNumber?, qualifyingDaysInPeriod?, qualifyingDaysPerWeek?,
+// averageWeeklyEarnings?, includeEmployerRecovery?, priorYearTotalClass1Nic? }.
+export const calculateUkStatutoryPay = async (payload) => {
+  return await api.post("/api/payroll/uk/statutory-pay/calculate", {
+    employee_id: payload.employeeId,
+    payment_type: payload.paymentType,
+    event_start_date: payload.eventStartDate,
+    week_number: payload.weekNumber ?? 1,
+    qualifying_days_in_period: payload.qualifyingDaysInPeriod ?? null,
+    qualifying_days_per_week: payload.qualifyingDaysPerWeek ?? null,
+    average_weekly_earnings: payload.averageWeeklyEarnings ?? null,
+    include_employer_recovery: payload.includeEmployerRecovery ?? false,
+    prior_year_total_class1_nic: payload.priorYearTotalClass1Nic ?? null,
+  });
+};
+
+// UK NI category relief-eligibility facts (Freeport/Investment Zone/
+// veteran/apprentice, ZP-TAX-UK-2026-27-001 §8.2/§9.3 gap-closure Part 2,
+// 2026-09-09) — feeds derive_ni_category() once _UK_DERIVE_NI_CATEGORY_
+// ENABLED_COUNTRIES is on (enabled 2026-09-10). Same snake_case-request/
+// camelCase-response split as the court-orders API above.
+export const listUkNiReliefFacts = async (employeeId) => {
+  return await api.get(`/api/payroll/uk/employees/${employeeId}/ni-relief-facts`);
+};
+
+export const createUkNiReliefFact = async (employeeId, payload) => {
+  return await api.post(`/api/payroll/uk/employees/${employeeId}/ni-relief-facts`, {
+    relief_type: payload.reliefType,
+    reference: payload.reference || null,
+    effective_from: payload.effectiveFrom,
+    effective_to: payload.effectiveTo || null,
+  });
+};
+
+export const deleteUkNiReliefFact = async (employeeId, factId) => {
+  return await api.delete(`/api/payroll/uk/employees/${employeeId}/ni-relief-facts/${factId}`);
+};
+
+// UK Court-Ordered Deductions (ZP-TAX-UK-2026-27-001 §17 gap-closure Part
+// 8, 2026-09-09) — England & Wales Attachment of Earnings Orders, Scottish
+// arrestments, Northern Ireland's own equivalent. The create/list/status
+// endpoints take/return snake_case for the create payload (backend has no
+// alias on UKCourtOrderCreate) but camelCase for the response
+// (UKCourtOrderResponse) — matched exactly below, not assumed consistent.
+export const listUkCourtOrders = async (employeeId, status) => {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return await api.get(`/api/payroll/uk/employees/${employeeId}/court-orders${query}`);
+};
+
+export const createUkCourtOrder = async (employeeId, payload) => {
+  return await api.post(`/api/payroll/uk/employees/${employeeId}/court-orders`, {
+    jurisdiction: payload.jurisdiction,
+    order_type: payload.orderType,
+    start_date: payload.startDate,
+    court_reference: payload.courtReference || null,
+    issue_date: payload.issueDate || null,
+    end_date: payload.endDate || null,
+    priority: payload.priority !== "" && payload.priority !== undefined ? Number(payload.priority) : null,
+    fixed_deduction_rate_pct: payload.fixedDeductionRatePct || null,
+    fixed_deduction_amount: payload.fixedDeductionAmount || null,
+    protected_earnings_amount: payload.protectedEarningsAmount || null,
+    total_amount_to_collect: payload.totalAmountToCollect || null,
+  });
+};
+
+export const setUkCourtOrderStatus = async (employeeId, orderId, status) => {
+  return await api.put(`/api/payroll/uk/employees/${employeeId}/court-orders/${orderId}/status`, { status });
+};
+
+export const calculateUkCourtOrderDeductions = async (payload) => {
+  return await api.post("/api/payroll/uk/court-orders/calculate", {
+    employee_id: payload.employeeId,
+    attachable_earnings: payload.attachableEarnings,
+    pay_frequency: payload.payFrequency,
+    as_of: payload.asOf || null,
+  });
+};
+
+// UK Employer Annual Charges — Employment Allowance + Class 1A/1B
+// (ZP-TAX-UK-2026-27-001 §9.3/§14 gap-closure Phase 6, 2026-09-09).
+// Whole-tax-year, run-independent employer liabilities — see the
+// matching backend endpoints under /api/payroll/uk/employer-charges/.
+export const getUkEmployerChargesSummary = async () => {
+  return await api.get("/api/payroll/uk/employer-charges/summary");
+};
+
+export const calculateUkEmploymentAllowance = async (employerHasClaimed) => {
+  return await api.post("/api/payroll/uk/employer-charges/employment-allowance", {
+    employer_has_claimed: employerHasClaimed,
+  });
+};
+
+export const calculateUkClass1A1BCharge = async (chargeType, amount) => {
+  return await api.post("/api/payroll/uk/employer-charges/class-1a-1b", {
+    charge_type: chargeType,
+    amount,
+  });
 };
 
 export const bulkCreateEmployees = async (employees) => {
@@ -593,16 +1010,20 @@ export const upsertJurisdictionPack = async (payload) => {
 
 // ── Compliance / Filings ───────────────────────────────
 //
-// fetchContributionRates / fetchTaxSlabs are now country-aware:
-//   1. They ask the backend for country-specific data (?country=XX).
-//   2. If the backend returns nothing yet (most backends won't have
-//      per-country data on day one) they fall back to the local
-//      compliancePacks.js lookup, so the UI is never empty and never
-//      silently shows the wrong country's numbers.
-//
-// This is the seam described in the earlier analysis: once the backend
-// grows real per-country compliance data, only the "if (data.length > 0)"
-// branch matters — no component changes needed.
+// fetchContributionRates / fetchTaxSlabs return exactly what the backend
+// has — including an empty array when nothing is configured yet — and
+// REJECT on a real fetch failure. Every current caller (ContributionRatesTable,
+// TaxSlabTable, TaxConfigurationTab) already has its own loading/error/
+// empty-state handling built for this; previously this function intercepted
+// both cases and silently substituted the hardcoded RATES_BY_COUNTRY/
+// SLABS_BY_COUNTRY tables instead, so an org with real rate-fetch failures
+// (or a genuinely unconfigured jurisdiction) still saw a "Live from payroll
+// engine" badge over fabricated numbers, with no way to tell the difference.
+// RATES_BY_COUNTRY/SLABS_BY_COUNTRY themselves are NOT removed — they're
+// still the correct, honestly-labeled source for getPolicyBasedExtraction's
+// "policy-based preview" (ComplianceDocuments.jsx explicitly flags that
+// path as a fallback to the reader); only this silent, unlabeled use of
+// them as a stand-in for live configuration is removed.
 
 export const fetchComplianceData = async (params) => {
   try {
@@ -613,30 +1034,42 @@ export const fetchComplianceData = async (params) => {
 };
 
 export const fetchContributionRates = async (countryCode = DEFAULT_COUNTRY) => {
-  try {
-    const res = await api.get("/api/payroll/compliance/contribution-rates", {
-      params: { country: countryCode },
-    });
-    const data = Array.isArray(res) ? res : res?.data || res?.items || [];
-    if (data.length > 0) return data;
-    return getComplianceRates(countryCode).rows;
-  } catch {
-    // Backend not reachable / not country-aware yet — use the local pack.
-    return getComplianceRates(countryCode).rows;
-  }
+  const res = await api.get("/api/payroll/compliance/contribution-rates", {
+    params: { country: countryCode },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
 };
 
 export const fetchTaxSlabs = async (countryCode = DEFAULT_COUNTRY) => {
-  try {
-    const res = await api.get("/api/payroll/compliance/tax-slabs", {
-      params: { country: countryCode },
-    });
-    const data = Array.isArray(res) ? res : res?.data || res?.items || [];
-    if (data.length > 0) return data;
-    return getTaxSlabs(countryCode).slabs;
-  } catch {
-    return getTaxSlabs(countryCode).slabs;
-  }
+  const res = await api.get("/api/payroll/compliance/tax-slabs", {
+    params: { country: countryCode },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
+};
+
+// A state/province's own canonical MARGINAL_RATE brackets (US state tax,
+// CA provincial/territorial tax) — deliberately a SEPARATE fetch from
+// fetchTaxSlabs above, which excludes every state-scoped row by design
+// (2026-09-11 fix, keeps them out of federal bracket calculation). Returns
+// [] (not an error) when state is falsy, matching the backend's own
+// falsy-state short-circuit.
+export const fetchStateTaxSlabs = async (countryCode = DEFAULT_COUNTRY, state) => {
+  if (!state) return [];
+  const res = await api.get("/api/payroll/compliance/tax-slabs/state", {
+    params: { country: countryCode, state },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
+};
+
+// Real local-tax rates for THIS org's own employees' work_locality codes
+// (US City/County/Local Payroll Tax in TaxConfigurationTab.jsx) — resolves
+// through the same Active-dataset lookup payroll calculation itself uses,
+// so what's shown here is exactly what an employee's paycheck applies.
+export const fetchOrgLocalityRates = async (countryCode = DEFAULT_COUNTRY) => {
+  const res = await api.get("/api/payroll/compliance/locality-rates", {
+    params: { country: countryCode },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
 };
 
 export const updateCompanyDetails = async (payload) => {
@@ -734,7 +1167,7 @@ export const applyExtractedRate = async ({ documentId, kind, row, countryCode = 
 // For real saved records, use getAttendanceRecords() or getAttendanceHistory().
 export const getEmployeeRoster = async (params = {}) => {
   try {
-    const employees = await getEmployees(params);
+    const employees = await api.get("/api/payroll/employees/roster", { params });
     const records = Array.isArray(employees) ? employees : [];
     // Add default attendance + compensation fields
     return records.map((emp) => ({
@@ -772,6 +1205,57 @@ export const saveAttendanceRecords = async (records) => {
   }
 };
 
+// Saves attendance in batches so a large range (employees × days) never hits
+// the proxy's request-size limit or timeout in a single request. Results are
+// aggregated into the same { saved, skipped, skippedDetails, records } shape
+// as one call. On failure the thrown error carries `savedCount` (rows the
+// server already confirmed in earlier batches) so callers can report partial
+// progress honestly.
+export const ATTENDANCE_SAVE_BATCH_SIZE = 500;
+
+export const saveAttendanceRecordsInBatches = async (records, { batchSize = ATTENDANCE_SAVE_BATCH_SIZE, onProgress } = {}) => {
+  const total = records.length;
+  const result = { saved: 0, skipped: 0, skippedDetails: [], records: [] };
+  for (let i = 0; i < total; i += batchSize) {
+    const batch = records.slice(i, i + batchSize);
+    let res;
+    try {
+      res = await saveAttendanceRecords(batch);
+    } catch (err) {
+      err.savedCount = result.saved;
+      err.totalCount = total;
+      throw err;
+    }
+    result.saved += res?.saved ?? 0;
+    result.skipped += res?.skipped ?? 0;
+    if (Array.isArray(res?.skippedDetails)) result.skippedDetails.push(...res.skippedDetails);
+    if (Array.isArray(res?.records)) result.records.push(...res.records);
+    onProgress?.(Math.min(i + batch.length, total), total);
+  }
+  return result;
+};
+
+// Human-readable reason for a failed attendance save — the server's own
+// message when it sent one, otherwise a plain explanation of the HTTP status.
+export const describeAttendanceSaveError = (err) => {
+  const status = err?.status;
+  if (status === 413) return "The upload is too large for the server to accept (HTTP 413). Try a smaller date range.";
+  if (status === 504 || status === 502) return `The server took too long to respond (HTTP ${status}). Try a smaller date range.`;
+  if (status === 403) return err?.message || "You don't have permission to save attendance (HTTP 403).";
+  if (status === 0 || err?.name === "TypeError") return "Could not reach the server. Check your connection and try again.";
+  return err?.message || "The server rejected the save.";
+};
+
+// Per-employee attendance coverage for a pay period — what the payroll run
+// gate checks. employeeIds omitted = every Active employee.
+export const getAttendanceReadiness = async (periodStart, periodEnd, employeeIds) => {
+  return await api.post("/api/payroll/attendance/readiness", {
+    periodStart,
+    periodEnd,
+    ...(employeeIds ? { employeeIds } : {}),
+  });
+};
+
 // Clear attendance records from the backend (optionally scoped to a date range)
 export const clearAttendanceRecords = async (startDate, endDate) => {
   try {
@@ -791,6 +1275,64 @@ export const getAttendanceRecords = async (params = {}) => {
     return Array.isArray(res) ? res : res?.data || res?.items || [];
   } catch {
     return [];
+  }
+};
+
+// Paged attendance fetch. Hits /attendance/page, which returns an exact total
+// plus a server-computed hasMore — the plain list endpoint cannot express
+// either, which is why a client paging it has to keep re-fetching blindly.
+export const getAttendanceRecordsPaginated = async (params = {}, limit = 100, offset = 0) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/page", {
+      params: { ...params, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      // Span of the whole filtered set, not of this page. The History tab
+      // derives its working-days count from these, so dropping them made the
+      // span read zero no matter what range was selected.
+      firstDate: res?.firstDate ?? null,
+      lastDate: res?.lastDate ?? null,
+    };
+  } catch {
+    // A failed page must not look like "the end of the data", or the UI will
+    // silently stop loading. Report it as an error and let the caller decide.
+    return { items: [], total: 0, limit, offset, hasMore: false, firstDate: null, lastDate: null, error: true };
+  }
+};
+
+// Per-employee attendance aggregates for a range, paged server-side. The
+// Summary tab used to download every attendance row in range and count days
+// in the browser; this does the counting in the database.
+//
+// `search` is forwarded so the server matches every employee in the
+// organization, not only the ones on the page currently loaded in the browser.
+// `totals` is the org-wide sum across the whole filtered set: the stat cards
+// must not total just the loaded page, which under-reports as soon as there
+// is a second page.
+export const getAttendanceSummaryByEmployee = async (
+  { startDate, endDate, search, limit = 100, offset = 0 } = {}
+) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/summary/by-employee", {
+      params: { startDate, endDate, search, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      totals: res?.totals ?? null,
+    };
+  } catch {
+    return { items: [], total: 0, limit, offset, hasMore: false, totals: null, error: true };
   }
 };
 
@@ -1013,6 +1555,7 @@ export const ENTERPRISE_JURISDICTIONS = [
   { code: "AU", name: "Australia", flag: "🇦🇺", currency: "AUD", financialYear: "Jul 1 – Jun 30" },
   { code: "DE", name: "Germany", flag: "🇩🇪", currency: "EUR", financialYear: "Jan 1 – Dec 31" },
   { code: "CA", name: "Canada", flag: "🇨🇦", currency: "CAD", financialYear: "Jan 1 – Dec 31" },
+{ code: "FR", name: "France", flag: "FR", currency: "EUR", financialYear: "Jan 1 - Dec 31" },
 ];
 
 export const ENTERPRISE_STATUS_LABELS = {
@@ -1153,6 +1696,9 @@ const CONTRIBUTION_COLUMNS_BY_COUNTRY = {
     // Same "silently missing" gap as Workplace Pension above — Student/
     // Postgraduate Loan genuinely reduces Net Pay but had no column here.
     { id: "student-loan", label: "Student Loan Deduction", previewField: "monthlyStudyLoanDeduction", payslipField: "studyLoanDeduction" },
+    // Same gap, found 2026-09-09 gap-closure Phase 3 — a concurrent
+    // Postgraduate Loan also reduces Net Pay and had no column here.
+    { id: "postgrad-loan", label: "Postgraduate Loan Deduction", previewField: "monthlyPostgradLoanDeduction", payslipField: "postgradLoanDeduction" },
   ],
   AU: [
     { id: "medicare-levy", label: "Medicare Levy", previewField: "monthlyMedicare", payslipField: "medicare" },
@@ -1314,4 +1860,706 @@ export const submitPublicForm = async (token, values) => {
   } catch (err) {
     throw err;
   }
+};
+
+// ── Report Generation (template-driven) ──────────────────────────────
+// Organization-side consumption of Super Admin-published Report Templates
+// — the org only ever selects a jurisdiction/year/period/run/report and
+// generates; it never authors template structure (that's superAdminService.js).
+
+// Mirrors backend PAYROLL_STATUS_ORDER (models.py) — kept as its own local
+// copy, same convention RunStatusTimeline.jsx already uses, rather than
+// importing across files for a single constant.
+export const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
+
+export const isRunFinalized = (run) => PAYROLL_STATUS_ORDER.indexOf(run?.status) >= PAYROLL_STATUS_ORDER.indexOf("Approved");
+
+export const getAvailableReports = async (params = {}) => {
+  // { reportingYear } -> [{ reportType, name }] — real, backend-owned list
+  // of reports with a Published/Active template for this org's jurisdiction+year.
+  try {
+    const res = await api.get("/api/payroll/report-templates/available", { params });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+export const getApplicableReportTemplate = async (params = {}) => {
+  // { reportingYear, reportType, payrollRunId? } — returns { template, validation }.
+  // validation is only populated when payrollRunId is passed.
+  try {
+    return await api.get("/api/payroll/report-templates/applicable", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const generateReport = async (payload) => {
+  // { reportTemplateId, payrollRunId, reportingPeriod? }
+  try {
+    return await api.post("/api/payroll/generated-reports", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGeneratedReports = async (params = {}) => {
+  try {
+    const res = await api.get("/api/payroll/generated-reports", { params });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+export const getGeneratedReport = async (id) => {
+  try {
+    return await api.get(`/api/payroll/generated-reports/${id}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const voidGeneratedReport = async (id, reason) => {
+  try {
+    return await api.post(`/api/payroll/generated-reports/${id}/void`, { reason });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// This org's upcoming Active statutory filing due dates — never
+// hardcoded/guessed client-side, always whatever Super Admin has
+// published for this org's jurisdiction.
+export const getUpcomingFilingDates = async (limit = 10) => {
+  try {
+    const res = await api.get("/api/payroll/report-templates/filing-calendar", { params: { limit } });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+// Single-employee certificate download (Form 130/P60-style PER_EMPLOYEE
+// reports only) — same manual-fetch-blob-download pattern as downloadReport.
+export const downloadReportCertificate = async (generatedReportId, employeeId, employeeName) => {
+  const token = getAccessToken();
+  const res = await fetch(
+    `${API_BASE_URL}/api/payroll/generated-reports/${generatedReportId}/certificate/${employeeId}`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+  if (!res.ok) throw new Error("Failed to download certificate");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `certificate-${(employeeName || employeeId).toString().replace(/\s+/g, "_")}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
+
+// All employees' certificates for a PER_EMPLOYEE generated report, as one ZIP.
+export const downloadReportCertificatesZip = async (generatedReportId) => {
+  const token = getAccessToken();
+  const res = await fetch(
+    `${API_BASE_URL}/api/payroll/generated-reports/${generatedReportId}/certificates.zip`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+  if (!res.ok) throw new Error("Failed to download certificates");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `certificates-${generatedReportId}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
+
+// ── India: Gratuity (ZP-TAX-IN-2026-27-001 §11, gap-closure Phase D) ─────
+// calculate_india_employee_gratuity has always existed on the backend but
+// had NO frontend anywhere — this is that missing call.
+export const calculateIndiaGratuity = async (payload) => {
+  return await api.post("/api/payroll/india/gratuity/calculate", {
+    employee_id: payload.employeeId,
+    eligibility_event: payload.eligibilityEvent,
+    is_fixed_term: payload.isFixedTerm || false,
+    date_of_leaving: payload.dateOfLeaving || null,
+    last_drawn_monthly_wage: payload.lastDrawnMonthlyWage || null,
+  });
+};
+
+// ── India: Form 122 salary TDS declaration (§6.2, gap-closure Phase E) ───
+export const listIndiaSalaryTdsDeclarations = async (employeeId, taxYear) => {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  if (taxYear) params.set("taxYear", taxYear);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return await api.get(`/api/payroll/india/salary-tds-declarations${query}`);
+};
+
+export const createIndiaSalaryTdsDeclaration = async (payload) => {
+  return await api.post("/api/payroll/india/salary-tds-declarations", {
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+    prior_employer_salary: payload.priorEmployerSalary || 0,
+    prior_employer_tds_deducted: payload.priorEmployerTdsDeducted || 0,
+    other_income: payload.otherIncome || 0,
+    house_property_loss: payload.housePropertyLoss || 0,
+  });
+};
+
+export const submitIndiaSalaryTdsDeclaration = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-declarations/${id}/submit`);
+};
+
+export const approveIndiaSalaryTdsDeclaration = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-declarations/${id}/approve`);
+};
+
+// ── India: Form 124 salary TDS claims (§6.2, gap-closure Phase E) ────────
+export const listIndiaSalaryTdsClaims = async (employeeId, taxYear) => {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  if (taxYear) params.set("taxYear", taxYear);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return await api.get(`/api/payroll/india/salary-tds-claims${query}`);
+};
+
+export const createIndiaSalaryTdsClaim = async (payload) => {
+  return await api.post("/api/payroll/india/salary-tds-claims", {
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+    claim_type: payload.claimType,
+    claimed_amount: payload.claimedAmount,
+    evidence_reference: payload.evidenceReference || null,
+  });
+};
+
+export const submitIndiaSalaryTdsClaim = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-claims/${id}/submit`);
+};
+
+export const approveIndiaSalaryTdsClaim = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-claims/${id}/approve`);
+};
+
+export const rejectIndiaSalaryTdsClaim = async (id, reason) => {
+  return await api.put(`/api/payroll/india/salary-tds-claims/${id}/reject`, { reason });
+};
+
+// ── India: Form 123 employee benefit valuation (§6.2/§7, gap-closure ─────
+// Phase E) — Zoiko does NOT compute perquisite valuation formulas (the
+// statutory pack gives none); the org enters its own already-determined
+// taxable value here.
+export const listIndiaEmployeeBenefitValuations = async (employeeId, taxYear) => {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  if (taxYear) params.set("taxYear", taxYear);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return await api.get(`/api/payroll/india/employee-benefit-valuations${query}`);
+};
+
+export const createIndiaEmployeeBenefitValuation = async (payload) => {
+  return await api.post("/api/payroll/india/employee-benefit-valuations", {
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+    benefit_type: payload.benefitType,
+    taxable_value: payload.taxableValue,
+    description: payload.description || null,
+  });
+};
+
+export const issueIndiaEmployeeBenefitValuation = async (id) => {
+  return await api.put(`/api/payroll/india/employee-benefit-valuations/${id}/issue`);
+};
+
+// ── India: Form 130/138/123 generation (gap-closure Phase E) — these are
+// NOT run-scoped like the generic generateReport() above, so they use
+// their own dedicated endpoints, same as UK's P45/P60/EPS.
+export const generateIndiaForm130 = async (payload) => {
+  return await api.post("/api/payroll/india/reports/form130", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateIndiaForm138 = async (payload) => {
+  return await api.post("/api/payroll/india/reports/form138", {
+    report_template_id: payload.reportTemplateId,
+    reporting_year: payload.reportingYear,
+    period_key: payload.periodKey,
+  });
+};
+
+export const generateIndiaForm123 = async (payload) => {
+  return await api.post("/api/payroll/india/reports/form123", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+  });
+};
+
+// ── US: Form W-2 (Production-Readiness Plan Phase 5) ───────────────────
+// Same shape as India's Form 123 above (report_template_id/employee_id/
+// tax_year) — a calendar-year "2026", not India's fiscal-year "2026-27".
+export const generateUsW2 = async (payload) => {
+  return await api.post("/api/payroll/us/reports/w2", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+  });
+};
+
+// ── US: Form 941/940 (Production-Readiness Plan Phase 5) ───────────────
+// Aggregate, employer-level — no employeeId, same footing as CA's PD7A.
+export const generateUs941 = async (payload) => {
+  return await api.post("/api/payroll/us/reports/941", {
+    report_template_id: payload.reportTemplateId,
+    year: payload.year,
+    quarter: payload.quarter,
+  });
+};
+
+export const generateUs940 = async (payload) => {
+  return await api.post("/api/payroll/us/reports/940", {
+    report_template_id: payload.reportTemplateId,
+    year: payload.year,
+  });
+};
+
+// ── US: New Hire Reporting (Production-Readiness Plan Phase 5) ─────────
+// Compliance tracking (due-date + mark-filed), not report generation —
+// a Pending row is auto-created for every new US employee server-side.
+export const getUsNewHireReports = async (status) => {
+  return await api.get("/api/payroll/us/new-hire-reports", { params: status ? { status } : {} });
+};
+
+export const createUsNewHireReport = async (payload) => {
+  return await api.post("/api/payroll/us/new-hire-reports", {
+    employeeId: payload.employeeId,
+    hireDate: payload.hireDate || null,
+    workState: payload.workState || null,
+    dueDateDays: payload.dueDateDays || null,
+  });
+};
+
+export const markUsNewHireReportFiled = async (reportId, payload = {}) => {
+  return await api.post(`/api/payroll/us/new-hire-reports/${reportId}/mark-filed`, {
+    filedDate: payload.filedDate || null,
+    notes: payload.notes || null,
+  });
+};
+
+// ── Canada: T4/RL-1/ROE (per-employee) + PD7A (per-period) generation ──
+// (ZP-TAX-CA-2026-001, forms/reports gap-closure). T4/RL-1/ROE share the
+// same shape as India's Form 130 above (report_template_id/employee_id/
+// as_of_date) — same widened backend endpoint family, just Canada's own
+// paths.
+export const generateCaT4 = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/t4", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateCaRl1 = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/rl1", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateCaRoe = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/roe", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateCaPd7a = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/pd7a", {
+    report_template_id: payload.reportTemplateId,
+    period_start: payload.periodStart,
+    period_end: payload.periodEnd,
+  });
+};
+
+// Canada bonus/retroactive-pay/vacation-not-taken/accumulated-overtime
+// special-payment method (§19) — a standalone calculator, same footing
+// as calculateIndiaGratuity, not a payroll-run deduction.
+export const calculateCaSpecialPayment = async (payload) => {
+  return await api.post("/api/payroll/canada/special-payment/calculate", {
+    employee_id: payload.employeeId,
+    regular_annual_pay: payload.regularAnnualPay,
+    special_payment_amount: payload.specialPaymentAmount,
+    payroll_date: payload.payrollDate || null,
+  });
+};
+
+// US supplemental wages flat-rate method (ZP-TAX-US-2026-001 §3.1, IRS
+// Pub. 15) — a standalone calculator, same footing as
+// calculateCaSpecialPayment: 22% flat, mandatory 37% on cumulative
+// calendar-year supplemental wages above $1,000,000.
+export const calculateUsSupplementalWages = async (payload) => {
+  return await api.post("/api/payroll/us/supplemental-wages/calculate", {
+    employee_id: payload.employeeId,
+    supplemental_wage_amount: payload.supplementalWageAmount,
+    cytd_supplemental_wages_before: payload.cytdSupplementalWagesBefore || 0,
+  });
+};
+
+// US federal deposit/filing calendar (ZP-TAX-US-2026-001 §3.5) — org-
+// scoped (no employee), a standalone calculator: depositor status,
+// deposit due date, $100,000 next-day rule, $500 FUTA deposit trigger,
+// Form W-2/W-3 January 31 deadline.
+export const calculateUsFederalDepositSchedule = async (payload) => {
+  return await api.post("/api/payroll/us/federal-deposit-schedule/calculate", {
+    lookback_period_liability: payload.lookbackPeriodLiability,
+    payroll_date: payload.payrollDate,
+    accumulated_undeposited_liability: payload.accumulatedUndepositedLiability || null,
+    quarterly_futa_liability: payload.quarterlyFutaLiability || null,
+  });
+};
+
+// Canada retiring allowance/severance lump-sum withholding (§19) — rate-
+// table lookup, resolves to 0%/unconfigured until Tax Ops enters real
+// CRA-sourced bands via Super Admin.
+export const calculateCaRetiringAllowance = async (payload) => {
+  return await api.post("/api/payroll/canada/retiring-allowance/calculate", {
+    employee_id: payload.employeeId,
+    amount: payload.amount,
+    payroll_date: payload.payrollDate || null,
+  });
+};
+
+// Canada TD1X commission formula (§18/§19) — recommended per-period
+// withholding for a commission employee with TD1X estimates on file.
+export const calculateCaTd1xCommission = async (payload) => {
+  return await api.post("/api/payroll/canada/td1x-commission/calculate", {
+    employee_id: payload.employeeId,
+    payroll_date: payload.payrollDate || null,
+    pay_periods_per_year: payload.payPeriodsPerYear || 12,
+  });
+};
+
+// Quebec WSDRF shortfall (§13/§15) — annual reconciliation, employer-
+// level, not tied to a single employee or payroll run.
+export const calculateCaWsdrf = async (payload) => {
+  return await api.post("/api/payroll/canada/wsdrf/calculate", {
+    period_start: payload.periodStart,
+    period_end: payload.periodEnd,
+    training_expenditure_override: payload.trainingExpenditureOverride || null,
+  });
+};
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Org-facing surface: the employer opens its France DSN, follows the four
+// lifecycle signals (FR-032) and drives its own idempotent outbox
+// (FR-033). Authority data — PAS rates, establishment AT/MP rate packs,
+// governed effectif, employer profile — is Super Admin-owned and lives in
+// superAdminService (compliance/france/*), exactly as the backend splits
+// them.
+export const createFranceDsnSubmission = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-submissions", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listFranceDsnSubmissionsForOrg = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/france/dsn-submissions", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnSubmission = async (submissionId, payload) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-submissions/${submissionId}/status`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createFranceDsnOutboxItem = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-outbox", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
+      params: { status, last_error: lastError || null },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Italy (ZP-IT-ENG-001 §17) — this organization's employer profile. The
+// readiness status in the response is recomputed server-side, never sent.
+export const getItalyEmployerProfile = async () => {
+  try {
+    return await api.get("/api/payroll/italy/employer-profile");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const saveItalyEmployerProfile = async (payload) => {
+  try {
+    return await api.put("/api/payroll/italy/employer-profile", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getFranceReadinessForOrg = async (forPeriod) => {
+  try {
+    return await api.get("/api/payroll/france/readiness", {
+      params: { for_period: forPeriod || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+// ── Singapore IR21 tax clearance (hold / clearance / release) ──────────
+// Tenant-scoped on the server (the caller's own organization only);
+// lifting a hold needs a distinct approver, enforced server-side.
+export const listSgIr21Cases = async (params = {}) => {
+  const res = await api.get("/api/payroll/singapore/ir21-cases", { params });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const createSgIr21Case = async (payload) =>
+  // { employeeId, triggerType, triggerDate, awareDate }
+  api.post("/api/payroll/singapore/ir21-cases", payload);
+
+export const transitionSgIr21Case = async (caseId, payload) =>
+  // { status, filedDate?, filingReference?, directiveDate?, directiveReference?, directiveTaxAmount?, exemptionCategory?, reason? }
+  api.post(`/api/payroll/singapore/ir21-cases/${caseId}/transition`, payload);
+
+// ── Singapore Phase 5 — readiness, preflight, CPF EZPay, Compliance Centre ──
+// Every figure and status is computed by the server; these calls only fetch
+// or submit an operator's decision.
+export const getSgEmployerReadiness = async () => api.get("/api/payroll/singapore/readiness");
+
+export const getSgComplianceCentre = async () => api.get("/api/payroll/singapore/compliance-centre");
+
+export const getSgRunPreflight = async (runId) => api.get(`/api/payroll/singapore/runs/${runId}/preflight`);
+
+export const getSgAisReadiness = async (year) => api.get("/api/payroll/singapore/ais-readiness", { params: { year } });
+
+export const listSgPwmClassifications = async () => {
+  const res = await api.get("/api/payroll/singapore/pwm-classifications");
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const recordSgCessation = async (employeeId, dateOfLeaving) =>
+  api.post(`/api/payroll/singapore/employees/${employeeId}/cessation`, { dateOfLeaving });
+
+export const listSgCpfEzpay = async () => {
+  const res = await api.get("/api/payroll/generated-reports", { params: { reportType: "SG_CPF_EZPAY" } });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const prepareSgCpfEzpay = async ({ year, month, adviceCode = "01" }) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_CPF_EZPAY" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error("No Active CPF EZPay template for this year.");
+  return api.post("/api/payroll/singapore/reports/cpf-ezpay", { reportTemplateId: templateId, year, month, adviceCode });
+};
+
+// Singapore Phase 5.7 — internal compliance reports (PWM / LQS per CPF wage
+// month, IR21 register per year) generated server-side from the existing
+// evaluators. Resolves the Active template like prepareSgCpfEzpay; these
+// routes take snake_case bodies (GY/JM monthly/annual request schemas).
+const SG_COMPLIANCE_REPORTS = {
+  SG_PWM_COMPLIANCE: "pwm-compliance",
+  SG_LQS_COMPLIANCE: "lqs-compliance",
+  SG_IR21_REGISTER: "ir21-register",
+};
+
+export const generateSgComplianceReport = async (reportType, { year, month }) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active ${reportType} template for ${year}.`);
+  const body = reportType === "SG_IR21_REGISTER"
+    ? { report_template_id: templateId, year }
+    : { report_template_id: templateId, year, month };
+  return api.post(`/api/payroll/singapore/reports/${SG_COMPLIANCE_REPORTS[reportType]}`, body);
+};
+
+export const transitionSgCpfEzpay = async (reportId, payload) =>
+  // { status: APPROVED | SUBMITTED | ACCEPTED | REJECTED | UNKNOWN, reference?, note? }
+  api.post(`/api/payroll/singapore/reports/cpf-ezpay/${reportId}/transition`, payload);
+
+export const downloadSgCpfEzpayFile = async (reportId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}/api/payroll/singapore/reports/cpf-ezpay/${reportId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let detail = "The CPF EZPay file could not be downloaded.";
+    try { detail = (await res.json())?.detail || detail; } catch { /* non-JSON error body */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const match = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `cpf-ezpay-${reportId}.DTL`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return { filename };
+};
+
+// ── Singapore Phase 5.1 — corrections, salary deductions, DR freeze ─────
+export const correctSgPayslip = async (payslipId, reason) =>
+  api.post(`/api/payroll/singapore/payslips/${payslipId}/corrections`, { reason });
+
+export const listSgPayslipCorrections = async (payslipId) =>
+  api.get(`/api/payroll/singapore/payslips/${payslipId}/corrections`);
+
+export const createSgSalaryDeduction = async (employeeId, payload) =>
+  // { category, startDate, endDate?, evidenceRef, evidenceDate, amount? | ratePct?, totalToCollect?, priority? }
+  api.post(`/api/payroll/singapore/employees/${employeeId}/deductions`, payload);
+
+export const listSgSalaryDeductions = async (employeeId) =>
+  api.get(`/api/payroll/singapore/employees/${employeeId}/deductions`);
+
+export const freezeSgAfterRestore = async (restorePoint, restoreDate) =>
+  api.post("/api/payroll/singapore/disaster-recovery/freeze", { restorePoint, restoreDate: restoreDate || null });
+
+// Singapore SG-047 — release a post-restore bank-export hold after the bank reconciliation.
+export const releaseSgBankExportHold = async (runId, reference) =>
+  api.post(`/api/payroll/singapore/disaster-recovery/bank-hold/${runId}/release`, { reference });
+
+// Singapore SG-023 — IR8A extracts and their controlled manual-submission record (API DIRECT SUBMISSION: NOT READY).
+export const listSgIr8a = async () => {
+  const res = await api.get("/api/payroll/singapore/reports/ir8a");
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const transitionSgIr8a = async (reportId, { status, reference, note }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/transition`, { status, reference, note });
+// Prepare an EXPORT_READY IR8A extract for one income year from the Active SG_IR8A template.
+export const generateSgIr8a = async (year) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_IR8A" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active IR8A template for ${year}.`);
+  return api.post("/api/payroll/singapore/reports/ir8a", { report_template_id: templateId, year });
+};
+// Phase 6.8 (G3) — Revision (full values) / Amendment (differences) of an IRAS-acknowledged extract.
+export const createSgIr8aModification = async (reportId, { method, reason }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/modifications`, { method, reason });
+
+// ── Hong Kong (ZP-HK-ENG-001) — tenant workflows ───────────────────────
+// Every rule (MPF, IR56G hold, IRD, eMPF, entitlements, SP/LSP, four-eyes)
+// is enforced server-side; these calls only fetch or submit operator input.
+const HK = "/api/payroll/hong-kong";
+export const recordHkWorkHours = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/work-hours`, payload);
+export const getHkContinuousContract = (employeeId, asOf) =>
+  api.get(`${HK}/employees/${employeeId}/continuous-contract`, { params: { as_of: asOf } });
+export const listHkTaxClearanceCases = async () => {
+  const res = await api.get(`${HK}/tax-clearance`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const identifyHkDeparture = (payload) => api.post(`${HK}/tax-clearance`, payload);
+export const recordHkIr56gFiled = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/filed`, payload);
+export const requestHkHoldRelease = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/release-request`, payload);
+export const approveHkHoldRelease = (holdId) => api.post(`${HK}/tax-clearance/${holdId}/release-approve`, {});
+export const changeHkDeparture = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/change`, payload);
+export const closeHkHold = (holdId) => api.post(`${HK}/tax-clearance/${holdId}/close`, {});
+export const listHkIrdCases = async (yearOfAssessment) => {
+  const res = await api.get(`${HK}/ird/cases`, { params: yearOfAssessment ? { year_of_assessment: yearOfAssessment } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const createHkIrdEventCases = (employeeId) => api.post(`${HK}/ird/employees/${employeeId}/event-cases`, {});
+export const generateHkAnnualReturn = (yearOfAssessment) => api.post(`${HK}/ird/annual-return`, { yearOfAssessment });
+export const transitionHkIrdCase = (caseId, payload) => api.post(`${HK}/ird/cases/${caseId}/transition`, payload);
+export const amendHkIrdCase = (caseId, reason) => api.post(`${HK}/ird/cases/${caseId}/amend`, { reason });
+export const getHkIrdCaseHistory = async (caseId) => {
+  const res = await api.get(`${HK}/ird/cases/${caseId}/history`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const calculateHkAverageWage = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/average-wage`, payload);
+export const calculateHkEntitlement = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/entitlements`, payload);
+export const calculateHkTermination = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/termination`, payload);
+export const approveHkTermination = (resultId) => api.post(`${HK}/termination/${resultId}/approve`, {});
+export const listHkEmpfSubmissions = async () => {
+  const res = await api.get(`${HK}/empf/submissions`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const prepareHkEmpfSubmission = (contributionPeriod) => api.post(`${HK}/empf/submissions`, { contributionPeriod });
+export const transitionHkEmpfSubmission = (id, payload) => api.post(`${HK}/empf/submissions/${id}/transition`, payload);
+export const estimateHkSalariesTax = (payload) => api.post(`${HK}/salaries-tax/estimate`, payload);
+export const getHkRunPreflight = (runId) => api.get(`${HK}/runs/${runId}/preflight`);
+export const getHkEmployerReadiness = () => api.get(`${HK}/readiness`);
+export const recordHkEmployeeCopy = (caseId, evidenceRef) => api.post(`${HK}/ird/cases/${caseId}/employee-copy`, { evidenceRef });
+// HK statutory reports (GeneratedReport from an Active template). Bodies are
+// snake_case exactly as the server's request schemas declare them.
+export const generateHkBir56a = (reportTemplateId, yearOfAssessment) =>
+  api.post(`${HK}/reports/bir56a`, { report_template_id: reportTemplateId, year_of_assessment: yearOfAssessment });
+export const generateHkIr56b = (reportTemplateId, employeeId, yearOfAssessment) =>
+  api.post(`${HK}/reports/ir56b`, { report_template_id: reportTemplateId, employee_id: employeeId, year_of_assessment: yearOfAssessment });
+export const generateHkIr56Notification = (reportTemplateId, caseId) =>
+  api.post(`${HK}/reports/ir56-notification`, { report_template_id: reportTemplateId, case_id: caseId });
+export const generateHkEmpfRemittance = (reportTemplateId, submissionId) =>
+  api.post(`${HK}/reports/empf-remittance`, { report_template_id: reportTemplateId, submission_id: submissionId });
+export const generateHkMpfContributionRecord = (reportTemplateId, employeeId, contributionPeriod) =>
+  api.post(`${HK}/reports/mpf-contribution-record`, { report_template_id: reportTemplateId, employee_id: employeeId, contribution_period: contributionPeriod });
+export const generateHkTerminationStatement = (reportTemplateId, terminationResultId) =>
+  api.post(`${HK}/reports/termination-statement`, { report_template_id: reportTemplateId, termination_result_id: terminationResultId });
+// D-14 linked corrections of committed HK payroll (maker requests, a different checker approves).
+export const requestHkCorrection = (payslipId, reason) => api.post(`${HK}/payslips/${payslipId}/corrections`, { reason });
+export const listHkCorrections = async (employeeId) => {
+  const res = await api.get(`${HK}/corrections`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listHkTerminationResults = async (employeeId) => {
+  const res = await api.get(`${HK}/termination-results`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listHkAverageWageSnapshots = async (employeeId) => {
+  const res = await api.get(`${HK}/employees/${employeeId}/average-wage-snapshots`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const requestHkAverageWageOverride = (snapshotId, payload) => api.post(`${HK}/average-wage/${snapshotId}/override-request`, payload);
+export const approveHkAverageWageOverride = (snapshotId) => api.post(`${HK}/average-wage/${snapshotId}/override-approve`, {});
+export const approveHkCorrection = (correctionId) => api.post(`${HK}/corrections/${correctionId}/approve`, {});
+export const rejectHkCorrection = (correctionId, reason) => api.post(`${HK}/corrections/${correctionId}/reject`, { reason });
+// D-19 legal holds and the HK statutory-data access log.
+export const listHkLegalHolds = async () => {
+  const res = await api.get(`${HK}/legal-holds`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const placeHkLegalHold = (payload) => api.post(`${HK}/legal-holds`, payload);
+export const releaseHkLegalHold = (holdId, reason) => api.post(`${HK}/legal-holds/${holdId}/release`, { reason });
+export const listHkAccessEvents = async (employeeId) => {
+  const res = await api.get(`${HK}/access-events`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
 };

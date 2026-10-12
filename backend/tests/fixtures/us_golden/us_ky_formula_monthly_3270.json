@@ -1,0 +1,18 @@
+{
+  "description": "Kentucky flat withholding formula (ZP-TAX-US-2026-001 §13, test ID US-KY-001) -- the document's own worked example: monthly gross $3,270, KY DOR 42A003 (TCF) 2026 formula ($3,360 annual standard deduction, 3.5% flat rate). Expected monthly withholding $104.65 per official example.",
+  "source": "ZP-TAX-US-2026-001 v1.0: Section 13 test US-KY-001 (\"Monthly $3,270 example\" -> \"Expected monthly withholding $104.65 per official example\"); Appendix A (\"42A003 (TCF) 2026 specifies $3,360 standard deduction and 3.5% flat withholding formula\"). Recomputed by running the real engine (build_context/calculate_payroll), not hand-derived: (3270*12 - 3360) * 3.5% / 12 = 104.65.",
+  "context": {
+    "gross": "3270.00",
+    "country": "US",
+    "work_state": "KY",
+    "state_rate_map": {
+      "state_standard_deduction": {"flat_amount": "3360.00"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": null, "rate_pct": "3.5", "rule_type": "FLAT_RATE", "jurisdiction_state": "KY"}
+    ]
+  },
+  "expected": {
+    "state_income_tax": "104.65"
+  }
+}

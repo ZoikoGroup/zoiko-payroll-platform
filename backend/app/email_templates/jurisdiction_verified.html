@@ -1,0 +1,16 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Hello,</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  <strong style="color:#0b1f3a;">{{country_label}}</strong> is now
+  <strong style="color:#15803d;">verified</strong>.
+</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Verified means this jurisdiction can now run production payroll: payroll runs,
+  payslips and statutory calculations for your organization resolve against
+  {{country_label}}&rsquo;s rules.
+</p>
+{{#if active_switched}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  {{country_label}} is now the <strong>active payroll country</strong> for new runs.
+  Existing runs keep the country they were calculated with.
+</p>
+{{/if}}

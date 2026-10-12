@@ -1,0 +1,16 @@
+{
+  "description": "New York Paid Family Leave annual cap (ZP-TAX-US-2026-001 §13, test ID US-NY-PFL-001) -- proves the $411.91 annual maximum actually stops the contribution rather than letting the flat 0.432% run uncapped. The harness has no YTD/multi-period accumulator, so this uses one period high enough (monthly gross $10,000, i.e. $120,000/yr) that the UNCAPPED amount ($43.20/mo) already exceeds the capped monthly equivalent ($411.91/12 = $34.33/mo) within a single period -- a stricter proof of the same invariant the document's own CYTD-accumulation framing describes, not a literal replay of it.",
+  "source": "ZP-TAX-US-2026-001 v1.0: Section 5 (NY Paid Family Leave: employee 0.432%, gross wages, annual employee max $411.91), Section 13 test US-NY-PFL-001 (\"Stop employee contribution at $411.91\"), Appendix A (\"2026 employee contribution rate 0.432% with annual maximum $411.91\"). Recomputed by running the real engine: uncapped 120000 * 0.432% / 12 = 43.20/mo; capped at 411.91/12 = 34.33/mo (rounded).",
+  "context": {
+    "gross": "10000.00",
+    "country": "US",
+    "work_state": "NY",
+    "state_rate_map": {
+      "paid_leave": {"employee_rate_pct": "0.432", "jurisdiction_state": "NY"},
+      "paid_leave_annual_max": {"flat_amount": "411.91"}
+    }
+  },
+  "expected": {
+    "state_program_deductions": "34.33"
+  }
+}

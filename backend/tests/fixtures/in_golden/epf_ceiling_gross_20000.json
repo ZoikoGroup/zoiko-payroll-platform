@@ -1,0 +1,17 @@
+{
+  "description": "IN-EPF-001 (ZP-TAX-IN-2026-27-001 §21) — PF base capped at the ₹15,000 statutory wage ceiling. Basic=gross=₹20,000 (no HRA/allowances), so both the Code Wages add-back mechanism (dormant-by-default per shared.py, but currently enabled per shared._IN_CODE_WAGES_ENABLED_COUNTRIES) and the plain basic-only default agree the pre-ceiling PF base is ₹20,000 — capped at ₹15,000 by india.py's pf_wage_ceiling logic (also currently enabled). employee_pf = employer_pf (pre-diversion) = 15,000 × 12% = ₹1,800, matching the doc's own stated figures exactly.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-EPF-001 + §9.1 (EPF wage ceiling ₹15,000, employee/employer rate 12%). Rate/ceiling supplied explicitly in this fixture rather than relying on hardcoded_defaults.py's own _IN_PF_WAGE_CEILING fallback, so the case is self-contained. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "20000.00",
+    "basic": "20000.00",
+    "country": "IN",
+    "pay_date": "2026-06-15",
+    "rate_map": {
+      "pf": {"employee_rate_pct": "12", "employer_rate_pct": "12"}
+    }
+  },
+  "expected": {
+    "employee_pf": "1800.00",
+    "employer_pf": "1800.00"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "Scale 3 (foreign resident), weekly gross $3000. x=3000.99 falls in the [2596,3653) band (a=0.37, b=181.7308). y = 0.37*3000.99 - 181.7308 = 928.6355, rounds to 929.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (NAT 1004, Scale 3 — foreign resident, effective 1 Jul 2026). Hand-computed against the document's own y=a*x-b formula, cross-checked by running the real engine at authoring time.",
+  "context": {
+    "gross": "3000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "FOREIGN_RESIDENT",
+    "slabs": [
+      {"min_amount": "0", "max_amount": "2596", "rate_pct": "0.3", "flat_amount": "0.3", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_3"},
+      {"min_amount": "2596", "max_amount": "3653", "rate_pct": "0.37", "flat_amount": "181.7308", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_3"},
+      {"min_amount": "3653", "max_amount": null, "rate_pct": "0.45", "flat_amount": "474.0385", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_3"}
+    ]
+  },
+  "expected": {
+    "tds": "929"
+  }
+}

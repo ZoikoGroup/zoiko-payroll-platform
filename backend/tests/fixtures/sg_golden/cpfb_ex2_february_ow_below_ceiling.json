@@ -1,0 +1,218 @@
+{
+  "description": "CPF Board AW example 2 (February): OW $4,500, AW $5,000. Estimated AW ceiling = $102,000 - ($4,500 x 12) = $48,000; all $5,000 AW subject. February CPF = OW 765/900 + AW 850/1,000 -> employer 1,615, employee 1,900.",
+  "source": "CPF Board, 'Examples for computation of Additional Wage (AW) Ceiling' (2026), sha256 98fc7777d8c6fb0f76f4770217570e26e94e91533345d98db7b1c451c8721220, retrieved 2026-09-23 - AW ceiling method approved as Option A. Rates from the CPF Board rate tables from 1 Jan 2026 (sha256 7ab21a34...). Run through the real production engine at authoring time.",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "NONE",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "60",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "16",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "54",
+        "employer_rate_pct": "16",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "18",
+        "employer_rate_pct": "16",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-FULL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "4",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "15",
+        "employer_rate_pct": "4",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "5",
+        "employer_rate_pct": "4",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-FULL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "45",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "15",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-FULL"
+      }
+    ],
+    "gross": "9500",
+    "additional_compensation": "5000",
+    "pay_date": "2026-02-28",
+    "ytd_cpf_ow_subject_before": "4500",
+    "ytd_cpf_aw_subject_before": "0",
+    "ytd_cpf_aw_paid_before": "0",
+    "sgp_aw_ledger": []
+  },
+  "expected": {
+    "employee_pension": "1900",
+    "employer_pension": "1615",
+    "ytd_cpf_aw_subject_after": "5000"
+  }
+}

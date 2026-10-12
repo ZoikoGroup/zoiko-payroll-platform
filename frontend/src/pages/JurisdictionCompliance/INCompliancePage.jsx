@@ -1,11 +1,19 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Pencil, Trash2, X, Percent } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Percent, BookOpen, CalendarClock, Landmark, FileText } from "lucide-react";
 import Modal from "../../components/Modal";
 import { upsertCanonicalContributionRate, upsertCanonicalTaxSlab } from "../../service/superAdminService";
 import { inputClass, labelClass } from "../../components/jurisdiction/constants";
 import RateFormModal from "../../components/jurisdiction/RateFormModal";
 import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
+import INTaxComponentsTab from "../../components/jurisdiction/india/INTaxComponentsTab";
+import INStateLocalReadinessTab from "../../components/jurisdiction/india/INStateLocalReadinessTab";
+import INCodeWagesTab from "../../components/jurisdiction/india/INCodeWagesTab";
+import INSourceEvidenceTab from "../../components/jurisdiction/india/INSourceEvidenceTab";
+import INComplianceCalendarTab from "../../components/jurisdiction/india/INComplianceCalendarTab";
+import INGratuityTab from "../../components/jurisdiction/india/INGratuityTab";
+import INSalaryTdsFormsTab from "../../components/jurisdiction/india/INSalaryTdsFormsTab";
+import { sanitizeNumeric } from "../../components/jurisdiction/india/inComponentConfig";
 
 // India — everything country-specific for this jurisdiction lives in this
 // one file: the two real backend constructs built this session (Section
@@ -37,27 +45,60 @@ const PARAM_SECTIONS = [
     fields: [
       { key: "rebate_87a_limit", label: "Income Eligibility Limit", type: "currency", perRegime: true },
       { key: "rebate_87a_max", label: "Maximum Rebate Amount", type: "currency", perRegime: true },
-      { key: "rebate_87a_marginal_relief", label: "Marginal Relief", type: "toggle", appliesToBoth: true },
+      // componentKey max 20 chars (payroll_contribution_rates.component_key
+      // is VARCHAR(20)) — "rebate_87a_marginal_relief" (26 chars) always
+      // 500'd on save. Shortened; also renamed in india.py's
+      // resolve_jurisdiction_parameter() call and its test fixtures so the
+      // engine keeps reading the same key it's saved under.
+      { key: "rebate_87a_mrelief", label: "Marginal Relief", type: "toggle", appliesToBoth: true },
     ],
   },
   {
     key: "surcharge", title: "Surcharge Slabs & Caps", subtitle: "Tiered — its own table below",
     fields: [
       { key: "surcharge_cap_pct", label: "Maximum Surcharge Cap", type: "percent", perRegime: true },
-      { key: "surcharge_marginal_relief", label: "Marginal Relief on Surcharge", type: "toggle", appliesToBoth: true },
+      // Same VARCHAR(20) fix as rebate_87a_mrelief above — also renamed in
+      // india.py and its test fixtures.
+      { key: "surcharge_mrelief", label: "Marginal Relief on Surcharge", type: "toggle", appliesToBoth: true },
     ],
   },
   {
     key: "retirement", title: "Retirement & Exemption Limits", subtitle: "Section 80C shown only under Old Regime",
     fields: [
-      { key: "nps_80ccd2_employer_cap_pct", label: "NPS Employer Contribution Cap — 80CCD(2)", type: "percent", appliesToBoth: true, notApplied: true },
-      { key: "gratuity_exemption_limit", label: "Gratuity Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
-      { key: "leave_encashment_exemption_limit", label: "Leave Encashment Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
+      // componentKey max 20 chars (payroll_contribution_rates.component_key
+      // is VARCHAR(20)) — these keys' original names (27/24/32 chars)
+      // always 500'd on save. Shortened; also renamed in india.py's own
+      // lookups so the engine reads the same key it's saved under.
+      //
+      // nps_80ccd2_cap_pct and gratuity_exempt_lim: genuinely consumed
+      // now (2026-09-18 production-readiness fix plan, Tier 1) —
+      // nps_80ccd2_cap_pct caps how much of the employer's NPS
+      // contribution is tax-exempt (the contribution itself is
+      // uncapped); gratuity_exempt_lim splits a computed gratuity
+      // payout into its Section 10(10) exempt/taxable portions. Neither
+      // is fed into any actual payslip/TDS calculation yet — that needs
+      // a final-settlement payroll-run integration this codebase
+      // doesn't have — so both remain informational-only outputs on
+      // their respective calculators for now.
+      { key: "nps_80ccd2_cap_pct", label: "NPS Employer Contribution Cap — 80CCD(2)", type: "percent", appliesToBoth: true },
+      { key: "gratuity_exempt_lim", label: "Gratuity Exemption Limit", type: "currency", appliesToBoth: true },
+      { key: "gratuity_max_amt", label: "Gratuity Maximum Notified Amount", type: "currency", appliesToBoth: true },
+      { key: "gratuity_min_yrs", label: "Gratuity Minimum Qualifying Years", type: "number", appliesToBoth: true },
+      // Genuinely still unbuilt: no "leave encashment" earning
+      // component/payout concept exists anywhere in this engine yet —
+      // applying an exemption LIMIT to a payout that isn't itself
+      // computed anywhere would be meaningless, so this stays
+      // notApplied until that underlying feature exists.
+      { key: "leave_encash_exempt", label: "Leave Encashment Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
       { key: "section_80c_limit", label: "Section 80C Limit", type: "currency", perRegime: true, oldOnly: true, notApplied: true },
     ],
   },
 ];
-const PARAM_KEYS = new Set(PARAM_SECTIONS.flatMap((s) => s.fields.map((f) => f.key)));
+// Exported so INTaxComponentsTab (the business-language Contribution
+// Components tab) can exclude these rows from its own card list — they're
+// only ever edited here, avoiding the same field showing up twice in raw
+// form on a second tab.
+export const PARAM_KEYS = new Set(PARAM_SECTIONS.flatMap((s) => s.fields.map((f) => f.key)));
 
 function ParametersTab({ pack, rates, slabs, addToast, onReload, onPublish }) {
   const [regime, setRegime] = useState("New");
@@ -105,7 +146,7 @@ function ParametersTab({ pack, rates, slabs, addToast, onReload, onPublish }) {
 
   function addTier() {
     const last = tiers[tiers.length - 1];
-    setTiers([...tiers, { id: null, minAmount: last ? String(Number(last.minAmount) + 1000000) : "5000000", ratePct: "10" }]);
+    setTiers([...tiers, { id: null, minAmount: last ? String(Number(sanitizeNumeric(last.minAmount)) + 1000000) : "5000000", ratePct: "10" }]);
   }
   function removeTier(idx) {
     setTiers(tiers.filter((_, i) => i !== idx));
@@ -129,7 +170,7 @@ function ParametersTab({ pack, rates, slabs, addToast, onReload, onPublish }) {
               id: entry?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
               jurisdictionState: pack.jurisdictionState || null, taxRegime: scope === "_" ? null : scope,
               componentKey: field.key, label: field.label,
-              flatAmount: raw === "" ? null : raw, sortOrder: 0,
+              flatAmount: raw === "" ? null : sanitizeNumeric(raw), sortOrder: 0,
             })
           );
         }
@@ -140,7 +181,7 @@ function ParametersTab({ pack, rates, slabs, addToast, onReload, onPublish }) {
           upsertCanonicalTaxSlab({
             id: t.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
             jurisdictionState: pack.jurisdictionState || null, taxRegime: regime,
-            minAmount: t.minAmount, maxAmount: null, ratePct: t.ratePct,
+            minAmount: sanitizeNumeric(t.minAmount), maxAmount: null, ratePct: sanitizeNumeric(t.ratePct),
             rateLabel: `Surcharge above ${t.minAmount}`, ruleType: "SURCHARGE", sortOrder: 0,
           })
         );
@@ -320,8 +361,11 @@ function PTSlabsTab({ slabs, onAdd, onEdit, onDelete }) {
               <tr>
                 <th className="px-3 py-2">Gross Income From (₹)</th>
                 <th className="px-3 py-2">Gross Income To (₹)</th>
-                <th className="px-3 py-2">Monthly PT Amount (₹)</th>
+                <th className="px-3 py-2">Amount (₹)</th>
                 <th className="px-3 py-2">Adjustment Month Amount (₹)</th>
+                <th className="px-3 py-2">Gender</th>
+                <th className="px-3 py-2">Basis</th>
+                <th className="px-3 py-2">Local Authority</th>
                 <th className="px-3 py-2 w-16"></th>
               </tr>
             </thead>
@@ -332,6 +376,9 @@ function PTSlabsTab({ slabs, onAdd, onEdit, onDelete }) {
                   <td className="px-3 py-2 text-foreground-secondary">{s.maxAmount ?? "Above"}</td>
                   <td className="px-3 py-2 font-medium text-foreground">₹{s.flatAmount ?? "0"}</td>
                   <td className="px-3 py-2 text-foreground-secondary">{s.adjustmentAmount != null ? `₹${s.adjustmentAmount}` : "—"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.filingStatus === "MALE" ? "Men" : s.filingStatus === "FEMALE" ? "Women" : "—"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.assessmentBasis === "HALF_YEAR_INCOME" ? "Half-yearly" : "Monthly"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.jurisdictionLocality || "—"}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1">
                       <button onClick={() => onEdit(s)} className="rounded p-1 text-foreground-disabled hover:text-primary hover:bg-surface-muted"><Pencil size={12} /></button>
@@ -354,17 +401,34 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
   const [maxAmount, setMaxAmount] = useState(slab?.maxAmount != null ? String(slab.maxAmount) : "");
   const [flatAmount, setFlatAmount] = useState(slab?.flatAmount != null ? String(slab.flatAmount) : "");
   const [adjustmentAmount, setAdjustmentAmount] = useState(slab?.adjustmentAmount != null ? String(slab.adjustmentAmount) : "");
+  // Gender-differentiated brackets (§13.2, Maharashtra) and local-
+  // authority half-yearly PT (§14.1, Chennai) both had NO form fields
+  // here at all before this — found while extending this modal for
+  // assessment_basis. filingStatus repurposes the same generic column
+  // india.py's _resolve_state_pt_bracket already reads for gender.
+  const [filingStatus, setFilingStatus] = useState(slab?.filingStatus || "");
+  const [assessmentBasis, setAssessmentBasis] = useState(slab?.assessmentBasis || "MONTHLY_WAGE");
+  const [jurisdictionLocality, setJurisdictionLocality] = useState(slab?.jurisdictionLocality || "");
   const [saving, setSaving] = useState(false);
 
-  const flatNum = Number(flatAmount) || 0;
-  const adjNum = adjustmentAmount === "" ? null : Number(adjustmentAmount);
+  const flatNum = Number(sanitizeNumeric(flatAmount)) || 0;
+  const adjNum = adjustmentAmount === "" ? null : Number(sanitizeNumeric(adjustmentAmount));
   const annualTotal = adjNum != null ? flatNum * 11 + adjNum : flatNum * 12;
 
   async function save() {
-    const min = Number(minAmount);
-    const max = isAbove ? null : Number(maxAmount);
-    const flat = Number(flatAmount);
-    const adj = adjustmentAmount === "" ? null : Number(adjustmentAmount);
+    // Sanitized once here — used for both validation and the save payload,
+    // so a value typed with Indian comma grouping (e.g. "1,00,00,000",
+    // matching how this same data is DISPLAYED elsewhere) is accepted
+    // instead of failing Number() parsing / the backend's decimal validator.
+    const cleanMin = sanitizeNumeric(minAmount);
+    const cleanMax = sanitizeNumeric(maxAmount);
+    const cleanFlat = sanitizeNumeric(flatAmount);
+    const cleanAdj = adjustmentAmount === "" ? "" : sanitizeNumeric(adjustmentAmount);
+
+    const min = Number(cleanMin);
+    const max = isAbove ? null : Number(cleanMax);
+    const flat = Number(cleanFlat);
+    const adj = cleanAdj === "" ? null : Number(cleanAdj);
 
     if (minAmount === "" || Number.isNaN(min) || min < 0) {
       addToast?.("Gross Income From must be a non-negative number.", "error");
@@ -383,7 +447,13 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
       return;
     }
 
-    const others = (existingSlabs || []).filter((s) => s.id !== slab?.id);
+    // Scoped to the SAME filingStatus (gender tag) + jurisdictionLocality —
+    // a Men/Women pair (or a state-wide vs. Chennai-local pair) legitimately
+    // covers the same income ranges as an independent bracket set, not an
+    // overlap.
+    const others = (existingSlabs || []).filter(
+      (s) => s.id !== slab?.id && (s.filingStatus || "") === filingStatus && (s.jurisdictionLocality || "") === jurisdictionLocality,
+    );
     for (const other of others) {
       const otherMin = Number(other.minAmount);
       const otherMax = other.maxAmount == null ? Infinity : Number(other.maxAmount);
@@ -403,9 +473,12 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
       await upsertCanonicalTaxSlab({
         id: slab?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
         jurisdictionState: pack.jurisdictionState || null, taxRegime: null,
-        minAmount, maxAmount: isAbove ? null : maxAmount,
-        ratePct: 0, rateLabel: `₹${flatAmount}`, taxFormula: "", ruleType: "PT_FLAT",
-        flatAmount, adjustmentAmount: adjustmentAmount === "" ? null : adjustmentAmount,
+        jurisdictionLocality: jurisdictionLocality || null,
+        filingStatus: filingStatus || null,
+        assessmentBasis: assessmentBasis === "MONTHLY_WAGE" ? null : assessmentBasis,
+        minAmount: cleanMin, maxAmount: isAbove ? null : cleanMax,
+        ratePct: 0, rateLabel: `₹${cleanFlat}`, taxFormula: "", ruleType: "PT_FLAT",
+        flatAmount: cleanFlat, adjustmentAmount: cleanAdj === "" ? null : cleanAdj,
         sortOrder: 0,
       });
       addToast?.("PT slab saved.", "success");
@@ -440,10 +513,234 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
           <label className={labelClass}>Adjustment Month Amount (₹) <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional)</span></label>
           <input className={inputClass} value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} placeholder="e.g. 300 for Feb" />
         </div>
+        <div>
+          <label className={labelClass}>Gender <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional — Maharashtra §13.2)</span></label>
+          <select className={inputClass} value={filingStatus} onChange={(e) => setFilingStatus(e.target.value)}>
+            <option value="">Applies to everyone</option>
+            <option value="MALE">Men</option>
+            <option value="FEMALE">Women</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelClass}>Assessment Basis</label>
+          <select className={inputClass} value={assessmentBasis} onChange={(e) => setAssessmentBasis(e.target.value)}>
+            <option value="MONTHLY_WAGE">Monthly wage (every existing state)</option>
+            <option value="HALF_YEAR_INCOME">Half-yearly income (local authority, e.g. Chennai)</option>
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className={labelClass}>Local Authority <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional — leave blank for a statewide bracket)</span></label>
+          <input className={inputClass} value={jurisdictionLocality} onChange={(e) => setJurisdictionLocality(e.target.value)} placeholder="e.g. Chennai" />
+          {assessmentBasis === "HALF_YEAR_INCOME" && (
+            <p className="mt-1.5 text-[11px] text-warning">
+              Half-yearly PT also needs its own collection month(s) configured — see "Half-Year PT — Collection Month 1/2" under Contribution Components. Without them, this bracket resolves ₹0 every month.
+            </p>
+          )}
+        </div>
       </div>
       {flatAmount !== "" && (
         <p className="mt-2 text-[11px] text-foreground-muted">Annual total for this bracket: ₹{annualTotal.toFixed(2)}</p>
       )}
+      <div className="mt-5 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
+        <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── TDS Brackets ────────────────────────────────────────────────────────
+// Country-level income-tax brackets — India's real "MARGINAL_RATE" TaxSlab
+// rows. Replaces the generic Tax Slabs tab (Rule Type / State / Sort Order)
+// with a table shaped for what these rows actually are, and — unlike the
+// generic SlabFormModal, which stamps every row with the pack's single
+// static taxRegime field — an explicit per-row New/Old regime, matching
+// how get_tax_slabs() actually resolves brackets for an employee (each
+// row's own tax_regime, not the pack's).
+function inr(n) {
+  return `₹${Number(n).toLocaleString("en-IN")}`;
+}
+
+function TDSBracketsTab({ slabs, onAdd, onEdit, onDelete }) {
+  const [regime, setRegime] = useState("New");
+  const filtered = slabs.filter((s) => (s.taxRegime || "New") === regime);
+  const sorted = [...filtered].sort((a, b) => Number(a.minAmount) - Number(b.minAmount));
+  const hasOpenEnded = sorted.some((s) => s.maxAmount == null);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="inline-flex rounded-lg border border-border bg-surface-muted p-1">
+          {["New", "Old"].map((r) => (
+            <button
+              key={r} onClick={() => setRegime(r)}
+              className={`rounded-md px-4 py-1.5 text-xs font-bold ${regime === r ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"}`}
+            >
+              {r} Regime
+            </button>
+          ))}
+        </div>
+        <button onClick={onAdd} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover">
+          <Plus size={13} /> Add Bracket
+        </button>
+      </div>
+      {sorted.length > 0 && !hasOpenEnded && (
+        <div className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
+          No bracket covers "and above" yet — an employee earning more than the highest configured amount under {regime} Regime won't match any slab.
+        </div>
+      )}
+      {sorted.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border-light px-3 py-8 text-center text-xs text-foreground-disabled">No {regime} Regime tax brackets yet.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-background text-left text-foreground-muted">
+              <tr>
+                <th className="px-3 py-2">Order</th>
+                <th className="px-3 py-2">Income From</th>
+                <th className="px-3 py-2">Income To</th>
+                <th className="px-3 py-2">Tax Rate</th>
+                <th className="px-3 py-2">Notes</th>
+                <th className="px-3 py-2 w-16"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((s, i) => (
+                <tr key={s.id} className="border-t border-border-light">
+                  <td className="px-3 py-2 text-foreground-secondary">{i + 1}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{inr(s.minAmount)}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.maxAmount == null ? "And above" : inr(s.maxAmount)}</td>
+                  <td className="px-3 py-2 font-medium text-foreground">{s.ratePct}%</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.rateLabel || "—"}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => onEdit(s)} className="rounded p-1 text-foreground-disabled hover:text-primary hover:bg-surface-muted"><Pencil size={12} /></button>
+                      <button onClick={() => onDelete(s)} className="rounded p-1 text-foreground-disabled hover:text-error hover:bg-error-light"><Trash2 size={12} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TDSBracketFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast }) {
+  const [regime, setRegime] = useState(slab?.taxRegime || "New");
+  const [minAmount, setMinAmount] = useState(slab?.minAmount != null ? String(slab.minAmount) : "");
+  const [isAbove, setIsAbove] = useState(slab ? slab.maxAmount == null : false);
+  const [maxAmount, setMaxAmount] = useState(slab?.maxAmount != null ? String(slab.maxAmount) : "");
+  const [ratePct, setRatePct] = useState(slab?.ratePct != null ? String(slab.ratePct) : "");
+  const [notes, setNotes] = useState(slab?.rateLabel || "");
+  const [saving, setSaving] = useState(false);
+
+  const cleanRatePctPreview = sanitizeNumeric(ratePct);
+  const autoLabel = cleanRatePctPreview !== "" && !Number.isNaN(Number(cleanRatePctPreview)) ? `${cleanRatePctPreview}% Bracket`.slice(0, 20) : "";
+
+  async function save() {
+    // Sanitized once here — used for both validation and the save payload,
+    // so a value typed with Indian comma grouping (e.g. "8,00,001",
+    // matching how this same data is DISPLAYED elsewhere via inr()) is
+    // accepted instead of failing Number() parsing / the backend's
+    // decimal validator.
+    const cleanMin = sanitizeNumeric(minAmount);
+    const cleanMax = sanitizeNumeric(maxAmount);
+    const cleanRate = sanitizeNumeric(ratePct);
+
+    const min = Number(cleanMin);
+    const max = isAbove ? null : Number(cleanMax);
+    const rate = Number(cleanRate);
+
+    if (minAmount === "" || Number.isNaN(min) || min < 0) {
+      addToast?.("Income From must be a non-negative number.", "error");
+      return;
+    }
+    if (!isAbove && (maxAmount === "" || Number.isNaN(max) || max <= min)) {
+      addToast?.("Income To must be greater than Income From (or check 'And above').", "error");
+      return;
+    }
+    if (ratePct === "" || Number.isNaN(rate) || rate < 0 || rate > 100) {
+      addToast?.("Tax Rate must be a number between 0 and 100.", "error");
+      return;
+    }
+
+    const others = (existingSlabs || []).filter((s) => s.id !== slab?.id && (s.taxRegime || "New") === regime);
+    for (const other of others) {
+      const otherMin = Number(other.minAmount);
+      const otherMax = other.maxAmount == null ? Infinity : Number(other.maxAmount);
+      // Strict inequalities — unlike PT_FLAT's inclusive-both-ends single-
+      // bracket lookup, these are marginal-rate brackets summed
+      // cumulatively (engine/countries/shared.py:_calculate_annual_tax):
+      // one bracket's max touching the next one's min (e.g. 0–400000 then
+      // 400000–and above) is the CORRECT, intended shape — income exactly
+      // at the boundary is counted once, in the lower bracket, not double-
+      // counted. Only a genuine overlap (ranges sharing more than a single
+      // touching point) should be rejected.
+      const overlaps = min < otherMax && (max ?? Infinity) > otherMin;
+      if (overlaps) {
+        addToast?.(`This overlaps the existing ${inr(other.minAmount)}–${other.maxAmount == null ? "and above" : inr(other.maxAmount)} bracket under ${regime} Regime.`, "error");
+        return;
+      }
+    }
+    if (isAbove && others.some((s) => s.maxAmount == null)) {
+      addToast?.(`Another bracket under ${regime} Regime is already open-ended ('And above') — only one is allowed.`, "error");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await upsertCanonicalTaxSlab({
+        id: slab?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
+        jurisdictionState: null, taxRegime: regime,
+        minAmount: cleanMin, maxAmount: isAbove ? null : cleanMax,
+        ratePct: cleanRate, rateLabel: (notes.trim() || autoLabel || `${cleanRate}%`).slice(0, 20),
+        taxFormula: "", ruleType: "MARGINAL_RATE", sortOrder: 0,
+      });
+      addToast?.("Tax bracket saved.", "success");
+      onSaved();
+    } catch (err) {
+      addToast?.(err.message || "Failed to save tax bracket.", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={slab ? "Edit Tax Bracket" : "Add Tax Bracket"} onClose={onClose} maxWidth="max-w-md">
+      <div className="mb-3 inline-flex rounded-lg border border-border bg-surface-muted p-1">
+        {["New", "Old"].map((r) => (
+          <button
+            key={r} type="button" onClick={() => setRegime(r)}
+            className={`rounded-md px-4 py-1.5 text-xs font-bold ${regime === r ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"}`}
+          >
+            {r} Regime
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelClass}>Income From (₹)</label>
+          <input className={inputClass} value={minAmount} onChange={(e) => setMinAmount(e.target.value)} placeholder="0" />
+        </div>
+        <div>
+          <label className={labelClass}>Income To (₹)</label>
+          <input className={inputClass} value={isAbove ? "" : maxAmount} disabled={isAbove} onChange={(e) => setMaxAmount(e.target.value)} placeholder={isAbove ? "And above" : "400000"} />
+          <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-foreground-muted">
+            <input type="checkbox" checked={isAbove} onChange={(e) => setIsAbove(e.target.checked)} className="rounded border-border-strong" />
+            And above (no upper limit)
+          </label>
+        </div>
+        <div>
+          <label className={labelClass}>Tax Rate (%)</label>
+          <input className={inputClass} value={ratePct} onChange={(e) => setRatePct(e.target.value)} placeholder="10" />
+        </div>
+        <div>
+          <label className={labelClass}>Notes <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional)</span></label>
+          <input className={inputClass} value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 20))} placeholder={autoLabel || "e.g. 10% Bracket"} maxLength={20} />
+        </div>
+      </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
         <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
@@ -464,6 +761,24 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
 // narrows the whole tab set down for it.
 const indiaComplianceConfig = {
   extraTabs: [
+    // Business-language replacement for the generic "Contribution Rates"
+    // tab (hidden below via hiddenTabs) — PF/ESI/PT/TDS, presented as a
+    // named-component picker instead of raw Component Key/Rate fields.
+    // Same gate as "parameters" below: doesn't apply to a state-scoped PT
+    // pack, which has no Contribution Rates concept of its own.
+    {
+      key: "components",
+      label: "Contribution Components",
+      icon: Percent,
+      after: "overview",
+      isVisible: (pack) => !pack.jurisdictionState,
+      render: ({ pack, rates, addToast, onReload, onDeleteRate, onNavigateTab }) => (
+        <INTaxComponentsTab
+          pack={pack} rates={rates} addToast={addToast} onReload={onReload}
+          onDeleteRate={onDeleteRate} onNavigateTab={onNavigateTab} paramKeys={PARAM_KEYS}
+        />
+      ),
+    },
     {
       key: "parameters",
       label: "Tax Parameters",
@@ -473,28 +788,104 @@ const indiaComplianceConfig = {
         <ParametersTab pack={pack} rates={rates} slabs={slabs} addToast={addToast} onReload={onReload} onPublish={onPublish} />
       ),
     },
+    // Not pack-scoped data (a country/state-wide registry, not tied to one
+    // pack version) — shown regardless of which pack is currently
+    // selected, same reasoning as Audit/Versions already being visible for
+    // every pack.
+    {
+      key: "readiness",
+      label: "State & Local Readiness",
+      icon: Percent,
+      isVisible: () => true,
+      render: () => <INStateLocalReadinessTab />,
+    },
+    {
+      key: "codeWages",
+      label: "Earnings & Taxability",
+      icon: Percent,
+      isVisible: (pack) => !pack.jurisdictionState,
+      render: () => <INCodeWagesTab />,
+    },
+    // Not pack-scoped data (platform-wide/org-wide registries), shown
+    // regardless of which pack is currently selected — same reasoning as
+    // "readiness" above.
+    {
+      key: "sourceEvidence",
+      label: "Source Evidence",
+      icon: BookOpen,
+      isVisible: () => true,
+      render: () => <INSourceEvidenceTab />,
+    },
+    {
+      key: "complianceCalendar",
+      label: "Compliance Calendar",
+      icon: CalendarClock,
+      isVisible: () => true,
+      render: () => <INComplianceCalendarTab />,
+    },
+    {
+      key: "gratuity",
+      label: "Gratuity",
+      icon: Landmark,
+      isVisible: (pack) => !pack.jurisdictionState,
+      render: ({ rates }) => <INGratuityTab rates={rates} />,
+    },
+    {
+      key: "salaryTdsForms",
+      label: "Salary TDS / Forms",
+      icon: FileText,
+      isVisible: () => true,
+      render: () => <INSalaryTdsFormsTab />,
+    },
   ],
+  hiddenTabs: ["rates"],
+  // Active for every India Tax pack now (was: state-scoped PT packs only)
+  // — branches internally on jurisdictionState so a state-scoped pack still
+  // gets exactly today's PT Slabs behavior, while a country-level pack gets
+  // the new TDS Brackets UI instead of the generic Tax Slabs tab. label/
+  // restrictTabsTo/deleteTitle are now functions of the pack (JurisdictionLayout's
+  // resolveOverride helper) so the two cases can differ — a country-level
+  // pack keeps its full tab set; only the state-scoped PT case narrows it,
+  // exactly as before.
   slabsTabOverride: {
-    isActive: (pack) => Boolean(pack.jurisdictionState) && pack.packType === "tax",
-    label: "PT Slabs",
-    restrictTabsTo: ["overview", "slabs", "organizations", "audit"],
-    renderTab: ({ slabs, onAdd, onEdit, onDelete }) => (
-      <PTSlabsTab slabs={slabs.filter((s) => s.ruleType === "PT_FLAT")} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />
-    ),
-    renderAddModal: ({ pack, slabs, onClose, onSaved, addToast }) => (
-      <PTSlabFormModal
-        pack={pack} existingSlabs={slabs.filter((s) => s.ruleType === "PT_FLAT")}
-        onClose={onClose} onSaved={onSaved} addToast={addToast}
-      />
-    ),
-    renderEditModal: ({ pack, slab, slabs, onClose, onSaved, addToast }) => (
-      <PTSlabFormModal
-        pack={pack} slab={slab} existingSlabs={slabs.filter((s) => s.ruleType === "PT_FLAT")}
-        onClose={onClose} onSaved={onSaved} addToast={addToast}
-      />
-    ),
-    deleteTitle: "Delete PT Slab",
-    deleteMessage: () => "Delete this PT slab? This cannot be undone.",
+    isActive: (pack) => pack.packType === "tax",
+    label: (pack) => (pack.jurisdictionState ? "PT Slabs" : "Tax Slabs"),
+    restrictTabsTo: (pack) => (pack.jurisdictionState ? ["overview", "slabs", "organizations", "audit"] : null),
+    renderTab: ({ pack, slabs, onAdd, onEdit, onDelete }) =>
+      pack.jurisdictionState ? (
+        <PTSlabsTab slabs={slabs.filter((s) => s.ruleType === "PT_FLAT")} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />
+      ) : (
+        <TDSBracketsTab slabs={slabs.filter((s) => (s.ruleType || "MARGINAL_RATE") === "MARGINAL_RATE")} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />
+      ),
+    renderAddModal: ({ pack, slabs, onClose, onSaved, addToast }) =>
+      pack.jurisdictionState ? (
+        <PTSlabFormModal
+          pack={pack} existingSlabs={slabs.filter((s) => s.ruleType === "PT_FLAT")}
+          onClose={onClose} onSaved={onSaved} addToast={addToast}
+        />
+      ) : (
+        <TDSBracketFormModal
+          pack={pack} existingSlabs={slabs.filter((s) => (s.ruleType || "MARGINAL_RATE") === "MARGINAL_RATE")}
+          onClose={onClose} onSaved={onSaved} addToast={addToast}
+        />
+      ),
+    renderEditModal: ({ pack, slab, slabs, onClose, onSaved, addToast }) =>
+      pack.jurisdictionState ? (
+        <PTSlabFormModal
+          pack={pack} slab={slab} existingSlabs={slabs.filter((s) => s.ruleType === "PT_FLAT")}
+          onClose={onClose} onSaved={onSaved} addToast={addToast}
+        />
+      ) : (
+        <TDSBracketFormModal
+          pack={pack} slab={slab} existingSlabs={slabs.filter((s) => (s.ruleType || "MARGINAL_RATE") === "MARGINAL_RATE")}
+          onClose={onClose} onSaved={onSaved} addToast={addToast}
+        />
+      ),
+    deleteTitle: (pack) => (pack.jurisdictionState ? "Delete PT Slab" : "Delete Tax Bracket"),
+    deleteMessage: (slab) =>
+      slab.ruleType === "PT_FLAT"
+        ? "Delete this PT slab? This cannot be undone."
+        : `Delete this ${slab.ratePct}% tax bracket (${slab.taxRegime || "New"} Regime)? This cannot be undone.`,
   },
 };
 
@@ -507,7 +898,10 @@ export default function INCompliancePage() {
       country="IN" countryName="India"
       initialState={jurisdiction ? decodeURIComponent(jurisdiction) : ""}
       onStateChange={(state) =>
-        navigate(state ? `/super-admin/compliance/india/${encodeURIComponent(state)}` : "/super-admin/compliance/india", { replace: true })
+        // Push (not replace) — each state selection is its own history
+        // entry so Back walks through them one at a time instead of
+        // collapsing every state click into a single overwritten entry.
+        navigate(state ? `/super-admin/compliance/india/${encodeURIComponent(state)}` : "/super-admin/compliance/india")
       }
       {...indiaComplianceConfig}
     />

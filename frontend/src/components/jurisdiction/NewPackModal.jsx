@@ -2,9 +2,9 @@ import { useState } from "react";
 import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
-import { inputClass, labelClass, STATUS_OPTIONS } from "./constants";
+import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS } from "./constants";
 
-export default function NewPackModal({ country, state, packType, onClose, onCreated }) {
+export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated }) {
   const { addToast } = useToast() || {};
   const [form, setForm] = useState({
     packId: "", jurisdictionState: state || "", version: "1.0", status: "Draft",
@@ -42,24 +42,38 @@ export default function NewPackModal({ country, state, packType, onClose, onCrea
   }
 
   return (
-    <Modal title={`New ${packType === "tax" ? "Tax" : "Policy"} Pack`} onClose={onClose} maxWidth="max-w-md">
-      <div className="grid grid-cols-2 gap-3">
+    <Modal title={`New ${packType === "tax" ? "Tax" : "Policy"} Pack`} onClose={onClose} maxWidth="max-w-2xl">
+      <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2"><label className={labelClass}>Pack ID</label><input className={inputClass} value={form.packId} onChange={set("packId")} placeholder="e.g. IN-PAYROLL-2026-V1" /></div>
-        <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder="e.g. Maharashtra" /></div>
+        <div>
+          <label className={labelClass}>State (optional)</label>
+          {stateOptions.length > 0 ? (
+            // A fixed state list (e.g. Canada's 13 provinces/territories)
+            // prevents a typo (e.g. "Ontario" instead of "ON") from
+            // silently creating a pack the engine's exact-match state
+            // resolver will never actually select for any employee.
+            <select className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")}>
+              <option value="">— Country-level (no state) —</option>
+              {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : (
+            <input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder="e.g. Maharashtra" />
+          )}
+        </div>
         <div><label className={labelClass}>Version</label><input className={inputClass} value={form.version} onChange={set("version")} /></div>
-        <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+        <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{(packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
         <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026-27" /></div>
         <div><label className={labelClass}>Effective From</label><input type="date" className={inputClass} value={form.effectiveFrom} onChange={set("effectiveFrom")} /></div>
         <div><label className={labelClass}>Effective To</label><input type="date" className={inputClass} value={form.effectiveTo} onChange={set("effectiveTo")} /></div>
         <div><label className={labelClass}>Tax Regime</label><input className={inputClass} value={form.taxRegime} onChange={set("taxRegime")} placeholder="Old / New" /></div>
         <div><label className={labelClass}>Currency</label><input className={inputClass} value={form.currency} onChange={set("currency")} placeholder="INR" /></div>
-        <div className="col-span-2"><label className={labelClass}>Regulatory Authority</label><input className={inputClass} value={form.regulatoryAuthority} onChange={set("regulatoryAuthority")} /></div>
         <div><label className={labelClass}>Compliance Category</label><input className={inputClass} value={form.complianceCategory} onChange={set("complianceCategory")} /></div>
+        <div className="col-span-3"><label className={labelClass}>Regulatory Authority</label><input className={inputClass} value={form.regulatoryAuthority} onChange={set("regulatoryAuthority")} /></div>
         <div><label className={labelClass}>Compliance Owner</label><input className={inputClass} value={form.complianceOwner} onChange={set("complianceOwner")} /></div>
-        <div className="col-span-2"><label className={labelClass}>Engineering Owner</label><input className={inputClass} value={form.engineeringOwner} onChange={set("engineeringOwner")} /></div>
+        <div><label className={labelClass}>Engineering Owner</label><input className={inputClass} value={form.engineeringOwner} onChange={set("engineeringOwner")} /></div>
         <div><label className={labelClass}>Next Review Date</label><input type="date" className={inputClass} value={form.nextReviewDate} onChange={set("nextReviewDate")} /></div>
-        <div className="col-span-2"><label className={labelClass}>Source References</label><input className={inputClass} value={form.sourceReferences} onChange={set("sourceReferences")} placeholder="e.g. ZP-TAX-UK-2026-27-001 v1.0" /></div>
-        <div className="col-span-2"><label className={labelClass}>Change Summary</label><textarea className={inputClass} rows={2} value={form.changeSummary} onChange={set("changeSummary")} /></div>
+        <div className="col-span-3"><label className={labelClass}>Source References</label><input className={inputClass} value={form.sourceReferences} onChange={set("sourceReferences")} placeholder="e.g. ZP-TAX-UK-2026-27-001 v1.0" /></div>
+        <div className="col-span-3"><label className={labelClass}>Change Summary</label><textarea className={inputClass} rows={2} value={form.changeSummary} onChange={set("changeSummary")} /></div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>

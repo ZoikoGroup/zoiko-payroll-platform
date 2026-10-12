@@ -120,7 +120,27 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
     try {
       let current = jurisdiction;
       if (!current) {
-        current = await addEnterpriseJurisdiction(meta.code);
+        try {
+          current = await addEnterpriseJurisdiction(meta.code);
+        } catch (err) {
+          // A blocked scope-limit/entitlement check (billing/entitlements.py)
+          // surfaces here as a 403 with structured `trace` data — show the
+          // plan's real limit and an upgrade nudge instead of a bare error,
+          // then close the panel since no jurisdiction was actually created.
+          if (err.status === 403 && err.trace) {
+            const { resource, limit_value: limitValue, plan_code: planCode } = err.trace;
+            addToast?.(
+              limitValue != null
+                ? `Your ${planCode || "current"} plan allows up to ${limitValue} jurisdiction(s). Upgrade to add more.`
+                : `Your ${planCode || "current"} plan doesn't include ${resource || "this"}. Upgrade to unlock it.`,
+              "error",
+            );
+          } else {
+            addToast?.(err.message || "Couldn't add this jurisdiction.", "error");
+          }
+          onClose?.();
+          return;
+        }
       }
       setRow(current);
       if (current.generalConfig) setGeneral((g) => ({ ...g, ...current.generalConfig }));

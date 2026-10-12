@@ -20,23 +20,34 @@ import re
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy.exc import ProgrammingError
 
 from app.config import settings
 from app.core.exceptions import (
     ZoikoException,
     zoiko_exception_handler,
     generic_exception_handler,
+    database_schema_error_handler,
 )
 from app.core.rate_limiter import limiter
 from app.database import initialize_database
+from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
 
 logger = logging.getLogger("zoiko_payroll")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# ── Error tracking (Sentry) ──────────────────────────────────────────────
+# Inert until SENTRY_DSN is set (empty by default -- see config.py). No
+# behavior change for any environment that hasn't opted in.
+if settings.SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False)
 
 # ── Access-log redaction for security tokens in query strings ───────────────
 
@@ -56,13 +67,46 @@ class _RedactSensitiveQueryFilter(logging.Filter):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
+    from app.modules.assisted_access.models import ensure_tables
     from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
+    from app.modules.auth.scheduler import start_token_cleanup_scheduler, stop_token_cleanup_scheduler
+    from app.modules.billing.scheduler import (
+        start_trial_scheduler, stop_trial_scheduler,
+        start_dunning_scheduler, stop_dunning_scheduler,
+        start_bwm_aggregation_scheduler, stop_bwm_aggregation_scheduler,
+    )
+    from app.modules.assisted_access.scheduler import (
+        start_assisted_access_scheduler, stop_assisted_access_scheduler,
+    )
 
-    start_assist_scheduler()
+    start_assist_scheduler(run_now=True)
+    start_trial_scheduler(run_now=True)
+    start_dunning_scheduler(run_now=True)
+    start_bwm_aggregation_scheduler(run_now=True)
+    start_assisted_access_scheduler(run_now=True)
+    start_token_cleanup_scheduler(run_now=True)
+    ensure_tables()
+
+    from app.modules.billing.router import _missing_checkout_config
+    missing_checkout_config = _missing_checkout_config()
+    if missing_checkout_config:
+        logger.warning(
+            "[startup] Checkout is not fully configured — missing: %s. "
+            "POST /billing/checkout will fail until these are set.",
+            ", ".join(missing_checkout_config),
+        )
+
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
+    stop_token_cleanup_scheduler()
     stop_assist_scheduler()
+    stop_trial_scheduler()
+    stop_dunning_scheduler()
+    stop_bwm_aggregation_scheduler()
+    stop_assisted_access_scheduler()
 
+
+from app.modules.communications.service import bind_request_background_tasks  # noqa: E402
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -70,11 +114,37 @@ app = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
     lifespan=lifespan,
+    # Every route gets the request's BackgroundTasks bound for
+    # communications.queue_email, so outbound email is sent after the
+    # response instead of blocking it on SMTP.
+    dependencies=[Depends(bind_request_background_tasks)],
 )
+
+async def _missing_compliance_configuration_handler(request: Request, exc: MissingComplianceConfigurationError):
+    """Converts the payroll engine's plain (framework-free by design)
+    MissingComplianceConfigurationError into the same clean JSON error
+    shape every other Zoiko error uses — kept here rather than in
+    core/exceptions.py so that module doesn't have to import a
+    payroll-specific engine class."""
+    from app.core.exceptions import _cors_headers
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=400,
+        content={
+            "success": False,
+            "error": "MISSING_COMPLIANCE_CONFIGURATION",
+            "message": str(exc),
+            "detail": str(exc),
+        },
+        headers=_cors_headers(request),
+    )
+
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(ZoikoException, zoiko_exception_handler)
+app.add_exception_handler(ProgrammingError, database_schema_error_handler)
+app.add_exception_handler(MissingComplianceConfigurationError, _missing_compliance_configuration_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
@@ -99,20 +169,43 @@ from app.modules.auth.router import user_router as auth_user_router
 from app.modules.organizations.router import router as organizations_router
 from app.modules.organizations.router import jurisdiction_router
 from app.modules.super_admin.router import router as super_admin_router
+from app.modules.super_admin.command_center_router import router as super_admin_command_center_router
 from app.modules.payroll.router import payroll_router
 from app.modules.payroll.forms.router import public_forms_router
 from app.modules.assist.router import assist_router
 from app.modules.assist.public_router import assist_public_router
+from app.modules.billing.router import router as billing_router
+from app.modules.billing.admin_router import router as billing_admin_router
+from app.modules.assisted_access.router import sa_router as assisted_access_sa_router
+from app.modules.assisted_access.router import org_router as assisted_access_org_router
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(auth_user_router, prefix="/api")
 app.include_router(organizations_router, prefix="/api")
 app.include_router(jurisdiction_router, prefix="/api")
 app.include_router(super_admin_router, prefix="/api")
+app.include_router(super_admin_command_center_router, prefix="/api")
 app.include_router(payroll_router, prefix="/api")
 app.include_router(public_forms_router, prefix="/api/payroll")
 app.include_router(assist_router, prefix="/api")
 app.include_router(assist_public_router, prefix="/api")
+app.include_router(billing_router, prefix="/api")
+app.include_router(billing_admin_router, prefix="/api")
+app.include_router(assisted_access_sa_router, prefix="/api")
+app.include_router(assisted_access_org_router, prefix="/api")
+
+# ── Assisted Access audit middleware ────────────────────────────────────────
+# Single chokepoint: every request that ran under a SafeGuard assisted-access
+# token is appended to assisted_access_audit_events. Best-effort by design —
+# an audit write failure must never break the request it describes.
+
+@app.middleware("http")
+async def assisted_access_audit_middleware(request: Request, call_next):
+    from app.modules.assisted_access.audit import record_request_if_assisted
+
+    response = await call_next(request)
+    record_request_if_assisted(request, response.status_code)
+    return response
 
 # ── Root health ──────────────────────────────────────────────────────────────
 
@@ -131,3 +224,54 @@ def health_check():
     from app.database import check_connection
 
     return {"status": "ok", "database": "connected" if check_connection() else "unavailable"}
+
+
+@app.get("/health/celery", tags=["Health"])
+@app.get("/api/health/celery", tags=["Health"])
+def health_celery():
+    from app.config import settings
+    from app.core.celery_app import celery_app
+    from app.core.cache import get_redis_client
+
+    if not settings.REDIS_URL:
+        return {
+            "status": "unconfigured",
+            "message": "Celery disabled; running in synchronous mode",
+            "broker": "unconfigured",
+            "workers": [],
+            "worker_count": 0,
+        }
+
+    # Test broker connectivity
+    broker_status = "offline"
+    try:
+        r = get_redis_client()
+        if r is not None and r.ping():
+            broker_status = "connected"
+    except Exception as exc:
+        logger.warning("Redis ping failed during celery health check: %s", exc)
+        broker_status = "offline"
+
+    # Inspect active workers with 1.0s timeout
+    active_workers = []
+    try:
+        insp = celery_app.control.inspect(timeout=1.0)
+        pings = insp.ping() or {}
+        active_workers = list(pings.keys())
+    except Exception as exc:
+        logger.warning("Celery worker inspect failed: %s", exc)
+
+    worker_count = len(active_workers)
+    if broker_status == "connected" and worker_count > 0:
+        overall_status = "healthy"
+    elif broker_status == "connected":
+        overall_status = "degraded"
+    else:
+        overall_status = "offline"
+
+    return {
+        "status": overall_status,
+        "broker": broker_status,
+        "workers": active_workers,
+        "worker_count": worker_count,
+    }

@@ -5,7 +5,7 @@ import { getComplianceJurisdictions } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionStatutory";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
 
-// Super Admin > Statutory Rates — Jurisdiction Statutory Rates entry point
+// Super Admin > Rules & Rates — Jurisdiction Statutory Rates entry point
 // -----------------------------------------------------------------------
 // Same split as Compliance's own CompliancePage.jsx (see that file's
 // history): the actual rate-viewing/quick-edit UI now lives in
@@ -28,9 +28,9 @@ export default function StatutoryRatesPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Statutory Rates</h1>
+        <h1 className="text-2xl font-bold text-foreground">Rules &amp; Rates</h1>
         <p className="text-sm text-foreground-muted mt-0.5">
-          Select a jurisdiction to view and quick-edit its statutory contribution rates. Creating tax packs or changing their status happens in Compliance.
+          Select a jurisdiction to view and quick-edit its statutory contribution rates. Creating tax packs or changing their status happens in Jurisdictions.
         </p>
       </div>
 

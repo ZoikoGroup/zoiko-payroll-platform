@@ -113,6 +113,45 @@ export default function TaxSlabTable({ documents = [], country, onStatusChange }
   );
 }
 
+// Read-only, org-facing mirror of Super Admin's PT Slabs table
+// (JurisdictionCompliance/INCompliancePage.jsx's PTSlabsTab) — same four
+// columns, same business language, so an Org Admin sees Professional Tax
+// laid out exactly the way Super Admin configured it instead of the
+// generic Min/Max/Rate/Tax Calculation table built for percentage
+// brackets. PT_FLAT rows only (caller filters before passing rows in).
+// No edit/delete affordances — this workspace is read-only by design,
+// same as every other table in Compliances/.
+export function PTSlabsTable({ rows, caption }) {
+  const sorted = [...rows].sort((a, b) => Number(a.minAmount) - Number(b.minAmount));
+  return (
+    <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="px-6 py-3 border-b border-border">
+        <p className="text-[13px] text-foreground-muted">{caption}</p>
+      </div>
+      <table className="w-full text-[13px]">
+        <thead>
+          <tr className="border-b border-border">
+            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Income From (₹)</th>
+            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Income To (₹)</th>
+            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Monthly PT Amount (₹)</th>
+            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Adjustment Month Amount (₹)</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {sorted.map((s) => (
+            <tr key={s.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+              <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.minAmount}</td>
+              <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.maxAmount ?? "Above"}</td>
+              <td className="px-5 py-3.5 font-bold text-foreground">₹{s.flatAmount ?? "0"}</td>
+              <td className="px-5 py-3.5 text-foreground-muted">{s.adjustmentAmount != null ? `₹${s.adjustmentAmount}` : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Exported for the same reason as ContributionRatesTable's RatesTable —
 // TaxConfigurationTab.jsx re-presents already-fetched rows under
 // jurisdiction-specific labels without a second fetch or API change.

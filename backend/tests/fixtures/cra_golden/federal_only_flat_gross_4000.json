@@ -1,0 +1,30 @@
+{
+  "description": "Federal-only baseline (no province configured, work_state omitted -> provincial tax resolves to $0 per canada.py's own 'no state_slabs -> 0, never a guess' contract) — CPP, EI, and federal income tax at their real ZP-TAX-CA-2026-001 2026 rates/brackets, no TD1/LSVCC declarations, no YTD accumulator wired. federal_income_tax/tds updated 2026-09-11 (gap-closure Phase 1): the CRA-correct credit method and the federal K2/K3 CPP/EI credit are now enabled by default, so this same income is $40.02/yr lower even though it never leaves the lowest bracket — that drop is entirely K2/K3 (a genuinely new credit on CPP/EI actually withheld this period), not the BPA credit-vs-deduction divergence (which only matters once income crosses a bracket).",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal 2026 brackets + BPAF hardcoded fallback $16,452, CEA $1,501), Section 10 (CPP base 4.95%+first-additional 1.00% = 5.95% combined, employer identical), Section 11 (EI employee 1.63%/employer 2.282%, Canada except Quebec). Hand-verified against the document's own bracket table and cross-checked by running the actual engine (build_context/calculate_payroll) at authoring time -- not run through CRA PDOC.",
+  "context": {
+    "gross": "4000.00",
+    "country": "CA",
+    "pay_date": "2026-06-30",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "310.53",
+    "state_income_tax": "0.00",
+    "tds": "310.53",
+    "social_security": "220.65",
+    "employer_social_security": "220.65",
+    "employee_esi": "65.20",
+    "employer_esi": "91.28",
+    "cpp2": "0.00"
+  }
+}

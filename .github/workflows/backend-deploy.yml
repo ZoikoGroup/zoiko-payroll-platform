@@ -1,0 +1,140 @@
+name: Deploy Zoiko Payroll Backend
+
+on:
+  push:
+    branches: [main, rugvedh]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+  pull_request:
+    branches: [main, rugvedh]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+jobs:
+  # Runs on every PR and every push to main/rugvedh. Nothing previously ran the
+  # test suite in CI at all -- a broken test could reach main and deploy
+  # unchecked. Needs zero configured secrets: tests/conftest.py's `db`
+  # fixture is an isolated in-memory SQLite database per test, and
+  # app/config.py's fail-closed guards only fire outside a "development"
+  # environment, which a bare CI runner (no ENVIRONMENT/APP_ENV set,
+  # DEBUG defaulting to True) satisfies on its own.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Run backend test suite
+        working-directory: backend
+        run: python -m pytest -q
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Verify single Alembic head, no duplicate revision IDs
+        run: |
+          python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; import sys; cfg = Config('backend/alembic.ini'); script = ScriptDirectory.from_config(cfg); heads = script.get_heads();
+          if len(heads) != 1:
+              print(f'FAIL: expected exactly one alembic head, found {len(heads)}: {heads}'); sys.exit(1)
+          print(f'OK: single head {heads[0]}')"
+      - name: SSH and deploy backend
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /var/www/zoiko-payroll/backend
+            TARGET_BRANCH="${GITHUB_REF_NAME:-main}"
+            git fetch origin "$TARGET_BRANCH"
+            git checkout "$TARGET_BRANCH" || git checkout -b "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+            git pull origin "$TARGET_BRANCH"
+            cd backend
+            source venv/bin/activate
+            pip install -r requirements.txt
+
+            echo "--- Migration diagnostics (read-only) ---"
+            git rev-parse HEAD
+            alembic heads || true
+            alembic branches || true
+            alembic history | head -n 40 || true
+            alembic current || true
+            echo "Database alembic_version:"
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' || true
+            from sqlalchemy import text
+            from app.database import engine
+
+            with engine.connect() as conn:
+                rows = conn.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+            for row in rows:
+                print("  " + row[0])
+            PY
+
+            echo "--- Applying migrations (self-healing orphan revisions) ---"
+            bash ../scripts/deploy_migrate.sh
+
+            echo "--- Post-migration verification ---"
+            echo "Repository heads:"
+            alembic heads
+
+            echo "Database revisions:"
+            alembic current
+
+            # Alembic exits nonzero if the database is not at every head.
+            alembic current --check-heads
+
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY'
+            from alembic.config import Config
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+            from app.database import engine
+
+            config = Config("alembic.ini")
+            script = ScriptDirectory.from_config(config)
+
+            expected = set(script.get_heads())
+            with engine.connect() as connection:
+                actual = set(MigrationContext.configure(connection).get_current_heads())
+
+            print(f"expected heads: {sorted(expected)}")
+            print(f"database heads: {sorted(actual)}")
+
+            if actual != expected:
+                raise SystemExit(
+                    "Database is not at the Alembic head: "
+                    f"missing={sorted(expected - actual)}, "
+                    f"unexpected={sorted(actual - expected)}"
+                )
+            print("Database is at the Alembic head.")
+            PY
+
+            deactivate
+            sudo systemctl restart zoiko-payroll-backend
+      - name: Check for model/schema drift
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/zoiko-payroll/backend/backend
+            source venv/bin/activate
+            python -m scripts.check_schema_drift

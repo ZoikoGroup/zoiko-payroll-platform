@@ -4,6 +4,7 @@ import StatCards from "./StatCards";
 import CostTrendChart from "./CostTrendChart";
 import BreakdownsChart from "./BreakdownsChart";
 import RecentActivity from "./RecentActivity";
+import TrialProgressBar from "./TrialProgressBar";
 import { CALCULATION_MODE_LABELS } from "../../../service/payrollService";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
@@ -135,6 +136,9 @@ export default function DashboardPage({ onNewPayrollRun }) {
             </button>
           </div>
         </div>
+
+        {/* Trial progress (evaluation workspaces only) */}
+        <TrialProgressBar />
 
         {/* Stat Cards */}
         <StatCards filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} />

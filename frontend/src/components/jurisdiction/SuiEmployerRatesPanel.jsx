@@ -9,13 +9,16 @@ import {
 } from "../../service/superAdminService";
 import { inputClass, labelClass } from "./constants";
 
-// Tenant-specific, agency-assigned rates (SUI and similar) — deliberately
-// NOT rendered as a JurisdictionLayout extraTab, since this data is
-// org+jurisdiction-scoped, not attached to any single JurisdictionPack
-// version the way Contribution Rates/Tax Slabs are. See
-// EmployerTaxProfile's backend model docstring for why this is kept
-// entirely separate from the canonical rate/slab CRUD.
-export default function SuiEmployerRatesPanel() {
+// Tenant-specific, agency-assigned rates (US SUI, Canada workers'
+// compensation/WCB, and similar) — deliberately NOT rendered as a
+// JurisdictionLayout extraTab, since this data is org+jurisdiction-
+// scoped, not attached to any single JurisdictionPack version the way
+// Contribution Rates/Tax Slabs are. See EmployerTaxProfile's backend
+// model docstring for why this is kept entirely separate from the
+// canonical rate/slab CRUD. `country` defaults to "US" (its original,
+// only caller) so USACompliancePage.jsx's existing usage is completely
+// unaffected — CACompliancePage.jsx is the first caller to pass "CA".
+export default function SuiEmployerRatesPanel({ country = "US" }) {
   const { addToast } = useToast() || {};
   const [orgs, setOrgs] = useState([]);
   const [organizationId, setOrganizationId] = useState("");
@@ -26,10 +29,10 @@ export default function SuiEmployerRatesPanel() {
   const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
-    getReportsOrganizations({ country: "US", limit: 200 })
+    getReportsOrganizations({ country, limit: 200 })
       .then((res) => setOrgs(res.items || []))
       .catch(() => setOrgs([]));
-  }, []);
+  }, [country]);
 
   const loadProfiles = useCallback(() => {
     if (!organizationId) { setProfiles([]); return; }
@@ -41,14 +44,16 @@ export default function SuiEmployerRatesPanel() {
 
   useEffect(() => { loadProfiles(); }, [loadProfiles]);
 
+  const heading = country === "CA" ? "Workers' Compensation (WCB/WSIB/CNESST)" : "SUI Employer Rates";
+  const description = country === "CA"
+    ? "Tenant-specific, agency-assigned workers' compensation rates — enter these against the employer's actual rate notice, never a global provincial default. See ZP-TAX-CA-2026-001 CA-D06/AC-24."
+    : "Tenant-specific, agency-assigned State Unemployment Insurance rates — enter these against the employer's actual rate notice, never guessed from a state default. See ZP-TAX-US-2026-001 §6.";
+
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
       <div className="mb-4">
-        <h2 className="text-lg font-bold text-foreground">SUI Employer Rates</h2>
-        <p className="mt-0.5 text-xs text-foreground-muted">
-          Tenant-specific, agency-assigned State Unemployment Insurance rates — enter these against the employer's
-          actual rate notice, never guessed from a state default. See ZP-TAX-US-2026-001 §6.
-        </p>
+        <h2 className="text-lg font-bold text-foreground">{heading}</h2>
+        <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -68,7 +73,7 @@ export default function SuiEmployerRatesPanel() {
       </div>
 
       {!organizationId ? (
-        <p className="py-8 text-center text-xs text-foreground-disabled">Select an organization to view its configured SUI/employer-specific rates.</p>
+        <p className="py-8 text-center text-xs text-foreground-disabled">Select an organization to view its configured employer-specific rates.</p>
       ) : loading ? (
         <p className="py-8 text-center text-xs text-foreground-disabled">Loading…</p>
       ) : profiles.length === 0 ? (
@@ -82,6 +87,7 @@ export default function SuiEmployerRatesPanel() {
                 <th className="pb-2 pr-3">Component</th>
                 <th className="pb-2 pr-3">Wage Base</th>
                 <th className="pb-2 pr-3">Employer Rate</th>
+                <th className="pb-2 pr-3">Covered Employees</th>
                 <th className="pb-2 pr-3">Source</th>
                 <th className="pb-2 pr-3">Effective</th>
                 <th className="pb-2 pr-3">Agency Account</th>
@@ -93,8 +99,9 @@ export default function SuiEmployerRatesPanel() {
                 <tr key={p.id} className="border-b border-border-light last:border-0">
                   <td className="py-2 pr-3 font-medium text-foreground">{p.jurisdictionId}</td>
                   <td className="py-2 pr-3">{p.componentCode}</td>
-                  <td className="py-2 pr-3">{p.taxableWageBase}</td>
-                  <td className="py-2 pr-3">{p.employerRatePct}%</td>
+                  <td className="py-2 pr-3">{p.taxableWageBase ?? "—"}</td>
+                  <td className="py-2 pr-3">{p.employerRatePct != null ? `${p.employerRatePct}%` : "—"}</td>
+                  <td className="py-2 pr-3">{p.coveredEmployeeCount ?? "—"}</td>
                   <td className="py-2 pr-3">{p.rateSource}</td>
                   <td className="py-2 pr-3 text-foreground-muted">{p.effectiveFrom} → {p.effectiveTo || "open"}</td>
                   <td className="py-2 pr-3 font-mono text-foreground-disabled">{p.agencyAccountId || "—"}</td>
@@ -113,7 +120,7 @@ export default function SuiEmployerRatesPanel() {
 
       {(showForm || editing) && (
         <SuiProfileFormModal
-          organizationId={organizationId} profile={editing}
+          organizationId={organizationId} profile={editing} country={country}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSaved={() => { setShowForm(false); setEditing(null); loadProfiles(); }}
         />
@@ -139,14 +146,57 @@ export default function SuiEmployerRatesPanel() {
   );
 }
 
-function SuiProfileFormModal({ organizationId, profile, onClose, onSaved }) {
+const COMPONENT_OPTIONS_BY_COUNTRY = {
+  // FAMLI/PFML/PAID_LEAVE (ZP-TAX-US-2026-001 §5 build-out): headcount-only
+  // profiles — no wage base/rate, just this employer's own covered
+  // headcount for a state program whose employer share is
+  // headcount-conditional (see the Covered Employees field below).
+  US: ["SUI", "ETT", "WF", "JDA", "FAMLI", "PFML", "PAID_LEAVE"],
+  // *_EXEMPTION_ALLOCATION_PCT (ZP-TAX-CA-2026-001 §15, gap-closure
+  // Phase 6): this org's own elected share (0-100, stored in Employer
+  // Rate %) of a shared exemption when connected_group_code links it to
+  // other associated employers — see engine/countries/canada.py's
+  // _ca_apply_levy_exemption_allocation. Unconfigured (every org today)
+  // defaults to 100% — this org gets the full exemption, unchanged.
+  // QC_WSDRF_TRAINING_EXPENDITURE (gap-closure Phase 7): this employer's
+  // own declared eligible training expenditure for the year (stored in
+  // Taxable Wage Base, despite the field's name — see service.
+  // calculate_ca_wsdrf_shortfall). QC_HSF_TEMP_SECTOR_EXEMPTION: presence
+  // of an effective-dated row (no rate/amount needed) is itself the
+  // eligibility signal for the temporary agriculture/forestry/fishing
+  // sector reclassification.
+  CA: [
+    "WCB", "ON_EHT_EXEMPTION_ALLOCATION_PCT", "BC_EHT_EXEMPTION_ALLOCATION_PCT",
+    "MB_HE_LEVY_EXEMPTION_ALLOCATION_PCT", "NL_HAPSET_EXEMPTION_ALLOCATION_PCT",
+    "QC_WSDRF_TRAINING_EXPENDITURE", "QC_HSF_TEMP_SECTOR_EXEMPTION",
+  ],
+  // AU_WORKERS_COMP (ZP-TAX-AU-2026-27-001 §18, Phase 9 follow-up,
+  // 2026-09-17): the one real, computable §18 employer overlay — a
+  // state-scheme/industry-classification/experience-rated premium,
+  // resolved by engine/countries/australia.py's calculate_au_workers_
+  // compensation_premium exactly like US SUI/CA WCB above. Jurisdiction
+  // is typed as "AU-NSW" etc. (this form's own free-text Jurisdiction
+  // field, pre-filled "AU-" via the country prop, needs no special case).
+  AU: ["AU_WORKERS_COMP"],
+};
+
+// A row for one of these components is headcount-only — it never carries
+// a real wage base/employer rate (that data lives in the canonical
+// state-program ContributionRate rows instead), so the form shows the
+// Covered Employees field INSTEAD of Wage Base/Employer Rate, and those
+// two aren't required for it.
+const HEADCOUNT_ONLY_COMPONENTS = ["FAMLI", "PFML", "PAID_LEAVE"];
+
+function SuiProfileFormModal({ organizationId, profile, country = "US", onClose, onSaved }) {
   const { addToast } = useToast() || {};
   const [sources, setSources] = useState([]);
+  const componentOptions = COMPONENT_OPTIONS_BY_COUNTRY[country] || COMPONENT_OPTIONS_BY_COUNTRY.US;
   const [form, setForm] = useState({
-    jurisdictionId: profile?.jurisdictionId || "US-",
-    componentCode: profile?.componentCode || "SUI",
+    jurisdictionId: profile?.jurisdictionId || `${country}-`,
+    componentCode: profile?.componentCode || componentOptions[0],
     taxableWageBase: profile?.taxableWageBase ?? "",
     employerRatePct: profile?.employerRatePct ?? "",
+    coveredEmployeeCount: profile?.coveredEmployeeCount ?? "",
     rateSource: profile?.rateSource || "EMPLOYER_NOTICE",
     effectiveFrom: profile?.effectiveFrom || "",
     effectiveTo: profile?.effectiveTo || "",
@@ -156,14 +206,39 @@ function SuiProfileFormModal({ organizationId, profile, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const isHeadcountOnly = HEADCOUNT_ONLY_COMPONENTS.includes(form.componentCode);
+  const isExemptionAllocation = form.componentCode.endsWith("_EXEMPTION_ALLOCATION_PCT");
+  const isTrainingExpenditure = form.componentCode === "QC_WSDRF_TRAINING_EXPENDITURE";
+  const isSectorExemptionFlag = form.componentCode === "QC_HSF_TEMP_SECTOR_EXEMPTION";
 
   useEffect(() => {
     getSourceArtifacts().then(setSources).catch(() => setSources([]));
   }, []);
 
   async function save() {
-    if (!form.jurisdictionId.trim() || form.taxableWageBase === "" || form.employerRatePct === "" || !form.effectiveFrom) {
-      addToast?.("Jurisdiction, wage base, employer rate, and effective-from date are required.", "error");
+    if (!form.jurisdictionId.trim() || !form.effectiveFrom) {
+      addToast?.("Jurisdiction and effective-from date are required.", "error");
+      return;
+    }
+    if (isHeadcountOnly) {
+      if (form.coveredEmployeeCount === "") {
+        addToast?.("Covered Employees is required for this component.", "error");
+        return;
+      }
+    } else if (isExemptionAllocation) {
+      if (form.employerRatePct === "") {
+        addToast?.("Exemption Allocation % is required for this component.", "error");
+        return;
+      }
+    } else if (isTrainingExpenditure) {
+      if (form.taxableWageBase === "") {
+        addToast?.("Eligible Training Expenditure is required for this component.", "error");
+        return;
+      }
+    } else if (isSectorExemptionFlag) {
+      // No rate/amount required — presence + effective dates are the signal.
+    } else if (form.taxableWageBase === "" || form.employerRatePct === "") {
+      addToast?.("Wage base and employer rate are required.", "error");
       return;
     }
     setSaving(true);
@@ -171,7 +246,11 @@ function SuiProfileFormModal({ organizationId, profile, onClose, onSaved }) {
       await upsertEmployerTaxProfile({
         id: profile?.id, organizationId: Number(organizationId),
         jurisdictionId: form.jurisdictionId, componentCode: form.componentCode,
-        taxableWageBase: form.taxableWageBase, employerRatePct: form.employerRatePct,
+        taxableWageBase: (isHeadcountOnly || isExemptionAllocation || isSectorExemptionFlag)
+          ? null : (form.taxableWageBase === "" ? null : form.taxableWageBase),
+        employerRatePct: (isHeadcountOnly || isTrainingExpenditure || isSectorExemptionFlag)
+          ? null : (form.employerRatePct === "" ? null : form.employerRatePct),
+        coveredEmployeeCount: form.coveredEmployeeCount === "" ? null : Number(form.coveredEmployeeCount),
         rateSource: form.rateSource, effectiveFrom: form.effectiveFrom,
         effectiveTo: form.effectiveTo || null, agencyAccountId: form.agencyAccountId || null,
         reimbursableStatus: form.reimbursableStatus,
@@ -189,17 +268,40 @@ function SuiProfileFormModal({ organizationId, profile, onClose, onSaved }) {
   return (
     <Modal title={profile ? "Edit Employer Tax Profile" : "Add Employer Tax Profile"} onClose={onClose} maxWidth="max-w-lg">
       <div className="grid grid-cols-2 gap-3">
-        <div><label className={labelClass}>Jurisdiction</label><input className={inputClass} value={form.jurisdictionId} onChange={set("jurisdictionId")} placeholder="US-CA" /></div>
+        <div><label className={labelClass}>Jurisdiction</label><input className={inputClass} value={form.jurisdictionId} onChange={set("jurisdictionId")} placeholder={country === "CA" ? "CA-ON" : "US-CA"} /></div>
         <div><label className={labelClass}>Component</label>
           <select className={inputClass} value={form.componentCode} onChange={set("componentCode")}>
-            <option value="SUI">SUI</option>
-            <option value="ETT">ETT</option>
-            <option value="WF">WF</option>
-            <option value="JDA">JDA</option>
+            {componentOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
-        <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="3.40" /></div>
+        {isHeadcountOnly ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Covered Employees</label>
+            <input type="number" min="0" className={inputClass} value={form.coveredEmployeeCount} onChange={set("coveredEmployeeCount")} placeholder="e.g. 15" />
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own headcount for this program — determines whether the employer share applies, per the statutory threshold configured in Tax Components.</p>
+          </div>
+        ) : isExemptionAllocation ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Exemption Allocation %</label>
+            <input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="e.g. 40" />
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own elected share (0-100) of the exemption shared across every organization with the same connected/associated group code. Leave unconfigured for 100% (the full exemption, unchanged from a standalone employer).</p>
+          </div>
+        ) : isTrainingExpenditure ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Eligible Training Expenditure ($, for the year)</label>
+            <input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="e.g. 30000" />
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own declared eligible training expenditure for the year — reduces the WSDRF shortfall dollar-for-dollar. Unconfigured defaults to $0 (no credit assumed).</p>
+          </div>
+        ) : isSectorExemptionFlag ? (
+          <div className="col-span-2">
+            <p className="text-[11px] text-foreground-muted">No rate or amount needed — the presence of this row, within its Effective From/To window below, is itself the eligibility signal for the temporary agriculture/forestry/fishing sector reclassification (reclassifies this employer as Primary/Manufacturing for HSF purposes during that window).</p>
+          </div>
+        ) : (
+          <>
+            <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
+            <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="3.40" /></div>
+          </>
+        )}
         <div><label className={labelClass}>Rate Source</label>
           <select className={inputClass} value={form.rateSource} onChange={set("rateSource")}>
             <option value="STATE_DEFAULT">State Default</option>

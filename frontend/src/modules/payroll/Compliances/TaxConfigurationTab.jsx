@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
-import { fetchContributionRates, fetchTaxSlabs } from "../../../service/payrollService";
-import { SlabsTable, withholdingTerm } from "./TaxSlabTable";
+import { fetchContributionRates, fetchTaxSlabs, fetchStateTaxSlabs, fetchOrgLocalityRates } from "../../../service/payrollService";
+import { SlabsTable, PTSlabsTable, withholdingTerm } from "./TaxSlabTable";
 import { RatesTable } from "./ContributionRatesTable";
+import HKTaxConfigurationPanel from "./HKTaxConfigurationPanel";
 
 // Organization Compliance > Tax Configuration — UI/UX ONLY.
 // -----------------------------------------------------------------------
@@ -10,24 +11,34 @@ import { RatesTable } from "./ContributionRatesTable";
 // aware navigation (Central/State, Federal/Provincial, National/Regional,
 // ...) built entirely on top of the SAME two fetches ContributionRatesTable
 // and TaxSlabTable already make (fetchContributionRates/fetchTaxSlabs) —
-// no new endpoint, no changed response shape, no calculation logic here.
+// no new endpoint (schemas.py's TaxSlabResponse gained one additive field,
+// ruleType), no calculation logic here.
 //
-// The underlying API doesn't (and isn't being asked to) expose a row's
-// rule_type or jurisdiction_state, so every split below is either:
-//   (a) a client-side content filter over rows already being fetched today
-//       (e.g. a real income-tax bracket's rate_label always contains "%";
-//       a flat/PT-style bracket's does not — visible directly in the
-//       existing screenshots), or
-//   (b) a label-substring match against the existing display label
-//       (e.g. a ContributionRate row literally labeled "Professional Tax"
-//       or "Church Tax"), or
-//   (c) an honest "not separately broken out" placeholder where the
-//       current data model genuinely has no second dataset to show,
-//       rather than inventing or duplicating numbers.
-// None of this changes what the two source fetches return.
+// Every slab-side split below filters on the row's real `ruleType`
+// (MARGINAL_RATE for a genuine income-tax bracket, PT_FLAT for a state
+// Professional Tax bracket, ...) — NOT a guess from the display label.
+// A previous version guessed "does rate_label contain %", which silently
+// misclassified a 0%-rate bracket labeled "Nil" (India's own lowest income-
+// tax bracket) as a flat/PT-style row, showing it under Professional Tax
+// instead of Income Tax/TDS. Rate-side (ContributionRate) splits still use
+// a label-substring match (e.g. a row literally labeled "Professional Tax"
+// or "Church Tax") since that API doesn't carry a componentKey today —
+// that part isn't broken, so it's left as-is. An honest "not separately
+// broken out" placeholder is used where the current data model genuinely
+// has no second dataset to show, rather than inventing or duplicating numbers.
+//
+// PT_FLAT rows (India's state Professional Tax) render via PTSlabsTable,
+// not the generic SlabsTable — a fixed monthly amount per gross-income
+// bracket has no meaningful "Rate"/"Tax Calculation" columns the way a
+// percentage bracket does. PTSlabsTable mirrors Super Admin's own PT
+// Slabs table (JurisdictionCompliance/INCompliancePage.jsx) column-for-
+// column — Gross Income From/To, Monthly PT Amount, Adjustment Month
+// Amount — reading the raw minAmount/maxAmount/flatAmount/adjustmentAmount
+// fields TaxSlabResponse now exposes, instead of the pre-formatted
+// currency strings (min/max/rate) used elsewhere in this file.
 
-function isPercentageBracket(row) {
-  return typeof row.rate === "string" && row.rate.includes("%");
+function isRuleType(row, ruleType) {
+  return row.ruleType === ruleType;
 }
 
 function labelIncludes(row, needle) {
@@ -47,7 +58,7 @@ const COUNTRY_TAX_CONFIG = {
           {
             key: "income-tax", label: "Income Tax / TDS", source: "slabs",
             matches: () => true,
-            filter: (rows) => rows.filter(isPercentageBracket),
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
           },
         ],
       },
@@ -63,7 +74,7 @@ const COUNTRY_TAX_CONFIG = {
             // the same obligation — show ONLY the brackets in that case
             // rather than stacking a redundant summary row above them.
             filter: (slabs, rates) => {
-              const slabRows = slabs.filter((r) => !isPercentageBracket(r));
+              const slabRows = slabs.filter((r) => isRuleType(r, "PT_FLAT"));
               const rateRows = slabRows.length > 0 ? [] : rates.filter((r) => labelIncludes(r, "professional tax"));
               return { slabRows, rateRows };
             },
@@ -79,14 +90,13 @@ const COUNTRY_TAX_CONFIG = {
         key: "national", label: "National Income Tax",
         items: [
           {
-            // Same isPercentageBracket filter India's Income Tax/TDS item
-            // already uses, for the same reason: the API doesn't expose a
-            // row's rule_type, but a real PAYE bracket's label always has
-            // a "%" ("Basic Rate 20%") while an NI Category band's never
-            // does ("NI Category A band 1") — without this, every NI band
-            // seeded for this org shows up here as if it were income tax.
+            // Same real-ruleType filter India's Income Tax/TDS item uses,
+            // for the same reason: a real PAYE bracket is MARGINAL_RATE,
+            // an NI Category band is NI_BAND — without this, any NI band
+            // synced into this org's cache would show up here as if it
+            // were income tax.
             key: "paye", label: "PAYE Income Tax", source: "slabs", matches: () => true,
-            filter: (rows) => rows.filter(isPercentageBracket),
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
           },
         ],
       },
@@ -95,7 +105,7 @@ const COUNTRY_TAX_CONFIG = {
         items: ["England", "Scotland", "Wales", "Northern Ireland"].map((region) => ({
           key: region.toLowerCase().replace(/\s+/g, "-"), label: region, source: "slabs",
           matches: (state) => (state || "").toLowerCase() === region.toLowerCase(),
-          filter: (rows) => rows.filter(isPercentageBracket),
+          filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
         })),
       },
     ],
@@ -109,22 +119,42 @@ const COUNTRY_TAX_CONFIG = {
         ],
       },
       {
-        key: "state", label: "State Taxes",
+        key: "state", label: "State Taxes", stateAware: true,
         items: [
           {
-            key: "state-income-tax", label: "State Income Tax", source: "slabs",
-            matches: () => false,
+            // Real state bracket data (fetchStateTaxSlabs — a genuinely
+            // separate, additive lookup from Federal's fetchTaxSlabs,
+            // which deliberately excludes every state-scoped row). Was
+            // hardcoded matches:()=>false regardless of what's actually
+            // configured — found 2026-09-15 Org Admin visibility audit.
+            key: "state-income-tax", label: "State Income Tax", source: "stateSlabs",
+            matches: (state) => Boolean(state),
             filter: (rows) => rows,
-            noStatePlaceholder: "State income tax isn't broken out separately from Federal Income Tax in the current data — see Federal Taxes.",
+            noStatePlaceholder: "Set an organization state under Company Details to see state income tax.",
           },
         ],
       },
       {
+        // Real per-employee locality data (fetchOrgLocalityRates —
+        // resolved from this org's own employees' work_locality codes
+        // through the same Active-dataset lookup payroll calculation uses)
+        // — previously always matches:()=>false regardless of what's
+        // configured, since nothing fetched org-specific locality data in
+        // at all (found 2026-09-15 Org Admin visibility audit).
         key: "local", label: "Local Taxes",
         items: [
-          { key: "city-tax", label: "City Tax", source: "slabs", matches: () => false, filter: (rows) => rows, noStatePlaceholder: "City tax isn't configured for this organization yet." },
-          { key: "county-tax", label: "County Tax", source: "slabs", matches: () => false, filter: (rows) => rows, noStatePlaceholder: "County tax isn't configured for this organization yet." },
-          { key: "local-payroll-tax", label: "Local Payroll Tax", source: "slabs", matches: () => false, filter: (rows) => rows, noStatePlaceholder: "Local payroll tax isn't configured for this organization yet." },
+          {
+            key: "city-tax", label: "City Tax", source: "localityRates", matches: () => true,
+            filter: (rows) => rows.filter((r) => r.localityType === "MUNICIPAL"),
+          },
+          {
+            key: "county-tax", label: "County Tax", source: "localityRates", matches: () => true,
+            filter: (rows) => rows.filter((r) => r.localityType === "COUNTY"),
+          },
+          {
+            key: "local-payroll-tax", label: "Local Payroll Tax", source: "localityRates", matches: () => true,
+            filter: (rows) => rows.filter((r) => r.localityType !== "MUNICIPAL" && r.localityType !== "COUNTY"),
+          },
         ],
       },
     ],
@@ -141,10 +171,19 @@ const COUNTRY_TAX_CONFIG = {
         key: "provincial", label: "Provincial / Territorial Tax", stateAware: true,
         items: [
           {
-            key: "provincial-income-tax", label: "Provincial / Territorial Income Tax", source: "slabs",
-            matches: () => false,
+            // Real bracket-calculated provincial/territorial tax (Phase 4
+            // of the Canada engine build) is now consumed by the payroll
+            // engine — this was a hardcoded matches:()=>false placeholder
+            // before that existed. Was reading the SAME country-level-only
+            // slabRows as the Federal tab (fetchTaxSlabs excludes every
+            // state-scoped row by design), so this tab was actually
+            // showing federal brackets mislabeled as provincial whenever a
+            // state was set — fixed 2026-09-15 alongside the US State
+            // Taxes gap to use the genuinely state-scoped fetch instead.
+            key: "provincial-income-tax", label: "Provincial / Territorial Income Tax", source: "stateSlabs",
+            matches: (state) => Boolean(state),
             filter: (rows) => rows,
-            noStatePlaceholder: "Provincial/territorial tax isn't broken out separately from Federal Income Tax in the current data — see Federal Tax.",
+            noStatePlaceholder: "Set an organization state under Company Details to see provincial/territorial tax.",
           },
         ],
       },
@@ -209,7 +248,279 @@ const COUNTRY_TAX_CONFIG = {
       },
     ],
   },
+  // ── Caribbean production jurisdictions (2026-09-21) — all country-
+  // level only (no stateAware group needed), same reasoning as DE above.
+  BB: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [{ key: "paye", label: "PAYE", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "nis-levies", label: "NIS & Levies",
+        items: [
+          {
+            key: "nis", label: "NIS (code R)", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nis")),
+            noStatePlaceholder: "NIS isn't configured for this organization yet.",
+          },
+          {
+            key: "resilience-regeneration", label: "Resilience & Regeneration Levy", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "resilience")),
+            noStatePlaceholder: "Resilience & Regeneration Levy isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  KY: {
+    groups: [
+      {
+        key: "pension", label: "Mandatory Pension",
+        items: [
+          {
+            key: "pension", label: "Mandatory Pension", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "pension")),
+            noStatePlaceholder: "Mandatory Pension isn't configured for this organization yet.",
+          },
+        ],
+      },
+      // No income-tax group — Cayman has no personal income tax (KY-002);
+      // there is deliberately no fake 0% tax band to show here.
+    ],
+  },
+  PR: {
+    groups: [
+      {
+        key: "hacienda-withholding", label: "Hacienda Withholding",
+        items: [
+          {
+            key: "withholding", label: "Puerto Rico Income Tax Withholding", source: "slabs",
+            matches: () => true, filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
+          },
+        ],
+      },
+      {
+        key: "social-security-medicare", label: "Social Security / Medicare",
+        items: [
+          {
+            key: "ss", label: "Social Security", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "social security")),
+            noStatePlaceholder: "Social Security isn't configured for this organization yet.",
+          },
+          {
+            key: "medicare", label: "Medicare / Additional Medicare", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "medicare")),
+            noStatePlaceholder: "Medicare isn't configured for this organization yet.",
+          },
+        ],
+      },
+      {
+        key: "futa-unemployment", label: "FUTA-equivalent / DTRH Unemployment",
+        items: [
+          {
+            key: "futa", label: "FUTA-equivalent (Employer)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "futa")),
+            noStatePlaceholder: "FUTA-equivalent isn't configured for this organization yet.",
+          },
+          {
+            key: "unemployment", label: "DTRH Unemployment (Employer, PR-018)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "unemployment")),
+            noStatePlaceholder: "DTRH Unemployment has no employer-specific rate on file yet — PR-018 requires a real DTRH rate notice, never a generic percentage.",
+          },
+        ],
+      },
+      {
+        key: "sinot", label: "SINOT (Temporary Non-Occupational Disability)",
+        items: [
+          {
+            key: "sinot", label: "SINOT", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "sinot")),
+            noStatePlaceholder: "SINOT isn't configured for this organization yet.",
+          },
+        ],
+      },
+      {
+        key: "cfse", label: "CFSE Workers' Compensation",
+        items: [
+          {
+            key: "cfse", label: "CFSE (Employer, PR-021)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "cfse")),
+            noStatePlaceholder: "CFSE has no employer-specific policy rate on file yet — PR-021 requires a real CFSE policy rate, never a universal percentage.",
+          },
+        ],
+      },
+    ],
+  },
+  DO: {
+    groups: [
+      {
+        key: "isr", label: "ISR",
+        items: [{ key: "isr", label: "ISR", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "tss-levies", label: "TSS & Levies",
+        items: [
+          {
+            key: "sfs", label: "SFS (health)", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "sfs")),
+            noStatePlaceholder: "SFS isn't configured for this organization yet.",
+          },
+          {
+            key: "pension", label: "Pension (SVDS)", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "svds") || labelIncludes(r, "pension")),
+            noStatePlaceholder: "Pension (SVDS) isn't configured for this organization yet.",
+          },
+          {
+            key: "srl", label: "Occupational Risk (SRL)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "risk") || labelIncludes(r, "srl")),
+            noStatePlaceholder: "SRL isn't configured for this organization yet.",
+          },
+          {
+            key: "infotep", label: "INFOTEP", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "infotep")),
+            noStatePlaceholder: "INFOTEP isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  GY: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [{ key: "paye", label: "PAYE", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "nis", label: "NIS",
+        items: [
+          {
+            key: "nis", label: "NIS", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nis")),
+            noStatePlaceholder: "NIS isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  JM: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [{ key: "paye", label: "PAYE", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "contributions", label: "Contributions",
+        items: [
+          {
+            key: "nis", label: "NIS", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nis")),
+            noStatePlaceholder: "NIS isn't configured for this organization yet.",
+          },
+          {
+            key: "nht", label: "NHT", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nht")),
+            noStatePlaceholder: "NHT isn't configured for this organization yet.",
+          },
+          {
+            key: "education-tax", label: "Education Tax", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "education")),
+            noStatePlaceholder: "Education Tax isn't configured for this organization yet.",
+          },
+          {
+            key: "heart", label: "HEART", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "heart")),
+            noStatePlaceholder: "HEART isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  BS: {
+    groups: [
+      {
+        key: "nib", label: "NIB",
+        items: [
+          {
+            key: "nib", label: "NIB", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nib")),
+            noStatePlaceholder: "NIB isn't configured for this organization yet.",
+          },
+        ],
+      },
+      // No income-tax group — the Bahamas has no personal income tax
+      // (BS-005); there is deliberately no fake 0% tax band to show here.
+    ],
+  },
+  TT: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [
+          {
+            key: "paye", label: "PAYE", source: "slabs", matches: () => true,
+            // Excludes TT_NIS_CLASS rows (see engine/countries/shared.py's
+            // docstring) — those carry rate_pct=0 with the real weekly
+            // dollar figures in flat_amount/employer_rate_pct, which this
+            // generic SlabsTable would otherwise render as a misleading
+            // "0%" income-tax bracket.
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
+          },
+        ],
+      },
+      {
+        key: "health-surcharge", label: "Health Surcharge",
+        items: [
+          {
+            key: "health-surcharge", label: "Health Surcharge", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "health surcharge")),
+            noStatePlaceholder: "Health Surcharge isn't configured for this organization yet.",
+          },
+        ],
+      },
+      // NIS (the fixed 16-class table, rule_type="TT_NIS_CLASS") is
+      // deliberately NOT shown here yet — it needs its own table
+      // component (this generic SlabsTable would render a misleading
+      // "0%" rate for it, same reasoning as the PAYE filter above). See
+      // Super Admin's TTCompliancePage.jsx for the equivalent disclosed
+      // gap on that side.
+    ],
+  },
 };
+
+// Local-tax rows (LocalityRateResponse) have a different shape from a
+// bracket (min/max/rate) or a flat ContributionRate — resident/nonresident
+// %, or a flat LST-style amount — so they get their own small table
+// instead of being forced through SlabsTable/RatesTable.
+function LocalityRatesTable({ rows, caption }) {
+  return (
+    <div className="overflow-x-auto rounded-[14px] border border-border">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-surface-muted border-b border-border text-left text-foreground-muted">
+            <th className="px-3 py-2 font-bold">Locality Code</th>
+            <th className="px-3 py-2 font-bold">Name</th>
+            <th className="px-3 py-2 font-bold">Resident Rate</th>
+            <th className="px-3 py-2 font-bold">Nonresident Rate</th>
+            <th className="px-3 py-2 font-bold">Flat Amount</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/50">
+          {rows.map((r) => (
+            <tr key={r.localityCode}>
+              <td className="px-3 py-2 font-mono text-foreground">{r.localityCode}</td>
+              <td className="px-3 py-2 text-foreground-muted">{r.localityName || "—"}</td>
+              <td className="px-3 py-2 text-foreground">{r.residentRatePct != null ? `${r.residentRatePct}%` : "—"}</td>
+              <td className="px-3 py-2 text-foreground">{r.nonresidentRatePct != null ? `${r.nonresidentRatePct}%` : "—"}</td>
+              <td className="px-3 py-2 text-foreground">{r.flatAmount != null ? r.flatAmount : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {caption && <p className="px-3 py-2 text-[11px] text-foreground-disabled border-t border-border">{caption}</p>}
+    </div>
+  );
+}
 
 function Level2Tabs({ groups, active, onChange }) {
   return (
@@ -268,24 +579,41 @@ function getVisibleItems(group, jurisdictionState) {
   return matching.length > 0 ? matching : group.items;
 }
 
-export default function TaxConfigurationTab({ documents = [], country, jurisdictionState }) {
+// Hong Kong has no per-organisation slab/rate rows (the calculator resolves
+// the platform pack in force), so it gets its own read-only view. Every other
+// country renders the unchanged generic tab below.
+export default function TaxConfigurationTab(props) {
+  if (props.country === "HK") return <HKTaxConfigurationPanel />;
+  return <GenericTaxConfigurationTab {...props} />;
+}
+
+function GenericTaxConfigurationTab({ documents = [], country, jurisdictionState }) {
   const [slabRows, setSlabRows] = useState([]);
+  const [stateSlabRows, setStateSlabRows] = useState([]);
   const [rateRows, setRateRows] = useState([]);
+  const [localityRateRows, setLocalityRateRows] = useState([]);
   const [loadState, setLoadState] = useState("loading");
 
   useEffect(() => {
     let cancelled = false;
     setLoadState("loading");
-    Promise.all([fetchTaxSlabs(country), fetchContributionRates(country)])
-      .then(([slabs, rates]) => {
+    Promise.all([
+      fetchTaxSlabs(country),
+      fetchContributionRates(country),
+      fetchStateTaxSlabs(country, jurisdictionState),
+      fetchOrgLocalityRates(country),
+    ])
+      .then(([slabs, rates, stateSlabs, localityRates]) => {
         if (cancelled) return;
         setSlabRows(Array.isArray(slabs) ? slabs : []);
         setRateRows(Array.isArray(rates) ? rates : []);
+        setStateSlabRows(Array.isArray(stateSlabs) ? stateSlabs : []);
+        setLocalityRateRows(Array.isArray(localityRates) ? localityRates : []);
         setLoadState("ready");
       })
       .catch(() => { if (!cancelled) setLoadState("error"); });
     return () => { cancelled = true; };
-  }, [country]);
+  }, [country, jurisdictionState]);
 
   const config = COUNTRY_TAX_CONFIG[country] || COUNTRY_TAX_CONFIG.US;
   const [activeGroupKey, setActiveGroupKey] = useState(config.groups[0].key);
@@ -370,6 +698,28 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
           );
         })()}
 
+        {loadState === "ready" && itemMatches && activeItem.source === "stateSlabs" && (() => {
+          const rows = activeItem.filter(stateSlabRows);
+          return rows.length === 0 ? (
+            <p className="rounded-[18px] border border-dashed border-border-light bg-surface px-4 py-8 text-center text-[13px] text-foreground-disabled">
+              No {activeItem.label.toLowerCase()} slabs configured for this jurisdiction yet.
+            </p>
+          ) : (
+            <SlabsTable rows={rows} caption={`Currently applied when calculating ${activeItem.label} in this jurisdiction.`} />
+          );
+        })()}
+
+        {loadState === "ready" && itemMatches && activeItem.source === "localityRates" && (() => {
+          const rows = activeItem.filter(localityRateRows);
+          return rows.length === 0 ? (
+            <p className="rounded-[18px] border border-dashed border-border-light bg-surface px-4 py-8 text-center text-[13px] text-foreground-disabled">
+              No {activeItem.label.toLowerCase()} configured for this organization's employees yet.
+            </p>
+          ) : (
+            <LocalityRatesTable rows={rows} caption={`Resolved from this organization's own employees' work-locality codes — matches what their payslips actually apply.`} />
+          );
+        })()}
+
         {loadState === "ready" && itemMatches && activeItem.source === "rates" && (() => {
           const rows = activeItem.filter(rateRows);
           return rows.length === 0 ? (
@@ -393,7 +743,12 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
           return (
             <div className="space-y-4">
               {filteredRates.length > 0 && <RatesTable rows={filteredRates} caption={`Currently applied to every payslip in this jurisdiction.`} singleColumn={activeItem.shareShape === "single"} />}
-              {filteredSlabs.length > 0 && <SlabsTable rows={filteredSlabs} caption={`Currently applied when calculating ${activeItem.label} in this jurisdiction.`} />}
+              {filteredSlabs.length > 0 && (
+                <PTSlabsTable
+                  rows={filteredSlabs}
+                  caption={`${activeItem.label} brackets — a fixed monthly deduction per gross-income range, applied to every payslip in this jurisdiction.`}
+                />
+              )}
             </div>
           );
         })()}

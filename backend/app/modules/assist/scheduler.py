@@ -13,6 +13,7 @@ duplicating their logic.
 """
 
 import logging
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -24,9 +25,16 @@ logger = logging.getLogger("zoiko_payroll.assist.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
 
+# Last-run tracking consumed by GET /super-admin/platform/service-health —
+# an in-memory dict, not persisted, so it reflects only this process's runs.
+last_run_status: dict = {"last_run_at": None, "last_success_at": None, "last_error": None}
+
 
 def _sweep_all_organizations() -> None:
     from app.modules.organizations.models import Organization
+
+    last_run_status["last_run_at"] = datetime.utcnow()
+    had_error = False
 
     db = SessionLocal()
     try:
@@ -40,8 +48,10 @@ def _sweep_all_organizations() -> None:
             expiry_result = service.run_kb_expiry_sweep(db, org_id)
             if expiry_result.get("expired"):
                 logger.info("[assist-sweep] org=%s expired %s KB item(s)", org_id, expiry_result["expired"])
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("[assist-sweep] KB expiry sweep failed for org=%s", org_id)
+            had_error = True
+            last_run_status["last_error"] = str(exc)
         finally:
             db.close()
 
@@ -52,21 +62,34 @@ def _sweep_all_organizations() -> None:
             retention_result = service.run_retention_cleanup(db, org_id, None)
             if retention_result.get("archived"):
                 logger.info("[assist-sweep] org=%s archived %s session(s)", org_id, retention_result["archived"])
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("[assist-sweep] Retention cleanup failed for org=%s", org_id)
+            had_error = True
+            last_run_status["last_error"] = str(exc)
         finally:
             db.close()
 
+    if not had_error:
+        last_run_status["last_success_at"] = datetime.utcnow()
+        last_run_status["last_error"] = None
 
-def start_assist_scheduler() -> BackgroundScheduler | None:
+
+def start_assist_scheduler(run_now: bool = False) -> BackgroundScheduler | None:
     """Start the background sweep on app startup. No-op if disabled via
-    ASSIST_SWEEP_ENABLED or already running (safe to call more than once)."""
+    ASSIST_SWEEP_ENABLED or already running (safe to call more than once).
+    `run_now` executes one sweep immediately before scheduling (used once at
+    startup so service-health shows a real last-run rather than 'unknown'
+    for one full interval)."""
     global _scheduler
     if not settings.ASSIST_SWEEP_ENABLED:
         logger.info("[assist-sweep] Disabled via ASSIST_SWEEP_ENABLED=false; not starting.")
         return None
     if _scheduler is not None:
         return _scheduler
+
+    if run_now:
+        logger.info("[assist-sweep] Running initial sweep at startup.")
+        _sweep_all_organizations()
 
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(

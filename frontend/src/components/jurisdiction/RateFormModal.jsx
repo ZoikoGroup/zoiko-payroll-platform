@@ -48,30 +48,61 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={rate ? "Edit Contribution Rate" : "Add Contribution Rate"} onClose={onClose} maxWidth="max-w-md">
-      <div className="grid grid-cols-2 gap-3">
-        <div><label className={labelClass}>Component Key</label><input className={inputClass} value={form.componentKey} onChange={set("componentKey")} placeholder="e.g. pf" /></div>
-        <div><label className={labelClass}>Label</label><input className={inputClass} value={form.label} onChange={set("label")} placeholder="e.g. Provident Fund" /></div>
-        <div className="col-span-2"><label className={labelClass}>State (optional — overrides country-level for this state)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
-        <div><label className={labelClass}>Employee Rate %</label><input className={inputClass} value={form.employeeSharePct} onChange={set("employeeSharePct")} placeholder="12.00" /></div>
-        <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerSharePct} onChange={set("employerSharePct")} placeholder="12.00" /></div>
-        <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={form.flatAmount} onChange={set("flatAmount")} placeholder="e.g. 200 for a flat fee" /></div>
-        {isUS && (
-          <div className="col-span-2">
-            <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
-            <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
-              <option value="">Any filing status</option>
-              {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+    <Modal title={rate ? "Edit Contribution Rate" : "Add Contribution Rate"} onClose={onClose} maxWidth="max-w-2xl">
+      <div className="space-y-5">
+        <FormSection title="General">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelClass}>Component Key</label><input className={inputClass} value={form.componentKey} onChange={set("componentKey")} placeholder="e.g. pf" /></div>
+            <div><label className={labelClass}>Label</label><input className={inputClass} value={form.label} onChange={set("label")} placeholder="e.g. Provident Fund" /></div>
+            <div><label className={labelClass}>State (optional — overrides country-level)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
           </div>
+        </FormSection>
+
+        <FormSection title="Rate Configuration">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelClass}>Employee Rate %</label><input className={inputClass} value={form.employeeSharePct} onChange={set("employeeSharePct")} placeholder="12.00" /></div>
+            <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerSharePct} onChange={set("employerSharePct")} placeholder="12.00" /></div>
+            <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={form.flatAmount} onChange={set("flatAmount")} placeholder="e.g. 200" /></div>
+          </div>
+        </FormSection>
+
+        {isUS && (
+          <FormSection title="Applicability">
+            <div className="grid grid-cols-3 gap-3">
+              <div><label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
+                <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
+                  <option value="">Any filing status</option>
+                  {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+          </FormSection>
         )}
-        <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
-        <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
+
+        <FormSection title="Administration">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
+            <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
+          </div>
+        </FormSection>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
         <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
       </div>
     </Modal>
+  );
+}
+
+// Pure presentational grouping — no field/state/payload changes. Used by
+// every country's Add/Edit Contribution Rate modal (RateFormModal is
+// shared, not US-only); groups the same fields into labeled fieldsets
+// instead of one flat grid, per the USA compliance UI/UX refactor.
+function FormSection({ title, children }) {
+  return (
+    <div>
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-foreground-muted">{title}</p>
+      {children}
+    </div>
   );
 }

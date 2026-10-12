@@ -22,6 +22,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from app.modules.auth.schemas import SuccessResponse
+from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit, require_not_dunning_restricted
+from app.modules.billing.feature_keys import MAX_ENTITIES, MULTI_ENTITY, MULTI_CURRENCY
+from app.modules.billing.models import DunningStage
 from app.core.dependencies import (
     get_current_super_admin,
     get_current_org_admin,
@@ -38,6 +41,9 @@ from app.modules.organizations.schemas import (
     OrganizationDetail,
     DepartmentHeadcount,
     RecentEmployee,
+    LegalEntityCreate,
+    LegalEntityResponse,
+    OrganizationBillingClassificationUpdate,
 )
 
 logger = logging.getLogger("zoiko_payroll.organizations")
@@ -114,6 +120,7 @@ def get_my_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.put("/me", response_model=OrganizationResponse)
 def update_my_organization(
     data: OrganizationUpdate,
@@ -126,13 +133,88 @@ def update_my_organization(
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None:
         raise NotFoundException("Organization", "id")
-    for field, value in data.model_dump(exclude_unset=True).items():
+
+    fields = data.model_dump(exclude_unset=True)
+    # An explicit currency override beyond the org's jurisdiction-derived
+    # default is a MULTI_CURRENCY-gated capability (Core: off, Professional:
+    # on) — only checked when currency is actually being set to a real value,
+    # not when it's absent from the request or being cleared back to None.
+    if fields.get("currency"):
+        require_entitlement(MULTI_CURRENCY)(current_user=current_user, db=db)
+
+    if "country" in fields:
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
+
+        block_reason = get_jurisdiction_change_block_reason(db, org.country, fields["country"])
+        if block_reason:
+            raise BadRequestException(block_reason)
+    for field, value in fields.items():
         setattr(org, field, value)
     db.commit()
     db.refresh(org)
     return org
 
 
+@router.get("/me/legal-entities", response_model=list[LegalEntityResponse])
+def list_my_legal_entities(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.core.dependencies import get_organization_id
+    from app.modules.organizations.models import LegalEntity
+
+    org_id = get_organization_id(current_user)
+    return (
+        db.query(LegalEntity)
+        .filter(LegalEntity.organization_id == org_id, LegalEntity.is_active == True)  # noqa: E712
+        .order_by(LegalEntity.created_at.asc())
+        .all()
+    )
+
+
+@router.post(
+    "/me/legal-entities", response_model=LegalEntityResponse,
+    dependencies=[
+        Depends(require_writeable_workspace()),
+        Depends(require_not_dunning_restricted(DunningStage.RESTRICT_EXPANSION.value)),
+    ],
+)
+def create_my_legal_entity(
+    data: LegalEntityCreate,
+    current_user=Depends(get_current_org_admin),
+    db: Session = Depends(get_db),
+):
+    """Register a legal entity under the caller's organization — gated by
+    MAX_ENTITIES (every org's plan caps how many it may have) and, for the
+    2nd entity onward, by MULTI_ENTITY (a plan may permit exactly one entity
+    without ever granting multi-entity operation at all)."""
+    from app.core.dependencies import get_organization_id
+    from app.modules.organizations.models import LegalEntity
+
+    org_id = get_organization_id(current_user)
+    current_count = (
+        db.query(LegalEntity)
+        .filter(LegalEntity.organization_id == org_id, LegalEntity.is_active == True)  # noqa: E712
+        .count()
+    )
+
+    if current_count >= 1:
+        require_entitlement(MULTI_ENTITY)(current_user=current_user, db=db)
+    require_scope_limit(MAX_ENTITIES, requested_qty=current_count + 1)(current_user=current_user, db=db)
+
+    entity = LegalEntity(
+        organization_id=org_id,
+        name=data.name,
+        registration_number=data.registration_number,
+        country=data.country,
+    )
+    db.add(entity)
+    db.commit()
+    db.refresh(entity)
+    return entity
+
+
+    dependencies=[Depends(require_writeable_workspace())],
 @router.post("/me/logo", response_model=OrganizationDetail)
 async def upload_my_organization_logo(
     file: UploadFile = File(...),
@@ -336,12 +418,22 @@ def list_organizations(
     limit: int = Query(50, ge=1, le=200),
     search: str = Query("", description="Search by name or code"),
     include_inactive: bool = Query(True),
+    country_code: str = Query("", description="Only organizations whose country resolves to this jurisdiction code (e.g. FR)"),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    from sqlalchemy import func
+
+    from app.core.jurisdiction import ALL_COUNTRY_NAME_TO_CODE
     from app.modules.organizations.models import Organization
 
     query = db.query(Organization)
+    if country_code:
+        # Organization.country holds a full name ("France") or, for some
+        # older rows, the code itself — match both, case-insensitively.
+        code = country_code.strip().upper()
+        names = {name for name, c in ALL_COUNTRY_NAME_TO_CODE.items() if c == code} | {code.lower()}
+        query = query.filter(func.lower(func.trim(Organization.country)).in_(names))
     if search:
         like = f"%{search}%"
         query = query.filter(
@@ -373,6 +465,7 @@ def get_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.put("/{organization_id}", response_model=OrganizationResponse)
 def update_organization(
     organization_id: int,
@@ -384,14 +477,65 @@ def update_organization(
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     if org is None:
         raise NotFoundException("Organization", "id")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+
+    _org_change_labels = {
+        "organization_name": "Organization name",
+        "industry": "Industry",
+        "company_type": "Company type",
+        "address": "Address",
+        "city": "City",
+        "state": "State",
+        "country": "Country",
+        "email": "Contact email",
+        "phone": "Contact phone",
+        "tax_no": "Tax number",
+        "registration_number": "Registration number",
+    }
+    _old_values = {k: (str(getattr(org, k)) if getattr(org, k) is not None else None) for k in updates}
+    if "country" in updates:
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
+
+        block_reason = get_jurisdiction_change_block_reason(db, org.country, updates["country"])
+        if block_reason:
+            raise BadRequestException(block_reason)
+
+    for field, value in updates.items():
         setattr(org, field, value)
     db.commit()
     db.refresh(org)
+
     logger.info("Super Admin %s updated organization %s", current_user.email, org.organization_code)
+
+    # Notify the org's own contact email of any registered-detail changes
+    # (old → new), best-effort only — a failed mail never changes the update.
+    changes = []
+    for k, old_value in _old_values.items():
+        new_value = str(getattr(org, k)) if getattr(org, k) is not None else None
+        if old_value != new_value:
+            changes.append((_org_change_labels.get(k, k), old_value, new_value))
+    if changes and org.email:
+        try:
+            from app.modules.communications.service import queue_email, repeatable_idempotency_key
+            from app.services.email_service import send_organization_details_changed_email
+            queue_email(
+                "organizations", "organizations.details_changed", None, org.email,
+                repeatable_idempotency_key(
+                    organization_id, "organizations.details_changed", org.email, None,
+                    f"org:{organization_id}", changes,
+                ),
+                send_organization_details_changed_email, org.email, changes,
+                send_kwargs={"organization_id": organization_id},
+                organization_id=organization_id, actor_user_id=current_user.id, db=db,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Organization details-changed email failed for org %s: %s", organization_id, exc,
+            )
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.post("/", response_model=OrganizationResponse)
 def create_organization(
     data: OrganizationBase,
@@ -404,6 +548,17 @@ def create_organization(
         validate_tax_identifiers_or_raise,
     )
     from app.modules.organizations.models import Organization
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+    # Same gate as public self-registration (auth/service.py's
+    # register_enterprise) — reused, not duplicated, so Super Admin can't
+    # bypass the "no active compliance pack" rejection just by using this
+    # endpoint instead. Checked before any tax-ID validation for the same
+    # reason: an unsupported country should surface this message, not a
+    # confusing tax-ID schema error.
+    block_reason = get_jurisdiction_onboarding_block_reason(db, data.country)
+    if block_reason:
+        raise BadRequestException(block_reason)
 
     tax_identifiers = validate_tax_identifiers_or_raise(data.country, data.tax_identifiers) \
         if data.tax_identifiers else None
@@ -432,36 +587,38 @@ def create_organization(
     logger.info("Super Admin %s created organization %s (%s)", current_user.email, org.organization_name, code)
 
     try:
-        from app.services.email_service import (
-            send_organization_created_email,
-            send_super_admin_org_created_notification_email,
+        from app.modules.communications.service import idempotency_key, queue_email
+        from app.modules.organizations.notifications import (
+            ORG_CREATED_EVENT,
+            ORG_CREATED_TEMPLATE_ID,
+            queue_super_admin_org_created_alerts,
         )
+        from app.services.email_service import send_organization_created_email
         if org.email:
-            ref_id = f"ORG-{org.id:04d}-INIT"
-            send_organization_created_email(
-                email=org.email,
-                recipient_first_name="Admin",
-                organization_name=org.organization_name,
-                reference_id=ref_id,
-                organization_id=org.id,
-                db=db,
+            # Same key as auth's self-serve register_enterprise COM-001 send, so
+            # an organization is only ever welcomed once whichever path created it.
+            queue_email(
+                "organizations", ORG_CREATED_EVENT, ORG_CREATED_TEMPLATE_ID, org.email,
+                idempotency_key(org.id, ORG_CREATED_EVENT, org.email, ORG_CREATED_TEMPLATE_ID),
+                send_organization_created_email,
+                send_kwargs=dict(
+                    email=org.email,
+                    recipient_first_name="Admin",
+                    organization_name=org.organization_name,
+                    reference_id=f"ORG-{org.id:04d}-INIT",
+                    organization_id=org.id,
+                ),
+                organization_id=org.id, actor_user_id=current_user.id, db=db,
             )
-            logger.info(
-                "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
-                org.email, org.id, ref_id,
-            )
-        # Notify Super Admins of the new organization created
-        send_super_admin_org_created_notification_email(
-            org=org,
-            reference_id=f"ADM-ORG-{org.id:04d}",
-            db=db,
-        )
+        # Notify Super Admins of the new organization created (ADM-001)
+        queue_super_admin_org_created_alerts(db, org, module="organizations", actor_user_id=current_user.id)
     except Exception as exc:
         logger.warning("Failed to dispatch org creation notification emails for org %s: %s", org.id, exc)
 
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.patch("/{organization_id}/status", response_model=OrganizationResponse)
 def update_organization_status(
     organization_id: int,
@@ -480,9 +637,77 @@ def update_organization_status(
         "Super Admin %s set organization %s is_active=%s",
         current_user.email, org.organization_code, is_active,
     )
+    org_name = getattr(org, "organization_name", None) or org.organization_code or ""
+    org_email = getattr(org, "email", None) or ""
+    try:
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        from app.services.email_service import send_organization_suspended_email
+        if org_email:
+            # Repeatable (suspend → reactivate → suspend): keyed on the new
+            # state within the dedup window, not on the organization alone.
+            queue_email(
+                "organizations", "organizations.status_changed", None, org_email,
+                repeatable_idempotency_key(
+                    org.id, "organizations.status_changed", org_email, None,
+                    f"org:{org.id}", {"is_active": is_active},
+                ),
+                send_organization_suspended_email, org_email, org_name,
+                send_kwargs=dict(suspended=not is_active, reason="", organization_id=org.id),
+                organization_id=org.id, actor_user_id=current_user.id, db=db,
+            )
+    except Exception as exc:  # pragma: no cover — notification never blocks the status flip
+        logger.warning("Failed to send org status email for org %s: %s", org.id, exc)
     return org
 
 
+_VALID_BILLING_CLASSIFICATIONS = {"COMMERCIAL_ACTIVE", "NON_CHARGEABLE", "LEGACY", "INTERNAL", "DEMO", "QA"}
+
+
+@router.patch("/{organization_id}/billing-classification", response_model=OrganizationResponse)
+def update_organization_billing_classification(
+    organization_id: int,
+    data: OrganizationBillingClassificationUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Super Admin only — moves an org between billing_classification
+    values (e.g. DEMO -> COMMERCIAL_ACTIVE). Setting COMMERCIAL_ACTIVE also
+    sets charge_enabled=True; moving away from it sets charge_enabled=False,
+    since those two fields should never disagree with each other outside
+    the self-service checkout auto-promotion path (billing/router.py)."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import BillingCommercialAuditEvent
+
+    if data.billing_classification not in _VALID_BILLING_CLASSIFICATIONS:
+        raise BadRequestException(
+            f"'{data.billing_classification}' is not a valid billing_classification. "
+            f"Must be one of: {', '.join(sorted(_VALID_BILLING_CLASSIFICATIONS))}."
+        )
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise NotFoundException("Organization", "id")
+
+    previous = org.billing_classification
+    org.billing_classification = data.billing_classification
+    org.charge_enabled = data.billing_classification == "COMMERCIAL_ACTIVE"
+    db.add(org)
+    db.add(BillingCommercialAuditEvent(
+        organization_id=organization_id,
+        actor_user_id=current_user.id,
+        event_type="BILLING_CLASSIFICATION_CHANGED",
+        payload={"from": previous, "to": data.billing_classification, "reason": data.reason},
+    ))
+    db.commit()
+    db.refresh(org)
+    logger.info(
+        "Super Admin %s changed organization %s billing_classification %s -> %s (%s)",
+        current_user.email, org.organization_code, previous, data.billing_classification, data.reason,
+    )
+    return org
+
+
+    dependencies=[Depends(require_writeable_workspace())],
 @router.delete("/{organization_id}", response_model=SuccessResponse)
 def delete_organization(
     organization_id: int,
@@ -504,6 +729,7 @@ def delete_organization(
 
     org_name = org.organization_name
     org_code = org.organization_code
+    org_email = org.email
 
     # Child → parent order. Org-scoped rows only. Three tables (inbound
     # attachments, policy sub-rules) carry no organization_id column — they
@@ -513,6 +739,10 @@ def delete_organization(
     # the subquery selects nothing (orphans on FK-disabled SQLite, FK
     # violation on Postgres).
     from sqlalchemy import text
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.get_bind())
+    existing_tables = set(inspector.get_table_names())
 
     _org_direct = [
         "payroll_email_settings",
@@ -529,6 +759,12 @@ def delete_organization(
         "payroll_company_compliance",
         "payroll_holidays",
         "payroll_enterprise_jurisdictions",
+        # These three reference payslip_items/payroll_runs/payroll_employees
+        # (NO ACTION) and must be deleted before those tables below, or the
+        # later DELETE fails with a foreign-key violation.
+        "payroll_generated_reports",
+        "payroll_super_guarantee_liabilities",
+        "organization_ytd_accumulators",
         "payslip_items",
         "payroll_attendance_records",
         "payroll_runs",
@@ -540,6 +776,11 @@ def delete_organization(
         ("payroll_policy_overtime_rules", "policy_id", "payroll_policies"),
         ("payroll_policy_leave_rules", "policy_id", "payroll_policies"),
         ("payroll_policy_employee_categories", "policy_id", "payroll_policies"),
+        # Not organization-scoped directly (no organization_id column) — scoped
+        # transitively via employee_id, and its last_updated_payslip_id FK
+        # (NO ACTION) blocks payslip_items from being deleted below unless
+        # this runs first.
+        ("payroll_ytd_accumulators", "employee_id", "payroll_employees"),
     ]
 
     # Inbound attachments reference inbound messages — must go first, before
@@ -548,6 +789,8 @@ def delete_organization(
     # parent-table row is deleted; payroll_policies is removed in the
     # second, explicit pass below.
     for table, fk_column, parent in _org_via_parent:
+        if table not in existing_tables:
+            continue
         db.execute(
             text(
                 f'DELETE FROM "{table}" WHERE "{fk_column}" IN '
@@ -556,18 +799,45 @@ def delete_organization(
             {"org_id": organization_id},
         )
     for table in _org_direct:
+        if table not in existing_tables:
+            continue
         db.execute(
             text(f'DELETE FROM "{table}" WHERE organization_id = :org_id'),
             {"org_id": organization_id},
         )
-    db.execute(
-        text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :org_id'),
-        {"org_id": organization_id},
-    )
-    db.execute(
-        text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
-        {"org_id": organization_id},
-    )
+    if "payroll_inbound_messages" in existing_tables:
+        db.execute(
+            text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+    if "payroll_policies" in existing_tables:
+        db.execute(
+            text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+
+    # Billing audit events have their own organization_id FK (nullable --
+    # some events are platform-level) AND an actor_user_id FK to users,
+    # neither with ondelete=CASCADE. Not DB-cascaded by anything below --
+    # must be cleared explicitly here, before both the org delete and the
+    # users delete right after this.
+    if "billing_commercial_audit_events" in existing_tables:
+        db.execute(
+            text('DELETE FROM "billing_commercial_audit_events" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+
+    # Tax-config audit log has no organization_id column at all — it's scoped
+    # purely by actor_id (NO ACTION FK to users), so it must be cleared by
+    # actor before the users delete below or that delete is blocked.
+    if "payroll_tax_configuration_audit" in existing_tables:
+        db.execute(
+            text(
+                'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
+                '(SELECT id FROM "users" WHERE organization_id = :org_id)'
+            ),
+            {"org_id": organization_id},
+        )
 
     # Login users + their action tokens (users has ondelete CASCADE from org).
     db.execute(
@@ -585,4 +855,18 @@ def delete_organization(
         "Super Admin %s hard-deleted organization %s (%s) and all its data",
         current_user.email, org_name, org_code,
     )
+    try:
+        from app.modules.communications.service import idempotency_key, queue_email
+        from app.services.email_service import send_organization_deleted_email
+        if org_email:
+            # organization_id is still recorded on the audit row: the column is
+            # deliberately FK-free so the evidence outlives the deleted tenant.
+            queue_email(
+                "organizations", "organizations.deleted", None, org_email,
+                idempotency_key(organization_id, "organizations.deleted", org_email, None, f"org:{organization_id}"),
+                send_organization_deleted_email, org_email, org_name,
+                organization_id=organization_id, actor_user_id=current_user.id, db=db,
+            )
+    except Exception as exc:  # pragma: no cover — notification never blocks the deletion
+        logger.warning("Failed to send org deletion email for org %s: %s", organization_id, exc)
     return {"message": f"Organization '{org_name}' and all of its data deleted."}

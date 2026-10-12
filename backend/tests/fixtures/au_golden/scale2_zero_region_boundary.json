@@ -1,0 +1,19 @@
+{
+  "description": "Mandatory boundary test (Section 27, 'PAYG Scale 2 zero region'): x immediately below the $362 threshold. Weekly gross $361 -> x=361.99, in the [0,362) band (a=0, b=0) -> y=0. Proves the zero-region band is selected correctly and withholding is never negative.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (NAT 1004, Scale 2) and Section 27 (mandatory boundary test 'PAYG Scale 2 zero region').",
+  "context": {
+    "gross": "361.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "slabs": [
+      {"min_amount": "0", "max_amount": "362", "rate_pct": "0", "flat_amount": "0", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "362", "max_amount": "538", "rate_pct": "0.15", "flat_amount": "54.3462", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"}
+    ]
+  },
+  "expected": {
+    "tds": "0"
+  }
+}

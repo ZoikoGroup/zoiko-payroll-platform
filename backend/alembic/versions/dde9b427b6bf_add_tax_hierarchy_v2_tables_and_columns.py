@@ -27,17 +27,13 @@ def upgrade() -> None:
         'payslip_items',
         sa.Column('tax_version_id', sa.Integer(), nullable=True),
     )
-    op.create_foreign_key(
-        'fk_payslip_items_tax_version_id',
-        'payslip_items',
-        'payroll_hierarchy_tax_versions',
-        ['tax_version_id'],
-        ['id'],
-    )
+    # NOTE: FK to payroll_hierarchy_tax_versions removed — that table does not
+    # exist anywhere in migration history or app models as of this repo state.
+    # Flagged upstream; re-add if/when the table is actually introduced.
+    pass
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_constraint('fk_payslip_items_tax_version_id', 'payslip_items', type_='foreignkey')
     op.drop_column('payslip_items', 'tax_version_id')
     op.drop_column('payroll_company_compliance', 'tax_hierarchy_v2_enabled')

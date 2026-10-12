@@ -13,12 +13,12 @@ Org admin: /auth/admin/users (list/create/update/deactivate/reset)
 import json
 import logging
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.dependencies import get_current_org_admin, get_current_user
+from app.core.dependencies import get_current_org_admin, get_current_user, oauth2_scheme
 from app.core.exceptions import BadRequestException
 from app.core.rate_limiter import limiter
 from app.database import get_db
@@ -29,11 +29,14 @@ from app.modules.auth.schemas import (
     ForgotPasswordRequest,
     GeneratedPasswordResponse,
     LoginRequest,
+    LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     SuccessResponse,
     TokenPasswordRequest,
     TokenResponse,
+    TrialRegisterRequest,
+    TrialStatusResponse,
     UserCreateRequest,
     UserListResponse,
     UserResponse,
@@ -114,8 +117,14 @@ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/register", response_model=TokenResponse, summary="Register a new organization")
 @limiter.limit("5/minute")
-def register(request: Request, data: RegisterRequest, db: Session = Depends(get_db)):
-    return service.register_enterprise(db, data)
+def register(request: Request, data: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    return service.register_enterprise(db, data, background_tasks)
+
+
+@router.post("/register-trial", response_model=TokenResponse, summary="Register a 30-day Professional Evaluation workspace")
+@limiter.limit("5/minute")
+def register_trial(request: Request, data: TrialRegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    return service.register_trial(db, data, background_tasks)
 
 
 @router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
@@ -128,8 +137,26 @@ def get_me(current_user=Depends(get_current_user)):
     return current_user
 
 
+@router.get(
+    "/me/trial-status",
+    response_model=TrialStatusResponse,
+    summary="Trial banner status for the current user's organization",
+)
+def get_me_trial_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_my_trial_status(db, current_user.organization_id)
+
+
 @router.post("/logout", response_model=SuccessResponse, summary="Logout")
-def logout(current_user=Depends(get_current_user), request: Request = None):
+def logout(
+    data: LogoutRequest = None,
+    token: str = Depends(oauth2_scheme),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service.logout_user(db, token, data.refresh_token if data else None)
     logger.info("User %s logged out", current_user.email)
     return {"message": "Logged out successfully."}
 
@@ -151,10 +178,20 @@ def generate_password(
     return service.generate_random_password(db, current_user.id)
 
 
+def _trusted_request_origin(request: Request):
+    """The SPA origin that submitted the form, used so emailed reset links point
+    at the site the user is actually on. Only honoured when it is in the CORS
+    allowlist (blocks Origin-header link poisoning)."""
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    allowed = {o.strip().rstrip("/") for o in settings.PAYROLL_CORS_ORIGINS.split(",") if o.strip()}
+    allowed.add(settings.FRONTEND_URL.rstrip("/"))
+    return origin if origin and origin in allowed else None
+
+
 @router.post("/forgot-password", response_model=SuccessResponse, summary="Request password reset link")
 @limiter.limit("5/minute")
 def forgot_password(request: Request, data: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    return service.request_password_reset(db, data.email)
+    return service.request_password_reset(db, data.email, base_url=_trusted_request_origin(request))
 
 
 def _invite_claimed_page(temp_password: str) -> HTMLResponse:
@@ -257,7 +294,8 @@ def update_user(
         from app.core.exceptions import NotFoundException
         raise NotFoundException("User", "id")
 
-    if data.role is not None and data.role != user.role:
+    old_role = user.role
+    if data.role is not None and data.role != old_role:
         if not can_create_role(current_user.role.value, data.role.value):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException(f"Cannot assign role {data.role.value}.")
@@ -269,6 +307,12 @@ def update_user(
             setattr(user, field, value)
     db.commit()
     db.refresh(user)
+    if data.role is not None and data.role != old_role:
+        # Role-changed notice (catalog ID pending): notify AFTER the commit that applied the change, only when
+        # the role actually changed (report uses the pre-update role).
+        service.notify_role_changed(
+            db, user=user, actor=current_user, old_role=old_role, new_role=user.role,
+        )
     return user
 
 
@@ -289,6 +333,9 @@ def deactivate_user(
         raise BadRequestException("You cannot deactivate your own account.")
     user.is_active = False
     db.commit()
+    # Account-deactivated notice (catalog ID pending): notify AFTER the commit. The deactivated user's email is still
+    # a valid delivery target; the notice names the same-org admin who acted.
+    service.notify_user_deactivated(db, user=user, actor=current_user)
     return {"message": "User deactivated successfully."}
 
 

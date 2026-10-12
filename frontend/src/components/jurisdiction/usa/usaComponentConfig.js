@@ -1,0 +1,205 @@
+// USA-only classification: maps a real ContributionRate row (or a chosen
+// Add-flow "component type") to which fields are actually relevant, so the
+// Tax Components tab never shows a wall of dashes for fields a component
+// doesn't use. This file is independent of constants.js/RateFormModal/
+// SlabFormModal — nothing shared depends on it, and it depends on nothing
+// shared, per the USA-isolation requirement.
+//
+// Real US componentKeys today (backend/app/modules/payroll/service.py
+// _CONTRIBUTION_RATES_BY_COUNTRY["US"] + backend/scripts/populate_canonical_
+// tax_v1.py): social-security / medicare (employee+employer rate, no flat),
+// medicare_additional (single rate — NOTE: its 0.9% surtax is actually
+// stored in employer_rate_pct, not employee_rate_pct, even though it reads
+// as an employee-only tax), medicare_addl_thresh / ss_wage_base /
+// futa_wage_base / standard_deduction (flat amount only), futa (employer
+// rate only), federal-income-tax (a placeholder row with NO numeric fields
+// at all — the real data lives in TaxSlab, not here).
+
+export const US_FILING_STATUSES = ["SINGLE", "MFJ", "MFS", "HOH"];
+
+export const UI_TYPES = {
+  PERCENTAGE: "PERCENTAGE",
+  EMPLOYEE_EMPLOYER_PERCENTAGE: "EMPLOYEE_EMPLOYER_PERCENTAGE",
+  EMPLOYER_ASSIGNED_RATE: "EMPLOYER_ASSIGNED_RATE",
+  WAGE_BASE: "WAGE_BASE",
+  THRESHOLD: "THRESHOLD",
+  FIXED_AMOUNT: "FIXED_AMOUNT",
+  DEDUCTION_AMOUNT: "DEDUCTION_AMOUNT",
+  // A state-program's own annual DOLLAR cap on the resulting contribution
+  // itself (e.g. NY PFL's $411.91/yr max, RI TDI's $1,100/yr max) — a
+  // distinct concept from WAGE_BASE (which caps the WAGE the rate applies
+  // to, not the resulting amount). See ZP-TAX-US-2026-001 §5 build-out:
+  // us.py's "<key>_annual_max" companion-row convention.
+  ANNUAL_MAX: "ANNUAL_MAX",
+  INCOME_TAX_POINTER: "INCOME_TAX_POINTER",
+};
+
+// Frontend-only "Add Component" type picker — never sent to the API, only
+// used to decide which fields the Add form shows.
+export const ADD_COMPONENT_TYPES = [
+  { uiType: UI_TYPES.PERCENTAGE, label: "Percentage Rate" },
+  { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE, label: "Employee + Employer Contribution" },
+  { uiType: UI_TYPES.WAGE_BASE, label: "Wage Base" },
+  { uiType: UI_TYPES.THRESHOLD, label: "Threshold" },
+  { uiType: UI_TYPES.FIXED_AMOUNT, label: "Fixed Amount" },
+  { uiType: UI_TYPES.DEDUCTION_AMOUNT, label: "Deduction Amount" },
+];
+
+// Static map for every real US componentKey seen in production data today.
+// Anything not listed here falls through to the populated-field heuristic
+// in classifyContributionRate — never breaks for a future/unmapped key.
+// `associatedKey` marks a componentKey whose row should be merged INTO its
+// parent's card (shown as one inline line there) rather than rendered as
+// its own separate top-level card — Social Security's wage base and
+// Additional Medicare's threshold are conceptually part of that same
+// component, not a distinct one, so showing them twice (once inline, once
+// as their own card) was pure duplication. The associated row is still a
+// fully separate API row/CRUD target — only its TOP-LEVEL card is hidden,
+// and only when its parent's card actually exists (see
+// USTaxComponentsTab.jsx's mergedAwayKeys) so an associated row is never
+// silently hidden if its parent is missing.
+const STATIC_MAP = {
+  "social-security": { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE, associatedKey: "ss_wage_base" },
+  medicare: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  medicare_additional: { uiType: UI_TYPES.PERCENTAGE, rateLabel: "Employee Rate %", associatedKey: "medicare_addl_thresh" },
+  medicare_addl_thresh: { uiType: UI_TYPES.THRESHOLD },
+  futa: { uiType: UI_TYPES.EMPLOYER_ASSIGNED_RATE, associatedKey: "futa_wage_base" },
+  ss_wage_base: { uiType: UI_TYPES.WAGE_BASE },
+  futa_wage_base: { uiType: UI_TYPES.WAGE_BASE },
+  standard_deduction: { uiType: UI_TYPES.DEDUCTION_AMOUNT },
+  "federal-income-tax": { uiType: UI_TYPES.INCOME_TAX_POINTER },
+
+  // State-level statutory payroll programs (ZP-TAX-US-2026-001 §5) —
+  // explicit entries so the Edit form shows the right field(s) with the
+  // right label, instead of falling through to the generic heuristic
+  // below (which mislabels an employer-only row like DC's Paid Leave as
+  // "Employee Rate %" — the heuristic has no way to know a single-rate
+  // row is CONCEPTUALLY employer-side just because only employerRatePct
+  // happens to be populated on this particular state's row).
+  paid_leave: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  // Delaware Paid Leave's SECOND tier row (gap-closure Plan Phase 4,
+  // 2026-09-14) — a genuinely, permanently employer-only rate (unlike
+  // the shared "paid_leave" key above, which spans states where either
+  // side can be populated), so EMPLOYER_ASSIGNED_RATE (a real, correctly
+  // labeled "Employer Rate %" field) is more honest than showing an
+  // always-empty Employee Rate % input. Previously unmapped entirely —
+  // the exact same class of bug already fixed for DC's own paid_leave
+  // row (see the comment above), just never ported to this sibling key.
+  paid_leave_parental: { uiType: UI_TYPES.EMPLOYER_ASSIGNED_RATE, associatedKey: "paid_leave_parental_wage_cap" },
+  sdi: { uiType: UI_TYPES.PERCENTAGE },
+  tdi: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "tdi_wage_cap" },
+  wa_cares: { uiType: UI_TYPES.PERCENTAGE },
+  worker_ui: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "worker_ui_wage_cap" },
+  worker_di: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "worker_di_wage_cap" },
+  workforce_dev: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "workforce_dev_wage_cap" },
+  fli: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "fli_wage_cap" },
+  state_standard_deduction: { uiType: UI_TYPES.DEDUCTION_AMOUNT },
+  // Headcount-conditional state programs (ZP-TAX-US-2026-001 §5 Phase 3C)
+  // — real employee AND employer sides, same shape as "paid_leave" above.
+  // Previously unmapped (gap-closure Plan Phase 4, 2026-09-14) — fell
+  // through to the generic heuristic, which happens to classify these
+  // correctly today (both sides are always populated for these three)
+  // but only by coincidence, not by design; explicit entries make that
+  // guaranteed rather than accidental.
+  famli: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE, associatedKey: "famli_wage_cap" },
+  ma_pfml: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  pfml: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE, associatedKey: "pfml_wage_cap" },
+  // Vermont Child Care Contribution (Batch 6, 2026-09-13) — permanently
+  // employer-only, same reasoning as paid_leave_parental above.
+  vt_ccc: { uiType: UI_TYPES.EMPLOYER_ASSIGNED_RATE },
+};
+
+// Business-language catalog for the "+ Add Component" picker — the admin
+// selects a payroll component by name (Social Security, FUTA, ...), never
+// a technical UI type. `uiType` here is looked up once at picker-build
+// time from STATIC_MAP so the two never drift apart. `parentKey` groups an
+// associated row (wage base / threshold) under its parent for display —
+// it's still independently selectable/editable, just shown indented.
+// `navigatesTo` marks the one entry (Federal/State Income Tax) that isn't
+// a fillable component at all — selecting it switches tabs instead.
+export const PAYROLL_COMPONENT_CATEGORIES = {
+  payrollTaxes: "Payroll Taxes",
+  incomeTax: "Income Tax",
+};
+
+export const PAYROLL_COMPONENT_CATALOG = [
+  { componentKey: "social-security", displayName: "Social Security", category: "payrollTaxes", description: "Employee & employer OASDI contribution." },
+  { componentKey: "ss_wage_base", displayName: "Social Security Wage Base", category: "payrollTaxes", description: "Annual wage cap Social Security applies up to.", parentKey: "social-security" },
+  { componentKey: "medicare", displayName: "Medicare", category: "payrollTaxes", description: "Employee & employer Medicare contribution." },
+  { componentKey: "medicare_additional", displayName: "Additional Medicare", category: "payrollTaxes", description: "Employee-only surtax above the threshold." },
+  { componentKey: "medicare_addl_thresh", displayName: "Additional Medicare Threshold", category: "payrollTaxes", description: "Wage level the Additional Medicare surtax applies above.", parentKey: "medicare_additional" },
+  { componentKey: "futa", displayName: "FUTA", category: "payrollTaxes", description: "Federal unemployment tax — employer only." },
+  { componentKey: "futa_wage_base", displayName: "FUTA Wage Base", category: "payrollTaxes", description: "Annual wage cap FUTA applies up to.", parentKey: "futa" },
+  { componentKey: "federal-income-tax", displayName: "Income Tax", category: "incomeTax", description: "Progressive brackets — configured in the Income Tax Brackets tab.", navigatesTo: "incomeTax" },
+  { componentKey: "standard_deduction", displayName: "Standard Deduction", category: "incomeTax", description: "Filing-status-based standard deduction amount." },
+];
+
+function isSet(v) {
+  return v !== null && v !== undefined && v !== "";
+}
+
+// Default field labels/behavior per UI type — used both by the display
+// card and the form, so they never drift apart.
+export function describeUiType(uiType, overrides = {}) {
+  switch (uiType) {
+    case UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE:
+      return { employeeRate: true, employerRate: true };
+    case UI_TYPES.PERCENTAGE:
+      return { singleRate: true, rateLabel: overrides.rateLabel || "Employee Rate %" };
+    case UI_TYPES.EMPLOYER_ASSIGNED_RATE:
+      return { singleRate: true, rateLabel: overrides.rateLabel || "Employer Rate %" };
+    case UI_TYPES.WAGE_BASE:
+      return { flatAmount: true, flatAmountLabel: "Annual Wage Base" };
+    case UI_TYPES.THRESHOLD:
+      return { flatAmount: true, flatAmountLabel: "Threshold Amount" };
+    case UI_TYPES.ANNUAL_MAX:
+      return { flatAmount: true, flatAmountLabel: "Annual Dollar Maximum" };
+    case UI_TYPES.DEDUCTION_AMOUNT:
+      return { flatAmount: true, flatAmountLabel: "Deduction Amount", filingStatus: true };
+    case UI_TYPES.FIXED_AMOUNT:
+      return { flatAmount: true, flatAmountLabel: "Fixed Amount" };
+    case UI_TYPES.INCOME_TAX_POINTER:
+    default:
+      return { pointer: true };
+  }
+}
+
+// Given a real fetched ContributionRate row, determine its UI type, which
+// field the single-rate types actually read/write (resolved per-row, since
+// medicare_additional's real data lives in employerRatePct despite reading
+// as "Employee Rate %"), and the resolved field labels/flags to render.
+export function classifyContributionRate(rate) {
+  const staticEntry = STATIC_MAP[rate?.componentKey];
+  const hasEmployee = isSet(rate?.employeeRatePct);
+  const hasEmployer = isSet(rate?.employerRatePct);
+  const hasFlat = isSet(rate?.flatAmount);
+
+  let uiType, rateField, overrides = {};
+  if (staticEntry) {
+    uiType = staticEntry.uiType;
+    overrides = staticEntry;
+  } else {
+    // Fallback heuristic for any future/unmapped componentKey — never
+    // hides a component just because it isn't in the static map above.
+    const haystack = `${rate?.componentKey || ""} ${rate?.label || ""}`.toLowerCase();
+    if (hasEmployee && hasEmployer) uiType = UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE;
+    else if (hasEmployee || hasEmployer) uiType = UI_TYPES.PERCENTAGE;
+    // "<key>_wage_cap"/"<key>_annual_max" (ZP-TAX-US-2026-001 §5's
+    // state-program companion-row convention, us.py's calculate()) —
+    // matched on the componentKey SUFFIX so any future program's cap/max
+    // row classifies correctly without needing its own STATIC_MAP entry.
+    else if (hasFlat && /_wage_cap$/.test(rate?.componentKey || "")) uiType = UI_TYPES.WAGE_BASE;
+    else if (hasFlat && /_annual_max$/.test(rate?.componentKey || "")) uiType = UI_TYPES.ANNUAL_MAX;
+    else if (hasFlat && /wage.?base/.test(haystack)) uiType = UI_TYPES.WAGE_BASE;
+    else if (hasFlat && /thresh/.test(haystack)) uiType = UI_TYPES.THRESHOLD;
+    else if (hasFlat && /deduct/.test(haystack)) uiType = UI_TYPES.DEDUCTION_AMOUNT;
+    else if (hasFlat) uiType = UI_TYPES.FIXED_AMOUNT;
+    else uiType = UI_TYPES.INCOME_TAX_POINTER;
+  }
+
+  if (uiType === UI_TYPES.PERCENTAGE || uiType === UI_TYPES.EMPLOYER_ASSIGNED_RATE) {
+    rateField = hasEmployee ? "employeeRatePct" : hasEmployer ? "employerRatePct" : "employeeRatePct";
+  }
+
+  return { uiType, rateField, associatedKey: staticEntry?.associatedKey, ...describeUiType(uiType, overrides) };
+}

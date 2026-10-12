@@ -1,0 +1,101 @@
+{
+  "description": "CDAC contributor at S$6,000 with an SHG-instructed amount of S$5.00 (CPF Board SHG page: a different amount through the SHG) instead of the $2 band.",
+  "source": "CPF Board 'CPF Contribution Rate Tables from 1 January 2026' Table 1 (≤ 55: total 37%, employee 20%; OW ceiling $8,000; round total half-up, employee down); CPF Board AW ceiling = 102,000 − (YTD OW + this month's OW × months remaining); SDL 0.25% ($2–$11.25).",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "CDAC=5.00",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "0",
+        "max_amount": "2000",
+        "rate_pct": "0",
+        "flat_amount": "0.50",
+        "rate_label": "SHG-CDAC-0"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "2000",
+        "max_amount": "3500",
+        "rate_pct": "0",
+        "flat_amount": "1",
+        "rate_label": "SHG-CDAC-1"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "3500",
+        "max_amount": "5000",
+        "rate_pct": "0",
+        "flat_amount": "1.50",
+        "rate_label": "SHG-CDAC-2"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "5000",
+        "max_amount": "7500",
+        "rate_pct": "0",
+        "flat_amount": "2",
+        "rate_label": "SHG-CDAC-3"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "7500",
+        "max_amount": null,
+        "rate_pct": "0",
+        "flat_amount": "3",
+        "rate_label": "SHG-CDAC-4"
+      }
+    ],
+    "pay_date": "2026-06-30",
+    "ytd_cpf_ow_subject_before": "0",
+    "ytd_cpf_aw_subject_before": "0",
+    "ytd_cpf_aw_paid_before": "0",
+    "sgp_aw_ledger": [],
+    "gross": "6000.00"
+  },
+  "expected": {
+    "professional_tax": "5.00",
+    "employee_pension": "1200",
+    "net_pay": "4795.00"
+  }
+}

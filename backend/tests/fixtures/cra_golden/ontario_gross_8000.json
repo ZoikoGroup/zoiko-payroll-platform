@@ -1,0 +1,38 @@
+{
+  "description": "Ontario employee, federal + provincial income tax + CPP + EI at $8,000/month. state_income_tax was originally $448.83, independently verified live against a real database in an earlier session of this project (2026-09-07 restoration work) under the legacy deduction method (the platform's only-ever default at that time). Updated 2026-09-11 (gap-closure Phase 1): the CRA-correct credit method (ZP-TAX-CA-2026-001 §7's 'T3 = (R×A) − K') plus the federal K2/K3 CPP/EI credit are now enabled by default. This income genuinely crosses a federal bracket (58,523) and an Ontario bracket (53,891), which is exactly the condition under which the credit and deduction methods are documented to diverge (engine/countries/shared.py's own _CA_CREDIT_METHOD_ENABLED_COUNTRIES comment) — federal_income_tax and state_income_tax below are the new figures, recomputed by running the real engine (not hand-derived), not a fresh guess either.",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal brackets/BPAF/CEA, same as federal_only_flat_gross_4000.json), Section 8 (Ontario 2026 brackets: 53,891/107,785/150,000/220,000 at 5.05/9.15/11.16/12.16/13.16%, Ontario basic amount $12,989), Section 10-11 (CPP/EI, same rates as the federal-only case). Hand-verified against the document's own bracket tables and cross-checked by running the actual engine at authoring time -- not run through CRA PDOC.",
+  "context": {
+    "gross": "8000.00",
+    "country": "CA",
+    "pay_date": "2026-06-30",
+    "work_state": "ON",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ],
+    "state_rate_map": {
+      "provincial_bpa": {"flat_amount": "12989"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "53891", "rate_pct": "5.05"},
+      {"min_amount": "53891", "max_amount": "107785", "rate_pct": "9.15"},
+      {"min_amount": "107785", "max_amount": "150000", "rate_pct": "11.16"},
+      {"min_amount": "150000", "max_amount": "220000", "rate_pct": "12.16"},
+      {"min_amount": "220000", "max_amount": null, "rate_pct": "13.16"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "1046.24",
+    "state_income_tax": "493.21",
+    "tds": "1539.45",
+    "social_security": "352.54",
+    "employee_esi": "93.59"
+  }
+}

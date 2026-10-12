@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, CheckCircle2 } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Plus, CheckCircle2, Upload, Download, FileText } from "lucide-react";
 import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
-import { getSourceArtifacts, createSourceArtifact, reviewSourceArtifact } from "../../service/superAdminService";
+import {
+  getSourceArtifacts, createSourceArtifact, reviewSourceArtifact,
+  uploadSourceArtifactFile, downloadSourceArtifactFile,
+} from "../../service/superAdminService";
 import { inputClass, labelClass } from "./constants";
 
 // Platform-wide (not US-only) — one row per official publication a
@@ -35,6 +38,16 @@ export default function SourceEvidencePanel() {
     }
   }
 
+  async function handleUpload(id, file) {
+    try {
+      await uploadSourceArtifactFile(id, file);
+      addToast?.("File uploaded — SHA-256 checksum computed from the actual bytes.", "success");
+      load();
+    } catch (err) {
+      addToast?.(err.message || "Upload failed.", "error");
+    }
+  }
+
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
       <div className="mb-4 flex items-start justify-between flex-wrap gap-3">
@@ -42,6 +55,7 @@ export default function SourceEvidencePanel() {
           <h2 className="text-lg font-bold text-foreground">Source Evidence</h2>
           <p className="mt-0.5 text-xs text-foreground-muted">
             Official publications behind configured rates/slabs — agency, title, URL, publication date, and reviewer.
+            Upload the actual preserved document to get a real, server-computed SHA-256 checksum (never hand-typed).
             See ZP-TAX-US-2026-001 §14. A correction is a new artifact, not an edit to an existing one.
           </p>
         </div>
@@ -65,6 +79,7 @@ export default function SourceEvidencePanel() {
                 <th className="pb-2 pr-3">Publication Date</th>
                 <th className="pb-2 pr-3">Retrieved</th>
                 <th className="pb-2 pr-3">Reviewed</th>
+                <th className="pb-2 pr-3">File / Checksum</th>
                 <th className="pb-2" />
               </tr>
             </thead>
@@ -85,6 +100,9 @@ export default function SourceEvidencePanel() {
                       <button onClick={() => markReviewed(a.id)} className="text-primary hover:underline">Mark reviewed</button>
                     )}
                   </td>
+                  <td className="py-2 pr-3">
+                    <SourceFileCell artifact={a} onUpload={(file) => handleUpload(a.id, file)} />
+                  </td>
                   <td className="py-2" />
                 </tr>
               ))}
@@ -98,6 +116,71 @@ export default function SourceEvidencePanel() {
           onClose={() => setShowForm(false)}
           onSaved={() => { setShowForm(false); load(); }}
         />
+      )}
+    </div>
+  );
+}
+
+function fmtBytes(n) {
+  if (n == null) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Real preserved-file storage cell (gap-closure Plan Phase 4) — a real,
+// server-computed SHA-256 checksum only ever exists once a file is
+// actually uploaded here; the create form's own "SHA-256 Checksum
+// (optional)" free-text field is legacy/unverified by comparison.
+function SourceFileCell({ artifact, onUpload }) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setUploading(true);
+    try {
+      await onUpload(file);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  if (artifact.hasFile) {
+    return (
+      <div className="flex flex-col gap-1">
+        <button
+          onClick={() => downloadSourceArtifactFile(artifact.id, artifact.originalFilename)}
+          className="flex items-center gap-1 text-primary hover:underline"
+        >
+          <Download size={12} /> {artifact.originalFilename || "Download"}
+          {artifact.fileSizeBytes != null && <span className="text-foreground-disabled">({fmtBytes(artifact.fileSizeBytes)})</span>}
+        </button>
+        {artifact.checksumSha256 && (
+          <span className="flex items-center gap-1 font-mono text-[11px] text-foreground-disabled" title={artifact.checksumSha256}>
+            <FileText size={11} /> {artifact.checksumSha256.slice(0, 16)}…
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <input ref={inputRef} type="file" className="hidden" onChange={handleFileChange} />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className="flex items-center gap-1 text-primary hover:underline disabled:opacity-50"
+      >
+        <Upload size={12} /> {uploading ? "Uploading…" : "Upload File"}
+      </button>
+      {artifact.checksumSha256 && (
+        <p className="mt-0.5 font-mono text-[11px] text-foreground-disabled" title={artifact.checksumSha256}>
+          (hand-typed) {artifact.checksumSha256.slice(0, 16)}…
+        </p>
       )}
     </div>
   );

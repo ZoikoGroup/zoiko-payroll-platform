@@ -42,6 +42,7 @@ import app.modules.payroll.models  # noqa: F401,E402
 import app.modules.payroll.policy.models  # noqa: F401,E402
 import app.modules.payroll.enterprise.models  # noqa: F401,E402
 import app.modules.payroll.mail.models  # noqa: F401,E402
+import app.modules.billing.models  # noqa: F401,E402
 
 # JSON is stored as JSONB on PostgreSQL (JSON is fine on SQLite).
 _JSON_TYPE = "JSONB" if engine.dialect.name == "postgresql" else "JSON"

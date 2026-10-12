@@ -3,7 +3,7 @@ import { CalendarCheck, Clock, Users, FileText, List, CalendarDays, Save, Dollar
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../ToastContext";
-import { getEmployeeRoster, saveAttendanceRecords, getAttendanceRecords, getAttendanceHistory, getHolidays, getPayrollLeaveRequests } from "../../../service/payrollService";
+import { getEmployeeRoster, getEmployees, saveAttendanceRecordsInBatches, describeAttendanceSaveError, getAttendanceRecords, getAttendanceRecordsPaginated, getAttendanceSummaryByEmployee, getHolidays, getPayrollLeaveRequests } from "../../../service/payrollService";
 import * as XLSX from "xlsx";
 
 function lsKey(orgId) {
@@ -22,15 +22,26 @@ function setLocalRecords(map, orgId) {
   try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
 }
 
-function mergeLocalIntoRecords(records, date, orgId) {
+function clearLocalRecords(orgId) {
+  const key = lsKey(orgId);
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch {}
+}
+
+// Attendance used to be written into this browser's localStorage on every
+// save and kept there when the server save failed ("saved locally"). Payroll
+// only ever reads the server, so those rows were invisible to it. Nothing
+// writes this cache any more; it is only read once to find rows that never
+// reached the server, so the user can sync or discard them.
+function flattenLocalRecords(orgId) {
   const local = getLocalRecords(orgId);
-  const dayRecords = local[date];
-  if (!dayRecords) return records;
-  return records.map((r) => {
-    const saved = dayRecords.find((d) => String(d.employeeId) === String(r.employeeId));
-    if (!saved) return r;
-    return { ...r, ...saved };
+  const rows = [];
+  Object.entries(local).forEach(([d, list]) => {
+    (Array.isArray(list) ? list : []).forEach((rec) => {
+      if (rec && typeof rec === "object") rows.push({ ...rec, date: rec.date || d });
+    });
   });
+  return rows;
 }
 
 // A stable per-record identity for de-duping/merging. Falls back to name when
@@ -151,14 +162,22 @@ function monthYearLabelsForDates(dates) {
 
 const TIME_RANGES = [
   { label: "1W", days: 7 },
-  { label: "1M", days: 30 },
+  { label: "1M", days: 30, calendarMonth: true },
   { label: "4M", days: 120 },
   { label: "6M", days: 180 },
   { label: "1Y", days: 365 },
   { label: "ALL", days: 0 },
 ];
 
-function getDateRange(days, startDate) {
+// Last calendar day of the month containing the given date string — native
+// Date rollover handles Feb 28/29, 30-day and 31-day months, and the
+// December→January boundary without any manual month-length table.
+function calendarMonthEnd(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return toLocalDateStr(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+}
+
+function getDateRange(days, startDate, calendarMonth = false) {
   const today = new Date();
   const start = startDate ? new Date(startDate + "T00:00:00") : today;
   if (days <= 0) {
@@ -168,8 +187,15 @@ function getDateRange(days, startDate) {
       end: toLocalDateStr(today),
     };
   }
-  const end = new Date(start);
-  end.setDate(end.getDate() + (days - 1));
+  let end;
+  if (calendarMonth && days === 30) {
+    // The "1M" preset is a real calendar month: a start of Jan 1 means
+    // Jan 1–31 (28/29 in February), not a flat 30-day span ending Jan 30.
+    end = new Date(calendarMonthEnd(toLocalDateStr(start)) + "T00:00:00");
+  } else {
+    end = new Date(start);
+    end.setDate(end.getDate() + (days - 1));
+  }
   return {
     start: toLocalDateStr(start),
     end: toLocalDateStr(end),
@@ -202,8 +228,25 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
   const [date, setDate] = useState(toLocalDateStr(new Date()));
   const [timeRange, setTimeRange] = useState(30);
-  const [historyRecords, setHistoryRecords] = useState([]);
+  const [monthRange, setMonthRange] = useState(false);
+  // Span of the saved attendance in the selected range, which drives "Total
+  // Working Days" for the ALL view. The tables themselves come from the
+  // server-side aggregates below, so raw rows are no longer held in the
+  // browser at all.
+  const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyFirstDate, setHistoryFirstDate] = useState(null);
+  const [historyLastDate, setHistoryLastDate] = useState(null);
+  // Server-computed per-employee aggregates for the Summary tab. These used to
+  // be counted in the browser from the full history fetch.
+  const [summaryRows, setSummaryRows] = useState([]);
+  const [summaryTotal, setSummaryTotal] = useState(0);
+  const [summaryTotals, setSummaryTotals] = useState({
+    totalDays: 0, present: 0, absent: 0, leave: 0, unpaidLeaves: 0, paidLeaves: 0,
+  });
+  const [summaryHasMore, setSummaryHasMore] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [filterStartDate, setFilterStartDate] = useState(() => {
     const d = new Date();
@@ -246,19 +289,13 @@ export default function AttendancePage() {
   // "Total Employees" whenever inactive employees exist or a range simply
   // has no attendance saved for everyone yet.
   const [totalEmployeeCount, setTotalEmployeeCount] = useState(0);
+  // Summary tab pagination
+  const [summaryPage, setSummaryPage] = useState(0);
+  const SUMMARY_PAGE_SIZE = 50;
 
   const loadRecords = useCallback(async () => {
     const requestId = ++recordsRequestIdRef.current;
     setLoading(true);
-    const local = getLocalRecords(orgId);
-    const localToday = local[date] || [];
-    let list = localToday.map((r) => ({
-      ...r,
-      breakMinutes: r.breakMinutes ?? 60,
-      checkInPeriod: r.checkInPeriod || "AM",
-      checkOutPeriod: r.checkOutPeriod || "PM",
-    }));
-    if (requestId === recordsRequestIdRef.current) setRecords(list.length ? list : []);
     try {
       const [rosterData, savedRecords, leaveReqs] = await Promise.all([
         getEmployeeRoster({ status: "Active" }),
@@ -297,17 +334,18 @@ export default function AttendancePage() {
           leaveType: approvedLeaveType || undefined,
         };
       });
-      apiList = mergeLocalIntoRecords(apiList, date, orgId);
       if (requestId === recordsRequestIdRef.current) {
         setRecords(apiList);
         setTotalEmployeeCount(apiList.length);
       }
-    } catch {
-      if (requestId === recordsRequestIdRef.current && !list.length) addToast?.("Loaded from local storage.", "info");
+    } catch (err) {
+      if (requestId === recordsRequestIdRef.current) {
+        addToast?.(`Couldn't load attendance from the server: ${describeAttendanceSaveError(err)}`, "error");
+      }
     } finally {
       if (requestId === recordsRequestIdRef.current) setLoading(false);
     }
-  }, [addToast, date, orgId]);
+  }, [addToast, date]);
 
   useEffect(() => {
     loadRecords();
@@ -323,73 +361,82 @@ export default function AttendancePage() {
 
   const recordsRequestIdRef = useRef(0);
   const historyRequestIdRef = useRef(0);
-  const allRecordsCacheRef = useRef({}); // { [orgId]: { data, fetchedAt } }
-  const ALL_CACHE_TTL_MS = 60_000; // reuse the full dataset for up to 60s across filter switches
+  const summaryRequestIdRef = useRef(0);
 
+  // The History and Summary tabs both render per-employee aggregates, which the
+  // server now computes. So the raw attendance rows are no longer needed to
+  // build a table at all -- the only thing still needed from them is the span
+  // of saved attendance in the selected range, which drives "Total Working
+  // Days" for the ALL view. That is a single row fetch, not a full download.
   const loadHistory = useCallback(async (days) => {
     const requestId = ++historyRequestIdRef.current;
     setHistoryLoading(true);
-    const local = getLocalRecords(orgId);
-    const range = days === 0 ? null : getDateRange(days, filterStartDate);
-
-    const localSeen = new Map();
-    Object.values(local).flat().forEach((rec) => {
-      if (!rec?.date) return;
-      // Only include records inside the selected date-range filter
-      if (range && (rec.date < range.start || rec.date > range.end)) return;
-      localSeen.set(recordKey(rec), rec);
-    });
-    if (requestId === historyRequestIdRef.current) {
-      setHistoryRecords([...localSeen.values()]);
-    }
-
-    // Reuse a recently-fetched full dataset instead of hitting the network again —
-    // this is what makes switching between 1W/1M/4M/6M/1Y/ALL feel instant after the first load.
-    const orgCache = allRecordsCacheRef.current[orgId];
-    const cacheFresh = orgCache && Date.now() - orgCache.fetchedAt < ALL_CACHE_TTL_MS;
-    if (cacheFresh) {
-      const scoped = range
-        ? orgCache.data.filter((rec) => rec?.date && rec.date >= range.start && rec.date <= range.end)
-        : orgCache.data;
-      if (requestId === historyRequestIdRef.current) {
-        const seen = new Map();
-        scoped.forEach((rec) => { seen.set(`${rec.employeeId || rec.employee}-${rec.date}`, rec); });
-        setHistoryRecords([...seen.values()]);
-        setHistoryLoading(false);
-      }
-      return;
-    }
+    const range = days === 0 ? null : getDateRange(days, filterStartDate, monthRange);
+    const params = range ? { startDate: range.start, endDate: range.end } : {};
 
     try {
-      let data;
-      if (days === 0) {
-        data = await getAttendanceRecords();
-        data = Array.isArray(data) ? data : [];
-      } else {
-        const { start, end } = range;
-        data = await getAttendanceHistory(start, end);
-        data = Array.isArray(data) ? data : [];
-        // Defensive client-side scoping in case the API doesn't bound results itself
-        data = data.filter((rec) => rec?.date && rec.date >= start && rec.date <= end);
+      // limit=1: only the span and total are read from this response.
+      const page = await getAttendanceRecordsPaginated(params, 1, 0);
+      if (requestId !== historyRequestIdRef.current) return;
+      if (page.error) {
+        setHistoryTotal(0);
+        setHistoryFirstDate(null);
+        setHistoryLastDate(null);
+        return;
       }
-      // Only "ALL" fetches represent the complete dataset, so only that response is cache-worthy
-      if (days === 0) {
-        allRecordsCacheRef.current[orgId] = { data, fetchedAt: Date.now() };
-      }
-      if (data.length && requestId === historyRequestIdRef.current) {
-        const seen = new Map();
-        data.forEach((rec) => { seen.set(`${rec.employeeId || rec.employee}-${rec.date}`, rec); });
-        setHistoryRecords([...seen.values()]);
-      }
+      setHistoryTotal(page.total);
+      setHistoryFirstDate(page.firstDate || null);
+      setHistoryLastDate(page.lastDate || null);
     } catch {
-      // already showing local data
+      // keep whatever span is already shown
     } finally {
       if (requestId === historyRequestIdRef.current) setHistoryLoading(false);
     }
-  }, [filterStartDate, orgId]);
+  }, [filterStartDate, monthRange]);
+
+  // Per-employee aggregates for the Summary tab, computed by the server.
+  // `summaryPage` is server-side, and `employeeSearch` is sent to the server so
+  // it matches every employee rather than only the page that happens to be
+  // loaded.
+  const loadSummary = useCallback(async (page = 0, search = "") => {
+    const requestId = ++summaryRequestIdRef.current;
+    const days = timeRange;
+    const range = days === 0 ? null : getDateRange(days, filterStartDate, monthRange);
+    const params = {
+      startDate: range?.start,
+      endDate: range?.end,
+      search: search?.trim() || undefined,
+    };
+    setSummaryLoading(true);
+    try {
+      const res = await getAttendanceSummaryByEmployee({
+        ...params, limit: SUMMARY_PAGE_SIZE, offset: page * SUMMARY_PAGE_SIZE,
+      });
+      if (requestId !== summaryRequestIdRef.current) return;
+      if (res.error) {
+        setSummaryError(true);
+        setSummaryRows([]);
+        setSummaryTotal(0);
+        setSummaryHasMore(false);
+        return;
+      }
+      setSummaryError(false);
+      setSummaryRows(res.items);
+      setSummaryTotal(res.total);
+      setSummaryTotals(res.totals || {
+        totalDays: 0, present: 0, absent: 0, leave: 0, unpaidLeaves: 0, paidLeaves: 0,
+      });
+      setSummaryHasMore(res.hasMore);
+    } catch {
+      setSummaryError(true);
+    } finally {
+      if (requestId === summaryRequestIdRef.current) setSummaryLoading(false);
+    }
+  }, [timeRange, filterStartDate, monthRange]);
 
   useEffect(() => {
     loadHistory(timeRange);
+    resetSummaryPagination();
   }, [timeRange, loadHistory]);
 
   // Clean up old unscoped localStorage keys from prior sessions
@@ -406,6 +453,86 @@ export default function AttendancePage() {
     }
     toRemove.forEach((key) => { try { localStorage.removeItem(key); } catch {} });
   }, [orgId]);
+
+  // Rows left in this browser by the old "saved locally" fallback that the
+  // server doesn't have. Compared against the server (not just "the cache is
+  // non-empty") because the old code also mirrored every SUCCESSFUL save
+  // into the cache. Anything already on the server is dropped silently.
+  const [localOnly, setLocalOnly] = useState(null);
+  const [localOnlySyncing, setLocalOnlySyncing] = useState(false);
+
+  const findLocalOnlyRecords = useCallback(async () => {
+    if (!orgId) return;
+    const rows = flattenLocalRecords(orgId).filter((r) => r.date);
+    if (!rows.length) { setLocalOnly(null); return; }
+    const dates = rows.map((r) => r.date).sort();
+    const firstDate = dates[0];
+    const lastDate = dates[dates.length - 1];
+    const serverById = new Set();
+    const serverByName = new Set();
+    const PAGE = 1000;
+    for (let offset = 0; ; offset += PAGE) {
+      const page = await getAttendanceRecordsPaginated({ startDate: firstDate, endDate: lastDate }, PAGE, offset);
+      if (page.error) return;   // can't compare — leave the cache alone, try again next visit
+      page.items.forEach((r) => {
+        serverById.add(`${r.employeeId}-${r.date}`);
+        if (r.name) serverByName.add(`${String(r.name).trim().toLowerCase()}-${r.date}`);
+      });
+      if (!page.hasMore) break;
+    }
+    const seen = new Set();
+    const missing = rows.filter((r) => {
+      const key = recordKey(r);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const hasId = r.employeeId !== null && r.employeeId !== undefined && r.employeeId !== "";
+      if (hasId) return !serverById.has(`${r.employeeId}-${r.date}`);
+      return !serverByName.has(`${String(r.name || "").trim().toLowerCase()}-${r.date}`);
+    });
+    if (!missing.length) {
+      clearLocalRecords(orgId);
+      setLocalOnly(null);
+      return;
+    }
+    const missingDates = missing.map((r) => r.date).sort();
+    setLocalOnly({ records: missing, firstDate: missingDates[0], lastDate: missingDates[missingDates.length - 1] });
+  }, [orgId]);
+
+  useEffect(() => { findLocalOnlyRecords(); }, [findLocalOnlyRecords]);
+
+  async function handleSyncLocalOnly() {
+    if (!localOnly?.records.length) return;
+    setLocalOnlySyncing(true);
+    try {
+      // eslint-disable-next-line no-unused-vars
+      const payload = localOnly.records.map(({ id, ...rec }) => rec);
+      const result = await saveAttendanceRecordsInBatches(payload);
+      clearLocalRecords(orgId);
+      setLocalOnly(null);
+      addToast?.(
+        result.skipped > 0
+          ? `Synced ${result.saved} record(s) to the server. ${result.skipped} skipped (e.g. employee no longer active).`
+          : `Synced ${result.saved} record(s) to the server.`,
+        result.skipped > 0 ? "warning" : "success"
+      );
+      await loadRecords();
+      await loadHistory(timeRange);
+      await loadSummary(0, employeeSearch);
+    } catch (err) {
+      const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were synced before the error.` : "";
+      addToast?.(`Sync failed: ${describeAttendanceSaveError(err)}${partial}`, "error");
+      if (err?.savedCount) await findLocalOnlyRecords();
+    } finally {
+      setLocalOnlySyncing(false);
+    }
+  }
+
+  function handleDiscardLocalOnly() {
+    if (!window.confirm(`Discard ${localOnly?.records.length || 0} attendance record(s) that exist only in this browser? They were never saved to the server and cannot be recovered.`)) return;
+    clearLocalRecords(orgId);
+    setLocalOnly(null);
+    addToast?.("Browser-only attendance discarded.", "success");
+  }
 
   const loadHolidays = useCallback(async () => {
     setHolidaysLoading(true);
@@ -437,118 +564,103 @@ export default function AttendancePage() {
 
   const totalBusinessDaysInRange = useMemo(() => {
     if (timeRange === 0) {
-      if (historyRecords.length === 0) return 0;
-      const dates = historyRecords.map((r) => r.date).filter(Boolean);
-      if (dates.length === 0) return 0;
-      const sorted = [...dates].sort();
-      return countBusinessDays(sorted[0], sorted[sorted.length - 1], excludeWeekends, holidayDates);
+      // Span comes from the server, not from the loaded rows. With paged
+      // history only one page is in memory, so min/max over what is loaded
+      // would shrink the reported range to whichever page happens to be held.
+      if (!historyFirstDate) return 0;
+      return countBusinessDays(historyFirstDate, historyLastDate || todayStr(), excludeWeekends, holidayDates);
     }
-    const { start, end } = getDateRange(timeRange, filterStartDate);
+    const { start, end } = getDateRange(timeRange, filterStartDate, monthRange);
     return countBusinessDays(start, end, excludeWeekends, holidayDates);
-  }, [timeRange, filterStartDate, historyRecords, excludeWeekends, holidayDates]);
+  }, [timeRange, filterStartDate, historyFirstDate, historyLastDate, excludeWeekends, holidayDates, monthRange]);
 
-  // Aggregate history records by employee — only days that have actually occurred count
-  // toward completed attendance stats; future/scheduled entries are excluded here.
+  // Per-employee attendance aggregates. These now come from the server
+  // (/attendance/summary/by-employee), which counts in SQL. The previous
+  // implementation aggregated the full history fetch in the browser, so every
+  // attendance row in range had to be downloaded just to count days per
+  // employee. Future-dated rows are already excluded server-side.
   const employeeAttendanceSummary = useMemo(() => {
-    const map = {};
-    (Array.isArray(historyRecords) ? historyRecords : [])
-      .filter((rec) => !isFutureDate(rec.date))
-      .forEach((rec) => {
-      const key = rec.employeeId || rec.employee || rec.name || "unknown";
-      if (!map[key]) {
-        map[key] = {
-          employeeId: rec.employeeId,
-          name: rec.name || rec.employee || "Unknown",
-          department: rec.department || "",
-          present: 0,
-          absent: 0,
-          leave: 0,
-          unpaidLeave: 0,
-          paidLeave: 0,
-          totalHours: 0,
-          days: 0,
-          checkInCounts: {},
-          checkOutCounts: {},
-          breakMinutes: 0,
-          breakCount: 0,
-        };
-      }
-      if (rec.status === "present") map[key].present++;
-      else if (rec.status === "absent") map[key].absent++;
-      else if (rec.status === "leave") {
-        map[key].leave++;
-        // Mirrors the backend's own convention exactly (_count_unpaid_leave_days
-        // in service.py): leaveType "unpaid" or missing/legacy (null) counts as
-        // unpaid; "paid" does not; sick/casual count toward Leave Days only.
-        if (rec.leaveType === "paid") map[key].paidLeave++;
-        else if (rec.leaveType == null || rec.leaveType === "unpaid") map[key].unpaidLeave++;
-      }
-      map[key].days++;
-      map[key].totalHours += Number(rec.hours || rec.totalHours || 0);
-      const ci = rec.checkIn || "";
-      if (ci) map[key].checkInCounts[ci] = (map[key].checkInCounts[ci] || 0) + 1;
-      const co = rec.checkOut || "";
-      if (co) map[key].checkOutCounts[co] = (map[key].checkOutCounts[co] || 0) + 1;
-      const bm = Number(rec.breakMinutes) || 0;
-      if (bm > 0) { map[key].breakMinutes += bm; map[key].breakCount++; }
-    });
+    // A failed aggregate must not fall back to counting a partial page, which
+    // would under-report; show nothing rather than a wrong payroll number.
+    if (summaryError) return [];
 
-    // If no history records, fall back to today's records for per-employee view
-    if (Object.keys(map).length === 0) {
+    const rows = Array.isArray(summaryRows) ? summaryRows : [];
+    if (rows.length) {
+      return rows.map((row) => ({
+        ...row,
+        // Every field is a direct, read-only derivation of the rows the server
+        // actually aggregated, so the table cannot drift from what was saved.
+        totalDays: row.totalDays || 0,
+        present: row.present || 0,
+        absent: row.absent || 0,
+        leave: row.leave || 0,
+        unpaidLeaves: row.unpaidLeaves || 0,
+        paidLeaves: row.paidLeaves || 0,
+        totalHours: row.totalHours || 0,
+        avgCheckIn: row.avgCheckIn || "",
+        avgCheckOut: row.avgCheckOut || "",
+        // payroll_attendance_records has no break_minutes column, so there is
+        // no data source for a break average. The server reports 0; the old
+        // client code read a field that never existed and also rendered 0.
+        avgBreak: row.avgBreak || 0,
+      }));
+    }
+
+    // If the selected range has no saved attendance at all, fall back to
+    // today's in-progress rows so the per-employee view is not simply blank.
+    if (Array.isArray(records) && records.length) {
+      const map = new Map();
       records.forEach((r) => {
         const key = r.employeeId || r.name || "unknown";
-        if (!map[key]) {
-          map[key] = {
-            employeeId: r.employeeId,
-            name: r.name,
-            department: r.department || "",
-            present: r.status === "present" ? 1 : 0,
-            absent: r.status === "absent" ? 1 : 0,
-            leave: r.status === "leave" ? 1 : 0,
-            unpaidLeave: r.status === "leave" && (r.leaveType == null || r.leaveType === "unpaid") ? 1 : 0,
-            paidLeave: r.status === "leave" && r.leaveType === "paid" ? 1 : 0,
-            totalHours: Number(r.hours || 0),
-            days: 1,
-            checkInCounts: r.checkIn ? { [r.checkIn]: 1 } : {},
-            checkOutCounts: r.checkOut ? { [r.checkOut]: 1 } : {},
-            breakMinutes: Number(r.breakMinutes) || 0,
-            breakCount: Number(r.breakMinutes) ? 1 : 0,
-          };
-        }
+        if (map.has(key)) return;
+        const isLeave = r.status === "leave";
+        map.set(key, {
+          employeeId: r.employeeId,
+          name: r.name || r.employee || "Unknown",
+          department: r.department || "",
+          totalDays: 1,
+          present: r.status === "present" ? 1 : 0,
+          absent: r.status === "absent" ? 1 : 0,
+          leave: isLeave ? 1 : 0,
+          // Same convention as the server and as _count_unpaid_leave_days:
+          // "unpaid" or missing/legacy null is unpaid, "paid" is paid, and
+          // sick/casual count toward Leave Days only.
+          unpaidLeaves: isLeave && (r.leaveType == null || r.leaveType === "unpaid") ? 1 : 0,
+          paidLeaves: isLeave && r.leaveType === "paid" ? 1 : 0,
+          totalHours: Number(r.hours || 0),
+          avgCheckIn: r.checkIn || "",
+          avgCheckOut: r.checkOut || "",
+          avgBreak: 0,
+        });
       });
+      return [...map.values()];
     }
 
-    return Object.values(map).map((emp) => {
-      const topCheckIn = Object.entries(emp.checkInCounts).sort((a, b) => b[1] - a[1])[0];
-      const topCheckOut = Object.entries(emp.checkOutCounts).sort((a, b) => b[1] - a[1])[0];
-      return {
-        ...emp,
-        // Every field below is a direct, read-only derivation of records actually
-        // fetched from the backend for this range — nothing here is user-editable,
-        // so the table can never silently drift from what was uploaded/saved.
-        totalDays: emp.days,                 // "Total Working Days" — count of recorded attendance days
-        present: emp.present,                // "Present Days"
-        leave: emp.leave,                    // "Leave Days"
-        absent: emp.absent,                  // "Absent Days"
-        unpaidLeaves: emp.unpaidLeave,        // "Unpaid Leaves" — leaveType "unpaid"/legacy null only, never paid leave
-        paidLeaves: emp.paidLeave,
-        totalHours: Math.round(emp.totalHours * 100) / 100,
-        avgCheckIn: topCheckIn ? topCheckIn[0] : "",
-        avgCheckOut: topCheckOut ? topCheckOut[0] : "",
-        avgBreak: emp.breakCount > 0 ? Math.round(emp.breakMinutes / emp.breakCount) : 0,
-      };
-    });
-  }, [historyRecords, records, timeRange]);
+    return [];
+  }, [summaryRows, summaryError, records]);
 
-  const filteredSummary = useMemo(() => {
-    if (!employeeSearch.trim()) return employeeAttendanceSummary;
-    const q = employeeSearch.toLowerCase();
-    return employeeAttendanceSummary.filter(
-      (emp) =>
-        emp.name?.toLowerCase().includes(q) ||
-        emp.department?.toLowerCase().includes(q)
-    );
-  }, [employeeAttendanceSummary, employeeSearch]);
+  // Search is applied server-side (see loadSummary), so these rows are already
+  // filtered. The name is kept because the stat cards and both XLSX exports
+  // read it, and exports need every matching employee, not just this page.
+  const filteredSummary = employeeAttendanceSummary;
+
+  // Paging is server-side, so a range or search change has to re-fetch page 0.
+  useEffect(() => {
+    loadSummary(0, employeeSearch);
+  }, [loadSummary, employeeSearch]);
+
+  const paginatedSummary = filteredSummary;
+  const hasMoreSummary = summaryHasMore;
+
+  function loadMoreSummary() {
+    const next = summaryPage + 1;
+    setSummaryPage(next);
+    loadSummary(next, employeeSearch);
+  }
+
+  function resetSummaryPagination() {
+    setSummaryPage(0);
+  }
 
   function updateRecord(idx, field, value) {
     setRecords((prev) => {
@@ -565,7 +677,7 @@ export default function AttendancePage() {
   // skipping or partially clearing — saved attendance is never deleted by
   // this button; that would need its own separate, deliberate action.
   async function handleResetAll() {
-    const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate);
+    const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate, monthRange);
 
     let existing = [];
     try {
@@ -602,11 +714,11 @@ export default function AttendancePage() {
       }
     } catch {}
 
-    // Bust the in-memory cache and re-fetch from the backend, so the UI
-    // shows exactly what's actually saved (with unsaved edits now gone)
-    // instead of blanking state that may still hold real saved data.
-    allRecordsCacheRef.current = {};
+    // Re-fetch from the backend, so the UI shows exactly what's actually saved
+    // (with unsaved edits now gone) instead of blanking state that may still
+    // hold real saved data.
     loadHistory(timeRange);
+    loadSummary(0, employeeSearch);
     if (!range || (date >= range.start && date <= range.end)) {
       loadRecords();
     }
@@ -634,21 +746,21 @@ export default function AttendancePage() {
         otherCompensation: Number(r.otherCompensation) || 0,
         notes: r.notes,
       }));
-      const local = getLocalRecords(orgId);
-      local[date] = payload;
-      setLocalRecords(local, orgId);
-      const result = await saveAttendanceRecords(payload);
-      allRecordsCacheRef.current = {};
-      const savedCount = result?.saved ?? payload.length;
-      const skippedCount = result?.skipped ?? 0;
+      const result = await saveAttendanceRecordsInBatches(payload);
+      const savedCount = result.saved;
+      const skippedCount = result.skipped;
       if (skippedCount > 0) {
         addToast?.(`Saved ${savedCount} record(s). ${skippedCount} skipped.`, "warning");
       } else {
         addToast?.("Attendance records saved.", "success");
       }
       await loadHistory(timeRange);
-    } catch {
-      addToast?.("Failed to save records.", "error");
+    } catch (err) {
+      // Nothing is kept in the browser as a fallback — the edits stay on
+      // screen so the user can retry, but they are NOT saved until the server
+      // confirms it.
+      const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were saved before the error.` : "";
+      addToast?.(`Attendance was NOT saved: ${describeAttendanceSaveError(err)}${partial}`, "error");
     } finally {
       setSaving(false);
     }
@@ -732,41 +844,28 @@ export default function AttendancePage() {
         return;
       }
 
-      // Clear the date range from localStorage first, then insert new records
-      const local = getLocalRecords(orgId);
-      const dateSet = new Set(toSave.map((r) => r.date));
-      dateSet.forEach((d) => { delete local[d]; });
-      toSave.forEach((rec) => {
-        if (!local[rec.date]) local[rec.date] = [];
-        local[rec.date].push(rec);
-      });
-      setLocalRecords(local, orgId);
-
-      // Merge with existing backend records so we don't create duplicates
+      // Server only, in batches. The backend upserts on (employee, date), so
+      // only the generated rows are sent — re-sending the range's existing
+      // rows (as this used to) just inflated the request past the proxy's
+      // size limit. Nothing is written to the browser as a fallback: a row
+      // only counts as attendance once the server has it.
       try {
-        const existingBackend = await getAttendanceHistory(bulkStartDate, bulkEndDate);
-        const merged = new Map();
-        (Array.isArray(existingBackend) ? existingBackend : []).forEach((rec) => {
-          merged.set(recordKey(rec), rec);
-        });
-        toSave.forEach((rec) => {
-          merged.set(recordKey(rec), rec);
-        });
-        const result = await saveAttendanceRecords([...merged.values()]);
-        const savedCount = result?.saved ?? toSave.length;
-        const skippedCount = result?.skipped ?? 0;
+        const result = await saveAttendanceRecordsInBatches(toSave);
+        const savedCount = result.saved;
+        const skippedCount = result.skipped;
         if (skippedCount > 0) {
           addToast?.(`Created ${savedCount} attendance record(s). ${skippedCount} skipped.`, "warning");
         } else {
           addToast?.(`Created ${savedCount} attendance record(s).`, "success");
         }
-      } catch {
-        addToast?.("Backend save failed, but data saved locally.", "warning");
+      } catch (err) {
+        const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were saved before the error.` : " Nothing was saved.";
+        addToast?.(`Bulk attendance failed: ${describeAttendanceSaveError(err)}${partial}`, "error");
       }
-      allRecordsCacheRef.current = {};
       setBulkPreview([]);
       await loadRecords();
       await loadHistory(timeRange);
+      await loadSummary(0, employeeSearch);
     } catch {
       addToast?.("Failed to generate bulk attendance.", "error");
     } finally {
@@ -1373,41 +1472,28 @@ export default function AttendancePage() {
   async function performUploadSave(validRows) {
     setUploadSaving(true);
     try {
-      const local = getLocalRecords(orgId);
-      const dateGroups = {};
-      validRows.forEach((rec) => {
-        const d = rec.date;
-        if (!dateGroups[d]) dateGroups[d] = [];
-        dateGroups[d].push(rec);
-      });
-      for (const [d, recs] of Object.entries(dateGroups)) {
-        if (!local[d]) local[d] = [];
-        const existingIds = new Set(local[d].map((r) => recordKey(r)));
-        recs.forEach((rec) => {
-          if (existingIds.has(recordKey(rec))) {
-            local[d] = local[d].map((r) => recordKey(r) === recordKey(rec) ? { ...r, ...rec } : r);
-          } else {
-            local[d].push(rec);
-            existingIds.add(recordKey(rec));
-          }
-        });
-      }
-      setLocalRecords(local, orgId);
-
-      let backendResult = null;
+      let backendResult;
       try {
         const merged = new Map();
         for (const rec of validRows) {
           merged.set(recordKey(rec), rec);
         }
-        backendResult = await saveAttendanceRecords([...merged.values()]);
-      } catch {
-        addToast?.("Backend save failed, but data saved locally.", "warning");
+        backendResult = await saveAttendanceRecordsInBatches([...merged.values()]);
+      } catch (err) {
+        // Report the failure as a failure — the old fallback claimed
+        // "Imported N record(s)" even when the server had saved none.
+        const partial = err?.savedCount ? ` ${err.savedCount} of ${err.totalCount} were saved before the error.` : " Nothing was saved.";
+        addToast?.(`Upload failed: ${describeAttendanceSaveError(err)}${partial}`, "error");
+        if (err?.savedCount) {
+          await loadHistory(timeRange);
+          await loadSummary(0, employeeSearch);
+        }
+        return;
       }
 
-      const savedCount = backendResult?.saved ?? validRows.length;
-      const skippedCount = backendResult?.skipped ?? 0;
-      const skippedDetails = backendResult?.skippedDetails ?? [];
+      const savedCount = backendResult.saved;
+      const skippedCount = backendResult.skipped;
+      const skippedDetails = backendResult.skippedDetails;
 
       if (skippedCount > 0) {
         const reasons = skippedDetails.slice(0, 5).map((s) => {
@@ -1448,24 +1534,12 @@ export default function AttendancePage() {
           return merged;
         });
 
-        // Keep the 60s "ALL" cache and the currently displayed history table
-        // in sync with what was just saved, reusing loadHistory's own
-        // range-scoping logic rather than re-fetching from the network.
-        const orgCache = allRecordsCacheRef.current[orgId];
-        if (orgCache) {
-          const cacheMap = new Map(orgCache.data.map((r) => [recordKey(r), r]));
-          savedRecords.forEach((r) => cacheMap.set(recordKey(r), r));
-          orgCache.data = [...cacheMap.values()];
-          const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate);
-          const scoped = range
-            ? orgCache.data.filter((rec) => rec?.date && rec.date >= range.start && rec.date <= range.end)
-            : orgCache.data;
-          const seen = new Map();
-          scoped.forEach((rec) => { seen.set(`${rec.employeeId || rec.employee}-${rec.date}`, rec); });
-          setHistoryRecords([...seen.values()]);
-        } else {
-          await loadHistory(timeRange);
-        }
+        // Re-fetch history and the summary aggregates after a save. The old
+        // 60s "ALL" full-dataset cache is gone, so there is nothing to patch in
+        // place; the server now owns both the rows and the per-employee totals,
+        // and a stale local patch could drift from them.
+        await loadHistory(timeRange);
+        await loadSummary(0, employeeSearch);
       } else {
         await loadRecords();
         await loadHistory(timeRange);
@@ -1492,9 +1566,13 @@ export default function AttendancePage() {
     }
     setShowClockChoice(false);
 
+    // Active employees only — the upload skips inactive ones anyway.
+    // (getEmployees was used here without being imported from 2026-08-17
+    // until 2026-10-06; the ReferenceError was swallowed by this catch and
+    // surfaced as "No employees found", so the template never downloaded.)
     let templateEmployees = [];
     try {
-      const data = await getEmployees();
+      const data = await getEmployees({ status: "Active" });
       const list = data?.items || data || [];
       templateEmployees = list.map((e) => ({
         name: e.name || `Employee ${e.employeeCode || e.id}`,
@@ -1502,11 +1580,12 @@ export default function AttendancePage() {
         code: e.employeeCode || "",
         dept: e.department || "",
       }));
-    } catch {
-      templateEmployees = [];
+    } catch (err) {
+      addToast?.(`Couldn't build the template: ${err?.message || "the employee list failed to load"}.`, "error");
+      return;
     }
     if (templateEmployees.length === 0) {
-      addToast?.("No employees found. Add employees before downloading the template.", "error");
+      addToast?.("No active employees found (or the employee list couldn't be loaded). Add active employees before downloading the template.", "error");
       return;
     }
 
@@ -1623,7 +1702,29 @@ export default function AttendancePage() {
     XLSX.writeFile(wb, fileName);
   }
 
-  function exportAttendance() {
+  // Exports must contain EVERY matching employee, not just the page the table
+  // happens to be showing, so they walk the server pages explicitly rather than
+  // reusing filteredSummary.
+  async function fetchAllSummaryRows() {
+    const days = timeRange;
+    const range = days === 0 ? null : getDateRange(days, filterStartDate, monthRange);
+    const search = employeeSearch?.trim() || undefined;
+    const out = [];
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
+      const res = await getAttendanceSummaryByEmployee({
+        startDate: range?.start, endDate: range?.end,
+        search, limit: pageSize, offset,
+      });
+      if (res.error) break;
+      out.push(...res.items);
+      if (!res.hasMore) break;
+      if (res.items.length === 0) break;
+    }
+    return out;
+  }
+
+  async function exportAttendance() {
     const wb = XLSX.utils.book_new();
     const now = new Date();
     const dateStamp = toLocalDateStr(now);
@@ -1652,8 +1753,9 @@ export default function AttendancePage() {
 
     if (activeTab === "records") {
       const rangeLabel = timeRange === 0 ? "all" : `${timeRange}d`;
-      const { start, end } = timeRange > 0 ? getDateRange(timeRange, filterStartDate) : { start: "all", end: "all" };
-      const rows = filteredSummary.map((emp) => ({
+      const { start, end } = timeRange > 0 ? getDateRange(timeRange, filterStartDate, monthRange) : { start: "all", end: "all" };
+      const allRows = await fetchAllSummaryRows();
+      const rows = allRows.map((emp) => ({
         "Employee ID": emp.employeeId || "",
         "Employee Name": emp.name || "",
         "Department": emp.department || "",
@@ -1687,7 +1789,7 @@ export default function AttendancePage() {
       wsSummary["!cols"] = [{ wch: 28 }, { wch: 14 }];
       XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
 
-      const detailRows = filteredSummary.map((emp) => ({
+      const detailRows = (await fetchAllSummaryRows()).map((emp) => ({
         "Employee ID": emp.employeeId || "",
         "Employee Name": emp.name || "",
         "Department": emp.department || "",
@@ -1712,13 +1814,15 @@ export default function AttendancePage() {
   const present = records.filter((r) => r.status === "present").length;
   const absent = records.filter((r) => r.status === "absent").length;
   const onLeave = records.filter((r) => r.status === "leave").length;
-  const totalWorkingDays = filteredSummary.reduce((s, e) => s + (e.totalDays || e.present), 0);
 
-  // Range-based summary metrics — derived from historyRecords (via filteredSummary)
-  // These reflect the full selected time range, including any uploaded sheets
-  const rangePresent = filteredSummary.reduce((s, e) => s + (e.present || 0), 0);
-  const rangeAbsent = filteredSummary.reduce((s, e) => s + (e.absent || 0), 0);
-  const rangeOnLeave = filteredSummary.reduce((s, e) => s + (e.leave || 0), 0);
+  // Range-based summary metrics. These are org-wide sums computed by the server
+  // across EVERY employee, not sums over the loaded page — the table is paged,
+  // so summing filteredSummary would under-report as soon as a second page
+  // exists.
+  const totalWorkingDays = summaryTotals.totalDays || 0;
+  const rangePresent = summaryTotals.present || 0;
+  const rangeAbsent = summaryTotals.absent || 0;
+  const rangeOnLeave = summaryTotals.leave || 0;
 
   return (
     <div className="bg-background min-h-screen p-6 lg:p-8 space-y-6">
@@ -1789,6 +1893,32 @@ export default function AttendancePage() {
       <p className="text-[11px] font-medium text-foreground-muted -mt-3">
         Tip: pick a future date above (or use the shortcuts) to pre-schedule attendance for upcoming days — it saves the same way, and won't count toward "Working Days" until that day actually arrives.
       </p>
+
+      {localOnly && localOnly.records.length > 0 && (
+        <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[13px] text-foreground">
+            <strong>{localOnly.records.length} attendance record(s)</strong> ({localOnly.firstDate} to {localOnly.lastDate}) were saved only in this browser and never reached the server. Payroll can{"'"}t see them until they are synced.
+          </p>
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={handleSyncLocalOnly}
+              disabled={localOnlySyncing}
+              className="rounded-[12px] bg-primary px-4 py-2 text-[13px] font-bold text-white transition-all hover:bg-primary-hover disabled:opacity-50"
+            >
+              {localOnlySyncing ? "Syncing…" : "Sync to server"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardLocalOnly}
+              disabled={localOnlySyncing}
+              className="rounded-[12px] border border-border bg-surface px-4 py-2 text-[13px] font-semibold text-foreground-muted transition-all hover:border-error hover:text-error disabled:opacity-50"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-surface-muted rounded-[14px] p-1 w-fit flex flex-wrap">
         {tabs.map((t) => (
@@ -2143,13 +2273,24 @@ export default function AttendancePage() {
             Please make sure to add attendance details only for <strong>Active Employees</strong>. Inactive employees present in the upload will be skipped by the system.
           </div>
           <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h3 className="text-base font-bold text-foreground mb-2 flex items-center gap-2">
-              <Upload size={18} className="text-info" />
-              Upload Attendance Sheet
-            </h3>
-            <p className="text-[13px] text-foreground-muted mb-5">
-              Upload an Excel (.xlsx) file with attendance data. Columns are auto-mapped by header name — matching records merge with existing data.
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-5">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-foreground mb-2 flex items-center gap-2">
+                  <Upload size={18} className="text-info" />
+                  Upload Attendance Sheet
+                </h3>
+                <p className="text-[13px] text-foreground-muted">
+                  Step 1: download the template for the period below. Step 2: fill it in and upload it here. Columns are auto-mapped by header name — matching records merge with existing data.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => downloadAttendanceTemplate()}
+                className="inline-flex flex-shrink-0 items-center justify-center gap-2 rounded-[12px] bg-info px-4 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:opacity-90"
+              >
+                <Download size={15} />Download template
+              </button>
+            </div>
 
             <div className="flex items-center gap-3 flex-wrap mb-5">
               <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1">
@@ -2270,7 +2411,7 @@ export default function AttendancePage() {
                   <div className="mt-4 pt-4 border-t border-border">
                     <button type="button" onClick={() => downloadAttendanceTemplate()}
                       className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-info hover:text-info transition-colors duration-200"
-                    ><Download size={14} />Download template</button>
+                    ><Download size={14} />{"Don't have the template? Download it"}</button>
                   </div>
                 </div>
 
@@ -2451,14 +2592,17 @@ export default function AttendancePage() {
               </div>
               {timeRange > 0 && (
                 <span className="text-[11px] text-foreground-muted">
-                  {formatDisplayDate(getDateRange(timeRange, filterStartDate).start)} → {formatDisplayDate(getDateRange(timeRange, filterStartDate).end)}
+                  {formatDisplayDate(getDateRange(timeRange, filterStartDate, monthRange).start)} → {formatDisplayDate(getDateRange(timeRange, filterStartDate, monthRange).end)}
                 </span>
               )}
               <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1">
                 {TIME_RANGES.map((r) => (
                   <button
                     key={r.label}
-                    onClick={() => setTimeRange(r.days)}
+                    onClick={() => {
+                      setMonthRange(r.calendarMonth === true);
+                      setTimeRange(r.days);
+                    }}
                     className={`px-3 py-1.5 rounded-[10px] text-[12px] font-semibold transition-all ${
                       timeRange === r.days
                         ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
@@ -2491,8 +2635,12 @@ export default function AttendancePage() {
               />
             </div>
 
-            {historyLoading ? (
+            {historyLoading || summaryLoading ? (
               <div className="text-center py-8 text-foreground-muted text-[13px]">Loading records...</div>
+            ) : summaryError ? (
+              <div className="text-center py-8 text-foreground-muted text-[13px]">
+                Could not load attendance summary — try again.
+              </div>
             ) : employeeAttendanceSummary.length === 0 ? (
               <div className="text-center py-8">
                 <List size={32} className="mx-auto mb-2 opacity-40" />
@@ -2503,7 +2651,7 @@ export default function AttendancePage() {
                 <div className="grid grid-cols-4 gap-3 mb-4">
                   <div className="bg-background rounded-[12px] p-3 text-center border border-border">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Employees</p>
-                    <p className="text-[18px] font-bold text-foreground">{filteredSummary.length}</p>
+                    <p className="text-[18px] font-bold text-foreground">{summaryTotal}</p>
                   </div>
                   <div className="bg-primary/10 rounded-[12px] p-3 text-center border border-primary/20">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-primary">Total Working Days</p>
@@ -2511,11 +2659,11 @@ export default function AttendancePage() {
                   </div>
                   <div className="bg-warning/10 rounded-[12px] p-3 text-center border border-warning/20">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-warning">Present Days</p>
-                    <p className="text-[18px] font-bold text-warning">{filteredSummary.reduce((s, e) => s + e.present, 0)}</p>
+                    <p className="text-[18px] font-bold text-warning">{rangePresent}</p>
                   </div>
                   <div className="bg-error/10 rounded-[12px] p-3 text-center border border-error/20">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-error">Absent Days</p>
-                    <p className="text-[18px] font-bold text-error">{filteredSummary.reduce((s, e) => s + e.absent, 0)}</p>
+                    <p className="text-[18px] font-bold text-error">{rangeAbsent}</p>
                   </div>
                 </div>
 
@@ -2534,8 +2682,8 @@ export default function AttendancePage() {
                         <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Working Hours</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
-                      {filteredSummary.map((emp, i) => (
+<tbody className="divide-y divide-border">
+                      {paginatedSummary.map((emp, i) => (
                         <tr key={emp.employeeId || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors">
                           <td className="px-4 py-3 font-medium text-foreground">
                             <div className="flex items-center gap-2.5">
@@ -2544,7 +2692,7 @@ export default function AttendancePage() {
                               </div>
                               {emp.name}
                             </div>
-                        </td>
+                          </td>
                           <td className="px-4 py-3 text-foreground-muted">{emp.department || "-"}</td>
                           <td className="px-4 py-3 text-center font-semibold text-foreground">{emp.totalDays || 0}</td>
                           <td className="px-4 py-3 text-center">
@@ -2584,6 +2732,20 @@ export default function AttendancePage() {
                     </tbody>
                   </table>
                 </div>
+                {hasMoreSummary && (
+                  <div className="text-center mt-4">
+                    <button
+                      onClick={loadMoreSummary}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-primary text-white text-[13px] font-semibold hover:bg-primary-hover transition-colors"
+                    >
+                      <span>
+                        {summaryLoading
+                          ? "Loading..."
+                          : `Load More (${Math.max(0, summaryTotal - (summaryPage + 1) * SUMMARY_PAGE_SIZE)} remaining)`}
+                      </span>
+                    </button>
+                  </div>
+                )}
                 <p className="text-[10px] text-foreground-muted mt-2">All columns reflect saved attendance records for this period. Leave Days link to Payroll Leaves — click to manage there.</p>
               </>
             )}

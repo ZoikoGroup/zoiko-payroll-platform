@@ -19,6 +19,53 @@ existing payroll footers / reports keep working unchanged.
 
 from typing import Optional
 
+# Countries available on the public registration forms. Mirrors the frontend
+# dropdown (frontend/src/utils/registrationRegions.js). Both registration
+# flows gate on this allow-list: /auth/register (production, additionally
+# requires an Active canonical compliance pack) and /auth/register-trial
+# (30-day evaluation, no compliance-pack requirement).
+REGISTRATION_COUNTRIES = [
+    "India",
+    "Germany",
+    "Canada",
+    "United States",
+    "United Kingdom",
+    "Australia",
+    # Caribbean production jurisdictions (Wave A + adjacent T1), added
+    # 2026-09-21 — each has its own JURISDICTION_TAX_SCHEMAS entry below
+    # and a dedicated engine/countries/*.py calculator wired into
+    # engine/standard.py's _COUNTRY_CALC. The ~25 other Caribbean
+    # jurisdictions (Coming Soon) are deliberately NOT listed here — see
+    # app/core/caribbean_regions.py, which is the master for those and is
+    # never consulted by registration/onboarding.
+    "Barbados",
+    "Cayman Islands",
+    "Dominican Republic",
+    "Guyana",
+    "Jamaica",
+    "Bahamas",
+    "Trinidad and Tobago",
+    # Puerto Rico (2026-09-23) — dual-jurisdiction (local Hacienda + an
+    # independently-computed federal-equivalent layer), architecturally a
+    # sibling of the 7 Caribbean entries above, not a US-dependent variant.
+    # See engine/countries/puerto_rico.py's own module docstring.
+    "Puerto Rico",
+    # France (2026-09-24, ZP-FR-ENG-001) — Europe expansion, launch slot #10,
+    # metropolitan private-sector wedge. SIREN/SIRET establishment-aware
+    # collection keys; engine/countries/france.py wired into _COUNTRY_CALC.
+    "France",
+    "Ireland",
+    # Sweden (ZP-SE-ENG-001) — effective-dated country package, priority
+    # market #24. Applicability-first resolution (tax status → tax table/
+    # column → social insurance → age cohort → payment date → income type →
+    # CBA/plan → reporting period) in engine/countries/sweden.py; Draft packs
+    # SE-PAYROLL-2026/2027 seeded by scripts/seed_sweden_canonical_packs.py. Production
+    # registration still requires an Active canonical compliance pack, which
+    # in turn requires the §16/§37 readiness gates (evidence, certification,
+    # four-eyes) — adding the name here never activates Sweden by itself.
+    "Sweden",
+]
+
 # Keyed by the 2-letter code the rest of the payroll module uses
 # ("IN"/"US"/"UK"/"DE"/"AU"). Matches REGISTRATION_COUNTRIES / payroll
 # COMPLIANCE_COUNTRIES so a country name and a code always resolve the same.
@@ -137,6 +184,378 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    # ── Caribbean production jurisdictions (2026-09-21) ──────────────────
+    # Digit-count patterns below follow each country's own engineering
+    # spec (ZP-BB/KY/DO/GY/JM/BS/TT-ENG-001) where it states a length;
+    # where the spec explicitly says the exact issuing form/identifier is
+    # still unresolved (e.g. Barbados's "acquire the currently issued form
+    # instead of hard-coding a form number"), the pattern is deliberately
+    # lenient rather than guessing a stricter format that could reject a
+    # real, valid ID.
+    "BB": {
+        "label": "TAMIS TIN / NIS Number",
+        "currency": "BBD",
+        "fields": [
+            {
+                "key": "tamis_tin",
+                "label": "TAMIS TIN",
+                "pattern": r"^\d{9,13}$",
+                "example": "1234567890123",
+                "primary": True,
+            },
+            {
+                "key": "nis_number",
+                "label": "NIS Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIS-1234567",
+                "primary": False,
+            },
+        ],
+    },
+    "KY": {
+        "label": "NIB Employer Number",
+        "currency": "KYD",
+        "fields": [
+            {
+                "key": "nib_employer_number",
+                "label": "NIB Employer Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIB-000123",
+                "primary": True,
+            },
+        ],
+    },
+    "DO": {
+        "label": "RNC (Registro Nacional del Contribuyente)",
+        "currency": "DOP",
+        "fields": [
+            {
+                "key": "rnc",
+                "label": "RNC",
+                "pattern": r"^\d{1,3}-?\d{2}-?\d{5}-?\d{1,2}$|^\d{9,11}$",
+                "example": "1-01-12345-6",
+                "primary": True,
+            },
+        ],
+    },
+    "GY": {
+        "label": "GRA TIN / NIS Number",
+        "currency": "GYD",
+        "fields": [
+            {
+                "key": "gra_tin",
+                "label": "GRA TIN",
+                "pattern": r"^\d{7,10}$",
+                "example": "1234567",
+                "primary": True,
+            },
+            {
+                "key": "nis_number",
+                "label": "NIS Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIS-1234567",
+                "primary": False,
+            },
+        ],
+    },
+    "JM": {
+        "label": "TRN (Taxpayer Registration Number)",
+        "currency": "JMD",
+        "fields": [
+            {
+                "key": "trn",
+                "label": "TRN",
+                "pattern": r"^\d{9}$",
+                "example": "123456789",
+                "primary": True,
+            },
+        ],
+    },
+    "BS": {
+        "label": "NIB Employer Number",
+        "currency": "BSD",
+        "fields": [
+            {
+                "key": "nib_employer_number",
+                "label": "NIB Employer Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIB-000123",
+                "primary": True,
+            },
+        ],
+    },
+    "TT": {
+        "label": "BIR File Number / NIBTT Employer Number",
+        "currency": "TTD",
+        "fields": [
+            {
+                "key": "bir_file_number",
+                "label": "BIR File Number",
+                "pattern": r"^\d{9,10}$",
+                "example": "1234567890",
+                "primary": True,
+            },
+            {
+                "key": "nibtt_employer_number",
+                "label": "NIBTT Employer Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIBTT-000123",
+                "primary": False,
+            },
+        ],
+    },
+    "PR": {
+        "label": "Hacienda Employer Identification Number (EIN) / SUTA Account",
+        "currency": "USD",
+        "fields": [
+            {
+                "key": "hacienda_ein",
+                "label": "Hacienda Employer Identification Number",
+                "pattern": r"^\d{9}$",
+                "example": "660123456",
+                "primary": True,
+            },
+            {
+                "key": "dtrh_suta_account",
+                "label": "DTRH SUTA Account Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "SUTA-000123",
+                "primary": False,
+            },
+        ],
+    },
+    # France (2026-09-24, ZP-FR-ENG-001 §11). Primary identifier is the
+    # SIREN, mirrored into tax_no; the SIRET is the establishment-level key
+    # France breaks its calculation on (FR-002) and is stored on the
+    # EmployerFranceProfile / EstablishmentRatePack records, kept here too so
+    # registration never loses it. SIRET = SIREN + 5-digit NAC nic.
+    "FR": {
+        "label": "SIREN / SIRET / TVA intracommunautaire",
+        "currency": "EUR",
+        "fields": [
+            {
+                "key": "siren",
+                "label": "SIREN",
+                "pattern": r"^\d{9}$",
+                "example": "552100554",
+                "primary": True,
+            },
+            {
+                "key": "siret",
+                "label": "SIRET",
+                "pattern": r"^\d{14}$",
+                "example": "55210055400021",
+                "primary": False,
+            },
+            {
+                "key": "vat_intracom",
+                "label": "TVA intracommunautaire",
+                "pattern": r"^FR[0-9]{11}$",
+                "example": "FR23392106162",
+                "primary": False,
+            },
+        ],
+    },
+    "IE": {
+        "label": "Revenue PAYE / PRSI Registration / ROS Sub-User",
+        "currency": "EUR",
+        "fields": [
+            {
+                "key": "paye_registration_number",
+                "label": "Revenue PAYE Registration Number",
+                "pattern": r"^[0-9A-Z]{6,12}$",
+                "example": "1234567",
+                "primary": True,
+            },
+            {
+                "key": "prsi_registration_number",
+                "label": "PRSI Registration Number",
+                "pattern": r"^[0-9A-Z]{6,12}$",
+                "example": "7654321",
+                "primary": False,
+            },
+            {
+                "key": "ros_sub_user_reference",
+                "label": "ROS Sub-User Reference",
+                "pattern": r"^[A-Za-z0-9._-]{3,64}$",
+                "example": "ZOIKO-IE-ROS-01",
+                "primary": False,
+            },
+            {
+                "key": "eircode",
+                "label": "Eircode",
+                "pattern": r"^[A-Z][0-9]{2}\s?[A-Z0-9]{4}$",
+                "example": "D02 AF30",
+                "primary": False,
+            },
+        ],
+    },
+    # Sweden (ZP-SE-ENG-001 §13 "Sweden employer setup" / §11
+    # EmployerRegistration). The organisation number is the primary tax ID
+    # (mirrored into Organization.tax_no like every other country); the tax
+    # account reference is Skatteverket's employer tax-account key used for
+    # AGI settlement (spec §10 "Payment"). Personal identity numbers are
+    # deliberately NOT collected at employer registration (spec §11
+    # EmployerRegistration = org no + tax account; §14 data minimisation):
+    # a worker's personnummer lives only on the employee record, masked.
+    "SE": {
+        "label": "Organisation number / Tax account",
+        "currency": "SEK",
+        "fields": [
+            {
+                "key": "employer_org_number",
+                "label": "Employer organisation number (organisationsnummer)",
+                "pattern": r"^\d{6}-?\d{4}$",
+                "example": "556123-4567",
+                "primary": True,
+            },
+            {
+                "key": "tax_account_reference",
+                "label": "Skatteverket tax account reference",
+                "pattern": r"^[0-9A-Z-]{4,30}$",
+                "example": "5561234567-0001",
+                "primary": False,
+            },
+        ],
+    },
+    # Italy (ZP-IT-ENG-001 §17 A–C) — schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: Italy stays PLANNED until gates G1–G8 are signed.
+    # Codice fiscale of a company is 11 digits (usually equal to the partita
+    # IVA); the INPS matricola is 10 digits; the INAIL PAT is 8 digits plus
+    # an optional 2-digit check. Formats only — never synthesised (IT-052).
+    "IT": {
+        "label": "Codice fiscale / Partita IVA / Matricola INPS / PAT INAIL",
+        "currency": "EUR",
+        "fields": [
+            {"key": "codice_fiscale", "label": "Codice fiscale (employer)",
+             "pattern": r"^(\d{11}|[A-Z0-9]{16})$", "example": "01234567890", "primary": True},
+            {"key": "partita_iva", "label": "Partita IVA",
+             "pattern": r"^\d{11}$", "example": "01234567890", "primary": False},
+            {"key": "matricola_inps", "label": "Matricola INPS",
+             "pattern": r"^\d{10}$", "example": "1234567890", "primary": False},
+            {"key": "pat_inail", "label": "PAT INAIL",
+             "pattern": r"^\d{8}(\d{2})?$", "example": "12345678", "primary": False},
+        ],
+    },
+    # Singapore (ZP-SG-ENG-001 §9 Employer Registration panels A–E) — schema
+    # only. Deliberately NOT in REGISTRATION_COUNTRIES above: the spec's
+    # production gates G1–G8 must be evidenced before any Singapore
+    # organization can be onboarded. UEN pattern covers the three published
+    # UEN shapes (business 8 digits + letter, local company 9 digits +
+    # letter, other entity T/S/R-prefixed). CSN per CPF Board "CPF EZPay
+    # (FTP) File Specifications" (effective 16 Jan 2025): UEN/NRIC/FIN (9 or
+    # 10 bytes) + Payment Type (3, e.g. PTE/AMS/VCT) + Sno (2), e.g.
+    # "234567891APTE01" (hyphens tolerated for readability). The remaining
+    # keys are the employer's registration SETTINGS (enumerated, validated
+    # by pattern; "options" lets the form render a choice list) that the
+    # Singapore readiness check (SG-027) reads — none is a statutory rate.
+    "SG": {
+        "label": "UEN / CPF Submission Number (CSN)",
+        "currency": "SGD",
+        "fields": [
+            {
+                "key": "uen",
+                "label": "UEN",
+                "pattern": r"^(\d{8}[A-Z]|\d{9}[A-Z]|[TSR]\d{2}[A-Z]{2}\d{4}[A-Z])$",
+                "example": "201912345K",
+                "primary": True,
+            },
+            {
+                "key": "cpf_submission_number",
+                "label": "CPF Submission Number (CSN)",
+                "pattern": r"^[A-Z0-9]{9,10}-?[A-Z]{3}-?\d{2}$",
+                "example": "201912345KPTE01",
+                "primary": False,
+            },
+            {"key": "cpf_ezpay_method", "label": "CPF EZPay submission method", "pattern": r"^(FILE_UPLOAD|ONLINE_FORM)$",
+             "example": "FILE_UPLOAD", "primary": False, "options": ["FILE_UPLOAD", "ONLINE_FORM"]},
+            {"key": "cpf_payment_method", "label": "CPF payment method", "pattern": r"^(DIRECT_DEBIT|PAYNOW|OTHER)$",
+             "example": "DIRECT_DEBIT", "primary": False, "options": ["DIRECT_DEBIT", "PAYNOW", "OTHER"]},
+            {"key": "ais_status", "label": "IRAS AIS participation", "pattern": r"^(PARTICIPANT|NOT_PARTICIPATING)$",
+             "example": "PARTICIPANT", "primary": False, "options": ["PARTICIPANT", "NOT_PARTICIPATING"]},
+            {"key": "ais_submission_mode", "label": "IRAS AIS submission mode", "pattern": r"^(EXPORT_ONLY|DIRECT_API)$",
+             "example": "EXPORT_ONLY", "primary": False, "options": ["EXPORT_ONLY", "DIRECT_API"]},
+            {"key": "corppass_authorised", "label": "Corppass authorisation for AIS in place", "pattern": r"^(YES|NO)$",
+             "example": "YES", "primary": False, "options": ["YES", "NO"]},
+            {"key": "annual_reporting_owner", "label": "Annual IRAS reporting owner", "pattern": r"^[A-Za-z0-9 .,'@&()/-]{2,100}$",
+             "example": "Finance Manager", "primary": False},
+            {"key": "employs_foreign_workers", "label": "Employs EP / S Pass / Work Permit holders", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "mom_sector", "label": "MOM Work Permit sector",
+             "pattern": r"^(SERVICES|MANUFACTURING|CONSTRUCTION|PROCESS|MARINE_SHIPYARD|NOT_APPLICABLE)$",
+             "example": "SERVICES", "primary": False,
+             "options": ["SERVICES", "MANUFACTURING", "CONSTRUCTION", "PROCESS", "MARINE_SHIPYARD", "NOT_APPLICABLE"]},
+            {"key": "mom_levy_payment", "label": "MOM levy payment method", "pattern": r"^(GIRO|PAYNOW_QR|NOT_APPLICABLE)$",
+             "example": "GIRO", "primary": False, "options": ["GIRO", "PAYNOW_QR", "NOT_APPLICABLE"]},
+            {"key": "pwm_applicable", "label": "Progressive Wage Model applies to some employees", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "sdl_payment_route", "label": "SDL payment route", "pattern": r"^(CPF_EZPAY|OTHER)$",
+             "example": "CPF_EZPAY", "primary": False, "options": ["CPF_EZPAY", "OTHER"]},
+            {"key": "bank_workflow_validated", "label": "Salary bank-payment workflow validated", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "pdpa_controls_approved", "label": "PDPA / NRIC handling controls approved", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+        ],
+    },
+    # Hong Kong (ZP-HK-ENG-001 §13 HKEmployerRegistration) — schema only.
+    # Deliberately NOT in REGISTRATION_COUNTRIES: live Hong Kong payroll stays
+    # disabled until release gates G1–G7 are evidenced and the signed pack is
+    # activated (and the registry row leaves PLANNED). BR number: the 8-digit
+    # Business Registration number. IRD employer's file number: the
+    # "6xx-xxxxxxxx" reference printed on BIR56A (format kept lenient — the
+    # exact issuing format is a G1 confirmation item). The remaining keys
+    # are employer SETTINGS read by the Hong Kong readiness check — none is
+    # a statutory rate.
+    "HK": {
+        "label": "BR Number / IRD Employer's File Number",
+        "currency": "HKD",
+        "fields": [
+            {"key": "br_number", "label": "Business Registration Number", "pattern": r"^\d{8}$",
+             "example": "12345678", "primary": True},
+            {"key": "ird_employer_file_number", "label": "IRD Employer's File Number",
+             "pattern": r"^\d[A-Z0-9]{2}-?\d{6,8}$", "example": "6A1-12345678", "primary": False},
+            {"key": "empf_employer_account", "label": "eMPF employer account number",
+             "pattern": r"^[A-Za-z0-9-]{4,30}$", "example": "ER-12345678", "primary": False},
+            {"key": "mpf_scheme_name", "label": "MPF scheme (trustee) the employer participates in",
+             "pattern": r"^[A-Za-z0-9 .,'&()/-]{2,100}$", "example": "Example MPF Master Trust", "primary": False},
+            {"key": "empf_submission_channel", "label": "eMPF submission channel",
+             "pattern": r"^(EMPF_PLATFORM_MANUAL|NOT_CONFIGURED)$", "example": "EMPF_PLATFORM_MANUAL",
+             "primary": False, "options": ["EMPF_PLATFORM_MANUAL", "NOT_CONFIGURED"]},
+            {"key": "ird_filing_channel", "label": "IRD employer's return filing channel",
+             "pattern": r"^(IRD_ETAX_MANUAL|PAPER|NOT_CONFIGURED)$", "example": "IRD_ETAX_MANUAL",
+             "primary": False, "options": ["IRD_ETAX_MANUAL", "PAPER", "NOT_CONFIGURED"]},
+            {"key": "ec_insurance_policy_number", "label": "Employees' Compensation insurance policy number",
+             "pattern": r"^[A-Za-z0-9/-]{3,40}$", "example": "EC-2026-000123", "primary": False},
+            {"key": "ec_insurance_expiry", "label": "Employees' Compensation insurance expiry (YYYY-MM-DD)",
+             "pattern": r"^\d{4}-\d{2}-\d{2}$", "example": "2027-06-30", "primary": False},
+            {"key": "pics_published", "label": "Employment Personal Information Collection Statement issued",
+             "pattern": r"^(YES|NO)$", "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "bank_workflow_validated", "label": "Salary bank-payment workflow validated",
+             "pattern": r"^(YES|NO)$", "example": "NO", "primary": False, "options": ["YES", "NO"]},
+        ],
+    },
+    # Switzerland — schema only. Deliberately NOT in REGISTRATION_COUNTRIES:
+    # live Swiss payroll stays disabled until gates G1+ are evidenced (the
+    # canonical CH packs are Draft and every value is needs-g1) and the
+    # registry row leaves PLANNED. UID = the CH-prefixed Swiss business
+    # identification number; the AHV employer number is issued by the
+    # compensation office (Ausgleichskasse) — formats only, never synthesised
+    # (the AHV/AVS number itself is a 13-digit EAN-13 verified at employee
+    # level, see employee_validation.CHEmployeeValidation). The compensation
+    # office is kept here (not only on a statutory profile) so onboarding can
+    # capture it before a profile exists, mirroring Sweden's residence code.
+    "CH": {
+        "label": "UID / AHV Employer Number",
+        "currency": "CHF",
+        "fields": [
+            {"key": "uid", "label": "UID (Swiss business identification number)",
+             "pattern": r"^CHE-\d{3}\.\d{3}\.\d{3}$", "example": "CHE-123.456.789", "primary": True},
+            {"key": "ahv_employer_number", "label": "AHV employer number (compensation office)",
+             "pattern": r"^\d{7,12}$", "example": "1234567", "primary": False},
+            {"key": "compensation_office", "label": "Compensation office (Ausgleichskasse)",
+             "pattern": r"^[A-Za-z][A-Za-z0-9 ,.'&()-]{1,98}$", "example": "SVA Aargau", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -151,6 +570,27 @@ COUNTRY_NAME_TO_CODE = {
     "great britain": "UK",
     "germany": "DE",
     "australia": "AU",
+    "barbados": "BB",
+    "cayman islands": "KY",
+    "dominican republic": "DO",
+    "guyana": "GY",
+    "jamaica": "JM",
+    "bahamas": "BS",
+    "the bahamas": "BS",
+    "trinidad and tobago": "TT",
+    "trinidad & tobago": "TT",
+    "puerto rico": "PR",
+    "france": "FR",
+    "ireland": "IE",
+    "sweden": "SE",
+    "singapore": "SG",
+    "hong kong": "HK",
+    "hong kong sar": "HK",
+    "hong kong, china": "HK",
+    "italy": "IT",
+    "italia": "IT",
+    "switzerland": "CH",
+    "swiss confederation": "CH",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -159,6 +599,21 @@ CODE_TO_COUNTRY_NAME = {
     "UK": "United Kingdom",
     "DE": "Germany",
     "AU": "Australia",
+    "BB": "Barbados",
+    "KY": "Cayman Islands",
+    "DO": "Dominican Republic",
+    "GY": "Guyana",
+    "JM": "Jamaica",
+    "BS": "Bahamas",
+    "TT": "Trinidad and Tobago",
+    "PR": "Puerto Rico",
+    "FR": "France",
+    "IE": "Ireland",
+    "SE": "Sweden",
+    "SG": "Singapore",
+    "HK": "Hong Kong",
+    "IT": "Italy",
+    "CH": "Switzerland",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

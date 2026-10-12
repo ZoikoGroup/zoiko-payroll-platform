@@ -103,6 +103,9 @@ class PayrollPolicyResponse(BaseModel):
     basic_pct: Decimal = Field(Decimal("40"), alias="basicPct")
     hra_pct: Decimal = Field(Decimal("20"), alias="hraPct")
     bank_export_format: str = Field("csv", alias="bankExportFormat")
+    attendance_required: bool = Field(True, alias="attendanceRequired")
+    attendance_required_employment_types: Optional[List[str]] = Field(None, alias="attendanceRequiredEmploymentTypes")
+    attendance_weekly_off_days: Optional[List[int]] = Field(None, alias="attendanceWeeklyOffDays")
     enterprise_status: str = Field("not_configured", alias="enterpriseStatus")
     enterprise_activated_at: Optional[datetime] = Field(None, alias="enterpriseActivatedAt")
     configured_at: Optional[datetime] = Field(None, alias="configuredAt")
@@ -141,9 +144,32 @@ class PayrollPolicyUpdate(BaseModel):
     basic_pct: Optional[Decimal] = Field(None, alias="basicPct")
     hra_pct: Optional[Decimal] = Field(None, alias="hraPct")
     bank_export_format: Optional[str] = Field(None, alias="bankExportFormat")
+    # Attendance gate. Employment types: [] or null = every employee.
+    # Weekly off days: Python weekday numbers (Mon=0 … Sun=6); null = Sat+Sun.
+    attendance_required: Optional[bool] = Field(None, alias="attendanceRequired")
+    attendance_required_employment_types: Optional[List[str]] = Field(None, alias="attendanceRequiredEmploymentTypes")
+    attendance_weekly_off_days: Optional[List[int]] = Field(None, alias="attendanceWeeklyOffDays")
     employee_categories: Optional[List[EmployeeCategoryBase]] = Field(None, alias="employeeCategories")
     overtime_rule: Optional[OvertimeRuleUpdate] = Field(None, alias="overtimeRule")
     allowance_components: Optional[List[AllowanceComponentBase]] = Field(None, alias="allowanceComponents")
+
+    @model_validator(mode="after")
+    def _validate_attendance_settings(self):
+        from app.modules.payroll.models import EmploymentType
+        if "attendance_required" in self.model_fields_set and self.attendance_required is None:
+            raise ValueError("attendanceRequired must be true or false.")
+        if self.attendance_weekly_off_days is not None:
+            days = self.attendance_weekly_off_days
+            if any(d < 0 or d > 6 for d in days) or len(set(days)) != len(days):
+                raise ValueError("attendanceWeeklyOffDays must be distinct weekday numbers 0 (Mon) to 6 (Sun).")
+            if len(days) >= 7:
+                raise ValueError("attendanceWeeklyOffDays cannot mark every day of the week as off.")
+        if self.attendance_required_employment_types is not None:
+            allowed = {e.value for e in EmploymentType}
+            bad = [t for t in self.attendance_required_employment_types if t not in allowed]
+            if bad:
+                raise ValueError(f"Unknown employment type(s) {bad}; expected any of {sorted(allowed)}.")
+        return self
 
     @model_validator(mode="before")
     @classmethod

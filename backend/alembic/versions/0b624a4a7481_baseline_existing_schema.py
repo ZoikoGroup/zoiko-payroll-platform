@@ -40,7 +40,6 @@ def upgrade() -> None:
     sa.Column('created_by_user_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['created_by_user_id'], ['users.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_organizations_id'), 'organizations', ['id'], unique=False)
@@ -114,6 +113,12 @@ def upgrade() -> None:
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
     op.create_index(op.f('ix_users_organization_id'), 'users', ['organization_id'], unique=False)
+    op.create_foreign_key(
+        'organizations_created_by_user_id_fkey',
+        'organizations', 'users',
+        ['created_by_user_id'], ['id'],
+        ondelete='SET NULL'
+    )
     op.create_table('payroll_activity_log',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('organization_id', sa.Integer(), nullable=False),

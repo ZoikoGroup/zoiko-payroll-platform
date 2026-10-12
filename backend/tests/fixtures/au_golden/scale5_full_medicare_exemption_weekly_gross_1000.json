@@ -1,0 +1,24 @@
+{
+  "description": "Scale 5 (full Medicare levy exemption), weekly gross $1000. x=1000.99 falls in the [865,1282) band (a=0.3027, b=185.1923). y = 0.3027*1000.99 - 185.1923 = 117.807, rounds to 118.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (NAT 1004, Scale 5 — full Medicare exemption, effective 1 Jul 2026). Hand-computed against the document's own y=a*x-b formula, cross-checked by running the real engine at authoring time.",
+  "context": {
+    "gross": "1000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_medicare_levy_exemption": "FULL",
+    "slabs": [
+      {"min_amount": "0", "max_amount": "362", "rate_pct": "0", "flat_amount": "0", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"},
+      {"min_amount": "362", "max_amount": "721", "rate_pct": "0.15", "flat_amount": "54.3462", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"},
+      {"min_amount": "721", "max_amount": "865", "rate_pct": "0.159", "flat_amount": "60.8365", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"},
+      {"min_amount": "865", "max_amount": "1282", "rate_pct": "0.3027", "flat_amount": "185.1923", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"},
+      {"min_amount": "1282", "max_amount": "2596", "rate_pct": "0.3", "flat_amount": "181.7308", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"},
+      {"min_amount": "2596", "max_amount": "3653", "rate_pct": "0.37", "flat_amount": "363.4615", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"},
+      {"min_amount": "3653", "max_amount": null, "rate_pct": "0.45", "flat_amount": "655.7692", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_5"}
+    ]
+  },
+  "expected": {
+    "tds": "118"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "description": "Schedule 8 STSL, 'no tax-free threshold claimed' family, alongside ordinary Scale 1 PAYG on the same $2100/week gross. PAYG: x=2100.99 in [932,2246) (a=0.32,b=71.6508) -> y=600.666 -> 601. STSL: x=2100.99 in [987,2144) (a=0.15,b=148.0615) -> y=167.087 -> 167.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (Scale 1) and Section 8 (NAT 3539, 'No tax-free threshold claimed' family, effective 1 Jul 2026). Hand-computed, cross-checked by running the real engine at authoring time.",
+  "context": {
+    "gross": "2100.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": false,
+    "study_loan_plan": "AU_HELP",
+    "study_loan_balance": "5000",
+    "slabs": [
+      {"min_amount": "932", "max_amount": "2246", "rate_pct": "0.32", "flat_amount": "71.6508", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "0", "max_amount": "987", "rate_pct": "0", "flat_amount": "0", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_NOT_CLAIMED"},
+      {"min_amount": "987", "max_amount": "2144", "rate_pct": "0.15", "flat_amount": "148.0615", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_NOT_CLAIMED"},
+      {"min_amount": "2144", "max_amount": "2727", "rate_pct": "0.17", "flat_amount": "190.9527", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_NOT_CLAIMED"},
+      {"min_amount": "2727", "max_amount": null, "rate_pct": "0.1", "flat_amount": "0", "rule_type": "AU_STSL_COEFFICIENT", "filing_status": "STSL_NOT_CLAIMED"}
+    ]
+  },
+  "expected": {
+    "tds": "601",
+    "study_loan_deduction": "167"
+  }
+}

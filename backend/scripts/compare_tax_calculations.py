@@ -35,8 +35,8 @@ def run(organization_id: int, country: str):
     scratch_pack = None
     scratch_rows = []
     try:
-        old_rates = get_contribution_rates(db, organization_id, country)
-        old_slabs = get_tax_slabs(db, organization_id, country)
+        old_rates = get_contribution_rates(db, organization_id, country=country)
+        old_slabs = get_tax_slabs(db, organization_id, country=country)
         old_rate_map = {r.component_key: r for r in old_rates}
         print(f"Org {organization_id} / {country}: live rows -> {len(old_rates)} contribution rate(s), {len(old_slabs)} tax slab(s)")
 

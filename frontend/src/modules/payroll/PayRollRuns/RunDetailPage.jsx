@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import RunsTable from "./RunsTable";
 import ApproveRunButton from "./ApproveRunButton";
+import AttendanceReadinessPanel from "./AttendanceReadinessPanel";
 import { CALCULATION_MODE_LABELS, getContributionColumns } from "../../../service/payrollService";
 
 function Step1Configure({ config, setConfig, onNext, calculationMode, employees, selectedEmployees, toggleEmployee, setSelectedEmployees }) {
@@ -163,7 +164,7 @@ function Step1Configure({ config, setConfig, onNext, calculationMode, employees,
   );
 }
 
-function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, calculationMode, jurisdictionCountry }) {
+function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, calculationMode, jurisdictionCountry, attendance }) {
   const isSimple = calculationMode === "simple";
   const contributionColumns = useMemo(() => getContributionColumns(jurisdictionCountry), [jurisdictionCountry]);
   // Deliberately NOT filtered down to selectedEmployees — every employee the
@@ -231,6 +232,19 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
         ))}
       </div>
 
+      {attendance && (
+        <AttendanceReadinessPanel
+          readiness={attendance.readiness}
+          loading={attendance.loading}
+          error={attendance.error}
+          onRefresh={attendance.onRefresh}
+          overrideEnabled={attendance.overrideEnabled}
+          setOverrideEnabled={attendance.setOverrideEnabled}
+          overrideReason={attendance.overrideReason}
+          setOverrideReason={attendance.setOverrideReason}
+        />
+      )}
+
       {enrichedEmployees.some((e) => e.prorated) && (
         <div className="rounded-[14px] bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 px-4 py-3 flex items-start gap-2">
           <span className="text-amber-500 text-[13px] mt-0.5">⚠</span>
@@ -253,7 +267,7 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
           <button onClick={onRecalculate} disabled={loading} className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary disabled:opacity-50">
             <RefreshCw size={14} /> {loading ? "Refreshing…" : "Recalculate"}
           </button>
-          <button onClick={onNext} disabled={loading || totals.count === 0} className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50">
+          <button onClick={onNext} disabled={loading || totals.count === 0 || (attendance && !attendance.canProceed)} title={attendance && !attendance.canProceed ? "Attendance must be complete (or overridden with a reason) before payroll can run" : undefined} className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50">
             Approve & Continue <ArrowRight size={14} />
           </button>
         </div>
@@ -313,8 +327,20 @@ function Step3Approve({ config, totals, onBack, onNext, fmtCurrency, runId, calc
   );
 }
 
-export default function RunDetailPage({ step, config, setConfig, employees, selectedEmployees, toggleEmployee, toggleAllEmployees, setSelectedEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, runId, calculationMode = "standard", jurisdictionCountry = "IN" }) {
+export default function RunDetailPage({ step, config, setConfig, employees, selectedEmployees, toggleEmployee, toggleAllEmployees, setSelectedEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, runId, calculationMode = "standard", jurisdictionCountry = "IN", attendance }) {
   const previewAttemptedRef = useRef(false);
+  const readinessAttemptedRef = useRef(false);
+  // Attendance check runs once when the Calculate step opens (Re-check /
+  // Recalculate refresh it after that).
+  const loadAttendance = attendance?.onLoad;
+  const hasReadiness = Boolean(attendance?.readiness);
+  useEffect(() => {
+    if (step === 2 && selectedEmployees.length > 0 && loadAttendance && !hasReadiness && !readinessAttemptedRef.current) {
+      readinessAttemptedRef.current = true;
+      loadAttendance(selectedEmployees);
+    }
+    if (step !== 2) readinessAttemptedRef.current = false;
+  }, [step, selectedEmployees, loadAttendance, hasReadiness]);
   useEffect(() => {
     if (step === 2 && selectedEmployees.length > 0 && !previewData && !loading && !previewAttemptedRef.current) {
       previewAttemptedRef.current = true;
@@ -337,7 +363,7 @@ export default function RunDetailPage({ step, config, setConfig, employees, sele
           setSelectedEmployees={setSelectedEmployees}
         />
       )}
-      {step === 2 && <Step2Review employees={employees} selectedEmployees={selectedEmployees} toggleEmployee={toggleEmployee} toggleAllEmployees={toggleAllEmployees} previewData={previewData} totals={totals} loading={loading} onNext={onNext} onBack={onBack} onRecalculate={onRecalculate} onLoadPreview={onLoadPreview} fmtCurrency={fmtCurrency} calculationMode={calculationMode} jurisdictionCountry={jurisdictionCountry} />}
+      {step === 2 && <Step2Review employees={employees} selectedEmployees={selectedEmployees} toggleEmployee={toggleEmployee} toggleAllEmployees={toggleAllEmployees} previewData={previewData} totals={totals} loading={loading} onNext={onNext} onBack={onBack} onRecalculate={onRecalculate} onLoadPreview={onLoadPreview} fmtCurrency={fmtCurrency} calculationMode={calculationMode} jurisdictionCountry={jurisdictionCountry} attendance={attendance} />}
       {step === 3 && <Step3Approve config={config} totals={totals} onBack={onBack} onNext={onNext} fmtCurrency={fmtCurrency} runId={runId} calculationMode={calculationMode} />}
       {step === 4 && (
         <div className="flex flex-col items-center justify-center py-12 text-center">

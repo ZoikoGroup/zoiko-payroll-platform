@@ -1,0 +1,134 @@
+<claude-code-hint v="1" type="plugin" value="stripe@claude-plugins-official" />
+INFO:     Started server process [19532]
+INFO:     Waiting for application startup.
+2026-09-23 19:44:52,673 [INFO] Existing tables detected — skipping schema creation.
+2026-09-23 19:44:54,815 [INFO] [assist-sweep] Running initial sweep at startup.
+2026-09-23 19:45:42,653 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:45:42,656 [INFO] Added job "_sweep_all_organizations" to job store "default"
+2026-09-23 19:45:42,656 [INFO] Scheduler started
+2026-09-23 19:45:42,657 [INFO] [assist-sweep] Started, running every 24 hour(s).
+2026-09-23 19:45:42,657 [INFO] [trial-sweep] Running initial sweep at startup.
+2026-09-23 19:45:43,300 [INFO] [trial-sweep] scanned=2 grace_started=0 closed=0
+2026-09-23 19:45:43,511 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:45:43,511 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-23 19:45:43,511 [INFO] Scheduler started
+2026-09-23 19:45:43,511 [INFO] [trial-sweep] Started, running every 24 hour(s).
+2026-09-23 19:45:43,512 [INFO] [dunning-sweep] Running initial sweep at startup.
+2026-09-23 19:45:44,361 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:45:44,361 [INFO] Added job "_run_dunning_sweep" to job store "default"
+2026-09-23 19:45:44,363 [INFO] Scheduler started
+2026-09-23 19:45:44,364 [INFO] [dunning-sweep] Started, running every 24 hour(s).
+2026-09-23 19:45:44,365 [INFO] [bwm-aggregation] Running initial aggregation at startup.
+2026-09-23 19:46:00,235 [INFO] [bwm-aggregation] month=2026-09-01 orgs=5
+2026-09-23 19:46:00,655 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:46:00,655 [INFO] Added job "_bwm_sweep_job" to job store "default"
+2026-09-23 19:46:00,655 [INFO] Scheduler started
+2026-09-23 19:46:00,656 [INFO] [bwm-aggregation] Started, running every 24 hour(s).
+2026-09-23 19:46:00,656 [INFO] [assisted-access-sweep] Running initial sweep at startup.
+2026-09-23 19:46:01,506 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:46:01,507 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-23 19:46:01,507 [INFO] Scheduler started
+2026-09-23 19:46:01,508 [INFO] [assisted-access-sweep] Started, running every 60 minute(s).
+2026-09-23 19:46:01,508 [INFO] [token-cleanup] Running initial sweep at startup.
+2026-09-23 19:46:02,355 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:46:02,355 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-23 19:46:02,355 [INFO] Scheduler started
+2026-09-23 19:46:02,358 [INFO] [token-cleanup] Started, running every 24 hour(s).
+2026-09-23 19:46:03,855 [INFO] Zoiko Payroll Platform backend is ready.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:49291 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49292 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "GET /api/billing/plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "GET /api/billing/plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
+2026-09-23 19:46:22,871 [INFO] New organization PE3 registered by pending-eval3-1790172971005@example.com
+INFO:     127.0.0.1:54477 - "POST /api/auth/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54477 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54477 - "OPTIONS /api/billing/checkout HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+2026-09-23 19:46:29,627 [INFO] message='Request to Stripe api' method=post url=https://api.stripe.com/v1/checkout/sessions
+2026-09-23 19:46:30,302 [INFO] [email] Sent to pending-eval3-1790172971005@example.com | template=org_created.html
+2026-09-23 19:46:30,547 [INFO] message='Stripe API response' path=https://api.stripe.com/v1/checkout/sessions response_code=200
+INFO:     127.0.0.1:54477 - "POST /api/billing/checkout HTTP/1.1" 200 OK
+2026-09-23 19:46:30,949 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=pending-eval3-1790172971005@example.com org_id=81 reference_id=ORG-0081-INIT
+2026-09-23 19:46:36,485 [INFO] [email] Sent to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html
+2026-09-23 19:46:40,882 [INFO] Stripe webhook: unhandled event type=customer.created id=evt_1UIqyRDaBdRFbmee6svnpjdn
+INFO:     127.0.0.1:64385 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:41,624 [INFO] [email] Sent to admin@test.com | template=super_admin_org_created.html
+2026-09-23 19:46:41,991 [INFO] Stripe webhook: unhandled event type=invoice.finalized id=evt_1UIqyRDaBdRFbmeeRh59qZdt
+2026-09-23 19:46:42,653 [INFO] message='Request to Stripe api' method=get url=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13
+2026-09-23 19:46:43,090 [INFO] message='Stripe API response' path=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13 response_code=200
+2026-09-23 19:46:46,584 [INFO] [email] Sent to info@zoikopayroll.com | template=super_admin_org_created.html
+2026-09-23 19:46:46,629 [INFO] message='Request to Stripe api' method=get url=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13
+2026-09-23 19:46:46,876 [INFO] message='Stripe API response' path=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13 response_code=200
+2026-09-23 19:46:47,515 [INFO] [invoice] Skipping invoice write for organization_id=81 (not billable or not yet commenced).
+2026-09-23 19:46:49,026 [INFO] Stripe webhook: unhandled event type=customer.updated id=evt_1UIqyRDaBdRFbmeeKTSIn1jY
+2026-09-23 19:46:50,089 [INFO] Stripe webhook: unhandled event type=setup_intent.created id=evt_1UIqyRDaBdRFbmee2H3ELcO6
+2026-09-23 19:46:51,190 [INFO] Stripe webhook: unhandled event type=payment_method.attached id=evt_1UIqyRDaBdRFbmeeBvIAJiZM
+2026-09-23 19:46:52,248 [INFO] Stripe webhook: unhandled event type=customer.subscription.created id=evt_1UIqyRDaBdRFbmeetPJ3l8Tw
+INFO:     127.0.0.1:64387 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:53,354 [INFO] Stripe webhook: unhandled event type=setup_intent.succeeded id=evt_1UIqyRDaBdRFbmeeXslLNoSD
+INFO:     127.0.0.1:64389 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:54,445 [INFO] Stripe webhook: unhandled event type=invoice.created id=evt_1UIqyRDaBdRFbmeeCctrryUd
+INFO:     127.0.0.1:64392 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:55,753 [INFO] Stripe webhook: unhandled event type=invoice.payment_succeeded id=evt_1UIqyRDaBdRFbmeePUgGoWtD
+INFO:     127.0.0.1:64394 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64396 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64398 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64400 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64402 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64404 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64406 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/auth/login HTTP/1.1" 200 OK
+2026-09-23 19:47:26,911 [INFO] User pending-eval3-1790172971005@example.com (org_admin) logged in
+INFO:     127.0.0.1:54866 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59203 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59203 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62222 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59203 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62222 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/auth/login HTTP/1.1" 200 OK
+2026-09-23 19:47:59,633 [INFO] User pending-eval3-1790172971005@example.com (org_admin) logged in
+INFO:     127.0.0.1:51716 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54405 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54405 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61858 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49675 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61858 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54405 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49675 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK

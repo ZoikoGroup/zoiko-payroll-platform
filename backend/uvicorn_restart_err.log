@@ -1,0 +1,37 @@
+INFO:     Started server process [12596]
+INFO:     Waiting for application startup.
+2026-09-22 13:59:57,516 [INFO] Existing tables detected — skipping schema creation.
+2026-09-22 13:59:59,206 [INFO] [assist-sweep] Running initial sweep at startup.
+2026-09-22 14:00:08,338 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 14:00:08,344 [INFO] Added job "_sweep_all_organizations" to job store "default"
+2026-09-22 14:00:08,344 [INFO] Scheduler started
+2026-09-22 14:00:08,345 [INFO] [assist-sweep] Started, running every 24 hour(s).
+2026-09-22 14:00:08,345 [INFO] [trial-sweep] Running initial sweep at startup.
+2026-09-22 14:00:09,197 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 14:00:09,202 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 14:00:09,202 [INFO] Scheduler started
+2026-09-22 14:00:09,205 [INFO] [trial-sweep] Started, running every 24 hour(s).
+2026-09-22 14:00:09,206 [INFO] [dunning-sweep] Running initial sweep at startup.
+2026-09-22 14:00:10,057 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 14:00:10,061 [INFO] Added job "_run_dunning_sweep" to job store "default"
+2026-09-22 14:00:10,061 [INFO] Scheduler started
+2026-09-22 14:00:10,062 [INFO] [dunning-sweep] Started, running every 24 hour(s).
+2026-09-22 14:00:10,062 [INFO] [bwm-aggregation] Running initial aggregation at startup.
+2026-09-22 14:00:14,832 [INFO] [bwm-aggregation] month=2026-09-01 orgs=3
+2026-09-22 14:00:14,836 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 14:00:14,836 [INFO] Added job "_bwm_sweep_job" to job store "default"
+2026-09-22 14:00:14,836 [INFO] Scheduler started
+2026-09-22 14:00:14,836 [INFO] [bwm-aggregation] Started, running every 24 hour(s).
+2026-09-22 14:00:14,837 [INFO] [assisted-access-sweep] Running initial sweep at startup.
+2026-09-22 14:00:15,725 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 14:00:15,729 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 14:00:15,729 [INFO] Scheduler started
+2026-09-22 14:00:15,730 [INFO] [assisted-access-sweep] Started, running every 60 minute(s).
+2026-09-22 14:00:15,731 [INFO] [token-cleanup] Running initial sweep at startup.
+2026-09-22 14:00:16,577 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 14:00:16,581 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 14:00:16,581 [INFO] Scheduler started
+2026-09-22 14:00:16,582 [INFO] [token-cleanup] Started, running every 24 hour(s).
+2026-09-22 14:00:18,147 [INFO] Zoiko Payroll Platform backend is ready.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)

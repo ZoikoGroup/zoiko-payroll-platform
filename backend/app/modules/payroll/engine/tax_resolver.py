@@ -27,6 +27,7 @@ from __future__ import annotations
 from datetime import date as date_cls
 from typing import List, Optional, Tuple
 
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
 from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
@@ -39,6 +40,32 @@ from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSl
 # overlay) — a pack whose ONLY slabs are that shape was never meant to
 # stand in for a country's real income-tax bands.
 _INCOME_TAX_RULE_TYPES = {"MARGINAL_RATE", "FORMULA", "TABLE_LOOKUP", "FIXED_PLUS_MARGINAL"}
+
+
+def _normalize_regime_label(value: Optional[str]) -> Optional[str]:
+    """Collapses regime-label variants a Tax Ops data-entry pass might use
+    for the same regime ("New", "New Tax Regime", "Default / New Regime")
+    down to the engine's own canonical "New"/"Old" tokens, so a row's
+    exact wording never silently fails to match an employee's tax_regime
+    (which is always the short canonical form this module and service.py
+    compute as `effective_regime`). A live example this caught: canonical
+    India `pf`/`esi`/`esi_wage_ceiling` rows tagged "New Tax Regime" would
+    otherwise never equal the resolver's own "New" and be silently
+    excluded — PF/ESI apply to BOTH regimes identically, so these should
+    really be untagged (None), but this normalizes the mislabeling instead
+    of requiring a live-row edit (which the standing edit-immutability
+    rules would block for an Active pack anyway). Returns the value
+    unchanged for anything that doesn't recognize as either regime —
+    never guesses, so a genuinely different label still fails closed
+    exactly as before this existed (i.e. still won't match "New"/"Old")."""
+    if not value:
+        return None
+    lowered = value.strip().lower()
+    if "old" in lowered:
+        return "Old"
+    if "new" in lowered or "default" in lowered:
+        return "New"
+    return value
 
 
 def _pack_has_income_tax_slabs(db: Session, pack_id: int) -> bool:
@@ -83,13 +110,45 @@ def _find_active_tax_pack(
         )
         q = state_filter(q)
         if tax_regime:
-            q = q.filter(JurisdictionPack.tax_regime == tax_regime)
+            # A pack with no regime tag of its own (every existing pack —
+            # today no country splits its canonical tax pack per regime)
+            # matches ANY requested regime, same "NULL is agnostic"
+            # convention row-level tax_regime tags already use everywhere
+            # else in this module. Without this, an employee whose
+            # tax_regime happens to be set explicitly (rather than left
+            # None) would find no pack at all here and silently fall
+            # through to the legacy get_contribution_rates/get_tax_slabs
+            # path instead — same final number today (that path already
+            # handles regime correctly), but via an unintended, invisible
+            # bypass of the org's actual canonical/pack-tracked data.
+            q = q.filter(or_(JurisdictionPack.tax_regime.is_(None), JurisdictionPack.tax_regime == tax_regime))
         q = q.filter(
             (JurisdictionPack.effective_from.is_(None)) | (JurisdictionPack.effective_from <= as_of),
         ).filter(
             (JurisdictionPack.effective_to.is_(None)) | (JurisdictionPack.effective_to >= as_of),
         )
-        return q.order_by(JurisdictionPack.updated_at.desc()).first()
+        # Phase 8BY: order by EFFECTIVE DATE, not edit time. Both filters
+        # above already restrict to packs whose validity window contains
+        # `as_of`; when more than one such pack exists the applicable one
+        # is the one that most recently CAME INTO EFFECT, never merely the
+        # one most recently edited (the previous `updated_at.desc()` meant
+        # re-saving an old pack could silently take over a payroll period,
+        # and a retro payroll could bind to a pack published later). This
+        # is the same "select the row applicable to the payroll period,
+        # never just the latest row" rule every Germany statutory registry
+        # resolver in service.py already follows.
+        #
+        # A NULL effective_from means "no start bound" (open-ended/generic)
+        # and must rank BELOW any explicitly dated pack, so it is only used
+        # when nothing more specific applies. Expressed as a CASE rather
+        # than NULLS LAST so it behaves identically on SQLite and Postgres.
+        # `updated_at` is retained only as the final deterministic
+        # tiebreaker between packs sharing an identical effective_from.
+        return q.order_by(
+            case((JurisdictionPack.effective_from.is_(None), 1), else_=0).asc(),
+            JurisdictionPack.effective_from.desc(),
+            JurisdictionPack.updated_at.desc(),
+        ).first()
 
     if state:
         pack = _query(lambda q: q.filter(JurisdictionPack.jurisdiction_state == state))
@@ -113,22 +172,245 @@ def resolve_tax_configuration(
     whatever they did before this resolver existed (org's own rows /
     the hardcoded per-country defaults), never raise, so a jurisdiction
     with no canonical data yet keeps working exactly as today.
+
+    Row-level effective dating (ZP-TAX-UK-2026-27-001 §3.2 gap-closure
+    Part 1A, 2026-09-09): a ContributionRate/TaxSlab row's own
+    effective_from/effective_to (both NULL on every existing row) lets
+    ONE rule family inside an already-Active pack carry a different
+    effective window than the pack's own — e.g. a rate that changes
+    1 June while the pack itself is effective from 6 April. A row with
+    both fields NULL is unaffected by this filter and is governed
+    entirely by the pack's own window (already checked above) —
+    completely additive to every rate/slab that exists today.
+
+    Results are served from Redis when configured (see engine/tax_cache).
+    The cache is a pure performance layer: it stores what this function
+    would have returned for the same (country, state, regime, date) and is
+    invalidated on every canonical write. With no REDIS_URL set — the
+    default, and the case in every test — it is a no-op and this function
+    always reads live rows, so cache bugs cannot silently become wrong
+    payroll numbers in an environment that has not opted in.
     """
+    from app.modules.payroll.engine.tax_cache import (
+        current_tax_cache_version, load_cached_tax_config, store_cached_tax_config,
+    )
+
     as_of = payroll_date or date_cls.today()
+    # Captured before the DB read and reused for the store: see
+    # current_tax_cache_version for the stale-write race this closes.
+    version = current_tax_cache_version()
+    cached = load_cached_tax_config(
+        country, state, tax_regime, as_of, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    if cached is not None:
+        return cached
+
+    rates, slabs, pack = _resolve_uncached(
+        db, country, state=state, tax_regime=tax_regime, as_of=as_of,
+    )
+    store_cached_tax_config(
+        country, state, tax_regime, as_of, rates, slabs, pack, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    return rates, slabs, pack
+
+
+def _resolve_uncached(
+    db: Session,
+    country: str,
+    state: Optional[str],
+    tax_regime: Optional[str],
+    as_of: date_cls,
+) -> Tuple[List[ContributionRate], List[TaxSlab], Optional[JurisdictionPack]]:
+    """The authoritative resolution, always reading live rows.
+
+    Split out from resolve_tax_configuration so the cache wrapper above
+    has exactly one place to fall back to, and so the bypass is callable
+    for tests that need to prove cached and uncached resolution agree.
+    """
     pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
     if not pack:
         return [], [], None
 
     rates = (
         db.query(ContributionRate)
-        .filter(ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack.id)
+        .filter(
+            ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack.id,
+            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
+            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of),
+        )
         .order_by(ContributionRate.sort_order)
         .all()
     )
     slabs = (
         db.query(TaxSlab)
-        .filter(TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == pack.id)
+        .filter(
+            TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == pack.id,
+            or_(TaxSlab.effective_from.is_(None), TaxSlab.effective_from <= as_of),
+            or_(TaxSlab.effective_to.is_(None), TaxSlab.effective_to >= as_of),
+        )
         .order_by(TaxSlab.sort_order, TaxSlab.min_amount)
         .all()
     )
+    # A single pack can hold MARGINAL_RATE rows for more than one regime
+    # (e.g. India's one pack carries both the New and Old regime bracket
+    # tables, since the pack itself isn't split per regime the way a
+    # dedicated per-regime pack would be) — same "two complete, mutually
+    # exclusive tables" hazard get_tax_slabs (service.py) already guards
+    # against, and it applies here identically: without this, an org on
+    # the canonical-pack path would get every regime's brackets summed
+    # together regardless of which regime the employee is actually on.
+    # Row-level regime filtering only; pack SELECTION above already used
+    # the raw (possibly-None) tax_regime and must keep doing so — this
+    # only decides which of the pack's OWN rows apply once it's found.
+    effective_regime = tax_regime or ("New" if country == "IN" else None)
+    if effective_regime:
+        regime_matches = [
+            s for s in slabs
+            if s.rule_type != "MARGINAL_RATE" or _normalize_regime_label(s.tax_regime) is None
+            or _normalize_regime_label(s.tax_regime) == effective_regime
+        ]
+        has_regime_specific_brackets = any(
+            s.rule_type == "MARGINAL_RATE" and _normalize_regime_label(s.tax_regime) == effective_regime
+            for s in regime_matches
+        )
+        if has_regime_specific_brackets:
+            slabs = [
+                s for s in regime_matches
+                if not (s.rule_type == "MARGINAL_RATE" and _normalize_regime_label(s.tax_regime) is None)
+            ]
+        else:
+            slabs = regime_matches
+        # ContributionRate rows (standard_deduction, rebate_87a_limit/max,
+        # etc.) previously had NO regime filtering at all here — every row
+        # on the pack was returned unconditionally and the caller's plain
+        # {component_key: row} dict comprehension let whichever row
+        # happened to sort last silently win, for EVERY employee regardless
+        # of their actual regime. Same OR-filter as slabs above (untagged
+        # rows always apply, a regime-tagged row applies only for a
+        # matching employee, a row tagged for the OTHER regime is
+        # excluded) — no MARGINAL_RATE-style "replaces the whole table"
+        # case exists for ContributionRate, so this is the complete fix.
+        rates = [
+            r for r in rates
+            if _normalize_regime_label(r.tax_regime) is None
+            or _normalize_regime_label(r.tax_regime) == effective_regime
+        ]
     return rates, slabs, pack
+
+
+def find_active_tax_pack(
+    db: Session,
+    country: str,
+    state: Optional[str] = None,
+    tax_regime: Optional[str] = None,
+    as_of: Optional[date_cls] = None,
+) -> Optional[JurisdictionPack]:
+    """Public wrapper over _find_active_tax_pack — same resolution rules
+    (state match only wins if it holds real income-tax slabs, respects
+    effective_from/effective_to, excludes Draft), exposed under a public
+    name for callers outside this module that need the pack itself rather
+    than resolve_tax_configuration's (rates, slabs, pack) tuple."""
+    return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
+
+
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK")
+
+
+def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str]) -> Optional[str]:
+    """Phase 6.10: moving an EXISTING organization into a registry-gated
+    country (_REGISTRY_ROW_REQUIRED_COUNTRIES) is onboarding into it, so it
+    passes the same gate as registration. Before this, PUT /organizations/me
+    (and the Super Admin organization update) set `country` directly — any
+    organization could move itself into a PLANNED Singapore. Changes that do
+    not enter such a country are untouched (None)."""
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    new_code = get_jurisdiction_code(new_country)
+    if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):
+        return None
+    return get_jurisdiction_onboarding_block_reason(db, new_country)
+
+
+def get_jurisdiction_onboarding_block_reason(
+    db: Session,
+    country: Optional[str],
+    state: Optional[str] = None,
+    as_of: Optional[date_cls] = None,
+) -> Optional[str]:
+    """Whether an organization should be allowed to onboard into `country`
+    right now — never raises, returns None when onboarding should proceed,
+    else a clean, business-friendly reason string safe to show a user
+    directly (no stack traces, no internal names).
+
+    Deliberately uses the EXACT SAME acceptance test
+    _resolve_effective_rate_inputs (service.py) already uses to decide
+    whether canonical configuration is usable for payroll
+    (`pack is not None and (rates or slabs)`) — so registration accepts
+    precisely what payroll would accept for this jurisdiction, one source
+    of truth, not a parallel "is configured" notion.
+
+    Country is normalized via app.core.jurisdiction.get_jurisdiction_code,
+    NOT payroll.service._normalize_country — that function silently
+    defaults unrecognized/empty input to "IN", which would be actively
+    dangerous at a rejection gate (an unrecognized country would silently
+    pass as if it were India).
+
+    Phase 8BK (main<->Germany merge): Germany ("DE") is fully implemented
+    via its own dedicated, registry/PAP-driven calculator
+    (engine/countries/germany.py) rather than the canonical-JurisdictionPack
+    mechanism this gate otherwise checks — building a parallel
+    JurisdictionPack for Germany purely to satisfy this gate would create
+    a second, redundant configuration system for the same jurisdiction
+    (exactly what this project's own architecture rules elsewhere forbid).
+    resolve_tax_configuration's own docstring already establishes that an
+    absent canonical pack must "never raise... keep working exactly as
+    today" for any such jurisdiction — DE is one, so it is exempted here
+    rather than blocked."""
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    code = get_jurisdiction_code(country)
+    if not code:
+        return (
+            f"'{country}' is not a supported payroll jurisdiction yet — "
+            "please contact your administrator or select a supported country."
+        )
+
+    # Commercial Billing & Subscription Operating Standard §5 — a
+    # NOT_AVAILABLE/PLANNED jurisdiction is blocked here, in the one place
+    # every onboarding call site (register_enterprise, POST /billing/checkout)
+    # already goes through, rather than duplicating this check per caller.
+    # A jurisdiction with NO registry row falls through to the existing
+    # canonical-pack check below unchanged — this is a layered ADDITIONAL
+    # gate, not a replacement, so an unseeded jurisdiction is never silently
+    # un-gated by this check's mere absence.
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    registry_row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == code).first()
+    if registry_row is not None and registry_row.availability in ("NOT_AVAILABLE", "PLANNED"):
+        return (
+            f"'{country}' is not yet available for onboarding — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+    # Singapore closure (fail-closed, per-country opt-in): for these countries
+    # the registry row is REQUIRED. Without one, the gate below would open
+    # onboarding as soon as a canonical pack went Active — activating the
+    # statutory pack must never be what makes a jurisdiction commercially
+    # available (the owner's PLANNED -> AVAILABLE step is). Other countries keep
+    # the existing fall-through unchanged.
+    if registry_row is None and code in _REGISTRY_ROW_REQUIRED_COUNTRIES:
+        return (
+            f"'{country}' is not yet available for onboarding — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+
+    if code == "DE":
+        return None
+    rates, slabs, pack = resolve_tax_configuration(db, code, state=state, tax_regime=None, payroll_date=as_of)
+    if pack is None or not (rates or slabs):
+        return (
+            "This jurisdiction is not yet configured for organization registration — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+    return None

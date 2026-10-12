@@ -1,0 +1,20 @@
+{
+  "description": "Mandatory boundary test (Section 27, 'PAYG Scale 2 Medicare transition'): x around $538/$673, the Medicare Levy shade-in bands embedded in Scale 2. Weekly gross $600 -> x=600.99, in the [538,673) band (a=0.25, b=108.2135). y = 0.25*600.99 - 108.2135 = 42.034, rounds to 42.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (NAT 1004, Scale 2) and Section 27 (mandatory boundary test 'PAYG Scale 2 Medicare transition').",
+  "context": {
+    "gross": "600.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "slabs": [
+      {"min_amount": "362", "max_amount": "538", "rate_pct": "0.15", "flat_amount": "54.3462", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "538", "max_amount": "673", "rate_pct": "0.25", "flat_amount": "108.2135", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "673", "max_amount": "721", "rate_pct": "0.17", "flat_amount": "54.3473", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"}
+    ]
+  },
+  "expected": {
+    "tds": "42"
+  }
+}

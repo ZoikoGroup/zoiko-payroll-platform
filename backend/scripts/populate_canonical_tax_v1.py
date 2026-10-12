@@ -42,8 +42,11 @@ _PARAMETERS_BY_COUNTRY = {
         ("esi_wage_ceiling", Decimal("21000"), None, None, "ESI Applicability Wage Ceiling (Monthly)"),
     ],
     "US": [
-        ("standard_deduction", Decimal("15000"), None, None, "Federal Standard Deduction (Single)"),
-        ("ss_wage_base", Decimal("176100"), None, None, "Social Security Wage Base"),
+        # standard_deduction and ss_wage_base are NOT listed here: both are
+        # already seeded, with the correct 2026 figures, by
+        # _CONTRIBUTION_RATES_BY_COUNTRY["US"] below (hardcoded_defaults.py),
+        # which runs first. Listing them here too used to silently overwrite
+        # those correct values with stale 2025 figures on every re-run.
         ("medicare_additional", None, Decimal("0.90"), None, "Additional Medicare Rate"),
         ("medicare_addl_thresh", Decimal("200000"), None, None, "Additional Medicare Threshold"),
     ],

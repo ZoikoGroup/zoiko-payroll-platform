@@ -197,14 +197,14 @@ def test_template_copy_compliance():
     assert ">Reset password</a>" in html          # single primary CTA label
     assert "{{expires_at_local}}" in html         # absolute, caller-formatted
     assert "If this was not you" in html
-    # §07: no tracking pixels — hidden/1x1 images barred; the content logo is
-    # a visible, sized image and allowed.
+    # §07: no tracking pixels — hidden/1x1 images barred. The header logo
+    # is a real, visible <img> (single-source partial), never a pixel.
     assert not re.search(
         r"<img[^>]*(width\s*=\s*[\"']?1[\s\"'>]|height\s*=\s*[\"']?1[\s\"'>]|display:\s*none)",
         html, re.IGNORECASE,
     )
-    assert 'alt="Zoiko Payroll"' in html
-    assert "{{logo_url}}" in html
+    assert "{{logo_header_block}}" in html
+    assert '<span style="color:#ffffff;">Zoiko</span>' not in html
     assert "temporary_password" not in html
 
 
@@ -260,3 +260,23 @@ def test_payroll_admin_full_cycle_including_unverified_invite_account(db, organi
 
 def _extract_token(link: str) -> str:
     return link.split("token=", 1)[1]
+
+
+def test_reset_link_base_prefers_request_origin_over_frontend_url(monkeypatch):
+    from app.modules.auth import service
+    from app.modules.auth.models import SecurityActionPurpose
+
+    monkeypatch.delenv("ACTION_BASE_URL", raising=False)
+    link = service._action_link(SecurityActionPurpose.RESET, "tok", "https://payroll.example.com/")
+    assert link == "https://payroll.example.com/reset-password?token=tok"
+
+
+def test_trusted_request_origin_rejects_unlisted_origin():
+    from types import SimpleNamespace
+    from app.config import settings
+    from app.modules.auth.router import _trusted_request_origin
+
+    evil = SimpleNamespace(headers={"origin": "https://evil.example"})
+    good = SimpleNamespace(headers={"origin": settings.FRONTEND_URL})
+    assert _trusted_request_origin(evil) is None
+    assert _trusted_request_origin(good) == settings.FRONTEND_URL.rstrip("/")

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
+import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
 
 const printStyles = `
 @media print {
@@ -19,7 +20,11 @@ const printStyles = `
 }
 `;
 
-const amountToWords = (n) => {
+// isIndia gates the Indian numbering system (Lakh/Crore) and "Paise" — every
+// other jurisdiction (including the 6 core countries this previously
+// affected too, not just the newer Caribbean/PR ones) uses standard
+// international Thousand/Million/Billion grouping and "Cents" instead.
+const amountToWords = (n, isIndia = true) => {
   if (n == null || isNaN(n)) return "Zero";
   const a = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
   const b = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
@@ -30,12 +35,17 @@ const amountToWords = (n) => {
     if (m < 20) return a[m];
     if (m < 100) return b[Math.floor(m / 10)] + (m % 10 ? " " + a[m % 10] : "");
     if (m < 1000) return a[Math.floor(m / 100)] + " Hundred" + (m % 100 ? " " + convert(m % 100) : "");
-    if (m < 100000) return convert(Math.floor(m / 1000)) + " Thousand" + (m % 1000 ? " " + convert(m % 1000) : "");
-    if (m < 10000000) return convert(Math.floor(m / 100000)) + " Lakh" + (m % 100000 ? " " + convert(m % 100000) : "");
-    return convert(Math.floor(m / 10000000)) + " Crore" + (m % 10000000 ? " " + convert(m % 10000000) : "");
+    if (isIndia) {
+      if (m < 100000) return convert(Math.floor(m / 1000)) + " Thousand" + (m % 1000 ? " " + convert(m % 1000) : "");
+      if (m < 10000000) return convert(Math.floor(m / 100000)) + " Lakh" + (m % 100000 ? " " + convert(m % 100000) : "");
+      return convert(Math.floor(m / 10000000)) + " Crore" + (m % 10000000 ? " " + convert(m % 10000000) : "");
+    }
+    if (m < 1000000) return convert(Math.floor(m / 1000)) + " Thousand" + (m % 1000 ? " " + convert(m % 1000) : "");
+    if (m < 1000000000) return convert(Math.floor(m / 1000000)) + " Million" + (m % 1000000 ? " " + convert(m % 1000000) : "");
+    return convert(Math.floor(m / 1000000000)) + " Billion" + (m % 1000000000 ? " " + convert(m % 1000000000) : "");
   };
   let words = whole === 0 ? "Zero" : convert(whole);
-  if (dec > 0) words += " and " + convert(dec) + " Paise";
+  if (dec > 0) words += " and " + convert(dec) + (isIndia ? " Paise" : " Cents");
   return words;
 };
 
@@ -67,14 +77,30 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
   const deductionRows = [
     ...getIncomeTaxLines(payslip).map(([label, amount]) => ({ label, amount })),
+    ...(labels.churchTax ? [{ label: labels.churchTax, amount: payslip.churchTax || 0 }] : []),
+    // Solidaritätszuschlag (Soli) — real, persisted (PayslipItem.soli),
+    // already emitted by the API (_serialize_payslip), but this on-screen
+    // payslip never rendered it — same "computed but never surfaced"
+    // defect class the churchTax line above already fixed for Germany.
+    ...(labels.solidaritySurcharge ? [{ label: labels.solidaritySurcharge, amount: payslip.soli || 0 }] : []),
     { label: labels.pf, amount: payslip.pf },
     { label: labels.esi, amount: payslip.esi },
-    { label: "Professional Tax", amount: payslip.professionalTax },
+    { label: labels.professionalTax, amount: payslip.professionalTax },
     { label: labels.socialSecurity, amount: payslip.socialSecurity || 0 },
     { label: labels.medicare, amount: payslip.medicare || 0 },
-    { label: "NI Employee", amount: payslip.niEmployee || 0 },
-    { label: "Workplace Pension", amount: payslip.employeePension || 0 },
+    { label: labels.niEmployee, amount: payslip.niEmployee || 0 },
+    { label: labels.employeePension, amount: payslip.employeePension || 0 },
     { label: "Student Loan Deduction", amount: payslip.studyLoanDeduction || 0 },
+    // UK: was reaching the API response (once the schema fix landed) but
+    // still had no row here — found 2026-09-09 gap-closure Phase 3.
+    { label: "Postgraduate Loan Deduction", amount: payslip.postgradLoanDeduction || 0 },
+    // US: State Disability Insurance / other state payroll-program employee
+    // deductions (CA SDI, NY/NJ/RI TDI, CT/MA/WA/CO/OR/etc. paid-leave
+    // employee share) — computed and persisted but never shown here until
+    // the 2026-09-15 Org Admin visibility audit (schema was silently
+    // stripping them from the API response before this fix too).
+    { label: "State Disability Insurance", amount: payslip.stateDisabilityInsurance || 0 },
+    { label: "State Payroll Programs (e.g. Paid Leave/TDI)", amount: payslip.stateProgramDeductions || 0 },
   ].filter((r) => Number(r.amount) > 0);
 
   // Employer-side contributions (PF/ESI/Social Security/Medicare/Pension/NI)
@@ -88,7 +114,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const totalEarnings = (Number(payslip.totalEarnings) || 0) || computedEarnings;
   const totalDeductions = (Number(payslip.totalDeductions) || 0) || computedDeductions;
   const netPay = payslip.netPay != null ? Number(payslip.netPay) : totalEarnings - totalDeductions;
-  const netInWords = amountToWords(netPay);
+  const netInWords = amountToWords(netPay, (payslip.country || "IN").toUpperCase() === "IN");
 
   const employeeFields = [
     ["Employee", payslip.employee],
@@ -98,6 +124,13 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     ["Pay Date", payslip.payDate],
     ["Bank Name", payslip.bankName || null],
     ["Bank Account", payslip.bankAccount],
+    // Jurisdiction-correct routing code (IFSC / Sort Code / ABA / Transit /
+    // IBAN / BSB) from the payslip snapshot — falls back to the legacy ifsc
+    // field for payslips generated before the `routing` block existed.
+    [bankBtfLabel(payslip.country),
+      payslip.routing?.length
+        ? combineRoutingValue(payslip.country, (key) => payslip.routing.find((r) => r.key === key)?.value)
+        : payslip.ifsc || null],
     [identity.label, identity.value],
     ["Payable Days", payslip.payableDays != null && payslip.totalWorkingDays != null
       ? `${payslip.payableDays} / ${payslip.totalWorkingDays}` : null],
@@ -106,6 +139,32 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const half = Math.ceil(employeeFields.length / 2);
   const leftFields = employeeFields.slice(0, half);
   const rightFields = employeeFields.slice(half);
+
+  // A blocked payslip (PayslipStatus.FAILED — e.g. Germany's
+  // GERMANY_PAP_NOT_AVAILABLE/GERMANY_STATUTORY_PROFILE_MISSING/etc.)
+  // persists ZERO monetary figures. Without this check, this on-screen
+  // view rendered an all-zero payslip indistinguishable from a
+  // legitimate zero-pay slip — the backend's own PDF renderer already
+  // shows an explicit "STATUS: BLOCKED" document for exactly this case
+  // (see generate_payslip_pdf_bytes/_render_blocked_payslip_pdf_bytes);
+  // this on-screen stub previously had no equivalent.
+  const isBlocked = payslip.status === "Failed";
+
+  // Phase 8BU: a PARTIAL payslip (Part 21 — "remove unnecessary internal
+  // blocking") DOES carry real figures for whichever components resolved
+  // (gross/RV/ALV/GKV/PV) — unlike a Failed one, earnings/deductions ARE
+  // shown — but wage tax/Soli/church tax (whichever are named in
+  // germanyUnavailableComponents) are forced to 0 server-side and net pay
+  // is ALWAYS forced to 0 too (engine/standard.py never presents a
+  // plausible net pay built on an unavailable wage tax). Net pay must
+  // therefore read "UNAVAILABLE" here, never a numeric €0.00.
+  const isPartial = payslip.status === "Partial";
+  const unavailableComponents = payslip.germanyUnavailableComponents || [];
+  const unavailableLabels = {
+    wage_tax: "Lohnsteuer (wage tax)",
+    soli: "Solidaritätszuschlag (Soli)",
+    church_tax: "Kirchensteuer (church tax)",
+  };
 
   return createPortal(
     <>
@@ -147,8 +206,43 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               ))}
             </div>
 
+            {/* BLOCKED STATE — mirrors the backend's dedicated blocked-payslip PDF */}
+            {isBlocked && (
+              <div className="rounded-[8px] bg-error/10 border border-error/40 px-4 py-3 mb-6">
+                <p className="text-[13px] font-bold text-error">STATUS: BLOCKED — NO PAYSLIP ISSUED</p>
+                <p className="text-[12px] text-foreground-muted mt-1">
+                  This payroll could NOT be calculated for {payslip.employee || "this employee"}.
+                  {payslip.blockedReasonCode ? ` Reason code: ${payslip.blockedReasonCode}.` : ""}
+                </p>
+                {payslip.blockedReasonMessage ? (
+                  <p className="text-[12px] text-foreground-muted mt-1">{payslip.blockedReasonMessage}</p>
+                ) : null}
+                <p className="text-[11px] text-foreground-disabled mt-2">
+                  No monetary figures below are real — every amount is zero because none was ever calculated.
+                </p>
+              </div>
+            )}
+
+            {/* PARTIAL STATE — real figures shown below, but net pay and
+                the named unavailable component(s) are never a fabricated
+                zero */}
+            {isPartial && (
+              <div className="rounded-[8px] bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700/50 px-4 py-3 mb-6">
+                <p className="text-[13px] font-bold text-amber-700 dark:text-amber-400">STATUS: PARTIALLY CALCULATED</p>
+                <p className="text-[12px] text-foreground-muted mt-1">
+                  The figures below that ARE shown are real, calculated amounts. {" "}
+                  {unavailableComponents.length > 0
+                    ? `${unavailableComponents.map((c) => unavailableLabels[c] || c).join(", ")} could NOT be calculated.`
+                    : "One or more tax components could NOT be calculated."}
+                </p>
+                <p className="text-[11px] text-foreground-disabled mt-2">
+                  Net Pay is shown as UNAVAILABLE, not zero — it is never computed as if the unavailable amount were €0.00.
+                </p>
+              </div>
+            )}
+
             {/* PRORATION WARNING */}
-            {payslip.payableDays != null && payslip.totalWorkingDays != null &&
+            {!isBlocked && payslip.payableDays != null && payslip.totalWorkingDays != null &&
               payslip.payableDays < payslip.totalWorkingDays && (
               <div className="rounded-[8px] bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 px-4 py-2.5 flex items-start gap-2 mb-6">
                 <span className="text-amber-500 text-[13px] mt-0.5">⚠</span>
@@ -160,7 +254,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               </div>
             )}
 
-            {/* EARNINGS & DEDUCTIONS */}
+            {/* EARNINGS & DEDUCTIONS \u2014 hidden for a blocked payslip: every
+                figure would be a real, persisted zero, but showing a full
+                zeroed-out breakdown next to the BLOCKED banner above reads
+                as "calculated to zero" rather than "never calculated". */}
+            {!isBlocked && (
             <div className="ps-body grid grid-cols-2 gap-6 mb-5">
               {/* EARNINGS TABLE */}
               <div>
@@ -204,8 +302,10 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 </div>
               </div>
             </div>
+            )}
 
             {/* SALARY SUMMARY */}
+            {!isBlocked && (
             <div className="flex justify-end mb-5">
               <div className="w-[50%] border border-border rounded-[8px] overflow-hidden">
                 <div className="flex justify-between px-4 py-3 border-b border-border text-[13px] bg-surface">
@@ -222,24 +322,46 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 </div>
               </div>
             </div>
+            )}
+
+            {/* HONG KONG: no Salaries Tax withholding; an IR56G hold is a
+                legal hold on payment, shown apart from deductions. */}
+            {!isBlocked && labels.noPayrollIncomeTax && (
+            <div className="mb-5 space-y-2 rounded-[8px] border border-border bg-surface p-4 text-[12px] text-foreground-secondary">
+              <p>
+                No Salaries Tax is withheld from this pay. Hong Kong Salaries Tax is assessed by the Inland Revenue
+                Department on the employee; the employer reports remuneration to the IRD.
+              </p>
+              {payslip.hkTaxClearanceHold && (
+                <p role="status" className="font-semibold text-warning">
+                  IR56G tax-clearance hold ({payslip.hkTaxClearanceHold.status}): {fmt(payslip.hkTaxClearanceHold.amount)} of
+                  this net pay is held pending the IRD letter of release. It is not a deduction and remains owed to you.
+                </p>
+              )}
+            </div>
+            )}
 
             {/* NET SALARY IN WORDS */}
+            {!isBlocked && (
             <div className="mb-5">
               <p className="text-[13px] font-bold text-foreground mb-2">Net Salary in Words</p>
               <p className="text-[13px] text-foreground-muted">{netInWords} Only.</p>
             </div>
+            )}
 
             {/* PAYMENT DETAILS */}
+            {!isBlocked && (
             <div className="border border-border rounded-[8px] overflow-hidden mb-6">
               <div className="grid grid-cols-2 border-b border-border">
                 <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider border-r border-border">Payment Mode</div>
                 <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider">Salary Credit Date</div>
               </div>
               <div className="grid grid-cols-2">
-                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">Bank Transfer (NEFT)</div>
+                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">Bank Transfer ({bankPaymentModeLabel(payslip.country)})</div>
                 <div className="px-4 py-3 text-[13px] font-medium text-foreground">{payslip.payDate || "\u2014"}</div>
               </div>
             </div>
+            )}
 
             {/* FOOTER */}
             <div className="ps-footer border-t border-border pt-4 text-center">

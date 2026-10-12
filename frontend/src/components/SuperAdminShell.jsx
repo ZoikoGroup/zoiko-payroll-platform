@@ -3,11 +3,6 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Menu,
   X,
-  LayoutDashboard,
-  Building2,
-  Users,
-  Settings,
-  LogOut,
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
@@ -15,61 +10,24 @@ import {
   KeyRound,
   Copy,
   Check,
-  Wallet,
-  FileBarChart,
-  ShieldCheck,
-  Landmark,
+  LogOut,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
 import { apiFetch } from "../api/client";
+import { listAlerts } from "../service/commandCenterService";
 import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
+import CommandPalette from "./CommandPalette";
+import PageErrorBoundary from "./PageErrorBoundary";
+import { NAV_GROUPS, isItemActive, getPageLabel } from "./superAdminNav";
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_super_admin_sidebar_collapsed";
 
-// Same grouped enterprise-nav format as the Organization Admin sidebar
-// (components/PayrollShell.jsx) — short section labels, few items each.
-const NAV_GROUPS = [
-  {
-    title: "Overview",
-    items: [{ label: "Dashboard", href: "/super-admin/dashboard", icon: LayoutDashboard, end: true }],
-  },
-  {
-    title: "Organizations",
-    items: [
-      { label: "Organizations", href: "/super-admin/organizations", icon: Building2 },
-      { label: "Users", href: "/super-admin/users", icon: Users },
-    ],
-  },
-  {
-    title: "Compliance & Finance",
-    items: [
-      { label: "Compliance", href: "/super-admin/compliance", icon: ShieldCheck },
-      { label: "Statutory Rates", href: "/super-admin/statutory-rates", icon: Landmark },
-      { label: "Finance", href: "/super-admin/finance", icon: Wallet },
-    ],
-  },
-  {
-    title: "Reporting",
-    items: [{ label: "Reports", href: "/super-admin/reports", icon: FileBarChart }],
-  },
-  {
-    title: "System",
-    items: [{ label: "Settings", href: "/super-admin/settings", icon: Settings }],
-  },
-];
-
-function isItemActive(item, pathname) {
-  if (item.end) return pathname === item.href;
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
-}
-
-function getPageLabel(pathname) {
-  const entries = NAV_GROUPS.flatMap((group) => group.items);
-  const match = entries.find((item) => isItemActive(item, pathname));
-  return match?.label || "Dashboard";
-}
+// Poll cadence for the Command Center high-severity count badge — same
+// pattern as org-facing pages (setInterval + refetch on tab focus) so an
+// alert raised in another tab surfaces here without a manual reload.
+const ALERTS_POLL_INTERVAL_MS = 30000;
 
 function getInitials(name) {
   return (
@@ -83,7 +41,7 @@ function getInitials(name) {
   );
 }
 
-function NavSection({ title, items, pathname, onNavigate, collapsed }) {
+function NavSection({ title, items, pathname, onNavigate, collapsed, badges }) {
   return (
     <div>
       {!collapsed && (
@@ -110,6 +68,14 @@ function NavSection({ title, items, pathname, onNavigate, collapsed }) {
             >
               <item.icon className={`h-4 w-4 shrink-0 ${active ? "text-brand-cyan" : ""}`} />
               {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+              {!collapsed && (badges?.[item.href] || 0) > 0 && (
+                <span
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-bold leading-none text-white"
+                  aria-label={`${badges[item.href]} high-severity alert${badges[item.href] === 1 ? "" : "s"}`}
+                >
+                  {badges[item.href]}
+                </span>
+              )}
             </NavLink>
           );
         })}
@@ -118,7 +84,7 @@ function NavSection({ title, items, pathname, onNavigate, collapsed }) {
   );
 }
 
-function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRef }) {
+function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRef, badges }) {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -172,6 +138,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
             pathname={pathname}
             onNavigate={onNavigate}
             collapsed={collapsed}
+            badges={badges}
           />
         ))}
       </nav>
@@ -235,7 +202,7 @@ function GeneratedPasswordModal({ password, onClose }) {
   return (
     <Modal title="New password generated" onClose={onClose} maxWidth="max-w-md">
       <p className="text-sm text-foreground-secondary mb-4">
-        Save this now — it won't be shown again. Use it to sign in, then change it to something memorable.
+        Save this now — it won&apos;t be shown again. Use it to sign in, then change it to something memorable.
       </p>
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background-secondary px-3.5 py-3">
         <code className="truncate text-sm font-mono text-foreground">{password}</code>
@@ -382,10 +349,13 @@ function Header({ onOpenSidebar, onToggleCollapse, collapsed }) {
 function ToastStack() {
   const { toasts, removeToast } = useToast();
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] flex w-full max-w-sm flex-col gap-2">
+    // Always-mounted live region so screen readers announce each toast;
+    // errors are assertive (role="alert"), the rest polite.
+    <div className="fixed bottom-5 right-5 z-[9999] flex w-full max-w-sm flex-col gap-2" aria-live="polite" aria-relevant="additions">
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          role={toast.type === "error" ? "alert" : "status"}
           className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm shadow-lg transition-all duration-200 ${
             toast.type === "success"
               ? "border-success/30 bg-success-light text-success"
@@ -398,9 +368,10 @@ function ToastStack() {
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
+            aria-label="Dismiss notification"
             className="ml-3 rounded-lg p-1 text-current/70 hover:bg-black/5"
           >
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       ))}
@@ -414,9 +385,34 @@ export default function SuperAdminShell({ children }) {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
   });
+  const [alertCount, setAlertCount] = useState(0);
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
   const wasOpenRef = useRef(false);
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshAlerts() {
+      try {
+        const res = await listAlerts();
+        if (!cancelled) setAlertCount(res?.high_severity_count ?? 0);
+      } catch {
+        // Polling stays silent by design — a down backend shouldn't spam
+        // toasts or crash the shell; the badge simply keeps its last value.
+      }
+    }
+    refreshAlerts();
+    const id = setInterval(refreshAlerts, ALERTS_POLL_INTERVAL_MS);
+    window.addEventListener("focus", refreshAlerts);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener("focus", refreshAlerts);
+    };
+  }, []);
+
+  const navBadges = { "/super-admin/dashboard": alertCount };
 
   function toggleCollapse() {
     setCollapsed((prev) => {
@@ -458,15 +454,29 @@ export default function SuperAdminShell({ children }) {
             collapsed={collapsed && !sidebarOpen}
             onToggleCollapse={toggleCollapse}
             closeButtonRef={closeButtonRef}
+            badges={navBadges}
           />
         </aside>
 
-        <div className={`transition-[padding] duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
+        {/* Below the lg breakpoint the sidebar is a fixed overlay (see
+            <aside> above) — before this fix, this wrapper only ever
+            reserved space for it via the lg:pl-* classes, so opening the
+            mobile menu on a sub-lg viewport drew the sidebar straight over
+            the page title/description/filters instead of pushing them
+            aside. `sidebarOpen ? "pl-72" : ""` reserves the same width the
+            open sidebar actually uses (`w-72` on the <aside>, unconditional
+            below lg) whenever it's open; the lg:pl-* classes remain
+            unconditional at lg and above, where the sidebar is always
+            visible regardless of `sidebarOpen`. */}
+        <div className={`transition-[padding] duration-200 ${sidebarOpen ? "pl-72" : ""} ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
           <Header onOpenSidebar={() => setSidebarOpen(true)} onToggleCollapse={toggleCollapse} collapsed={collapsed} />
-          <main className="w-full p-4 sm:p-6 lg:p-8">{children}</main>
+          <main className="w-full p-4 sm:p-6 lg:p-8">
+            <PageErrorBoundary resetKey={pathname}>{children}</PageErrorBoundary>
+          </main>
         </div>
 
         <ToastStack />
+        <CommandPalette />
       </div>
     </ToastProvider>
   );
