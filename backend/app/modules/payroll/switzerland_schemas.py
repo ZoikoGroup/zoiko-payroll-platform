@@ -68,15 +68,12 @@ class BvgBand(_Strict):
             raise ValueError(f"age_to {self.age_to} is below age_from {self.age_from}")
         if self.salary_from is not None and self.salary_to is not None and self.salary_to < self.salary_from:
             raise ValueError(f"salary_to {self.salary_to} is below salary_from {self.salary_from}")
-        if (self.employee_pct is None) == (self.employee_amount is None):
-            raise ValueError("exactly one of employee_pct / employee_amount is required")
-        if (self.employer_pct is None) == (self.employer_amount is None):
-            raise ValueError("exactly one of employer_pct / employer_amount is required")
-        if (self.employee_pct is None) != (self.employer_pct is None):
-            raise ValueError("employee and employer shares must use the same basis (both pct or both amount) "
-                             "so the employer-share rule can be checked")
-        employee = self.employee_pct if self.employee_pct is not None else self.employee_amount
-        employer = self.employer_pct if self.employer_pct is not None else self.employer_amount
+        if self.employee_amount is not None or self.employer_amount is not None:
+            raise ValueError("fixed-amount BVG bands are not supported yet — express the plan in percentages")
+        if self.employee_pct is None or self.employer_pct is None:
+            raise ValueError("employee_pct and employer_pct are required (percentage basis)")
+        employee = self.employee_pct
+        employer = self.employer_pct
         # Employer pays at least half of each band (CH Step 5 contract).
         if employer < employee:
             raise ValueError(f"band ages {self.age_from}-{self.age_to} ({self.component}): employer share "

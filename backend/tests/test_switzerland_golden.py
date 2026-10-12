@@ -219,7 +219,7 @@ def test_readiness_reports_every_gate_not_passed(db, ch):  # noqa: F811
     g5 = {c["key"]: c for c in next(g for g in out["gates"] if g["key"] == "G5")["checks"]}
     assert g5["golden_certification"]["passed"] is True        # a PASS run is supporting info only
     labels = " ".join(g["label"] for g in out["gates"])
-    for words in ("specialist", "ESTV", "scheme evidence", "Swissdec", "Parallel", "encryption", "Operations"):
+    for words in ("specialist", "ESTV", "scheme evidence", "Interface certification", "Parallel", "encryption", "Operations"):
         assert words in labels
 
 

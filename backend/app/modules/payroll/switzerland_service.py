@@ -2041,7 +2041,7 @@ CH_GATES = {
           "canton data (FAK amounts, QST model) for every canton in scope",
     "G3": "Employer scheme evidence — compensation office, FAK fund, BVG plan, UVG and KTG policy documents "
           "for each launch employer",
-    "G4": "Swissdec — certification of the ELM / Lohnausweis output and a certified transmission channel",
+    "G4": "Interface certification — required ELM domains validated against the current receiver / certification-body requirements; no certification is claimed unless actually obtained",
     "G5": "Parallel payroll — representative parallel runs reconciled with no unexplained variance",
     "G6": "Security / privacy — encryption, RBAC and retention reviewed and approved",
     "G7": "Operations — filing / payment responsibilities, maker-checker, reconciliation and runbooks approved",
@@ -2114,7 +2114,7 @@ def get_ch_readiness(db: Session, on: Optional[date] = None) -> dict:
             check("cantons_ready", not not_ready,
                   "All 26 cantons ready." if not not_ready else f"Not ready: {', '.join(not_ready)}"),
         ],
-        "G4": [check("certified_channel", False, "No Swissdec-certified ELM channel exists; transmission is gated off.")],
+        "G4": [check("certified_channel", False, "No certified ELM transmission channel exists; transmission is gated off.")],
         "G5": [check("golden_certification", latest_cert is not None and latest_cert.status == "PASS",
                      (f"Latest CH certification run #{latest_cert.id}: {latest_cert.status} (synthetic golden cases — "
                       "supporting evidence only, never a substitute for parallel runs)") if latest_cert else
@@ -2594,7 +2594,7 @@ def qst_tariff_affected_payslips(db: Session, tariff_file_id: int) -> dict:
 CH_LOHNAUSWEIS_REPORT_TYPE = "CH_LOHNAUSWEIS"
 CH_LOHNAUSWEIS_TEMPLATE_KEY = "CH-LOHNAUSWEIS"
 CH_LA_SCOPE_KEY = "EMPLOYEE:{}:{}"          # EMPLOYEE:<payroll_employee_id>:<calendar year>
-CH_ELM_SCHEMA_VERSION = "ELM_5.0"
+CH_ELM_SCHEMA_VERSION = "ZOIKO-ELM-ENVELOPE-1"
 CH_ELM_TRANSMIT_ENABLED = False
 
 # Domains a Step 14 builder can produce an envelope for (a subset of the

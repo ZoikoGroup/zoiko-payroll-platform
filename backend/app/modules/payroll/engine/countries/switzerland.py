@@ -680,6 +680,8 @@ def _calculate_qst(ctx: PayrollContext, pack: _Pack) -> dict | None:
     tariff_file_id = getattr(ctx, "ch_qst_tariff_file_id", None)
     if tariff_file_id is None:
         pack.block("ch_qst_tariff_file", "no QST tariff file id was passed in context")
+    if not getattr(ctx, "ch_qst_tariff_file_sha256", None):
+        pack.block("ch_qst_tariff_file_sha256", "the QST tariff file fingerprint is required for exact replay")
     if getattr(ctx, "ch_qst_children", None) is None:
         pack.block("ch_qst_children", "the children count is needed for the QST tariff")
     church = getattr(ctx, "ch_qst_church_tax", None)
