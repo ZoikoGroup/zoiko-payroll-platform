@@ -24,17 +24,17 @@ export const ASSIST_LOCALES = {
 
 const MESSAGES = {
   en: {
-    "assist.title": "Assist",
+    "assist.title": "Global Payroll AI Concierge",
     "assist.notice.title": "Assist policy notice",
     "assist.notice.acknowledge": "Acknowledge and continue",
     "assist.newSession": "New session",
     "assist.about": "About Assist",
     "assist.close": "Close",
-    "assist.open": "Open Zoiko Payroll Assist",
-    "assist.thinking": "Thinking…",
-    "assist.placeholder": "Ask about payroll readiness, exceptions, policies…",
-    "assist.footer": "Governed by Zoiko Payroll Assist policy · previews & confirmations required for actions",
-    "assist.intro": "Hi, I'm {name}. I can summarize payroll run readiness, list exceptions, explain policies and prepare work — but I can never approve payroll, release payments or change protected data.",
+    "assist.open": "Open Global Payroll AI Concierge",
+    "assist.thinking": "Thinking...",
+    "assist.placeholder": "Ask a question about Zoiko Payroll...",
+    "assist.footer": "General information only. For help with your payroll account, sign in securely. Do not enter employee, payment, tax ID or other sensitive data.",
+    "assist.intro": "Welcome to Zoiko Payroll! Your intelligent guide to global payroll. Explore payroll solutions, tax compliance, payslips, supported countries, integrations, and pricing. Choose a topic below or ask a question about Zoiko Payroll.",
     "assist.sources": "Sources ({count})",
     "assist.helpful": "Helpful",
     "assist.notHelpful": "Not helpful",
@@ -105,7 +105,7 @@ const MESSAGES = {
     "assist.about.support.body": "Use the support icon in this panel to escalate a conversation to your payroll or compliance team.",
   },
   fr: {
-    "assist.title": "Assist",
+    "assist.title": "Global Payroll AI Concierge",
     "assist.notice.title": "Avis de politique Assist",
     "assist.notice.acknowledge": "Accepter et continuer",
     "assist.newSession": "Nouvelle session",
@@ -186,7 +186,7 @@ const MESSAGES = {
     "assist.about.support.body": "Utilisez l'icône d'assistance de ce panneau pour transmettre une conversation à votre équipe paie ou conformité.",
   },
   es: {
-    "assist.title": "Assist",
+    "assist.title": "Global Payroll AI Concierge",
     "assist.notice.title": "Aviso de política de Assist",
     "assist.notice.acknowledge": "Aceptar y continuar",
     "assist.newSession": "Nueva sesión",
@@ -267,7 +267,7 @@ const MESSAGES = {
     "assist.about.support.body": "Usa el icono de soporte en este panel para escalar una conversación a tu equipo de nómina o cumplimiento.",
   },
   hi: {
-    "assist.title": "Assist",
+    "assist.title": "Global Payroll AI Concierge",
     "assist.notice.title": "Assist नीति सूचना",
     "assist.notice.acknowledge": "स्वीकार करें और जारी रखें",
     "assist.newSession": "नया सत्र",

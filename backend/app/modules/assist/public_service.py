@@ -33,12 +33,12 @@ MAX_MESSAGES_PER_SESSION = 20
 _ALLOWED_PUBLIC_INTENTS = {"kb.answer", "explain.field", "chat.greeting", "chat.acknowledgment"}
 
 SIGN_IN_REDIRECT = (
-    "I can help with general payroll questions here. To access your organization's "
-    "payroll information or take any action, please sign in to Zoiko Payroll."
+    "I can help with general payroll questions here. For help with your payroll account, sign in securely. "
+    "Do not enter employee, payment, tax ID or other sensitive data."
 )
 NO_MATCH_FALLBACK = (
-    "I don't have public information on that yet. I can answer general payroll questions here — "
-    "for anything about your own account or organization, please sign in to Zoiko Payroll."
+    "I don't have public information on that yet. I can answer general payroll questions about Zoiko Payroll "
+    "here. For help with your payroll account, sign in securely."
 )
 
 

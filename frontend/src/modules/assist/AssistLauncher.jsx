@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
-  Send,
   Sparkles,
   ShieldCheck,
   RotateCcw,
@@ -16,15 +15,15 @@ import {
   History,
   FileText,
   Check,
-  Languages,
   Save,
   LifeBuoy,
-  Square,
+  ArrowLeft,
 } from "lucide-react";
 import {
   acknowledgeAssistNotice,
-  getAssistCapabilities,
   getAssistResponse,
+  getAssistStatus,
+  getPublicPayrollCountries,
   getAssistSuggestions,
   getCurrentAssistNotice,
   submitAssistFeedback,
@@ -50,6 +49,20 @@ import { ASSIST_LOCALES, getAssistLocale, setAssistLocale, t, formatAssistDate }
 import { useAuth } from "../../context/AuthContext";
 import zoikoPayrollLogo from "../../assets/zoiko-payroll-logo.png";
 import zoikoPayrollIcon from "../../assets/zoiko-payroll-icon.png";
+import { COPY, DEFAULT_LINKS, POPULAR_QUESTIONS, TOPICS } from "./concierge/content";
+import {
+  ConciergeComposer,
+  ConciergeHeader,
+  ConciergeLauncher,
+  CountryCheck,
+  CtaRow,
+  FOCUS_RING,
+  PANEL_CLASS,
+  PopularQuestions,
+  ThinkingBubble,
+  TopicGrid,
+  WelcomeBlock,
+} from "./concierge/ConciergeUI";
 
 // Scoped per user id — otherwise switching accounts in the same browser
 // leaves the previous user's session id in localStorage, and the widget
@@ -58,6 +71,9 @@ const SESSION_KEY_PREFIX = "zoiko_payroll_assist_session";
 function getSessionStorageKey(userId) {
   return userId ? `${SESSION_KEY_PREFIX}_${userId}` : SESSION_KEY_PREFIX;
 }
+
+// Mirrors MessageContent.text's max_length in the backend schemas.
+const MAX_MESSAGE_LENGTH = 8000;
 
 const ACCENT = "bg-primary";
 const ACCENT_HOVER = "hover:bg-primary-hover";
@@ -100,7 +116,7 @@ function AboutAssistPanel({ onClose }) {
       role="dialog"
       aria-modal="true"
       aria-label={t("assist.about.title")}
-      className="absolute inset-0 z-20 flex flex-col bg-white"
+      className="absolute inset-0 z-20 flex flex-col bg-surface"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <p className="text-[13px] font-bold text-primary">{t("assist.about.title")}</p>
@@ -135,7 +151,7 @@ function SuggestionChips({ suggestions, onPick }) {
           key={s.intent_id + s.position}
           type="button"
           onClick={() => onPick(s.prompt)}
-          className="rounded-[12px] border border-border bg-white px-3 py-2 text-left text-[12px] font-medium text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
+          className="rounded-[12px] border border-border bg-surface px-3 py-2 text-left text-[12px] font-medium text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
         >
           {s.prompt}
         </button>
@@ -286,7 +302,7 @@ function ActionCard({ action, onError }) {
           type="button"
           onClick={handleCancel}
           disabled={state === "busy"}
-          className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-white px-3 py-1.5 text-[11px] font-semibold text-foreground-muted transition hover:border-error hover:text-error disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[11px] font-semibold text-foreground-muted transition hover:border-error hover:text-error disabled:opacity-60"
         >
           {t("assist.action.cancel")}
         </button>
@@ -350,7 +366,7 @@ function HandoffPanel({ sessionId, onClose }) {
   }
 
   return (
-    <div className="mx-4 mt-3 rounded-[14px] border border-border bg-white p-3">
+    <div className="mx-4 mt-3 rounded-[14px] border border-border bg-surface p-3">
       <div className="mb-2 flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-[12px] font-bold text-foreground">
           <LifeBuoy size={13} className="text-primary" /> {t("assist.handoff.title")}
@@ -398,7 +414,7 @@ function HandoffPanel({ sessionId, onClose }) {
               type="button"
               onClick={handleCancel}
               disabled={state === "busy"}
-              className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-white px-3 py-1.5 text-[11px] font-semibold text-foreground-muted transition hover:border-error hover:text-error disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[11px] font-semibold text-foreground-muted transition hover:border-error hover:text-error disabled:opacity-60"
             >
               {t("assist.action.cancel")}
             </button>
@@ -413,7 +429,7 @@ function HandoffPanel({ sessionId, onClose }) {
             <select
               value={destination}
               onChange={(e) => setDestination(e.target.value)}
-              className="mt-1 w-full rounded-[8px] border border-border bg-white px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
+              className="mt-1 w-full rounded-[8px] border border-border bg-surface px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             >
               {HANDOFF_DESTINATIONS.map((d) => (
                 <option key={d} value={d}>{d.replaceAll("_", " ")}</option>
@@ -427,7 +443,7 @@ function HandoffPanel({ sessionId, onClose }) {
             <input
               value={reasonCode}
               onChange={(e) => setReasonCode(e.target.value)}
-              className="mt-1 w-full rounded-[8px] border border-border bg-white px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
+              className="mt-1 w-full rounded-[8px] border border-border bg-surface px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             />
           </div>
           <div>
@@ -439,7 +455,7 @@ function HandoffPanel({ sessionId, onClose }) {
               onChange={(e) => setSummary(e.target.value)}
               rows={3}
               placeholder={t("assist.handoff.summaryPlaceholder")}
-              className="mt-1 w-full resize-none rounded-[8px] border border-border bg-white px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
+              className="mt-1 w-full resize-none rounded-[8px] border border-border bg-surface px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             />
           </div>
           <button
@@ -506,7 +522,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
         <select
           value={draftType}
           onChange={(e) => setDraftType(e.target.value)}
-          className="rounded-[8px] border border-border bg-white px-2 py-1 text-[11px] text-foreground outline-none"
+          className="rounded-[8px] border border-border bg-surface px-2 py-1 text-[11px] text-foreground outline-none"
         >
           <option value="note">note</option>
           <option value="case_summary">case_summary</option>
@@ -517,7 +533,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
         value={draftContent}
         onChange={(e) => setDraftContent(e.target.value)}
         rows={3}
-        className="mt-2 w-full resize-none rounded-[10px] border border-border bg-white px-2.5 py-2 text-[11px] text-foreground outline-none focus:border-primary"
+        className="mt-2 w-full resize-none rounded-[10px] border border-border bg-surface px-2.5 py-2 text-[11px] text-foreground outline-none focus:border-primary"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -553,7 +569,7 @@ export function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) 
   }
   return (
     <div className="flex justify-start">
-      <div className="max-w-[90%] rounded-[16px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+      <div className="max-w-[90%] rounded-[16px] rounded-bl-[4px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
         {message.loading ? (
           <span className="inline-flex items-center gap-2 text-[12px] text-foreground-muted">
             <Loader2 size={13} className="animate-spin text-primary" />
@@ -664,7 +680,7 @@ function DraftsPanel({ sessionId }) {
           </p>
         ) : (
           drafts.map((d) => (
-            <div key={d.id} className="rounded-[12px] border border-border bg-white p-2.5">
+            <div key={d.id} className="rounded-[12px] border border-border bg-surface p-2.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">
                   {d.draft_type}
@@ -706,7 +722,7 @@ function DraftsPanel({ sessionId }) {
           <select
             value={draftType}
             onChange={(e) => setDraftType(e.target.value)}
-            className="rounded-[8px] border border-border bg-white px-2 py-1 text-[11px] text-foreground outline-none"
+            className="rounded-[8px] border border-border bg-surface px-2 py-1 text-[11px] text-foreground outline-none"
           >
             <option value="note">note</option>
             <option value="case_summary">case_summary</option>
@@ -782,7 +798,7 @@ function HistoryPanel({ onResume }) {
           </p>
         ) : (
           sessions.map((s) => (
-            <div key={s.id} className="rounded-[12px] border border-border bg-white p-2.5">
+            <div key={s.id} className="rounded-[12px] border border-border bg-surface p-2.5">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-[12px] font-bold text-foreground">{s.title || `Session #${s.id}`}</p>
                 <span
@@ -821,49 +837,9 @@ function HistoryPanel({ onResume }) {
   );
 }
 
-function LocalePicker() {
-  const [locale, setLocaleState] = useState(getAssistLocale());
-  const [open, setOpen] = useState(false);
-  function pick(code) {
-    setAssistLocale(code);
-    setLocaleState(code);
-    setOpen(false);
-  }
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={t("assist.locale")}
-        aria-label={t("assist.locale")}
-        aria-expanded={open}
-        className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
-      >
-        <Languages size={15} />
-      </button>
-      {open ? (
-        <div className="absolute right-0 top-9 z-10 w-36 overflow-hidden rounded-[12px] border border-border bg-white shadow-lg">
-          {Object.entries(ASSIST_LOCALES).map(([code, meta]) => (
-            <button
-              key={code}
-              type="button"
-              onClick={() => pick(code)}
-              className={`flex w-full items-center justify-between px-3 py-2 text-[12px] font-medium transition hover:bg-background ${
-                code === locale ? "text-primary" : "text-foreground-muted"
-              }`}
-            >
-              <span>{meta.name}</span>
-              <span className="text-[10px] font-bold text-foreground-muted">{meta.flag}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function AssistLauncher() {
   const { user } = useAuth();
+  const headingId = useId();
   const sessionKey = getSessionStorageKey(user?.id);
   const [open, setOpen] = useState(false);
   const [booting, setBooting] = useState(false);
@@ -874,15 +850,24 @@ export default function AssistLauncher() {
   const [sessionId, setSessionId] = useState(() => localStorage.getItem(sessionKey) || null);
   const [messages, setMessages] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
-  const [capabilities, setCapabilities] = useState([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [tab, setTab] = useState("chat");
   const [showHandoff, setShowHandoff] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [pendingResponseId, setPendingResponseId] = useState(null);
+  const [locale, setLocaleState] = useState(getAssistLocale());
+  const [health, setHealth] = useState("checking");
+  const [view, setView] = useState("home");
+  const [activeTopicId, setActiveTopicId] = useState(null);
+  const [feed, setFeed] = useState(null);
+  const [feedState, setFeedState] = useState("loading");
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
+  const launcherRef = useRef(null);
+  const headingRef = useRef(null);
+  const textareaRef = useRef(null);
+  const links = DEFAULT_LINKS;
 
   useEffect(() => {
     if (open && !booting && !sessionId) {
@@ -891,8 +876,48 @@ export default function AssistLauncher() {
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, open, tab]);
+    if (view === "chat") scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, open, tab, view]);
+
+  useEffect(() => {
+    if (open) headingRef.current?.focus();
+  }, [open]);
+
+  // Probe service health on every open — not only when a new session is
+  // booted, since a stored session id skips bootSession entirely.
+  useEffect(() => {
+    if (!open) return;
+    getAssistStatus().then((status) => {
+      if (!status || status.status !== "ok") setHealth("unavailable");
+      else setHealth(status.knowledge_available ? "available" : "degraded");
+    });
+  }, [open]);
+
+  // Country coverage is the same public registry feed the website widget
+  // uses — loaded once, on first open.
+  useEffect(() => {
+    if (!open || feed || feedState === "error") return;
+    getPublicPayrollCountries(locale).then((f) => {
+      setFeed(f);
+      setFeedState(f && Array.isArray(f.countries) ? "ready" : "error");
+    });
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function minimize() {
+    setOpen(false);
+    launcherRef.current?.focus();
+  }
+
+  function close() {
+    abortRef.current?.abort();
+    setShowHandoff(false);
+    minimize();
+  }
+
+  function changeLocale(code) {
+    setAssistLocale(code);
+    setLocaleState(code);
+  }
 
   async function bootSession() {
     setBooting(true);
@@ -904,13 +929,13 @@ export default function AssistLauncher() {
       ]);
       setNotice(currentNotice);
       setSuggestions(sugg);
-      getAssistCapabilities().then(setCapabilities).catch(() => {});
 
       const session = await createAssistSession({ title: "Payroll Assist" });
       setSessionId(session.id);
       localStorage.setItem(sessionKey, String(session.id));
     } catch (e) {
-      setError(e.message || t("assist.bootError"));
+      setError(!e?.status ? COPY.connectivity : e.message || t("assist.bootError"));
+      setHealth("unavailable");
     } finally {
       setBooting(false);
     }
@@ -944,6 +969,7 @@ export default function AssistLauncher() {
     if (!trimmed || !sessionId || sending) return;
     setInput("");
     setError("");
+    setView("chat");
     const isFirstMessage = messages.length === 0;
     const userMsg = { id: `u-${Date.now()}`, role: "user", content: trimmed };
     setMessages((prev) => [...prev, userMsg]);
@@ -1032,10 +1058,15 @@ export default function AssistLauncher() {
         patch((m) => ({ ...m, content: m.content || t("assist.stopped"), loading: false, stopped: true }));
         return;
       }
+      // A network failure (backend down, CORS, offline) has no HTTP status —
+      // show the recoverable connectivity copy, never the browser's raw
+      // "Failed to fetch".
+      const networkFailure = !e?.status;
+      if (networkFailure) setHealth("unavailable");
       patch((m) => ({
         id: pendingId,
         role: "assistant",
-        content: e.message || t("assist.sendError"),
+        content: networkFailure ? COPY.connectivity : e.message || t("assist.sendError"),
         loading: false,
       }));
     } finally {
@@ -1067,11 +1098,14 @@ export default function AssistLauncher() {
     setNotice(null);
     setError("");
     setTab("chat");
+    setView("home");
+    setActiveTopicId(null);
     await bootSession();
   }
 
   async function handleResume(session) {
     setTab("chat");
+    setView("chat");
     setSessionId(session.id);
     localStorage.setItem(sessionKey, String(session.id));
     setMessages([]);
@@ -1130,119 +1164,129 @@ export default function AssistLauncher() {
     { id: "history", label: t("assist.tabs.history"), icon: History },
   ];
 
+  const locales = Object.entries(ASSIST_LOCALES).map(([code, meta]) => ({ code, label: meta.name }));
+  // Server-curated suggestions are the signed-in "popular questions"; the
+  // approved public six are the fallback when none are configured.
+  const popularQuestions = suggestions.length
+    ? suggestions.slice(0, 6).map((s) => ({ id: `${s.intent_id}-${s.position}`, label: s.prompt }))
+    : POPULAR_QUESTIONS;
+  const hasConversation = messages.length > 0;
+
+  function handleTopicPrompt(prompt) {
+    if (prompt.mode === "prefill") {
+      setInput(prompt.prefill);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
+      return;
+    }
+    sendMessage(prompt.label);
+  }
+
+  const toolButton = `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-foreground-muted transition hover:bg-surface-muted hover:text-primary ${FOCUS_RING}`;
+
   return createPortal(
     <>
-      <style>{`
-        @keyframes assistLauncherGlow {
-          0%, 100% { opacity: 0.55; transform: scale(1); }
-          50% { opacity: 0.9; transform: scale(1.12); }
-        }
-        .assist-launcher-glow { animation: assistLauncherGlow 2.8s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) {
-          .assist-launcher-glow { animation: none; }
-        }
-      `}</style>
-      <div className="fixed bottom-6 right-6 z-[9997] h-14 w-14">
-        {/* Ambient glow halo — sits behind the button, pulses gently */}
-        <div
-          aria-hidden="true"
-          className={`assist-launcher-glow pointer-events-none absolute inset-0 rounded-2xl bg-primary blur-xl transition-opacity duration-300 ${
-            open ? "opacity-80" : "opacity-55"
-          }`}
-        />
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-label={t("assist.open")}
-          className={`relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_32%_26%,var(--color-primary-hover)_0%,var(--color-primary)_55%,var(--color-primary-active)_100%)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),inset_0_-8px_14px_-6px_rgba(0,0,0,0.4),0_16px_30px_-8px_rgba(0,0,0,0.45)] transition-all duration-200 hover:-translate-y-[3px] hover:scale-[1.04] hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.45),inset_0_-8px_14px_-6px_rgba(0,0,0,0.4),0_20px_36px_-8px_rgba(0,0,0,0.5)] active:translate-y-0 active:scale-100 ${
-            open ? "rotate-90 text-white" : ""
-          }`}
-        >
-          {open ? <X size={22} /> : <img src={zoikoPayrollIcon} alt="" className="h-full w-full object-cover" />}
-        </button>
-      </div>
+      <ConciergeLauncher
+        ref={launcherRef}
+        open={open}
+        onToggle={() => (open ? minimize() : setOpen(true))}
+        iconSrc={zoikoPayrollIcon}
+        label={open ? t("assist.close") : t("assist.open")}
+      />
 
       {open ? (
         <div
           role="dialog"
-          aria-modal="true"
-          aria-label={t("assist.title")}
-          className="fixed inset-0 z-[9997] flex flex-col overflow-hidden bg-white sm:inset-auto sm:bottom-24 sm:right-6 sm:h-[560px] sm:max-h-[calc(100dvh-8rem)] sm:w-[min(550px,calc(100vw-2rem))] sm:max-w-[calc(100vw-2rem)] sm:rounded-[22px] sm:border sm:border-border sm:shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]"
+          aria-labelledby={headingId}
+          lang={locale}
+          className={PANEL_CLASS}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !showAbout) {
+              e.preventDefault();
+              minimize();
+            }
+          }}
         >
           {showAbout ? <AboutAssistPanel onClose={() => setShowAbout(false)} /> : null}
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-border bg-white px-4 py-3">
-            <div className="flex items-center gap-2.5">
-              <img src={zoikoPayrollLogo} alt="" className="h-6 w-auto shrink-0" />
-              <div className="h-5 w-px shrink-0 bg-border-light" />
-              <p className="text-[13px] font-bold tracking-wide text-primary">{t("assist.title")}</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <LocalePicker />
-              <button
-                type="button"
-                onClick={() => setShowHandoff((v) => !v)}
-                title={t("assist.handoff.title")}
-                aria-label={t("assist.handoff.title")}
-                aria-pressed={showHandoff}
-                className={`rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary ${showHandoff ? "bg-background text-primary" : ""}`}
-              >
-                <LifeBuoy size={15} />
-              </button>
-              <button
-                type="button"
-                onClick={handleNewSession}
-                title={t("assist.newSession")}
-                aria-label={t("assist.newSession")}
-                className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
-              >
-                <RotateCcw size={15} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAbout(true)}
-                title={t("assist.about")}
-                aria-label={t("assist.about")}
-                className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
-              >
-                <Info size={15} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                title={t("assist.close")}
-                aria-label={t("assist.close")}
-                className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
 
-          {/* Tabs */}
-          <div className="flex border-b border-border-light bg-white px-2 pt-2">
-            {tabs.map((tabDef) => {
-              const Icon = tabDef.icon;
-              return (
-                <button
-                  key={tabDef.id}
-                  type="button"
-                  onClick={() => setTab(tabDef.id)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-t-[10px] px-2 py-2 text-[11px] font-bold transition ${
-                    tab === tabDef.id ? "border-b-2 border-primary text-primary" : "text-foreground-muted hover:text-foreground-muted"
-                  }`}
-                >
-                  <Icon size={12} /> {tabDef.label}
-                </button>
-              );
-            })}
+          <ConciergeHeader
+            logoSrc={zoikoPayrollLogo}
+            headingId={headingId}
+            headingRef={headingRef}
+            status={booting ? "checking" : health}
+            locales={locales}
+            locale={locale}
+            onLocaleChange={changeLocale}
+            onMinimize={minimize}
+            onClose={close}
+          />
+
+          {/* Tabs + session tools */}
+          <div className="flex items-center gap-1 border-b border-border-light bg-surface px-2 md:px-3">
+            <div role="tablist" aria-label={t("assist.title")} className="flex flex-1">
+              {tabs.map((tabDef) => {
+                const Icon = tabDef.icon;
+                return (
+                  <button
+                    key={tabDef.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === tabDef.id}
+                    onClick={() => setTab(tabDef.id)}
+                    className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-[12px] font-bold transition ${FOCUS_RING} ${
+                      tab === tabDef.id
+                        ? "border-primary text-primary"
+                        : "border-transparent text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    <Icon size={13} aria-hidden="true" /> {tabDef.label}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowHandoff((v) => !v)}
+              title={t("assist.handoff.title")}
+              aria-label={t("assist.handoff.title")}
+              aria-pressed={showHandoff}
+              className={`${toolButton} ${showHandoff ? "bg-surface-muted text-primary" : ""}`}
+            >
+              <LifeBuoy size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={handleNewSession}
+              title={t("assist.newSession")}
+              aria-label={t("assist.newSession")}
+              className={toolButton}
+            >
+              <RotateCcw size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAbout(true)}
+              title={t("assist.about")}
+              aria-label={t("assist.about")}
+              className={toolButton}
+            >
+              <Info size={16} aria-hidden="true" />
+            </button>
           </div>
 
           {/* Body */}
           <div className="flex min-h-0 flex-1 flex-col">
             {booting ? (
               <div className="flex flex-1 items-center justify-center">
-                <Loader2 size={22} className="animate-spin text-primary" />
+                <Loader2
+                  size={22}
+                  className="animate-spin text-primary motion-reduce:animate-none"
+                  aria-label={t("assist.thinking")}
+                />
               </div>
             ) : noticeGateShown && tab === "chat" ? (
               <div className="flex-1">
@@ -1257,48 +1301,78 @@ export default function AssistLauncher() {
                 {showHandoff ? (
                   <HandoffPanel sessionId={sessionId} onClose={() => setShowHandoff(false)} />
                 ) : null}
-                <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-background-secondary p-4">
+                <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface">
                   {error ? (
-                    <p className="rounded-[12px] bg-error-light px-3 py-2 text-[12px] font-medium text-error">{error}</p>
+                    <p
+                      role="alert"
+                      className="mx-4 mt-4 rounded-[12px] bg-error-light px-3 py-2 text-[12px] font-medium text-error md:mx-5"
+                    >
+                      {error}
+                    </p>
                   ) : null}
-                  {messages.length === 0 ? (
-                    <div className="flex flex-col items-start gap-4 pt-2">
-                      <div className="rounded-[16px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
-                        <p>{t("assist.intro", { name: "Zoiko Payroll Assist" })}</p>
-                      </div>
-                      <SuggestionChips suggestions={suggestions} onPick={sendMessage} />
-                      {capabilities.length ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {capabilities.filter((c) => c.risk_tier === "A1").slice(0, 3).map((c) => (
-                            <span
-                              key={c.capability_id}
-                              className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary"
-                            >
-                              {c.name}
-                            </span>
-                          ))}
-                        </div>
+                  {view === "home" ? (
+                    <div className="space-y-4 px-4 py-4 md:px-5">
+                      {hasConversation ? (
+                        <button
+                          type="button"
+                          onClick={() => setView("chat")}
+                          className={`inline-flex items-center gap-1.5 rounded-[8px] text-[12px] font-semibold text-primary hover:underline ${FOCUS_RING}`}
+                        >
+                          <ArrowLeft size={14} aria-hidden="true" /> Back to conversation
+                        </button>
                       ) : null}
+                      <WelcomeBlock
+                        iconSrc={zoikoPayrollIcon}
+                        compact={hasConversation}
+                        body={t("assist.intro", { name: "Zoiko Payroll Assist" })}
+                      />
+                      <TopicGrid
+                        topics={TOPICS}
+                        activeTopicId={activeTopicId}
+                        onSelectTopic={setActiveTopicId}
+                        onBack={() => setActiveTopicId(null)}
+                        onPrompt={handleTopicPrompt}
+                        disabled={sending || !sessionId}
+                      />
+                      <CountryCheck
+                        feed={feed}
+                        feedState={feedState}
+                        links={links}
+                        disabled={sending || !sessionId}
+                        onAsk={(country) => sendMessage(`How does payroll work in ${country.name}?`)}
+                      />
+                      <div className="border-t border-border-light" aria-hidden="true" />
+                      <PopularQuestions
+                        questions={popularQuestions}
+                        disabled={sending || !sessionId}
+                        faqUrl={links.faq}
+                        links={links}
+                        onPick={(q) => sendMessage(q.label)}
+                      />
+                      {/* Signed-in users already have an account, so the
+                          commercial CTAs are dropped; support routes to the
+                          existing governed handoff flow. */}
+                      <CtaRow links={{}} onSupport={() => setShowHandoff(true)} supportExpanded={showHandoff} />
                     </div>
                   ) : (
-                    messages.map((m) => (
-                      <MessageBubble
-                        key={m.id}
-                        message={m}
-                        onFeedback={handleFeedback}
-                        sessionId={sessionId}
-                        onDraftSaved={() => {}}
-                      />
-                    ))
-                  )}
-                  {sending ? (
-                    <div className="flex justify-start">
-                      <div className="flex items-center gap-2 rounded-[16px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[12px] text-foreground-muted">
-                        <Loader2 size={14} className="animate-spin text-primary" />
-                        {t("assist.thinking")}
+                    <div className="space-y-3 px-4 py-4 md:px-5">
+                      <WelcomeBlock iconSrc={zoikoPayrollIcon} compact />
+                      <div role="log" aria-label={t("assist.title")} className="space-y-3">
+                        {messages.map((m) => (
+                          <MessageBubble
+                            key={m.id}
+                            message={m}
+                            onFeedback={handleFeedback}
+                            sessionId={sessionId}
+                            onDraftSaved={() => {}}
+                          />
+                        ))}
                       </div>
+                      {sending && !messages[messages.length - 1]?.loading ? (
+                        <ThinkingBubble iconSrc={zoikoPayrollIcon} />
+                      ) : null}
                     </div>
-                  ) : null}
+                  )}
                   {/* Screen-reader-only status announcer — separate from the
                       visible streaming text so assistive tech gets one concise
                       state change, not a re-read on every appended character. */}
@@ -1311,51 +1385,19 @@ export default function AssistLauncher() {
                   </div>
                 </div>
 
-                <div className="border-t border-border-light p-3">
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      sendMessage();
-                    }}
-                    className="flex items-end gap-2"
-                  >
-                    <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          sendMessage();
-                        }
-                      }}
-                      rows={1}
-                      placeholder={t("assist.placeholder")}
-                      className="max-h-28 flex-1 resize-none rounded-[12px] border border-border bg-background px-3 py-2.5 text-[13px] text-foreground placeholder-foreground-disabled outline-none transition focus:border-primary"
-                    />
-                    {sending ? (
-                      <button
-                        type="button"
-                        onClick={handleStop}
-                        title={t("assist.stop")}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border bg-white text-foreground-muted transition hover:border-error hover:text-error"
-                      >
-                        <Square size={14} />
-                      </button>
-                    ) : (
-                      <button
-                        type="submit"
-                        disabled={!input.trim() || sending}
-                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] text-white transition disabled:opacity-40 ${ACCENT} ${ACCENT_HOVER}`}
-                      >
-                        <Send size={16} />
-                      </button>
-                    )}
-                  </form>
-                  <p className="mt-2 flex items-center gap-1 text-[10px] text-foreground-disabled">
-                    <ShieldCheck size={11} className="text-primary" />
-                    {t("assist.footer")}
-                  </p>
-                </div>
+                <ConciergeComposer
+                  ref={textareaRef}
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={() => sendMessage()}
+                  sending={sending}
+                  onStop={handleStop}
+                  disabled={!sessionId}
+                  maxLength={MAX_MESSAGE_LENGTH}
+                  notice={t("assist.footer")}
+                  showTopicsButton={view === "chat"}
+                  onShowTopics={() => setView("home")}
+                />
               </>
             )}
           </div>
