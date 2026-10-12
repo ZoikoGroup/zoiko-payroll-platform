@@ -31,8 +31,8 @@ skips them rather than flagging a false positive.
 from decimal import Decimal
 
 from app.modules.payroll.engine.countries import (
-    australia, canada, germany, hong_kong, india, italy, saudi_arabia,
-    singapore, sweden, switzerland, uk, us,
+    australia, canada, germany, hong_kong, india, italy, netherlands,
+    saudi_arabia, singapore, sweden, switzerland, uk, us,
 )
 from app.modules.payroll import hardcoded_defaults
 
@@ -53,6 +53,7 @@ _MODULES = {
     # Super Admin viewer. Added alongside SA (same one-line fix).
     "italy": italy,
     "saudi_arabia": saudi_arabia,
+    "netherlands": netherlands,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -388,6 +389,38 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_10_PLUS", "label": "EOS on Resignation — 10+ Years", "resolverKey": "sa_eos_resign_frac_10_plus", "required": False, "note": "NO FALLBACK — spec §13 (1); exact fraction in text_value."},
     {"country": "SA", "module": "saudi_arabia", "attr": "_SA_SETTLEMENT_DEADLINE_TERMINATION_DAYS", "label": "Final Settlement Deadline — Employer Termination (days)", "resolverKey": "sa_settlement_deadline_termination_days", "required": False, "note": "NO FALLBACK — spec §13 (7)."},
     {"country": "SA", "module": "saudi_arabia", "attr": "_SA_SETTLEMENT_DEADLINE_RESIGNATION_DAYS", "label": "Final Settlement Deadline — Worker Termination (days)", "resolverKey": "sa_settlement_deadline_resignation_days", "required": False, "note": "NO FALLBACK — spec §13 (14)."},
+
+    # ── Netherlands ──────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-NL-ENG-001): every constant is None — listed
+    # so the readiness check knows which scalar keys a Netherlands pack must
+    # configure. The NL engine (engine/countries/netherlands.py) BLOCKS when a
+    # required key is missing from the active pack (no engine fallback). The
+    # NL-PAYROLL-2026 pack seeds ContributionRate/TaxSlab rows from
+    # netherlands_content.py; a missing row raises NLBlock.
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — AWf Rate (AWf employee portion)", "resolverKey": "nl_awf_pct", "side": "employee", "note": "NO FALLBACK — AWf employee % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — AWf Rate (AWf employer portion)", "resolverKey": "nl_awf_pct", "side": "employer", "note": "NO FALLBACK — AWf employer % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — Aof Rate (Aof employee portion)", "resolverKey": "nl_aof_pct", "side": "employee", "note": "NO FALLBACK — Aof employee % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — Aof Rate (Aof employer portion)", "resolverKey": "nl_aof_pct", "side": "employer", "note": "NO FALLBACK — Aof employer % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — Wko Rate (Wko employee portion)", "resolverKey": "nl_wko_pct", "side": "employee", "note": "NO FALLBACK — Wko employee % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — Wko Rate (Wko employer portion)", "resolverKey": "nl_wko_pct", "side": "employer", "note": "NO FALLBACK — Wko employer % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "NL Employee Insurance — Whk Rate (employer-specific, per CAO)", "resolverKey": "nl_whk_pct", "side": "employer", "note": "NO FALLBACK — per-employer Whk % from Active NL-PAYROLL-2026 pack (PENDING_G1 per spec NL-006); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Zvw — Employer Levy Rate", "resolverKey": "nl_zvw_employer_pct", "side": "employer", "note": "NO FALLBACK — Zvw employer income-dependent % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS (NL-020 separate series)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Zvw — Employee Contribution Rate", "resolverKey": "nl_zvw_employee_pct", "side": "employee", "note": "NO FALLBACK — Zvw employee income-dependent % from Active NL-PAYROLL-2026 pack; a missing row BLOCKS (NL-020 separate series)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Zvw — Annual Ceiling (contributable wage cap)", "resolverKey": "nl_zvw_ceiling", "note": "NO FALLBACK — Zvw annual ceiling from Active pack; VCR cumulative base capped."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Minimum Wage — Hourly Rate (by age cohort, dated)", "resolverKey": "nl_min_wage", "note": "NO FALLBACK — NL_MIN_WAGE TaxSlab rows by age cohort & effective date; Jan 2026 <21 rates are PENDING_G1 (spec §2/F6)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "VCR — Period Maxima (ANNUAL/MONTHLY/DAILY/WEEKLY/FOUR_WEEKLY/QUARTERLY)", "resolverKey": "nl_period_max", "note": "NO FALLBACK — official time-period maxima from Active pack; only ANNUAL/MONTHLY specified in spec §5, others PENDING_G1 — a period with no row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "WKR — Free Space Band 1 (2.00% up to €400k)", "resolverKey": "nl_wkr_free_space", "note": "NO FALLBACK — WKR free space band from Active NL-WKR pack; missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "WKR — Free Space Band 2 (1.18% above €400k)", "resolverKey": "nl_wkr_free_space", "note": "NO FALLBACK — second free space tier; missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "WKR — Excess Levy (80%)", "resolverKey": "nl_wkr_excess_levy", "note": "NO FALLBACK — 80% levy on excess; missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Company Car — Standard Bijtelling (22%)", "resolverKey": "nl_car_addition_standard", "note": "NO FALLBACK — standard class 22% from Active pack; dated effective window."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Company Car — Zero-Emission Bijtelling (18%)", "resolverKey": "nl_car_addition_zero_emission", "note": "NO FALLBACK — zero-emission class 18% from Active pack; dated effective window."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Vacation Allowance — Percentage (8%)", "resolverKey": "nl_vacation_allowance_pct", "note": "NO FALLBACK — vakantiegeld 8% from Active pack; NL-022."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Sick Pay — Minimum Percentage (70%)", "resolverKey": "nl_sick_pay_pct", "note": "NO FALLBACK — ziektewet minimum 70% from Active pack; NL-022."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Sick Pay — Maximum Years (2)", "resolverKey": "nl_sick_pay_max_years", "note": "NO FALLBACK — max 2 years ordinary sick pay from Active pack; NL-022."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Transition Payment — Cap (€102,000)", "resolverKey": "nl_transition_payment_cap", "note": "NO FALLBACK — transitievergoeding cap from Active pack; NL-022."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Transition Payment — Months per Service Year (1/3)", "resolverKey": "nl_transition_payment_month_frac", "note": "NO FALLBACK — 1/3 month per year from Active pack; NL-022."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Expat 30% Facility — Eligibility & Rate", "resolverKey": "nl_expat_facility", "note": "NO FALLBACK — expat scheme parameters from Active pack; NL-023."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_PARAMETER_KEYS", "label": "Wage Tax — Belastingdienst 2026 Tariff", "resolverKey": "nl_wage_tax_tariff", "note": "NO FALLBACK — official 2026 wage-tax tables (all periods) NOT YET INGESTED (NL-019); calculation BLOCKS until G1 supplies."},
 ]
 
 

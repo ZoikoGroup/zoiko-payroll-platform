@@ -1122,6 +1122,26 @@ class EmployeeStatutoryProfile(Base):
     ch_experience_years        = Column(Numeric(4, 1), nullable=True)
     ch_evidence_document_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # ── Netherlands (NL) — ZP-NL-ENG-001 employee-owned facts (Sections 10–11) ─────────────
+    # All nullable/additive — no existing non-NL employee row is affected.
+    # The BSN itself stays in the employee's compliance fields and is masked by the server.
+    nl_bsn_verified_at            = Column(DateTime(timezone=True), nullable=True)
+    nl_identity_status            = Column(String(20), nullable=True)
+    nl_residence_country          = Column(String(2), nullable=True)
+    nl_residence_variant          = Column(String(20), nullable=True)
+    nl_table_color                = Column(String(10), nullable=True)
+    nl_zvw_path                   = Column(String(20), nullable=True)  # EMPLOYER_LEVY / EMPLOYEE_CONTRIB / SPECIAL
+    nl_ei_insured                 = Column(Boolean, nullable=True)
+    nl_insurance_exception_code   = Column(String(20), nullable=True)
+    nl_insurance_evidence_ref     = Column(String(200), nullable=True)
+    nl_cross_border_status        = Column(String(20), nullable=True)  # NONE / SUPPORTED / BLOCKED
+    nl_a1_reference               = Column(String(100), nullable=True)
+    nl_pension_scheme_id          = Column(Integer, nullable=True)
+    nl_voluntary_extra_withholding = Column(Numeric(14, 2), nullable=True)
+    nl_vacation_allowance_pct     = Column(Numeric(5, 2), nullable=True)
+    nl_contract_hours_per_week    = Column(Numeric(5, 2), nullable=True)
+    nl_personnel_number           = Column(String(50), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -8426,3 +8446,233 @@ class SaEosLedgerEntry(Base):
 
     def __repr__(self):
         return f"<SaEosLedgerEntry emp={self.employee_id} {self.period_from}–{self.period_to} accrued={self.eos_award_accrued}>"
+
+
+class PayrollNlTaxTableFile(Base):
+    """NL wage-tax table file import (ZP-NL-ENG-001 NL-011..NL-014, gate G1).
+    Mirrors CH QST tariff file lifecycle: IMPORTED -> VALIDATED -> APPROVED -> ACTIVE.
+    Four-eyes approval at APPROVE and ACTIVATE. Supersede on new activation.
+    One file = one table (tax_year + color + kind + period + residence_variant)."""
+    __tablename__ = "payroll_nl_tax_table_files"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id", ondelete="CASCADE"), nullable=False, index=True)
+    tax_year              = Column(Integer, nullable=False, index=True)  # SmallInteger in migration
+    table_color           = Column(String(10), nullable=False)  # WHITE / GREEN
+    table_kind            = Column(String(30), nullable=False)  # PERIOD / SPECIAL_REMUNERATION
+    period                = Column(String(20), nullable=True)   # DAY, WEEK, FOUR_WEEK, MONTH, QUARTER, YEAR (NULL for special-remuneration)
+    residence_variant     = Column(String(20), nullable=False)  # NL or derivation code
+    source_url            = Column(String(500), nullable=True)
+    source_filename       = Column(String(255), nullable=False)
+    file_sha256           = Column(String(64), nullable=False, unique=True, index=True)
+    row_count             = Column(Integer, nullable=False, default=0, server_default="0")
+    status                = Column(String(20), nullable=False, default="IMPORTED", server_default="IMPORTED")  # IMPORTED/VALIDATED/APPROVED/ACTIVE/SUPERSEDED/REJECTED
+    validation_report     = Column(sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql"), nullable=True)
+    imported_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    validated_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    activated_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    effective_from        = Column(Date, nullable=False, index=True)
+    effective_to          = Column(Date, nullable=True, index=True)
+    superseded_by_id      = Column(Integer, ForeignKey("payroll_nl_tax_table_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("table_color IN ('WHITE', 'GREEN')", name="ck_nl_tax_table_color"),
+        sa.CheckConstraint("table_kind IN ('PERIOD', 'SPECIAL_REMUNERATION')", name="ck_nl_tax_table_kind"),
+        sa.CheckConstraint("period IN ('DAY', 'WEEK', 'FOUR_WEEK', 'MONTH', 'QUARTER', 'YEAR')", name="ck_nl_tax_table_period"),
+        sa.CheckConstraint("status IN ('IMPORTED', 'VALIDATED', 'APPROVED', 'ACTIVE', 'SUPERSEDED', 'REJECTED')", name="ck_nl_tax_table_status"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlTaxTableFile {self.tax_year} {self.table_color} {self.table_kind} {self.period or ''} {self.residence_variant} {self.status}>"
+
+
+class PayrollNlTaxTableRow(Base):
+    """Individual row within an NL wage-tax table file.
+    Immutable once written (same guards as ChQstTariffRow)."""
+    __tablename__ = "payroll_nl_tax_table_rows"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    file_id             = Column(Integer, ForeignKey("payroll_nl_tax_table_files.id", ondelete="CASCADE"), nullable=False, index=True)
+    row_no              = Column(Integer, nullable=False)
+    wage_from           = Column(Numeric(12, 2), nullable=False)
+    wage_to             = Column(Numeric(12, 2), nullable=True)  # NULL = open-ended top bracket
+    aow_cohort          = Column(String(20), nullable=False)  # BELOW_AOW / AOW_AGE
+    with_tax_credit     = Column(Boolean, nullable=False, default=True, server_default="true")
+    withholding_amount  = Column(Numeric(12, 2), nullable=True)  # for PERIOD tables
+    percentage          = Column(Numeric(7, 4), nullable=True)   # for SPECIAL_REMUNERATION table
+    row_sha256          = Column(String(64), nullable=False)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("aow_cohort IN ('BELOW_AOW', 'AOW_AGE')", name="ck_nl_tax_row_aow_cohort"),
+        sa.UniqueConstraint("file_id", "row_no", name="uq_nl_tax_table_rows_file_row"),
+        sa.Index("ix_nl_tax_table_rows_file_wage", "file_id", "wage_from", "wage_to"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlTaxTableRow file={self.file_id} row={self.row_no} {self.wage_from}–{self.wage_to or '∞'} {self.aow_cohort} {'tc' if self.with_tax_credit else 'no-tc'}>"
+
+
+class PayrollNlEmployerProfile(Base):
+    """NL employer profile (versioned, immutable — like ChEntityProfile).
+    Only one open (effective_to IS NULL) row per organization. No private keys stored,
+    only PKI cert reference + fingerprint (NL-030)."""
+    __tablename__ = "payroll_nl_employer_profiles"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    version                   = Column(Integer, nullable=False, default=1, server_default="1")
+    previous_version_id       = Column(Integer, ForeignKey("payroll_nl_employer_profiles.id", ondelete="SET NULL"), nullable=True)
+    effective_from            = Column(Date, nullable=False, index=True)
+    effective_to              = Column(Date, nullable=True, index=True)
+    legal_name                = Column(String(200), nullable=False)
+    kvk_number                = Column(String(20), nullable=True)
+    rsin                      = Column(String(20), nullable=True)
+    address                   = Column(postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"), nullable=True)
+    payroll_contact           = Column(postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"), nullable=True)
+    loonheffingennummer       = Column(String(50), nullable=True)
+    loonheffingen_subnumber   = Column(String(50), nullable=True)
+    registration_letter_ref   = Column(String(100), nullable=True)
+    registration_verified_at  = Column(DateTime(timezone=True), nullable=True)
+    registration_verified_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    return_period             = Column(String(20), nullable=False, default="MONTH", server_default="MONTH")  # MONTH / FOUR_WEEK
+    payroll_schedule          = Column(String(20), nullable=False, default="MONTH", server_default="MONTH")  # MONTH / FOUR_WEEK / WEEK
+    standard_pay_day          = Column(SmallInteger, nullable=True)
+    bank_lead_days            = Column(SmallInteger, nullable=False, default=2, server_default="2")
+    bank_iban_token           = Column(String(100), nullable=True)
+    bank_bic                  = Column(String(20), nullable=True)
+    pki_cert_ref              = Column(String(200), nullable=True)
+    pki_cert_fingerprint      = Column(String(100), nullable=True)
+    pki_cert_issuer           = Column(String(200), nullable=True)
+    pki_cert_expires_at       = Column(DateTime(timezone=True), nullable=True)
+    digipoort_channel         = Column(String(50), nullable=True)
+    digipoort_test_status     = Column(String(20), nullable=True)
+    digipoort_test_evidence_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    cao_status                = Column(String(20), nullable=False, default="NONE", server_default="NONE")  # NONE / APPLICABLE / UNKNOWN
+    collective_agreement_id   = Column(Integer, ForeignKey("payroll_collective_agreements.id", ondelete="SET NULL"), nullable=True)
+    pension_status            = Column(String(20), nullable=True)
+    wkr_mode                  = Column(String(20), nullable=False, default="STANDALONE", server_default="STANDALONE")  # STANDALONE / CONCERN
+    wkr_concern_id            = Column(Integer, nullable=True)
+    readiness_status          = Column(String(20), nullable=False, default="INCOMPLETE", server_default="INCOMPLETE")
+    readiness_evidence        = Column(postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"), nullable=True)
+    created_by                = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("return_period IN ('MONTH', 'FOUR_WEEK')", name="ck_nl_emp_return_period"),
+        sa.CheckConstraint("payroll_schedule IN ('MONTH', 'FOUR_WEEK', 'WEEK')", name="ck_nl_emp_payroll_schedule"),
+        sa.CheckConstraint("cao_status IN ('NONE', 'APPLICABLE', 'UNKNOWN')", name="ck_nl_emp_cao_status"),
+        sa.CheckConstraint("wkr_mode IN ('STANDALONE', 'CONCERN')", name="ck_nl_emp_wkr_mode"),
+        sa.CheckConstraint("standard_pay_day IS NULL OR (standard_pay_day >= 1 AND standard_pay_day <= 31)", name="ck_nl_emp_pay_day"),
+        sa.Index("ix_nl_employer_profiles_org_open", "organization_id", unique=True,
+                 postgresql_where=sa.text("effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlEmployerProfile org={self.organization_id} v={self.version} {self.legal_name}>"
+
+
+class PayrollNlIncomeRelationship(Base):
+    """Income relationship (IKV) for NL — set once, never regenerated."""
+    __tablename__ = "payroll_nl_income_relationships"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    ikv_number              = Column(String(50), nullable=False)
+    income_relation_code    = Column(String(10), nullable=False)
+    payroll_period          = Column(String(20), nullable=False)
+    start_date              = Column(Date, nullable=False, index=True)
+    end_date                = Column(Date, nullable=True, index=True)
+    status                  = Column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")
+    closed_reason           = Column(String(200), nullable=True)
+    created_by              = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('ACTIVE', 'CLOSED')", name="ck_nl_ikv_status"),
+        sa.UniqueConstraint("organization_id", "employee_id", "ikv_number", name="uq_nl_ikv_org_emp_ikv"),
+        sa.Index("ix_nl_ikv_org_emp_start", "organization_id", "employee_id", "start_date"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlIncomeRelationship org={self.organization_id} emp={self.employee_id} ikv={self.ikv_number}>"
+
+
+class PayrollNlTaxCreditInstruction(Base):
+    """Tax credit instruction (Model opgaaf gegevens) — insert-only, supersedes chain (NL-029)."""
+    __tablename__ = "payroll_nl_tax_credit_instructions"
+
+    id                          = Column(Integer, primary_key=True, index=True)
+    organization_id             = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    apply_tax_credit            = Column(Boolean, nullable=False, default=True, server_default="true")
+    form_version                = Column(String(50), nullable=False, default="Model opgaaf 2026-08")
+    signed_at                   = Column(DateTime(timezone=True), nullable=False)
+    effective_from              = Column(Date, nullable=False, index=True)
+    signed_document_artifact_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    captured_by                 = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    superseded_by_id            = Column(Integer, ForeignKey("payroll_nl_tax_credit_instructions.id", ondelete="SET NULL"), nullable=True)
+    created_at                  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.Index("ix_nl_tax_credit_org_emp_effective", "organization_id", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlTaxCreditInstruction org={self.organization_id} emp={self.employee_id} apply={self.apply_tax_credit} from={self.effective_from}>"
+
+
+class PayrollNlContractVersion(Base):
+    """Contract version with derived AWf class (NL-015). Versioned chain."""
+    __tablename__ = "payroll_nl_contract_versions"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id  = Column(Integer, ForeignKey("payroll_nl_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True)
+    version                 = Column(Integer, nullable=False)
+    previous_version_id     = Column(Integer, ForeignKey("payroll_nl_contract_versions.id", ondelete="SET NULL"), nullable=True)
+    contract_term           = Column(String(20), nullable=False)  # INDEFINITE / FIXED
+    written_record          = Column(Boolean, nullable=False, default=False, server_default="false")
+    written_evidence_ref    = Column(String(200), nullable=True)
+    on_call                 = Column(Boolean, nullable=False, default=False, server_default="false")
+    agreed_hours_per_week   = Column(Numeric(5, 2), nullable=True)
+    statutory_exception_code = Column(String(20), nullable=True)
+    start_date              = Column(Date, nullable=False, index=True)
+    end_date                = Column(Date, nullable=True, index=True)
+    derived_awf_class       = Column(String(10), nullable=True)  # LOW / HIGH
+    awf_derivation_reason   = Column(String(200), nullable=True)
+    effective_from          = Column(Date, nullable=False, index=True)
+    effective_to            = Column(Date, nullable=True, index=True)
+    created_by              = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("contract_term IN ('INDEFINITE', 'FIXED')", name="ck_nl_contract_term"),
+        sa.CheckConstraint("derived_awf_class IS NULL OR derived_awf_class IN ('LOW', 'HIGH')", name="ck_nl_contract_awf_class"),
+        sa.Index("ix_nl_contract_org_emp_effective", "organization_id", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlContractVersion org={self.organization_id} emp={self.employee_id} v={self.version} awf={self.derived_awf_class}>"
+
+
+class PayrollNlIdempotencyRecord(Base):
+    """Idempotency record for NL HTTP calls (netherlands_http.py)."""
+    __tablename__ = "payroll_nl_idempotency_records"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    idempotency_key     = Column(String(100), nullable=False, unique=True, index=True)
+    request_hash        = Column(String(64), nullable=False)
+    response_status     = Column(SmallInteger, nullable=True)
+    response_body       = Column(Text, nullable=True)
+    created_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at          = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<PayrollNlIdempotencyRecord key={self.idempotency_key[:16]}...>"
