@@ -160,7 +160,7 @@ function RetiringAllowanceSection({ employee }) {
     <div className="mt-5 border-t border-border pt-4">
       <p className="mb-3 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
         Federal lump-sum withholding for a retiring allowance or severance payment. Resolves to 0% until a Super
-        Admin has entered real CRA-sourced rate bands — this platform does not guess a statutory rate. Quebec's
+        Admin has entered real CRA-sourced rate bands — this platform does not guess a statutory rate. Quebec&apos;s
         own combined federal+provincial rate is not modeled here.
       </p>
       <Field label="Retiring allowance / severance amount">
@@ -237,7 +237,7 @@ function Td1xCommissionSection({ employee, onEmployeeUpdated }) {
   return (
     <div className="mt-5 border-t border-border pt-4">
       <p className="mb-3 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
-        CRA's real commission formula for an employee with a TD1X election on file — uses estimated annual
+        CRA&apos;s real commission formula for an employee with a TD1X election on file — uses estimated annual
         commission income minus estimated annual expenses, not annualized periodic salary.
       </p>
       <div className="grid grid-cols-2 gap-3">
@@ -285,7 +285,7 @@ export default function CAStatutoryFormsModal({ employee: initialEmployee, onClo
     <Modal title={`Canada Statutory Forms — ${employee.name}`} onClose={onClose} maxWidth="max-w-2xl">
       <p className="mb-4 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
         T4 and RL-1 (Quebec) are calendar-year-end slips. ROE (Record of Employment) is triggered by an actual
-        interruption of earnings — set the last day worked below before generating it. ROE's insurable-hours
+        interruption of earnings — set the last day worked below before generating it. ROE&apos;s insurable-hours
         block (15C) is not populated; only insurable earnings and EI premiums are.
       </p>
 

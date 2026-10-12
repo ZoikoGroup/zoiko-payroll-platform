@@ -582,7 +582,7 @@ function FinancialIntegrationSummary({ component }) {
       )}
       {info.isBlocked && (
         <p className="text-[11px] text-warning" title="Social insurance is fully applied; this payslip's own wage tax was never computed via the internal calculator, so no wage-tax/Soli/Kirchensteuer delta could be derived for this premium">
-          Wage tax/Soli/Kirchensteuer not applied — base payslip's wage tax unavailable
+          Wage tax/Soli/Kirchensteuer not applied — base payslip&apos;s wage tax unavailable
         </p>
       )}
       {info.isPartial && (

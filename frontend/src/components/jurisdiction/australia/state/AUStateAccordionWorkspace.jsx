@@ -54,7 +54,7 @@ export default function AUStateAccordionWorkspace({ initialSelectedState = "" })
     <div>
       <p className="mb-4 text-xs text-foreground-muted">
         Each state/territory levies its own payroll tax as an employer liability — it never reduces an
-        employee's own net pay. Expand a state to configure its threshold/rate parameters or bracket table.
+        employee&apos;s own net pay. Expand a state to configure its threshold/rate parameters or bracket table.
       </p>
 
       {loading && !hasLoadedOnce ? (

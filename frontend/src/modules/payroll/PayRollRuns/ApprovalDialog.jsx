@@ -172,7 +172,7 @@ export default function ApprovalDialog({ run, targetStatus = "Approved", onClose
                 {isApprovedStep ? (
                   <>
                     <p className="text-[12px] text-foreground-muted mb-3">
-                      Generate the bank transfer file for this run's Banking Policy format
+                      Generate the bank transfer file for this run&apos;s Banking Policy format
                       ({FORMAT_LABELS[summary?.bankFormat] || "CSV"}) and download it.
                     </p>
                     {downloadResult && (

@@ -37,7 +37,7 @@ export default function INComplianceCalendarTab() {
   return (
     <div className="space-y-3">
       <div className="rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-[11px] text-foreground-secondary">
-        India's statutory filing due dates (Form 138 quarterly TDS statement, §6.3, and any other filing-calendar
+        India&apos;s statutory filing due dates (Form 138 quarterly TDS statement, §6.3, and any other filing-calendar
         entries seeded for India) — reads the same platform-wide filing-calendar registry every other jurisdiction
         uses. Empty means nothing has been seeded for India yet, not that no obligation exists.
       </div>

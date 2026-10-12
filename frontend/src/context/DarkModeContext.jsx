@@ -7,7 +7,7 @@ export function DarkModeProvider({ children }) {
     try {
       const stored = localStorage.getItem("zoiko-payroll-dark-mode");
       if (stored !== null) return stored === "true";
-    } catch {}
+    } catch { /* storage unavailable — non-fatal */ }
     return false;
   });
 
@@ -18,7 +18,7 @@ export function DarkModeProvider({ children }) {
     } else {
       root.classList.remove("dark");
     }
-    try { localStorage.setItem("zoiko-payroll-dark-mode", String(isDark)); } catch {}
+    try { localStorage.setItem("zoiko-payroll-dark-mode", String(isDark)); } catch { /* storage unavailable — non-fatal */ }
   }, [isDark]);
 
   const toggle = () => setIsDark((prev) => !prev);

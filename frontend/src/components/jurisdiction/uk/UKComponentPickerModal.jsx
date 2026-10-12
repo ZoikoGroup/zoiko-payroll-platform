@@ -95,7 +95,7 @@ export default function UKComponentPickerModal({ pack, rates, slabs, onEditExist
         })}
 
         {entries.length === 0 && (
-          <p className="py-6 text-center text-xs text-foreground-disabled">No components match "{search}".</p>
+          <p className="py-6 text-center text-xs text-foreground-disabled">No components match &quot;{search}&quot;.</p>
         )}
 
         <div>

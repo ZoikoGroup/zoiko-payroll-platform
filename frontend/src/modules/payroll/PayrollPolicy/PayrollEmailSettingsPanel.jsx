@@ -91,7 +91,7 @@ export default function PayrollEmailSettingsPanel() {
           </p>
         </div>
         <p className="text-[11px] text-foreground-muted">
-          Optional — payslip and payroll emails still send through the platform's shared mail
+          Optional — payslip and payroll emails still send through the platform&apos;s shared mail
           server. Set these so employees see your organization as the sender instead of the
           platform default. Leave blank to keep the platform default.
         </p>

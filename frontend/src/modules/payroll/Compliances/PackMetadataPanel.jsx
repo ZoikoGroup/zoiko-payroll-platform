@@ -91,7 +91,7 @@ export default function PackMetadataPanel({ country, state }) {
 
       <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 mb-5 text-[12px] text-foreground-muted flex items-center gap-2">
         <Info size={14} className="text-info shrink-0" />
-        <span>Values below are strictly read-only and inherited from the <strong>Super Admin's</strong> jurisdiction pack configuration.</span>
+        <span>Values below are strictly read-only and inherited from the <strong>Super Admin&apos;s</strong> jurisdiction pack configuration.</span>
       </div>
 
       <div className="rounded-[12px] bg-warning/10 border border-warning/20 px-4 py-3 mb-5">

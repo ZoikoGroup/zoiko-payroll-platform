@@ -377,7 +377,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
           // with no signal anywhere today (found 2026-09-15
           // onboarding-guidance audit).
           <div className="mt-4 rounded-[12px] bg-warning/10 border border-warning/30 px-4 py-3 text-[12px] text-warning">
-            This employee's state is set but no W-4 filing status is on file — federal (and possibly state)
+            This employee&apos;s state is set but no W-4 filing status is on file — federal (and possibly state)
             withholding will calculate as $0 until one is entered.
           </div>
         )}

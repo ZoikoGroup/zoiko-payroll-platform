@@ -54,7 +54,7 @@ function SupplementalWageSection({ employee }) {
       <p className="mb-3 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
         For a bonus, commission, severance, or other payment separately identified as a supplemental wage under
         IRS Pub. 15. 22% flat on qualifying amounts; the 37% rate is MANDATORY (not elective) on whatever portion
-        of this employee's cumulative calendar-year supplemental wages exceeds $1,000,000. This does not create a
+        of this employee&apos;s cumulative calendar-year supplemental wages exceeds $1,000,000. This does not create a
         payslip line.
       </p>
       <div className="grid grid-cols-2 gap-3">
@@ -139,10 +139,10 @@ function W2Section({ employee }) {
   return (
     <div className="mt-5 border-t border-border pt-4">
       <p className="mb-3 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
-        W-2 is a calendar-year-end wage statement, summed from this employee's own finalized (Approved/Authorized/
+        W-2 is a calendar-year-end wage statement, summed from this employee&apos;s own finalized (Approved/Authorized/
         Paid/Closed) payslips for the year. Boxes 1/3/5/16/18 use gross pay — no pre-tax deduction (401k/HSA/
         Section 125) reduces taxable wages in this platform yet. Box 12/13 and employee address (Box f) are not
-        populated — see the generated report's own "knownGaps" for the full list.
+        populated — see the generated report&apos;s own &quot;knownGaps&quot; for the full list.
       </p>
       <Field label="Tax year">
         <input type="number" className={inputClass} value={taxYear} onChange={(e) => setTaxYear(e.target.value)} />

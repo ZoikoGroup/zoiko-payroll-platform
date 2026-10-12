@@ -154,7 +154,7 @@ export default function UKTaxComponentsTab({ pack, rates, slabs, onReload, onDel
       {rateGroups.length === 0 && niCategories.length === 0 && (
         <div className="rounded-xl border border-dashed border-border bg-surface-muted py-12 text-center">
           <p className="text-sm text-foreground-disabled">No tax components configured yet.</p>
-          <p className="mt-1 text-xs text-foreground-disabled">Click "Add Component" to get started.</p>
+          <p className="mt-1 text-xs text-foreground-disabled">Click &quot;Add Component&quot; to get started.</p>
         </div>
       )}
 

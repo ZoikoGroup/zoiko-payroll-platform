@@ -73,7 +73,7 @@ export default function CheckoutCancelPage() {
         </h1>
 
         <p style={{ color: "#6B7280", fontSize: "15px", margin: 0 }}>
-          No charge was made. You can choose a plan whenever you're ready —
+          No charge was made. You can choose a plan whenever you&apos;re ready —
           your trial access continues in the meantime.
         </p>
 

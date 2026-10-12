@@ -110,7 +110,7 @@ export default function PlanReviewPage() {
               Review your plan
             </h1>
             <p style={{ fontSize: "14px", color: "#6B7280", margin: 0 }}>
-              Confirm what you're signing up for before we take you to secure checkout.
+              Confirm what you&apos;re signing up for before we take you to secure checkout.
             </p>
           </div>
 

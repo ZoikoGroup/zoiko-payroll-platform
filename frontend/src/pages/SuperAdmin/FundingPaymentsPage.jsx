@@ -60,8 +60,8 @@ function CurrencyManagerModal({ onClose }) {
   return (
     <Modal title="Manage Organization Currencies" onClose={onClose} maxWidth="max-w-2xl">
       <p className="text-sm text-foreground-muted mb-4">
-        Set an explicit currency for an organization when it differs from its jurisdiction's default. Leave as
-        "Auto (from jurisdiction)" to keep using the derived currency.
+        Set an explicit currency for an organization when it differs from its jurisdiction&apos;s default. Leave as
+        &quot;Auto (from jurisdiction)&quot; to keep using the derived currency.
       </p>
       {loading ? (
         <p className="py-8 text-center text-sm text-foreground-disabled">Loading…</p>
@@ -184,7 +184,7 @@ export default function FundingPaymentsPage() {
           <p className="text-sm text-foreground-muted mt-0.5">
             Customer payroll money movement across organizations — not Zoiko revenue
             (that lives in Zoiko Commercial → Revenue &amp; Collections, and the two are never merged).
-            Does not replace an org's own Payroll module.
+            Does not replace an org&apos;s own Payroll module.
           </p>
         </div>
         <div className="flex items-center gap-2">

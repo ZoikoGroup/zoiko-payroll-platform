@@ -675,7 +675,7 @@ function GenericTaxConfigurationTab({ documents = [], country, jurisdictionState
           <div className="bg-error/5 border border-error/20 rounded-[18px] p-4 flex items-start gap-3">
             <AlertCircle size={16} className="text-error shrink-0 mt-0.5" />
             <p className="text-[13px] text-error">
-              Couldn't load the org's active tax configuration. This is the table {term} is actually calculated
+              Couldn&apos;t load the org&apos;s active tax configuration. This is the table {term} is actually calculated
               against — try refreshing before relying on the extracted-document values below.
             </p>
           </div>
@@ -716,7 +716,7 @@ function GenericTaxConfigurationTab({ documents = [], country, jurisdictionState
           const rows = activeItem.filter(localityRateRows);
           return rows.length === 0 ? (
             <p className="rounded-[18px] border border-dashed border-border-light bg-surface px-4 py-8 text-center text-[13px] text-foreground-disabled">
-              No {activeItem.label.toLowerCase()} configured for this organization's employees yet.
+              No {activeItem.label.toLowerCase()} configured for this organization&apos;s employees yet.
             </p>
           ) : (
             <LocalityRatesTable rows={rows} caption={`Resolved from this organization's own employees' work-locality codes — matches what their payslips actually apply.`} />

@@ -400,7 +400,7 @@ function InvoiceExplanationDetail({ invoiceId }) {
 
       {!explanation.bwm_data_available ? (
         <p style={{ fontSize: 13, color: "var(--ink-faint)" }}>
-          No per-employee billable-worker-month data is available for this invoice's period yet.
+          No per-employee billable-worker-month data is available for this invoice&apos;s period yet.
         </p>
       ) : (
         <>
@@ -808,7 +808,7 @@ export default function SubscriptionPage() {
               </div>
               <h3>No Active Subscription</h3>
               <p>
-                You don't have an active subscription yet. Choose a plan to unlock
+                You don&apos;t have an active subscription yet. Choose a plan to unlock
                 full payroll features for your organization.
               </p>
               {canManage ? (

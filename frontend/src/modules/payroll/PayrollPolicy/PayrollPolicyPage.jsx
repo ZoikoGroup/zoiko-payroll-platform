@@ -359,7 +359,7 @@ export default function PayrollPolicyPage() {
         <Card className="space-y-5">
           <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 text-[12px] text-foreground-muted flex items-center gap-2">
             <Info size={14} className="text-info shrink-0" />
-            <span>Values below are inherited from the <strong>Super Admin's</strong> master configuration. You can overwrite any unlocked field — changes apply only to your organization.</span>
+            <span>Values below are inherited from the <strong>Super Admin&apos;s</strong> master configuration. You can overwrite any unlocked field — changes apply only to your organization.</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label={<span className="flex items-center gap-1">Policy Name <InheritedDefaultsNote /></span>}>
@@ -457,8 +457,8 @@ export default function PayrollPolicyPage() {
               </span>
             </div>
             <p className="text-[11px] text-foreground-muted mb-2">
-              Default percentages inherited from the <strong>Super Admin's</strong> configuration. Percentage of monthly gross paid as Basic and HRA for employees without their own explicit
-              amounts set — Special Allowance is always whatever's left of gross.
+              Default percentages inherited from the <strong>Super Admin&apos;s</strong> configuration. Percentage of monthly gross paid as Basic and HRA for employees without their own explicit
+              amounts set — Special Allowance is always whatever&apos;s left of gross.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(() => {
@@ -503,7 +503,7 @@ export default function PayrollPolicyPage() {
               Special Allowance
             </span>
             <p className="text-[11px] text-foreground-muted mb-2">
-              Special Allowance is always whatever's left of gross after Basic, HRA, and any named components below.
+              Special Allowance is always whatever&apos;s left of gross after Basic, HRA, and any named components below.
               Components are defined by your <strong>Super Admin</strong> — you can adjust the value where override is allowed.
             </p>
             {policy.allowanceComponents.length === 0 ? (

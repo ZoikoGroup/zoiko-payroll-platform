@@ -237,7 +237,7 @@ export default function LoginPage() {
             </div>
 
             <p style={{ fontSize: "11px", color: "#9CA3AF", marginTop: "24px", lineHeight: "1.6" }}>
-              🔵 Your access is governed by your organization's permissions, roles, workspace settings and security policies.
+              🔵 Your access is governed by your organization&apos;s permissions, roles, workspace settings and security policies.
             </p>
           </div>
         </div>

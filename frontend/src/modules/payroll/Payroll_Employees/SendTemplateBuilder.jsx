@@ -276,7 +276,7 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
         <>
           <div>
             <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
-              Send "{savedForm?.name}" to — {pickedIds.size} selected
+              Send &quot;{savedForm?.name}&quot; to — {pickedIds.size} selected
             </span>
             <EmployeeTable
               employees={employees}

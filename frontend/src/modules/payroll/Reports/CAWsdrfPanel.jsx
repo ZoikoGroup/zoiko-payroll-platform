@@ -44,8 +44,8 @@ export default function CAWsdrfPanel() {
       <div className="rounded-[14px] border border-border bg-surface p-5">
         <h3 className="mb-1 text-[15px] font-bold text-foreground">WSDRF — Workforce Skills Development and Recognition Fund</h3>
         <p className="mb-4 text-[12px] text-foreground-secondary">
-          1% of total Quebec payroll (real, finalized payslips only) for the period, minus this employer's own
-          declared eligible training expenditure (Compliance &gt; Canada &gt; Workers' Compensation &amp; Employer
+          1% of total Quebec payroll (real, finalized payslips only) for the period, minus this employer&apos;s own
+          declared eligible training expenditure (Compliance &gt; Canada &gt; Workers&apos; Compensation &amp; Employer
           Profiles — component QC_WSDRF_TRAINING_EXPENDITURE). An annual reconciliation figure, not a per-payslip
           deduction.
         </p>

@@ -76,7 +76,7 @@ export default function LeaveApprovalEmail({
           <div className="p-3.5 bg-slate-950/50 rounded-lg border border-slate-800/80 flex gap-3 text-xs text-slate-400">
             <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-slate-300 font-medium">Secondary guidance:</strong> If you believe this decision does not reflect your current request, contact your organization's designated support route before relying on it for other arrangements.
+              <strong className="text-slate-300 font-medium">Secondary guidance:</strong> If you believe this decision does not reflect your current request, contact your organization&apos;s designated support route before relying on it for other arrangements.
             </p>
           </div>
 

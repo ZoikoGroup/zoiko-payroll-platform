@@ -92,7 +92,7 @@ export default function EngineFallbackDefaultsPage() {
       <div className="mb-5 flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 px-4 py-3">
         <Info size={15} className="mt-0.5 shrink-0 text-info" />
         <p className="text-xs text-foreground-secondary">
-          <strong>Read-only.</strong> Nothing on this page can be edited here. "Seedable Defaults" become real, Super-Admin-editable rows in Compliance the first time an organization uses that jurisdiction. "Engine-Only Constants" have no database row at all today — changing one requires an engineering change, not a Compliance edit.
+          <strong>Read-only.</strong> Nothing on this page can be edited here. &quot;Seedable Defaults&quot; become real, Super-Admin-editable rows in Compliance the first time an organization uses that jurisdiction. &quot;Engine-Only Constants&quot; have no database row at all today — changing one requires an engineering change, not a Compliance edit.
         </p>
       </div>
 
