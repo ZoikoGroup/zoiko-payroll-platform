@@ -576,6 +576,25 @@ JURISDICTION_TAX_SCHEMAS = {
              "example": "MUDAD-001234", "primary": False},
         ],
     },
+    # Netherlands — schema only. Deliberately NOT in REGISTRATION_COUNTRIES:
+    # live Dutch payroll stays disabled until release gates G1–G8 are evidenced
+    # and the registry row leaves PLANNED. KVK = Kamer van Koophandel (Chamber
+    # of Commerce) number; RSIN = the 9-digit legal-entity identification used
+    # by the Belastingdienst; loonheffingennummer = the payroll-tax (loonheffing)
+    # withholding number issued by the Belastingdienst. Formats only — never
+    # synthesised.
+    "NL": {
+        "label": "KVK / RSIN / Loonheffingennummer",
+        "currency": "EUR",
+        "fields": [
+            {"key": "kvk_number", "label": "KVK (Chamber of Commerce) number", "pattern": r"^\d{8}$",
+             "example": "12345678", "primary": True},
+            {"key": "rsin", "label": "RSIN (legal-entity identification number)", "pattern": r"^\d{9}$",
+             "example": "123456789", "primary": False},
+            {"key": "loonheffingennummer", "label": "Loonheffingennummer (payroll-tax number)",
+             "pattern": r"^\d{9}L\d{2}$", "example": "123456789L01", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -614,6 +633,9 @@ COUNTRY_NAME_TO_CODE = {
     "saudi arabia": "SA",
     "saudi": "SA",
     "ksa": "SA",
+    "netherlands": "NL",
+    "the netherlands": "NL",
+    "holland": "NL",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -638,6 +660,7 @@ CODE_TO_COUNTRY_NAME = {
     "IT": "Italy",
     "CH": "Switzerland",
     "SA": "Saudi Arabia",
+    "NL": "Netherlands",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

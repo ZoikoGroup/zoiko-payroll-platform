@@ -32505,6 +32505,8 @@ def _get_currency_symbol(country: str) -> str:
         # fell through to the "$" default below, which is a silently wrong
         # currency rather than a visible failure.
         "IE": "\u20ac", "FR": "\u20ac",
+        # Netherlands uses the euro too.
+        "NL": "\u20ac",
     }.get(country, "$")
 
 
@@ -32530,6 +32532,8 @@ def _get_currency_code(country: str) -> str:
         # Ireland (ZP-IE-ENG-001) uses the euro; without this row IE silently
         # fell through to the "USD" default below.
         "IE": "EUR", "FR": "EUR",
+        # Netherlands uses the euro.
+        "NL": "EUR",
     }.get(country, "USD")
 
 

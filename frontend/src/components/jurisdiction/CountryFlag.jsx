@@ -260,10 +260,22 @@ function Switzerland() {
   );
 }
 
+// Netherlands — horizontal tricolour, red / white / blue.
+function Netherlands() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="5.34" fill="#AE1C28" />
+      <rect y="5.33" width="24" height="5.34" fill="#fff" />
+      <rect y="10.67" width="24" height="5.33" fill="#21468B" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
+  NL: Netherlands,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

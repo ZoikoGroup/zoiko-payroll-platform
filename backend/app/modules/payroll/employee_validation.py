@@ -1392,6 +1392,53 @@ class SAEmployeeValidation(EmployeeValidationStrategy):
             raise BadRequestException(f"IBAN {iban!r} fails the mod-97 validation.")
 
 
+def bsn_is_valid(value: str) -> bool:
+    """Dutch BSN (Burgerservicenummer) — 9 digits validated by the
+    "elfproef" (eleven-test): sum(digit_i x weight_i) mod 11 == 0, with
+    weights 9,8,7,6,5,4,3,2,-1 (the ninth digit carries weight -1). Refuses
+    every other shape — a BSN is exactly 9 digits; the 8-digit written form is
+    not accepted here."""
+    raw = re.sub(r"[\s.-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{9}", raw):
+        return False
+    total = sum(int(d) * w for d, w in zip(raw, (9, 8, 7, 6, 5, 4, 3, 2, -1)))
+    return total % 11 == 0
+
+
+class NLEmployeeValidation(EmployeeValidationStrategy):
+    """Netherlands (ZP-NL-ENG-001) — BSN.
+
+    The BSN is validated in shape AND the elfproef, because a wrong one breaks
+    the loonaangifte / UWV Polisadministratie linkage and the jaaropgaaf — a
+    typo must be caught at entry against the identity document, never at the
+    first payroll return. It is SENSITIVE (masked in API responses) and the
+    duplicate-check key. No income-tax amount or tax-credit figure is captured
+    here: loonheffingskorting is a signed, effective-dated employee
+    instruction resolved against the wage-tax tables (NL-006/NL-031), and every
+    2026 statutory rate lives on the NL-PAYROLL-2026 canonical pack — never an
+    editable employee field. Bank details (IBAN/BIC) are handled by the
+    bank-routing layer, not this strategy (see the base class note on
+    SENSITIVE_FIELDS)."""
+    country_code = "NL"
+    duplicate_field = "bsn"
+    SENSITIVE_FIELDS = ('bsn',)
+    FIELD_SPECS = {
+        "bsn": {
+            "required": True,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "BSN must be the 9-digit Burgerservicenummer.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        n = cleaned.get("bsn")
+        if n and not bsn_is_valid(n):
+            raise BadRequestException("BSN fails the elfproef (eleven-test) check — check the "
+                                      "number against the employee's identity document.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1415,6 +1462,7 @@ _STRATEGIES = {
     "IT": ITEmployeeValidation,
     "CH": CHEmployeeValidation,
     "SA": SAEmployeeValidation,
+    "NL": NLEmployeeValidation,
 }
 
 
