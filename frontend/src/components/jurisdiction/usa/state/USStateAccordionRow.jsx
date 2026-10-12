@@ -111,7 +111,7 @@ export default function USStateAccordionRow({
         <div className="border-t border-border p-4">
           {!selectedPack ? (
             <p className="py-6 text-center text-xs text-foreground-disabled">
-              No tax pack configured for {stateName} yet — use "New State / Tax" above to create one.
+              No tax pack configured for {stateName} yet — use &quot;New State / Tax&quot; above to create one.
             </p>
           ) : (
             <>

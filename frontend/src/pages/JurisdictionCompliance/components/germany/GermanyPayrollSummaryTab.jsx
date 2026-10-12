@@ -179,7 +179,7 @@ export default function GermanyPayrollSummaryTab() {
             Wage tax calculation mode: INTERNAL FUNCTIONAL REFERENCE ({"§32a/§39b EStG"})
           </p>
           <p className="mt-0.5 text-foreground-muted">
-            These wage-tax/Soli figures are computed by Zoiko Payroll's internal statutory-reference calculator
+            These wage-tax/Soli figures are computed by Zoiko Payroll&apos;s internal statutory-reference calculator
             (real German tax law formulas, not fabricated) because no certified BMF Programmablaufplan (PAP) asset
             is published. They are <span className="font-semibold">not BMF-certified</span> — do not represent them
             as official government-certified output.

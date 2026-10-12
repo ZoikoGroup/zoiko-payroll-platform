@@ -55,12 +55,12 @@ export default function USForm941Panel() {
   return (
     <div className="max-w-xl space-y-4">
       <div className="rounded-[14px] border border-border bg-surface p-5">
-        <h3 className="mb-1 text-[15px] font-bold text-foreground">Form 941 — Employer's Quarterly Federal Tax Return</h3>
+        <h3 className="mb-1 text-[15px] font-bold text-foreground">Form 941 — Employer&apos;s Quarterly Federal Tax Return</h3>
         <p className="mb-4 text-[12px] text-foreground-secondary">
           Sums wages, federal income tax withheld, and combined employee + employer Social Security/Medicare tax
           across every finalized (Approved/Authorized/Paid/Closed — never Draft/Review) US payslip paid within the
           chosen IRS calendar quarter. Lines 5c/5d (regular vs. Additional Medicare) are combined — see the
-          generated report's own "knownGaps" for the full list of disclosed simplifications, including that total
+          generated report&apos;s own &quot;knownGaps&quot; for the full list of disclosed simplifications, including that total
           deposits/balance due are not computed (no deposits-made ledger exists in this platform).
         </p>
         <div className="grid grid-cols-2 gap-3">

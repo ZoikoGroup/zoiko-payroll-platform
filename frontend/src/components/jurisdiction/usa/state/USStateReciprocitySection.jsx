@@ -39,7 +39,7 @@ export default function USStateReciprocitySection({ stateName }) {
         <p className="py-6 text-center text-xs text-foreground-disabled">Loading…</p>
       ) : !code ? (
         <p className="py-6 text-center text-xs text-foreground-disabled">
-          "{stateName}" doesn't match a known state code — check reciprocity agreements on the full tab.
+          &quot;{stateName}&quot; doesn&apos;t match a known state code — check reciprocity agreements on the full tab.
         </p>
       ) : filtered.length === 0 ? (
         <p className="py-6 text-center text-xs text-foreground-disabled">No reciprocity agreements involve {stateName} yet.</p>

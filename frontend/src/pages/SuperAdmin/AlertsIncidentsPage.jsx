@@ -157,7 +157,7 @@ export default function AlertsIncidentsPage() {
       ))}
       {!loading && groups.length > 0 && (
         <p className="text-xs text-foreground-muted">
-          Alerts are derived from each source page's own query logic — resolving one here is the same as resolving it
+          Alerts are derived from each source page&apos;s own query logic — resolving one here is the same as resolving it
           on its source page.
         </p>
       )}

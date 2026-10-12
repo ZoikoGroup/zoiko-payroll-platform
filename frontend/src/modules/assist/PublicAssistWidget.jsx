@@ -87,7 +87,6 @@ export default function PublicAssistWidget() {
   const [view, setView] = useState("home");
   const [activeTopicId, setActiveTopicId] = useState(null);
   const [showSupport, setShowSupport] = useState(false);
-  const [focusCountry, setFocusCountry] = useState(false);
 
   const launcherRef = useRef(null);
   const headingRef = useRef(null);
@@ -95,25 +94,26 @@ export default function PublicAssistWidget() {
   const textareaRef = useRef(null);
   const countryInputRef = useRef(null);
   const inFlight = useRef(false);
+  const pendingCountryFocus = useRef(false);
 
   // Config, country feed and health load once, on first open (never on
   // page load — the widget must not do work without a user gesture).
-  useEffect(() => {
-    if (!open || loaded) return;
-    setLoaded(true);
-    getPublicAssistConfig(locale).then((c) => setConfig(mergeConfig(c)));
-    getPublicPayrollCountries(locale).then((f) => {
-      setFeed(f);
-      setFeedState(f && Array.isArray(f.countries) ? "ready" : "error");
-    });
-    resolvePublicHealth().then(setHealth);
-  }, [open, loaded, locale]);
-
-  // Re-check a failed health probe whenever the panel is reopened, so a
-  // transient outage doesn't leave the composer locked for the whole visit.
-  useEffect(() => {
-    if (open && loaded && health === "unavailable") resolvePublicHealth().then(setHealth);
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  function openPanel() {
+    setOpen(true);
+    if (!loaded) {
+      setLoaded(true);
+      getPublicAssistConfig(locale).then((c) => setConfig(mergeConfig(c)));
+      getPublicPayrollCountries(locale).then((f) => {
+        setFeed(f);
+        setFeedState(f && Array.isArray(f.countries) ? "ready" : "error");
+      });
+      resolvePublicHealth().then(setHealth);
+    } else if (health === "unavailable") {
+      // Re-check a failed probe on reopen so a transient outage doesn't
+      // leave the composer locked for the whole visit.
+      resolvePublicHealth().then(setHealth);
+    }
+  }
 
   useEffect(() => {
     if (open) headingRef.current?.focus();
@@ -123,13 +123,14 @@ export default function PublicAssistWidget() {
     if (view === "chat") scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending, view]);
 
+  // A "Check your country" follow-up switches to the home view; focus the
+  // country search once that view has mounted.
   useEffect(() => {
-    if (focusCountry && view === "home") {
-      countryInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-      countryInputRef.current?.focus({ preventScroll: true });
-      setFocusCountry(false);
-    }
-  }, [focusCountry, view]);
+    if (!pendingCountryFocus.current || view !== "home") return;
+    pendingCountryFocus.current = false;
+    countryInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    countryInputRef.current?.focus({ preventScroll: true });
+  }, [view]);
 
   const minimize = useCallback(() => {
     setOpen(false);
@@ -235,7 +236,7 @@ export default function PublicAssistWidget() {
   function goToCountryCheck() {
     setView("home");
     setActiveTopicId(null);
-    setFocusCountry(true);
+    pendingCountryFocus.current = true;
   }
 
   const hasConversation = messages.length > 0;
@@ -246,7 +247,7 @@ export default function PublicAssistWidget() {
       <ConciergeLauncher
         ref={launcherRef}
         open={open}
-        onToggle={() => (open ? minimize() : setOpen(true))}
+        onToggle={() => (open ? minimize() : openPanel())}
         iconSrc={zoikoPayrollIcon}
         label={open ? "Minimize Global Payroll AI Concierge" : "Open Global Payroll AI Concierge"}
       />

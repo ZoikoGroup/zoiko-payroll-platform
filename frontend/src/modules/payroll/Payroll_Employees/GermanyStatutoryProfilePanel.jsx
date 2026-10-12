@@ -343,7 +343,7 @@ export default function GermanyStatutoryProfilePanel({ employee, onClose }) {
             <div className="text-[12px] text-foreground">
               <span className="font-bold">Live ELStAM connector: not connected.</span>{" "}
               Zoiko holds no ELSTER organizational certificate — this data is entered manually, from the
-              employee's paper "Bescheinigung für den Lohnsteuerabzug," or via a structured import of data
+              employee&apos;s paper &quot;Bescheinigung für den Lohnsteuerabzug,&quot; or via a structured import of data
               already validated outside this system. Nothing on this screen contacts ELSTER/BZSt.
             </div>
           </div>

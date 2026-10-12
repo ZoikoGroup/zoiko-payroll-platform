@@ -65,7 +65,7 @@ export default function INForm138Panel() {
         <h3 className="mb-1 text-[15px] font-bold text-foreground">Form 138 — Quarterly Salary TDS Statement</h3>
         <p className="mb-4 text-[12px] text-foreground-secondary">
           Sums TDS across every finalized (Approved/Authorized/Paid/Closed — never Draft/Review) India payslip whose
-          pay period falls within the chosen quarter's real calendar date range, not just one payroll run.
+          pay period falls within the chosen quarter&apos;s real calendar date range, not just one payroll run.
         </p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Reporting year (India FY)">

@@ -39,7 +39,7 @@ export default function LocalityRatesPanel() {
       <div className="mb-4">
         <h2 className="text-lg font-bold text-foreground">Locality Rates</h2>
         <p className="mt-0.5 text-xs text-foreground-muted">
-          County/municipal/school-district tax rates, entered against the jurisdiction's actual published rate —
+          County/municipal/school-district tax rates, entered against the jurisdiction&apos;s actual published rate —
           never inferred from an address. An employee only sees this rate once their own Work Locality Code
           matches. See ZP-TAX-US-2026-001 §C.
         </p>

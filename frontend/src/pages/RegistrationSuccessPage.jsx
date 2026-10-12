@@ -88,7 +88,7 @@ export default function RegistrationSuccessPage() {
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
               <span className="font-medium text-slate-700">{orgName}</span>{" "}
-              is ready for Zoiko Payroll. We've sent a confirmation to
+              is ready for Zoiko Payroll. We&apos;ve sent a confirmation to
             </p>
             <p className="mt-0.5 flex items-center justify-center gap-1.5 text-sm font-medium text-slate-700">
               <Mail size={14} className="text-slate-400" />

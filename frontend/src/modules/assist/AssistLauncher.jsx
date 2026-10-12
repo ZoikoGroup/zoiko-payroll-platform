@@ -622,6 +622,9 @@ function DraftsPanel({ sessionId }) {
   }
 
   useEffect(() => {
+    // Fetch-on-mount: load() flips the busy flag before awaiting the API,
+    // which is the intended loading state, not a cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -766,6 +769,9 @@ function HistoryPanel({ onResume }) {
   }
 
   useEffect(() => {
+    // Fetch-on-mount: load() flips the busy flag before awaiting the API,
+    // which is the intended loading state, not a cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

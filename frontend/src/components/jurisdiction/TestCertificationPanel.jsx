@@ -80,7 +80,7 @@ export default function TestCertificationPanel({ jurisdiction, label, fixturesPa
       {loading ? (
         <p className="py-8 text-center text-xs text-foreground-disabled">Loading…</p>
       ) : runs.length === 0 ? (
-        <p className="py-8 text-center text-xs text-foreground-disabled">No runs yet — click "Run Now" to certify.</p>
+        <p className="py-8 text-center text-xs text-foreground-disabled">No runs yet — click &quot;Run Now&quot; to certify.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border-light">
           <table className="w-full text-xs">

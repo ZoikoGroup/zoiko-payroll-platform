@@ -269,7 +269,7 @@ export default function PayrollRunsMonitorPage() {
           ))}
           {visibleOrganizations.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-10 text-center shadow-sm">
-              <p className="text-sm text-foreground-disabled">No organizations match "{keyword}".</p>
+              <p className="text-sm text-foreground-disabled">No organizations match &quot;{keyword}&quot;.</p>
             </div>
           )}
         </div>

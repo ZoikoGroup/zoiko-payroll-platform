@@ -230,7 +230,7 @@ export default function TrialSignupPage() {
                 borderRadius: "10px", padding: "12px 14px"
               }}>
                 <p style={{ margin: 0, fontSize: "13px", color: "#15803D", lineHeight: "1.5" }}>
-                  Free for 30 days. Convert to a production account any time — you'll be asked for
+                  Free for 30 days. Convert to a production account any time — you&apos;ll be asked for
                   business and tax details only when you do.
                 </p>
               </div>

@@ -17,7 +17,7 @@ export default function USStateSourceEvidenceNote({
     <div className="rounded-xl border border-dashed border-border bg-surface-muted p-6 text-center">
       <FileCheck2 size={20} className="mx-auto mb-2 text-foreground-disabled" />
       <p className="mx-auto max-w-md text-xs text-foreground-secondary">
-        Source Evidence records aren't tracked per-state — they're a platform-wide log of the official
+        Source Evidence records aren&apos;t tracked per-state — they&apos;re a platform-wide log of the official
         publications behind configured rates and slabs.
       </p>
       <Link to={linkTo} className="mt-2 inline-block text-xs font-semibold text-primary hover:underline">

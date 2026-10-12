@@ -87,7 +87,7 @@ export default function RevenueCollectionsPage() {
             <CircleDollarSign size={22} className="text-primary" /> Revenue & Collections
           </h1>
           <p className="text-sm text-foreground-muted mt-0.5">
-            Zoiko's own subscription revenue (PAID invoices) — distinct from Funding &amp; Payments, which reports customers'
+            Zoiko&apos;s own subscription revenue (PAID invoices) — distinct from Funding &amp; Payments, which reports customers&apos;
             payroll money movement. These are never merged.
           </p>
         </div>

@@ -61,7 +61,7 @@ export default function RtiFormsPage() {
         <p className="py-12 text-center text-sm text-foreground-disabled">Loading…</p>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-foreground-disabled">
-          No filings generated yet for this filter. A report's template needs to be authored and activated first
+          No filings generated yet for this filter. A report&apos;s template needs to be authored and activated first
           (Super Admin &gt; Report Templates &gt; the relevant jurisdiction) before any organization can generate against it.
         </div>
       ) : (

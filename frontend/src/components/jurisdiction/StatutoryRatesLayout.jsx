@@ -167,7 +167,7 @@ export default function StatutoryRatesLayout({ country, countryName, initialStat
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-[11px] text-foreground-disabled">Editing tax brackets happens in Compliance's Tax Slabs tab.</p>
+          <p className="mt-2 text-[11px] text-foreground-disabled">Editing tax brackets happens in Compliance&apos;s Tax Slabs tab.</p>
         </div>
       )}
 

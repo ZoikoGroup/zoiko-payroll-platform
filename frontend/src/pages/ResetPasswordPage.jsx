@@ -122,7 +122,7 @@ export default function ResetPasswordPage() {
                 Choose a new password
               </h1>
               <p style={{ fontSize: "14px", color: "#6B7280", lineHeight: "1.6", margin: "0 0 28px 0" }}>
-                Pick a strong password you haven't used for this account before.
+                Pick a strong password you haven&apos;t used for this account before.
               </p>
 
               {error && (

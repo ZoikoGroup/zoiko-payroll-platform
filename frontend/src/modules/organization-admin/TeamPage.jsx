@@ -89,7 +89,7 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
   return (
     <Modal title="Invite Payroll Admin" onClose={onClose} maxWidth="max-w-xl">
       <p className="text-sm text-foreground-muted mb-4">
-        They'll receive an email with a link to set their own password. Payroll Admin is the only role you can
+        They&apos;ll receive an email with a link to set their own password. Payroll Admin is the only role you can
         invite here.
       </p>
 

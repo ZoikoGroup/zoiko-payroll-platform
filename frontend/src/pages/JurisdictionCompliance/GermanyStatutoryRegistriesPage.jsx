@@ -423,7 +423,7 @@ function LifecycleRegistryTab({
               GermanyCompliancePackSection's own docstring). */}
           <label className="col-span-2">
             <span className="mb-1 block text-[11px] font-semibold text-foreground-muted">
-              Germany Compliance Pack ID (optional — links this DRAFT version to a specific pack, e.g. "DE-PAYROLL-CY2026-V1")
+              Germany Compliance Pack ID (optional — links this DRAFT version to a specific pack, e.g. &quot;DE-PAYROLL-CY2026-V1&quot;)
             </span>
             <input
               className={inputCls} type="number" placeholder="Pack row id (see Compliance Pack tab)"
@@ -587,14 +587,14 @@ export function HealthFundsTab() {
     <>
       <Card title="U1 / U2 (health-fund-specific) &amp; accident insurance">
         <p className="text-[11px] text-foreground-muted">
-          U1 (sickness reimbursement) and U2 (maternity levy) are set per Krankenkasse, right here on each fund's own
+          U1 (sickness reimbursement) and U2 (maternity levy) are set per Krankenkasse, right here on each fund&apos;s own
           row (spec DE-D06) — never a national rate. U1 is <strong>employer-elected per tariff</strong>: each fund
           publishes multiple U1 tariff options (different reimbursement % and corresponding levy %), and the employer
-          selects one. Manage those tariffs in the "U1 Tariffs" tab below — once a tariff is published, an employer
-          references it via the employee's statutory profile (<code>de_u1_tariff_id</code>). <strong>Accident
+          selects one. Manage those tariffs in the &quot;U1 Tariffs&quot; tab below — once a tariff is published, an employer
+          references it via the employee&apos;s statutory profile (<code>de_u1_tariff_id</code>). <strong>Accident
           insurance</strong> (Berufsgenossenschaft carrier/risk-class assessment) is a per-employer statutory fact, not a
           fund rate — it reuses the existing Employer Tax Profile mechanism (the same one US SUI uses): Super Admin &gt;
-          Compliance &gt; Employer Tax Profiles, jurisdiction "DE", component "DE_ACCIDENT_INSURANCE". No dedicated
+          Compliance &gt; Employer Tax Profiles, jurisdiction &quot;DE&quot;, component &quot;DE_ACCIDENT_INSURANCE&quot;. No dedicated
           Germany UI panel for it yet — the API and calculation-trace visibility are complete; a Germany-labeled panel is
           a follow-up item.
         </p>
@@ -751,7 +751,7 @@ export function MinijobMidijobParametersTab() {
           Effective-dated Minijob and Midijob thresholds, flat rates, and Übergangsbereich formula coefficients —
           previously hardcoded Python constants with no effective dating. Each consuming calculation still falls
           back to its existing hardcoded default until a real PUBLISHED row exists here for that parameter code, so
-          an empty registry reflects this environment's genuine starting state, not a missing configuration.
+          an empty registry reflects this environment&apos;s genuine starting state, not a missing configuration.
         </p>
       </Card>
       <LifecycleRegistryTab
@@ -815,7 +815,7 @@ export function EarningTaxabilityTab() {
         <p className="text-[11px] text-foreground-muted">
           Every Germany earning/deduction type independently declares wage-tax treatment, GKV/PV treatment, RV/ALV
           treatment, and a free-text reporting classification (spec §15 gives no enumerated set for the fourth
-          dimension) — never a single "Taxable" checkbox.
+          dimension) — never a single &quot;Taxable&quot; checkbox.
         </p>
       </Card>
       <LifecycleRegistryTab
@@ -869,7 +869,7 @@ export function OvertimePremiumCategoriesTab() {
       <Card title="Statutory overtime/shift-premium categories (§3b EStG)">
         <p className="text-[11px] text-foreground-muted">
           The wage-tax-free percentage of a night/Sunday/holiday surcharge, computed on an hourly Grundlohn — see
-          the separate "Overtime Grundlohn Caps" tab for the €/hour caps this percentage applies against. This
+          the separate &quot;Overtime Grundlohn Caps&quot; tab for the €/hour caps this percentage applies against. This
           registry does not calculate a premium amount, classify a work period as night/Sunday/holiday, or feed
           the payroll engine yet.
         </p>
@@ -910,8 +910,8 @@ export function OvertimeGrundlohnCapsTab() {
         <p className="text-[11px] text-foreground-muted">
           The hourly Grundlohn ceiling used to compute overtime/shift-premium exemptions — WAGE_TAX (§3b EStG) and
           SOCIAL_INSURANCE (§1 Abs. 1 Satz 1 Nr. 1 SvEV) caps are genuinely different amounts and must never be
-          confused. This is a <strong>statutory Grundlohn cap</strong>, not an employee's hourly pay rate — see the
-          employee's Germany statutory profile ("Overtime / Premium Basis") for that separate, per-employee value.
+          confused. This is a <strong>statutory Grundlohn cap</strong>, not an employee&apos;s hourly pay rate — see the
+          employee&apos;s Germany statutory profile (&quot;Overtime / Premium Basis&quot;) for that separate, per-employee value.
         </p>
       </Card>
       <LifecycleRegistryTab
@@ -1066,8 +1066,8 @@ export function ElstamBatchesTab() {
       <ErrorBanner message={actionError} />
       <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
         This is an operations/review surface only — it records that a batch was received and its review status.
-        Nothing here polls ELSTER/BZSt or auto-applies attribute changes; each employee's actual change is entered
-        separately via the employee statutory-profile screen's "Structured ELStAM import" mode.
+        Nothing here polls ELSTER/BZSt or auto-applies attribute changes; each employee&apos;s actual change is entered
+        separately via the employee statutory-profile screen&apos;s &quot;Structured ELStAM import&quot; mode.
       </div>
       {showForm && (
         <form onSubmit={handleCreate} className="mb-4 grid grid-cols-2 gap-2 rounded-[10px] border border-border p-3">
@@ -1227,7 +1227,7 @@ export function ElsterTab() {
         action={<button className={btnSecondary} onClick={() => setShowCreate((v) => !v)}><Plus size={12} className="inline -mt-0.5 mr-1" /> Prepare transmission record</button>}
       >
         <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
-          Records only — validation is structural (non-empty type, sane period), and "Transmit" runs against the
+          Records only — validation is structural (non-empty type, sane period), and &quot;Transmit&quot; runs against the
           fail-closed boundary: it records <span className="font-bold">BLOCKED_EXTERNAL</span> with the reason, never a
           fake acknowledgement. Retry is safe and idempotent.
         </div>
@@ -1332,7 +1332,7 @@ export function SourceEvidenceTab() {
       <Card title="DE-SRC-001 … 014 backfill status (spec §24 Source Register)">
         <p className="mb-3 text-[11px] text-foreground-muted">
           A checkmark means a source-artifact row citing that evidence exists below — never inferred from the
-          document's own reference table alone. An unchecked row is genuinely <strong>SOURCE_REQUIRED</strong>.
+          document&apos;s own reference table alone. An unchecked row is genuinely <strong>SOURCE_REQUIRED</strong>.
         </p>
         <table className="w-full text-[12px]">
           <thead><tr><Th>ID</Th><Th>Requirement</Th><Th>Status</Th></tr></thead>
@@ -1472,7 +1472,7 @@ export function EmployerLeviesTab() {
       <Card title="Germany accident insurance (Unfallversicherung) — employer-specific">
         <p className="text-[11px] text-foreground-muted">
           Statutory accident insurance is <strong>carrier/industry/employer specific</strong> (spec DE-D06) — there
-          is no national rate to publish. Each profile below is one employer's own Berufsgenossenschaft-assigned
+          is no national rate to publish. Each profile below is one employer&apos;s own Berufsgenossenschaft-assigned
           rate, carried through the same DRAFT → VERIFIED → APPROVED → PUBLISHED maker-checker workflow as every
           other Germany registry on this page. Publishing a profile records it for configuration and
           calculation-trace audit visibility only — German accident insurance is assessed <strong>annually</strong>
@@ -1553,7 +1553,7 @@ export default function GermanyStatutoryRegistriesPage() {
       <div className="mb-5">
         <h1 className="text-[18px] font-bold text-foreground">Germany statutory registries</h1>
         <p className="mt-1 text-[13px] text-foreground-muted">
-          Operational management for the Germany 2026 statutory configuration Zoiko's payroll engine reads from —
+          Operational management for the Germany 2026 statutory configuration Zoiko&apos;s payroll engine reads from —
           PAP, health funds, contribution ceilings, PV configuration, church tax, ELStAM change-list batches, the
           ELSTER transmission boundary and source evidence. Every action here calls a real backend operation; nothing
           is simulated.

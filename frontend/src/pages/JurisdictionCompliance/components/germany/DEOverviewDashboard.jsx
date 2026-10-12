@@ -108,7 +108,7 @@ export default function DEOverviewDashboard({ onSelectSection }) {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h3 className="mb-1 text-sm font-bold text-foreground">Germany payroll compliance</h3>
         <p className="text-xs text-foreground-muted">
-          Statutory configuration Zoiko's payroll engine reads from for Germany — PAP, health funds (SI contribution
+          Statutory configuration Zoiko&apos;s payroll engine reads from for Germany — PAP, health funds (SI contribution
           rates), contribution ceilings, PV (Pflegeversicherung) configuration, church tax, overtime treatment,
           employer levies, ELStAM change-list batches, and the source evidence backing each of them. Select any
           area below to open it directly, or use the tabs above.
