@@ -97,7 +97,7 @@ export default function AUStateAccordionRow({
         <div className="border-t border-border p-4">
           {!selectedPack ? (
             <p className="py-6 text-center text-xs text-foreground-disabled">
-              No payroll tax pack configured for {stateLabel} yet — use "New State Pack" above to create one.
+              No payroll tax pack configured for {stateLabel} yet — use &quot;New State Pack&quot; above to create one.
             </p>
           ) : (
             <>

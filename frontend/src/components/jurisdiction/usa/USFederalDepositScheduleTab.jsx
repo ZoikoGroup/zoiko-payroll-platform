@@ -46,8 +46,8 @@ export default function USFederalDepositScheduleTab() {
         <h2 className="text-lg font-bold text-foreground">Federal Deposit &amp; Filing Calendar</h2>
         <p className="mt-0.5 text-xs text-foreground-muted">
           IRS Pub. 15 depositor status, deposit due dates, the $100,000 next-day rule, the $500 FUTA quarterly
-          deposit trigger, and the Form W-2/W-3 deadline. See ZP-TAX-US-2026-001 §3.5. Form 941's own due date is
-          not shown here — this document doesn't give that figure literally, so it isn't guessed at.
+          deposit trigger, and the Form W-2/W-3 deadline. See ZP-TAX-US-2026-001 §3.5. Form 941&apos;s own due date is
+          not shown here — this document doesn&apos;t give that figure literally, so it isn&apos;t guessed at.
         </p>
       </div>
 

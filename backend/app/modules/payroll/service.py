@@ -26647,6 +26647,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         # recalculation) — this genuinely differs from a same-input
         # reproduction, so surface it rather than silently accepting
         # whatever number comes out.
+        import logging
         logging.getLogger("zoiko").warning(
             "[ca-ytd-recalc] payslip %s recalculated with YTD accumulation now available but no prior "
             "ytd_snapshot to reproduce from — figures may differ from the original run.",
@@ -35894,7 +35895,6 @@ def _net_salary_cell_text(item, fmt) -> str:
     if item.status == PayslipStatus.PARTIAL:
         return "N/A"
     return fmt(item.net_pay)
-    return Decimal(str(getattr(item, field, 0) or 0))
 
 
 def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int = None) -> bytes:

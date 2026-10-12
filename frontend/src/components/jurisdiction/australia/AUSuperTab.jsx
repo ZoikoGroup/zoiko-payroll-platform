@@ -10,7 +10,7 @@ export default function AUSuperTab({ pack, rates, onAddRate, onEditRate, onDelet
   return (
     <div className="space-y-3">
       <p className="text-xs text-foreground-muted">
-        Superannuation Guarantee rate and the annual Maximum Contribution Base (§10) — SG is capped once an employee's cumulative qualifying earnings for the Australian financial year reach this base.
+        Superannuation Guarantee rate and the annual Maximum Contribution Base (§10) — SG is capped once an employee&apos;s cumulative qualifying earnings for the Australian financial year reach this base.
       </p>
       <RatesTab pack={pack} rates={filtered} onAdd={onAddRate} onEdit={onEditRate} onDelete={onDeleteRate} />
     </div>

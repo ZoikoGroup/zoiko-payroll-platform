@@ -27,10 +27,10 @@ export default function INGratuityTab({ rates }) {
         <Info size={14} className="mt-0.5 shrink-0" />
         <span>
           Gratuity is an employer termination/retirement LIABILITY, not a recurring payroll deduction (§11) — this
-          is a read-only view of the rate-map parameters india.py's calculate_gratuity() actually uses. To edit
-          them, use the "Tax Parameters" tab's Retirement &amp; Exemption Limits section (they're the same
+          is a read-only view of the rate-map parameters india.py&apos;s calculate_gratuity() actually uses. To edit
+          them, use the &quot;Tax Parameters&quot; tab&apos;s Retirement &amp; Exemption Limits section (they&apos;re the same
           canonical rows). To test the calculation for a real employee, use the calculator embedded on that
-          employee's own record.
+          employee&apos;s own record.
         </span>
       </div>
 
@@ -58,9 +58,9 @@ export default function INGratuityTab({ rates }) {
       <div className="rounded-xl border border-border p-4">
         <p className="text-sm font-bold text-foreground">Test a Real Calculation</p>
         <p className="mt-1 text-xs text-foreground-muted">
-          The actual "15 days' wages per completed year" gratuity calculator is embedded on each employee's own
-          record — open Payroll &gt; Employees, select an employee, and use its "Gratuity &amp; Statutory Forms
-          (122/123/124)" section.
+          The actual &quot;15 days&apos; wages per completed year&quot; gratuity calculator is embedded on each employee&apos;s own
+          record — open Payroll &gt; Employees, select an employee, and use its &quot;Gratuity &amp; Statutory Forms
+          (122/123/124)&quot; section.
         </p>
         <Link
           to="/payroll/employees"

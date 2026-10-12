@@ -305,27 +305,15 @@ export const getEmployees = async (params) => {
 };
 
 export const getEmployeeById = async (id) => {
-  try {
-    return await api.get(`/api/payroll/employees/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${id}`);
 };
 
 export const createEmployee = async (payload) => {
-  try {
-    return await api.post("/api/payroll/employees", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/employees", payload);
 };
 
 export const updateEmployee = async (id, payload) => {
-  try {
-    return await api.put(`/api/payroll/employees/${id}`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/employees/${id}`, payload);
 };
 
 // ── Germany statutory profile / ELStAM boundary (Phase 8N) ──────────────
@@ -333,45 +321,25 @@ export const updateEmployee = async (id, payload) => {
 // Zoiko's own backend, exactly like every other function in this file.
 
 export const getEmployeeStatutoryProfile = async (employeeId, asOf) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile`, {
-      params: asOf ? { as_of: asOf } : {},
-    });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile`, {
+    params: asOf ? { as_of: asOf } : {},
+  });
 };
 
 export const getEmployeeStatutoryProfileHistory = async (employeeId) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile/history`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile/history`);
 };
 
 export const createEmployeeStatutoryProfile = async (employeeId, payload) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/statutory-profile`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/statutory-profile`, payload);
 };
 
 export const importEmployeeElstamPayload = async (employeeId, payload) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/elstam-import`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/elstam-import`, payload);
 };
 
 export const getEmployeeElstamImportAttempts = async (employeeId) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/elstam-imports`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/elstam-imports`);
 };
 
 // ── Germany ELStAM change-list batches (Phase 8O Super Admin surface) ───
@@ -379,35 +347,19 @@ export const getEmployeeElstamImportAttempts = async (employeeId) => {
 // backend service.create_elstam_change_list_batch's own docstring.
 
 export const createElstamChangeListBatch = async (payload) => {
-  try {
-    return await api.post("/api/payroll/germany/elstam-change-list-batches", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/germany/elstam-change-list-batches", payload);
 };
 
 export const listElstamChangeListBatches = async () => {
-  try {
-    return await api.get("/api/payroll/germany/elstam-change-list-batches");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/germany/elstam-change-list-batches");
 };
 
 export const getElstamChangeListBatch = async (id) => {
-  try {
-    return await api.get(`/api/payroll/germany/elstam-change-list-batches/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/germany/elstam-change-list-batches/${id}`);
 };
 
 export const updateElstamChangeListBatchStatus = async (id, payload) => {
-  try {
-    return await api.patch(`/api/payroll/germany/elstam-change-list-batches/${id}/status`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.patch(`/api/payroll/germany/elstam-change-list-batches/${id}/status`, payload);
 };
 
 // Phase 8BF — read-only, org-independent (these registries are global):
@@ -415,22 +367,14 @@ export const updateElstamChangeListBatchStatus = async (id, payload) => {
 // the employee-creation form can warn BEFORE an org admin creates a DE
 // employee, instead of only failing closed at actual payroll-run time.
 export const getGermanyStatutoryConfigurationReadiness = async () => {
-  try {
-    return await api.get("/api/payroll/germany/statutory-configuration-readiness");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/germany/statutory-configuration-readiness");
 };
 
 // Phase 8BI — Germany statutory payroll summary, aggregated from real,
 // persisted PayslipItem/PayrollRun rows (never a fabricated figure). Optional
 // periodStart/periodEnd (YYYY-MM-DD) filter by the owning run's period.
 export const getGermanyPayrollSummaryReport = async (params = {}) => {
-  try {
-    return await api.get("/api/payroll/germany/reports/summary", { params });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/germany/reports/summary", { params });
 };
 
 // ── Germany ELSTER transmission boundary (Phase 8BF) ─────────────────────
@@ -440,51 +384,27 @@ export const getGermanyPayrollSummaryReport = async (params = {}) => {
 // closed by design). No Transferticket is ever fabricated.
 
 export const getGermanyElsterCertificateConfig = async () => {
-  try {
-    return await api.get("/api/payroll/germany/elster-certificate-config");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/germany/elster-certificate-config");
 };
 
 export const setGermanyElsterCertificateConfig = async (payload) => {
-  try {
-    return await api.put("/api/payroll/germany/elster-certificate-config", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put("/api/payroll/germany/elster-certificate-config", payload);
 };
 
 export const createGermanyElsterTransmission = async (payload) => {
-  try {
-    return await api.post("/api/payroll/germany/elster-transmissions", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/germany/elster-transmissions", payload);
 };
 
 export const listGermanyElsterTransmissions = async () => {
-  try {
-    return await api.get("/api/payroll/germany/elster-transmissions");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/germany/elster-transmissions");
 };
 
 export const validateGermanyElsterTransmission = async (id) => {
-  try {
-    return await api.post(`/api/payroll/germany/elster-transmissions/${id}/validate`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/germany/elster-transmissions/${id}/validate`);
 };
 
 export const transmitGermanyElsterTransmission = async (id) => {
-  try {
-    return await api.post(`/api/payroll/germany/elster-transmissions/${id}/transmit`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/germany/elster-transmissions/${id}/transmit`);
 };
 
 // ── Germany overtime/shift-premium (Phase 8AC-8AH backend; Phase 8AI
@@ -495,119 +415,67 @@ export const transmitGermanyElsterTransmission = async (id) => {
 // own backend, exactly like every other function in this file.
 
 export const listGermanyOvertimeWorkRecords = async (employeeId, { dateFrom, dateTo } = {}) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, {
-      params: { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined },
-    });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, {
+    params: { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined },
+  });
 };
 
 export const createGermanyOvertimeWorkRecord = async (employeeId, payload) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, payload);
 };
 
 export const setGermanyOvertimeWorkRecordApproval = async (employeeId, recordId, hrApprovalStatus) => {
-  try {
-    return await api.post(
-      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/approval`,
-      { hrApprovalStatus },
-    );
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(
+    `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/approval`,
+    { hrApprovalStatus },
+  );
 };
 
 export const classifyGermanyOvertimeWorkRecord = async (employeeId, recordId) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
 };
 
 export const getGermanyOvertimeClassification = async (employeeId, recordId) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
 };
 
 export const calculateGermanyOvertimeWageTax = async (employeeId, recordId) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
 };
 
 export const getGermanyOvertimeWageTaxResult = async (employeeId, recordId) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
 };
 
 export const calculateGermanyOvertimeSocialInsurance = async (employeeId, recordId) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
 };
 
 export const getGermanyOvertimeSocialInsuranceResult = async (employeeId, recordId) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
 };
 
 export const buildGermanyOvertimePremiumComponents = async (employeeId, recordId) => {
-  try {
-    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
 };
 
 export const getGermanyOvertimePremiumComponents = async (employeeId, recordId) => {
-  try {
-    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
 };
 
 export const attachGermanyOvertimePremiumComponentToPayslip = async (employeeId, recordId, componentId, payslipItemId) => {
-  try {
-    return await api.post(
-      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/attach-to-payslip`,
-      { payslipItemId },
-    );
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(
+    `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/attach-to-payslip`,
+    { payslipItemId },
+  );
 };
 
 // Phase 8AQ — explicit detach. Reverses attach; never deletes the
 // component or its attach history (see GermanyOvertimePanel.jsx).
 export const detachGermanyOvertimePremiumComponentFromPayslip = async (employeeId, recordId, componentId) => {
-  try {
-    return await api.post(
-      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/detach-from-payslip`,
-    );
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(
+    `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/detach-from-payslip`,
+  );
 };
 
 // Phase 8AO — batch attach. Still explicit/operator-initiated (see
@@ -615,32 +483,20 @@ export const detachGermanyOvertimePremiumComponentFromPayslip = async (employeeI
 // (componentId, payslipItemId) pairs; every pair is re-validated
 // server-side regardless of what this UI believes about eligibility.
 export const listGermanyOvertimePremiumComponentsForBatchAttach = async ({ employeeId, workDateFrom, workDateTo, attachmentState } = {}) => {
-  try {
-    return await api.get("/api/payroll/germany-overtime-premium-components/eligible-for-batch-attach", {
-      params: {
-        employeeId: employeeId || undefined, workDateFrom: workDateFrom || undefined,
-        workDateTo: workDateTo || undefined, attachmentState: attachmentState || undefined,
-      },
-    });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/germany-overtime-premium-components/eligible-for-batch-attach", {
+    params: {
+      employeeId: employeeId || undefined, workDateFrom: workDateFrom || undefined,
+      workDateTo: workDateTo || undefined, attachmentState: attachmentState || undefined,
+    },
+  });
 };
 
 export const batchAttachGermanyOvertimePremiumComponentsToPayslips = async (items) => {
-  try {
-    return await api.post("/api/payroll/germany-overtime-premium-components/batch-attach", { items });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/germany-overtime-premium-components/batch-attach", { items });
 };
 
 export const deleteEmployee = async (id) => {
-  try {
-    return await api.delete(`/api/payroll/employees/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.delete(`/api/payroll/employees/${id}`);
 };
 
 // UK Statutory Sick Pay / Statutory Family Pay calculator (ZP-TAX-UK-
@@ -747,29 +603,17 @@ export const calculateUkClass1A1BCharge = async (chargeType, amount) => {
 };
 
 export const bulkCreateEmployees = async (employees) => {
-  try {
-    // Expected response shape: { created: [...employees], failed: [{ row, reason }] }
-    return await api.post("/api/payroll/employees/bulk", { employees });
-  } catch (err) {
-    throw err;
-  }
+  // Expected response shape: { created: [...employees], failed: [{ row, reason }] }
+  return await api.post("/api/payroll/employees/bulk", { employees });
 };
 
 export const bulkDeleteEmployees = async (employeeIds) => {
-  try {
-    return await api.post("/api/payroll/employees/bulk-delete", { employee_ids: employeeIds });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/employees/bulk-delete", { employee_ids: employeeIds });
 };
 
 export const bulkUpdateEmployees = async (employees) => {
-  try {
-    // Expected response shape: { employees: [...updated], failed: [{ row, reason }] }
-    return await api.post("/api/payroll/employees/bulk-update", { employees });
-  } catch (err) {
-    throw err;
-  }
+  // Expected response shape: { employees: [...updated], failed: [{ row, reason }] }
+  return await api.post("/api/payroll/employees/bulk-update", { employees });
 };
 
 export const EMPLOYMENT_TYPES = ["Full-time", "Part-time", "Contract", "Intern"];
@@ -795,11 +639,7 @@ export const fetchRuns = async (params) => {
 };
 
 export const getRunById = async (id) => {
-  try {
-    return await api.get(`/api/payroll/runs/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/runs/${id}`);
 };
 
 export const getRunItems = async (id) => {
@@ -820,11 +660,7 @@ export const getRunLeaveSummary = async (id) => {
 };
 
 export const getBankTransferSummary = async (runId) => {
-  try {
-    return await api.get(`/api/payroll/runs/${runId}/bank-transfer-summary`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/runs/${runId}/bank-transfer-summary`);
 };
 
 export const downloadBankTransferFile = async (runId, format) => {
@@ -850,62 +686,38 @@ export const downloadBankTransferFile = async (runId, format) => {
 };
 
 export const createRun = async (payload) => {
-  try {
-    return await api.post("/api/payroll/runs", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/runs", payload);
 };
 
 export const approveRun = async (id) => {
-  try {
-    return await api.put(`/api/payroll/runs/${id}/approve`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/runs/${id}/approve`);
 };
 
 export const recalculateEmployeePayslip = async (runId, employeeId) => {
-  try {
-    return await api.put(`/api/payroll/runs/${runId}/employees/${employeeId}/recalculate`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/runs/${runId}/employees/${employeeId}/recalculate`);
 };
 
 export const updateRun = async (id, payload) => {
-  try {
-    return await api.put(`/api/payroll/runs/${id}`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/runs/${id}`, payload);
 };
 
 export const deletePayRun = async (id) => {
-  try {
-    return await api.delete(`/api/payroll/runs/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.delete(`/api/payroll/runs/${id}`);
 };
 
 export const previewPayrollRun = async (employeeIds, country = "IN", periodStart = undefined, periodEnd = undefined, calculationMode = undefined) => {
-  try {
-    return await api.post("/api/payroll/runs/preview", {
-      employeeIds,
-      country,
-      // Without these, the backend has no pay period to look up attendance
-      // records against, so rewards/bonus/other compensation entered on the
-      // Attendance screen silently get excluded from the preview totals —
-      // even though the actual generated payslip includes them. Sending
-      // them here keeps preview and generation in sync.
-      ...(periodStart ? { periodStart } : {}),
-      ...(periodEnd ? { periodEnd } : {}),
-      ...(calculationMode ? { calculationMode } : {}),
-    });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/runs/preview", {
+    employeeIds,
+    country,
+    // Without these, the backend has no pay period to look up attendance
+    // records against, so rewards/bonus/other compensation entered on the
+    // Attendance screen silently get excluded from the preview totals —
+    // even though the actual generated payslip includes them. Sending
+    // them here keeps preview and generation in sync.
+    ...(periodStart ? { periodStart } : {}),
+    ...(periodEnd ? { periodEnd } : {}),
+    ...(calculationMode ? { calculationMode } : {}),
+  });
 };
 
 // ── Company Holidays ─────────────────────────────────────
@@ -913,11 +725,7 @@ export const previewPayrollRun = async (employeeIds, country = "IN", periodStart
 // also replace whatever separate holiday sources the Attendance/Leave pages
 // currently use, so all three agree on the same list.
 export const getPayrollHolidays = async (year) => {
-  try {
-    return await api.get("/api/payroll/holidays", { params: year ? { year } : {} });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/holidays", { params: year ? { year } : {} });
 };
 
 export const upsertPayrollHolidays = async (holidays) => {
@@ -940,11 +748,7 @@ export const getPayslips = async (params) => {
 };
 
 export const getPayslipById = async (id) => {
-  try {
-    return await api.get(`/api/payroll/payslips/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/payslips/${id}`);
 };
 
 export const downloadPayslip = async (payslip) => {
@@ -980,11 +784,7 @@ export const downloadRunPayslips = async (runId) => {
 };
 
 export const deletePayslip = async (id) => {
-  try {
-    return await api.delete(`/api/payroll/payslips/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.delete(`/api/payroll/payslips/${id}`);
 };
 
 // ── Jurisdiction Compliance Pack (identity/metadata) ────
@@ -1001,11 +801,7 @@ export const fetchJurisdictionPack = async (country, state) => {
 };
 
 export const upsertJurisdictionPack = async (payload) => {
-  try {
-    return await api.put("/api/payroll/compliance/jurisdiction-packs", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put("/api/payroll/compliance/jurisdiction-packs", payload);
 };
 
 // ── Compliance / Filings ───────────────────────────────
@@ -1073,11 +869,7 @@ export const fetchOrgLocalityRates = async (countryCode = DEFAULT_COUNTRY) => {
 };
 
 export const updateCompanyDetails = async (payload) => {
-  try {
-    return await api.put("/api/payroll/compliance/company-details", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put("/api/payroll/compliance/company-details", payload);
 };
 
 // ── Compliance Documents (upload → extraction) ─────────
@@ -1116,11 +908,7 @@ export const uploadComplianceDocument = async (file, countryCode = DEFAULT_COUNT
   const formData = new FormData();
   formData.append("file", file);
   formData.append("country", countryCode);
-  try {
-    return await api.post("/api/payroll/compliance/documents", formData);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/compliance/documents", formData);
 };
 
 export const fetchComplianceDocuments = async (countryCode = DEFAULT_COUNTRY) => {
@@ -1133,11 +921,7 @@ export const fetchComplianceDocuments = async (countryCode = DEFAULT_COUNTRY) =>
 };
 
 export const deleteComplianceDocument = async (id) => {
-  try {
-    return await api.delete(`/api/payroll/compliance/documents/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.delete(`/api/payroll/compliance/documents/${id}`);
 };
 
 // Promote a single extracted rate/slab row (from an uploaded document) into
@@ -1198,11 +982,7 @@ export const getAttendanceBase = getEmployeeRoster;
 
 // Save attendance + compensation records for a pay period
 export const saveAttendanceRecords = async (records) => {
-  try {
-    return await api.post("/api/payroll/attendance/bulk", { records });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/attendance/bulk", { records });
 };
 
 // Saves attendance in batches so a large range (employees × days) never hits
@@ -1258,14 +1038,10 @@ export const getAttendanceReadiness = async (periodStart, periodEnd, employeeIds
 
 // Clear attendance records from the backend (optionally scoped to a date range)
 export const clearAttendanceRecords = async (startDate, endDate) => {
-  try {
-    const params = {};
-    if (startDate) params.startDate = startDate;
-    if (endDate) params.endDate = endDate;
-    return await api.delete("/api/payroll/attendance", { params });
-  } catch (err) {
-    throw err;
-  }
+  const params = {};
+  if (startDate) params.startDate = startDate;
+  if (endDate) params.endDate = endDate;
+  return await api.delete("/api/payroll/attendance", { params });
 };
 
 // Fetch saved attendance records (with compensation data)
@@ -1438,11 +1214,7 @@ export const getPayrollReports = async (params = {}) => {
 
 // Leave Allocations (Paid / Unpaid)
 export const saveLeaveRecords = async (records) => {
-  try {
-    return await api.post("/api/payroll/leaves/bulk", { records });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/leaves/bulk", { records });
 };
 
 export const getLeaveRecords = async (params = {}) => {
@@ -1470,19 +1242,11 @@ export const getPayrollLeaveRequests = async (params = {}) => {
 };
 
 export const createPayrollLeaveRequest = async (payload) => {
-  try {
-    return await api.post("/api/payroll/leave-requests", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/leave-requests", payload);
 };
 
 export const reviewPayrollLeaveRequest = async (requestId, status) => {
-  try {
-    return await api.put(`/api/payroll/leave-requests/${requestId}/review`, { status });
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/leave-requests/${requestId}/review`, { status });
 };
 
 export const downloadReport = async (id, format = "pdf") => {
@@ -1509,41 +1273,25 @@ export const downloadReport = async (id, format = "pdf") => {
 // updateCompanyDetails() etc. elsewhere in this file.
 
 export const getActivePolicy = async () => {
-  try {
-    return await api.get("/api/payroll/policy/active");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/policy/active");
 };
 
 export const updatePolicy = async (policyId, payload) => {
-  try {
-    return await api.put(`/api/payroll/policy/${policyId}`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/policy/${policyId}`, payload);
 };
 
 export const enablePolicyIntegration = async (policyId, category, providerKey) => {
-  try {
-    return await api.post(
-      `/api/payroll/policy/${policyId}/integrations/${category}/${providerKey}/enable`,
-      {}
-    );
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(
+    `/api/payroll/policy/${policyId}/integrations/${category}/${providerKey}/enable`,
+    {}
+  );
 };
 
 export const disablePolicyIntegration = async (policyId, category, providerKey) => {
-  try {
-    return await api.post(
-      `/api/payroll/policy/${policyId}/integrations/${category}/${providerKey}/disable`,
-      {}
-    );
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(
+    `/api/payroll/policy/${policyId}/integrations/${category}/${providerKey}/disable`,
+    {}
+  );
 };
 
 // ── Enterprise Policy Onboarding ─────────────────────────────────────
@@ -1575,35 +1323,19 @@ export const getEnterpriseJurisdictions = async () => {
 };
 
 export const addEnterpriseJurisdiction = async (countryCode) => {
-  try {
-    return await api.post("/api/payroll/enterprise/jurisdictions", { countryCode });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/enterprise/jurisdictions", { countryCode });
 };
 
 export const updateEnterpriseJurisdiction = async (jurisdictionId, payload) => {
-  try {
-    return await api.put(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`, payload);
 };
 
 export const verifyEnterpriseJurisdiction = async (jurisdictionId) => {
-  try {
-    return await api.post(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}/verify`, {});
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}/verify`, {});
 };
 
 export const removeEnterpriseJurisdiction = async (jurisdictionId) => {
-  try {
-    return await api.delete(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.delete(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`);
 };
 
 export const getEnterpriseContributionRates = async (jurisdictionId) => {
@@ -1616,14 +1348,10 @@ export const getEnterpriseContributionRates = async (jurisdictionId) => {
 };
 
 export const updateEnterpriseContributionRate = async (jurisdictionId, componentKey, payload) => {
-  try {
-    return await api.put(
-      `/api/payroll/enterprise/jurisdictions/${jurisdictionId}/contribution-rates/${componentKey}`,
-      payload
-    );
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(
+    `/api/payroll/enterprise/jurisdictions/${jurisdictionId}/contribution-rates/${componentKey}`,
+    payload
+  );
 };
 
 export const getEnterpriseValidation = async () => {
@@ -1635,19 +1363,11 @@ export const getEnterpriseValidation = async () => {
 };
 
 export const activateEnterprise = async () => {
-  try {
-    return await api.post("/api/payroll/enterprise/activate", {});
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/enterprise/activate", {});
 };
 
 export const deactivateEnterprise = async () => {
-  try {
-    return await api.post("/api/payroll/enterprise/deactivate", {});
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/enterprise/deactivate", {});
 };
 
 export const getEnterpriseDashboard = async () => {
@@ -1756,110 +1476,58 @@ export const EMPLOYEE_CATEGORY_LABELS = {
 // ── Payroll Mail (SMTP send identity) ───────────────────────────────────
 
 export const getEmailSettings = async () => {
-  try {
-    return await api.get("/api/payroll/mail/settings");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/mail/settings");
 };
 
 export const updateEmailSettings = async (payload) => {
-  try {
-    return await api.put("/api/payroll/mail/settings", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put("/api/payroll/mail/settings", payload);
 };
 
 // ── Send Template (custom fields, form templates, sending, review) ──────
 
 export const getCustomFields = async () => {
-  try {
-    return await api.get("/api/payroll/employee-forms/custom-fields");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/employee-forms/custom-fields");
 };
 
 export const createCustomField = async (payload) => {
-  try {
-    return await api.post("/api/payroll/employee-forms/custom-fields", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/employee-forms/custom-fields", payload);
 };
 
 export const deleteCustomField = async (id) => {
-  try {
-    return await api.delete(`/api/payroll/employee-forms/custom-fields/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.delete(`/api/payroll/employee-forms/custom-fields/${id}`);
 };
 
 export const getUpdateForms = async () => {
-  try {
-    return await api.get("/api/payroll/employee-forms/templates");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/employee-forms/templates");
 };
 
 export const createUpdateForm = async (payload) => {
-  try {
-    return await api.post("/api/payroll/employee-forms/templates", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/employee-forms/templates", payload);
 };
 
 export const sendUpdateForm = async (formId, employeeIds) => {
-  try {
-    return await api.post(`/api/payroll/employee-forms/templates/${formId}/send`, { employeeIds });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employee-forms/templates/${formId}/send`, { employeeIds });
 };
 
 export const getFormSubmissions = async (status) => {
-  try {
-    return await api.get("/api/payroll/employee-forms/submissions", { params: status ? { status } : undefined });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/employee-forms/submissions", { params: status ? { status } : undefined });
 };
 
 export const approveFormSubmission = async (id, notes) => {
-  try {
-    return await api.post(`/api/payroll/employee-forms/submissions/${id}/approve`, { notes });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employee-forms/submissions/${id}/approve`, { notes });
 };
 
 export const rejectFormSubmission = async (id, notes) => {
-  try {
-    return await api.post(`/api/payroll/employee-forms/submissions/${id}/reject`, { notes });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/employee-forms/submissions/${id}/reject`, { notes });
 };
 
 // Public, unauthenticated — reached via the emailed link, no token attached.
 export const getPublicForm = async (token) => {
-  try {
-    return await api.get(`/api/public/employee-forms/${token}`, { auth: false });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/public/employee-forms/${token}`, { auth: false });
 };
 
 export const submitPublicForm = async (token, values) => {
-  try {
-    return await api.post(`/api/public/employee-forms/${token}/submit`, { values }, { auth: false });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/public/employee-forms/${token}/submit`, { values }, { auth: false });
 };
 
 // ── Report Generation (template-driven) ──────────────────────────────
@@ -1888,20 +1556,12 @@ export const getAvailableReports = async (params = {}) => {
 export const getApplicableReportTemplate = async (params = {}) => {
   // { reportingYear, reportType, payrollRunId? } — returns { template, validation }.
   // validation is only populated when payrollRunId is passed.
-  try {
-    return await api.get("/api/payroll/report-templates/applicable", { params });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/report-templates/applicable", { params });
 };
 
 export const generateReport = async (payload) => {
   // { reportTemplateId, payrollRunId, reportingPeriod? }
-  try {
-    return await api.post("/api/payroll/generated-reports", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/generated-reports", payload);
 };
 
 export const getGeneratedReports = async (params = {}) => {
@@ -1914,19 +1574,11 @@ export const getGeneratedReports = async (params = {}) => {
 };
 
 export const getGeneratedReport = async (id) => {
-  try {
-    return await api.get(`/api/payroll/generated-reports/${id}`);
-  } catch (err) {
-    throw err;
-  }
+  return await api.get(`/api/payroll/generated-reports/${id}`);
 };
 
 export const voidGeneratedReport = async (id, reason) => {
-  try {
-    return await api.post(`/api/payroll/generated-reports/${id}/void`, { reason });
-  } catch (err) {
-    throw err;
-  }
+  return await api.post(`/api/payroll/generated-reports/${id}/void`, { reason });
 };
 
 // This org's upcoming Active statutory filing due dates — never
@@ -2269,73 +1921,41 @@ export const calculateCaWsdrf = async (payload) => {
 // superAdminService (compliance/france/*), exactly as the backend splits
 // them.
 export const createFranceDsnSubmission = async (payload) => {
-  try {
-    return await api.post("/api/payroll/france/dsn-submissions", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/france/dsn-submissions", payload);
 };
 
 export const listFranceDsnSubmissionsForOrg = async (params = {}) => {
-  try {
-    return await api.get("/api/payroll/france/dsn-submissions", { params });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/france/dsn-submissions", { params });
 };
 
 export const transitionFranceDsnSubmission = async (submissionId, payload) => {
-  try {
-    return await api.put(`/api/payroll/france/dsn-submissions/${submissionId}/status`, payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/france/dsn-submissions/${submissionId}/status`, payload);
 };
 
 export const createFranceDsnOutboxItem = async (payload) => {
-  try {
-    return await api.post("/api/payroll/france/dsn-outbox", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.post("/api/payroll/france/dsn-outbox", payload);
 };
 
 export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) => {
-  try {
-    return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
-      params: { status, last_error: lastError || null },
-    });
-  } catch (err) {
-    throw err;
-  }
+  return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
+    params: { status, last_error: lastError || null },
+  });
 };
 
 // Italy (ZP-IT-ENG-001 §17) — this organization's employer profile. The
 // readiness status in the response is recomputed server-side, never sent.
 export const getItalyEmployerProfile = async () => {
-  try {
-    return await api.get("/api/payroll/italy/employer-profile");
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/italy/employer-profile");
 };
 
 export const saveItalyEmployerProfile = async (payload) => {
-  try {
-    return await api.put("/api/payroll/italy/employer-profile", payload);
-  } catch (err) {
-    throw err;
-  }
+  return await api.put("/api/payroll/italy/employer-profile", payload);
 };
 
 export const getFranceReadinessForOrg = async (forPeriod) => {
-  try {
-    return await api.get("/api/payroll/france/readiness", {
-      params: { for_period: forPeriod || undefined },
-    });
-  } catch (err) {
-    throw err;
-  }
+  return await api.get("/api/payroll/france/readiness", {
+    params: { for_period: forPeriod || undefined },
+  });
 };
 // ── Singapore IR21 tax clearance (hold / clearance / release) ──────────
 // Tenant-scoped on the server (the caller's own organization only);

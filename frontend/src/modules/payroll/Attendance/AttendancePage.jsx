@@ -19,13 +19,13 @@ function getLocalRecords(orgId) {
 function setLocalRecords(map, orgId) {
   const key = lsKey(orgId);
   if (!key) return;
-  try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
+  try { localStorage.setItem(key, JSON.stringify(map)); } catch { /* storage unavailable — non-fatal */ }
 }
 
 function clearLocalRecords(orgId) {
   const key = lsKey(orgId);
   if (!key) return;
-  try { localStorage.removeItem(key); } catch {}
+  try { localStorage.removeItem(key); } catch { /* storage unavailable — non-fatal */ }
 }
 
 // Attendance used to be written into this browser's localStorage on every
@@ -451,7 +451,7 @@ export default function AttendancePage() {
         toRemove.push(key);
       }
     }
-    toRemove.forEach((key) => { try { localStorage.removeItem(key); } catch {} });
+    toRemove.forEach((key) => { try { localStorage.removeItem(key); } catch { /* storage unavailable — non-fatal */ } });
   }, [orgId]);
 
   // Rows left in this browser by the old "saved locally" fallback that the
@@ -712,7 +712,7 @@ export default function AttendancePage() {
       } else {
         localStorage.removeItem(lsKey(orgId));
       }
-    } catch {}
+    } catch { /* storage unavailable — non-fatal */ }
 
     // Re-fetch from the backend, so the UI shows exactly what's actually saved
     // (with unsaved edits now gone) instead of blanking state that may still
@@ -1891,7 +1891,7 @@ export default function AttendancePage() {
         </div>
       </div>
       <p className="text-[11px] font-medium text-foreground-muted -mt-3">
-        Tip: pick a future date above (or use the shortcuts) to pre-schedule attendance for upcoming days — it saves the same way, and won't count toward "Working Days" until that day actually arrives.
+        Tip: pick a future date above (or use the shortcuts) to pre-schedule attendance for upcoming days — it saves the same way, and won&apos;t count toward &quot;Working Days&quot; until that day actually arrives.
       </p>
 
       {localOnly && localOnly.records.length > 0 && (

@@ -35,7 +35,7 @@ export default function TTNisClassPanel({ pack, slabs, onReload }) {
         <div>
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Landmark size={15} /> NIS Earnings Classes</h3>
           <p className="mt-0.5 text-xs text-foreground-muted">
-            NIBTT's 16-class fixed weekly contribution table (ZP-TT-ENG-001 §5) — a flat dollar amount per earnings
+            NIBTT&apos;s 16-class fixed weekly contribution table (ZP-TT-ENG-001 §5) — a flat dollar amount per earnings
             band, not a percentage. Monthly- and Weekly-paid employees use different band boundaries.
           </p>
         </div>

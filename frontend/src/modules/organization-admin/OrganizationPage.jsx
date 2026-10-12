@@ -635,7 +635,7 @@ export default function OrgAdminOrganizationPage() {
         <div className="hero rise" style={{ animationDelay: ".05s" }}>
           <div>
             <h1 className="title">My Organization</h1>
-            <p className="subtitle">A live record of your organization's identity, contacts, and workforce.</p>
+            <p className="subtitle">A live record of your organization&apos;s identity, contacts, and workforce.</p>
           </div>
           <div className="head-actions">
             <button className="btn btn-primary" onClick={openEdit}>Edit organization</button>

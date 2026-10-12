@@ -50,7 +50,7 @@ export default function ContributionRatesTable({ documents = [], country }) {
           <div className="bg-error/5 border border-error/20 rounded-[18px] p-4 flex items-start gap-3">
             <AlertCircle size={16} className="text-error shrink-0 mt-0.5" />
             <p className="text-[13px] text-error">
-              Couldn't load the org's active contribution rates. This is the data payroll runs are actually
+              Couldn&apos;t load the org&apos;s active contribution rates. This is the data payroll runs are actually
               calculated against — try refreshing before relying on the extracted-document values below.
             </p>
           </div>

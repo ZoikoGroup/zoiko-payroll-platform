@@ -250,7 +250,7 @@ export default function JurisdictionLayout({
         )}
         <h1 className="text-2xl font-bold text-foreground">{countryName} Compliance</h1>
         <p className="text-sm text-foreground-muted mt-0.5">
-          Manage {countryName}'s tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
+          Manage {countryName}&apos;s tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
         </p>
       </div>
 

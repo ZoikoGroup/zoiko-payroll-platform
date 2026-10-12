@@ -77,7 +77,7 @@ export default function DECompliancePage() {
       <div className="mb-2">
         <h1 className="text-lg font-bold text-foreground">Germany Payroll Compliance</h1>
         <p className="text-xs text-foreground-muted">
-          Manage Germany's statutory payroll configuration — the versioned Compliance Pack (tax year), PAP, health
+          Manage Germany&apos;s statutory payroll configuration — the versioned Compliance Pack (tax year), PAP, health
           funds, contribution ceilings, PV configuration, church tax, overtime treatment, employer levies, ELStAM
           change-list batches, ELSTER transmission, DEÜV social insurance reporting, the source evidence backing each
           of them, and the Germany payroll summary.

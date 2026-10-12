@@ -266,8 +266,41 @@ export const createPublicAssistSession = async ({ locale = "en" } = {}) => {
   return api.post("/api/assist/public/sessions", { locale }, { auth: false });
 };
 
-export const submitPublicAssistMessage = async (sessionId, text) => {
-  return api.post(`/api/assist/public/sessions/${sessionId}/messages`, { text }, { auth: false });
+// country_code / topic_id are optional context hints (wireframe §11); the
+// backend ignores fields it doesn't know yet, so sending them is safe.
+export const submitPublicAssistMessage = async (sessionId, text, { countryCode, topicId, signal } = {}) => {
+  const payload = { text };
+  if (countryCode) payload.country_code = countryCode;
+  if (topicId) payload.topic_id = topicId;
+  return api.post(`/api/assist/public/sessions/${sessionId}/messages`, payload, { auth: false, signal });
+};
+
+// Proposed contracts from the public chatbot wireframe (§11). Each one
+// resolves to null when the endpoint isn't deployed yet or fails, so the
+// widget falls back to its documented safe states (no country count, no
+// invented availability) instead of erroring.
+export const getPublicAssistConfig = async (locale = "en") => {
+  try {
+    return await api.get("/api/assist/public/config", { auth: false, params: { locale } });
+  } catch {
+    return null;
+  }
+};
+
+export const getPublicPayrollCountries = async (locale = "en") => {
+  try {
+    return await api.get("/api/assist/public/payroll-countries", { auth: false, params: { locale } });
+  } catch {
+    return null;
+  }
+};
+
+export const getPublicAssistHealth = async () => {
+  try {
+    return await api.get("/api/assist/public/health", { auth: false });
+  } catch {
+    return null;
+  }
 };
 
 export const listPublicAssistMessages = async (sessionId) => {

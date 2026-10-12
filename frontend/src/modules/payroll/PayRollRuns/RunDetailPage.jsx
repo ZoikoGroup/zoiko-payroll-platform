@@ -250,7 +250,7 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
           <span className="text-amber-500 text-[13px] mt-0.5">⚠</span>
           <p className="text-[12px] text-amber-700 dark:text-amber-400">
             {enrichedEmployees.filter((e) => e.prorated).length} of {enrichedEmployees.length} employees have prorated pay
-            this period due to recorded absence or unpaid leave — see the "Payable Days" column below.
+            this period due to recorded absence or unpaid leave — see the &quot;Payable Days&quot; column below.
           </p>
         </div>
       )}

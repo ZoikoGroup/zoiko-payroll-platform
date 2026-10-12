@@ -48,12 +48,12 @@ export default function USForm940Panel() {
   return (
     <div className="max-w-xl space-y-4">
       <div className="rounded-[14px] border border-border bg-surface p-5">
-        <h3 className="mb-1 text-[15px] font-bold text-foreground">Form 940 — Employer's Annual FUTA Tax Return</h3>
+        <h3 className="mb-1 text-[15px] font-bold text-foreground">Form 940 — Employer&apos;s Annual FUTA Tax Return</h3>
         <p className="mb-4 text-[12px] text-foreground-secondary">
           Sums total payments and FUTA tax across every finalized (Approved/Authorized/Paid/Closed — never Draft/
           Review) US payslip paid during the calendar year. Taxable FUTA wages independently re-applies the real
           $7,000/employee/year wage-base cap. Payments exempt from FUTA and credit-reduction states are not
-          modeled — see the generated report's own "knownGaps" for details.
+          modeled — see the generated report&apos;s own &quot;knownGaps&quot; for details.
         </p>
         <Field label="Year">
           <input type="number" className={inputClass} value={year} onChange={(e) => setYear(e.target.value)} />

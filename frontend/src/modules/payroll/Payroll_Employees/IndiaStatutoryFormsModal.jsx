@@ -147,7 +147,7 @@ function GratuitySection({ employee }) {
     <div>
       <p className="mb-4 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
         Gratuity is an employer termination liability, not a routine payroll deduction — calculating it here does
-        not create a payslip line. Uses the employee's own date of joining and, unless overridden below, their
+        not create a payslip line. Uses the employee&apos;s own date of joining and, unless overridden below, their
         stored monthly Basic.
       </p>
       <div className="grid grid-cols-2 gap-3">
@@ -569,9 +569,9 @@ function BenefitsSection({ employee, taxYear }) {
   return (
     <div>
       <p className="mb-4 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
-        Perquisite/profit-in-lieu-of-salary values for {taxYear} — Zoiko does not compute a perquisite's taxable
+        Perquisite/profit-in-lieu-of-salary values for {taxYear} — Zoiko does not compute a perquisite&apos;s taxable
         value (the statutory pack gives no valuation formula); enter your own already-determined amount. Feeds
-        both regimes' taxable income once Issued, and Form 123 generation.
+        both regimes&apos; taxable income once Issued, and Form 123 generation.
       </p>
       {error && <div className="mb-3 rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">{error}</div>}
       {loading ? (

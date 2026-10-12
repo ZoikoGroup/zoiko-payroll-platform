@@ -88,8 +88,8 @@ export default function USASpecialProgramsPanel({ onNavigateToState }) {
         <div>
           <h2 className="text-lg font-bold text-foreground">Special Programs</h2>
           <p className="mt-0.5 text-xs text-foreground-muted">
-            Every state's paid-leave/SDI/TDI-style statutory program, in one place — read-only here; edit in the
-            state's own Federal/State-District pack.
+            Every state&apos;s paid-leave/SDI/TDI-style statutory program, in one place — read-only here; edit in the
+            state&apos;s own Federal/State-District pack.
           </p>
         </div>
       </div>

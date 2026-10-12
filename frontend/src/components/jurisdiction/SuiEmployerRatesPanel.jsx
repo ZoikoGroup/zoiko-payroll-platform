@@ -278,19 +278,19 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
           <div className="col-span-2">
             <label className={labelClass}>Covered Employees</label>
             <input type="number" min="0" className={inputClass} value={form.coveredEmployeeCount} onChange={set("coveredEmployeeCount")} placeholder="e.g. 15" />
-            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own headcount for this program — determines whether the employer share applies, per the statutory threshold configured in Tax Components.</p>
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer&apos;s own headcount for this program — determines whether the employer share applies, per the statutory threshold configured in Tax Components.</p>
           </div>
         ) : isExemptionAllocation ? (
           <div className="col-span-2">
             <label className={labelClass}>Exemption Allocation %</label>
             <input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="e.g. 40" />
-            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own elected share (0-100) of the exemption shared across every organization with the same connected/associated group code. Leave unconfigured for 100% (the full exemption, unchanged from a standalone employer).</p>
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer&apos;s own elected share (0-100) of the exemption shared across every organization with the same connected/associated group code. Leave unconfigured for 100% (the full exemption, unchanged from a standalone employer).</p>
           </div>
         ) : isTrainingExpenditure ? (
           <div className="col-span-2">
             <label className={labelClass}>Eligible Training Expenditure ($, for the year)</label>
             <input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="e.g. 30000" />
-            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own declared eligible training expenditure for the year — reduces the WSDRF shortfall dollar-for-dollar. Unconfigured defaults to $0 (no credit assumed).</p>
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer&apos;s own declared eligible training expenditure for the year — reduces the WSDRF shortfall dollar-for-dollar. Unconfigured defaults to $0 (no credit assumed).</p>
           </div>
         ) : isSectorExemptionFlag ? (
           <div className="col-span-2">

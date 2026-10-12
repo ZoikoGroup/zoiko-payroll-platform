@@ -54,7 +54,7 @@ function createApiError(message, status, extra = {}) {
  * Automatically attaches the bearer token (if present) and JSON headers,
  * and attempts a single silent refresh on a 401 response.
  */
-export async function apiRequest(path, { method = "GET", body, headers = {}, auth = true, retry = true, params } = {}) {
+export async function apiRequest(path, { method = "GET", body, headers = {}, auth = true, retry = true, params, signal } = {}) {
   let url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
   if (params) {
     const query = Object.entries(params)
@@ -77,12 +77,13 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
     method,
     headers: finalHeaders,
     body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
+    signal,
   });
 
   if (res.status === 401 && auth && retry) {
     const refreshResult = await tryRefreshToken();
     if (refreshResult.ok) {
-      return apiRequest(path, { method, body, headers, auth, retry: false });
+      return apiRequest(path, { method, body, headers, auth, retry: false, signal });
     }
     if (refreshResult.invalidSession) {
       clearSession();

@@ -146,7 +146,7 @@ export default function TaxabilityMatrixTab({ country = "CA" }) {
         ))}
       </div>
       <div className="rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-[11px] text-foreground-secondary">
-        With no row configured for a component, it counts toward every program by default (today's existing
+        With no row configured for a component, it counts toward every program by default (today&apos;s existing
         behavior — one gross figure feeds every wage base). Add a row below only to EXCLUDE a
         component from this specific program. Dormant until a Super Admin enables the Taxability Matrix rollout
         switch — configuring rows here has no effect on live payroll until then.

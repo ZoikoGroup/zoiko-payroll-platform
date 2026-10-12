@@ -58,7 +58,7 @@ export default function ForgotPasswordPage() {
                 Forgot your password?
               </h1>
               <p style={{ fontSize: "14px", color: "#6B7280", lineHeight: "1.6", margin: "0 0 28px 0" }}>
-                Enter the email address for your account and we'll send you a secure link to reset your password.
+                Enter the email address for your account and we&apos;ll send you a secure link to reset your password.
               </p>
 
               {error && (

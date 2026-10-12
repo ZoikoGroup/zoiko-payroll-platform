@@ -504,7 +504,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                 </div>
               )}
               <div className="mt-4 pt-4 border-t border-border">
-                <p className="text-[11px] text-foreground-muted mb-2">Tip: Use "Export" on the employee list to download all existing employees. Add new rows without IDs, then re-upload — existing rows are auto-skipped. The statutory columns in this template match your organization's jurisdiction ({defaultCountryCode || "IN"}); set the "Country" column per row to place an employee under a different jurisdiction.</p>
+                <p className="text-[11px] text-foreground-muted mb-2">Tip: Use &quot;Export&quot; on the employee list to download all existing employees. Add new rows without IDs, then re-upload — existing rows are auto-skipped. The statutory columns in this template match your organization&apos;s jurisdiction ({defaultCountryCode || "IN"}); set the &quot;Country&quot; column per row to place an employee under a different jurisdiction.</p>
                 <button
                   type="button"
                   onClick={() => downloadTemplate(defaultCountryCode)}

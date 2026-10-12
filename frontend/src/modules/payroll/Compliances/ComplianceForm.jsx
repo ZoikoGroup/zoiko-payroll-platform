@@ -150,7 +150,7 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
 
       <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 mb-5 text-[12px] text-foreground-muted flex items-center gap-2">
         <Info size={14} className="text-info shrink-0" />
-        <span>Values below are inherited from the <strong>Super Admin's</strong> compliance configuration. You can overwrite fields where permitted — changes apply only to your organization.</span>
+        <span>Values below are inherited from the <strong>Super Admin&apos;s</strong> compliance configuration. You can overwrite fields where permitted — changes apply only to your organization.</span>
       </div>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -261,7 +261,7 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
       )}
 
       <p className="text-[13px] text-foreground-muted mt-5">
-        Jurisdiction is set automatically from your organization's registration details and can't be changed here.
+        Jurisdiction is set automatically from your organization&apos;s registration details and can&apos;t be changed here.
         {" "}{stateRuleNote}
       </p>
     </div>

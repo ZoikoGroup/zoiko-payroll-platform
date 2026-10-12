@@ -28,7 +28,7 @@ export default function DelayedBillingBanner({ commencementDate }) {
     >
       <Clock size={18} color="#0369A1" style={{ flexShrink: 0, marginTop: "1px" }} />
       <p style={{ fontSize: "13px", color: "#075985", margin: 0, lineHeight: 1.5 }}>
-        <strong>Your 30-day trial starts today.</strong> You won't be charged until{" "}
+        <strong>Your 30-day trial starts today.</strong> You won&apos;t be charged until{" "}
         <strong>{formatted}</strong> — cancel anytime before then.
       </p>
     </div>

@@ -39,7 +39,7 @@ export default function ImpactPreviewModal({ pack, onClose }) {
           </div>
 
           {preview.organizations.length === 0 ? (
-            <p className="text-sm text-foreground-disabled">No organization currently matches this pack's jurisdiction.</p>
+            <p className="text-sm text-foreground-disabled">No organization currently matches this pack&apos;s jurisdiction.</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-xs">

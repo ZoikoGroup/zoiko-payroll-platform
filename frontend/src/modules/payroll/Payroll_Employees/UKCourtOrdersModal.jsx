@@ -164,8 +164,8 @@ export default function UKCourtOrdersModal({ employee, onClose }) {
   return (
     <Modal title={`Court-Ordered Deductions — ${employee.name}`} onClose={onClose} maxWidth="max-w-2xl">
       <p className="mb-4 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
-        England &amp; Wales AEOs, Scottish arrestments, and Northern Ireland's equivalent orders are each
-        calculated separately, per HMRC's own rule — pick the correct jurisdiction below. An order is never
+        England &amp; Wales AEOs, Scottish arrestments, and Northern Ireland&apos;s equivalent orders are each
+        calculated separately, per HMRC&apos;s own rule — pick the correct jurisdiction below. An order is never
         deleted once recorded; mark it completed or cancelled instead.
       </p>
 

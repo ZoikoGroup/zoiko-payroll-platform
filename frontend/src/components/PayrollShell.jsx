@@ -275,7 +275,7 @@ function NotificationBell() {
             role="menu"
             className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-border bg-surface py-4 px-4 text-center shadow-lg"
           >
-            <p className="text-sm text-foreground-muted">You're all caught up — no new notifications.</p>
+            <p className="text-sm text-foreground-muted">You&apos;re all caught up — no new notifications.</p>
           </div>
         </>
       )}

@@ -349,7 +349,7 @@ function PTSlabsTab({ slabs, onAdd, onEdit, onDelete }) {
       </div>
       {sorted.length > 0 && !hasOpenEnded && (
         <div className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
-          No bracket covers "and above" yet — an employee earning more than the highest configured amount won't match any slab.
+          No bracket covers &quot;and above&quot; yet — an employee earning more than the highest configured amount won&apos;t match any slab.
         </div>
       )}
       {sorted.length === 0 ? (
@@ -533,7 +533,7 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
           <input className={inputClass} value={jurisdictionLocality} onChange={(e) => setJurisdictionLocality(e.target.value)} placeholder="e.g. Chennai" />
           {assessmentBasis === "HALF_YEAR_INCOME" && (
             <p className="mt-1.5 text-[11px] text-warning">
-              Half-yearly PT also needs its own collection month(s) configured — see "Half-Year PT — Collection Month 1/2" under Contribution Components. Without them, this bracket resolves ₹0 every month.
+              Half-yearly PT also needs its own collection month(s) configured — see &quot;Half-Year PT — Collection Month 1/2&quot; under Contribution Components. Without them, this bracket resolves ₹0 every month.
             </p>
           )}
         </div>
@@ -585,7 +585,7 @@ function TDSBracketsTab({ slabs, onAdd, onEdit, onDelete }) {
       </div>
       {sorted.length > 0 && !hasOpenEnded && (
         <div className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
-          No bracket covers "and above" yet — an employee earning more than the highest configured amount under {regime} Regime won't match any slab.
+          No bracket covers &quot;and above&quot; yet — an employee earning more than the highest configured amount under {regime} Regime won&apos;t match any slab.
         </div>
       )}
       {sorted.length === 0 ? (

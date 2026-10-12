@@ -74,8 +74,8 @@ export default function GermanyCompliancePackSection() {
           </button>
         </div>
         <p className="text-xs text-foreground-muted">
-          The versioned, governed record of Germany's payroll compliance configuration for a given tax year (e.g.
-          "DE-PAYROLL-CY2026-V1") — regulatory authority, effective period, source references, change summary, and
+          The versioned, governed record of Germany&apos;s payroll compliance configuration for a given tax year (e.g.
+          &quot;DE-PAYROLL-CY2026-V1&quot;) — regulatory authority, effective period, source references, change summary, and
           Draft → In Review → QA → Approved → Active lifecycle, using the same framework and maker-checker approval
           gate as the USA/UK compliance packs. Historical and future tax years are preserved as separate, independently
           effective-dated pack versions rather than overwritten.
@@ -90,8 +90,8 @@ export default function GermanyCompliancePackSection() {
         </p>
       ) : state.packs.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border bg-surface-muted py-8 text-center text-xs text-foreground-disabled">
-          No Germany compliance pack configured yet — create one with "New Tax Pack" above (e.g. pack ID
-          "DE-PAYROLL-CY2026-V1").
+          No Germany compliance pack configured yet — create one with &quot;New Tax Pack&quot; above (e.g. pack ID
+          &quot;DE-PAYROLL-CY2026-V1&quot;).
         </p>
       ) : (
         <div className="space-y-2">

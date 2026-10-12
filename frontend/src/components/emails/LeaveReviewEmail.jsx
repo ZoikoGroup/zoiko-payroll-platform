@@ -80,7 +80,7 @@ export default function LeaveReviewEmail({
           <div className="p-3.5 bg-slate-950/50 rounded-lg border border-slate-800/80 flex gap-3 text-xs text-slate-400">
             <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-slate-300 font-medium">Secondary guidance:</strong> If you have questions about this decision, use your organization's designated support route rather than replying to this email.
+              <strong className="text-slate-300 font-medium">Secondary guidance:</strong> If you have questions about this decision, use your organization&apos;s designated support route rather than replying to this email.
             </p>
           </div>
 

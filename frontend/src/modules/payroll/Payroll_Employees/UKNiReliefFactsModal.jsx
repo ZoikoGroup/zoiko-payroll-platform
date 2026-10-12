@@ -103,8 +103,8 @@ export default function UKNiReliefFactsModal({ employee, onClose }) {
     <Modal title={`NI Category Relief Facts — ${employee.name}`} onClose={onClose} maxWidth="max-w-xl">
       <p className="mb-4 rounded-[12px] bg-info/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary">
         These are eligibility facts, not a rate toggle — recording one here does not itself change this
-        employee's NI category. It only gives the automatic-derivation feature real evidence to act on the
-        next time payroll runs; the employee's manually-set NI category is used whenever no fact applies.
+        employee&apos;s NI category. It only gives the automatic-derivation feature real evidence to act on the
+        next time payroll runs; the employee&apos;s manually-set NI category is used whenever no fact applies.
       </p>
 
       {loadError && (

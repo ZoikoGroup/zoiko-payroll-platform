@@ -12,7 +12,7 @@ export default function AUMedicareTab({ pack, rates, onAddRate, onEditRate, onDe
   return (
     <div className="space-y-3">
       <p className="text-xs text-foreground-muted">
-        Medicare Levy Surcharge (MLS) — a genuinely separate annual calculation from ordinary PAYG, unrelated to Scale selection. Medicare Levy proper is configured on the PAYG tab's own Scale 5/6 coefficient bands.
+        Medicare Levy Surcharge (MLS) — a genuinely separate annual calculation from ordinary PAYG, unrelated to Scale selection. Medicare Levy proper is configured on the PAYG tab&apos;s own Scale 5/6 coefficient bands.
       </p>
       <RatesTab pack={pack} rates={filtered} onAdd={onAddRate} onEdit={onEditRate} onDelete={onDeleteRate} />
     </div>

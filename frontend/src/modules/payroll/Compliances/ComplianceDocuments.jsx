@@ -119,7 +119,7 @@ export default function ComplianceDocumentUpload({ country, addToast, documents 
           Drop a compliance or tax document here, or click to upload
         </p>
         <p className="text-[13px] text-foreground-muted mt-1">
-          PDF, image, or scanned notice — we'll pull out contribution rates, tax slabs, and requirements for this jurisdiction.
+          PDF, image, or scanned notice — we&apos;ll pull out contribution rates, tax slabs, and requirements for this jurisdiction.
         </p>
         <input
           ref={inputRef}

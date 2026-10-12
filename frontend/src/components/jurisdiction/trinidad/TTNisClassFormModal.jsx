@@ -79,7 +79,7 @@ export default function TTNisClassFormModal({ pack, slab, onClose, onSaved }) {
           <div><label className={labelClass}>Weekly employer contribution</label><input className={inputClass} value={form.employerWeekly} onChange={set("employerWeekly")} placeholder="e.g. 244.00" /></div>
         </div>
         <p className="text-xs text-foreground-muted">
-          Fixed dollar amounts per contribution week — not a percentage (NIBTT's 16-class table, ZP-TT-ENG-001 §5).
+          Fixed dollar amounts per contribution week — not a percentage (NIBTT&apos;s 16-class table, ZP-TT-ENG-001 §5).
         </p>
 
         <div className="grid grid-cols-3 gap-3">
