@@ -415,7 +415,13 @@ function FinalSettlement({ employees }) {
   }, []);
 
   const create = async () => {
-    await act(() => createSaFinalSettlement(form), "Draft settlement created.");
+    const { noticeDays, repatriationAmount, ...rest } = form;
+    await act(() => createSaFinalSettlement({
+      ...rest,
+      employeeId: Number(form.employeeId),
+      noticePeriodDays: Number(noticeDays) || 0,
+      repatriationPay: repatriationAmount === "" ? null : Number(repatriationAmount) || 0,
+    }), "Draft settlement created.");
     listSaFinalSettlements().then((r) => setSettlements(Array.isArray(r) ? r : r?.data || r?.items || [])).catch(() => setSettlements([]));
   };
 
@@ -497,7 +503,7 @@ function WPSSection({ employees }) {
 
   const viewObs = async (id) => {
     setObsFileId(id);
-    const o = await listSaWpsObservations(id);
+    const o = await listSaWpsObservations(undefined, id);
     setObs(Array.isArray(o) ? o : o?.data || o?.items || []);
   };
 

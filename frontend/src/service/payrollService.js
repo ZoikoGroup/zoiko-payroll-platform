@@ -2802,6 +2802,8 @@ export const getSaRunPreflight = (runId) => api.get(`${SA}/runs/${runId}/preflig
 export const getSaRunFingerprint = (runId) => api.get(`${SA}/runs/${runId}/fingerprint`);
 export const createSaCorrection = (payslipId, payload) => api.post(`${SA}/payslips/${payslipId}/correction`, payload);
 export const listSaCorrections = (payslipId, organizationId) => api.get(`${SA}/payslips/${payslipId}/corrections`, { params: { organizationId } });
+// Every SA correction delta in the caller's organisation (no payslip needed).
+export const listSaOrgCorrections = () => api.get(`${SA}/corrections`);
 export const getHkEmployerReadiness = () => api.get(`${HK}/readiness`);
 export const getSaEmployerReadiness = () => api.get(`${SA}/readiness`);
 export const previewSaudiArabiaCalculation = (payload) => api.post(`${SA}/calculation-preview`, payload);

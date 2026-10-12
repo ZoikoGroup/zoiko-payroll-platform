@@ -713,6 +713,9 @@ export const compareHongKongReportTemplates = (fromId, toId) =>
 export const getHongKongPackGoldenCheck = (packRowId) =>
   apiFetch(`/api/super-admin/compliance/hong-kong/packs/${packRowId}/golden-check`);
 
+export const getSaudiArabiaPackGoldenCheck = (packRowId) =>
+  apiFetch(`/api/super-admin/compliance/saudi-arabia/packs/${packRowId}/golden-check`);
+
 // ————— France (ZP-FR-ENG-001, 2026-09-24) ————
 // Super-Admin-owned authority data for the France Compliance workspace:
 // SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate

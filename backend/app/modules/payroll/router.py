@@ -3920,6 +3920,241 @@ def preview_saudi_arabia_calculation_org(
     return saudi_arabia_service.preview_saudi_arabia_calculation(db, data)
 
 
+# ── Saudi Arabia (ZP-SA-ENG-001) — org-scoped ledgers: GOSI liability, EOS,
+# final settlement, WPS, and the org's correction list ─────────────────────
+# The org Compliance Centre (frontend SAComplianceCentreTab) calls these. They
+# are thin, org-scoped twins of the Super Admin routes under
+# /api/super-admin/compliance/saudi-arabia/... and call the SAME
+# saudi_arabia_service functions, so every rule (committed-run checks, four-eyes,
+# idempotency, content addressing) stays in one place. The organisation is
+# always the caller's own; an explicit organizationId that differs is refused.
+from app.modules.payroll.schemas import (  # noqa: E402
+    SaGosiLiabilityResponse, SaEosAccrualResponse,
+    SaFinalSettlementCreateRequest, SaFinalSettlementResponse, SaFinalSettlementPayRequest,
+    SaWpsFileResponse, SaWpsObservationResponse, SaWpsFileBuildResponse, SaWpsRejectRequest,
+)
+
+
+def _sa_org_id(current_user, requested_org_id: Optional[int] = None) -> int:
+    if requested_org_id is not None and requested_org_id != current_user.organization_id:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Organization mismatch")
+    return current_user.organization_id
+
+
+def _sa_actor_id(current_user) -> Optional[int]:
+    return getattr(current_user, "id", None)
+
+
+@payroll_router.get(
+    "/saudi-arabia/gosi-liabilities", response_model=list[SaGosiLiabilityResponse], response_model_by_alias=True,
+    summary="List the organisation's monthly GOSI liabilities (SA-024)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_gosi_liabilities_org(
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_gosi_liabilities(db, _sa_org_id(current_user, organization_id))
+
+
+@payroll_router.post(
+    "/saudi-arabia/runs/{run_id}/gosi-liability", response_model=SaGosiLiabilityResponse, response_model_by_alias=True,
+    summary="Aggregate one committed run into the organisation's monthly GOSI liability (idempotent)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def build_sa_gosi_liability_org(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.build_sa_gosi_liability(
+        db, _sa_org_id(current_user), run_id, _sa_actor_id(current_user))
+
+
+@payroll_router.get(
+    "/saudi-arabia/eos-ledger",
+    summary="List the organisation's EOS accrual ledger (optionally one employee)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_eos_ledger_org(
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_eos_ledger(db, _sa_org_id(current_user, organization_id), employee_id)
+
+
+@payroll_router.post(
+    "/saudi-arabia/runs/{run_id}/eos-accrual", response_model=SaEosAccrualResponse, response_model_by_alias=True,
+    summary="Accrue one month of end-of-service for every Saudi employee in a committed run (SA-020/SA-021)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def accrue_sa_eos_org(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.accrue_sa_eos_for_run(
+        db, _sa_org_id(current_user), run_id, _sa_actor_id(current_user))
+
+
+@payroll_router.get(
+    "/saudi-arabia/final-settlements", response_model=list[SaFinalSettlementResponse], response_model_by_alias=True,
+    summary="List the organisation's final settlements (optionally one employee)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_final_settlements_org(
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_final_settlements(db, _sa_org_id(current_user, organization_id), employee_id)
+
+
+@payroll_router.post(
+    "/saudi-arabia/final-settlements", response_model=SaFinalSettlementResponse, response_model_by_alias=True,
+    summary="Compute one final settlement as DRAFT (EOS + recorded dues) — SA-026/SA-027",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def build_sa_final_settlement_org(
+    data: SaFinalSettlementCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.build_sa_final_settlement(
+        db, _sa_org_id(current_user), data, _sa_actor_id(current_user))
+
+
+@payroll_router.post(
+    "/saudi-arabia/final-settlements/{settlement_id}/approve",
+    response_model=SaFinalSettlementResponse, response_model_by_alias=True,
+    summary="Approve a DRAFT final settlement (four-eyes: not by its creator)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def approve_sa_final_settlement_org(
+    settlement_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.approve_sa_final_settlement(
+        db, _sa_org_id(current_user), settlement_id, _sa_actor_id(current_user))
+
+
+@payroll_router.post(
+    "/saudi-arabia/final-settlements/{settlement_id}/pay",
+    response_model=SaFinalSettlementResponse, response_model_by_alias=True,
+    summary="Mark an APPROVED final settlement paid",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def pay_sa_final_settlement_org(
+    settlement_id: int,
+    data: SaFinalSettlementPayRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.pay_sa_final_settlement(
+        db, _sa_org_id(current_user), settlement_id, data.paymentReference, _sa_actor_id(current_user))
+
+
+@payroll_router.get(
+    "/saudi-arabia/wps-files", response_model=list[SaWpsFileResponse], response_model_by_alias=True,
+    summary="List the organisation's WPS SIE file submissions (SA-025)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_wps_files_org(
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_wps_files(db, _sa_org_id(current_user, organization_id))
+
+
+@payroll_router.post(
+    "/saudi-arabia/runs/{run_id}/wps-file", response_model=SaWpsFileBuildResponse, response_model_by_alias=True,
+    summary="Build (or return) the content-addressed WPS SIE extract for one committed run",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def build_sa_wps_file_org(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.build_sa_wps_file(db, _sa_org_id(current_user), run_id, _sa_actor_id(current_user))
+
+
+@payroll_router.get(
+    "/saudi-arabia/wps-files/{wps_file_id}/observations",
+    response_model=list[SaWpsObservationResponse], response_model_by_alias=True,
+    summary="List the per-employee observations on one of the organisation's WPS files",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_wps_observations_org(
+    wps_file_id: int,
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_wps_observations(db, _sa_org_id(current_user, organization_id), wps_file_id)
+
+
+@payroll_router.post(
+    "/saudi-arabia/wps-files/{wps_file_id}/accepted", response_model=SaWpsFileResponse, response_model_by_alias=True,
+    summary="Record that the WPS file was accepted",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def accept_sa_wps_file_org(
+    wps_file_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.mark_sa_wps_file_accepted(db, _sa_org_id(current_user), wps_file_id)
+
+
+@payroll_router.post(
+    "/saudi-arabia/wps-files/{wps_file_id}/rejected", response_model=SaWpsFileResponse, response_model_by_alias=True,
+    summary="Record that the WPS file was rejected (reason required)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def reject_sa_wps_file_org(
+    wps_file_id: int,
+    data: SaWpsRejectRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.mark_sa_wps_file_rejected(db, _sa_org_id(current_user), wps_file_id, data.reason)
+
+
+@payroll_router.get(
+    "/saudi-arabia/corrections",
+    summary="List every Saudi Arabia correction delta in the organisation (newest first)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sa_org_corrections(
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.modules.payroll import saudi_arabia_service
+    return saudi_arabia_service.list_sa_org_corrections(db, _sa_org_id(current_user, organization_id))
+
+
 @payroll_router.post(
     "/singapore/employees/{employee_id}/cessation",
     summary="Record a Singapore employee's cessation — a non-citizen's monies go on IR21 hold automatically",

@@ -146,6 +146,10 @@ export default function SACompliancePage() {
           <TestCertificationPanel jurisdiction="SA" label="Saudi Arabia (GOSI / MHRSD / Mudad)"
             fixturesPath="backend/tests/fixtures/sa_golden/README.md" />
         ) },
+      { key: "sa-golden-check", label: "Pack Golden Check", icon: ShieldCheck, after: "sa-golden", isVisible: isTax,
+        render: ({ pack, addToast, onReload }) => (
+          <SAPackGoldenCheckTab pack={pack} onReload={onReload} />
+        ) },
     ],
     hiddenTabs: ["slabs", "rates"],
     countryLevelLabel: "Saudi Arabia (country-level)",

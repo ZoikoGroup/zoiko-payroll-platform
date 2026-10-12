@@ -526,7 +526,8 @@ def get_sa_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
         "Missing: " + ", ".join(missing) if missing else f"All {len(required)} required parameters configured.")
 
     branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-    absent_branches = [r for r in branch_regimes if r not in rule_types]
+    gosi_branches = {s.tax_regime for s in slabs if getattr(s, "rule_type", None) == "SA_GOSI_BRANCH"}
+    absent_branches = [r for r in branch_regimes if r not in gosi_branches]
     add("gosi_branches", "GOSI branch rows for every worker class (PENSION_NEW/LEGACY, SANED, OCCUPATIONAL_HAZARDS)",
         not absent_branches, "Missing branch regimes: " + ", ".join(absent_branches) if absent_branches
         else "All four GOSI branch regimes present.")
@@ -1085,6 +1086,27 @@ def list_sa_corrections(db: Session, organization_id: int, payslip_id: int) -> l
              "totalsAll": (c.sa_calculation_snapshot or {}).get("correction", {}).get("totalsAll", {}),
              "createdAt": c.payroll_run.created_at.isoformat() if c.payroll_run else None}
             for c in chain]
+
+
+def list_sa_org_corrections(db: Session, organization_id: int) -> list:
+    """Every SA correction delta payslip in the organisation, newest first —
+    the org Compliance Centre's Corrections list (list_sa_corrections above
+    needs one original payslip). Same row shape, plus the original payslip,
+    the employee and countryCode."""
+    items = (db.query(PayslipItem)
+             .filter(PayslipItem.organization_id == organization_id, PayslipItem.country_code == SA)
+             .order_by(PayslipItem.id.desc()).all())
+    rows = []
+    for c in items:
+        correction = (c.sa_calculation_snapshot or {}).get("correction") or {}
+        if not correction.get("originalPayslipId"):
+            continue
+        rows.append({"payslipId": c.id, "runId": c.payroll_run_id, "countryCode": SA,
+                     "originalPayslipId": correction.get("originalPayslipId"),
+                     "employeeId": c.employee_id, "employeeName": c.employee_name,
+                     "deltas": correction.get("deltas", {}), "totalsAll": correction.get("totalsAll", {}),
+                     "createdAt": c.payroll_run.created_at.isoformat() if c.payroll_run and c.payroll_run.created_at else None})
+    return rows
 
 
 def sa_replay(frozen_context: dict, baseline_totals: dict = None):
