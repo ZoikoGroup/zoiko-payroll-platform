@@ -533,6 +533,33 @@ def test_sickness_allowance_ld_example_2_and_conditions(db, packs):
     assert preg["status"] == "ENTITLED"
 
 
+def test_sickness_allowance_from_a_lookback_with_unpaid_and_part_paid_periods(db, packs):
+    """Wireframe §16 row 9 (LD Concise Guide Appendix 1): a 12-month lookback holding 10 days of
+    unpaid leave and 5 days of sick leave paid at less than full pay. Both periods are disregarded
+    — their days AND the sums paid for them — and the sickness allowance is 4/5 of the resulting
+    average daily wage. Wage figures are TEST data, not statutory values."""
+    from app.modules.payroll.engine.jurisdictions.hong_kong import average_wage, entitlements
+
+    rate_map, _s, _p = _inputs(db, date(2026, 7, 15))
+    slips = [_slip(i, 2025 + (6 + i) // 12, (6 + i) % 12 + 1, "15000") for i in range(12)]   # Jul 2025 – Jun 2026
+    slips[2]["eoWages"] = "10000"                    # Sep 2025: 10 unpaid days already not paid
+    disregarded = [
+        {"from": "2025-09-10", "to": "2025-09-19", "reason": "UNPAID_LEAVE", "amountPaid": "0"},
+        {"from": "2025-11-03", "to": "2025-11-07", "reason": "SICK_LEAVE_FOUR_FIFTHS_PAY", "amountPaid": "2000"},
+    ]
+    avg = average_wage.calculate(date(2026, 7, 15), date(2020, 1, 1), slips, disregarded, "SICKNESS", rate_map=rate_map)
+    assert avg["lookbackStart"] == "2025-07-01" and avg["lookbackEnd"] == "2026-06-30"
+    assert avg["totalDays"] == 365 and avg["excludedDays"] == 15 and avg["includedDays"] == 350
+    assert D(avg["excludedAmount"]) == D("2000.00") and D(avg["wagesUsed"]) == D("173000.00")
+    adw = (D("175000") - D("2000")) / D("350")
+    assert D(avg["averageDailyWage"]) == adw.quantize(D("0.0001"))
+    assert D(avg["averageDailyWage"]) > (D("175000") / D("365")).quantize(D("0.0001"))   # exclusions raise it
+    out = entitlements.sickness_allowance(rate_map, _cc_result("2020-01-01"), avg, 5, 5, True, D("20"))
+    daily = D(avg["averageDailyWage"]) * D("4") / D("5")
+    assert out["status"] == "ENTITLED" and D(out["dailyRate"]) == daily.quantize(D("0.01"))
+    assert D(out["amount"]) == (daily * 5).quantize(D("0.01"))
+
+
 def test_paid_sickness_day_accrual_2_then_4_capped_at_120(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong import entitlements
 

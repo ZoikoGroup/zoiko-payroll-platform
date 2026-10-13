@@ -611,6 +611,157 @@ def test_annual_leave_entitlement_through_the_service(db, hk):
     assert D(out["amount"]) == (D(snap.result["averageDailyWage"]) * 3).quantize(D("0.01"))
 
 
+def test_r5_468_rule_end_to_end_from_timesheet_through_payroll_to_entitlement(db, hk, monkeypatch):
+    """Wireframe §16 row 5 end to end. Two employees start Sun 18 Jan 2026 and work 18 h every week, except
+    the week of 22 Feb: A works 16 h (4-week total 70 — the post-18-Jan-2026 68-hour limb is met), B works
+    13 h (total 67 — not met). Timesheet hours go in through the service; the February run's preflight shows
+    A continuous / B not; payroll is committed Jan–Apr; holiday pay for 1 May 2026 is ENTITLED for A and
+    NOT_ENTITLED for B. Hours and pay are TEST data."""
+    import app.core.code_generation as code_generation
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import PayrollRun
+
+    base = {"n": 0}
+
+    def _spaced(db, organization_id, prefix, table, code_column, date_format=None, seq_width=3):
+        base["n"] += 100                      # a run numbers its payslips from one base: keep runs apart
+        return f"TEST{prefix}{base['n']:05d}"
+
+    monkeypatch.setattr(code_generation, "generate_business_code", _spaced)
+
+    def hours(emp, short_week):
+        entries = []
+        week = date(2026, 1, 18)
+        while week <= date(2026, 4, 26):
+            days = ([("8", 1), ("8", 2)] if short_week == 16 else [("8", 1), ("5", 2)]) if week == date(2026, 2, 22) \
+                else [("6", 1), ("6", 2), ("6", 3)]
+            entries += [{"date": (week + timedelta(days=offset)).isoformat(), "hours": h} for h, offset in days]
+            week += timedelta(days=7)
+        hong_kong_service.record_work_hours(db, hk.org.id, emp.id, entries, MAKER.id)
+
+    a = _employee(db, hk.org.id, "R5A", date_of_joining=date(2026, 1, 18))
+    b = _employee(db, hk.org.id, "R5B", date_of_joining=date(2026, 1, 18))
+    for emp, short in ((a, 16), (b, 13)):
+        _profile(db, emp, hk.org.id, "2026-01-18")
+        hours(emp, short)
+
+    cc_a = hong_kong_service.continuous_contract(db, hk.org.id, a.id, date(2026, 2, 28))
+    cc_b = hong_kong_service.continuous_contract(db, hk.org.id, b.id, date(2026, 2, 28))
+    week_a = next(w for w in cc_a["weeks"] if w["weekStart"] == "2026-02-22")
+    week_b = next(w for w in cc_b["weeks"] if w["weekStart"] == "2026-02-22")
+    assert cc_a["status"] == "CONTINUOUS" and (week_a["rule"], week_a["result"], D(week_a["fourWeekHours"])) == ("4_WEEK_17_68", "MET", D("70"))
+    assert cc_b["status"] == "NOT_CONTINUOUS" and week_b["result"] != "MET" and D(week_b["fourWeekHours"]) == D("67")
+
+    for m in (1, 2, 3, 4):
+        _month(db, hk.org, m)
+    feb = next(r for r in db.query(PayrollRun).filter(PayrollRun.organization_id == hk.org.id, PayrollRun.period_label == "2026-02"))
+    checks = hong_kong_service.hk_payroll_preflight(db, hk.org.id, feb.id)["checks"]
+    codes = {c.get("employeeCode"): {x["code"] for x in checks if x.get("employeeCode") == c.get("employeeCode")} for c in checks}
+    assert "EO_CONTINUOUS_CONTRACT" in codes["R5A"] and "EO_NOT_A_CONTINUOUS_CONTRACT" in codes["R5B"]
+    assert all(_item(db, feb, e).net_pay > 0 for e in (a, b))                     # payroll result committed for both
+
+    outcomes = {}
+    for emp in (a, b):
+        snap = hong_kong_service.calculate_average_wage(db, hk.org.id, emp.id, "HOLIDAY", date(2026, 5, 1), [], MAKER.id)
+        outcomes[emp.employee_code] = hong_kong_service.calculate_entitlement(
+            db, hk.org.id, emp.id, "HOLIDAY_PAY", {"averageWageSnapshotId": snap.id, "date": "2026-05-01"})
+    assert outcomes["R5A"]["status"] == "ENTITLED" and D(outcomes["R5A"]["amount"]) > 0
+    assert outcomes["R5B"]["status"] == "NOT_ENTITLED" and outcomes["R5B"]["amount"] == "0.00"
+    assert "continuous contract" in outcomes["R5B"]["failedConditions"][0]
+
+
+def _spaced_codes(monkeypatch):
+    """A run numbers its payslips from one base code: keep multi-employee runs apart."""
+    import app.core.code_generation as code_generation
+
+    base = {"n": 0}
+
+    def _spaced(db, organization_id, prefix, table, code_column, date_format=None, seq_width=3):
+        base["n"] += 100
+        return f"TEST{prefix}{base['n']:05d}"
+
+    monkeypatch.setattr(code_generation, "generate_business_code", _spaced)
+
+
+def _weekly_hours(db, org_id, emp_id, first_sunday, last_sunday, per_day="6", days=(1, 2, 3)):
+    from app.modules.payroll import hong_kong_service
+
+    entries, week = [], first_sunday
+    while week <= last_sunday:
+        entries += [{"date": (week + timedelta(days=d)).isoformat(), "hours": per_day} for d in days]
+        week += timedelta(days=7)
+    hong_kong_service.record_work_hours(db, org_id, emp_id, entries, MAKER.id)
+
+
+def test_r2_r3_mpf_thresholds_end_to_end_through_a_committed_run(db, hk, monkeypatch):
+    """Wireframe §16 rows 2–3 through payroll: HK$6,500 → employer 5% (325.00), employee nil;
+    HK$45,000 → both capped at HK$1,500. April 2026 (past the 60th day). Salaries are TEST data."""
+    _spaced_codes(monkeypatch)
+    low = _employee(db, hk.org.id, "R2", ctc=D("78000"))
+    high = _employee(db, hk.org.id, "R3", ctc=D("540000"))
+    for emp in (low, high):
+        _profile(db, emp, hk.org.id, "2026-01-16")
+    run = _month(db, hk.org, 4)
+    a, b = _item(db, run, low), _item(db, run, high)
+    assert a.gross_pay == D("6500.00") and (a.employee_pension, a.employer_pension) == (D("0.00"), D("325.00"))
+    assert b.gross_pay == D("45000.00") and (b.employee_pension, b.employer_pension) == (D("1500.00"), D("1500.00"))
+    assert a.net_pay == D("6500.00") and b.net_pay == D("43500.00")
+
+
+def test_r4_smw_crossover_end_to_end_from_timesheet_through_a_payroll_run(db, hk, monkeypatch):
+    """Wireframe §16 row 4 through payroll: a run whose wage period is 16 Apr – 15 May 2026 with recorded
+    hours of 10 h/day before and 6 h/day from 1 May. The payslip's minimum-wage assessment prices
+    150 h at HK$42.10 and 90 h at HK$43.10 (10,194.00); a swapped mapping would be 10,254.00. TEST data."""
+    from app.modules.payroll import hong_kong_service, service
+    from app.modules.payroll.models import PayrollRun, PayrollStatus
+
+    _spaced_codes(monkeypatch)
+    emp = _employee(db, hk.org.id, "R4", ctc=D("120000"))
+    _profile(db, emp, hk.org.id, "2026-01-16")
+    hong_kong_service.record_work_hours(db, hk.org.id, emp.id, [
+        {"date": (date(2026, 4, 16) + timedelta(days=i)).isoformat(), "hours": "10" if i < 15 else "6"} for i in range(30)],
+        MAKER.id)
+    run = PayrollRun(organization_id=hk.org.id, period_label="2026-04-16..05-15", period_start=date(2026, 4, 16),
+                     period_end=date(2026, 5, 15), pay_date=date(2026, 5, 15))
+    db.add(run)
+    db.commit()
+    service.generate_payslips_for_run(db, run, hk.org.id)
+    run.status = PayrollStatus.APPROVED
+    db.commit()
+    smw = _item(db, run, emp).hk_calculation_trace["minimumWage"]
+    seg = {s["rate"]: s for s in smw["segments"]}
+    assert D(seg["42.10"]["hours"]) == D("150") and D(seg["43.10"]["hours"]) == D("90") and seg["43.10"]["from"] == "2026-05-01"
+    assert D(smw["minimumDue"]) == D("10194.00")
+
+
+def test_r9_sickness_allowance_end_to_end_after_a_mixed_paid_unpaid_lookback(db, hk, monkeypatch):
+    """Wireframe §16 row 9 through the services: committed payroll Jan–May 2026, recorded hours (continuous
+    contract), a SICKNESS average-wage snapshot that disregards 10 unpaid days and 4 part-paid sick days
+    (days AND sums), then the sickness allowance at 4/5 of that average. Figures are TEST data."""
+    from app.modules.payroll import hong_kong_service
+
+    _spaced_codes(monkeypatch)
+    emp = _employee(db, hk.org.id, "R9", date_of_joining=date(2026, 1, 18))
+    _profile(db, emp, hk.org.id, "2026-01-18")
+    _weekly_hours(db, hk.org.id, emp.id, date(2026, 1, 18), date(2026, 6, 14))
+    for m in (1, 2, 3, 4, 5):
+        _month(db, hk.org, m)
+    disregarded = [{"from": "2026-03-02", "to": "2026-03-11", "reason": "UNPAID_LEAVE", "amountPaid": "0"},
+                   {"from": "2026-04-07", "to": "2026-04-10", "reason": "SICK_LEAVE_FOUR_FIFTHS_PAY", "amountPaid": "2400"}]
+    snap = hong_kong_service.calculate_average_wage(db, hk.org.id, emp.id, "SICKNESS", date(2026, 6, 15), disregarded, MAKER.id)
+    r = snap.result
+    assert r["lookbackStart"] == "2026-01-18" and r["lookbackEnd"] == "2026-05-31" and r["excludedDays"] == 14
+    assert D(r["excludedAmount"]) == D("2400.00")
+    adw = (D(r["totalWages"]) - D("2400")) / D(r["totalDays"] - 14)
+    assert D(r["averageDailyWage"]) == adw.quantize(D("0.0001"))
+    out = hong_kong_service.calculate_entitlement(db, hk.org.id, emp.id, "SICKNESS_ALLOWANCE", {
+        "averageWageSnapshotId": snap.id, "date": "2026-06-15", "sicknessDays": 4, "consecutiveDays": 4,
+        "medicallyCertified": True})
+    assert out["status"] == "ENTITLED" and out["continuousContract"] == "CONTINUOUS"
+    daily = D(r["averageDailyWage"]) * D("4") / D("5")
+    assert D(out["dailyRate"]) == daily.quantize(D("0.01")) and D(out["amount"]) == (daily * 4).quantize(D("0.01"))
+
+
 def test_work_hours_are_append_only(db, hk):
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import hong_kong_service
