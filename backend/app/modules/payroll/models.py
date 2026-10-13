@@ -1458,6 +1458,9 @@ class PayrollRun(Base):
     # fingerprint. Written at approval time; read at correction time to verify
     # the basis hasn't drifted. Uses generic JSON for SQLite compatibility.
     sa_approval_fingerprint = Column(JSON, nullable=True)
+    # Netherlands (ZP-NL-ENG-001 NL-034): {fingerprint, approvedBy, approvedAt} —
+    # binds approval to inputs + rule pack + premium decisions + VCR snapshot.
+    nl_approval_fingerprint = Column(JSON, nullable=True)
 
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -1889,6 +1892,9 @@ class PayslipItem(Base):
     # GOSI branch resolution, earning classifications, EOS accrual, settlement
     # components. NULL for non-SA payslips and SA payslips before this column.
     sa_calculation_snapshot = Column(JSON, nullable=True)
+    # Netherlands (ZP-NL-ENG-001): frozen NL inputs + nl_result, replayed by
+    # corrections exactly as computed (never reconstructed). NULL for non-NL.
+    nl_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -8676,3 +8682,412 @@ class PayrollNlIdempotencyRecord(Base):
 
     def __repr__(self):
         return f"<PayrollNlIdempotencyRecord key={self.idempotency_key[:16]}...>"
+
+
+# ── Netherlands (ZP-NL-ENG-001) — Phases 3, 5–7 ─────────────────────────────
+# Each class mirrors its Alembic migration column-for-column (M2 ac68f3723174,
+# M5 1080702411b1, M6 2ad71ebff6b5). The three ledgers (VCR snapshots, WKR
+# accumulators, vacation-allowance ledger) are insert-only: a correction is a
+# NEW revision/entry, never an edit (NL-045), enforced by the ORM guards below.
+
+_NL_JSON = postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
+
+
+class PayrollNlVcrSnapshot(Base):
+    """One committed VCR step (voortschrijdend cumulatief rekenen, NL-012/013).
+    Series key = employer entity + employee + tax year + family; `revision` is
+    the optimistic-concurrency token (NL-046). Written only on run COMMIT."""
+    __tablename__ = "payroll_nl_vcr_snapshots"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id = Column(Integer, nullable=True, index=True)
+    tax_year               = Column(SmallInteger, nullable=False, index=True)
+    family                 = Column(String(20), nullable=False)  # EI / ZVW_LEVY / ZVW_CONTRIB
+    revision               = Column(Integer, nullable=False)
+    payroll_run_id         = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    payslip_item_id        = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    period_count           = Column(Integer, nullable=False, default=0)
+    period_max_amount      = Column(Numeric(14, 2), nullable=False, default=0)
+    cumulative_wage        = Column(Numeric(14, 2), nullable=False, default=0)
+    cumulative_max         = Column(Numeric(14, 2), nullable=False, default=0)
+    cumulative_base        = Column(Numeric(14, 2), nullable=False, default=0)
+    base_increment         = Column(Numeric(14, 2), nullable=False, default=0)
+    previous_snapshot_id   = Column(Integer, ForeignKey("payroll_nl_vcr_snapshots.id", ondelete="SET NULL"), nullable=True)
+    content_pack_id        = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id", ondelete="SET NULL"), nullable=True)
+    is_correction          = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    snapshot_sha256        = Column(String(64), nullable=False)
+    created_by             = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("family IN ('EI', 'ZVW_LEVY', 'ZVW_CONTRIB')", name="ck_nl_vcr_family"),
+        UniqueConstraint("organization_id", "employee_id", "tax_year", "family", "revision",
+                         name="uq_nl_vcr_snapshots_org_emp_year_family_rev"),
+        Index("ix_nl_vcr_snapshots_lookup", "organization_id", "employee_id", "tax_year", "family", "revision"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlVcrSnapshot org={self.organization_id} emp={self.employee_id} {self.tax_year} {self.family} r{self.revision}>"
+
+
+class PayrollNlEmployerPremiumDecision(Base):
+    """Employer-specific premium decision (Aof size class, Whk WGA/ZW-flex) —
+    effective-dated with source decision evidence (NL-017). Never a universal rate."""
+    __tablename__ = "payroll_nl_employer_premium_decisions"
+
+    id                               = Column(Integer, primary_key=True, index=True)
+    organization_id                  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    tax_year                         = Column(SmallInteger, nullable=False, index=True)
+    aof_size_class                   = Column(String(10), nullable=False)  # SMALL / LARGE
+    aof_basis_year                   = Column(SmallInteger, nullable=False)
+    aof_basis_premium_wage           = Column(Numeric(14, 2), nullable=False)
+    whk_wga_pct                      = Column(Numeric(7, 4), nullable=True)
+    whk_wga_employee_recoverable_pct = Column(Numeric(7, 4), nullable=True)
+    whk_zw_flex_pct                  = Column(Numeric(7, 4), nullable=True)
+    sector_code                      = Column(String(50), nullable=True)
+    decision_reference               = Column(String(100), nullable=False)
+    decision_date                    = Column(Date, nullable=False)
+    evidence_artifact_id             = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    effective_from                   = Column(Date, nullable=False, index=True)
+    effective_to                     = Column(Date, nullable=True, index=True)
+    status                           = Column(String(20), nullable=False, default="DRAFT")  # DRAFT/APPROVED/ACTIVE/SUPERSEDED
+    created_by                       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by                      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    sha256                           = Column(String(64), nullable=False)
+    created_at                       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                       = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("aof_size_class IN ('SMALL', 'LARGE')", name="ck_nl_emp_prem_aof_class"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'ACTIVE', 'SUPERSEDED')", name="ck_nl_emp_prem_status"),
+        Index("ix_nl_emp_prem_decisions_active_lookup", "organization_id", "tax_year", "status",
+              postgresql_where=sa.text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlEmployerPremiumDecision org={self.organization_id} {self.tax_year} {self.status}>"
+
+
+class PayrollNlEarningClassification(Base):
+    """Per-earning-code classification on seven independent axes (NL-047).
+    organization_id NULL = platform catalog; an org row overrides it."""
+    __tablename__ = "payroll_nl_earning_classifications"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    earning_code             = Column(String(50), nullable=False, index=True)
+    remuneration_type        = Column(String(20), nullable=False)  # REGULAR / SPECIAL
+    wage_tax                 = Column(Boolean, nullable=False, default=True)
+    employee_insurance_wage  = Column(Boolean, nullable=False, default=True)
+    zvw_wage                 = Column(Boolean, nullable=False, default=True)
+    pensionable              = Column(Boolean, nullable=False, default=True)
+    wkr_treatment            = Column(String(40), nullable=False, default="WAGE")
+    vacation_allowance_basis = Column(Boolean, nullable=False, default=True)
+    minimum_wage_reckonable  = Column(Boolean, nullable=False, default=True)
+    evidence_policy          = Column(String(20), nullable=False, default="NONE")
+    effective_from           = Column(Date, nullable=False, index=True)
+    effective_to             = Column(Date, nullable=True, index=True)
+    status                   = Column(String(20), nullable=False, default="ACTIVE")  # ACTIVE / SUPERSEDED / ARCHIVED
+    sha256                   = Column(String(64), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("remuneration_type IN ('REGULAR', 'SPECIAL')", name="ck_nl_earn_rem_type"),
+        sa.CheckConstraint("wkr_treatment IN ('WAGE', 'TARGETED_EXEMPTION', 'ZERO_VALUATION', 'FINAL_LEVY_DESIGNATED', 'N_A')",
+                           name="ck_nl_earn_wkr_treatment"),
+        sa.CheckConstraint("evidence_policy IN ('NONE', 'RECEIPT', 'DECLARATION', 'BOTH')", name="ck_nl_earn_evidence"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'SUPERSEDED', 'ARCHIVED')", name="ck_nl_earn_status"),
+        Index("ix_nl_earn_org_code_eff", "organization_id", "earning_code", "effective_from"),
+        UniqueConstraint("organization_id", "earning_code", "effective_from", name="uq_nl_earn_org_code_eff_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlEarningClassification org={self.organization_id} {self.earning_code} {self.status}>"
+
+
+class PayrollNlVacationAllowanceLedger(Base):
+    """Vacation-allowance accrual/payout ledger, separate from taxable wage (NL-009). Insert-only."""
+    __tablename__ = "payroll_nl_vacation_allowance_ledger"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id = Column(Integer, ForeignKey("payroll_nl_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True)
+    accrual_year           = Column(SmallInteger, nullable=False, index=True)
+    period                 = Column(String(20), nullable=False)
+    entry_type             = Column(String(20), nullable=False)  # ACCRUAL / PAYOUT / CORRECTION
+    basis_amount           = Column(Numeric(14, 2), nullable=False, default=0)
+    pct                    = Column(Numeric(5, 2), nullable=False)
+    amount                 = Column(Numeric(14, 2), nullable=False, default=0)
+    balance_after          = Column(Numeric(14, 2), nullable=False, default=0)
+    payroll_run_id         = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    payslip_item_id        = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("entry_type IN ('ACCRUAL', 'PAYOUT', 'CORRECTION')", name="ck_nl_vac_entry_type"),
+        Index("ix_nl_vac_org_emp_year", "organization_id", "employee_id", "accrual_year"),
+    )
+
+
+class PayrollNlWkrAccumulator(Base):
+    """Employer/concern annual WKR accumulator revision (NL-023). Insert-only."""
+    __tablename__ = "payroll_nl_wkr_accumulators"
+
+    id                             = Column(Integer, primary_key=True, index=True)
+    organization_id                = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    concern_id                     = Column(Integer, nullable=True, index=True)  # NULL = standalone
+    tax_year                       = Column(SmallInteger, nullable=False, index=True)
+    revision                       = Column(Integer, nullable=False)
+    fiscal_wage_cumulative         = Column(Numeric(14, 2), nullable=False, default=0)
+    free_space_available           = Column(Numeric(14, 2), nullable=False, default=0)
+    designated_wage_cumulative     = Column(Numeric(14, 2), nullable=False, default=0)
+    targeted_exemptions_cumulative = Column(Numeric(14, 2), nullable=False, default=0)
+    excess_amount                  = Column(Numeric(14, 2), nullable=False, default=0)
+    excess_levy_80                 = Column(Numeric(14, 2), nullable=False, default=0)
+    payroll_run_id                 = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    snapshot_sha256                = Column(String(64), nullable=False)
+    created_at                     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "concern_id", "tax_year", "revision", name="uq_nl_wkr_acc_org_concern_year_rev"),
+        Index("uq_nl_wkr_acc_standalone_year_rev", "organization_id", "tax_year", "revision", unique=True,
+              postgresql_where=sa.text("concern_id IS NULL"), sqlite_where=sa.text("concern_id IS NULL")),
+    )
+
+
+class PayrollNlWkrConcern(Base):
+    """WKR concern group for one year — only with recorded eligibility evidence (NL-023)."""
+    __tablename__ = "payroll_nl_wkr_concerns"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    parent_organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    tax_year                = Column(SmallInteger, nullable=False, index=True)
+    member_org_ids          = Column(_NL_JSON, nullable=False)
+    eligibility_evidence_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status                  = Column(String(20), nullable=False, default="ACTIVE")  # ACTIVE / DISSOLVED
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('ACTIVE', 'DISSOLVED')", name="ck_nl_wkr_concern_status"),
+        UniqueConstraint("parent_organization_id", "tax_year", name="uq_nl_wkr_concern_parent_year"),
+    )
+
+
+class PayrollNlWkrSettlement(Base):
+    """Annual WKR excess-levy settlement (second return period of the following year)."""
+    __tablename__ = "payroll_nl_wkr_settlements"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    concern_id             = Column(Integer, nullable=True, index=True)
+    tax_year               = Column(SmallInteger, nullable=False, index=True)
+    excess_levy_amount     = Column(Numeric(14, 2), nullable=False, default=0)
+    target_return_period   = Column(String(20), nullable=False)
+    loonaangifte_return_id = Column(Integer, nullable=True)  # FK added with the Phase 9 return table
+    status                 = Column(String(20), nullable=False, default="PENDING")  # PENDING / FILED / ASSESSED
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'FILED', 'ASSESSED')", name="ck_nl_wkr_settlement_status"),
+    )
+
+
+class PayrollNlCompanyCar(Base):
+    """Company car made available for private use — benefit-in-kind inputs (NL-024/025)."""
+    __tablename__ = "payroll_nl_company_cars"
+
+    id                          = Column(Integer, primary_key=True, index=True)
+    organization_id             = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    plate_masked                = Column(String(20), nullable=True)
+    catalog_value               = Column(Numeric(14, 2), nullable=False)
+    first_admission_date        = Column(Date, nullable=False)
+    vehicle_class               = Column(String(20), nullable=True)
+    co2_class                   = Column(String(20), nullable=True)
+    addition_rate_window_key    = Column(String(50), nullable=False, index=True)
+    private_use_status          = Column(String(20), nullable=False, default="PRIVATE")  # PRIVATE / NO_PRIVATE_USE_500KM
+    no_private_use_evidence_ref = Column(String(200), nullable=True)
+    employee_own_contribution   = Column(Numeric(14, 2), nullable=False, default=0)
+    effective_from              = Column(Date, nullable=False, index=True)
+    effective_to                = Column(Date, nullable=True, index=True)
+    status                      = Column(String(20), nullable=False, default="ACTIVE")  # ACTIVE / RETURNED / SOLD
+    created_at                  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("private_use_status IN ('PRIVATE', 'NO_PRIVATE_USE_500KM')", name="ck_nl_car_private_use"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'RETURNED', 'SOLD')", name="ck_nl_car_status"),
+    )
+
+
+class PayrollNlExpatDecision(Base):
+    """Belastingdienst 30%-facility decision — payroll activates it only from a
+    VERIFIED authority decision, never an HR checkbox (NL-026)."""
+    __tablename__ = "payroll_nl_expat_decisions"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    decision_reference   = Column(String(100), nullable=False)
+    decision_date        = Column(Date, nullable=False)
+    granted_from         = Column(Date, nullable=False, index=True)
+    granted_to           = Column(Date, nullable=True, index=True)
+    method               = Column(String(30), nullable=False)  # FACILITY_30PCT / ACTUAL_ET_COSTS
+    threshold_category   = Column(String(30), nullable=False)  # STANDARD / UNDER30_MASTER / RESEARCH_MEDICAL
+    allowance_pct        = Column(Numeric(5, 2), nullable=False)
+    evidence_artifact_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status               = Column(String(20), nullable=False, default="PENDING")  # PENDING / VERIFIED / REVOKED / EXPIRED
+    verified_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    verified_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("method IN ('FACILITY_30PCT', 'ACTUAL_ET_COSTS')", name="ck_nl_expat_method"),
+        sa.CheckConstraint("threshold_category IN ('STANDARD', 'UNDER30_MASTER', 'RESEARCH_MEDICAL')", name="ck_nl_expat_threshold"),
+        sa.CheckConstraint("status IN ('PENDING', 'VERIFIED', 'REVOKED', 'EXPIRED')", name="ck_nl_expat_status"),
+        UniqueConstraint("organization_id", "employee_id", "granted_from", name="uq_nl_expat_org_emp_granted"),
+    )
+
+
+class PayrollNlPensionScheme(Base):
+    """Pension scheme (catalog when organization_id is NULL). Rates are
+    scheme-owned and effective-dated (NL-043)."""
+    __tablename__ = "payroll_nl_pension_schemes"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    fund_name               = Column(String(200), nullable=False)
+    scheme_code             = Column(String(50), nullable=False, index=True)
+    mandatory_sector        = Column(Boolean, nullable=False, default=False)
+    collective_agreement_id = Column(Integer, ForeignKey("payroll_collective_agreements.id", ondelete="SET NULL"), nullable=True, index=True)
+    franchise_amount        = Column(Numeric(14, 2), nullable=False, default=0)
+    max_pensionable_salary  = Column(Numeric(14, 2), nullable=True)
+    employee_pct            = Column(Numeric(7, 4), nullable=False, default=0)
+    employer_pct            = Column(Numeric(7, 4), nullable=False, default=0)
+    basis_rule              = Column(String(30), nullable=False, default="GROSS_MINUS_FRANCHISE")
+    effective_from          = Column(Date, nullable=False, index=True)
+    effective_to            = Column(Date, nullable=True, index=True)
+    status                  = Column(String(20), nullable=False, default="ACTIVE")
+    evidence_artifact_id    = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("basis_rule IN ('GROSS_MINUS_FRANCHISE', 'CAPPED_PENSIONABLE')", name="ck_nl_pension_basis_rule"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'SUPERSEDED', 'ARCHIVED')", name="ck_nl_pension_status"),
+        Index("ix_nl_pension_org_code_eff", "organization_id", "scheme_code", "effective_from"),
+        UniqueConstraint("organization_id", "scheme_code", "effective_from", name="uq_nl_pension_org_code_eff_from"),
+    )
+
+
+class PayrollNlAbsencePayPolicy(Base):
+    """Employer sickness-pay policy layered over the statutory floor (NL-042)."""
+    __tablename__ = "payroll_nl_absence_pay_policies"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    waiting_days         = Column(SmallInteger, nullable=False, default=0)
+    year1_pct            = Column(Numeric(5, 2), nullable=False)
+    year1_min_wage_floor = Column(Boolean, nullable=False, default=True)
+    year2_pct            = Column(Numeric(5, 2), nullable=False)
+    cao_enhancements     = Column(_NL_JSON, nullable=True)
+    effective_from       = Column(Date, nullable=False, index=True)
+    effective_to         = Column(Date, nullable=True, index=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_nl_absence_policy_org_eff", "organization_id", "effective_from"),
+    )
+
+
+class PayrollNlSicknessEvent(Base):
+    """One sickness period for an employee (drives wage continuation, NL-042)."""
+    __tablename__ = "payroll_nl_sickness_events"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    first_sick_day  = Column(Date, nullable=False, index=True)
+    recovery_date   = Column(Date, nullable=True, index=True)
+    policy_id       = Column(Integer, ForeignKey("payroll_nl_absence_pay_policies.id", ondelete="SET NULL"), nullable=True, index=True)
+    status          = Column(String(20), nullable=False, default="ACTIVE")  # ACTIVE / RECOVERED / TERMINATED
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('ACTIVE', 'RECOVERED', 'TERMINATED')", name="ck_nl_sickness_status"),
+        Index("ix_nl_sickness_org_emp_date", "organization_id", "employee_id", "first_sick_day"),
+    )
+
+
+class PayrollNlTerminationSettlement(Base):
+    """Termination settlement — final salary components kept separate with
+    audit evidence (NL-044); approval by someone other than the preparer."""
+    __tablename__ = "payroll_nl_termination_settlements"
+
+    id                          = Column(Integer, primary_key=True, index=True)
+    organization_id             = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id      = Column(Integer, ForeignKey("payroll_nl_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True)
+    termination_date            = Column(Date, nullable=False, index=True)
+    reason                      = Column(String(200), nullable=False)
+    initiated_by                = Column(String(50), nullable=False)  # EMPLOYER / EMPLOYEE / MUTUAL
+    transition_payment_eligible = Column(Boolean, nullable=False, default=True)
+    service_months              = Column(SmallInteger, nullable=False, default=0)
+    monthly_salary_basis        = Column(Numeric(14, 2), nullable=False, default=0)
+    transition_payment_amount   = Column(Numeric(14, 2), nullable=False, default=0)
+    cap_applied                 = Column(Boolean, nullable=False, default=False)
+    unused_leave_hours          = Column(Numeric(7, 2), nullable=False, default=0)
+    leave_payout                = Column(Numeric(14, 2), nullable=False, default=0)
+    vacation_allowance_payout   = Column(Numeric(14, 2), nullable=False, default=0)
+    tax_treatment               = Column(_NL_JSON, nullable=True)
+    status                      = Column(String(20), nullable=False, default="DRAFT")  # DRAFT / APPROVED / PAID
+    prepared_by                 = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by                 = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at                 = Column(DateTime(timezone=True), nullable=True)
+    paid_at                     = Column(DateTime(timezone=True), nullable=True)
+    created_at                  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("initiated_by IN ('EMPLOYER', 'EMPLOYEE', 'MUTUAL')", name="ck_nl_term_initiated_by"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'PAID')", name="ck_nl_term_status"),
+        Index("ix_nl_term_org_emp_date", "organization_id", "employee_id", "termination_date"),
+    )
+
+
+class PayrollNlAwfRevision(Base):
+    """A detected AWf retrospective revision situation (NL-016): reviewed by a
+    second person, then applied as an append-only correction run (M7)."""
+    __tablename__ = "payroll_nl_awf_revisions"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_version_id = Column(Integer, ForeignKey("payroll_nl_contract_versions.id", ondelete="SET NULL"), nullable=True, index=True)
+    tax_year            = Column(SmallInteger, nullable=False, index=True)
+    trigger_code        = Column(String(40), nullable=False)
+    detected_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    detected_by         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    affected_periods    = Column(_NL_JSON, nullable=False)
+    recomputed_delta    = Column(_NL_JSON, nullable=False)
+    status              = Column(String(20), nullable=False, default="DETECTED", server_default="DETECTED")
+    reviewed_by         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at         = Column(DateTime(timezone=True), nullable=True)
+    correction_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    resolution_note     = Column(Text, nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DETECTED', 'REVIEWED', 'APPLIED', 'DISMISSED')", name="ck_nl_awf_revision_status"),
+        UniqueConstraint("organization_id", "employee_id", "contract_version_id", "tax_year", "trigger_code",
+                         name="uq_nl_awf_revision_trigger"),
+    )
+
+
+def _refuse_nl_ledger_mutation(mapper, connection, target):
+    # NL-045: committed NL ledger rows are append-only — a correction writes a
+    # NEW revision/entry that links back, never an edit of history.
+    raise ValueError(f"{type(target).__name__} rows are append-only (id {target.id}); write a new revision instead")
+
+
+for _nl_ledger in (PayrollNlVcrSnapshot, PayrollNlWkrAccumulator, PayrollNlVacationAllowanceLedger):
+    _sa_event.listen(_nl_ledger, "before_update", _refuse_nl_ledger_mutation)
+    _sa_event.listen(_nl_ledger, "before_delete", _refuse_nl_ledger_mutation)

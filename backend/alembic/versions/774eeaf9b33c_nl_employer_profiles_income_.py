@@ -172,7 +172,8 @@ def upgrade() -> None:
         batch.add_column(sa.Column("nl_insurance_evidence_ref", sa.String(200), nullable=True))
         batch.add_column(sa.Column("nl_cross_border_status", sa.String(20), nullable=True))
         batch.add_column(sa.Column("nl_a1_reference", sa.String(100), nullable=True))
-        batch.add_column(sa.Column("nl_pension_scheme_id", sa.Integer, sa.ForeignKey("payroll_pension_schemes.id", ondelete="SET NULL"), nullable=True))
+        # Plain integer: payroll_nl_pension_schemes is created later (M6).
+        batch.add_column(sa.Column("nl_pension_scheme_id", sa.Integer, nullable=True))
         batch.add_column(sa.Column("nl_voluntary_extra_withholding", sa.Numeric(14, 2), nullable=True))
         batch.add_column(sa.Column("nl_vacation_allowance_pct", sa.Numeric(5, 2), nullable=True))
         batch.add_column(sa.Column("nl_contract_hours_per_week", sa.Numeric(5, 2), nullable=True))

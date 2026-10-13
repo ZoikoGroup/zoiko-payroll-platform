@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,19 +25,18 @@ from sqlalchemy.orm import Session
 
 from .models import (
     JurisdictionPack,
-    User,
     PayrollNlTaxTableFile,
     PayrollNlTaxTableRow,
 )
 from .engine.jurisdictions.netherlands.wage_tax import (
     NlTableKey,
-    register_table_rows,
+    TABLE_FILE_PERIOD,
     TableColor,
     TableKind,
     PeriodCode,
     AowCohort,
 )
-from .exceptions import BadRequestException, NotFoundException
+from app.core.exceptions import BadRequestException, NotFoundException
 
 
 # ---- Import & Parse ----
@@ -99,11 +98,12 @@ def import_table_file(
     try:
         TableColor(table_color)
         TableKind(table_kind)
-        if period:
-            PeriodCode(period)
-        AowCohort("BELOW_AOW")  # just validate enum exists
     except ValueError as e:
         raise BadRequestException(f"Invalid enum value: {e}")
+    # The file's period is stored in the CHECK-constrained file vocabulary
+    # (DAY/WEEK/FOUR_WEEK/MONTH/QUARTER/YEAR), not the engine's PeriodCode.
+    if period and period not in TABLE_FILE_PERIOD.values():
+        raise BadRequestException(f"Invalid period {period!r}: use one of {', '.join(TABLE_FILE_PERIOD.values())}")
 
     if table_kind == "PERIOD" and not period:
         raise BadRequestException("PERIOD table_kind requires a period (DAY/WEEK/FOUR_WEEK/MONTH/QUARTER/YEAR)")
@@ -320,50 +320,16 @@ def activate_table_file(db: Session, file_id: int, actor_id: int) -> Tuple[Payro
     if superseded:
         superseded.status = "SUPERSEDED"
         superseded.superseded_by_id = file_row.id
-        superseded.effective_to = file_row.effective_from  # cutover date
+        # Inclusive windows: the old file ends the day before the new one starts.
+        superseded.effective_to = file_row.effective_from - timedelta(days=1)
 
     file_row.status = "ACTIVE"
     file_row.activated_by = actor_id
     db.flush()
 
-    # Load into engine cache
-    table_key = NlTableKey(
-        tax_year=file_row.tax_year,
-        table_color=TableColor(file_row.table_color),
-        table_kind=TableKind(file_row.table_kind),
-        period=PeriodCode(file_row.period) if file_row.period else None,
-        residence_variant=file_row.residence_variant,
-        aow_cohort=AowCohort(file_row.aow_cohort),  # placeholder; actual rows have per-row aow_cohort
-        with_tax_credit=True,  # placeholder; actual rows have per-row with_tax_credit
-    )
-    # Actually we need to load ALL rows grouped by (aow_cohort, with_tax_credit)
-    # The cache key includes these, so we register multiple keys
-    rows = db.query(PayrollNlTaxTableRow).filter(PayrollNlTaxTableRow.file_id == file_id).all()
-    for aow in ("BELOW_AOW", "AOW_AGE"):
-        for wtc in (True, False):
-            subset = [r for r in rows if r.aow_cohort == aow and r.with_tax_credit == wtc]
-            if subset:
-                key = NlTableKey(
-                    tax_year=file_row.tax_year,
-                    table_color=TableColor(file_row.table_color),
-                    table_kind=TableKind(file_row.table_kind),
-                    period=PeriodCode(file_row.period) if file_row.period else None,
-                    residence_variant=file_row.residence_variant,
-                    aow_cohort=AowCohort(aow),
-                    with_tax_credit=wtc,
-                )
-                register_table_rows(key, [
-                    {
-                        "wage_from": r.wage_from,
-                        "wage_to": r.wage_to,
-                        "aow_cohort": r.aow_cohort,
-                        "with_tax_credit": r.with_tax_credit,
-                        "withholding_amount": r.withholding_amount,
-                        "percentage": r.percentage,
-                    }
-                    for r in subset
-                ])
-
+    # No process-local cache: the payroll path reads the ACTIVE rows from the
+    # database for every calculation (active_table_rows), so a restart or a
+    # second worker can never see a different table.
     return file_row, superseded
 
 
@@ -385,15 +351,34 @@ def reject_table_file(db: Session, file_id: int, actor_id: int, reason: str) -> 
 
 # ---- Helpers ----
 
-def get_active_table_file(db: Session, table_key: NlTableKey) -> Optional[PayrollNlTaxTableFile]:
-    return db.query(PayrollNlTaxTableFile).filter(
+def get_active_table_file(db: Session, table_key: NlTableKey, on: Optional[date] = None) -> Optional[PayrollNlTaxTableFile]:
+    """The ACTIVE file for this key whose legal window covers `on` (default:
+    any). Period codes map onto the file's CHECK-constrained values (MONTHLY
+    -> MONTH)."""
+    q = db.query(PayrollNlTaxTableFile).filter(
         PayrollNlTaxTableFile.status == "ACTIVE",
         PayrollNlTaxTableFile.tax_year == table_key.tax_year,
         PayrollNlTaxTableFile.table_color == table_key.table_color.value,
         PayrollNlTaxTableFile.table_kind == table_key.table_kind.value,
-        PayrollNlTaxTableFile.period == (table_key.period.value if table_key.period else None),
         PayrollNlTaxTableFile.residence_variant == table_key.residence_variant,
-    ).first()
+    )
+    if table_key.period is None:
+        q = q.filter(PayrollNlTaxTableFile.period.is_(None))
+    else:
+        q = q.filter(PayrollNlTaxTableFile.period == TABLE_FILE_PERIOD[table_key.period])
+    if on is not None:
+        q = q.filter(PayrollNlTaxTableFile.effective_from <= on,
+                     or_(PayrollNlTaxTableFile.effective_to.is_(None), PayrollNlTaxTableFile.effective_to >= on))
+    return q.order_by(PayrollNlTaxTableFile.effective_from.desc()).first()
+
+
+def table_rows(db: Session, file_id: int) -> List[Dict[str, Any]]:
+    """All rows of one file as plain dicts (the shape wage_tax consumes)."""
+    rows = (db.query(PayrollNlTaxTableRow).filter(PayrollNlTaxTableRow.file_id == file_id)
+            .order_by(PayrollNlTaxTableRow.row_no).all())
+    return [{"row_no": r.row_no, "wage_from": r.wage_from, "wage_to": r.wage_to, "aow_cohort": r.aow_cohort,
+             "with_tax_credit": r.with_tax_credit, "withholding_amount": r.withholding_amount,
+             "percentage": r.percentage, "row_sha256": r.row_sha256} for r in rows]
 
 
 def list_table_files(db: Session, pack_id: Optional[int] = None, status: Optional[str] = None) -> List[PayrollNlTaxTableFile]:

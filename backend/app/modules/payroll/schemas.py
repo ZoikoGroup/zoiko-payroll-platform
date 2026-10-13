@@ -365,6 +365,26 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     sa_service_start_date:        Optional[date] = Field(None, validation_alias="saServiceStartDate")
     sa_eos_exclusions:            Optional[str] = Field(None, validation_alias="saEosExclusions")
 
+    # ── Netherlands (ZP-NL-ENG-001 §11) — employee-owned facts; see models.py's
+    # nl_* block. Validated by netherlands_service._nl_statutory_profile_errors;
+    # fields not sent carry forward from the previous NL version.
+    nl_bsn_verified_at:            Optional[datetime] = Field(None, validation_alias="nlBsnVerifiedAt")
+    nl_identity_status:            Optional[str] = Field(None, validation_alias="nlIdentityStatus")
+    nl_residence_country:          Optional[str] = Field(None, validation_alias="nlResidenceCountry")
+    nl_residence_variant:          Optional[str] = Field(None, validation_alias="nlResidenceVariant")
+    nl_table_color:                Optional[str] = Field(None, validation_alias="nlTableColor")
+    nl_zvw_path:                   Optional[str] = Field(None, validation_alias="nlZvwPath")
+    nl_ei_insured:                 Optional[bool] = Field(None, validation_alias="nlEiInsured")
+    nl_insurance_exception_code:   Optional[str] = Field(None, validation_alias="nlInsuranceExceptionCode")
+    nl_insurance_evidence_ref:     Optional[str] = Field(None, validation_alias="nlInsuranceEvidenceRef")
+    nl_cross_border_status:        Optional[str] = Field(None, validation_alias="nlCrossBorderStatus")
+    nl_a1_reference:               Optional[str] = Field(None, validation_alias="nlA1Reference")
+    nl_pension_scheme_id:          Optional[int] = Field(None, validation_alias="nlPensionSchemeId")
+    nl_voluntary_extra_withholding:Optional[Decimal] = Field(None, validation_alias="nlVoluntaryExtraWithholding")
+    nl_vacation_allowance_pct:     Optional[Decimal] = Field(None, validation_alias="nlVacationAllowancePct")
+    nl_contract_hours_per_week:    Optional[Decimal] = Field(None, validation_alias="nlContractHoursPerWeek")
+    nl_personnel_number:           Optional[str] = Field(None, validation_alias="nlPersonnelNumber")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -515,6 +535,24 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     saReducedRamadanHours:      Optional[bool] = Field(None, validation_alias="sa_reduced_ramadan_hours", serialization_alias="saReducedRamadanHours")
     saServiceStartDate:         Optional[date] = Field(None, validation_alias="sa_service_start_date", serialization_alias="saServiceStartDate")
     saEosExclusions:            Optional[str] = Field(None, validation_alias="sa_eos_exclusions", serialization_alias="saEosExclusions")
+
+    # ── Netherlands (ZP-NL-ENG-001 §11) — see Create schema above.
+    nlBsnVerifiedAt:                Optional[datetime] = Field(None, validation_alias="nl_bsn_verified_at", serialization_alias="nlBsnVerifiedAt")
+    nlIdentityStatus:               Optional[str] = Field(None, validation_alias="nl_identity_status", serialization_alias="nlIdentityStatus")
+    nlResidenceCountry:             Optional[str] = Field(None, validation_alias="nl_residence_country", serialization_alias="nlResidenceCountry")
+    nlResidenceVariant:             Optional[str] = Field(None, validation_alias="nl_residence_variant", serialization_alias="nlResidenceVariant")
+    nlTableColor:                   Optional[str] = Field(None, validation_alias="nl_table_color", serialization_alias="nlTableColor")
+    nlZvwPath:                      Optional[str] = Field(None, validation_alias="nl_zvw_path", serialization_alias="nlZvwPath")
+    nlEiInsured:                    Optional[bool] = Field(None, validation_alias="nl_ei_insured", serialization_alias="nlEiInsured")
+    nlInsuranceExceptionCode:       Optional[str] = Field(None, validation_alias="nl_insurance_exception_code", serialization_alias="nlInsuranceExceptionCode")
+    nlInsuranceEvidenceRef:         Optional[str] = Field(None, validation_alias="nl_insurance_evidence_ref", serialization_alias="nlInsuranceEvidenceRef")
+    nlCrossBorderStatus:            Optional[str] = Field(None, validation_alias="nl_cross_border_status", serialization_alias="nlCrossBorderStatus")
+    nlA1Reference:                  Optional[str] = Field(None, validation_alias="nl_a1_reference", serialization_alias="nlA1Reference")
+    nlPensionSchemeId:              Optional[int] = Field(None, validation_alias="nl_pension_scheme_id", serialization_alias="nlPensionSchemeId")
+    nlVoluntaryExtraWithholding:    Optional[Decimal] = Field(None, validation_alias="nl_voluntary_extra_withholding", serialization_alias="nlVoluntaryExtraWithholding")
+    nlVacationAllowancePct:         Optional[Decimal] = Field(None, validation_alias="nl_vacation_allowance_pct", serialization_alias="nlVacationAllowancePct")
+    nlContractHoursPerWeek:         Optional[Decimal] = Field(None, validation_alias="nl_contract_hours_per_week", serialization_alias="nlContractHoursPerWeek")
+    nlPersonnelNumber:              Optional[str] = Field(None, validation_alias="nl_personnel_number", serialization_alias="nlPersonnelNumber")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses
@@ -1256,6 +1294,10 @@ class PayslipItemResponse(BaseModel):
     # trace, read by the statutory trace drawer). _serialize_payslip emits it
     # for CH only; declared here so response_model does not strip it.
     chCalculationSnapshot: Optional[dict] = None
+    # Netherlands (ZP-NL-ENG-001): nl_calculation_snapshot (frozen inputs,
+    # totals with net pay vs employer cost, exceptions, trace). Emitted for NL
+    # only; declared here so response_model does not strip it.
+    nlCalculationSnapshot: Optional[dict] = None
     # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
     # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
     # amount; informational only, never affects employeePension/
