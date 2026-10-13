@@ -152,7 +152,10 @@ def test_alembic_heads_is_single_head():
     # f898189cb4e3 (2026-10-06): merge of main's 2d0cdeeeecc4 (HK convergence)
     # with venu's c5981cbcbe13 (Italy 3A/3C -> CH -> attendance gate); both
     # chains grow from cd62503afe26. Pure graph merge, no schema change.
-    assert heads == ["f898189cb4e3"]
+    # 6b5a4c3d2e1f (CH Step 14 ELM payload column) -> b08f04497195 (Saudi
+    # Arabia foundation), brought from venu byte-identical because production
+    # is already at b08f04497195; linear on f898189cb4e3, single head.
+    assert heads == ["b08f04497195"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -164,7 +167,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["f898189cb4e3"]
+    assert list(script.get_heads()) == ["b08f04497195"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -199,7 +202,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 179   # + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
+    assert len(revs) == 181   # + b08f04497195 (Saudi foundation) + 6b5a4c3d2e1f (CH ELM payload) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
 
 
 def test_germany_head_chain_wiring_is_intact():
