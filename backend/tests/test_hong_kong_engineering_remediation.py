@@ -750,3 +750,69 @@ def test_a_missing_next_year_pack_is_signalled_ahead_and_payroll_for_it_is_refus
     assert out["outcome"].startswith("BLOCKED") and out["pack"] is None
     assert db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == "HK",
                                              JurisdictionPack.tax_year == "2027/28").count() == 0   # nothing invented
+
+
+# ── F-8: durable storage — production never writes evidence / HK documents to the /tmp fallback ──
+
+def _storage_env(monkeypatch, env, gcs=False):
+    for k in ("ENVIRONMENT", "APP_ENV", "PAYROLL_STORAGE_BACKEND", "PAYROLL_GCS_BUCKET"):
+        monkeypatch.delenv(k, raising=False)
+    if env:
+        monkeypatch.setenv("ENVIRONMENT", env)
+    if gcs:
+        monkeypatch.setenv("PAYROLL_GCS_BUCKET", "test-bucket")
+
+
+def _spy_save(monkeypatch):
+    from app.core import object_storage
+
+    calls = []
+    monkeypatch.setattr(object_storage, "save_upload", lambda *, subdir, filename, data: calls.append(filename) or f"mem://{filename}")
+    return calls
+
+
+def test_production_refuses_evidence_upload_on_the_local_fallback_and_audits_it(db, monkeypatch):
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import service
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    art = _art(db, "HK-GATE-G4")
+    _storage_env(monkeypatch, "production")
+    calls = _spy_save(monkeypatch)
+    with pytest.raises(BadRequestException, match="not durable"):
+        service.upload_source_artifact_file(db, art.id, "g4.pdf", "application/pdf", b"G4", actor_id=MAKER.id)
+    db.refresh(art)
+    assert calls == [] and art.file_path is None and art.checksum_sha256 is None           # nothing written
+    audit = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "source_artifact",
+                                                    TaxConfigurationAudit.entity_id == art.id,
+                                                    TaxConfigurationAudit.action == "refused").one())
+    assert audit.new_value["cause"] == "NON_DURABLE_STORAGE" and audit.actor_id == MAKER.id
+
+
+def test_production_refuses_hk_document_upload_on_the_local_fallback_over_http(db, hk, monkeypatch):
+    from tests.test_hong_kong_governance import _http
+    from types import SimpleNamespace
+
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    _storage_env(monkeypatch, "production")
+    calls = _spy_save(monkeypatch)
+    operator = SimpleNamespace(id=MAKER.id, organization_id=hk.org.id, role="payroll_admin", is_active=True)
+    with _http(db, operator) as c:
+        r = c.post("/api/payroll/compliance/documents", data={"country": "HK", "title": "TEST"},
+                   files={"file": ("ir56b.pdf", b"TEST", "application/pdf")})
+    assert r.status_code == 409 and "not durable" in r.text and calls == []
+    assert (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_document_storage",
+                                                   TaxConfigurationAudit.action == "refused").count() == 1)
+
+
+@pytest.mark.parametrize("env,gcs", [(None, False), ("development", False), ("production", True)])
+def test_uploads_work_in_dev_test_and_in_production_with_cloud_storage(db, monkeypatch, env, gcs):
+    from app.modules.payroll import service
+
+    art = _art(db, "HK-GATE-G4")
+    _storage_env(monkeypatch, env, gcs)
+    calls = _spy_save(monkeypatch)
+    out = service.upload_source_artifact_file(db, art.id, "g4.pdf", "application/pdf", b"G4", actor_id=MAKER.id)
+    assert len(calls) == 1                                                      # exactly one durable write
+    assert out.checksum_sha256 == hashlib.sha256(b"G4").hexdigest()

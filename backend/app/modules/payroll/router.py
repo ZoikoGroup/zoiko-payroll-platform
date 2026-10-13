@@ -62,7 +62,7 @@ from app.core import object_storage
 from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
 )
-from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
+from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException, ZoikoException
 from app.modules.billing.entitlements import require_writeable_workspace, require_active_subscription, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_BWM
 from app.modules.billing.models import DunningStage
@@ -2620,6 +2620,14 @@ async def upload_compliance_document(
     country: Optional[str] = Form(None, max_length=10),
 ):
     resolved_title = title or document_type or file.filename or "Untitled Document"
+    refusal = object_storage.durable_storage_refusal("Hong Kong document upload") if (country or "").upper() == "HK" else None
+    if refusal:                                  # F-8: HK documents never go to non-durable disk in production
+        service.record_tax_audit(db, actor_id=current_user.id, action="refused", entity_type="hk_document_storage",
+                                 entity_id=current_user.organization_id, old_value=None,
+                                 new_value={"attempted": "compliance_document_upload", "result": "REFUSED",
+                                            "cause": "NON_DURABLE_STORAGE", "fileName": file.filename},
+                                 reason=refusal)
+        raise ZoikoException(409, "NON_DURABLE_STORAGE", refusal)
     contents = await file.read()
     ext = os.path.splitext(file.filename or "")[1] or ".bin"
     unique_name = f"{uuid.uuid4().hex}{ext}"

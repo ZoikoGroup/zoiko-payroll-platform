@@ -3477,6 +3477,13 @@ def upload_source_artifact_file(
         raise BadRequestException(message)
     ext = os.path.splitext(filename or "")[1][:20]
     old_ref = row.file_path
+    refusal = object_storage.durable_storage_refusal("Evidence upload")
+    if refusal:                                  # F-8: never write evidence to non-durable disk in production
+        record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="source_artifact", entity_id=row.id,
+                         old_value={"formNumber": row.form_number},
+                         new_value={"attempted": "upload", "result": "REFUSED", "cause": "NON_DURABLE_STORAGE"},
+                         reason=refusal)
+        raise BadRequestException(refusal)
     new_ref = object_storage.save_upload(
         subdir="source_artifacts", filename=f"{_uuid.uuid4().hex}{ext}", data=data,
     )

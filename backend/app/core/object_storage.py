@@ -69,6 +69,25 @@ def _get_bucket(bucket_name: Optional[str] = None):
     return _bucket_client_cache[name]
 
 
+def production_mode() -> bool:
+    """True only when ENVIRONMENT / APP_ENV is explicitly "production" (the
+    same explicit signal config._is_development_environment trusts)."""
+    env = (os.environ.get("ENVIRONMENT") or os.environ.get("APP_ENV") or "").strip().lower()
+    return env == "production"
+
+
+def durable_storage_refusal(purpose: str) -> Optional[str]:
+    """The refusal message when `purpose` would land on the local-disk
+    fallback (UPLOAD_BASE_DIR, /tmp/uploads by default) in production, where
+    Cloud Run's disk is ephemeral and the file would be lost; None otherwise.
+    Callers check BEFORE writing anything (G5 finding F-8)."""
+    if production_mode() and not using_gcs():
+        return (f"{purpose} refused: production is running on the local upload fallback "
+                f"({os.environ.get('UPLOAD_BASE_DIR', '/tmp/uploads')}), which is not durable. "
+                "Configure Cloud Storage (PAYROLL_GCS_BUCKET / PAYROLL_STORAGE_BACKEND=gcs) first; nothing was stored.")
+    return None
+
+
 def save_upload(*, subdir: str, filename: str, data: bytes) -> str:
     """Persist upload bytes; returns the reference to store on the DB row."""
     safe_name = os.path.basename(filename)
