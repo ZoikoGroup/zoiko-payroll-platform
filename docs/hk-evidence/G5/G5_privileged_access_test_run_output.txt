@@ -1,0 +1,67 @@
+﻿# command: python -m pytest -v -p no:cacheprovider tests/test_hong_kong_release_candidate.py::test_hk_route_inventory_is_pinned tests/test_hong_kong_release_candidate.py::test_every_hk_route_refuses_an_unauthenticated_caller_over_http tests/test_hong_kong_release_candidate.py::test_every_hk_route_refuses_a_non_operator_role_over_http tests/test_hong_kong_governance.py::test_every_hk_route_authorizes_the_right_role tests/test_hong_kong_privacy.py tests/test_assisted_access.py tests/test_hong_kong_engineering_remediation.py::test_hk_evidence_review_rejects_with_a_reason_keeps_the_artifact_and_needs_supersession tests/test_hong_kong_engineering_remediation.py::test_hk_evidence_review_endpoint_and_summary_expose_evidence_and_certification tests/test_hong_kong_governance.py::test_registry_route_refuses_no_auth_and_non_super_admin tests/test_hong_kong_governance.py::test_registry_refuses_unknown_targets_and_unidentified_actors tests/test_hong_kong_control.py::test_empf_configuration_holds_no_secrets_and_activates_four_eyes tests/test_hong_kong_control.py::test_retention_is_blocked_until_the_owner_decides_and_then_four_eyes tests/test_hong_kong_engineering_remediation.py::test_production_refuses_evidence_upload_on_the_local_fallback_and_audits_it tests/test_hong_kong_engineering_remediation.py::test_production_refuses_hk_document_upload_on_the_local_fallback_over_http tests/test_hong_kong_engineering_remediation.py::test_uploads_work_in_dev_test_and_in_production_with_cloud_storage
+# started (UTC): 2026-10-13T08:55:12.5721439Z
+# database: throwaway SQLite (PAYROLL_DATABASE_URL=scratch g5_tests.db)
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend
+plugins: anyio-4.12.1
+collecting ... collected 41 items
+
+tests/test_hong_kong_release_candidate.py::test_hk_route_inventory_is_pinned PASSED [  2%]
+tests/test_hong_kong_release_candidate.py::test_every_hk_route_refuses_an_unauthenticated_caller_over_http PASSED [  4%]
+tests/test_hong_kong_release_candidate.py::test_every_hk_route_refuses_a_non_operator_role_over_http PASSED [  7%]
+tests/test_hong_kong_governance.py::test_every_hk_route_authorizes_the_right_role PASSED [  9%]
+tests/test_hong_kong_privacy.py::test_identity_token_is_keyed_versioned_and_never_the_raw_value PASSED [ 12%]
+tests/test_hong_kong_privacy.py::test_legal_hold_blocks_deletion_and_needs_a_different_user_to_release PASSED [ 14%]
+tests/test_hong_kong_privacy.py::test_an_organisation_wide_hold_covers_every_hk_employee PASSED [ 17%]
+tests/test_hong_kong_privacy.py::test_retained_hk_statutory_records_block_a_hard_delete PASSED [ 19%]
+tests/test_hong_kong_privacy.py::test_legal_hold_is_tenant_and_jurisdiction_scoped PASSED [ 21%]
+tests/test_hong_kong_privacy.py::test_non_hk_employee_deletion_is_unchanged PASSED [ 24%]
+tests/test_hong_kong_privacy.py::test_access_log_records_hk_reports_only_and_is_tenant_scoped PASSED [ 26%]
+tests/test_hong_kong_privacy.py::test_statutory_profile_view_and_certificate_download_are_logged_over_http PASSED [ 29%]
+tests/test_hong_kong_privacy.py::test_access_event_records_an_assisted_access_session PASSED [ 31%]
+tests/test_hong_kong_privacy.py::test_legacy_identity_tokens_are_rederived_only_on_write PASSED [ 34%]
+tests/test_hong_kong_privacy.py::test_mpf_member_account_is_masked_by_default_in_employee_and_payslip_responses PASSED [ 36%]
+tests/test_hong_kong_privacy.py::test_mpf_account_reveal_needs_the_permission_and_every_read_and_refusal_is_logged PASSED [ 39%]
+tests/test_hong_kong_privacy.py::test_empf_filing_view_carries_the_full_account_while_the_stored_batch_stays_masked PASSED [ 41%]
+tests/test_hong_kong_privacy.py::test_mpf_reveal_over_http_is_masked_for_a_plain_operator PASSED [ 43%]
+tests/test_hong_kong_privacy.py::test_no_new_code_reads_the_mpf_member_account_outside_the_audited_paths PASSED [ 46%]
+tests/test_hong_kong_privacy.py::test_empf_filing_payload_contract_full_number_only_via_the_filing_view PASSED [ 48%]
+tests/test_assisted_access.py::test_consent_is_required_before_any_token_and_refusals_are_audited PASSED [ 51%]
+tests/test_assisted_access.py::test_a_pending_or_rejected_request_never_yields_a_usable_token PASSED [ 53%]
+tests/test_assisted_access.py::test_an_unapproved_request_lapses_after_the_approval_window PASSED [ 56%]
+tests/test_assisted_access.py::test_break_glass_needs_a_second_super_admin_is_time_limited_and_notifies_the_tenant PASSED [ 58%]
+tests/test_assisted_access.py::test_sessions_created_before_consent_existed_keep_working PASSED [ 60%]
+tests/test_assisted_access.py::test_org_admins_and_other_tenants_cannot_drive_the_privileged_endpoints_over_http PASSED [ 63%]
+tests/test_assisted_access.py::test_break_glass_notification_failure_is_audited_alerted_and_keeps_the_session[not_delivered] PASSED [ 65%]
+tests/test_assisted_access.py::test_break_glass_notification_failure_is_audited_alerted_and_keeps_the_session[raises] PASSED [ 68%]
+tests/test_assisted_access.py::test_break_glass_notification_failure_is_audited_alerted_and_keeps_the_session[no_org_admin] PASSED [ 70%]
+tests/test_assisted_access.py::test_a_delivered_break_glass_notice_raises_no_alert PASSED [ 73%]
+tests/test_hong_kong_engineering_remediation.py::test_hk_evidence_review_rejects_with_a_reason_keeps_the_artifact_and_needs_supersession PASSED [ 75%]
+tests/test_hong_kong_engineering_remediation.py::test_hk_evidence_review_endpoint_and_summary_expose_evidence_and_certification PASSED [ 78%]
+tests/test_hong_kong_governance.py::test_registry_route_refuses_no_auth_and_non_super_admin PASSED [ 80%]
+tests/test_hong_kong_governance.py::test_registry_refuses_unknown_targets_and_unidentified_actors PASSED [ 82%]
+tests/test_hong_kong_control.py::test_empf_configuration_holds_no_secrets_and_activates_four_eyes PASSED [ 85%]
+tests/test_hong_kong_control.py::test_retention_is_blocked_until_the_owner_decides_and_then_four_eyes PASSED [ 87%]
+tests/test_hong_kong_engineering_remediation.py::test_production_refuses_evidence_upload_on_the_local_fallback_and_audits_it PASSED [ 90%]
+tests/test_hong_kong_engineering_remediation.py::test_production_refuses_hk_document_upload_on_the_local_fallback_over_http PASSED [ 92%]
+tests/test_hong_kong_engineering_remediation.py::test_uploads_work_in_dev_test_and_in_production_with_cloud_storage[None-False] PASSED [ 95%]
+tests/test_hong_kong_engineering_remediation.py::test_uploads_work_in_dev_test_and_in_production_with_cloud_storage[development-False] PASSED [ 97%]
+tests/test_hong_kong_engineering_remediation.py::test_uploads_work_in_dev_test_and_in_production_with_cloud_storage[production-True] PASSED [100%]
+
+============================== warnings summary ===============================
+tests/test_hong_kong_release_candidate.py::test_hk_route_inventory_is_pinned
+  C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160: UserWarning: Field "model_route" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+tests/test_hong_kong_release_candidate.py::test_hk_route_inventory_is_pinned
+  C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160: UserWarning: Field "model_configured" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 41 passed, 2 warnings in 20.98s =======================
+

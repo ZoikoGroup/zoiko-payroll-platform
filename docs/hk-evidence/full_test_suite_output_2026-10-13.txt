@@ -1,0 +1,198 @@
+2026-10-13T11:40:36Z
+........................................................................ [  1%]
+........................................................................ [  2%]
+....................................s................................... [  4%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+.............................................s.......................... [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+................................x.x..................................... [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+.............................................
+[benchmark] load+validate: 0.359ms | execution (avg of 50): 0.092ms
+........................... [ 44%]
+........................................................................ [ 45%]
+....................................................................s... [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+................s....................................................... [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+.....s.................................................................. [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+...............s........................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+..........................................................s............. [ 99%]
+.....................................                                    [100%]
+============================== warnings summary ===============================
+C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160
+C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160
+  C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160: UserWarning: Field "model_route" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160
+C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160
+  C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:160: UserWarning: Field "model_configured" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+tests/test_hong_kong_e2e.py::test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_hong_kong_e2e.py:268: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(PayslipItem).get(item.id).net_pay == item.net_pay        # a legal hold, NOT a deduction
+
+tests/test_hong_kong_e2e.py::test_hk_preflight_block_refuses_approval_until_it_is_resolved
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_hong_kong_e2e.py:1042: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(type(run)).get(run.id).status == PayrollStatus.REVIEW
+
+tests/test_singapore_phase65_hardening.py::test_a_refusal_rolls_back_pending_changes_before_auditing
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase65_hardening.py:135: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(JurisdictionPack).get(pack.id).change_summary != "PENDING-UNCOMMITTED"
+
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_CPF_EZPAY]
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_IR21_REGISTER]
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_IR8A]
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_SDL_MONTHLY]
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase65_hardening.py:298: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(GeneratedReport).get(first.id).applicable_tax_pack_version == "1.2"  # history untouched
+
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_CPF_EZPAY]
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_IR21_REGISTER]
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_IR8A]
+tests/test_singapore_phase65_hardening.py::test_c_dedicated_report_records_the_payslips_pack_and_a_later_pack_never_rewrites_it[SG_SDL_MONTHLY]
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase65_hardening.py:301: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(GeneratedReport).get(first.id).status == "Superseded"
+
+tests/test_singapore_phase66_hotfix.py::test_failure_writing_the_hotfix_record_never_leaves_an_active_pack_without_evidence[SG]
+tests/test_singapore_phase66_hotfix.py::test_failure_writing_the_hotfix_record_never_leaves_an_active_pack_without_evidence[UK]
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase66_hotfix.py:149: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(JurisdictionPack).get(pack.id).status == before                      # activation rolled back
+
+tests/test_singapore_phase66_hotfix.py::test_failure_writing_the_hotfix_record_never_leaves_an_active_pack_without_evidence[SG]
+tests/test_singapore_phase66_hotfix.py::test_failure_writing_the_hotfix_record_never_leaves_an_active_pack_without_evidence[UK]
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase66_hotfix.py:151: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(JurisdictionPack).get(pack.id).approved_by_id is None                 # no phantom approval
+
+tests/test_singapore_phase66_hotfix.py::test_successful_hotfix_persists_status_and_record_together
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase66_hotfix.py:160: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    stored = db.query(JurisdictionPack).get(pack.id)
+
+tests/test_singapore_phase67_ir8a_guard.py::test_after_acknowledgement_a_new_extract_is_never_recorded_as_another_submission
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase67_ir8a_guard.py:63: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(GeneratedReport).get(first.id).status == "ACKNOWLEDGED"        # acknowledged evidence untouched
+
+tests/test_singapore_phase67_ir8a_guard.py::test_after_acknowledgement_a_new_extract_is_never_recorded_as_another_submission
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase67_ir8a_guard.py:64: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(GeneratedReport).get(again.id).status == "Generated"            # still EXPORT_READY
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_revision_carries_full_values_preserves_the_original_and_replaces_the_position
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:139: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    original_data = dict(db.query(GeneratedReport).get(base.id).rendered_data)
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_revision_carries_full_values_preserves_the_original_and_replaces_the_position
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:145: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    report = db.query(GeneratedReport).get(mod["reportId"])
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_revision_carries_full_values_preserves_the_original_and_replaces_the_position
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:151: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    stored = db.query(GeneratedReport).get(base.id)
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_amendment_stores_only_the_differences
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:164: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    entries = db.query(GeneratedReport).get(mod["reportId"]).rendered_data["amendmentEntries"]
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_an_unfiled_modification_is_superseded_and_can_never_be_filed
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:206: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(GeneratedReport).get(first["reportId"]).status == "Superseded"
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_the_preparer_cannot_record_the_modification_filing
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:250: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    row = db.query(SgpIr8aModification).get(mod["id"])
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_a_modification_cannot_itself_be_modified
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:276: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    _modify(db, organization, db.query(GeneratedReport).get(mod["reportId"]), "AMENDMENT")
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_a_stale_modification_cannot_be_filed
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:287: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    row = db.query(SgpIr8aModification).get(mod["id"])
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_pack_and_template_versions_are_preserved
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:336: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    report = db.query(GeneratedReport).get(mod["reportId"])
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_acknowledged_modifications_stay_immutable_after_later_ones
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:352: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    frozen = (db.query(GeneratedReport).get(first["reportId"]).rendered_data,
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_acknowledged_modifications_stay_immutable_after_later_ones
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:353: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    db.query(SgpIr8aModification).get(first["id"]).resulting_position)
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_acknowledged_modifications_stay_immutable_after_later_ones
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:357: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(GeneratedReport).get(first["reportId"]).status == "ACKNOWLEDGED"
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_acknowledged_modifications_stay_immutable_after_later_ones
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:358: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert (db.query(GeneratedReport).get(first["reportId"]).rendered_data,
+
+tests/test_singapore_phase68_ir8a_modifications.py::test_acknowledged_modifications_stay_immutable_after_later_ones
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_singapore_phase68_ir8a_modifications.py:359: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    db.query(SgpIr8aModification).get(first["id"]).resulting_position) == frozen
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+5212 passed, 7 skipped, 2 xfailed, 36 warnings in 999.93s (0:16:39)
+pytest exit 0

@@ -1,0 +1,36 @@
+{"command": "python -m scripts.hk_export_g1_worksheet docs/hk-evidence/G1/G1_governed_values_worksheet.csv  (PAYROLL_DATABASE_URL = scratch DB hk_evidence holding the canonical HK seed; read-only session)", "result": 
+{
+ "ranAt": "2026-10-13T08:54:19.136677+00:00",
+ "packs": {
+  "HK-PAYROLL-2025 v1.0": 153,
+  "HK-PAYROLL-2026 v1.0": 152
+ },
+ "rows": 309,
+ "flagged": {
+  "UNVERIFIED — G1": 56,
+  "SOURCE_HASH_REQUIRED": 2,
+  "UNVERIFIED / SOURCE_REQUIRED": 4
+ },
+ "flaggedByPack": {
+  "HK-PAYROLL-2025 v1.0": {
+   "UNVERIFIED — G1": 28,
+   "SOURCE_HASH_REQUIRED": 1
+  },
+  "HK-PAYROLL-2026 v1.0": {
+   "UNVERIFIED — G1": 28,
+   "SOURCE_HASH_REQUIRED": 1
+  }
+ },
+ "authorityCounts": {
+  "S3": 40,
+  "S5": 20,
+  "S6": 14,
+  "S7": 139,
+  "S8": 2,
+  "S1": 28,
+  "outside S1–S10 (Inland Revenue Department)": 62,
+  "SOURCE_REQUIRED (official general-holiday list)": 4
+ },
+ "csvSha256": "2f1d25fe4867fd0e50a097cdeced7668d38c30c742be00791bade3aff94b0901"
+}
+}

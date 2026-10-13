@@ -1,0 +1,68 @@
+﻿# command: python -m pytest -v -p no:cacheprovider tests/test_hong_kong.py::test_60_day_rule_first_contribution_day_and_holiday_boundary tests/test_hong_kong.py::test_golden_vectors_embedded_rows tests/test_hong_kong.py::test_golden_vectors_reproduce_from_each_packs_own_rows tests/test_hong_kong_e2e.py::test_e2e_runs_60_day_catch_up_pack_switch_no_withholding tests/test_hong_kong.py::test_case_a_b_c_threshold_branches_from_pack_rows tests/test_hong_kong.py::test_case_g_wage_period_crossing_1_may_2026_splits_rates tests/test_hong_kong.py::test_case_g_unequal_hours_price_each_side_of_1_may_2026_at_its_own_rate tests/test_hong_kong.py::test_case_h_468_rule_one_week_below_17_but_4_weeks_total_70 tests/test_hong_kong.py::test_pre_18_january_2026_weeks_use_the_legacy_418_rule tests/test_hong_kong.py::test_468_fails_when_4_week_total_below_68 tests/test_hong_kong.py::test_468_rule_is_unavailable_in_the_first_weeks_of_a_new_employment tests/test_hong_kong.py::test_case_i_ir56g_states_and_release_rules tests/test_hong_kong_e2e.py::test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release tests/test_hong_kong_e2e.py::test_bank_export_leaves_out_held_payslips tests/test_hong_kong_e2e.py::test_changed_departure_keeps_holding_until_release tests/test_hong_kong.py::test_case_j_ir56b_suppressed_after_filed_ir56f_for_the_same_income tests/test_hong_kong_e2e.py::test_case_j_ir56b_suppressed_after_prior_ir56f tests/test_hong_kong.py::test_case_k_pre_and_post_transition_split_and_mandatory_mpf_offset_only_hits_pre tests/test_hong_kong.py::test_post_transition_employee_has_single_portion_and_no_mandatory_offset tests/test_hong_kong.py::test_390000_cap_excess_deducted_from_post_transition_portion tests/test_hong_kong_e2e.py::test_case_k_termination_through_the_service_with_frozen_wage_and_four_eyes tests/test_hong_kong.py::test_sickness_allowance_from_a_lookback_with_unpaid_and_part_paid_periods tests/test_hong_kong.py::test_case_l_average_wage_excludes_maternity_period_and_pay tests/test_hong_kong.py::test_average_wage_blocks_on_missing_history_and_unreasoned_exclusions tests/test_hong_kong.py::test_sickness_allowance_ld_example_2_and_conditions tests/test_hong_kong_e2e.py::test_empf_batch_partial_rejection_does_not_touch_payroll tests/test_hong_kong_e2e.py::test_empf_rejecting_the_employee_row_keeps_the_committed_run_and_payslip_unchanged tests/test_hong_kong_corrections.py::test_submitted_empf_period_gets_a_supplementary_batch_and_unsubmitted_ones_are_superseded tests/test_hong_kong_corrections.py::test_correction_appends_a_linked_delta_and_never_touches_the_original tests/test_hong_kong_e2e.py::test_r2_r3_mpf_thresholds_end_to_end_through_a_committed_run tests/test_hong_kong_e2e.py::test_r4_smw_crossover_end_to_end_from_timesheet_through_a_payroll_run tests/test_hong_kong_e2e.py::test_r5_468_rule_end_to_end_from_timesheet_through_payroll_to_entitlement tests/test_hong_kong_e2e.py::test_r9_sickness_allowance_end_to_end_after_a_mixed_paid_unpaid_lookback tests/test_hong_kong.py::test_contribution_day_deferral_weekend_holiday_chain_and_disruption tests/test_hong_kong.py::test_payroll_trace_applies_the_governed_deferral_from_the_pack tests/test_hong_kong_e2e.py::test_recorded_signal_day_defers_the_empf_deadline_and_is_audited tests/test_hong_kong_e2e.py::test_the_deferral_rule_is_a_governed_unverified_value tests/test_hong_kong.py::test_deferral_uses_only_general_holidays_and_flags_an_unloaded_list tests/test_hong_kong_e2e.py::test_general_holiday_loader_records_the_source_digest_and_drives_the_empf_deadline tests/test_hong_kong_e2e.py::test_empty_general_holiday_list_keeps_weekend_deferral_and_is_flagged
+# started (UTC): 2026-10-13T08:54:53.3294014Z
+# database: throwaway SQLite (PAYROLL_DATABASE_URL=scratch g4_tests.db)
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Nikhi\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend
+plugins: anyio-4.12.1
+collecting ... collected 50 items
+
+tests/test_hong_kong.py::test_60_day_rule_first_contribution_day_and_holiday_boundary PASSED [  2%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_a_below_minimum_6500] PASSED [  4%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_b_within_levels_20000] PASSED [  6%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_c_above_maximum_45000] PASSED [  8%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_d_weekly_above_maximum] PASSED [ 10%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_d_weekly_within_levels] PASSED [ 12%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_e_60_day_catch_up_march_2026] PASSED [ 14%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_e_pending_before_60th_day] PASSED [ 16%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[case_f_leaves_before_60_days] PASSED [ 18%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[exempt_age_66] PASSED [ 20%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[exempt_orso_with_evidence] PASSED [ 22%]
+tests/test_hong_kong.py::test_golden_vectors_embedded_rows[ya_2025_26_april_2025] PASSED [ 24%]
+tests/test_hong_kong.py::test_golden_vectors_reproduce_from_each_packs_own_rows PASSED [ 26%]
+tests/test_hong_kong_e2e.py::test_e2e_runs_60_day_catch_up_pack_switch_no_withholding PASSED [ 28%]
+tests/test_hong_kong.py::test_case_a_b_c_threshold_branches_from_pack_rows PASSED [ 30%]
+tests/test_hong_kong.py::test_case_g_wage_period_crossing_1_may_2026_splits_rates PASSED [ 32%]
+tests/test_hong_kong.py::test_case_g_unequal_hours_price_each_side_of_1_may_2026_at_its_own_rate PASSED [ 34%]
+tests/test_hong_kong.py::test_case_h_468_rule_one_week_below_17_but_4_weeks_total_70 PASSED [ 36%]
+tests/test_hong_kong.py::test_pre_18_january_2026_weeks_use_the_legacy_418_rule PASSED [ 38%]
+tests/test_hong_kong.py::test_468_fails_when_4_week_total_below_68 PASSED [ 40%]
+tests/test_hong_kong.py::test_468_rule_is_unavailable_in_the_first_weeks_of_a_new_employment PASSED [ 42%]
+tests/test_hong_kong.py::test_case_i_ir56g_states_and_release_rules PASSED [ 44%]
+tests/test_hong_kong_e2e.py::test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release PASSED [ 46%]
+tests/test_hong_kong_e2e.py::test_bank_export_leaves_out_held_payslips PASSED [ 48%]
+tests/test_hong_kong_e2e.py::test_changed_departure_keeps_holding_until_release PASSED [ 50%]
+tests/test_hong_kong.py::test_case_j_ir56b_suppressed_after_filed_ir56f_for_the_same_income PASSED [ 52%]
+tests/test_hong_kong_e2e.py::test_case_j_ir56b_suppressed_after_prior_ir56f PASSED [ 54%]
+tests/test_hong_kong.py::test_case_k_pre_and_post_transition_split_and_mandatory_mpf_offset_only_hits_pre PASSED [ 56%]
+tests/test_hong_kong.py::test_post_transition_employee_has_single_portion_and_no_mandatory_offset PASSED [ 58%]
+tests/test_hong_kong.py::test_390000_cap_excess_deducted_from_post_transition_portion PASSED [ 60%]
+tests/test_hong_kong_e2e.py::test_case_k_termination_through_the_service_with_frozen_wage_and_four_eyes PASSED [ 62%]
+tests/test_hong_kong.py::test_sickness_allowance_from_a_lookback_with_unpaid_and_part_paid_periods PASSED [ 64%]
+tests/test_hong_kong.py::test_case_l_average_wage_excludes_maternity_period_and_pay PASSED [ 66%]
+tests/test_hong_kong.py::test_average_wage_blocks_on_missing_history_and_unreasoned_exclusions PASSED [ 68%]
+tests/test_hong_kong.py::test_sickness_allowance_ld_example_2_and_conditions PASSED [ 70%]
+tests/test_hong_kong_e2e.py::test_empf_batch_partial_rejection_does_not_touch_payroll PASSED [ 72%]
+tests/test_hong_kong_e2e.py::test_empf_rejecting_the_employee_row_keeps_the_committed_run_and_payslip_unchanged PASSED [ 74%]
+tests/test_hong_kong_corrections.py::test_submitted_empf_period_gets_a_supplementary_batch_and_unsubmitted_ones_are_superseded PASSED [ 76%]
+tests/test_hong_kong_corrections.py::test_correction_appends_a_linked_delta_and_never_touches_the_original PASSED [ 78%]
+tests/test_hong_kong_e2e.py::test_r2_r3_mpf_thresholds_end_to_end_through_a_committed_run PASSED [ 80%]
+tests/test_hong_kong_e2e.py::test_r4_smw_crossover_end_to_end_from_timesheet_through_a_payroll_run PASSED [ 82%]
+tests/test_hong_kong_e2e.py::test_r5_468_rule_end_to_end_from_timesheet_through_payroll_to_entitlement PASSED [ 84%]
+tests/test_hong_kong_e2e.py::test_r9_sickness_allowance_end_to_end_after_a_mixed_paid_unpaid_lookback PASSED [ 86%]
+tests/test_hong_kong.py::test_contribution_day_deferral_weekend_holiday_chain_and_disruption PASSED [ 88%]
+tests/test_hong_kong.py::test_payroll_trace_applies_the_governed_deferral_from_the_pack PASSED [ 90%]
+tests/test_hong_kong_e2e.py::test_recorded_signal_day_defers_the_empf_deadline_and_is_audited PASSED [ 92%]
+tests/test_hong_kong_e2e.py::test_the_deferral_rule_is_a_governed_unverified_value PASSED [ 94%]
+tests/test_hong_kong.py::test_deferral_uses_only_general_holidays_and_flags_an_unloaded_list PASSED [ 96%]
+tests/test_hong_kong_e2e.py::test_general_holiday_loader_records_the_source_digest_and_drives_the_empf_deadline PASSED [ 98%]
+tests/test_hong_kong_e2e.py::test_empty_general_holiday_list_keeps_weekend_deferral_and_is_flagged PASSED [100%]
+
+============================== warnings summary ===============================
+tests/test_hong_kong_e2e.py::test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release
+  D:\zoiko_payroll_platform\Zoiko-payroll-platform\backend\tests\test_hong_kong_e2e.py:268: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert db.query(PayslipItem).get(item.id).net_pay == item.net_pay        # a legal hold, NOT a deduction
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 50 passed, 1 warning in 17.39s ========================
+
