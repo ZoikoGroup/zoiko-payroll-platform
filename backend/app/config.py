@@ -188,6 +188,11 @@ class Settings(BaseSettings):
     # (new reason, new session, new token) once it lapses. The background
     # sweep auto-ends anything past this cap even if nobody manually ends it.
     ASSISTED_ACCESS_SESSION_MINUTES: int = 30
+    # Consent / break-glass (launch readiness G5): how long a tenant has to
+    # approve a CONSENT request (and the requester to activate it), and the
+    # length of an emergency BREAK_GLASS session.
+    ASSISTED_ACCESS_APPROVAL_WINDOW_MINUTES: int = 60
+    ASSISTED_ACCESS_BREAK_GLASS_MINUTES: int = 60
     ASSISTED_ACCESS_SWEEP_ENABLED: bool = True
     ASSISTED_ACCESS_SWEEP_INTERVAL_MINUTES: int = 60
 

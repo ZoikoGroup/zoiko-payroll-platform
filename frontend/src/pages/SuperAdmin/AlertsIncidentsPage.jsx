@@ -35,6 +35,7 @@ const CATEGORY_META = {
   filing: { label: "Filings", icon: FileText },
   platform: { label: "Platform", icon: Activity },
   billing: { label: "Billing", icon: CreditCard },
+  security: { label: "Security", icon: ShieldAlert },
 };
 
 function AlertRow({ alert }) {

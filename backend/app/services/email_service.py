@@ -772,6 +772,24 @@ def send_employee_sensitive_fields_changed_email(
     }, organization_id=organization_id, db=db, accent=PALETTE["warning"])
 
 
+def send_break_glass_access_notice_email(
+    email: str, session_id: int, reason: str, starts_at: str, expires_at: str, organization_id=None, db=None,
+) -> bool:
+    """Immediate tenant notice of an emergency (break-glass) assisted-access
+    session — sent to each active org admin when the second Super Admin
+    approves it."""
+    return _payroll_send(email, "privileged_access_break_glass.html", {
+        "subject": "Emergency support access to your payroll workspace | Zoiko Payroll",
+        "preheader": "Zoiko support was granted emergency access to your organisation.",
+        "heading": "Emergency support access granted",
+        "details_panel": _details_rows([
+            ("Session", f"#{session_id}"),
+            ("Reason given", reason),
+            ("Access window (UTC)", f"{starts_at} – {expires_at}"),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["error"])
+
+
 def send_payroll_run_created_email(
     org_email: str, pay_period: str, pay_date: str = "", run_code: str = "",
     employee_count: int = 0, organization_id=None, db=None,
