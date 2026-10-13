@@ -2027,8 +2027,12 @@ def test_mask_compliance_fields_masks_personal_identifiers_only():
                                      "w4_filing_status": "SINGLE"})
     assert (masked["ssn"], masked["nino"], masked["nric_fin"]) == ("1******6789", "A****456C", "*****567D")
     assert masked["esi_number"] == "3*****3456" and masked["steuer_id"].endswith("8901") and "*" in masked["tfn"]
-    assert (masked["sort_code"], masked["aba_routing_number"], masked["iban"], masked["w4_filing_status"]) == (
-        "40-12-34", "021000021", "DE89370400440532013000", "SINGLE")
+    # Bank routing codes and filing status stay visible; the IBAN is a personal
+    # account identifier and is masked (since 1d0a08b). An edit form that
+    # round-trips the mask keeps the stored IBAN (restore_masked_compliance_fields).
+    assert (masked["sort_code"], masked["aba_routing_number"], masked["w4_filing_status"]) == (
+        "40-12-34", "021000021", "SINGLE")
+    assert masked["iban"] == "D*****************3000"
 
 
 def test_employee_and_payslip_responses_mask_identifiers_for_every_country(db, organization):

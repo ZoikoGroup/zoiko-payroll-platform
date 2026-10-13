@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { X, ListTree } from "lucide-react";
+import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDrawer";
 import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
@@ -49,7 +50,23 @@ const amountToWords = (n, isIndia = true) => {
   return words;
 };
 
+// Switzerland: employee-side lines read from the payslip's own frozen snapshot
+// (totalsAll, per obligation) — the generic PF/ESI/... columns do not exist
+// for CH. Labels name the Swiss social insurance; amounts are never computed here.
+const CH_EMPLOYEE_LINES = [
+  ["ch_ahv_employee", "AHV — old-age & survivors insurance"],
+  ["ch_iv_employee", "IV — invalidity insurance"],
+  ["ch_eo_employee", "EO — loss-of-earnings allowance"],
+  ["ch_alv_employee", "ALV — unemployment insurance"],
+  ["ch_bvg_employee", "BVG — occupational pension"],
+  ["ch_uvg_employee", "NBU — non-occupational accident insurance"],
+  ["ch_ktg_employee", "KTG — daily sickness allowance insurance"],
+  ["ch_fak_employee", "FAK — family allowance fund (employee share)"],
+  ["ch_qst_total", "Source tax (QST)"],
+];
+
 export default function PayslipStub({ payslip, onClose, currencyCode = "INR", company = null }) {
+  const [traceOpen, setTraceOpen] = useState(false);
   useEffect(() => {
     if (!payslip) return;
     const prev = document.body.style.overflow;
@@ -66,6 +83,14 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const labels = getPayrollLabels(payslip.country);
   const identity = getIdentityField(payslip);
 
+  const chSnapshot = (payslip.country || payslip.countryCode) === "CH" ? payslip.chCalculationSnapshot : null;
+  const chTotals = chSnapshot?.totalsAll || {};
+  // paid on top of salary (engine/standard.py adds them to net pay)
+  const chPaidOnTop = chSnapshot ? [
+    { label: "Family allowances (FAK)", amount: chTotals.ch_family_allowance_total || chSnapshot.totals?.ch_family_allowance_total || 0 },
+    { label: "Absence benefit allowances", amount: chTotals.ch_absence_earnings_total || chSnapshot.totals?.ch_absence_earnings_total || 0 },
+  ].filter((r) => Number(r.amount) > 0) : [];
+
   const earningsRows = [
     { label: "Basic Pay", amount: payslip.basicPay },
     { label: "HRA", amount: payslip.hra },
@@ -73,9 +98,12 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     { label: "Special Allowance", amount: payslip.specialAllowance },
     { label: "Overtime", amount: payslip.overtime || 0 },
     { label: "Additional Compensation", amount: payslip.additionalCompensation || 0 },
+    ...chPaidOnTop,
   ].filter((r) => Number(r.amount) > 0);
 
-  const deductionRows = [
+  const deductionRows = chSnapshot ? CH_EMPLOYEE_LINES
+    .map(([key, label]) => ({ label, amount: chTotals[key] || 0 }))
+    .filter((r) => Number(r.amount) > 0) : [
     ...getIncomeTaxLines(payslip).map(([label, amount]) => ({ label, amount })),
     ...(labels.churchTax ? [{ label: labels.churchTax, amount: payslip.churchTax || 0 }] : []),
     // Solidaritätszuschlag (Soli) — real, persisted (PayslipItem.soli),
@@ -102,6 +130,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     { label: "State Disability Insurance", amount: payslip.stateDisabilityInsurance || 0 },
     { label: "State Payroll Programs (e.g. Paid Leave/TDI)", amount: payslip.stateProgramDeductions || 0 },
   ].filter((r) => Number(r.amount) > 0);
+  const chPaidOnTopTotal = chPaidOnTop.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   // Employer-side contributions (PF/ESI/Social Security/Medicare/Pension/NI)
   // are deliberately NOT shown here — this is the employee's own payslip,
@@ -111,7 +140,8 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
   const computedEarnings = earningsRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const computedDeductions = allDeductionRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const totalEarnings = (Number(payslip.totalEarnings) || 0) || computedEarnings;
+  const totalEarnings = ((Number(payslip.totalEarnings) || 0) + (Number(payslip.totalEarnings) ? chPaidOnTopTotal : 0))
+    || computedEarnings;
   const totalDeductions = (Number(payslip.totalDeductions) || 0) || computedDeductions;
   const netPay = payslip.netPay != null ? Number(payslip.netPay) : totalEarnings - totalDeductions;
   const netInWords = amountToWords(netPay, (payslip.country || "IN").toUpperCase() === "IN");
@@ -178,9 +208,17 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               <p className="text-2xl font-extrabold tracking-tight">{companyName}</p>
               <p className="text-[13px] opacity-80 mt-1">{companyAddress}</p>
             </div>
-            <button onClick={onClose} className="ps-close-btn rounded-[10px] p-1.5 bg-white/15 hover:bg-white/25 transition-all duration-200">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-2">
+              {chSnapshot?.trace && (
+                <button type="button" onClick={() => setTraceOpen(true)}
+                  className="ps-no-print flex items-center gap-1.5 rounded-[10px] bg-white/15 px-2.5 py-1.5 text-xs font-semibold hover:bg-white/25 transition-all duration-200">
+                  <ListTree size={14} /> Statutory trace
+                </button>
+              )}
+              <button onClick={onClose} aria-label="Close" className="ps-close-btn rounded-[10px] p-1.5 bg-white/15 hover:bg-white/25 transition-all duration-200">
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
           {/* MAIN CONTENT */}
@@ -370,6 +408,9 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
           </div>
         </div>
       </div>
+      <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
+        title={`Statutory trace — ${payslip.employee || ""}`} subtitle="Switzerland · as frozen on this payslip"
+        currency="CHF" layerClass="z-[10000]" />
     </>,
     document.body
   );

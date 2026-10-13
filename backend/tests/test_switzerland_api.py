@@ -41,7 +41,8 @@ BVG_RULES = {
     "bands": [
         {"age_from": 25, "age_to": 34, "employee_pct": "3.5", "employer_pct": "3.5", "component": "MANDATORY"},
         {"age_from": 35, "age_to": 44, "employee_pct": "5", "employer_pct": "6", "component": "MANDATORY"},
-        {"age_from": 25, "age_to": 65, "salary_from": "90000", "employee_amount": "100", "employer_amount": "150",
+        # Percentages only: fixed-amount BVG bands are refused (6c87074).
+        {"age_from": 25, "age_to": 65, "salary_from": "90000", "employee_pct": "1", "employer_pct": "1.5",
          "component": "EXTRA_MANDATORY"},
     ],
 }
@@ -126,12 +127,12 @@ def test_each_scheme_type_accepts_its_rules_and_hashes_them_server_side(db, orgs
     ("BVG_PLAN", {**BVG_RULES, "coordination": {"mode": "MAGIC"}}, "coordination.mode"),
     ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][0], "employer_pct": "3.4"}]},
      "employer share 3.4 is below 50% of the total 6.9"),
-    ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][2], "employer_amount": "99"}]},
+    ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][2], "employer_pct": "0.5"}]},
      "below 50% of the total"),
     ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][0], "employer_pct": None, "employer_amount": "9"}]},
-     "same basis"),
-    ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][0], "employee_amount": "1"}]},
-     "exactly one of employee_pct / employee_amount"),
+     "fixed-amount BVG bands are not supported yet"),
+    ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][0], "employee_pct": None}]},
+     "employee_pct and employer_pct are required"),
     ("BVG_PLAN", {**BVG_RULES, "bands": [BVG_RULES["bands"][0], {**BVG_RULES["bands"][0], "age_from": 30}]},
      "overlap"),
     ("BVG_PLAN", {**BVG_RULES, "bands": [{**BVG_RULES["bands"][0], "age_to": 20}]}, "age_to 20 is below"),
@@ -619,3 +620,19 @@ def test_migration_is_the_single_head_on_top_of_switzerland_support():
     heads = list(script.get_heads())
     assert len(heads) == 1
     assert "376bb8637603" in {rev.revision for rev in script.walk_revisions("base", heads[0])}
+
+
+def test_guard_reads_the_stored_status_on_an_expired_row(db, orgs):
+    """Regression (found in Step 6): after a commit the instance is expired, so
+    in-memory history cannot tell the old status - the guard must read the
+    stored row, not mistake the new value for the old one."""
+    from app.modules.payroll.models import ChSchemeProfile
+
+    sid = _live_org_scheme(db, orgs, "FAK")
+    db.commit()                                              # expire every loaded attribute
+    db.get(ChSchemeProfile, sid).status = "RETIRED"         # legitimate retirement
+    db.commit()
+    db.get(ChSchemeProfile, sid).status = "LIVE"            # never back from RETIRED
+    with pytest.raises(ValueError, match="RETIRED and immutable"):
+        db.flush()
+    db.rollback()

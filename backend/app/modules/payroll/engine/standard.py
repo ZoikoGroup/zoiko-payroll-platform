@@ -73,6 +73,8 @@ from app.modules.payroll.engine.countries import singapore as _singapore
 from app.modules.payroll.engine.countries import hong_kong as _hong_kong
 from app.modules.payroll.engine.countries import sweden as _sweden
 from app.modules.payroll.engine.countries import italy as _italy
+from app.modules.payroll.engine.countries import switzerland as _switzerland
+from app.modules.payroll.engine.countries import saudi_arabia as _saudi_arabia
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -145,6 +147,8 @@ _calc_singapore = _singapore.calculate
 _calc_hong_kong = _hong_kong.calculate
 _calc_sweden = _sweden.calculate
 _calc_italy = _italy.calculate
+_calc_switzerland = _switzerland.calculate
+_calc_saudi_arabia = _saudi_arabia.calculate
 
 
 _COUNTRY_CALC = {
@@ -193,7 +197,21 @@ _COUNTRY_CALC = {
     # municipal additions on the TAX DOMICILE. Fail-closed:
     # countries/italy.py.
     "IT": _calc_italy,
+    # Switzerland (CH spec) — federal AHV/IV/EO/ALV + admin cost, ALV ceiling
+    # with YTD cap, family allowances added to net. Fail-closed: countries/switzerland.py.
+    "CH": _calc_switzerland,
+    # Saudi Arabia (ZP-SA-ENG-001) — GOSI branches (pension/SANED/Occupational
+    # Hazards) on the monthly contributory wage, never `tds` (not a monthly-PAYE
+    # jurisdiction). Fail-closed: countries/saudi_arabia.py.
+    "SA": _calc_saudi_arabia,
 }
+
+
+# PayrollResult's flat Switzerland fields (engine/base.py) — copied from the
+# countries/switzerland.py dict when present; absent for every other country.
+_CH_RESULT_FIELDS = tuple(
+    name for name in PayrollResult.__dataclass_fields__ if name.startswith("ch_") and name != "ch_result"
+)
 
 
 # ── Strategy class ─────────────────────────────────────────────────────────
@@ -264,6 +282,15 @@ class StandardStrategy(PayrollStrategy):
             # added below, never a negative deduction (IT-009). Absent -> 0
             # everywhere else, same additive mechanism as ie_/fr_/sgp_/se_ above.
             + deductions.get("it_employee_total", Decimal("0"))
+            # Switzerland employee-side total (AHV/IV/EO/ALV, BVG, UVG NBU,
+            # KTG, QST, FAK employee share). Absent -> 0 everywhere else.
+            + deductions.get("ch_employee_total", Decimal("0"))
+            # Saudi Arabia: validated Labour-Law deductions (court order, loan,
+            # advance, authorised benefit, disciplinary, damage — per-type and
+            # aggregate caps already enforced by countries/saudi_arabia.py).
+            # Employee GOSI arrives via employee_pension/social_security above.
+            # Absent -> 0 everywhere else.
+            + deductions.get("sa_other_deductions_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -274,6 +301,13 @@ class StandardStrategy(PayrollStrategy):
         it_wedge_tax_free_sum = deductions.get("it_wedge_tax_free_sum", Decimal("0"))
         if it_wedge_tax_free_sum:
             net_pay = max(_round2(net_pay + it_wedge_tax_free_sum), Decimal("0"))
+        # Switzerland: family allowances (per APPROVED entitlement) and the
+        # absence-benefit allowances / top-ups are paid to the employee on
+        # top of salary — never negative deductions. 0 for every other country.
+        ch_paid_on_top = (deductions.get("ch_family_allowance_total", Decimal("0"))
+                          + deductions.get("ch_absence_earnings_total", Decimal("0")))
+        if ch_paid_on_top:
+            net_pay = max(_round2(net_pay + ch_paid_on_top), Decimal("0"))
         # Phase 8BU: a PARTIAL Germany result (wage_tax/soli/church_tax
         # genuinely unavailable, RV/ALV/GKV/PV genuinely computed) must
         # NEVER present a net_pay computed as if the missing tax were
@@ -510,6 +544,16 @@ class StandardStrategy(PayrollStrategy):
             it_ytd_after=deductions.get("it_ytd_after"),
             it_employee_total=deductions.get("it_employee_total", Decimal("0")),
             it_calculation_trace=deductions.get("it_calculation_trace"),
+            ch_result=deductions if "ch_calculation_trace" in deductions else None,
+            # the flat ch_* PayrollResult fields (declared in base.py, previously
+            # never populated — every one read 0): filled from the same CH dict
+            **{k: deductions[k] for k in _CH_RESULT_FIELDS if k in deductions},
+            # Saudi Arabia (ZP-SA-ENG-001) — the whole SA dict (branch
+            # breakdown + trace) and the employer-only Occupational Hazards
+            # line. Absent from every non-SA calculator dict, so a .get with
+            # the default keeps every other country's result unchanged.
+            employer_occupational_hazard=deductions.get("employer_occupational_hazard", Decimal("0")),
+            sa_result=deductions.get("sa_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

@@ -1,0 +1,149 @@
+{
+  "description": "Spec fixture F1: Saudi, legacy/current system, contributory wage SAR 20,000, Sep 2026.",
+  "source": "ZP-SA-ENG-001 v1.0 (22 Sep 2026) section 17 F1: pension 1,800 + 1,800; SANED 150 + 150; OH 400; employee statutory 1,950. Hand-computed: 20,000 x 9% = 1,800; x 0.75% = 150; x 2% = 400.",
+  "context": {
+    "country": "SA",
+    "pay_frequency": "Monthly",
+    "gross": "20000",
+    "pay_date": "2026-09-30",
+    "sa_worker_class": "SAUDI",
+    "rate_map": {
+      "sa_rate_selection_basis": {
+        "text_value": "PENDING_G1"
+      },
+      "sa_gosi_below_min_behaviour": {
+        "text_value": "BLOCK"
+      },
+      "sa_rounding_mode": {
+        "text_value": "HALF_UP"
+      },
+      "sa_rounding_precision": {
+        "flat_amount": "2"
+      },
+      "sa_loan_cap_pct": {
+        "employee_rate_pct": "10"
+      },
+      "sa_aggregate_deduction_cap_pct": {
+        "employee_rate_pct": "50"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "SA_GOSI_BRANCH",
+        "filing_status": "SAUDI",
+        "tax_regime": "PENSION_NEW",
+        "rate_pct": "9.5000",
+        "employer_rate_pct": "9.5000",
+        "min_amount": "1500",
+        "max_amount": "45000",
+        "effective_from": "2026-01-01",
+        "effective_to": "2026-07-02"
+      },
+      {
+        "rule_type": "SA_GOSI_BRANCH",
+        "filing_status": "SAUDI",
+        "tax_regime": "PENSION_NEW",
+        "rate_pct": "10.0000",
+        "employer_rate_pct": "10.0000",
+        "min_amount": "1500",
+        "max_amount": "45000",
+        "effective_from": "2026-07-03",
+        "effective_to": null
+      },
+      {
+        "rule_type": "SA_GOSI_BRANCH",
+        "filing_status": "SAUDI",
+        "tax_regime": "PENSION_LEGACY",
+        "rate_pct": "9.0000",
+        "employer_rate_pct": "9.0000",
+        "min_amount": "1500",
+        "max_amount": "45000",
+        "effective_from": "2026-01-01",
+        "effective_to": null
+      },
+      {
+        "rule_type": "SA_GOSI_BRANCH",
+        "filing_status": "SAUDI",
+        "tax_regime": "SANED",
+        "rate_pct": "0.7500",
+        "employer_rate_pct": "0.7500",
+        "min_amount": "1500",
+        "max_amount": "45000",
+        "effective_from": "2026-01-01",
+        "effective_to": null
+      },
+      {
+        "rule_type": "SA_GOSI_BRANCH",
+        "filing_status": "SAUDI",
+        "tax_regime": "OCCUPATIONAL_HAZARDS",
+        "rate_pct": "0.0000",
+        "employer_rate_pct": "2.0000",
+        "min_amount": "400",
+        "max_amount": "45000",
+        "effective_from": "2026-01-01",
+        "effective_to": null
+      },
+      {
+        "rule_type": "SA_GOSI_BRANCH",
+        "filing_status": "NON_SAUDI",
+        "tax_regime": "OCCUPATIONAL_HAZARDS",
+        "rate_pct": "0.0000",
+        "employer_rate_pct": "2.0000",
+        "min_amount": "400",
+        "max_amount": "45000",
+        "effective_from": "2026-01-01",
+        "effective_to": null
+      },
+      {
+        "rule_type": "SA_EARNING_CLASS",
+        "filing_status": "BASIC",
+        "tax_regime": "GOSI",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "SA_EARNING_CLASS",
+        "filing_status": "HOUSING",
+        "tax_regime": "GOSI",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "SA_EARNING_CLASS",
+        "filing_status": "HOUSING_IN_KIND",
+        "tax_regime": "GOSI",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "SA_EARNING_CLASS",
+        "filing_status": "ALLOWANCE_REGULAR",
+        "tax_regime": "GOSI",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "SA_EARNING_CLASS",
+        "filing_status": "OVERTIME",
+        "tax_regime": "GOSI",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "SA_EARNING_CLASS",
+        "filing_status": "OTHER_EARNINGS",
+        "tax_regime": "GOSI",
+        "assessment_basis": "REVIEW"
+      }
+    ],
+    "sa_cohort": "LEGACY",
+    "sa_cohort_evidence_ref": "gosi-contributor-statement-0001",
+    "sa_contributory_wage": "20000"
+  },
+  "expected": {
+    "employee_pension": "1800.00",
+    "employer_pension": "1800.00",
+    "social_security": "150.00",
+    "employer_social_security": "150.00",
+    "employer_occupational_hazard": "400.00",
+    "sa_employee_total": "1950.00",
+    "sa_employer_total": "2350.00",
+    "net_pay": "18050.00",
+    "tds": "0"
+  }
+}

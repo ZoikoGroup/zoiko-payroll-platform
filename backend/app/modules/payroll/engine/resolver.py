@@ -217,6 +217,7 @@ def build_context_from_employee(
     ireland_inputs: dict | None = None,
     sweden_inputs: dict | None = None,
     italy_inputs: dict | None = None,
+    saudi_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -400,4 +401,7 @@ def build_context_from_employee(
         # Italy (ZP-IT-ENG-001): italy_statutory_profile + it_* context fields
         # resolved by italy_service.resolve_it_calc_inputs.
         **(italy_inputs or {}),
+        # Saudi Arabia (ZP-SA-ENG-001): sa_statutory_profile + sa_* context
+        # fields resolved by saudi_arabia_service.resolve_sa_calc_inputs.
+        **(saudi_inputs or {}),
     )

@@ -47,6 +47,12 @@ function resolveOverride(value, pack) {
   return typeof value === "function" ? value(pack) : value;
 }
 
+// Stable no-op default for onPackChange. A fresh `() => {}` default is a new
+// function identity on every render, which would retrigger loadPackDetail's
+// useCallback and its effect on every render — refetching forever and forcing
+// the tab back to "overview".
+const NOOP = () => {};
+
 const BASE_TABS = [
   { key: "overview", label: "Overview", icon: ShieldCheck },
   { key: "rates", label: "Contribution Rates", icon: ScrollText },
@@ -82,6 +88,8 @@ export default function JurisdictionLayout({
   // straight away. Applied only while nothing is selected; every other
   // country leaves it unset and is unchanged.
   autoSelectPack = null,
+  // Called when the selected pack changes (for org picker updates, etc.)
+  onPackChange = NOOP,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -162,16 +170,26 @@ export default function JurisdictionLayout({
 
   const loadPackDetail = useCallback(() => {
     if (!selectedPack) return;
-    setTab("overview");
     getCanonicalContributionRates({ jurisdictionPackId: selectedPack.id }).then(setRates);
     getCanonicalTaxSlabs({ jurisdictionPackId: selectedPack.id }).then(setSlabs);
     getCompliancePolicyOrganizations(selectedPack.id).then(setOrgs);
     getCompliancePolicyEligibleOrganizations(selectedPack.id).then(setEligibleOrgs);
     getCompliancePolicyVersions(selectedPack.packId).then(setVersions);
     getTaxConfigurationAudit({ jurisdictionPackId: selectedPack.id }).then(setAudit);
-  }, [selectedPack]);
+    onPackChange(selectedPack);
+  }, [selectedPack, onPackChange]);
 
   useEffect(() => { loadPackDetail(); }, [loadPackDetail]);
+
+  // Reset to the Overview tab only when the *selected pack* changes — not on
+  // every detail reload/re-render. React's "adjust state while rendering"
+  // pattern (same as the autoSelectPack block above), so it never calls
+  // setState inside an effect.
+  const [tabResetPackId, setTabResetPackId] = useState(selectedPack?.id);
+  if (selectedPack?.id !== tabResetPackId) {
+    setTabResetPackId(selectedPack?.id);
+    setTab("overview");
+  }
 
   async function changeStatus(newStatus) {
     try {
