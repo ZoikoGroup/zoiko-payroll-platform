@@ -75,6 +75,7 @@ from app.modules.payroll.engine.countries import sweden as _sweden
 from app.modules.payroll.engine.countries import italy as _italy
 from app.modules.payroll.engine.countries import switzerland as _switzerland
 from app.modules.payroll.engine.countries import saudi_arabia as _saudi_arabia
+from app.modules.payroll.engine.countries import netherlands as _netherlands
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -149,6 +150,7 @@ _calc_sweden = _sweden.calculate
 _calc_italy = _italy.calculate
 _calc_switzerland = _switzerland.calculate
 _calc_saudi_arabia = _saudi_arabia.calculate
+_calc_netherlands = _netherlands.calculate
 
 
 _COUNTRY_CALC = {
@@ -204,6 +206,10 @@ _COUNTRY_CALC = {
     # Hazards) on the monthly contributory wage, never `tds` (not a monthly-PAYE
     # jurisdiction). Fail-closed: countries/saudi_arabia.py.
     "SA": _calc_saudi_arabia,
+    # Netherlands (ZP-NL-ENG-001) — wage tax (Belastingdienst tables), employee
+    # insurance (AWf/Aof/Wko), employer premiums (Whk), Zvw (employer + employee),
+    # WKR, car addition, labor pay. Fail-closed: countries/netherlands.py.
+    "NL": _calc_netherlands,
 }
 
 
@@ -291,6 +297,10 @@ class StandardStrategy(PayrollStrategy):
             # Employee GOSI arrives via employee_pension/social_security above.
             # Absent -> 0 everywhere else.
             + deductions.get("sa_other_deductions_total", Decimal("0"))
+            # Netherlands: Zvw employee contribution + any lawful Whk employee
+            # recovery (wage tax arrives as tds, pension as employee_pension).
+            # Employer premiums are never in here (NL-035). 0 elsewhere.
+            + deductions.get("nl_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -554,6 +564,12 @@ class StandardStrategy(PayrollStrategy):
             # the default keeps every other country's result unchanged.
             employer_occupational_hazard=deductions.get("employer_occupational_hazard", Decimal("0")),
             sa_result=deductions.get("sa_result"),
+            # Netherlands (ZP-NL-ENG-001) — the whole NL dict (wage tax,
+            # employee insurance, employer premiums, Zvw, WKR, car addition,
+            # labor pay, net pay, employer cost). Returns under 'nl_result' key.
+            # Absent from every non-NL calculator dict, so a .get with the
+            # default keeps every other country's result unchanged.
+            nl_result=deductions.get("nl_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

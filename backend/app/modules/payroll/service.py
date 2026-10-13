@@ -19247,7 +19247,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden", "NL": "nl_golden"}
 
 
 def run_golden_test_certification(
@@ -19929,6 +19929,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     as_of=period_end or date.today())
             if emp_country == "SA" else None
         )
+        # Netherlands (ZP-NL-ENG-001): read-only input resolution — a preview
+        # never commits a VCR / WKR / vacation ledger (NL-033).
+        netherlands_inputs = (
+            jurisdiction_hooks.call("NL", "calc_inputs", db, None, emp, None,
+                                    as_of=period_end or date.today())
+            if emp_country == "NL" else None
+        )
         # Switzerland (CH spec): every resolver check, read-only; a blocked
         # worker raises SwitzerlandCalculationBlockedError (same surfacing as
         # Italy's blocks). Applied to ctx after it is built.
@@ -20074,6 +20081,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             sweden_inputs=sweden_inputs,
             italy_inputs=italy_inputs,
             saudi_inputs=saudi_inputs,
+            netherlands_inputs=netherlands_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -25004,6 +25012,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, resolved_pack)
         if country == "SA" else None
     )
+    # Netherlands (ZP-NL-ENG-001): resolver for statutory profile, wage-tax
+    # table file, VCR snapshots, employer premium decisions, BSN, tax-credit.
+    netherlands_inputs = (
+        jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "NL" else None
+    )
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
     # raises SwitzerlandCalculationBlockedError, same surfacing as Italy.
     switzerland_attrs = (
@@ -25093,6 +25107,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         sweden_inputs=sweden_inputs,
         italy_inputs=italy_inputs,
         saudi_inputs=saudi_inputs,
+        netherlands_inputs=netherlands_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -25267,6 +25282,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # cohort, rate basis, per-branch amounts + trace) — JSON-safe, replayed
         # from the payslip exactly as computed (never reconstructed).
         "sa_calculation_snapshot": result.sa_result,
+        # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
+        # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
+        # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
+        # status, errors, warnings). Read by netherlands_service.nl_payslip_snapshot.
+        "nl_calculation_snapshot": result.nl_result,
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -26378,6 +26398,9 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
     if (run.notes or "").startswith("[HK-CORRECTION]"):
         raise BadRequestException("A Hong Kong correction run holds one correction delta only — it is never generated "
                                   "from employee data (D-14).")
+    if (run.notes or "").startswith("[NL-CORRECTION]"):
+        raise BadRequestException("A Netherlands correction run holds correction deltas only — it is never generated "
+                                  "from employee data (NL-045).")
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     # Org-level, not per-employee — resolved once for the whole run, same as
     # rate_map/slabs are cached per-jurisdiction below.
@@ -26571,6 +26594,9 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     if (run.notes or "").startswith("[HK-CORRECTION]"):
         raise BadRequestException("A Hong Kong correction delta is not recalculated — reject it and request a new "
                                   "correction of the original payslip (D-14).")
+    if (run.notes or "").startswith("[NL-CORRECTION]"):
+        raise BadRequestException("A Netherlands correction delta is not recalculated — create a further correction "
+                                  "of the original payslip instead (NL-045).")
     if _sg_is_correction_run(run):
         raise BadRequestException("A Singapore correction delta is not recalculated — create a further correction of the "
                                   "original payslip instead (SG-044).")
@@ -31616,6 +31642,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, None)
         if country == "SA" else None
     )
+    # Netherlands: refuses (409) once the run's NL ledgers are committed.
+    netherlands_inputs = (
+        jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, None)
+        if country == "NL" else None
+    )
     switzerland_attrs = (
         _switzerland_service.ch_calc_context(
             db, organization_id, employee, run.pay_date, run.period_start, run.period_end,
@@ -31747,6 +31778,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         sweden_inputs=sweden_inputs,
         italy_inputs=italy_inputs,
         saudi_inputs=saudi_inputs,
+        netherlands_inputs=netherlands_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -31795,6 +31827,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         country_code=country,
         compliance_fields=dict(getattr(employee, "compliance_fields", None) or {}),
         ch_calculation_snapshot=_switzerland_service.ch_payslip_snapshot(calc, frozen=switzerland_frozen),
+        nl_calculation_snapshot=calc.nl_result if country == "NL" else None,
         **tax_snapshot,
         basic_salary=calc.basic,
         hra=calc.hra,
@@ -32437,6 +32470,9 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # cohort, rate basis, per-branch amounts + trace), gated to SA like the
         # other country-specific snapshot above. Replayed, never reconstructed.
         "saCalculationSnapshot": item.sa_calculation_snapshot if (item.country_code or country) == "SA" else None,
+        # Netherlands (ZP-NL-ENG-001): frozen inputs + nl_result (net vs employer
+        # cost kept apart, NL-035). Gated to NL — never Canada's NL province.
+        "nlCalculationSnapshot": item.nl_calculation_snapshot if (item.country_code or country) == "NL" else None,
     }
 
 

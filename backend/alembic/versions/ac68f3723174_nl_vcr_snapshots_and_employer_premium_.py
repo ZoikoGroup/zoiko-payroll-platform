@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer, primary_key=True, index=True),
         sa.Column("organization_id", sa.Integer, sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True),
         sa.Column("employee_id", sa.Integer, sa.ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True),
-        sa.Column("income_relationship_id", sa.Integer, sa.ForeignKey("payroll_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True),
+        sa.Column("income_relationship_id", sa.Integer, nullable=True, index=True),
         sa.Column("tax_year", sa.SmallInteger, nullable=False, index=True),
         sa.Column("family", sa.String(20), nullable=False),  # EI / ZVW_LEVY / ZVW_CONTRIB
         sa.Column("revision", sa.Integer, nullable=False),
@@ -39,17 +39,21 @@ def upgrade() -> None:
         sa.Column("cumulative_base", sa.Numeric(14, 2), nullable=False, default=0),
         sa.Column("base_increment", sa.Numeric(14, 2), nullable=False, default=0),
         sa.Column("previous_snapshot_id", sa.Integer, sa.ForeignKey("payroll_nl_vcr_snapshots.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("content_pack_id", sa.Integer, sa.ForeignKey("jurisdiction_packs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("content_pack_id", sa.Integer, sa.ForeignKey("payroll_jurisdiction_packs.id", ondelete="SET NULL"), nullable=True),
         sa.Column("is_correction", sa.Boolean, nullable=False, default=False, server_default="false"),
         sa.Column("snapshot_sha256", sa.String(64), nullable=False),
         sa.Column("created_by", sa.Integer, sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("family IN ('EI', 'ZVW_LEVY', 'ZVW_CONTRIB')", name="ck_nl_vcr_family"),
     )
+    # NL-013/NL-046: one VCR series per employer entity + employee + year +
+    # family; the revision is the optimistic-concurrency token. The nullable
+    # income_relationship_id is NOT part of the key (NULLs are distinct in a
+    # unique constraint, which would let two stale commits through).
     op.create_unique_constraint(
-        "uq_nl_vcr_snapshots_org_emp_ikv_year_family_rev",
+        "uq_nl_vcr_snapshots_org_emp_year_family_rev",
         "payroll_nl_vcr_snapshots",
-        ["organization_id", "employee_id", "income_relationship_id", "tax_year", "family", "revision"],
+        ["organization_id", "employee_id", "tax_year", "family", "revision"],
     )
     op.create_index("ix_nl_vcr_snapshots_lookup", "payroll_nl_vcr_snapshots",
                     ["organization_id", "employee_id", "tax_year", "family", "revision"])
@@ -90,6 +94,6 @@ def downgrade() -> None:
     """Drop tables."""
     op.drop_index("ix_nl_emp_prem_decisions_active_lookup", table_name="payroll_nl_employer_premium_decisions")
     op.drop_table("payroll_nl_employer_premium_decisions")
-    op.drop_constraint("uq_nl_vcr_snapshots_org_emp_ikv_year_family_rev", "payroll_nl_vcr_snapshots", type_="unique")
+    op.drop_constraint("uq_nl_vcr_snapshots_org_emp_year_family_rev", "payroll_nl_vcr_snapshots", type_="unique")
     op.drop_index("ix_nl_vcr_snapshots_lookup", table_name="payroll_nl_vcr_snapshots")
     op.drop_table("payroll_nl_vcr_snapshots")

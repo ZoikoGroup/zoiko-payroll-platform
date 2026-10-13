@@ -26,6 +26,7 @@ from app.modules.payroll.engine.jurisdictions.netherlands.premiums import (
     calculate_ei_period,
     round_eur,
     get_rates_from_pack,
+    PremiumConfigurationError,
 )
 from app.modules.payroll.engine.jurisdictions.netherlands.vcr import (
     VcrState,
@@ -36,12 +37,20 @@ from app.modules.payroll.engine.jurisdictions.netherlands.vcr import (
 
 
 class TestPremiumRates:
-    def test_get_rates_from_pack_defaults(self):
-        rates = get_rates_from_pack({})
+    def test_get_rates_from_pack_missing_blocks(self):
+        """No fallback rate: an unconfigured pack blocks (NL-003/NL-017)."""
+        with pytest.raises(PremiumConfigurationError, match="nl_awf_low_pct"):
+            get_rates_from_pack({})
+
+    def test_get_rates_from_pack_reads_contribution_rate_rows(self):
+        class _Row:
+            def __init__(self, employer=None, employee=None):
+                self.employer_rate_pct, self.employee_rate_pct = employer, employee
+        rate_map = {k: _Row(employer=v) for k, v in {
+            "nl_awf_low_pct": "2.7400", "nl_awf_high_pct": "7.7400", "nl_aof_low_pct": "6.2700",
+            "nl_aof_high_pct": "7.6300", "nl_wko_pct": "0.5000"}.items()}
+        rates = get_rates_from_pack(rate_map)
         assert rates.awf_low_pct == Decimal("2.74")
-        assert rates.awf_high_pct == Decimal("7.74")
-        assert rates.aof_small_pct == Decimal("6.27")
-        assert rates.aof_large_pct == Decimal("7.63")
         assert rates.wko_pct == Decimal("0.50")
 
     def test_get_rates_from_pack_overrides(self):
@@ -71,7 +80,8 @@ class TestAwfContractFacts:
         )
         assert c.qualifies_for_low_rate()
 
-    def test_fixed_term_12_months_written_qualifies(self):
+    def test_fixed_term_12_months_written_is_high(self):
+        """S6: only a written INDEFINITE contract qualifies — fixed-term of any length is high."""
         c = AwfContractFacts(
             is_permanent=False,
             fixed_term_months=12,
@@ -79,7 +89,19 @@ class TestAwfContractFacts:
             is_on_call_no_guaranteed_hours=False,
             is_standby_contract=False,
         )
+        assert not c.qualifies_for_low_rate()
+
+    def test_permanent_unwritten_is_high(self):
+        c = AwfContractFacts(is_permanent=True, fixed_term_months=None, has_written_contract=False,
+                             is_on_call_no_guaranteed_hours=False, is_standby_contract=False)
+        assert not c.qualifies_for_low_rate()
+
+    def test_statutory_exception_qualifies_low(self):
+        c = AwfContractFacts(is_permanent=False, fixed_term_months=6, has_written_contract=True,
+                             is_on_call_no_guaranteed_hours=False, is_standby_contract=False,
+                             statutory_exception_code="BBL")
         assert c.qualifies_for_low_rate()
+        assert "BBL" in c.low_rate_reason()
 
     def test_fixed_term_11_months_fails(self):
         c = AwfContractFacts(

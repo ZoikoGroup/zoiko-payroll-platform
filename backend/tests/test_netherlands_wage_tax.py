@@ -190,7 +190,7 @@ class TestWageTaxLookups:
 
     def test_anonymous_rate(self):
         """Anonymous rate applies 52% and adds remediation warning."""
-        result = anonymous_rate(Decimal("5000"))
+        result = anonymous_rate(Decimal("5000"), Decimal("52.00"))
         assert result.withholding_amount == Decimal("2600.00")  # 52% of 5000
         assert result.method == "ANONYMOUS_RATE"
         assert "Anonymous rate" in result.warnings[0]
@@ -226,7 +226,7 @@ class TestWageTaxLookups:
         r2 = calculate_wage_tax(ctx, Decimal("5000"), special_remuneration=True)
         assert r2.method == "SPECIAL_REMUNERATION"
         # Anonymous
-        r3 = calculate_wage_tax(ctx, Decimal("5000"), anonymous=True)
+        r3 = calculate_wage_tax(ctx, Decimal("5000"), anonymous=True, anonymous_rate_pct=Decimal("52.00"))
         assert r3.method == "ANONYMOUS_RATE"
         # Voluntary extra
         r4 = calculate_wage_tax(ctx, Decimal("5000"), voluntary_extra_amount=Decimal("100"))

@@ -3,13 +3,12 @@ engine/jurisdictions/netherlands/premiums.py
 ---------------------------------------------
 Employee insurance premium calculations (ZP-NL-ENG-001 NL-015..NL-018).
 
-AWf (NL-015):
-  - Low rate (2.74%) ONLY if contract meets ALL conditions:
-      * indefinite (permanent) OR fixed-term ≥ 1 year with written contract
-      * NOT on-call without guaranteed hours
-      * NOT a standby/contingency contract
-    Otherwise HIGH rate (7.74%). Admin CANNOT simply pick "low"; the engine
-    evaluates contract facts and raises if facts are missing.
+AWf (NL-015, spec §6 / S6):
+  - Low rate ONLY for a WRITTEN INDEFINITE-term contract that is not an
+    on-call / standby contract, or where a recorded statutory exception
+    applies. Every other contract (fixed-term of any length, unwritten,
+    on-call) pays the HIGH rate. Admin CANNOT simply pick "low": the class is
+    derived from contract facts.
 
 Aof (NL-017):
   - Rate depends on employer size class for the 2024 basis year:
@@ -35,7 +34,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
-from .vcr import VcrState, VcrInput, VcrResult, advance, VcrFamily
+from .vcr import VcrResult, VcrFamily
 
 
 def round_eur(amount: Decimal) -> Decimal:
@@ -51,17 +50,19 @@ class AwfContractFacts:
     is_on_call_no_guaranteed_hours: bool
     is_standby_contract: bool
 
+    statutory_exception_code: Optional[str] = None  # recorded low-rate exception (S6)
+
     def qualifies_for_low_rate(self) -> bool:
-        """NL-015: low rate only if ALL conditions met."""
-        if self.is_on_call_no_guaranteed_hours:
-            return False
-        if self.is_standby_contract:
-            return False
-        if self.is_permanent:
-            return True
-        if self.fixed_term_months is not None and self.fixed_term_months >= 12 and self.has_written_contract:
-            return True
-        return False
+        """NL-015: written indefinite non-on-call contract, or a recorded statutory exception."""
+        return self.low_rate_reason() is not None
+
+    def low_rate_reason(self) -> Optional[str]:
+        if self.statutory_exception_code:
+            return f"statutory exception {self.statutory_exception_code}"
+        if (self.is_permanent and self.has_written_contract
+                and not self.is_on_call_no_guaranteed_hours and not self.is_standby_contract):
+            return "written indefinite-term contract, not on-call"
+        return None
 
 
 @dataclass(frozen=True)
@@ -84,15 +85,47 @@ class EwPremiumRates:
     wko_pct: Decimal          # 0.50
 
 
+class PremiumConfigurationError(ValueError):
+    """A statutory premium rate is not configured in the active pack — the
+    engine blocks; there is no fallback rate (spec NL-003/NL-017)."""
+
+
+_RATE_KEYS = {
+    "awf_low_pct": "nl_awf_low_pct",
+    "awf_high_pct": "nl_awf_high_pct",
+    "aof_small_pct": "nl_aof_low_pct",
+    "aof_large_pct": "nl_aof_high_pct",
+    "wko_pct": "nl_wko_pct",
+}
+
+
+def _rate_value(entry) -> Optional[Decimal]:
+    """A rate_map entry is either a ContributionRate-like row (employer premium
+    -> employer_rate_pct) or a plain number (tests / frozen context)."""
+    if entry is None:
+        return None
+    for attr in ("employer_rate_pct", "employee_rate_pct"):
+        value = getattr(entry, attr, None)
+        if value is not None:
+            return Decimal(str(value))
+    if isinstance(entry, (int, float, str, Decimal)):
+        return Decimal(str(entry))
+    return None
+
+
 def get_rates_from_pack(rate_map: dict) -> EwPremiumRates:
-    """Extract NL premium rates from engine rate_map."""
-    return EwPremiumRates(
-        awf_low_pct=Decimal(str(rate_map.get("nl_awf_low_pct", "2.74"))),
-        awf_high_pct=Decimal(str(rate_map.get("nl_awf_high_pct", "7.74"))),
-        aof_small_pct=Decimal(str(rate_map.get("nl_aof_low_pct", "6.27"))),
-        aof_large_pct=Decimal(str(rate_map.get("nl_aof_high_pct", "7.63"))),
-        wko_pct=Decimal(str(rate_map.get("nl_wko_pct", "0.50"))),
-    )
+    """Extract NL premium rates from the engine rate_map. A missing key
+    raises PremiumConfigurationError — never a default rate."""
+    values = {}
+    missing = []
+    for field_name, key in _RATE_KEYS.items():
+        value = _rate_value(rate_map.get(key))
+        if value is None:
+            missing.append(key)
+        values[field_name] = value
+    if missing:
+        raise PremiumConfigurationError(f"NL premium rate(s) not configured in the active pack: {', '.join(missing)}")
+    return EwPremiumRates(**values)
 
 
 @dataclass(frozen=True)
@@ -191,6 +224,9 @@ def calculate_whk(
     employer_total = wga + zw_flex
 
     employee_recoverable = Decimal("0")
+    if (decision.whk_wga_employee_recoverable_pct is not None
+            and decision.whk_wga_employee_recoverable_pct > decision.whk_wga_pct):
+        raise ValueError("Whk employee-recoverable % cannot exceed the WGA premium % (NL-018)")
     if decision.whk_wga_employee_recoverable_pct is not None:
         employee_recoverable = round_eur(base * decision.whk_wga_employee_recoverable_pct / Decimal("100"))
 

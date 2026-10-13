@@ -952,6 +952,32 @@ class PayrollContext:
     # pay only with the employee's recorded consent.
     sa_overtime_comp_leave_consented: bool = False
 
+    # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
+    # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
+    # BLOCKS (NetherlandsCalculationBlockedError) rather than guess any that
+    # are missing; all default to None so every non-NL caller is unaffected.
+    nl_statutory_profile: object = None        # EmployeeStatutoryProfile (nl_* facts)
+    nl_organization_id: int = None
+    nl_employee_id: int = None
+    nl_payroll_period: str = None              # overrides pay_frequency for the table period
+    nl_with_tax_credit: bool = None            # signed instruction in force; None = no instruction
+    nl_tax_credit_instruction_id: int = None
+    nl_anonymous: bool = False                 # BSN missing/unverified -> anonymous rate (NL-008)
+    nl_wage_tax_table: dict = None             # {fileId, fileSha256, tableKey, rows}
+    nl_special_tax_table: dict = None          # same shape, SPECIAL_REMUNERATION file
+    nl_reference_annual_wage: Decimal = None   # special-remuneration reference wage (NL-010)
+    nl_contract: dict = None                   # contract version in force (AWf facts)
+    nl_premium_decision: dict = None           # ACTIVE employer premium decision
+    nl_vcr_before: dict = None                 # {family: committed VCR state}; {} = first period
+    nl_earnings: dict = None                   # {earning_code: amount}
+    nl_earning_classifications: dict = None    # {earning_code: classification dict}
+    nl_company_cars: list = None
+    nl_expat_decision: dict = None
+    nl_pension_scheme: dict = None
+    nl_sickness: dict = None                   # {first_sick_day, policy}
+    nl_period_hours: Decimal = None            # paid hours; None = contract hours
+    nl_vacation_balance_before: Decimal = None
+
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
     # affects a figure. None means "caller didn't supply one," in which
@@ -1555,6 +1581,13 @@ class PayrollResult:
     # (SANED maps to the generic social-security slots, pension to the
     # employee/employer pension slots). 0 for every non-SA country.
     employer_occupational_hazard: Decimal = Decimal("0")
+
+    # Netherlands (ZP-NL-ENG-001) — the whole dict countries/netherlands.py
+    # returns under 'nl_result' key (wage_tax, employee_insurance, whk, zvw,
+    # wkr, car_addition, labor_pay, net_pay, employer_cost, pack, parameters,
+    # minimum_wage_hourly, period_maximum, status, errors, warnings).
+    # None for every non-NL country.
+    nl_result: dict = None
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through
