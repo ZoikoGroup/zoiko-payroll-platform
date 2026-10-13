@@ -78,6 +78,19 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "bank_workflow_validated", label: "Salary bank-payment workflow validated", pattern: "^(YES|NO)$", example: "NO", primary: false, options: ["YES", "NO"] },
     ],
   },
+  // Saudi Arabia — mirrors backend core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.SA
+  // (schema only; live Saudi payroll stays gated until the release gates are
+  // evidenced). CR = Commercial Registration; GOSI employer number; MHRSD
+  // establishment number; Mudad ID for wage protection.
+  SA: {
+    label: "CR / GOSI Employer No. / MHRSD Establishment / Mudad ID",
+    fields: [
+      { key: "cr_number", label: "Commercial Registration (CR)", pattern: "^\\d{10}$", example: "1010123456", primary: true },
+      { key: "gosi_employer_number", label: "GOSI Employer Number", pattern: "^\\d{6,10}$", example: "1234567", primary: false },
+      { key: "mhrsd_establishment_number", label: "MHRSD Establishment Number", pattern: "^\\d{6,12}$", example: "12345678", primary: false },
+      { key: "mudad_id", label: "Mudad ID", pattern: "^[A-Za-z0-9-]{8,30}$", example: "MUDAD-001234", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -91,6 +104,9 @@ const COUNTRY_NAME_TO_CODE = {
   "hong kong": "HK",
   france: "FR",
   ireland: "IE",
+  "saudi arabia": "SA",
+  saudi: "SA",
+  ksa: "SA",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -102,6 +118,7 @@ const CODE_TO_COUNTRY_NAME = {
   HK: "Hong Kong",
   FR: "France",
   IE: "Ireland",
+  SA: "Saudi Arabia",
 };
 
 export function getJurisdictionCode(country) {

@@ -10,6 +10,9 @@ import USStatutoryFormsModal from "./USStatutoryFormsModal";
 import GermanyStatutoryProfilePanel from "./GermanyStatutoryProfilePanel";
 import ItalyStatutoryProfilePanel from "./ItalyStatutoryProfilePanel";
 import HKStatutoryProfilePanel from "./HKStatutoryProfilePanel";
+import SwitzerlandStatutoryProfilePanel from "./SwitzerlandStatutoryProfilePanel";
+import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
+import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
 import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
 import GermanyOvertimePanel from "./GermanyOvertimePanel";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
@@ -95,6 +98,9 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [showGermanyStatutory, setShowGermanyStatutory] = useState(false);
 const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showHkStatutory, setShowHkStatutory] = useState(false);
+  const [showSwissStatutory, setShowSwissStatutory] = useState(false);
+  const [showChFamily, setShowChFamily] = useState(false);
+  const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
   const [showGermanyOvertime, setShowGermanyOvertime] = useState(false);
 
@@ -475,6 +481,15 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showHkForms && (
         <HKStatutoryFormsModal employee={employee} onClose={() => setShowHkForms(false)} />
+      )}
+      {showSwissStatutory && (
+        <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />
+      )}
+      {showChFamily && (
+        <CHFamilyAllowancePanel employee={employee} onClose={() => setShowChFamily(false)} />
+      )}
+      {showChAbsence && (
+        <CHAbsenceEventsPanel employee={employee} onClose={() => setShowChAbsence(false)} />
       )}
       {showGermanyOvertime && (
         <GermanyOvertimePanel employee={employee} onClose={() => setShowGermanyOvertime(false)} />

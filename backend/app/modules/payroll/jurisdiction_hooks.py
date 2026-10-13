@@ -26,6 +26,14 @@ from typing import Callable, Dict, Tuple
 # Countries whose statutory workflows live in a jurisdiction service module.
 _MODULES: Dict[str, str] = {
     "HK": "app.modules.payroll.hong_kong_service",
+    "SA": "app.modules.payroll.saudi_arabia_service",
+    # NL is deliberately NOT registered yet: a registered module must provide
+    # every platform hook (retention_settings, before_run_transition,
+    # payment_treatment, ...). netherlands_service only defines "calculate",
+    # and shared loops such as retention_service._report_country() call
+    # retention_settings on every registered module — so registering NL made
+    # every non-HK/SA report download raise (fail-closed) for all orgs.
+    # Re-add "NL": "app.modules.payroll.netherlands_service" once those hooks exist.
 }
 
 

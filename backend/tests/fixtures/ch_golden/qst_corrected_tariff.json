@@ -1,0 +1,290 @@
+{
+ "context": {
+  "ch_frozen_context": {
+   "attrs": {
+    "ch_absence_earnings": [],
+    "ch_alv_proration_rule": "annual",
+    "ch_annual_salary": "96000",
+    "ch_bvg_plan_scheme_id": 3,
+    "ch_bvg_scheme_rules": {
+     "bands": [
+      {
+       "age_from": 18,
+       "age_to": 24,
+       "component": "MANDATORY",
+       "employee_pct": "0",
+       "employer_pct": "0.5"
+      },
+      {
+       "age_from": 25,
+       "age_to": 34,
+       "component": "MANDATORY",
+       "employee_pct": "3.5",
+       "employer_pct": "3.5"
+      },
+      {
+       "age_from": 35,
+       "age_to": 44,
+       "component": "MANDATORY",
+       "employee_pct": "5",
+       "employer_pct": "5"
+      },
+      {
+       "age_from": 45,
+       "age_to": 54,
+       "component": "MANDATORY",
+       "employee_pct": "7.5",
+       "employer_pct": "7.5"
+      },
+      {
+       "age_from": 55,
+       "age_to": 65,
+       "component": "MANDATORY",
+       "employee_pct": "9",
+       "employer_pct": "9"
+      }
+     ]
+    },
+    "ch_canton_rate_maps": {
+     "CH-GE": {
+      "ch_fak_child": {
+       "employee_rate_pct": null,
+       "employer_rate_pct": null,
+       "flat_amount": "311",
+       "text_value": null
+      },
+      "ch_fak_education": {
+       "employee_rate_pct": null,
+       "employer_rate_pct": null,
+       "flat_amount": "415",
+       "text_value": null
+      }
+     },
+     "CH-ZH": {
+      "ch_fak_child": {
+       "employee_rate_pct": null,
+       "employer_rate_pct": null,
+       "flat_amount": "250",
+       "text_value": null
+      },
+      "ch_fak_education": {
+       "employee_rate_pct": null,
+       "employer_rate_pct": null,
+       "flat_amount": "300",
+       "text_value": null
+      }
+     }
+    },
+    "ch_classification": {
+     "ch_ahv": {
+      "base_salary": true
+     },
+     "ch_alv": {
+      "base_salary": true
+     },
+     "ch_eo": {
+      "base_salary": true
+     },
+     "ch_iv": {
+      "base_salary": true
+     },
+     "ch_qst": {
+      "base_salary": true
+     },
+     "ch_uvg": {
+      "base_salary": true
+     }
+    },
+    "ch_date_of_birth": "1990-05-01",
+    "ch_experience_years": null,
+    "ch_fak_entitlements": [],
+    "ch_fak_scheme_id": 2,
+    "ch_fak_scheme_rules": {
+     "employer_pct": "1.2"
+    },
+    "ch_federal_pack_id": 0,
+    "ch_federal_pack_version": "golden",
+    "ch_grade": null,
+    "ch_multiple_employment": false,
+    "ch_occupation": null,
+    "ch_other_employment_pct": null,
+    "ch_qst_canton": "CH-ZH",
+    "ch_qst_children": 0,
+    "ch_qst_church_tax": false,
+    "ch_qst_model": "MONTHLY",
+    "ch_qst_rate": {
+     "min_tax": null,
+     "rate_pct": "7.5",
+     "row_id": 302
+    },
+    "ch_qst_subject": "YES",
+    "ch_qst_tariff_code": "A",
+    "ch_qst_tariff_file_id": 3,
+    "ch_qst_tariff_file_sha256": "synthetic-ch-zh-corrected",
+    "ch_qst_treatment": {
+     "base_salary": "PERIODIC"
+    },
+    "ch_scheme_rules": {
+     "admin_cost_pct": "1.0"
+    },
+    "ch_uvg_policy_scheme_id": 4,
+    "ch_uvg_risk_class": "A1",
+    "ch_uvg_scheme_rules": {
+     "insurer": "SYNTHETIC",
+     "risk_classes": [
+      {
+       "bu_employer_pct": "0.3",
+       "code": "A1",
+       "nbu_employee_share_pct": "100",
+       "nbu_pct": "0.9"
+      }
+     ]
+    },
+    "ch_wage_floor_agreements": [],
+    "ch_weekly_hours": "42",
+    "ch_work_canton": "CH-ZH",
+    "earnings": {
+     "base_salary": "8000"
+    },
+    "organization_id": null,
+    "payroll_date": "2026-03-31",
+    "ytd": {
+     "ch_alv": {
+      "recorded": false,
+      "wages": "0",
+      "withheld": "0"
+     },
+     "ch_uvg": {
+      "recorded": false,
+      "wages": "0",
+      "withheld": "0"
+     }
+    }
+   },
+   "calculationMode": "standard",
+   "ctx": {
+    "additional_compensation": "0",
+    "basic": "8000",
+    "calendar_days": null,
+    "gross": "8000",
+    "hra": "0",
+    "overtime": "0",
+    "pay_date": "2026-03-31",
+    "pay_frequency": "Monthly",
+    "payroll_days": 30,
+    "special_allowance": "0",
+    "unpaid_leave_days": 0
+   },
+   "rateMap": {
+    "ch_ahv": {
+     "employee_rate_pct": "4.35",
+     "employer_rate_pct": "4.35",
+     "flat_amount": null,
+     "text_value": null
+    },
+    "ch_alv": {
+     "employee_rate_pct": "1.10",
+     "employer_rate_pct": "1.10",
+     "flat_amount": null,
+     "text_value": null
+    },
+    "ch_alv_ceiling": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "148200",
+     "text_value": null
+    },
+    "ch_bvg_coordination_deduction": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "26460",
+     "text_value": null
+    },
+    "ch_bvg_entry_threshold": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "22680",
+     "text_value": null
+    },
+    "ch_bvg_min_coordinated": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "3780",
+     "text_value": null
+    },
+    "ch_bvg_upper_salary": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "90720",
+     "text_value": null
+    },
+    "ch_eo": {
+     "employee_rate_pct": "0.25",
+     "employer_rate_pct": "0.25",
+     "flat_amount": null,
+     "text_value": null
+    },
+    "ch_fak_child_min": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "215",
+     "text_value": null
+    },
+    "ch_fak_education_min": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "268",
+     "text_value": null
+    },
+    "ch_iv": {
+     "employee_rate_pct": "0.70",
+     "employer_rate_pct": "0.70",
+     "flat_amount": null,
+     "text_value": null
+    },
+    "ch_nbu_min_weekly_hours": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "8",
+     "text_value": null
+    },
+    "ch_rounding_rule": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "0.05",
+     "text_value": null
+    },
+    "ch_uvg_ceiling": {
+     "employee_rate_pct": null,
+     "employer_rate_pct": null,
+     "flat_amount": "148200",
+     "text_value": null
+    }
+   },
+   "version": 1
+  },
+  "country": "CH"
+ },
+ "description": "QST: March recalculated on the corrected ZH tariff (top band 7.5 %).",
+ "expected": {
+  "ch_admin_cost_employer": "80",
+  "ch_ahv_employee": "348",
+  "ch_ahv_employer": "348",
+  "ch_alv_employee": "88",
+  "ch_alv_employer": "88",
+  "ch_bvg_employee": "267.75",
+  "ch_bvg_employer": "267.75",
+  "ch_employee_total": "1451.75",
+  "ch_employer_total": "979.75",
+  "ch_fak_employer": "96",
+  "ch_family_allowance_total": "0",
+  "ch_qst_total": "600",
+  "ch_uvg_bu_employer": "24",
+  "ch_uvg_nbu_employee": "72",
+  "ch_uvg_nbu_employer": "0",
+  "gross": "8000",
+  "net_pay": "6548.25",
+  "total_deductions": "1451.75"
+ },
+ "source": "tests/fixtures/ch_golden/calc_reference.py (independent standalone calculator; synthetic tariff / scheme / canton data)"
+}

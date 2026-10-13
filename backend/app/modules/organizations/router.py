@@ -765,6 +765,10 @@ def delete_organization(
         "payroll_generated_reports",
         "payroll_super_guarantee_liabilities",
         "organization_ytd_accumulators",
+        "payroll_ch_absence_benefit_events",
+        "payroll_ch_family_allowance_entitlements",
+        "payroll_ch_elm_submissions",
+        "payroll_ch_entity_profiles",
         "payslip_items",
         "payroll_attendance_records",
         "payroll_runs",
@@ -835,6 +839,41 @@ def delete_organization(
             text(
                 'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
                 '(SELECT id FROM "users" WHERE organization_id = :org_id)'
+            ),
+            {"org_id": organization_id},
+        )
+
+    if "payroll_ch_scheme_profiles" in existing_tables:
+        db.execute(
+            text(
+                'UPDATE "payroll_ch_scheme_profiles" SET previous_version_id = NULL '
+                'WHERE organization_id = :org_id'
+            ),
+            {"org_id": organization_id},
+        )
+
+    if "payroll_ch_entity_profiles" in existing_tables:
+        db.execute(
+            text(
+                'UPDATE "payroll_ch_entity_profiles" SET previous_version_id = NULL '
+                'WHERE organization_id = :org_id'
+            ),
+            {"org_id": organization_id},
+        )
+
+    if "payroll_ch_elm_submissions" in existing_tables:
+        db.execute(
+            text(
+                'UPDATE "payroll_ch_elm_submissions" SET correction_of_id = NULL '
+                'WHERE organization_id = :org_id'
+            ),
+            {"org_id": organization_id},
+        )
+
+    if "payroll_ch_idempotency_records" in existing_tables:
+        db.execute(
+            text(
+                "DELETE FROM payroll_ch_idempotency_records WHERE scope_key = 'org:' || :org_id"
             ),
             {"org_id": organization_id},
         )

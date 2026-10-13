@@ -30,10 +30,12 @@ performed an action, not a payroll employee record.
 """
 
 import enum
+import sqlalchemy as sa
 from sqlalchemy import (
     Column, Integer, String, Date, DateTime, Boolean,
     ForeignKey, Text, Numeric, SmallInteger, UniqueConstraint, Index, JSON, text,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -1048,6 +1050,45 @@ class EmployeeStatutoryProfile(Base):
     it_contractual_weekly_hours = Column(Numeric(5, 2), nullable=True)
     it_termination_reason      = Column(String(50), nullable=True)
 
+    # ── Saudi Arabia (SA) — ZP-SA-ENG-001 employee-owned facts ─────────────
+    # All nullable/additive — no existing non-SA employee row is affected.
+    # Worker class / cohort: SAUDI | NON_SAUDI | GCC | DOMESTIC (GOSI branches)
+    sa_worker_class                  = Column(String(20), nullable=True)
+    # Cohort evidence (e.g. Saudi national ID, GCC passport) — mirrors ie_ppsn's
+    # evidential role; never inferred from worker_class.
+    sa_cohort                        = Column(String(20), nullable=True)
+    sa_cohort_evidence_ref           = Column(String(200), nullable=True)
+    sa_cohort_source_document_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    sa_cohort_verified_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sa_cohort_verified_at            = Column(DateTime(timezone=True), nullable=True)
+    # Identity: Iqama | Passport | Border_Pass; token is SHA-256 of normalized ID.
+    sa_identity_document_type        = Column(String(20), nullable=True)
+    sa_identity_token                = Column(String(80), nullable=True)
+    sa_identity_expiry               = Column(Date, nullable=True)
+    # GOSI registration lifecycle: REGISTERED | PENDING | EXEMPT | REJECTED
+    sa_gosi_registration_status      = Column(String(30), nullable=True)
+    sa_gosi_registration_date        = Column(Date, nullable=True)
+    sa_gosi_registration_token       = Column(String(80), nullable=True)
+    # Registered contributory wage (SAR/month) — the wage GOSI actually has on file
+    # for this employee as of the effective date, plus its GOSI reference.
+    sa_contributory_wage             = Column(Numeric(14, 2), nullable=True)
+    sa_contributory_wage_effective_from = Column(Date, nullable=True)
+    sa_contributory_wage_gosi_ref    = Column(String(100), nullable=True)
+    # In-kind housing value (SAR/month) — for EOS base if contract specifies.
+    sa_in_kind_housing_value         = Column(Numeric(14, 2), nullable=True)
+    # Contract type: FIXED_TERM | INDEFINITE | PROBATION | SEASONAL
+    sa_contract_type                 = Column(String(30), nullable=True)
+    # Occupation per MHRSD classification (e.g. "Engineer", "Driver").
+    sa_occupation                    = Column(String(100), nullable=True)
+    # Special category: DOMESTIC | AGRICULTURE | SEAFARER | MINOR | DISABLED
+    sa_special_category              = Column(String(50), nullable=True)
+    # Reduced hours in Ramadan flag — Labour Law Art. 98.
+    sa_reduced_ramadan_hours         = Column(Boolean, nullable=True)
+    # Service start date (may differ from date_of_joining for transfer of business).
+    sa_service_start_date            = Column(Date, nullable=True)
+    # Free-text EOS exclusions (e.g. "gross misconduct Art. 80" — no EOS award).
+    sa_eos_exclusions                = Column(Text, nullable=True)
+
     # ── Switzerland: statutory-anchor employee facts (CH spec) ─────────────
     # All nullable/additive — no existing non-CH employee row is affected.
     ch_work_canton             = Column(String(5), nullable=True)
@@ -1080,6 +1121,26 @@ class EmployeeStatutoryProfile(Base):
     ch_grade                   = Column(String(50), nullable=True)
     ch_experience_years        = Column(Numeric(4, 1), nullable=True)
     ch_evidence_document_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    # ── Netherlands (NL) — ZP-NL-ENG-001 employee-owned facts (Sections 10–11) ─────────────
+    # All nullable/additive — no existing non-NL employee row is affected.
+    # The BSN itself stays in the employee's compliance fields and is masked by the server.
+    nl_bsn_verified_at            = Column(DateTime(timezone=True), nullable=True)
+    nl_identity_status            = Column(String(20), nullable=True)
+    nl_residence_country          = Column(String(2), nullable=True)
+    nl_residence_variant          = Column(String(20), nullable=True)
+    nl_table_color                = Column(String(10), nullable=True)
+    nl_zvw_path                   = Column(String(20), nullable=True)  # EMPLOYER_LEVY / EMPLOYEE_CONTRIB / SPECIAL
+    nl_ei_insured                 = Column(Boolean, nullable=True)
+    nl_insurance_exception_code   = Column(String(20), nullable=True)
+    nl_insurance_evidence_ref     = Column(String(200), nullable=True)
+    nl_cross_border_status        = Column(String(20), nullable=True)  # NONE / SUPPORTED / BLOCKED
+    nl_a1_reference               = Column(String(100), nullable=True)
+    nl_pension_scheme_id          = Column(Integer, nullable=True)
+    nl_voluntary_extra_withholding = Column(Numeric(14, 2), nullable=True)
+    nl_vacation_allowance_pct     = Column(Numeric(5, 2), nullable=True)
+    nl_contract_hours_per_week    = Column(Numeric(5, 2), nullable=True)
+    nl_personnel_number           = Column(String(50), nullable=True)
 
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
@@ -1390,6 +1451,13 @@ class PayrollRun(Base):
     attendance_override_reason = Column(Text, nullable=True)
     attendance_override_by     = Column(Integer, ForeignKey("users.id"), nullable=True)
     attendance_override_at     = Column(DateTime(timezone=True), nullable=True)
+
+    # Saudi Arabia approval fingerprint (ZP-SA-ENG-001 §16/§17) — a SHA-256
+    # hash of the resolved inputs, rule hashes, scheme versions and payslip
+    # values that the approval is bound to. Mirrors Switzerland's approval
+    # fingerprint. Written at approval time; read at correction time to verify
+    # the basis hasn't drifted. Uses generic JSON for SQLite compatibility.
+    sa_approval_fingerprint = Column(JSON, nullable=True)
 
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -1816,6 +1884,15 @@ class PayslipItem(Base):
     # rates, bracket and YTD-ledger facts the CH payrun used. NULL for every
     # non-CH payslip and every CH payslip before this column existed.
     ch_calculation_snapshot = Column(JSON, nullable=True)
+    # Saudi Arabia: calculation snapshot (ZP-SA-ENG-001) — same country-scoped
+    # JSON-column precedent as the CH/SG/HK/AU traces: frozen statutory inputs,
+    # GOSI branch resolution, earning classifications, EOS accrual, settlement
+    # components. NULL for non-SA payslips and SA payslips before this column.
+    sa_calculation_snapshot = Column(JSON, nullable=True)
+    # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
+    # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
+    # from employee. Zero for non-SA payslips.
+    employer_occupational_hazard = Column(Numeric(12, 2), default=0, server_default="0")
     # India: EPS diversion + residual — purely-informational breakdown of
     # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
     # employer_pf_residual == employer_pf always, never additional to it.
@@ -7935,18 +8012,26 @@ def _ch_changed_columns(target) -> set:
     return {a.key for a in state.attrs if a.history.has_changes()}
 
 
-def _ch_previous_value(target, key):
-    from sqlalchemy import inspect as _sa_inspect
+def _ch_previous_value(connection, target, key):
+    # The value as STORED. In-memory history only knows the old value when the
+    # attribute was loaded before it changed; on an expired instance (e.g.
+    # after a commit) it is empty, so the database row is read instead.
+    from sqlalchemy import inspect as _sa_inspect, select as _sa_select
 
     history = _sa_inspect(target).attrs[key].history
-    return history.deleted[0] if history.deleted else getattr(target, key)
+    if history.deleted:
+        return history.deleted[0]
+    if not history.added:
+        return getattr(target, key)
+    table = type(target).__table__
+    return connection.execute(_sa_select(table.c[key]).where(table.c.id == target.id)).scalar()
 
 
 def _refuse_released_scheme_mutation(mapper, connection, target):
     # A LIVE scheme profile is frozen content: the only permitted change is
     # its retirement (LIVE -> RETIRED); a RETIRED one never changes again.
     # A changed scheme is a NEW version row.
-    before = _ch_previous_value(target, "status")
+    before = _ch_previous_value(connection, target, "status")
     if before not in ("LIVE", "RETIRED"):
         return
     changed = _ch_changed_columns(target) - {"updated_at"}
@@ -8069,6 +8154,7 @@ class ChElmSubmission(Base):
     canton                     = Column(String(5), nullable=True)
     schema_version             = Column(String(30), nullable=True)
     period_key                 = Column(String(50), nullable=True)
+    payload_xml                = Column(Text, nullable=True)
     payload_sha256             = Column(String(64), nullable=True)
     payload_ref                = Column(String(255), nullable=True)
     transport_status           = Column(String(30), nullable=True)
@@ -8116,3 +8202,477 @@ class ChIdempotencyRecord(Base):
 
     def __repr__(self):
         return f"<ChIdempotencyRecord {self.scope_key} {self.idempotency_key} {self.operation}>"
+
+
+# ── Saudi Arabia (SA) — ZP-SA-ENG-001 jurisdiction tables ──────────────────
+
+class SaEmployerProfile(Base):
+    """One effective-dated version of an employer's GOSI/SANED/OH profile.
+    Versioned per organization — mirrors GermanyHealthFund's effective-dated
+    shape. One open-ended row per org at a time (partial unique index)."""
+    __tablename__ = "payroll_sa_employer_profiles"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    effective_from          = Column(Date, nullable=False, index=True)
+    effective_to            = Column(Date, nullable=True)
+    gosi_employer_code      = Column(String(50), nullable=False)
+    branch_code             = Column(String(50), nullable=True)
+    activity_code           = Column(String(50), nullable=True)
+    risk_category           = Column(String(30), nullable=True)
+    occupational_hazard_rate_pct = Column(Numeric(6, 4), nullable=True)
+    saned_employer_rate_pct = Column(Numeric(6, 4), nullable=True)
+    pension_employer_rate_pct = Column(Numeric(6, 4), nullable=True)
+    status                  = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    authority_source_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id     = Column(Integer, ForeignKey("payroll_sa_employer_profiles.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_employer_profile_org_period", "organization_id", "effective_from"),
+        Index(
+            "uq_sa_employer_profile_one_open",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return f"<SaEmployerProfile org={self.organization_id} code={self.gosi_employer_code} {self.status}>"
+
+
+class SaContractVersion(Base):
+    """One effective-dated version of an employee's employment contract.
+    Versioned per employee — mirrors EmployeeStatutoryProfile's shape.
+    One open-ended row per employee at a time."""
+    __tablename__ = "payroll_sa_contract_versions"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    effective_from          = Column(Date, nullable=False, index=True)
+    effective_to            = Column(Date, nullable=True)
+    contract_type           = Column(String(30), nullable=False)
+    occupation              = Column(String(100), nullable=True)
+    basic_wage              = Column(Numeric(14, 2), nullable=True)
+    housing_allowance       = Column(Numeric(14, 2), nullable=True)
+    transport_allowance     = Column(Numeric(14, 2), nullable=True)
+    other_allowances        = Column(Numeric(14, 2), nullable=True)
+    in_kind_housing_value   = Column(Numeric(14, 2), nullable=True)
+    probation_end_date      = Column(Date, nullable=True)
+    contract_end_date       = Column(Date, nullable=True)
+    status                  = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    authority_source_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id     = Column(Integer, ForeignKey("payroll_sa_contract_versions.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_contract_version_emp_period", "employee_id", "effective_from"),
+        Index(
+            "uq_sa_contract_version_one_open",
+            "employee_id",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return f"<SaContractVersion emp={self.employee_id} {self.contract_type} {self.status}>"
+
+
+class SaGosiLiability(Base):
+    """Monthly GOSI/SANED/OH liability per employer — one row per org per
+    contribution month. Aggregated from payslip_items for the period."""
+    __tablename__ = "payroll_sa_gosi_liabilities"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    contribution_month      = Column(Date, nullable=False, index=True)
+    total_wages             = Column(Numeric(16, 2), default=0, server_default="0")
+    contributory_wages      = Column(Numeric(16, 2), default=0, server_default="0")
+    pension_employee        = Column(Numeric(16, 2), default=0, server_default="0")
+    pension_employer        = Column(Numeric(16, 2), default=0, server_default="0")
+    saned_employee          = Column(Numeric(16, 2), default=0, server_default="0")
+    saned_employer          = Column(Numeric(16, 2), default=0, server_default="0")
+    occupational_hazard_employer = Column(Numeric(16, 2), default=0, server_default="0")
+    total_due               = Column(Numeric(16, 2), default=0, server_default="0")
+    status                  = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    paid_at                 = Column(DateTime(timezone=True), nullable=True)
+    payment_reference       = Column(String(100), nullable=True)
+    source_run_id           = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_gosi_liability_org_month", "organization_id", "contribution_month", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<SaGosiLiability org={self.organization_id} month={self.contribution_month} due={self.total_due}>"
+
+
+class SaWpsFile(Base):
+    """One SIE (Salary Information Extract) file submission to WPS.
+    SHA-256 deduplication prevents duplicate uploads."""
+    __tablename__ = "payroll_sa_wps_files"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    payroll_run_id          = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
+    file_name               = Column(String(255), nullable=False)
+    file_sha256             = Column(String(64), nullable=False)
+    employee_count          = Column(Integer, default=0, server_default="0")
+    total_amount            = Column(Numeric(16, 2), default=0, server_default="0")
+    status                  = Column(String(30), nullable=False, default="UPLOADED", server_default="UPLOADED")
+    submitted_at            = Column(DateTime(timezone=True), nullable=True)
+    accepted_at             = Column(DateTime(timezone=True), nullable=True)
+    rejected_at             = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason        = Column(Text, nullable=True)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_wps_file_org_date", "organization_id", "created_at"),
+        Index("uq_sa_wps_file_sha256", "file_sha256", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<SaWpsFile org={self.organization_id} {self.file_name} {self.status}>"
+
+
+class SaWpsObservation(Base):
+    """Per-employee WPS observation (variance, missing data, etc.) linked to
+    a SaWpsFile. Mirrors the SIE observation codes from MHRSD."""
+    __tablename__ = "payroll_sa_wps_observations"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    wps_file_id             = Column(Integer, ForeignKey("payroll_sa_wps_files.id"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    observation_code        = Column(String(20), nullable=False)
+    observation_description = Column(Text, nullable=True)
+    expected_amount         = Column(Numeric(14, 2), nullable=True)
+    reported_amount         = Column(Numeric(14, 2), nullable=True)
+    resolved                = Column(Boolean, default=False, server_default="0")
+    resolved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at             = Column(DateTime(timezone=True), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_wps_obs_file_emp", "wps_file_id", "employee_id"),
+    )
+
+    def __repr__(self):
+        return f"<SaWpsObservation file={self.wps_file_id} emp={self.employee_id} {self.observation_code}>"
+
+
+class SaFinalSettlement(Base):
+    """Final settlement (end-of-service) for a terminated/resigned employee.
+    Labour Law Arts. 87–90: 7 days (termination) / 14 days (resignation)."""
+    __tablename__ = "payroll_sa_final_settlements"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    termination_date        = Column(Date, nullable=False)
+    termination_type        = Column(String(20), nullable=False)
+    notice_given            = Column(Boolean, default=False, server_default="0")
+    notice_period_days      = Column(Integer, nullable=True)
+    eos_award               = Column(Numeric(16, 2), default=0, server_default="0")
+    unused_leave_days       = Column(Integer, default=0, server_default="0")
+    unused_leave_pay        = Column(Numeric(14, 2), default=0, server_default="0")
+    notice_pay              = Column(Numeric(14, 2), default=0, server_default="0")
+    repatriation_pay        = Column(Numeric(14, 2), default=0, server_default="0")
+    other_dues              = Column(Numeric(14, 2), default=0, server_default="0")
+    total_due               = Column(Numeric(16, 2), default=0, server_default="0")
+    deductions              = Column(Numeric(14, 2), default=0, server_default="0")
+    net_payable             = Column(Numeric(16, 2), default=0, server_default="0")
+    deadline_date           = Column(Date, nullable=False)
+    paid_at                 = Column(DateTime(timezone=True), nullable=True)
+    payment_reference       = Column(String(100), nullable=True)
+    status                  = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_final_settlement_emp", "employee_id", "termination_date"),
+    )
+
+    def __repr__(self):
+        return f"<SaFinalSettlement emp={self.employee_id} type={self.termination_type} net={self.net_payable}>"
+
+
+class SaEosLedgerEntry(Base):
+    """EOS accrual ledger — one row per employee per payroll period.
+    Accrual: ½ month/year first 5 years, then 1 month/year (Labour Law Art. 84).
+    EOS base = last basic + housing (if contract specifies)."""
+    __tablename__ = "payroll_sa_eos_ledger_entries"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    period_from             = Column(Date, nullable=False, index=True)
+    period_to               = Column(Date, nullable=False)
+    basic_wage              = Column(Numeric(14, 2), nullable=False)
+    housing_allowance       = Column(Numeric(14, 2), default=0, server_default="0")
+    eos_base                = Column(Numeric(14, 2), nullable=False)
+    days_worked             = Column(Integer, nullable=False)
+    accrual_months          = Column(Numeric(6, 4), nullable=False)
+    eos_award_accrued       = Column(Numeric(16, 2), default=0, server_default="0")
+    cumulative_award        = Column(Numeric(16, 2), default=0, server_default="0")
+    status                  = Column(String(20), nullable=False, default="ACCRUED", server_default="ACCRUED")
+    settled_at              = Column(DateTime(timezone=True), nullable=True)
+    source_run_id           = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_sa_eos_ledger_emp_period", "employee_id", "period_from", "period_to", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<SaEosLedgerEntry emp={self.employee_id} {self.period_from}–{self.period_to} accrued={self.eos_award_accrued}>"
+
+
+class PayrollNlTaxTableFile(Base):
+    """NL wage-tax table file import (ZP-NL-ENG-001 NL-011..NL-014, gate G1).
+    Mirrors CH QST tariff file lifecycle: IMPORTED -> VALIDATED -> APPROVED -> ACTIVE.
+    Four-eyes approval at APPROVE and ACTIVATE. Supersede on new activation.
+    One file = one table (tax_year + color + kind + period + residence_variant)."""
+    __tablename__ = "payroll_nl_tax_table_files"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id", ondelete="CASCADE"), nullable=False, index=True)
+    tax_year              = Column(Integer, nullable=False, index=True)  # SmallInteger in migration
+    table_color           = Column(String(10), nullable=False)  # WHITE / GREEN
+    table_kind            = Column(String(30), nullable=False)  # PERIOD / SPECIAL_REMUNERATION
+    period                = Column(String(20), nullable=True)   # DAY, WEEK, FOUR_WEEK, MONTH, QUARTER, YEAR (NULL for special-remuneration)
+    residence_variant     = Column(String(20), nullable=False)  # NL or derivation code
+    source_url            = Column(String(500), nullable=True)
+    source_filename       = Column(String(255), nullable=False)
+    file_sha256           = Column(String(64), nullable=False, unique=True, index=True)
+    row_count             = Column(Integer, nullable=False, default=0, server_default="0")
+    status                = Column(String(20), nullable=False, default="IMPORTED", server_default="IMPORTED")  # IMPORTED/VALIDATED/APPROVED/ACTIVE/SUPERSEDED/REJECTED
+    validation_report     = Column(sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql"), nullable=True)
+    imported_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    validated_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    activated_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    effective_from        = Column(Date, nullable=False, index=True)
+    effective_to          = Column(Date, nullable=True, index=True)
+    superseded_by_id      = Column(Integer, ForeignKey("payroll_nl_tax_table_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("table_color IN ('WHITE', 'GREEN')", name="ck_nl_tax_table_color"),
+        sa.CheckConstraint("table_kind IN ('PERIOD', 'SPECIAL_REMUNERATION')", name="ck_nl_tax_table_kind"),
+        sa.CheckConstraint("period IN ('DAY', 'WEEK', 'FOUR_WEEK', 'MONTH', 'QUARTER', 'YEAR')", name="ck_nl_tax_table_period"),
+        sa.CheckConstraint("status IN ('IMPORTED', 'VALIDATED', 'APPROVED', 'ACTIVE', 'SUPERSEDED', 'REJECTED')", name="ck_nl_tax_table_status"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlTaxTableFile {self.tax_year} {self.table_color} {self.table_kind} {self.period or ''} {self.residence_variant} {self.status}>"
+
+
+class PayrollNlTaxTableRow(Base):
+    """Individual row within an NL wage-tax table file.
+    Immutable once written (same guards as ChQstTariffRow)."""
+    __tablename__ = "payroll_nl_tax_table_rows"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    file_id             = Column(Integer, ForeignKey("payroll_nl_tax_table_files.id", ondelete="CASCADE"), nullable=False, index=True)
+    row_no              = Column(Integer, nullable=False)
+    wage_from           = Column(Numeric(12, 2), nullable=False)
+    wage_to             = Column(Numeric(12, 2), nullable=True)  # NULL = open-ended top bracket
+    aow_cohort          = Column(String(20), nullable=False)  # BELOW_AOW / AOW_AGE
+    with_tax_credit     = Column(Boolean, nullable=False, default=True, server_default="true")
+    withholding_amount  = Column(Numeric(12, 2), nullable=True)  # for PERIOD tables
+    percentage          = Column(Numeric(7, 4), nullable=True)   # for SPECIAL_REMUNERATION table
+    row_sha256          = Column(String(64), nullable=False)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("aow_cohort IN ('BELOW_AOW', 'AOW_AGE')", name="ck_nl_tax_row_aow_cohort"),
+        sa.UniqueConstraint("file_id", "row_no", name="uq_nl_tax_table_rows_file_row"),
+        sa.Index("ix_nl_tax_table_rows_file_wage", "file_id", "wage_from", "wage_to"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlTaxTableRow file={self.file_id} row={self.row_no} {self.wage_from}–{self.wage_to or '∞'} {self.aow_cohort} {'tc' if self.with_tax_credit else 'no-tc'}>"
+
+
+class PayrollNlEmployerProfile(Base):
+    """NL employer profile (versioned, immutable — like ChEntityProfile).
+    Only one open (effective_to IS NULL) row per organization. No private keys stored,
+    only PKI cert reference + fingerprint (NL-030)."""
+    __tablename__ = "payroll_nl_employer_profiles"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    version                   = Column(Integer, nullable=False, default=1, server_default="1")
+    previous_version_id       = Column(Integer, ForeignKey("payroll_nl_employer_profiles.id", ondelete="SET NULL"), nullable=True)
+    effective_from            = Column(Date, nullable=False, index=True)
+    effective_to              = Column(Date, nullable=True, index=True)
+    legal_name                = Column(String(200), nullable=False)
+    kvk_number                = Column(String(20), nullable=True)
+    rsin                      = Column(String(20), nullable=True)
+    address                   = Column(postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"), nullable=True)
+    payroll_contact           = Column(postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"), nullable=True)
+    loonheffingennummer       = Column(String(50), nullable=True)
+    loonheffingen_subnumber   = Column(String(50), nullable=True)
+    registration_letter_ref   = Column(String(100), nullable=True)
+    registration_verified_at  = Column(DateTime(timezone=True), nullable=True)
+    registration_verified_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    return_period             = Column(String(20), nullable=False, default="MONTH", server_default="MONTH")  # MONTH / FOUR_WEEK
+    payroll_schedule          = Column(String(20), nullable=False, default="MONTH", server_default="MONTH")  # MONTH / FOUR_WEEK / WEEK
+    standard_pay_day          = Column(SmallInteger, nullable=True)
+    bank_lead_days            = Column(SmallInteger, nullable=False, default=2, server_default="2")
+    bank_iban_token           = Column(String(100), nullable=True)
+    bank_bic                  = Column(String(20), nullable=True)
+    pki_cert_ref              = Column(String(200), nullable=True)
+    pki_cert_fingerprint      = Column(String(100), nullable=True)
+    pki_cert_issuer           = Column(String(200), nullable=True)
+    pki_cert_expires_at       = Column(DateTime(timezone=True), nullable=True)
+    digipoort_channel         = Column(String(50), nullable=True)
+    digipoort_test_status     = Column(String(20), nullable=True)
+    digipoort_test_evidence_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    cao_status                = Column(String(20), nullable=False, default="NONE", server_default="NONE")  # NONE / APPLICABLE / UNKNOWN
+    collective_agreement_id   = Column(Integer, ForeignKey("payroll_collective_agreements.id", ondelete="SET NULL"), nullable=True)
+    pension_status            = Column(String(20), nullable=True)
+    wkr_mode                  = Column(String(20), nullable=False, default="STANDALONE", server_default="STANDALONE")  # STANDALONE / CONCERN
+    wkr_concern_id            = Column(Integer, nullable=True)
+    readiness_status          = Column(String(20), nullable=False, default="INCOMPLETE", server_default="INCOMPLETE")
+    readiness_evidence        = Column(postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"), nullable=True)
+    created_by                = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("return_period IN ('MONTH', 'FOUR_WEEK')", name="ck_nl_emp_return_period"),
+        sa.CheckConstraint("payroll_schedule IN ('MONTH', 'FOUR_WEEK', 'WEEK')", name="ck_nl_emp_payroll_schedule"),
+        sa.CheckConstraint("cao_status IN ('NONE', 'APPLICABLE', 'UNKNOWN')", name="ck_nl_emp_cao_status"),
+        sa.CheckConstraint("wkr_mode IN ('STANDALONE', 'CONCERN')", name="ck_nl_emp_wkr_mode"),
+        sa.CheckConstraint("standard_pay_day IS NULL OR (standard_pay_day >= 1 AND standard_pay_day <= 31)", name="ck_nl_emp_pay_day"),
+        sa.Index("ix_nl_employer_profiles_org_open", "organization_id", unique=True,
+                 postgresql_where=sa.text("effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlEmployerProfile org={self.organization_id} v={self.version} {self.legal_name}>"
+
+
+class PayrollNlIncomeRelationship(Base):
+    """Income relationship (IKV) for NL — set once, never regenerated."""
+    __tablename__ = "payroll_nl_income_relationships"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    ikv_number              = Column(String(50), nullable=False)
+    income_relation_code    = Column(String(10), nullable=False)
+    payroll_period          = Column(String(20), nullable=False)
+    start_date              = Column(Date, nullable=False, index=True)
+    end_date                = Column(Date, nullable=True, index=True)
+    status                  = Column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")
+    closed_reason           = Column(String(200), nullable=True)
+    created_by              = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('ACTIVE', 'CLOSED')", name="ck_nl_ikv_status"),
+        sa.UniqueConstraint("organization_id", "employee_id", "ikv_number", name="uq_nl_ikv_org_emp_ikv"),
+        sa.Index("ix_nl_ikv_org_emp_start", "organization_id", "employee_id", "start_date"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlIncomeRelationship org={self.organization_id} emp={self.employee_id} ikv={self.ikv_number}>"
+
+
+class PayrollNlTaxCreditInstruction(Base):
+    """Tax credit instruction (Model opgaaf gegevens) — insert-only, supersedes chain (NL-029)."""
+    __tablename__ = "payroll_nl_tax_credit_instructions"
+
+    id                          = Column(Integer, primary_key=True, index=True)
+    organization_id             = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    apply_tax_credit            = Column(Boolean, nullable=False, default=True, server_default="true")
+    form_version                = Column(String(50), nullable=False, default="Model opgaaf 2026-08")
+    signed_at                   = Column(DateTime(timezone=True), nullable=False)
+    effective_from              = Column(Date, nullable=False, index=True)
+    signed_document_artifact_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    captured_by                 = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    superseded_by_id            = Column(Integer, ForeignKey("payroll_nl_tax_credit_instructions.id", ondelete="SET NULL"), nullable=True)
+    created_at                  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.Index("ix_nl_tax_credit_org_emp_effective", "organization_id", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlTaxCreditInstruction org={self.organization_id} emp={self.employee_id} apply={self.apply_tax_credit} from={self.effective_from}>"
+
+
+class PayrollNlContractVersion(Base):
+    """Contract version with derived AWf class (NL-015). Versioned chain."""
+    __tablename__ = "payroll_nl_contract_versions"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id  = Column(Integer, ForeignKey("payroll_nl_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True)
+    version                 = Column(Integer, nullable=False)
+    previous_version_id     = Column(Integer, ForeignKey("payroll_nl_contract_versions.id", ondelete="SET NULL"), nullable=True)
+    contract_term           = Column(String(20), nullable=False)  # INDEFINITE / FIXED
+    written_record          = Column(Boolean, nullable=False, default=False, server_default="false")
+    written_evidence_ref    = Column(String(200), nullable=True)
+    on_call                 = Column(Boolean, nullable=False, default=False, server_default="false")
+    agreed_hours_per_week   = Column(Numeric(5, 2), nullable=True)
+    statutory_exception_code = Column(String(20), nullable=True)
+    start_date              = Column(Date, nullable=False, index=True)
+    end_date                = Column(Date, nullable=True, index=True)
+    derived_awf_class       = Column(String(10), nullable=True)  # LOW / HIGH
+    awf_derivation_reason   = Column(String(200), nullable=True)
+    effective_from          = Column(Date, nullable=False, index=True)
+    effective_to            = Column(Date, nullable=True, index=True)
+    created_by              = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("contract_term IN ('INDEFINITE', 'FIXED')", name="ck_nl_contract_term"),
+        sa.CheckConstraint("derived_awf_class IS NULL OR derived_awf_class IN ('LOW', 'HIGH')", name="ck_nl_contract_awf_class"),
+        sa.Index("ix_nl_contract_org_emp_effective", "organization_id", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlContractVersion org={self.organization_id} emp={self.employee_id} v={self.version} awf={self.derived_awf_class}>"
+
+
+class PayrollNlIdempotencyRecord(Base):
+    """Idempotency record for NL HTTP calls (netherlands_http.py)."""
+    __tablename__ = "payroll_nl_idempotency_records"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    idempotency_key     = Column(String(100), nullable=False, unique=True, index=True)
+    request_hash        = Column(String(64), nullable=False)
+    response_status     = Column(SmallInteger, nullable=True)
+    response_body       = Column(Text, nullable=True)
+    created_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at          = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<PayrollNlIdempotencyRecord key={self.idempotency_key[:16]}...>"
