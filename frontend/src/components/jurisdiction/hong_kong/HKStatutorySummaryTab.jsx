@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, CircleDashed } from "lucide-react";
 import { getHongKongStatutorySummary } from "../../../service/superAdminService";
+import HKEvidencePanel from "./HKEvidencePanel";
+import HKContributionDayDisruptions from "./HKContributionDayDisruptions";
 
 // Hong Kong statutory summary (ZP-HK-ENG-001) — renders
 // GET /super-admin/compliance/hong-kong/statutory-summary as returned: packs,
@@ -9,6 +11,7 @@ import { getHongKongStatutorySummary } from "../../../service/superAdminService"
 const STATE_STYLE = {
   PASS: { cls: "text-success", Icon: CheckCircle2 },
   SUBMITTED: { cls: "text-warning", Icon: AlertTriangle },
+  REJECTED: { cls: "text-error", Icon: AlertTriangle },
   EVIDENCE_REQUIRED: { cls: "text-warning", Icon: AlertTriangle },
 };
 
@@ -28,10 +31,13 @@ const td = "px-2 py-1.5 text-[12px] text-foreground";
 export default function HKStatutorySummaryTab() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [open, setOpen] = useState(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     getHongKongStatutorySummary().then(setData).catch((err) => setError(err?.message || "Could not load the summary."));
   }, []);
+  useEffect(() => { load(); }, [load]);
+  const cert = data?.goldenCertification;
 
   if (error) return <p role="alert" className="text-[13px] text-error">{error}</p>;
   if (!data) return <p className="text-[13px] text-foreground-muted">Loading Hong Kong statutory summary…</p>;
@@ -47,6 +53,19 @@ export default function HKStatutorySummaryTab() {
           <li><strong>Service registry:</strong> {data.serviceRegistry}</li>
         </ul>
       </section>
+
+      {cert && (
+        <section className={card} aria-labelledby="hk-cert">
+          <h3 id="hk-cert" className="mb-2 text-[14px] font-semibold text-foreground">Golden-vector certification</h3>
+          <p className="text-[12px] text-foreground-secondary">
+            <GateState state={cert.status === "PASS" ? "PASS" : cert.status === "NOT_RUN" ? "EVIDENCE_REQUIRED" : "REJECTED"} />{" "}
+            Latest HK run: <strong>{cert.status}</strong>
+            {cert.runId ? ` (#${cert.runId}, ${cert.passedCases}/${cert.totalCases} cases passed, ${cert.runAt})` : ""} ·
+            Eligible for pack activation: <strong>{cert.eligibleForActivation ? "Yes" : "No"}</strong>
+          </p>
+          <p className="mt-1 text-[12px] text-foreground-muted">{cert.detail} Run it from the Golden Vectors tab.</p>
+        </section>
+      )}
 
       <section className={card} aria-labelledby="hk-packs">
         <h3 id="hk-packs" className="mb-2 text-[14px] font-semibold text-foreground">Rule packs (year of assessment)</h3>
@@ -70,20 +89,37 @@ export default function HKStatutorySummaryTab() {
       <section className={card} aria-labelledby="hk-gates">
         <h3 id="hk-gates" className="mb-2 text-[14px] font-semibold text-foreground">Production release gates</h3>
         <p className="mb-2 text-[12px] text-foreground-muted">
-          Evidence is recorded as a Source Evidence artifact tagged with the gate (e.g. HK-GATE-G1), with the signed document uploaded;
-          a different Super Admin reviews it. G1 is enforced at pack activation.
+          Submit each gate&apos;s signed document below (tagged with the gate, e.g. HK-GATE-G1; the server computes its SHA-256);
+          a different Super Admin accepts or rejects it. G1 is enforced at pack activation; G1–G7 at service opening.
         </p>
         <table className="w-full">
-          <thead><tr><th className={th}>Gate</th><th className={th}>Requirement</th><th className={th}>State</th></tr></thead>
+          <thead><tr><th className={th}>Gate</th><th className={th}>Requirement</th><th className={th}>State</th><th className={th}>Evidence</th></tr></thead>
           <tbody>
             {data.gates.map((g) => (
-              <tr key={g.gate} className="border-t border-border">
-                <td className={td}>{g.gate}</td><td className={td}>{g.requirement}</td><td className={td}><GateState state={g.state} /></td>
-              </tr>
+              <Fragment key={g.gate}>
+                <tr className="border-t border-border">
+                  <td className={td}>{g.gate}</td><td className={td}>{g.requirement}</td><td className={td}><GateState state={g.state} /></td>
+                  <td className={td}>
+                    <button type="button" className="text-[12px] font-semibold text-primary underline" aria-expanded={open === g.gate}
+                      onClick={() => setOpen(open === g.gate ? null : g.gate)}>
+                      {open === g.gate ? "Hide" : `Evidence (${(g.evidence || []).length})`}
+                    </button>
+                  </td>
+                </tr>
+                {open === g.gate && (
+                  <tr><td colSpan={4} className="px-2 pb-2"><HKEvidencePanel tag={g.evidenceTag} items={g.evidence} onChanged={load} /></td></tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
+        <div className="mt-3">
+          <h4 className="mb-1 text-[12px] font-semibold text-foreground">Production read-only verification (HK-PRODUCTION-VERIFICATION)</h4>
+          <HKEvidencePanel tag="HK-PRODUCTION-VERIFICATION" items={data.productionVerificationEvidence} onChanged={load} />
+        </div>
       </section>
+
+      <HKContributionDayDisruptions />
 
       <section className={card} aria-labelledby="hk-blockers">
         <h3 id="hk-blockers" className="mb-2 text-[14px] font-semibold text-foreground">External blockers</h3>

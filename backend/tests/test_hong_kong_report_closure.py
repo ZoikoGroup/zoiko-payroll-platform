@@ -195,7 +195,8 @@ def test_empf_contribution_day_comes_from_the_pack_row(db, hk):
     from app.modules.payroll.models import ContributionRate
 
     _months(db, hk, (4,))
-    assert hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id).contribution_day == date(2026, 5, 10)
+    # Base day 10 May 2026 is a Sunday: the governed deferral rule ([G1] UNVERIFIED) moves it to Monday 11 May.
+    assert hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id).contribution_day == date(2026, 5, 11)
     row = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == hk.packs[1].id,
                                              ContributionRate.component_key == "mpf_contribution_day").one())
     row.flat_amount = D("12")                 # a (test-only) different pack value — no literal in the code

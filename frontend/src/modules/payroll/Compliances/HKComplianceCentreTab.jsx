@@ -1,3 +1,4 @@
+import { EmpfFilingView } from "./HKMpfAccessControls";
 import { useCallback, useEffect, useState } from "react";
 import {
   amendHkIrdCase, approveHkHoldRelease, approveHkTermination, calculateHkTermination, changeHkDeparture, closeHkHold,
@@ -345,6 +346,7 @@ function Empf() {
           </p>
           <p className="text-[12px] text-foreground-secondary">{s.totals.employees} employee(s) · relevant income HK$ {s.totals.relevantIncome} · employer HK$ {s.totals.employerMandatory} · employee HK$ {s.totals.employeeMandatory}</p>
           {s.validationErrors.length > 0 && <ul className="mt-1 list-disc pl-5 text-[12px] text-warning">{s.validationErrors.map((e) => <li key={e}>{e}</li>)}</ul>}
+          <EmpfFilingView submissionId={s.id} />
           {s.status === "VALIDATED" && (
             <div className="mt-2 flex flex-wrap gap-1">
               <input aria-label="eMPF submission reference" placeholder="eMPF submission reference" className={input} onChange={(e) => setRef({ ...ref, [s.id]: e.target.value })} />

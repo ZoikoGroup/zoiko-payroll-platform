@@ -52,6 +52,11 @@ def test_legal_hold_blocks_deletion_and_needs_a_different_user_to_release(db, hk
     assert exc.value.status_code == 409
     with pytest.raises(BadRequestException, match="four-eyes"):
         retention_service.release_legal_hold(db, "HK", hk.org.id, hold.id, "closed", MAKER.id)
+    from app.modules.payroll.models import TaxConfigurationAudit
+    assert (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "legal_hold",
+                                                   TaxConfigurationAudit.entity_id == hold.id,
+                                                   TaxConfigurationAudit.action == "refused",
+                                                   TaxConfigurationAudit.actor_id == MAKER.id).count() == 1)
     retention_service.release_legal_hold(db, "HK", hk.org.id, hold.id, "enquiry closed", CHECKER.id)
     with pytest.raises(HTTPException, match="legal-hold history"):        # released, but retained as evidence
         service.delete_employee(db, bare.id, hk.org.id)
@@ -202,3 +207,165 @@ def test_legacy_identity_tokens_are_rederived_only_on_write(db, hk):
     assert rehash(db, write=True)["notReproducible"] == 1
     db.refresh(profile)
     assert len(profile.hk_identity_token) == 64                                       # left untouched
+
+
+# ── MPF member account: masked by default, audited permission-gated reveal (G5 F-1) ──
+
+def _users(db, org_id):
+    from app.modules.auth.models import User, UserRole
+
+    def mk(email, role):
+        u = User(email=email, hashed_password="x", role=role, organization_id=org_id, first_name="T", last_name=email[:4],
+                 is_active=True)
+        db.add(u)
+        db.commit()
+        return u
+    return (mk("admin-a@zoikotest.dev", UserRole.ORG_ADMIN), mk("admin-b@zoikotest.dev", UserRole.ORG_ADMIN),
+            mk("filer@zoikotest.dev", UserRole.PAYROLL_ADMIN), mk("clerk@zoikotest.dev", UserRole.PAYROLL_ADMIN))
+
+
+def _events(db, action="REVEAL_MPF_MEMBER_ACCOUNT"):
+    from app.modules.payroll.models import PersonalDataAccessEvent
+
+    return db.query(PersonalDataAccessEvent).filter(PersonalDataAccessEvent.action == action).order_by(
+        PersonalDataAccessEvent.id).all()
+
+
+def test_mpf_member_account_is_masked_by_default_in_employee_and_payslip_responses(db, hk):
+    from app.modules.payroll.schemas import EmployeeResponse
+    from tests.test_hong_kong_governance import _http
+
+    stored = hk.emp.compliance_fields["mpf_member_account"]
+    shown = EmployeeResponse.model_validate(hk.emp).complianceFields["mpf_member_account"]
+    assert stored == "MB-HK1" and shown == "**-HK1" and stored not in shown
+    item = _item(db, _month(db, hk.org, 4), hk.emp)
+    operator = SimpleNamespace(id=MAKER.id, organization_id=hk.org.id, role="payroll_admin", is_active=True)
+    with _http(db, operator) as c:
+        body = c.get(f"/api/payroll/payslips/{item.id}").json()
+        emp = c.get(f"/api/payroll/employees/{hk.emp.id}").json()
+    assert body["complianceFields"]["mpf_member_account"] == "**-HK1" and "MB-HK1" not in str(body)
+    assert emp["complianceFields"]["mpf_member_account"] == "**-HK1" and "MB-HK1" not in str(emp)
+    db.refresh(hk.emp)
+    assert hk.emp.compliance_fields["mpf_member_account"] == "MB-HK1"          # storage untouched
+
+
+def test_mpf_account_reveal_needs_the_permission_and_every_read_and_refusal_is_logged(db, hk):
+    from app.core.exceptions import BadRequestException, ForbiddenException
+    from app.modules.payroll import hong_kong_service as hks
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    admin_a, admin_b, filer, clerk = _users(db, hk.org.id)
+    with pytest.raises(ForbiddenException, match="HK_MPF_ACCOUNT_REVEAL"):
+        hks.reveal_mpf_member_account(db, hk.org.id, filer.id, hk.emp.id, "eMPF filing 2026-04")
+    assert [(e.actor_id, e.result) for e in _events(db)] == [(filer.id, "REFUSED")]
+    with pytest.raises(ForbiddenException, match="organisation admin"):
+        hks.grant_mpf_account_reveal(db, hk.org.id, clerk.id, filer.id, "trying")             # payroll admin cannot grant
+    with pytest.raises(BadRequestException, match="yourself"):
+        hks.grant_mpf_account_reveal(db, hk.org.id, admin_a.id, admin_a.id, "self")
+    with pytest.raises(BadRequestException, match="reason"):
+        hks.grant_mpf_account_reveal(db, hk.org.id, admin_a.id, filer.id, " ")
+    grant = hks.grant_mpf_account_reveal(db, hk.org.id, admin_a.id, filer.id, "eMPF filing duty (TEST)")
+    audit = db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "user_permission",
+                                                   TaxConfigurationAudit.entity_id == grant.id).one()
+    assert audit.actor_id == admin_a.id and audit.new_value["userId"] == filer.id
+    with pytest.raises(ForbiddenException, match="purpose"):
+        hks.reveal_mpf_member_account(db, hk.org.id, filer.id, hk.emp.id, "  ")
+    out = hks.reveal_mpf_member_account(db, hk.org.id, filer.id, hk.emp.id, "eMPF filing 2026-04")
+    assert out["mpfMemberAccount"] == "MB-HK1"
+    with pytest.raises(ForbiddenException):
+        hks.reveal_mpf_member_account(db, hk.org.id, clerk.id, hk.emp.id, "curious")           # no permission
+    ev = _events(db)
+    assert [(e.actor_id, e.result) for e in ev] == [(filer.id, "REFUSED"), (filer.id, "REFUSED"),
+                                                    (filer.id, "SUCCESS"), (clerk.id, "REFUSED")]
+    assert ev[2].employee_id == hk.emp.id and ev[2].purpose == "eMPF filing 2026-04"
+    hks.revoke_mpf_account_reveal(db, hk.org.id, admin_b.id, filer.id, "duty ended (TEST)")
+    with pytest.raises(ForbiddenException):
+        hks.reveal_mpf_member_account(db, hk.org.id, filer.id, hk.emp.id, "after revoke")
+
+
+def test_empf_filing_view_carries_the_full_account_while_the_stored_batch_stays_masked(db, hk):
+    from app.core.exceptions import ForbiddenException
+    from app.modules.payroll import hong_kong_service as hks
+
+    admin_a, _b, filer, clerk = _users(db, hk.org.id)
+    _month(db, hk.org, 4)
+    sub = hks.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
+    assert "MB-HK1" not in str(sub.rows) and sub.rows[0]["memberAccount"] == "**-HK1"
+    with pytest.raises(ForbiddenException):
+        hks.empf_filing_view(db, hk.org.id, clerk.id, sub.id, "filing")
+    hks.grant_mpf_account_reveal(db, hk.org.id, admin_a.id, filer.id, "eMPF filing duty (TEST)")
+    view = hks.empf_filing_view(db, hk.org.id, filer.id, sub.id, "eMPF filing 2026-04")
+    assert view["rows"][0]["memberAccount"] == "MB-HK1" and view["rows"][0]["employerMandatory"] == sub.rows[0]["employerMandatory"]
+    db.refresh(sub)
+    assert "MB-HK1" not in str(sub.rows)                                      # filing view never rewrites the batch
+    assert [(e.resource_type, e.result) for e in _events(db)][-1] == ("empf_submission", "SUCCESS")
+
+
+def test_mpf_reveal_over_http_is_masked_for_a_plain_operator(db, hk):
+    from tests.test_hong_kong_governance import _http
+
+    _a, _b, _filer, clerk = _users(db, hk.org.id)
+    principal = SimpleNamespace(id=clerk.id, organization_id=hk.org.id, role="payroll_admin", is_active=True)
+    with _http(db, principal) as c:
+        r = c.post(f"/api/payroll/hong-kong/employees/{hk.emp.id}/mpf-member-account", json={"purpose": "look"})
+    assert r.status_code == 403 and "MB-HK1" not in r.text
+
+
+# ── eMPF submission guard (contract): the full MPF account reaches a filing payload only via the audited filing view ──
+
+_MPF_ACCOUNT_READERS = {
+    # file -> functions allowed to read compliance_fields["mpf_member_account"], and why
+    "app/modules/payroll/employee_validation.py": {"<module>"},                      # field spec + SENSITIVE_FIELDS
+    "app/modules/payroll/service.py": {"_payslip_identity_rows"},                   # payslip: masked (last 4)
+    "app/modules/payroll/hong_kong_service.py": {
+        "_hk_mpf_enrolled",              # presence check only (enrolment evidence)
+        "prepare_empf_submission",       # stored batch: masked (last 4)
+        "reveal_mpf_member_account",     # audited, permission-gated single reveal
+        "empf_filing_view",              # audited, permission-gated filing payload (the ONLY full-number filing path)
+    },
+}
+
+
+def test_no_new_code_reads_the_mpf_member_account_outside_the_audited_paths():
+    """Tripwire for any future eMPF file / API submission builder: it must obtain the full account through
+    hong_kong_service.empf_filing_view (permission + purpose + access log), never by reading the field
+    itself or the masked stored batch. A new reader fails this test until it is reviewed and listed."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    found = {}
+    for f in (root / "app").rglob("*.py"):
+        tree = ast.parse(f.read_text(encoding="utf-8-sig"))
+
+        def walk(node, fn=None):
+            for ch in ast.iter_child_nodes(node):
+                name = ch.name if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn
+                if isinstance(ch, ast.Constant) and ch.value == "mpf_member_account":
+                    found.setdefault(f.relative_to(root).as_posix(), set()).add(fn or "<module>")
+                walk(ch, name)
+        walk(tree)
+    assert found == _MPF_ACCOUNT_READERS, found
+    src = (root / "app/modules/payroll/hong_kong_service.py").read_text(encoding="utf-8")
+    assert 'mask_account_last4(cf.get("mpf_member_account"))' in src          # the stored batch is built masked
+
+
+def test_empf_filing_payload_contract_full_number_only_via_the_filing_view(db, hk):
+    """Contract for the future eMPF builder: input = empf_filing_view(...) rows; each row carries the FULL member
+    account and the same contribution figures as the stored batch; the stored batch never holds the full number;
+    the read is permission-gated and logged."""
+    from app.core.exceptions import ForbiddenException
+    from app.modules.payroll import hong_kong_service as hks
+
+    admin_a, _b, filer, clerk = _users(db, hk.org.id)
+    _month(db, hk.org, 4)
+    sub = hks.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
+    with pytest.raises(ForbiddenException):
+        hks.empf_filing_view(db, hk.org.id, clerk.id, sub.id, "eMPF upload")
+    hks.grant_mpf_account_reveal(db, hk.org.id, admin_a.id, filer.id, "eMPF filing duty (TEST)")
+    payload = hks.empf_filing_view(db, hk.org.id, filer.id, sub.id, "eMPF upload 2026-04")
+    assert [r["memberAccount"] for r in payload["rows"]] == ["MB-HK1"]
+    for stored, filed in zip(sub.rows, payload["rows"]):
+        assert {k: v for k, v in filed.items() if k != "memberAccount"} == {k: v for k, v in stored.items() if k != "memberAccount"}
+        assert stored["memberAccount"] == "**-HK1"
+    assert _events(db)[-1].resource_type == "empf_submission" and _events(db)[-1].result == "SUCCESS"

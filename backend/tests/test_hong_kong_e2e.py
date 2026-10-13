@@ -338,6 +338,11 @@ def test_annual_return_from_committed_payroll_reconciles_and_files_four_eyes(db,
     hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "VALIDATED", MAKER.id)
     with pytest.raises(BadRequestException, match="four-eyes"):
         hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "FILED", MAKER.id, filing_reference="ER-2026-1", submission=INTERNAL_FILING)
+    from app.modules.payroll.models import TaxConfigurationAudit
+    refused = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_ird_reporting_case",
+                                                      TaxConfigurationAudit.entity_id == case.id,
+                                                      TaxConfigurationAudit.action == "refused").all())
+    assert [(r.actor_id, r.new_value["attempted"]) for r in refused] == [(MAKER.id, "FILED")]   # refusal is audited
     hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id, filing_reference="ER-2026-1", submission=INTERNAL_FILING)
     payload_hash = case.payload_hash
     again = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
@@ -388,7 +393,8 @@ def test_empf_batch_partial_rejection_does_not_touch_payroll(db, hk):
     run = _month(db, hk.org, 4)
     before = _item(db, run, hk.emp).employee_pension
     sub = hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
-    assert sub.status == "VALIDATED" and sub.totals["employees"] == 1 and sub.contribution_day == date(2026, 5, 10)
+    # Base day 10 May 2026 is a Sunday: the governed deferral rule ([G1] UNVERIFIED) moves it to Monday 11 May.
+    assert sub.status == "VALIDATED" and sub.totals["employees"] == 1 and sub.contribution_day == date(2026, 5, 11)
     assert "A123456(3)" not in str(sub.rows)                                      # identifiers masked
     with pytest.raises(BadRequestException, match="four-eyes"):
         hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "SUBMITTED", MAKER.id, submission_reference="E-1")
@@ -401,6 +407,146 @@ def test_empf_batch_partial_rejection_does_not_touch_payroll(db, hk):
                                                 row_outcomes=[{"payslipId": 1, "status": "ACCEPTED"},
                                                               {"payslipId": 2, "status": "REJECTED"}])
     assert sub.status == "PARTIAL" and _item(db, run, hk.emp).employee_pension == before
+
+
+def test_empf_rejecting_the_employee_row_keeps_the_committed_run_and_payslip_unchanged(db, hk):
+    """Wireframe §16 row 10: eMPF rejects the employee's row → the batch is marked REJECTED with the
+    row outcome retained; the committed run status and every payslip money field stay as they were."""
+    from app.modules.payroll import hong_kong_service
+
+    run = _month(db, hk.org, 4)
+    item = _item(db, run, hk.emp)
+    fields = ("gross_pay", "net_pay", "employee_pension", "employer_pension", "total_deductions")
+    before = {f: getattr(item, f) for f in fields}
+    run_status = run.status
+    sub = hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
+    hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "SUBMITTED", CHECKER.id, submission_reference="E-9")
+    outcome = [{"payslipId": item.id, "status": "REJECTED", "reason": "TEST member account not found"}]
+    sub = hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "REJECTED", CHECKER.id, row_outcomes=outcome)
+    db.expire_all()
+    assert sub.status == "REJECTED" and sub.row_outcomes == outcome
+    assert db.get(type(run), run.id).status == run_status
+    after = _item(db, run, hk.emp)
+    assert after.id == item.id and {f: getattr(after, f) for f in fields} == before
+
+
+def test_g3_reconciliation_export_and_compare_on_a_committed_hk_run(db, hk, tmp_path, monkeypatch):
+    """The G3 tool exports a committed run by employee code only (no names / identifiers) and the
+    compare step flags a seeded variance, never hiding it."""
+    import csv
+
+    from app.modules.payroll import models
+    from scripts import hk_parallel_reconciliation as recon
+
+    run = _month(db, hk.org, 4)
+    item = _item(db, run, hk.emp)
+    monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+    out = tmp_path / "zoiko.csv"
+    assert recon.export(run.id, out) == 0
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
+    code = db.get(models.PayrollEmployee, hk.emp.id).employee_code
+    assert {r["element"] for r in rows} == set(recon.ELEMENTS) and {r["employee_ref"] for r in rows} == {code}
+    assert "A123456(3)" not in out.read_text(encoding="utf-8")
+    net = next(r for r in rows if r["element"] == "net_pay")
+    assert D(net["amount"]) == item.net_pay
+    inc = tmp_path / "incumbent.csv"
+    inc.write_text("employee_ref,period,element,amount\n" + "".join(
+        f"{r['employee_ref']},{r['period']},{r['element']},"
+        f"{D(r['amount']) + (D('25') if r['element'] == 'mpf_employer' else 0)}\n" for r in rows), encoding="utf-8")
+    s = recon.compare(out, inc, tmp_path / "recon", D("1.00"), D("0"))
+    assert s["byStatus"] == {"MATCH": len(rows) - 1, "VARIANCE": 1} and s["nonMatchingByElement"] == {"mpf_employer": 1}
+
+
+def test_recorded_signal_day_defers_the_empf_deadline_and_is_audited(db, hk):
+    """Operator override: a recorded black-rainstorm / No. 8+ day moves the eMPF deadline again
+    (April 2026: base Sun 10 May -> Mon 11 May -> recorded signal day -> Tue 12 May). Reason is required,
+    the signal is validated, a date is recorded once, and the record is audited. TEST data only."""
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    with pytest.raises(BadRequestException, match="reason"):
+        hong_kong_service.record_contribution_day_disruption(db, date(2026, 5, 11), "BLACK_RAINSTORM", " ", MAKER.id)
+    with pytest.raises(BadRequestException, match="signal must be one of"):
+        hong_kong_service.record_contribution_day_disruption(db, date(2026, 5, 11), "RAIN", "TEST", MAKER.id)
+    row = hong_kong_service.record_contribution_day_disruption(
+        db, date(2026, 5, 11), "BLACK_RAINSTORM", "TEST: black rainstorm warning 08:00-12:00", MAKER.id, "HKO TEST-REF")
+    with pytest.raises(BadRequestException, match="already recorded"):
+        hong_kong_service.record_contribution_day_disruption(db, date(2026, 5, 11), "BLACK_RAINSTORM", "again", MAKER.id)
+    audit = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_contribution_day_disruption",
+                                                    TaxConfigurationAudit.entity_id == row.id).one())
+    assert audit.actor_id == MAKER.id and audit.new_value["signal"] == "BLACK_RAINSTORM"
+    detail = hong_kong_service.contribution_day_detail(db, date(2026, 4, 30))
+    assert detail["base"] == date(2026, 5, 10) and detail["contributionDay"] == date(2026, 5, 12)
+    assert [s["skipped"] for s in detail["steps"] if "skipped" in s] == ["Sunday", "disruption (operator-recorded)"]
+    assert detail["generalHolidayListLoaded"] is False                    # list not loaded: flagged, weekends + signal days only
+    _month(db, hk.org, 4)
+    sub = hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
+    assert sub.contribution_day == date(2026, 5, 12)
+
+
+def test_general_holiday_loader_records_the_source_digest_and_drives_the_empf_deadline(db, hk, tmp_path, monkeypatch):
+    """The loader takes an archived source file + a transcribed CSV, records the file's SHA-256, writes [G1]
+    UNVERIFIED rows into a Draft pack only, refuses bad input, and the eMPF deadline then skips the loaded day.
+    A reseed keeps the loaded rows. All dates / files here are TEST data."""
+    import hashlib
+
+    from app.core import object_storage
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import SourceArtifact, TaxConfigurationAudit, TaxSlab
+    from scripts import hk_load_general_holidays as loader
+    from scripts.seed_hong_kong_canonical_pack import YA_2026, seed_hong_kong
+
+    blobs = {}
+    monkeypatch.setattr(object_storage, "save_upload", lambda *, subdir, filename, data: blobs.setdefault(f"mem://{filename}", data) and f"mem://{filename}")
+    src = tmp_path / "general_holidays_2026_TEST.html"
+    src.write_bytes(b"TEST-ONLY archived list")
+    csv_ok = "date,name\n2026-05-11,TEST holiday Monday\n"
+    pack = hk.packs[1]
+    kw = dict(pack_id=pack.pack_id, version=pack.version, year=2026, source_file=src, source_url="https://www.gov.hk/TEST",
+              actor_id=MAKER.id)
+    with pytest.raises(loader.LoadRefused, match="Draft only"):
+        loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)                        # fixture pack is Active
+    pack.status = "Draft"
+    db.commit()
+    for bad, msg in (("date,name\n2027-01-01,x\n", "not in 2026"), ("date,name\n2026-05-11,\n", "no holiday name"),
+                     ("date,name\n2026-05-11,a\n2026-05-11,b\n", "twice"), ("date,name\n11/05/2026,x\n", "ISO"),
+                     ("date,name\n", "no rows")):
+        with pytest.raises(loader.LoadRefused, match=msg):
+            loader.load_general_holidays(db, dates_csv_text=bad, **kw)
+    out = loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)
+    assert out["loaded"] == 1 and out["sha256"] == hashlib.sha256(b"TEST-ONLY archived list").hexdigest()
+    art = db.get(SourceArtifact, out["sourceArtifactId"])
+    assert art.checksum_sha256 == out["sha256"] and "[UNVERIFIED" in art.title
+    with pytest.raises(loader.LoadRefused, match="already holds 1"):
+        loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)
+    assert db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_general_holiday_list").count() == 1
+    rows = [r for dom in hong_kong_service.domains(db, pack.id)["domains"] for r in dom["rows"] if r["key"] == "HK_GENERAL_HOLIDAY"]
+    assert len(rows) == 1 and rows[0]["status"] == "UNVERIFIED — G1" and rows[0]["domain"] == "leave_holidays"
+    seed_hong_kong(db, YA_2026)                                                             # reseed keeps the list
+    assert db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.rule_type == "HK_GENERAL_HOLIDAY").count() == 1
+    pack.status = "Active"
+    db.commit()
+    detail = hong_kong_service.contribution_day_detail(db, date(2026, 4, 30))                # Sun 10 May -> Mon 11 (holiday) -> Tue 12
+    assert detail["contributionDay"] == date(2026, 5, 12) and detail["generalHolidayListLoaded"] is True
+    assert [s["skipped"] for s in detail["steps"]] == ["Sunday", "holiday"]
+
+
+def test_empty_general_holiday_list_keeps_weekend_deferral_and_is_flagged(db, hk):
+    from app.modules.payroll import hong_kong_service
+
+    detail = hong_kong_service.contribution_day_detail(db, date(2026, 4, 30))
+    assert detail["contributionDay"] == date(2026, 5, 11) and detail["generalHolidayListLoaded"] is False
+    assert any("general-holiday list not loaded for 2026" in (s.get("warning") or "") for s in detail["steps"])
+
+
+def test_the_deferral_rule_is_a_governed_unverified_value(db, hk):
+    from app.modules.payroll import hong_kong_service
+
+    rows = [r for d in hong_kong_service.domains(db, hk.packs[1].id)["domains"] for r in d["rows"]]
+    rule = next(r for r in rows if r["key"] == "mpf_contribution_day_deferral")
+    assert rule["value"] == "NEXT_DAY_NOT_SAT_SUN_OR_GENERAL_HOLIDAY" and rule["domain"] == "mpf"
+    assert rule["status"] == "UNVERIFIED — G1" and rule["source"]["agency"] == "Mandatory Provident Fund Schemes Authority"
 
 
 def test_empf_validation_flags_missing_identity_and_employer_account(db, hk):
@@ -870,8 +1016,18 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
     renamed_tables = {new: old for old, new in convergence._TABLE_RENAMES}
     renamed_columns = {(table, new): old for table, old, new in convergence._COLUMN_RENAMES}
     shared = set(convergence._SHARED_TABLES.values())
+    # Tables added later by the launch-readiness migration are created there
+    # under their final name (no hkg_ history to rename).
+    readiness = (versions / "8b14824fb575_hk_launch_readiness_controls.py").read_text(encoding="utf8")
+    created_later = {"payroll_hk_contribution_day_disruptions"}
     checked = 0
     for name, table in Base.metadata.tables.items():
+        if name in created_later:
+            assert f'"{name}"' in readiness, name
+            for col in table.columns:
+                assert f'"{col.name}"' in readiness, f"{name}.{col.name}"
+            checked += 1
+            continue
         if name.startswith("payroll_hk_") or name in shared:
             old = renamed_tables[name]                                  # every HK / shared table is renamed
             assert f"'{old}'" in foundation, old
@@ -884,6 +1040,6 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
             if col.name.startswith("hk_") and not (name.startswith("payroll_hk_") or name in shared):
                 assert f"'{renamed_columns[(name, col.name)]}'" in foundation, f"{name}.{col.name}"
                 checked += 1
-    assert checked == 13 + 24 + 1, checked                              # 13 tables + 24 profile columns + trace
+    assert checked == 13 + 1 + 24 + 1, checked                          # 13 tables + 1 later table + 24 profile columns + trace
     assert "down_revision: Union[str, Sequence[str], None] = '917a54ed2347'" in foundation
     assert convergence.down_revision == "cd62503afe26"

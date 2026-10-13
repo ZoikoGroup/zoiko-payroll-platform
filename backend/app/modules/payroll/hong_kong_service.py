@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException, ZoikoException
 from app.modules.payroll import jurisdiction_hooks, retention_service, service
-from app.modules.payroll.employee_validation import mask_identifier
+from app.modules.payroll.employee_validation import mask_account_last4, mask_identifier
 from app.modules.payroll.engine.jurisdictions.hong_kong import (
     average_wage as hk_average_wage,
     continuous_contract as hk_cc,
@@ -70,6 +70,7 @@ from app.modules.payroll.models import (
     EmployeeStatutoryProfile,
     GeneratedReport,
     HongKongAverageWageSnapshot,
+    HongKongContributionDayDisruption,
     HongKongEmpfConfiguration,
     HongKongEmpfSubmission,
     HongKongIrdReportingCase,
@@ -819,7 +820,9 @@ def transition_ird_case(db: Session, organization_id: int, case_id: int, target:
             raise BadRequestException("a case with validation errors cannot be filed")
         if not filing_reference:
             raise BadRequestException("the IRD filing reference (from the IRD's own filing channel) is required")
-        service.require_four_eyes(case.prepared_by_id, actor_id, "Filing an IRD return / notification")
+        service.require_four_eyes(case.prepared_by_id, actor_id, "Filing an IRD return / notification", db=db,
+                                  entity_type="hk_ird_reporting_case", entity_id=case.id,
+                                  current_status=case.status, attempted="FILED")
         _record_submission(db, case, submission, actor_id)
         case.filing_reference, case.filed_at, case.approved_by_id = filing_reference, datetime.utcnow(), actor_id
         if case.amends_case_id:
@@ -1156,7 +1159,9 @@ def approve_average_wage_override(db, organization_id, snapshot_id, actor_id):
     snap = _snapshot(db, organization_id, snapshot_id)
     if snap.override_average_daily_wage is None:
         raise BadRequestException("no override has been requested")
-    service.require_four_eyes(snap.override_requested_by_id, actor_id, "An average-wage override")
+    service.require_four_eyes(snap.override_requested_by_id, actor_id, "An average-wage override", db=db,
+                              entity_type="hk_average_wage_snapshot", entity_id=snap.id,
+                              current_status=snap.status, attempted="approve_override")
     snap.override_approved_by_id, snap.status = actor_id, "OVERRIDDEN"
     _audit(db, actor_id, "status_change", "hk_average_wage_snapshot", snap.id,
            new={"status": "OVERRIDDEN", "calculated": str(snap.average_daily_wage),
@@ -1318,7 +1323,9 @@ def approve_termination(db: Session, organization_id: int, result_id: int, actor
         raise NotFoundException("Hong Kong termination result", result_id)
     if row.status != "CALCULATED":
         raise BadRequestException(f"only a CALCULATED result can be approved (this one is {row.status})")
-    service.require_four_eyes(row.created_by_id, actor_id, "Approving a termination calculation")
+    service.require_four_eyes(row.created_by_id, actor_id, "Approving a termination calculation", db=db,
+                              entity_type="hk_termination_result", entity_id=row.id,
+                              current_status=row.status, attempted="approve")
     row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, datetime.utcnow()
     _audit(db, actor_id, "status_change", "hk_termination_result", row.id, new={"status": "APPROVED"})
     return row
@@ -1334,14 +1341,66 @@ EMPF_TRANSITIONS = {
 
 
 def _contribution_day(db: Session, period_end: date) -> date:
-    """The MPF contribution day for a wage period, from the pack row
-    mpf_contribution_day in force at the period end (never a literal)."""
-    rate_map, _slabs, _pack = pack_inputs(db, period_end)
+    """The MPF contribution day for a wage period: the pack row
+    mpf_contribution_day in force at the period end (never a literal), moved by
+    the governed deferral rule (pack row mpf_contribution_day_deferral, [G1]
+    UNVERIFIED) past weekends, the pack's holiday rows and operator-recorded
+    black-rainstorm / No. 8+ signal days."""
+    return contribution_day_detail(db, period_end)["contributionDay"]
+
+
+def contribution_day_detail(db: Session, period_end: date) -> dict:
+    from app.modules.payroll.engine.jurisdictions.hong_kong import entitlements as hk_entitlements
+
+    rate_map, slabs, _pack = pack_inputs(db, period_end)
     try:
         day = int(hk_mpf.mpf_parameters(rate_map)["values"]["mpf_contribution_day"])
+        rule, _row = hk_mpf.deferral_rule(rate_map)
     except HongKongCalculationBlockedError as exc:
         raise _blocked(exc)
-    return hk_mpf.period_contribution_day(period_end, day)
+    base = hk_mpf.period_contribution_day(period_end, day)
+    holidays, years = hk_entitlements.holiday_calendar(slabs)
+    disruptions = {d.disruption_date for d in db.query(HongKongContributionDayDisruption)
+                   .filter(HongKongContributionDayDisruption.disruption_date >= base,
+                           HongKongContributionDayDisruption.disruption_date <= base + timedelta(days=31))}
+    due, steps = hk_mpf.contribution_due_date(base, rule, holidays, disruptions, holiday_years=years)
+    return {"base": base, "contributionDay": due, "rule": rule, "steps": steps,
+            "generalHolidayListLoaded": not hk_mpf.general_holiday_list_missing(steps)}
+
+
+DISRUPTION_SIGNALS = ("BLACK_RAINSTORM", "TYPHOON_SIGNAL_8_OR_ABOVE")
+
+
+def record_contribution_day_disruption(db: Session, on: date, signal: str, reason: str, actor_id: Optional[int],
+                                       evidence_reference: Optional[str] = None) -> HongKongContributionDayDisruption:
+    """Super Admin records a black-rainstorm / No. 8+ signal day (territory-wide).
+    Reason required; audited; one record per date; it only ever moves a
+    contribution deadline later, never earlier."""
+    signal = (signal or "").strip().upper()
+    if signal not in DISRUPTION_SIGNALS:
+        raise BadRequestException(f"signal must be one of {list(DISRUPTION_SIGNALS)}")
+    reason = (reason or "").strip()
+    if not reason:
+        raise BadRequestException("A disruption day needs a reason (e.g. the Observatory warning and its times).")
+    if actor_id is None:
+        raise BadRequestException("A disruption day needs an identified operator.")
+    if db.query(HongKongContributionDayDisruption).filter(HongKongContributionDayDisruption.disruption_date == on).first():
+        raise BadRequestException(f"{on} is already recorded as a disruption day.")
+    row = HongKongContributionDayDisruption(disruption_date=on, signal=signal, reason=reason,
+                                            evidence_reference=(evidence_reference or "").strip() or None,
+                                            recorded_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "create", "hk_contribution_day_disruption", row.id, None,
+           {"date": on.isoformat(), "signal": signal, "evidenceReference": row.evidence_reference}, reason)
+    db.refresh(row)
+    return row
+
+
+def contribution_day_disruptions(db: Session) -> list:
+    return [{"id": d.id, "date": d.disruption_date.isoformat(), "signal": d.signal, "reason": d.reason,
+             "evidenceReference": d.evidence_reference, "recordedById": d.recorded_by_id}
+            for d in db.query(HongKongContributionDayDisruption).order_by(HongKongContributionDayDisruption.disruption_date)]
 
 
 def prepare_empf_submission(db: Session, organization_id: int, period: str, actor_id: Optional[int]) -> HongKongEmpfSubmission:
@@ -1392,7 +1451,7 @@ def prepare_empf_submission(db: Session, organization_id: int, period: str, acto
                      # official eMPF member-identifier layout is not archived (G2): these
                      # are internal reconciliation fields, not a certified eMPF format.
                      "mpfSchemeRef": facts.get("mpfSchemeRef"),
-                     "memberAccount": mask_identifier(cf.get("mpf_member_account")) if cf.get("mpf_member_account") else None,
+                     "memberAccount": mask_account_last4(cf.get("mpf_member_account")) if cf.get("mpf_member_account") else None,
                      "relevantIncome": (mpf.get("currentPeriod") or {}).get("relevantIncome"),
                      "employerMandatory": mpf.get("employer"), "employeeMandatory": mpf.get("employee"),
                      "catchUpPeriods": len(mpf.get("catchUp") or []), "errors": row_errors})
@@ -1473,7 +1532,9 @@ def transition_empf_submission(db: Session, organization_id: int, submission_id:
     if target == "SUBMITTED":
         if not submission_reference:
             raise BadRequestException("the eMPF submission reference is required (recorded from the eMPF platform)")
-        service.require_four_eyes(sub.prepared_by_id, actor_id, "An eMPF submission")
+        service.require_four_eyes(sub.prepared_by_id, actor_id, "An eMPF submission", db=db,
+                                  entity_type="hk_empf_submission", entity_id=sub.id,
+                                  current_status=sub.status, attempted="SUBMITTED")
         sub.submission_reference, sub.submitted_by_id, sub.approved_by_id = submission_reference, actor_id, actor_id
     if target in ("ACCEPTED", "PARTIAL", "REJECTED"):
         outcomes = row_outcomes or []
@@ -1515,7 +1576,7 @@ def salaries_tax_estimate(db: Session, ya: str, income, deductions, allowances: 
 # ── Super Admin: activation evidence, golden check, statutory summary ───
 
 def gate_state(db: Session, gate: str) -> str:
-    """EVIDENCE_REQUIRED / SUBMITTED / PASS for an HK-GATE-Gn artifact —
+    """EVIDENCE_REQUIRED / SUBMITTED / REJECTED / PASS for an HK-GATE-Gn artifact —
     PASS only when a DIFFERENT Super Admin reviewed an uploaded document and
     it has not been superseded."""
     rows = (db.query(SourceArtifact).filter(SourceArtifact.form_number == f"HK-GATE-{gate}",
@@ -1525,7 +1586,10 @@ def gate_state(db: Session, gate: str) -> str:
     for r in rows:
         if r.reviewer_id and r.file_path and r.created_by_id and r.reviewer_id != r.created_by_id:
             return "PASS"
-    return "SUBMITTED"
+    # REJECTED only when every current artifact was rejected; any other
+    # current artifact is still awaiting its independent review.
+    rejected = evidence_rejections(db, [r.id for r in rows])
+    return "REJECTED" if all(r.id in rejected for r in rows) else "SUBMITTED"
 
 
 def _pack_rows_for_golden(db: Session, pack: JurisdictionPack, on: date, period: tuple) -> tuple:
@@ -1617,8 +1681,10 @@ def statutory_summary(db: Session) -> dict:
         "packs": pack_views,
         "sources": [{"id": s.id, "agency": s.agency, "title": s.title, "url": s.source_url, "sha256": s.checksum_sha256,
                      "reviewed": bool(s.reviewer_id), "unverified": "[UNVERIFIED" in (s.title or "")} for s in sources],
-        "gates": [{"gate": g, "requirement": text, "state": gate_state(db, g), "evidenceTag": f"HK-GATE-{g}"}
-                  for g, text in HK_GATES.items()],
+        "gates": [{"gate": g, "requirement": text, "state": gate_state(db, g), "evidenceTag": f"HK-GATE-{g}",
+                   "evidence": evidence_items(db, f"HK-GATE-{g}")} for g, text in HK_GATES.items()],
+        "goldenCertification": golden_certification_status(db),
+        "productionVerificationEvidence": evidence_items(db, PRODUCTION_EVIDENCE_TAG),
         "certificationItems": certification_items,
         "serviceRegistry": registry.availability if registry else "MISSING (onboarding blocked)",
         "activationReadiness": activation_readiness(db),
@@ -1691,7 +1757,8 @@ DOMAINS = [
     ("eo_entitlements", "Employment Ordinance Entitlements",
      lambda k: k.startswith(("eo_sickness_", "eo_maternity_", "eo_paternity_", "eo_holiday_pay_", "eo_wage_payment_")),
      _ENG + "entitlements.py"),
-    ("leave_holidays", "Leave & Holidays", lambda k: k in ("HK_ANNUAL_LEAVE_SCALE", "HK_STATUTORY_HOLIDAY"),
+    ("leave_holidays", "Leave & Holidays", lambda k: k in ("HK_ANNUAL_LEAVE_SCALE", "HK_STATUTORY_HOLIDAY",
+                                                            "HK_GENERAL_HOLIDAY"),
      _ENG + "entitlements.py"),
     ("sp_lsp", "SP / LSP", lambda k: k.startswith(("sp_", "lsp_")) or k in ("mpf_offset_transition_date", "eo_days_per_year"),
      _ENG + "termination.py"),
@@ -1795,7 +1862,7 @@ def _rate_row(db: Session, pack, r) -> dict:
 
 def _slab_row(db: Session, pack, s) -> dict:
     dkey, dlabel, consumer = _domain_of(s.rule_type)
-    if s.rule_type == "HK_STATUTORY_HOLIDAY":
+    if s.rule_type in ("HK_STATUTORY_HOLIDAY", "HK_GENERAL_HOLIDAY"):
         display, unit, label = s.tax_formula, "date", f"{s.rate_label} ({s.filing_status})"
     elif s.rule_type == "HK_ANNUAL_LEAVE_SCALE":
         hi = f"–{s.max_amount.normalize():f}" if s.max_amount is not None else "+"
@@ -1918,7 +1985,7 @@ def _match_key(r: dict) -> str:
     raw = r["raw"]
     if r["kind"] == "rate":
         return f"rate|{r['key']}|" + (r["effectiveFrom"] if r["key"].startswith("smw_") else "")
-    if r["key"] == "HK_STATUTORY_HOLIDAY":
+    if r["key"] in ("HK_STATUTORY_HOLIDAY", "HK_GENERAL_HOLIDAY"):
         return f"slab|{r['key']}|{raw['taxFormula']}|{raw['rateLabel']}"
     if r["key"] in ("HK_ANNUAL_LEAVE_SCALE",) or r["key"].startswith("HK_SALARIES_TAX"):
         return f"slab|{r['key']}|{raw['minAmount']}|{raw['maxAmount']}"
@@ -2127,10 +2194,12 @@ def _evidence(db: Session, tag: str):
 def owner_decisions(db: Session) -> list:
     out = []
     for key, (label, blocks) in DECISIONS.items():
-        accepted, submitted = _evidence(db, f"HK-DECISION-{key}")
-        out.append({"key": key, "label": label, "blocksLaunch": blocks, "evidenceTag": f"HK-DECISION-{key}",
-                    "state": "RECORDED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
-                    "artifactId": accepted.id if accepted else None})
+        tag = f"HK-DECISION-{key}"
+        accepted, submitted = _evidence(db, tag)
+        state = "RECORDED" if accepted else (
+            ("REJECTED" if _all_current_rejected(db, tag) else "SUBMITTED") if submitted else "OPEN")
+        out.append({"key": key, "label": label, "blocksLaunch": blocks, "evidenceTag": tag, "state": state,
+                    "artifactId": accepted.id if accepted else None, "evidence": evidence_items(db, tag)})
     return out
 
 
@@ -2170,6 +2239,147 @@ def _next_year_key(kind: str, on: date) -> str:
 def _reviewed_by_other(artifact) -> bool:
     return bool(artifact is not None and artifact.reviewer_id and artifact.file_path is not None
                 and artifact.reviewer_id != artifact.created_by_id)
+
+
+# ── governed evidence review outcome (G1–G7, D-n, production verification) ──
+# Same model as Singapore's: no new table or column. The outcome is an
+# immutable TaxConfigurationAudit row on the SourceArtifact keyed by
+# "hkEvidenceOutcome"; ACCEPTED also sets the reviewer through the shared
+# mark_source_artifact_reviewed. A REJECTED artifact is kept (with its
+# file, digest and rejection reason) and can never be accepted afterwards —
+# the correction is a new artifact with the same tag plus supersession.
+
+HK_EVIDENCE_OUTCOMES = ("ACCEPTED", "REJECTED")
+_HK_EVIDENCE_TAG = re.compile(r"^(HK-GATE-G[1-7]|HK-DECISION-D-\d+|HK-PRODUCTION-VERIFICATION)$")
+
+
+def evidence_rejections(db: Session, artifact_ids) -> dict:
+    """{artifact id: rejection notes} for HK governed evidence rejected through review_evidence."""
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    ids = [i for i in artifact_ids if i is not None]
+    if not ids:
+        return {}
+    out = {}
+    for a in (db.query(TaxConfigurationAudit)
+              .filter(TaxConfigurationAudit.entity_type == "source_artifact", TaxConfigurationAudit.entity_id.in_(ids))
+              .order_by(TaxConfigurationAudit.id).all()):
+        value = a.new_value if isinstance(a.new_value, dict) else {}
+        if value.get("hkEvidenceOutcome") == "REJECTED":
+            out[a.entity_id] = value.get("notes")
+    return out
+
+
+def _current_evidence(db: Session, tag: str) -> list:
+    from app.modules.payroll.models import SourceArtifact
+
+    return (db.query(SourceArtifact).filter(SourceArtifact.form_number == tag, SourceArtifact.superseded_by_id.is_(None))
+            .order_by(SourceArtifact.id).all())
+
+
+def _all_current_rejected(db: Session, tag: str) -> bool:
+    rows = _current_evidence(db, tag)
+    rejected = evidence_rejections(db, [r.id for r in rows])
+    return bool(rows) and all(r.id in rejected for r in rows)
+
+
+def evidence_items(db: Session, tag: str) -> list:
+    """The current (not superseded) artifacts for one evidence tag with their review status, for the UI:
+    AWAITING_UPLOAD -> AWAITING_REVIEW -> ACCEPTED | REJECTED (rejection notes kept). No file contents."""
+    rows = _current_evidence(db, tag)
+    rejected = evidence_rejections(db, [r.id for r in rows])
+    out = []
+    for r in rows:
+        if r.id in rejected:
+            status = "REJECTED"
+        elif _reviewed_by_other(r):
+            status = "ACCEPTED"
+        elif not r.file_path:
+            status = "AWAITING_UPLOAD"
+        else:
+            status = "AWAITING_REVIEW"
+        out.append({"id": r.id, "title": r.title, "status": status, "hasFile": bool(r.file_path),
+                    "sha256": r.checksum_sha256, "createdById": r.created_by_id, "reviewerId": r.reviewer_id,
+                    "rejectionNotes": rejected.get(r.id)})
+    return out
+
+
+def _evidence_refused(db: Session, row, attempted: str, actor_id: Optional[int], message: str):
+    """A refused review leaves one "refused" audit row and nothing else (as Singapore's)."""
+    artifact_id, form_number = row.id, row.form_number
+    db.rollback()
+    _audit(db, actor_id, "refused", "source_artifact", artifact_id, {"formNumber": form_number},
+           {"attempted": attempted, "result": "REFUSED"}, message)
+    raise BadRequestException(message)
+
+
+def evidence_review_refusal(db: Session, row, actor_id: Optional[int], attempted: str = "review") -> None:
+    """Shared-review guard (called from mark_source_artifact_reviewed): a REJECTED HK artifact is never accepted."""
+    if row.id in evidence_rejections(db, [row.id]):
+        _evidence_refused(db, row, attempted, actor_id,
+                          f"{row.form_number} evidence #{row.id} was REJECTED — the rejection is retained evidence. "
+                          "Register a new artifact with the same evidence tag, upload the corrected document and "
+                          "supersede this one.")
+
+
+def review_evidence(db: Session, artifact_id: int, outcome: str, notes: Optional[str] = None,
+                    actor_id: Optional[int] = None):
+    """Record the independent review OUTCOME of HK gate / decision / production-verification evidence:
+    ACCEPTED, or REJECTED with notes. Maker-checker (never the registrant); only an uploaded, current,
+    not-yet-reviewed artifact; the outcome is immutable."""
+    from app.modules.payroll.models import SourceArtifact
+
+    outcome = (outcome or "").strip().upper()
+    if outcome not in HK_EVIDENCE_OUTCOMES:
+        raise BadRequestException(f"Outcome must be one of {list(HK_EVIDENCE_OUTCOMES)}.")
+    row = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
+    if row is None:
+        raise NotFoundException("SourceArtifact", artifact_id)
+    if not _HK_EVIDENCE_TAG.match(row.form_number or ""):
+        raise BadRequestException("Only Hong Kong gate / decision / production-verification evidence "
+                                  "(HK-GATE-G<n>, HK-DECISION-D-<n>, HK-PRODUCTION-VERIFICATION) is reviewed here.")
+    if row.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{row.id} is superseded by #{row.superseded_by_id} — review the replacement.")
+    if actor_id is None or row.created_by_id is None or row.created_by_id == actor_id:
+        _evidence_refused(db, row, f"review:{outcome}", actor_id,
+                          "This evidence needs a reviewer different from whoever registered it (maker-checker).")
+    if not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it.")
+    evidence_review_refusal(db, row, actor_id, f"review:{outcome}")
+    if row.reviewer_id is not None:
+        _evidence_refused(db, row, f"review:{outcome}", actor_id,
+                          f"{row.form_number} evidence #{row.id} is already reviewed — its review is retained "
+                          "evidence and cannot be replaced; register a replacement and supersede this one.")
+    notes = (notes or "").strip() or None
+    if outcome == "REJECTED" and not notes:
+        raise BadRequestException("A rejection needs notes saying what is wrong with the evidence.")
+    if outcome == "ACCEPTED":
+        row = service.mark_source_artifact_reviewed(db, row.id, reviewer_id=actor_id)
+    _audit(db, actor_id, "review", "source_artifact", row.id, {"formNumber": row.form_number},
+           {"hkEvidenceOutcome": outcome, "notes": notes, "formNumber": row.form_number,
+            "sha256": row.checksum_sha256},
+           f"{row.form_number} evidence #{row.id} {outcome}" + (f": {notes}" if notes else ""))
+    return row
+
+
+def golden_certification_status(db: Session) -> dict:
+    """The latest HK golden-vector certification run — the activation guard requires it to be PASS
+    (and HK activation re-runs the vectors against the pack's own rows). Read-only."""
+    from app.modules.payroll.models import TestCertificationRun
+
+    run = (db.query(TestCertificationRun).filter(TestCertificationRun.jurisdiction_country == HK)
+           .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc()).first())
+    if run is None:
+        return {"status": "NOT_RUN", "eligibleForActivation": False, "runId": None, "runAt": None,
+                "totalCases": 0, "passedCases": 0, "failedCases": 0,
+                "detail": "No Hong Kong golden-vector certification run recorded — run Test Certification for HK."}
+    ok = run.status == "PASS"
+    return {"status": run.status, "eligibleForActivation": ok, "runId": run.id,
+            "runAt": run.run_at.isoformat() if run.run_at else None, "totalCases": run.total_cases,
+            "passedCases": run.passed_cases, "failedCases": run.failed_cases,
+            "detail": "Latest run passed — the pack-bound golden check still runs at activation." if ok
+            else f"Latest run #{run.id} is {run.status} — resolve and re-run Test Certification for HK."}
 
 
 # ── report templates ────────────────────────────────────────────────────
@@ -2267,6 +2477,9 @@ def compare_report_templates(db: Session, from_id: int, to_id: int) -> dict:
 # ── activation readiness + registry ─────────────────────────────────────
 
 def activation_readiness(db: Session, as_of: Optional[date] = None) -> dict:
+    import hmac
+
+    from app.config import settings
     from app.modules.billing.models import JurisdictionServiceRegistry
     from app.modules.payroll.models import ReportTemplate, SourceArtifact
     from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
@@ -2292,7 +2505,25 @@ def activation_readiness(db: Session, as_of: Optional[date] = None) -> dict:
     reqs.append({"key": "PRODUCTION_VERIFICATION",
                  "label": f"production read-only verification and restore rehearsal recorded ({PRODUCTION_EVIDENCE_TAG})",
                  "met": prod is not None,
-                 "detail": "PASS" if prod else ("SUBMITTED" if prod_submitted else "EVIDENCE_REQUIRED")})
+                 "detail": "PASS" if prod else (("REJECTED" if _all_current_rejected(db, PRODUCTION_EVIDENCE_TAG)
+                                                 else "SUBMITTED") if prod_submitted else "EVIDENCE_REQUIRED")})
+    # Machine enforcement of the launch-blocking owner decisions (previously
+    # only the G7 signatory checked them): each must be RECORDED — its decision
+    # document uploaded and reviewed by a second Super Admin.
+    for d in owner_decisions(db):
+        if d["blocksLaunch"]:
+            reqs.append({"key": f"DECISION_{d['key']}", "label": f"owner decision {d['key']} recorded ({d['label']})",
+                         "met": d["state"] == "RECORDED", "detail": d["state"]})
+    # D-5: HKID tokens must be keyed by a dedicated secret, not the fallback
+    # derived from PAYROLL_SECRET_KEY. Presence only — the value is never read out.
+    configured = (settings.HK_IDENTITY_TOKEN_KEY or "").strip()
+    reused = bool(configured) and hmac.compare_digest(configured, (settings.PAYROLL_SECRET_KEY or "").strip())
+    dedicated_key = bool(configured) and not reused
+    reqs.append({"key": "IDENTITY_TOKEN_KEY", "label": "HK_IDENTITY_TOKEN_KEY configured as a dedicated secret (D-5)",
+                 "met": dedicated_key,
+                 "detail": "configured" if dedicated_key else
+                           "set to the same value as PAYROLL_SECRET_KEY — not a dedicated key" if reused else
+                           "not configured — HKID tokens fall back to a key derived from PAYROLL_SECRET_KEY"})
     for cov in template_coverage(db, as_of):
         if cov["period"] != "current":
             continue
@@ -3058,7 +3289,9 @@ def before_run_transition(db: Session, run: PayrollRun, next_status, actor_id: O
         raise _conflict(f"correction #{correction.id} is not approved")
     if next_status != PayrollStatus.APPROVED:
         return
-    service.require_four_eyes(correction.requested_by_id, actor_id, "Approving a Hong Kong payroll correction")
+    service.require_four_eyes(correction.requested_by_id, actor_id, "Approving a Hong Kong payroll correction", db=db,
+                              entity_type="hk_payslip_correction", entity_id=correction.id,
+                              current_status=correction.status, attempted="approve")
     original = db.get(PayslipItem, correction.original_payslip_id)
     if original is None or canonical_hash(original.hk_calculation_trace) != correction.original_trace_hash:
         raise _conflict("the original payslip changed after the correction was requested — reject and request it again")
@@ -3184,7 +3417,9 @@ def approve_correction(db: Session, organization_id: int, correction_id: int, ac
     correction = _correction(db, organization_id, correction_id)
     if correction.status != "REQUESTED":
         raise _conflict(f"correction #{correction.id} is {correction.status}")
-    service.require_four_eyes(correction.requested_by_id, actor_id, "Approving a Hong Kong payroll correction")
+    service.require_four_eyes(correction.requested_by_id, actor_id, "Approving a Hong Kong payroll correction", db=db,
+                              entity_type="hk_payslip_correction", entity_id=correction.id,
+                              current_status=correction.status, attempted="approve")
     run = db.get(PayrollRun, correction.correction_run_id)
     while run.status != PayrollStatus.APPROVED:
         run = service.advance_payroll_run_status(db, run.id, actor_id, organization_id)
@@ -4672,6 +4907,142 @@ def retention_settings() -> "retention_service.RetentionJurisdiction":
 
 
 # hook name (asked for by the platform) -> attribute of this module
+# ── MPF member account: masked by default, audited permission-gated reveal ──
+# (launch-readiness G5 finding F-1). API responses carry the last 4 characters
+# only (employee_validation SENSITIVE_FIELDS). The full number is read only by
+# a tenant user holding the explicit HK_MPF_ACCOUNT_REVEAL permission, granted
+# by an org admin of the same organisation (never self-granted), and every
+# reveal — and every refused reveal — is in the HK personal-data access log.
+
+MPF_ACCOUNT_REVEAL = "HK_MPF_ACCOUNT_REVEAL"
+
+
+def _tenant_user(db: Session, organization_id: int, user_id: Optional[int]):
+    from app.modules.auth.models import User
+
+    user = db.query(User).filter(User.id == user_id, User.organization_id == organization_id).first() if user_id else None
+    if user is None or not user.is_active:
+        raise NotFoundException("User", user_id)
+    return user
+
+
+def _active_permission(db: Session, organization_id: int, user_id: Optional[int], permission: str):
+    from app.modules.payroll.models import PayrollUserPermission
+
+    if user_id is None:
+        return None
+    return (db.query(PayrollUserPermission)
+            .filter(PayrollUserPermission.organization_id == organization_id, PayrollUserPermission.user_id == user_id,
+                    PayrollUserPermission.permission == permission, PayrollUserPermission.revoked_at.is_(None))
+            .order_by(PayrollUserPermission.id.desc()).first())
+
+
+def _require_real_org_admin(db: Session, organization_id: int, actor_id: Optional[int]):
+    from app.core.exceptions import ForbiddenException
+    from app.modules.auth.models import User, UserRole
+
+    actor = (db.query(User).filter(User.id == actor_id, User.organization_id == organization_id).first()
+             if actor_id else None)
+    if actor is None or not actor.is_active or actor.role != UserRole.ORG_ADMIN:
+        raise ForbiddenException("Only an organisation admin of this organisation can grant or revoke this permission.")
+    return actor
+
+
+def grant_mpf_account_reveal(db: Session, organization_id: int, actor_id: Optional[int], user_id: int, reason: str):
+    from app.modules.payroll.models import PayrollUserPermission
+
+    _require_real_org_admin(db, organization_id, actor_id)
+    if user_id == actor_id:
+        raise BadRequestException("A permission cannot be granted to yourself — another org admin must grant it.")
+    grantee = _tenant_user(db, organization_id, user_id)
+    reason = (reason or "").strip()
+    if not reason:
+        raise BadRequestException("Granting MPF account access needs a reason (e.g. the eMPF filing duty).")
+    if _active_permission(db, organization_id, grantee.id, MPF_ACCOUNT_REVEAL):
+        raise BadRequestException("This user already holds MPF account access.")
+    row = PayrollUserPermission(organization_id=organization_id, user_id=grantee.id, permission=MPF_ACCOUNT_REVEAL,
+                                reason=reason, granted_by_id=actor_id, granted_at=datetime.utcnow())
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "grant", "user_permission", row.id, None,
+           {"permission": MPF_ACCOUNT_REVEAL, "userId": grantee.id, "organizationId": organization_id}, reason)
+    db.refresh(row)
+    return row
+
+
+def revoke_mpf_account_reveal(db: Session, organization_id: int, actor_id: Optional[int], user_id: int, reason: str):
+    _require_real_org_admin(db, organization_id, actor_id)
+    row = _active_permission(db, organization_id, user_id, MPF_ACCOUNT_REVEAL)
+    if row is None:
+        raise NotFoundException("Permission", user_id)
+    row.revoked_at, row.revoked_by_id = datetime.utcnow(), actor_id
+    db.flush()
+    _audit(db, actor_id, "revoke", "user_permission", row.id, {"permission": MPF_ACCOUNT_REVEAL, "userId": user_id},
+           {"revoked": True}, (reason or "").strip() or "revoked")
+    return row
+
+
+def mpf_account_reveal_holders(db: Session, organization_id: int) -> list:
+    from app.modules.payroll.models import PayrollUserPermission
+
+    return [{"id": p.id, "userId": p.user_id, "reason": p.reason, "grantedById": p.granted_by_id,
+             "grantedAt": p.granted_at.isoformat(), "revokedAt": p.revoked_at.isoformat() if p.revoked_at else None}
+            for p in db.query(PayrollUserPermission).filter(PayrollUserPermission.organization_id == organization_id,
+                                                            PayrollUserPermission.permission == MPF_ACCOUNT_REVEAL)
+            .order_by(PayrollUserPermission.id)]
+
+
+def _reveal_gate(db: Session, organization_id: int, actor_id: Optional[int], resource_type: str, resource_id,
+                 employee_id, purpose: Optional[str], request):
+    """Permission check for any full MPF account read; a refusal is logged and raises 403."""
+    from app.core.exceptions import ForbiddenException
+
+    purpose = (purpose or "").strip()
+    allowed = _active_permission(db, organization_id, actor_id, MPF_ACCOUNT_REVEAL) is not None
+    if not allowed or not purpose:
+        retention_service.record_access(db, HK, organization_id, actor_id, "REVEAL_MPF_MEMBER_ACCOUNT", resource_type,
+                                        resource_id, employee_id=employee_id, purpose=purpose or None,
+                                        result="REFUSED", request=request)
+        raise ForbiddenException("Reading a full MPF member account number needs the HK_MPF_ACCOUNT_REVEAL permission."
+                                 if not allowed else "State the purpose of this read.")
+    return purpose
+
+
+def reveal_mpf_member_account(db: Session, organization_id: int, actor_id: Optional[int], employee_id: int,
+                              purpose: Optional[str], request=None) -> dict:
+    employee = _employee(db, employee_id, organization_id)
+    purpose = _reveal_gate(db, organization_id, actor_id, "employee", employee.id, employee.id, purpose, request)
+    value = (employee.compliance_fields or {}).get("mpf_member_account")
+    retention_service.record_access(db, HK, organization_id, actor_id, "REVEAL_MPF_MEMBER_ACCOUNT", "employee",
+                                    employee.id, employee_id=employee.id, purpose=purpose, request=request)
+    return {"employeeId": employee.id, "mpfMemberAccount": value}
+
+
+def empf_filing_view(db: Session, organization_id: int, actor_id: Optional[int], submission_id: int,
+                     purpose: Optional[str], request=None) -> dict:
+    """The eMPF batch for filing on the eMPF platform, with the FULL member
+    account per row (the stored batch keeps them masked). Permission-gated and
+    logged as one access event per batch."""
+    sub = (db.query(HongKongEmpfSubmission).filter(HongKongEmpfSubmission.id == submission_id,
+                                                   HongKongEmpfSubmission.organization_id == organization_id).first())
+    if sub is None:
+        raise NotFoundException("eMPF submission", submission_id)
+    purpose = _reveal_gate(db, organization_id, actor_id, "empf_submission", sub.id, None, purpose, request)
+    accounts, rows = {}, []
+    for r in sub.rows or []:
+        emp_id = r.get("employeeId")
+        if emp_id not in accounts:
+            emp = (db.query(PayrollEmployee).filter(PayrollEmployee.id == emp_id,
+                                                    PayrollEmployee.organization_id == organization_id).first())
+            accounts[emp_id] = (emp.compliance_fields or {}).get("mpf_member_account") if emp else None
+        rows.append({**r, "memberAccount": accounts[emp_id]})
+    retention_service.record_access(db, HK, organization_id, actor_id, "REVEAL_MPF_MEMBER_ACCOUNT", "empf_submission",
+                                    sub.id, purpose=purpose, request=request)
+    return {"submissionId": sub.id, "contributionPeriod": sub.contribution_period, "status": sub.status,
+            "contributionDay": sub.contribution_day.isoformat() if sub.contribution_day else None,
+            "totals": sub.totals, "rows": rows}
+
+
 JURISDICTION_HOOKS = {
     "retention_settings": "retention_settings",
     "service_registry_transition": "transition_hk_service_registry",
@@ -4686,4 +5057,5 @@ JURISDICTION_HOOKS = {
     "statutory_profile_errors": "_hk_statutory_profile_errors",
     "statutory_profile_values": "_hk_profile_values",
     "payslip_hold_view": "_hk_payslip_hold_view",
+    "evidence_review_refusal": "evidence_review_refusal",
 }

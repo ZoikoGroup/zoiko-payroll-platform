@@ -164,6 +164,14 @@ COMMON_RATES = [
     ("mpf_regular_employee_days", "MPF regular employee — continuous employment days", "mpfa_coverage", dict(flat_amount="60")),
     ("mpf_employee_holiday_days", "MPF employee contribution holiday — days", "mpfa_employees", dict(flat_amount="30")),
     ("mpf_contribution_day", "MPF contribution day (day of following month)", "mpfa_employees", dict(flat_amount="10")),
+    # Governed deferral of the contribution day (launch-readiness Task 3). The
+    # rule is UNVERIFIED ([G1]) until the Hong Kong specialist certifies it
+    # against the MPFA contribution-day guidance; general holidays that are not
+    # statutory holidays are not seeded (G1 open item).
+    ("mpf_contribution_day_deferral",
+     "MPF contribution day deferral — next non-Sat/Sun/general-holiday day; signal days by operator [G1]",
+     "mpfa_employees",
+     dict(text_value="NEXT_DAY_NOT_SAT_SUN_OR_GENERAL_HOLIDAY")),
     ("mpf_partial_month_threshold_basis", "MPF levels for an incomplete monthly wage period [G1]", "mpfa_employees",
      dict(text_value="MONTHLY_LEVELS")),
     # The MPF mandatory-contribution Salaries Tax ceiling is NOT seeded here: one
@@ -528,6 +536,14 @@ def seed_hong_kong(db, spec=None) -> JurisdictionPack:
                       # IRD rows: tax_formula = the IR56 field the amount is reported in.
                       tax_formula=ird_field if obligation == _IRD else f"{obligation}: {basis}",
                       rate_label=f"HKCLS-{spec['tax_year']}-{component}-{obligation} [G1]"[:100])
+    # General holidays are NOT canonical seed data: they are loaded from an
+    # archived official list (scripts/hk_load_general_holidays.py). Re-stage the
+    # pack's existing rows unchanged so the reconcile keeps them (identical rows
+    # are kept, never deleted) — a reseed must not wipe a loaded list.
+    _bookkeeping = {"id", "created_at", "updated_at"}
+    for g in (db.query(TaxSlab).filter(TaxSlab.id.in_(prior[TaxSlab] or [-1]),
+                                       TaxSlab.rule_type == "HK_GENERAL_HOLIDAY").all()):
+        db.add(TaxSlab(**{c.name: getattr(g, c.name) for c in TaxSlab.__table__.columns if c.name not in _bookkeeping}))
     changes = _reconcile(db, pack, prior)
     registry = _ensure_service_registry_row(db)
     db.flush()

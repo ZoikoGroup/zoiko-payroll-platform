@@ -2172,6 +2172,15 @@ export const requestHkAverageWageOverride = (snapshotId, payload) => api.post(`$
 export const approveHkAverageWageOverride = (snapshotId) => api.post(`${HK}/average-wage/${snapshotId}/override-approve`, {});
 export const approveHkCorrection = (correctionId) => api.post(`${HK}/corrections/${correctionId}/approve`, {});
 export const rejectHkCorrection = (correctionId, reason) => api.post(`${HK}/corrections/${correctionId}/reject`, { reason });
+// MPF member account: masked by default; full value only with HK_MPF_ACCOUNT_REVEAL (audited).
+export const revealHkMpfAccount = (employeeId, purpose) => api.post(`${HK}/employees/${employeeId}/mpf-member-account`, { purpose });
+export const getHkEmpfFilingView = (submissionId, purpose) => api.post(`${HK}/empf/submissions/${submissionId}/filing-view`, { purpose });
+export const listHkMpfRevealHolders = async () => {
+  const res = await api.get(`${HK}/permissions/mpf-account-reveal`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const grantHkMpfReveal = (userId, reason) => api.post(`${HK}/permissions/mpf-account-reveal`, { userId, reason });
+export const revokeHkMpfReveal = (userId, reason) => api.post(`${HK}/permissions/mpf-account-reveal/${userId}/revoke`, { reason });
 // D-19 legal holds and the HK statutory-data access log.
 export const listHkLegalHolds = async () => {
   const res = await api.get(`${HK}/legal-holds`);

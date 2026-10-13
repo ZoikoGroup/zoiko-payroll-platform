@@ -4220,6 +4220,15 @@ class HKReasonRequest(_HKBody):
     reason: str
 
 
+class HKPurposeRequest(_HKBody):
+    purpose: str = ""
+
+
+class HKPermissionGrantRequest(_HKBody):
+    userId: int
+    reason: str
+
+
 class HKCorrectionRequest(_HKBody):
     reason: str = Field(min_length=1, max_length=2000)
 

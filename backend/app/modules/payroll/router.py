@@ -4291,7 +4291,7 @@ from app.modules.payroll.schemas import (  # noqa: E402
     HKAnnualReturnRequest, HKAverageWageOverrideRequest, HKAverageWageRequest, HKDepartureChangeRequest,
     HKDepartureRequest, HKEmpfPrepareRequest, HKEmpfTransitionRequest, HKEntitlementRequest, HKIr56gFiledRequest,
     HKCorrectionRequest, HKLegalHoldRequest, HKEmployeeCopyRequest, HKIrdAmendRequest, HKIrdTransitionRequest, HKReasonRequest, HKReleaseRequest, HKSalariesTaxEstimateRequest, HKTerminationRequest,
-    HKWorkHoursRequest,
+    HKWorkHoursRequest, HKPurposeRequest, HKPermissionGrantRequest,
 )
 
 _HK_READ = [Depends(get_current_payroll_operator)]
@@ -4591,6 +4591,48 @@ def hk_empf_transition(submission_id: int, data: HKEmpfTransitionRequest, db: Se
                                                 current_user.id, data.submissionReference, data.rowOutcomes,
                                                 data.settlementReference)
     return _hk_empf_view(sub)
+
+
+@payroll_router.post("/hong-kong/employees/{employee_id}/mpf-member-account", dependencies=_HK_READ,
+                     summary="Reveal one full MPF member account number (HK_MPF_ACCOUNT_REVEAL permission + purpose; "
+                             "every read and refusal is in the HK access log)")
+def hk_reveal_mpf_member_account(employee_id: int, data: HKPurposeRequest, request: Request,
+                                 db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.reveal_mpf_member_account(db, current_user.organization_id, current_user.id, employee_id,
+                                                       data.purpose, request=request)
+
+
+@payroll_router.post("/hong-kong/empf/submissions/{submission_id}/filing-view", dependencies=_HK_READ,
+                     summary="eMPF batch with full member accounts for filing on the eMPF platform "
+                             "(HK_MPF_ACCOUNT_REVEAL permission + purpose; logged)")
+def hk_empf_filing_view(submission_id: int, data: HKPurposeRequest, request: Request,
+                        db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.empf_filing_view(db, current_user.organization_id, current_user.id, submission_id,
+                                              data.purpose, request=request)
+
+
+@payroll_router.get("/hong-kong/permissions/mpf-account-reveal", dependencies=_HK_READ,
+                    summary="Who holds (or held) the HK_MPF_ACCOUNT_REVEAL permission in this organisation")
+def hk_mpf_reveal_holders(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.mpf_account_reveal_holders(db, current_user.organization_id)
+
+
+@payroll_router.post("/hong-kong/permissions/mpf-account-reveal", dependencies=_HK_WRITE,
+                     summary="Org admin grants HK_MPF_ACCOUNT_REVEAL to another user (reason required; audited)")
+def hk_grant_mpf_reveal(data: HKPermissionGrantRequest, db: Session = Depends(get_db),
+                        current_user=Depends(get_current_user)):
+    row = hong_kong_service.grant_mpf_account_reveal(db, current_user.organization_id, current_user.id, data.userId,
+                                                     data.reason)
+    return {"id": row.id, "userId": row.user_id, "permission": row.permission}
+
+
+@payroll_router.post("/hong-kong/permissions/mpf-account-reveal/{user_id}/revoke", dependencies=_HK_WRITE,
+                     summary="Org admin revokes HK_MPF_ACCOUNT_REVEAL (audited)")
+def hk_revoke_mpf_reveal(user_id: int, data: HKReasonRequest, db: Session = Depends(get_db),
+                         current_user=Depends(get_current_user)):
+    row = hong_kong_service.revoke_mpf_account_reveal(db, current_user.organization_id, current_user.id, user_id,
+                                                      data.reason)
+    return {"id": row.id, "userId": row.user_id, "revokedAt": row.revoked_at.isoformat()}
 
 
 @payroll_router.post("/hong-kong/salaries-tax/estimate", dependencies=_HK_READ,

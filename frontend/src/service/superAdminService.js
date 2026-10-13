@@ -710,6 +710,13 @@ export const transitionHongKongServiceRegistry = (availability, reason) =>
   apiFetch("/api/super-admin/compliance/hong-kong/service-registry", { method: "POST", body: { availability, reason } });
 export const compareHongKongReportTemplates = (fromId, toId) =>
   apiFetch("/api/super-admin/compliance/hong-kong/report-templates/compare", { params: { from: fromId, to: toId } });
+// Hong Kong gate / decision / production-verification evidence review outcome: ACCEPTED, or REJECTED (notes required).
+export const reviewHkEvidence = (id, { outcome, notes }) =>
+  apiFetch(`${HK_SA}/evidence/${id}/review`, { method: "PUT", body: { outcome, notes: notes || null } });
+// MPF contribution-day deferral: operator-recorded black rainstorm / No. 8+ signal days (audited).
+export const getHkContributionDayDisruptions = () => apiFetch(`${HK_SA}/contribution-day-disruptions`);
+export const recordHkContributionDayDisruption = (payload) =>
+  apiFetch(`${HK_SA}/contribution-day-disruptions`, { method: "POST", body: payload });
 export const getHongKongPackGoldenCheck = (packRowId) =>
   apiFetch(`/api/super-admin/compliance/hong-kong/packs/${packRowId}/golden-check`);
 

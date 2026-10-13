@@ -174,6 +174,87 @@ def test_hk_gate_state_follows_the_superseding_evidence_version(db, storage):
     assert hong_kong_service.gate_state(db, "G1") == "SUBMITTED"
 
 
+def test_hk_evidence_review_rejects_with_a_reason_keeps_the_artifact_and_needs_supersession(db, storage):
+    """G1–G7 / decision evidence review outcome: maker-checker, REJECTED needs notes, a rejection is
+    retained and can never be accepted afterwards (neither here nor via the shared review), and the
+    gate / decision show REJECTED until a corrected document supersedes it and is accepted."""
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import hong_kong_service, service
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    def audits(art_id, action):
+        return (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "source_artifact",
+                                                       TaxConfigurationAudit.entity_id == art_id,
+                                                       TaxConfigurationAudit.action == action).all())
+
+    g2 = _art(db, "HK-GATE-G2")
+    with pytest.raises(BadRequestException, match="uploaded document"):
+        hong_kong_service.review_evidence(db, g2.id, "REJECTED", "wrong file", actor_id=CHECKER.id)
+    service.upload_source_artifact_file(db, g2.id, "g2.pdf", "application/pdf", b"G2 draft", actor_id=MAKER.id)
+    assert hong_kong_service.evidence_items(db, "HK-GATE-G2")[0]["status"] == "AWAITING_REVIEW"
+    with pytest.raises(BadRequestException, match="maker-checker"):
+        hong_kong_service.review_evidence(db, g2.id, "ACCEPTED", actor_id=MAKER.id)
+    assert audits(g2.id, "refused")[-1].new_value == {"attempted": "review:ACCEPTED", "result": "REFUSED"}
+    with pytest.raises(BadRequestException, match="Outcome must be one of"):
+        hong_kong_service.review_evidence(db, g2.id, "MAYBE", actor_id=CHECKER.id)
+    with pytest.raises(BadRequestException, match="needs notes"):
+        hong_kong_service.review_evidence(db, g2.id, "REJECTED", "  ", actor_id=CHECKER.id)
+
+    hong_kong_service.review_evidence(db, g2.id, "REJECTED", "unsigned draft", actor_id=CHECKER.id)
+    db.refresh(g2)
+    assert g2.reviewer_id is None and g2.file_path and g2.superseded_by_id is None       # kept, never accepted
+    assert hong_kong_service.gate_state(db, "G2") == "REJECTED"
+    item = hong_kong_service.evidence_items(db, "HK-GATE-G2")[0]
+    assert item["status"] == "REJECTED" and item["rejectionNotes"] == "unsigned draft"
+    assert audits(g2.id, "review")[-1].new_value["hkEvidenceOutcome"] == "REJECTED"
+    for attempt in (lambda: hong_kong_service.review_evidence(db, g2.id, "ACCEPTED", actor_id=CHECKER.id),
+                    lambda: service.mark_source_artifact_reviewed(db, g2.id, CHECKER.id)):
+        with pytest.raises(BadRequestException, match="was REJECTED"):
+            attempt()
+    db.refresh(g2)
+    assert g2.reviewer_id is None and hong_kong_service.gate_state(db, "G2") == "REJECTED"
+
+    g2b = _art(db, "HK-GATE-G2")
+    assert hong_kong_service.gate_state(db, "G2") == "SUBMITTED"                          # a new one awaits review
+    service.upload_source_artifact_file(db, g2b.id, "g2b.pdf", "application/pdf", b"G2 signed", actor_id=MAKER.id)
+    service.supersede_governed_evidence(db, g2.id, g2b.id, actor_id=MAKER.id)
+    hong_kong_service.review_evidence(db, g2b.id, "ACCEPTED", "signed by all parties", actor_id=CHECKER.id)
+    assert hong_kong_service.gate_state(db, "G2") == "PASS"
+    with pytest.raises(BadRequestException, match="already reviewed"):
+        hong_kong_service.review_evidence(db, g2b.id, "REJECTED", "second thoughts", actor_id=CHECKER.id)
+    with pytest.raises(BadRequestException, match="superseded"):
+        hong_kong_service.review_evidence(db, g2.id, "ACCEPTED", actor_id=CHECKER.id)
+    plain = _art(db, None)
+    with pytest.raises(BadRequestException, match="Only Hong Kong"):
+        hong_kong_service.review_evidence(db, plain.id, "ACCEPTED", actor_id=CHECKER.id)
+
+    d1 = _art(db, "HK-DECISION-D-1")
+    service.upload_source_artifact_file(db, d1.id, "d1.pdf", "application/pdf", b"D-1 memo", actor_id=MAKER.id)
+    hong_kong_service.review_evidence(db, d1.id, "REJECTED", "not signed by the owner", actor_id=CHECKER.id)
+    d = next(x for x in hong_kong_service.owner_decisions(db) if x["key"] == "D-1")
+    assert d["state"] == "REJECTED" and d["evidence"][0]["rejectionNotes"] == "not signed by the owner"
+
+
+def test_hk_evidence_review_endpoint_and_summary_expose_evidence_and_certification(db, storage):
+    from tests.test_hong_kong_governance import SA_A, SA_B, _http
+    from app.modules.payroll import service
+
+    g5 = _art(db, "HK-GATE-G5", created_by=SA_A.id)
+    service.upload_source_artifact_file(db, g5.id, "g5.pdf", "application/pdf", b"G5 review", actor_id=SA_A.id)
+    with _http(db, SA_A) as c:
+        r = c.put(f"/api/super-admin/compliance/hong-kong/evidence/{g5.id}/review", json={"outcome": "ACCEPTED"})
+        assert r.status_code == 400 and "maker-checker" in r.json()["detail"]
+    with _http(db, SA_B) as c:
+        r = c.put(f"/api/super-admin/compliance/hong-kong/evidence/{g5.id}/review",
+                  json={"outcome": "REJECTED", "notes": "missing privacy counsel signature"})
+        assert r.status_code == 200 and r.json()["reviewerId"] is None
+        s = c.get("/api/super-admin/compliance/hong-kong/statutory-summary").json()
+    gate = next(g for g in s["gates"] if g["gate"] == "G5")
+    assert gate["state"] == "REJECTED" and gate["evidence"][0]["status"] == "REJECTED"
+    assert s["goldenCertification"]["status"] == "NOT_RUN" and s["goldenCertification"]["eligibleForActivation"] is False
+    assert s["productionVerificationEvidence"] == []
+
+
 def test_singapore_evidence_supersession_is_unchanged_through_the_dispatcher(db, storage):
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service

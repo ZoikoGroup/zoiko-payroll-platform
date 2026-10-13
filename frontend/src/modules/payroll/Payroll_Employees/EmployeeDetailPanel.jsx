@@ -1,3 +1,4 @@
+import { MpfAccountReveal } from "../Compliances/HKMpfAccessControls";
 import React, { useEffect, useState } from "react";
 import { X, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
@@ -272,6 +273,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                         value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])} />
                     ))}
                   </dl>
+                  {employee.complianceFields?.mpf_member_account && <MpfAccountReveal employeeId={employee.id} />}
                 </div>
               )}
 

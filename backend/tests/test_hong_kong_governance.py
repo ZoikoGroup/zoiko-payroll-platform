@@ -118,7 +118,8 @@ def test_available_is_refused_over_http_while_gates_are_missing_and_the_refusal_
     assert refusal.actor_id == SA_A.id and "GATE_G1" in refusal.new_value["unmet"]
 
 
-def test_available_only_when_every_requirement_is_met_then_suspension_is_always_allowed(db, hk):
+def test_available_only_when_every_requirement_is_met_then_suspension_is_always_allowed(db, hk, monkeypatch):
+    from app.config import settings
     from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import TaxConfigurationAudit
 
@@ -130,9 +131,21 @@ def test_available_only_when_every_requirement_is_met_then_suspension_is_always_
                                             for r in readiness["requirements"])
     _activate_all_templates(db)
     readiness = hong_kong_service.activation_readiness(db, on)
+    blocking = [d["key"] for d in hong_kong_service.owner_decisions(db) if d["blocksLaunch"]]
+    monkeypatch.setattr(settings, "HK_IDENTITY_TOKEN_KEY", "")
     assert not readiness["canOpen"] and [r["key"] for r in readiness["requirements"] if not r["met"]] == [
-        "PRODUCTION_VERIFICATION"]                                     # production evidence is mandatory too
+        "PRODUCTION_VERIFICATION"] + [f"DECISION_{k}" for k in blocking] + ["IDENTITY_TOKEN_KEY"]
     _artifact(db, "HK-PRODUCTION-VERIFICATION")                        # TEST-ONLY evidence row
+    for key in blocking:
+        _artifact(db, f"HK-DECISION-{key}")                            # TEST-ONLY decision records
+    readiness = hong_kong_service.activation_readiness(db, on)
+    assert [r["key"] for r in readiness["requirements"] if not r["met"]] == ["IDENTITY_TOKEN_KEY"]   # D-5 is machine-enforced
+    monkeypatch.setattr(settings, "HK_IDENTITY_TOKEN_KEY", "   ")                  # blank is not a key
+    assert not hong_kong_service.activation_readiness(db, on)["canOpen"]
+    monkeypatch.setattr(settings, "HK_IDENTITY_TOKEN_KEY", settings.PAYROLL_SECRET_KEY)   # reusing the app secret is not dedicated
+    reused = next(r for r in hong_kong_service.activation_readiness(db, on)["requirements"] if r["key"] == "IDENTITY_TOKEN_KEY")
+    assert not reused["met"] and "same value" in reused["detail"] and settings.PAYROLL_SECRET_KEY not in reused["detail"]
+    monkeypatch.setattr(settings, "HK_IDENTITY_TOKEN_KEY", "TEST-ONLY-dedicated-key")
     readiness = hong_kong_service.activation_readiness(db, on)
     assert readiness["canOpen"], [r for r in readiness["requirements"] if not r["met"]]
     with pytest.raises(Exception, match="reason"):
@@ -252,6 +265,7 @@ def test_hk_template_compare_over_http(db, hk):
 
 
 def test_summary_shows_activation_readiness_and_template_coverage(db, hk):
+    from app.modules.payroll import hong_kong_service
     from scripts.seed_statutory_report_templates import seed_hong_kong
 
     _registry(db)
@@ -259,7 +273,8 @@ def test_summary_shows_activation_readiness_and_template_coverage(db, hk):
     with _http(db, SA_A) as c:
         s = c.get("/api/super-admin/compliance/hong-kong/statutory-summary").json()
     readiness = s["activationReadiness"]
-    assert readiness["canOpen"] is False and readiness["total"] == 7 + 1 + 2 + 8
+    blocking = sum(1 for d in hong_kong_service.owner_decisions(db) if d["blocksLaunch"])
+    assert readiness["canOpen"] is False and readiness["total"] == 7 + 1 + 2 + 8 + blocking + 1   # + decisions + D-5 key
     assert {r["key"] for r in readiness["requirements"]} >= {"GATE_G1", "GATE_G7", "ACTIVE_PACK", "GOLDEN", "TEMPLATE_HK_IR56B"}
     cov = s["templateCoverage"]
     assert len(cov) == 16 and {c["period"] for c in cov} == {"current", "next"}
@@ -404,14 +419,20 @@ def test_every_hk_route_authorizes_the_right_role(db, hk):
     routes = sorted((m, r.path) for r in app.routes if hasattr(r, "methods") and "hong-kong" in r.path
                     for m in r.methods - {"HEAD", "OPTIONS"})
     refused = []
+    permission_gated = {("POST", "/api/payroll/hong-kong/employees/{employee_id}/mpf-member-account"),
+                        ("POST", "/api/payroll/hong-kong/empf/submissions/{submission_id}/filing-view")}
     for principal, prefix in ((operator, "/api/payroll/"), (SA_A, "/api/super-admin/")):
         with _http(db, principal) as c:
             for m, p in routes:
                 if p.startswith(prefix):
                     res = c.request(m, re.sub(r"\{[^}]+\}", "1", p), json={})
                     if res.status_code in (401, 403):
+                        # Permission-gated beyond the role (G5 F-1): a plain operator is refused
+                        # by the HK_MPF_ACCOUNT_REVEAL check itself, never by the role gate.
+                        if (m, p) in permission_gated and "HK_MPF_ACCOUNT_REVEAL" in res.text:
+                            continue
                         refused.append((m, p, res.status_code))
-    assert len(routes) == 65 and refused == []
+    assert len(routes) == 73 and refused == [], refused
 
 
 def test_a_future_year_cannot_activate_without_vectors_and_never_reaches_current_payroll(db, hk):
