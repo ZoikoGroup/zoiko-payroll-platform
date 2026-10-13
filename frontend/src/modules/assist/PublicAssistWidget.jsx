@@ -3,12 +3,12 @@ import { createPortal } from "react-dom";
 import { ArrowLeft, RotateCcw, TriangleAlert } from "lucide-react";
 import {
   createPublicAssistSession,
-  getAssistStatus,
   getPublicAssistConfig,
   getPublicAssistHealth,
   getPublicPayrollCountries,
   submitPublicAssistMessage,
 } from "../../service/assistService";
+import { api } from "../../service/api";
 import zoikoPayrollLogo from "../../assets/zoiko-payroll-logo.png";
 import zoikoPayrollIcon from "../../assets/zoiko-payroll-icon.png";
 import {
@@ -44,13 +44,19 @@ import {
 
 // Prefers the dedicated public health endpoint; until that is deployed,
 // falls back to the existing unauthenticated /assist/status. Fails closed.
+// Some deployments protect /assist/status (401/403) — any non-5xx HTTP
+// answer still proves the service is reachable, so only a network failure
+// or a server error counts as unavailable.
 async function resolvePublicHealth() {
   const health = await getPublicAssistHealth();
   if (health?.status) return health.status;
-  const status = await getAssistStatus();
-  if (!status) return "unavailable";
-  if (status.status !== "ok") return "unavailable";
-  return status.knowledge_available ? "available" : "degraded";
+  try {
+    const status = await api.get("/api/assist/status", { auth: false });
+    if (status?.status !== "ok") return "degraded";
+    return status.knowledge_available ? "available" : "degraded";
+  } catch (e) {
+    return e?.status && e.status < 500 ? "available" : "unavailable";
+  }
 }
 
 function classifyError(e) {
