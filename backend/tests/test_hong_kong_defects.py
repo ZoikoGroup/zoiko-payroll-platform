@@ -202,3 +202,31 @@ def test_d_d_ir56g_filing_needs_a_second_person_and_a_submission_record(db, hk):
     assert hold.state == "IR56G_FILED_HOLD_ACTIVE"
     assert (case.status, case.filing_reference, case.approved_by_id, case.submission_mode) == (
         "FILED", "IR56G-REF", CHECKER.id, "INTERNAL_PREPARATION_ONLY")
+
+
+# ── D-F: the BIR56A reconciliation explains suppressed and excluded amounts ─────────────────────
+# HK-011 / wireframe §7 "Annual reconciliation: reported remuneration must reconcile exactly to
+# committed payroll plus certified non-payroll reportable adjustments". Before the fix the BIR56A
+# compared the reported total (suppressed IR56B and IRD-excluded amounts removed) with EVERY
+# employee's full gross, so a legitimate IR56F suppression showed a "Variance".
+
+def test_d_f_bir56a_reconciles_when_an_ir56b_is_suppressed_by_a_filed_ir56f(db, hk, monkeypatch):
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase
+    from tests.test_hong_kong_reports import _seeded
+
+    _spaced_codes(monkeypatch)
+    leaver = _employee(db, hk.org.id, "DF2")
+    _profile(db, leaver, hk.org.id, "2026-01-16")
+    for m in (1, 2, 3):
+        _month(db, hk.org, m)
+    db.add(HongKongIrdReportingCase(organization_id=hk.org.id, employee_id=leaver.id, form_type="IR56F",
+                                    year_of_assessment="2025/26", event_date=date(2026, 3, 31), status="FILED",
+                                    income_period_start=date(2025, 4, 1), income_period_end=date(2026, 3, 31)))
+    db.commit()
+    report = hong_kong_service.generate_hong_kong_bir56a(db, hk.org.id, _seeded(db, "HK-BIR56A").id, "2025/26")
+    rec = report.reconciliation
+    assert rec["status"] == "Reconciled", rec
+    assert D(rec["lessReportedOnIr56fIr56g"]) == D("49999.95")      # the leaver's Jan-Mar committed pay
+    assert D(rec["expectedReportable"]) == D(rec["reportedTotal"]) == D("49999.95")   # the other employee only
+    assert D(rec["committedPayrollGross"]) == D("99999.90") and D(rec["variance"]) == D("0")

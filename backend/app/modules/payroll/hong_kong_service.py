@@ -710,6 +710,8 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
     identifiers = (company.tax_identifiers or {}) if company else {}
     results, grand_total, payroll_total = [], ZERO, ZERO
+    # Gap audit D-F: what the reported total must equal, item by item.
+    suppressed_gross, excluded_total = ZERO, ZERO
     cover_filed = (db.query(HongKongIrdReportingCase.id)
                    .filter(HongKongIrdReportingCase.organization_id == organization_id, HongKongIrdReportingCase.form_type == "BIR56A",
                            HongKongIrdReportingCase.year_of_assessment == ya,
@@ -743,7 +745,11 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
         if existing is not None and existing.status in hk_ird.FILED_STATES + ("SUPPRESSED",):
             results.append({"employeeId": employee_id, "caseId": existing.id, "status": existing.status,
                             "message": "already filed — never regenerated (amend instead)"})
-            grand_total += reported if existing.status != "SUPPRESSED" else ZERO
+            if existing.status == "SUPPRESSED":
+                suppressed_gross += gross
+            else:
+                grand_total += reported
+                excluded_total += _excluded_ird(pairs)
             continue
         if existing is not None and existing.status == "REJECTED":
             # The rejected return keeps its filed evidence until an operator
@@ -751,6 +757,7 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
             results.append({"employeeId": employee_id, "caseId": existing.id, "status": existing.status,
                             "message": "rejected by the IRD — choose Prepare again before regenerating"})
             grand_total += reported
+            excluded_total += _excluded_ird(pairs)
             continue
         errors = []
         cf = (employee.compliance_fields or {}) if employee else {}
@@ -779,11 +786,13 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
         row.reported_income = payload["fields"]
         if decision["action"] == "SUPPRESS":
             row.status, row.suppression_reason, row.validation_errors = "SUPPRESSED", decision["message"], []
+            suppressed_gross += gross
         else:
             if decision["action"] == "RESOLVE":
                 errors.append(decision["message"])
             row.status, row.validation_errors = "PREPARED", errors
             grand_total += reported
+            excluded_total += _excluded_ird(pairs)
         db.flush()
         results.append({"employeeId": employee_id, "caseId": row.id, "status": row.status,
                         "message": decision["message"], "validationErrors": row.validation_errors})
@@ -810,9 +819,22 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
     _audit(db, actor_id, "create", "hk_ird_annual_return", cover.id,
            new={"yearOfAssessment": ya, "employees": len(results), "total": str(cents(grand_total))}, commit=False)
     db.commit()
+    expected = payroll_total - suppressed_gross - excluded_total
+    reconciliation = {
+        "committedPayrollGross": str(cents(payroll_total)),
+        "lessReportedOnIr56fIr56g": str(cents(suppressed_gross)),
+        "lessExcludedFromIrd": str(cents(excluded_total)),
+        "expectedReportable": str(cents(expected)),
+        "reportedTotal": str(cents(grand_total)),
+        "variance": str(cents(grand_total - expected)),
+        "status": "Reconciled" if cents(grand_total) == cents(expected) else "Variance",
+        "basis": "committed HK payroll for the year of assessment, less income already reported on a filed IR56F / "
+                 "IR56G, less amounts the classification excludes from (or holds for review in) IRD reporting, must "
+                 "equal the reported total exactly (HK-011)",
+    }
     return {"yearOfAssessment": ya, "bir56aCaseId": cover.id, "employees": results,
             "reportedTotal": str(cents(grand_total)), "committedPayrollGross": str(cents(payroll_total)),
-            "schemaStatus": hk_ird.SCHEMA_STATUS}
+            "reconciliation": reconciliation, "schemaStatus": hk_ird.SCHEMA_STATUS}
 
 
 def _excluded_ird(pairs) -> Decimal:
@@ -4000,7 +4022,7 @@ def generate_hong_kong_bir56a(
         ],
     }
     reconciliation = {
-        "status": "Reconciled" if outcome.get("reportedTotal") == outcome.get("committedPayrollGross") else "Variance",
+        **(outcome.get("reconciliation") or {}),
         "reportedTotal": outcome.get("reportedTotal"),
         "committedPayrollGross": outcome.get("committedPayrollGross"),
         "tolerance": None,
