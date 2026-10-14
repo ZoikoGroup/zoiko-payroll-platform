@@ -22,6 +22,8 @@ So deploying means merging `nikhil` into `main`. As of 2026-10-14, `origin/main`
 
 If `main` gains more migrations before the merge, re-parent onto the new head and re-run that rehearsal.
 
+**Update 2026-10-14:** `main` was merged into `nikhil` on GitHub (`02070f8`), and that merge left two heads, which failed the PR's CI test job. The re-parent patch is now **applied on `nikhil`**, together with the fixed pins in `test_alembic_metadata.py` (a single head `8b14824fb575`, 190 revisions) and the restored snapshot fixture. P-3 now holds on `nikhil` itself.
+
 ## 1. Pre-checks (all must pass; a human runs each)
 
 | # | Check | How | Pass when |

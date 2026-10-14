@@ -1,11 +1,11 @@
-# Patch files (NOT applied, NOT committed as code)
+# Patch files (not applied unless marked APPLIED)
 
 Each patch applies to `nikhil` with `git apply <file>` from the repository root. Every one was applied **temporarily** to the working tree, tested, saved here, and reverted. Applying any of them is a reviewer's decision.
 
 | Patch | What it does | Decision owner |
 |---|---|---|
 | `migration_lock_safety.patch` | Migration `8b14824fb575`: on PostgreSQL, adds the `approved_by_user_id` foreign key as `NOT VALID`, which skips reading every `assisted_access_sessions` row under ACCESS EXCLUSIVE. SQLite keeps the original path | Deploy owner, if the pre-deploy row count exceeds about 1,000,000 (`../MIGRATION_8b14824fb575_REVIEW.md` §3a) |
-| `reparent_8b14824fb575_onto_main_head.patch` | Changes `8b14824fb575`'s parent from `b08f04497195` to `main`'s head `2f905bb1c296`, which is needed when `nikhil` is merged into `main` (otherwise there are two heads and CI refuses) | Whoever merges `nikhil` into `main` (`../HK_DEPLOY_RUNBOOK.md` §0) |
+| `reparent_8b14824fb575_onto_main_head.patch` | Changes `8b14824fb575`'s parent from `b08f04497195` to `main`'s head `2f905bb1c296`, which is needed when `nikhil` is merged into `main` (otherwise there are two heads and CI refuses) | **APPLIED on `nikhil` 2026-10-14**, after `main` was merged into `nikhil` (`02070f8`) |
 | `f4_audit_fail_closed.patch` | G5 F-4 option A + C: an `ORG_API_CALL_STARTED` audit row is committed before any assisted-access endpoint runs; if it cannot be written, the request is refused (503). The post-response row carries `intent_id`; an unmatched start raises a high-severity Security alert. Also fixes **F-11** (a first `token=` query parameter was stored unredacted). No `main.py` change | Security lead (packet 03) |
 | `f5_f6_audit_immutability.patch` | G5 F-5: new append-only `auth_audit_events` (login success / failure, inactive account, refresh, logout, password reset, invitation accepted; no password or token stored; an unknown email only as SHA-256), and a successful login is refused if its audit row cannot be written. G5 F-6: migration `d1e5a7c3b9f2` installs a PostgreSQL trigger that rejects UPDATE and DELETE on `payroll_tax_configuration_audit`, `assisted_access_audit_events`, `payroll_personal_data_access_events` and `auth_audit_events`. SQLite tests get the same triggers. DELETE is possible only inside an explicit, logged purge scope, which today only the organisation hard-delete uses (**Security / counsel to confirm that this is acceptable**) | Security lead (packet 03); counsel for the purge rule (packet 04) |
 

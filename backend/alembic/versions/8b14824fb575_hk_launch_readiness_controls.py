@@ -1,7 +1,7 @@
 """hk launch readiness controls: MPF account reveal permission, contribution-day disruptions, privileged-access consent
 
 Revision ID: 8b14824fb575
-Revises: b08f04497195
+Revises: 2f905bb1c296
 Create Date: 2026-10-13
 
 Additive only (no existing column changes meaning; nothing is dropped):
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "8b14824fb575"
-down_revision = "b08f04497195"
+down_revision = "2f905bb1c296"
 branch_labels = None
 depends_on = None
 
