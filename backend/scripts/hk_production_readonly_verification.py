@@ -36,6 +36,16 @@ _FORBIDDEN = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|ALTER|DROP|CREATE|TRUNCA
 CHECKS = [
     ("alembic_version", "SELECT version_num FROM alembic_version ORDER BY version_num",
      f"exactly one row: {EXPECTED_ALEMBIC_HEAD}"),
+    # Pre-deploy sizing for migration 8b14824fb575: its `ADD COLUMN approved_by_user_id ... REFERENCES users`
+    # reads every assisted_access_sessions row once while holding ACCESS EXCLUSIVE (FK validation).
+    # count(*) is exact (one read-only scan, ACCESS SHARE); reltuples is the planner's estimate (no scan).
+    ("pre_deploy_assisted_access_sessions_size",
+     "SELECT count(*) AS exact_rows, "
+     "(SELECT c.reltuples::bigint FROM pg_class c WHERE c.oid = 'assisted_access_sessions'::regclass) AS estimated_rows, "
+     "pg_size_pretty(pg_total_relation_size('assisted_access_sessions'::regclass)) AS total_size "
+     "FROM assisted_access_sessions",
+     "small; measured locally: 2,000,000 rows take about 0.3 s to validate. Above 1,000,000 apply "
+     "docs/hk-evidence/ops/patches/migration_lock_safety.patch (NOT VALID) before deploy"),
     ("hk_service_registry", "SELECT availability FROM jurisdiction_service_registry WHERE country = 'HK'",
      "PLANNED until G1–G7 are accepted and launch is authorised"),
     ("hk_packs", "SELECT pack_id, version, status, effective_from, effective_to FROM payroll_jurisdiction_packs "
