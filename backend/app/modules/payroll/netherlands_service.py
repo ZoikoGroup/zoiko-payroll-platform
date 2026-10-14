@@ -1369,6 +1369,22 @@ def verify_expat_decision(db: Session, decision_id: int, organization_id: int, a
     return row
 
 
+def revoke_expat_decision(db: Session, decision_id: int, organization_id: int, actor_id: int) -> PayrollNlExpatDecision:
+    """The authority decision no longer applies: payroll stops applying the
+    facility from now on (committed payslips are never rewritten — use a
+    correction for any retroactive effect)."""
+    row = (db.query(PayrollNlExpatDecision)
+           .filter(PayrollNlExpatDecision.id == decision_id,
+                   PayrollNlExpatDecision.organization_id == organization_id).first())
+    if row is None:
+        raise NotFoundException("PayrollNlExpatDecision", decision_id)
+    if row.status not in ("PENDING", "VERIFIED"):
+        raise BadRequestException(f"a {row.status} decision cannot be revoked")
+    row.status = "REVOKED"
+    db.flush()
+    return row
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Phase 7 — pension, absence pay, sickness, termination
 # ══════════════════════════════════════════════════════════════════════════

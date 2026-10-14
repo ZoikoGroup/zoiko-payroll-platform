@@ -3,6 +3,7 @@ export { default as UKReportTemplatesPage } from "./UKReportTemplatesPage";
 export { default as USAReportTemplatesPage } from "./USAReportTemplatesPage";
 export { default as CAReportTemplatesPage } from "./CAReportTemplatesPage";
 export { default as AUReportTemplatesPage } from "./AUReportTemplatesPage";
+export { default as NLReportTemplatesPage } from "./NLReportTemplatesPage";
 // Caribbean 7 (2026-09-22, Group D gap-closure) — one seeded PER_EMPLOYEE
 // statutory pay-component template each (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY + _REPORT_COMPONENTS_BY_TYPE), same pattern
@@ -59,4 +60,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   HK: "hong-kong",
   SE: "sweden",
   CH: "switzerland",
+  NL: "netherlands",
 };

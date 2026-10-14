@@ -31,6 +31,10 @@ const COUNTRIES = [
   // Switzerland — every CH registry row is "NO FALLBACK" (the engine blocks
   // instead of defaulting); this shows those rows and where each value comes from.
   { code: "CH", name: "Switzerland" },
+  // Netherlands (ZP-NL-ENG-001) — engine fallback defaults for loonheffing,
+  // premies, vakantiegeld, WKR, minimumloon, ziektewet, transitievergoeding,
+  // pensioen. NL has its own fallback registry in fallback_registry.py.
+  { code: "NL", name: "Netherlands" },
 ];
 
 function toNumber(v) {

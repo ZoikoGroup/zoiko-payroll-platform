@@ -123,6 +123,80 @@ export const getItalyReadiness = (packId) =>
 export const previewItalyCalculation = (payload) =>
   apiFetch("/api/super-admin/compliance/italy/calculation-preview", { method: "POST", body: payload });
 
+// ————— Netherlands (ZP-NL-ENG-001) ————
+// Super Admin API: backend/app/modules/payroll/netherlands_router.py. Every
+// organisation-scoped call takes an explicit orgId (no default organisation).
+// Statutory pack rows (minimum wage, WKR, car windows, period maxima) are
+// read-only here — they change only through the governed pack editor.
+const NL_SA = "/api/super-admin/compliance/netherlands";
+
+export const listNlOrganizations = () => apiFetch(`${NL_SA}/organizations`);
+export const listNlEmployees = (orgId) => apiFetch(`${NL_SA}/employees`, { params: { org_id: orgId } });
+
+export const getNlEmployerProfile = (orgId) => apiFetch(`${NL_SA}/employer-profile`, { params: { org_id: orgId } });
+export const createNlEmployerProfile = (orgId, payload) =>
+  apiFetch(`${NL_SA}/employer-profile`, { method: "POST", body: payload, params: { org_id: orgId } });
+export const getNlEmployerReadiness = (orgId) =>
+  apiFetch(`${NL_SA}/employer-profile/readiness`, { params: { org_id: orgId } });
+
+export const listNlTaxTables = () => apiFetch(`${NL_SA}/tax-tables`);
+export const transitionNlTaxTable = (id, action, reason) =>
+  apiFetch(`${NL_SA}/tax-tables/${id}/${action}`, { method: "PUT", body: reason ? { reason } : {} });
+// Multipart upload: apiFetch JSON-encodes bodies, so the file goes through fetch.
+export const importNlTaxTable = async (file, fields) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  Object.entries(fields).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== "") formData.append(k, v); });
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${NL_SA}/tax-tables/import`, {
+    method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formData,
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) throw new Error(data.detail || "Import failed.");
+  return data;
+};
+
+export const getNlPackRows = (kind, on) => apiFetch(`${NL_SA}/${kind}`, { params: on ? { on } : {} });
+
+export const listNlPremiumDecisions = (orgId) => apiFetch(`${NL_SA}/premium-decisions`, { params: { org_id: orgId } });
+export const createNlPremiumDecision = (orgId, payload) =>
+  apiFetch(`${NL_SA}/premium-decisions`, { method: "POST", body: payload, params: { org_id: orgId } });
+export const activateNlPremiumDecision = (orgId, id) =>
+  apiFetch(`${NL_SA}/premium-decisions/${id}/activate`, { method: "PUT", params: { org_id: orgId } });
+
+export const getNlVcr = (orgId, employeeId, taxYear) =>
+  apiFetch(`${NL_SA}/vcr`, { params: { org_id: orgId, employee_id: employeeId, tax_year: taxYear } });
+
+export const listNlEarningClassifications = (orgId) =>
+  apiFetch(`${NL_SA}/earning-classifications`, { params: orgId ? { org_id: orgId } : {} });
+export const createNlEarningClassification = (payload) =>
+  apiFetch(`${NL_SA}/earning-classifications`, { method: "POST", body: payload });
+
+export const listNlExpatDecisions = (orgId) => apiFetch(`${NL_SA}/expat-decisions`, { params: { org_id: orgId } });
+export const createNlExpatDecision = (orgId, payload) =>
+  apiFetch(`${NL_SA}/expat-decisions`, { method: "POST", body: payload, params: { org_id: orgId } });
+export const transitionNlExpatDecision = (orgId, id, action) =>
+  apiFetch(`${NL_SA}/expat-decisions/${id}/${action}`, { method: "PUT", params: { org_id: orgId } });
+
+export const listNlCaos = () => apiFetch(`${NL_SA}/caos`);
+export const listNlPensionSchemes = (orgId) =>
+  apiFetch(`${NL_SA}/pension-schemes`, { params: orgId ? { org_id: orgId } : {} });
+export const createNlPensionScheme = (payload) =>
+  apiFetch(`${NL_SA}/pension-schemes`, { method: "POST", body: payload });
+
+export const getNlReadiness = () => apiFetch(`${NL_SA}/readiness`);
+
+export const listNlReturns = (orgId, taxYear) =>
+  apiFetch(`${NL_SA}/loonaangifte`, { params: { org_id: orgId, ...(taxYear ? { tax_year: taxYear } : {}) } });
+export const getNlReturn = (orgId, id) => apiFetch(`${NL_SA}/loonaangifte/${id}`, { params: { org_id: orgId } });
+export const buildNlReturn = (orgId, payload) =>
+  apiFetch(`${NL_SA}/loonaangifte/build`, { method: "POST", body: payload, params: { org_id: orgId } });
+export const reconcileNlReturn = (orgId, id) =>
+  apiFetch(`${NL_SA}/loonaangifte/${id}/reconcile`, { method: "PUT", params: { org_id: orgId } });
+export const correctNlReturn = (orgId, id) =>
+  apiFetch(`${NL_SA}/loonaangifte/${id}/correction`, { method: "POST", params: { org_id: orgId } });
+
 // Governed collective-agreement registry (spec §9) — no national default.
 export const listCollectiveAgreements = (params) =>
   apiFetch("/api/super-admin/compliance/collective-agreements", { params });
