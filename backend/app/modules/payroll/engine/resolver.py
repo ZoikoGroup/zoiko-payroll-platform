@@ -98,6 +98,17 @@ def calculate_payroll(
             "IRELAND_SIMPLE_MODE_UNSUPPORTED",
             "Ireland payroll cannot use simple calculation mode; use standard or enterprise.",
         )
+    if (ctx.country or "").upper() == "NL" and key == "simple":
+        # Netherlands (ZP-NL-ENG-001): simple mode would silently skip wage tax
+        # (Belastingdienst tables), employee insurance (AWf/Aof/Wko), employer
+        # premiums (Whk), Zvw (employer + employee), WKR, car addition, labor
+        # pay — all statutory, no fallback. Fail-closed: countries/netherlands.py.
+        from app.modules.payroll.engine.countries.netherlands import NLError
+
+        raise NLError(
+            "NL_SIMPLE_MODE_UNSUPPORTED",
+            "Netherlands payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
 
     strategy = resolve_strategy(calculation_mode)
     try:
@@ -217,6 +228,8 @@ def build_context_from_employee(
     ireland_inputs: dict | None = None,
     sweden_inputs: dict | None = None,
     italy_inputs: dict | None = None,
+    saudi_inputs: dict | None = None,
+    netherlands_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -400,4 +413,10 @@ def build_context_from_employee(
         # Italy (ZP-IT-ENG-001): italy_statutory_profile + it_* context fields
         # resolved by italy_service.resolve_it_calc_inputs.
         **(italy_inputs or {}),
+        # Saudi Arabia (ZP-SA-ENG-001): sa_statutory_profile + sa_* context
+        # fields resolved by saudi_arabia_service.resolve_sa_calc_inputs.
+        **(saudi_inputs or {}),
+        # Netherlands (ZP-NL-ENG-001): nl_statutory_profile + nl_* context
+        # fields resolved by netherlands_service.resolve_nl_calc_inputs.
+        **(netherlands_inputs or {}),
     )

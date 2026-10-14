@@ -44,7 +44,9 @@ from typing import List, Optional
 # directly) and route through `ach_routing_number`.
 # France (ZP-FR-ENG-001, 2026-09-24) joins DE on the SEPA rail: IBAN + BIC
 # read from compliance_fields, exactly like every non-India country.
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK")
+# Netherlands (ZP-NL-ENG-001) also rides SEPA with IBAN + BIC, following the
+# DE pattern (combined "{iban} {bic}" BTF routing value).
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -85,6 +87,10 @@ ROUTING_FIELDS = {
         {"key": "iban", "label": "IBAN"},
         {"key": "bic", "label": "BIC"},
     ],
+    "NL": [
+        {"key": "iban", "label": "IBAN"},
+        {"key": "bic", "label": "BIC"},
+    ],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -100,6 +106,7 @@ BTF_ROUTING_LABEL = {
     "HK": "Bank-Branch Code",
     "FR": "IBAN",
     "IE": "IBAN",
+    "NL": "IBAN",
     "BB": "Bank/Branch Code",
     "KY": "Bank/Branch Code",
     "DO": "Bank/Branch Code",
@@ -120,6 +127,7 @@ PAYMENT_MODE_LABEL = {
     "AU": "Direct Entry",
     "FR": "SEPA",
     "IE": "SEPA",
+    "NL": "SEPA",
     "BB": "EFT",
     "KY": "EFT",
     "DO": "EFT",
@@ -211,7 +219,7 @@ def btf_routing_value(obj, country: Optional[str] = None) -> str:
         bank = _field_value(obj, "bank_code")
         branch = _field_value(obj, "branch_code")
         return f"{bank}-{branch}" if bank and branch else (bank or branch)
-    if effective == "DE":
+    if effective in ("DE", "NL"):
         iban = _field_value(obj, "iban")
         bic = _field_value(obj, "bic")
         if iban and bic:

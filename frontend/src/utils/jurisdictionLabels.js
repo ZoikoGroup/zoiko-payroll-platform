@@ -30,12 +30,19 @@ const INCOME_TAX_LABELS = {
   // Sweden's preliminary tax (preliminär skatt) — table/column, 30%
   // supplementary, one-time or SINK, per the frozen se_calculation_snapshot.
   SE: "Preliminary Tax",
+  // Switzerland — source tax (Quellensteuer), employee-only; the canton
+  // tariffs are ingested as QST tariff files (ZP-CH-PAYROLL-001). Matches
+  // the backend's own PDF wording "Source tax (Quellensteuer) withheld".
+  CH: "Source Tax (QST)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
 // shows no income-tax line (not even a zero one). Hong Kong Salaries Tax is
-// employee-assessed by the IRD (ZP-HK-ENG-001 architecture lock).
-const NO_PAYROLL_INCOME_TAX = new Set(["HK"]);
+// employee-assessed by the IRD (ZP-HK-ENG-001 architecture lock). Saudi Arabia
+// has no monthly income-tax withholding: its statutory payroll liability is
+// GOSI (pension/SANED/occupational hazard), never a `tds` line
+// (ZP-SA-ENG-001 — the engine NEVER returns a `tds` key and tds stays 0.00).
+const NO_PAYROLL_INCOME_TAX = new Set(["HK", "SA"]);
 
 const PF_LABELS = { DE: "Pension Insurance" };
 const ESI_LABELS = { DE: "Social Insurance (Health / Unemployment / Care)", CA: "Employment Insurance (EI)" };
@@ -126,6 +133,7 @@ const TAX_ID_LABELS = {
   DE: "Tax Registration No. (Steuernummer / USt-IdNr.)",
   CA: "Business Number (BN)",
   HK: "Business Registration No. / IRD Employer's File No.",
+  CH: "UID (Business Identification No.)",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only
@@ -172,6 +180,8 @@ const IDENTITY_FIELD = {
   IE: { label: "PPSN", get: (p) => p.complianceFields?.ppsn },
   SE: { label: "Personnummer", get: (p) => p.complianceFields?.swedish_id_number },
   IT: { label: "Codice fiscale", get: (p) => p.complianceFields?.codice_fiscale },
+  // Masked server-side (SENSITIVE_FIELDS), same as HKID above.
+  CH: { label: "AHV No.", get: (p) => p.complianceFields?.ahv_number },
 };
 
 export function getIdentityField(payslip) {

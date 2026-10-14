@@ -26,6 +26,8 @@ from typing import Callable, Dict, Tuple
 # Countries whose statutory workflows live in a jurisdiction service module.
 _MODULES: Dict[str, str] = {
     "HK": "app.modules.payroll.hong_kong_service",
+    "SA": "app.modules.payroll.saudi_arabia_service",
+    "NL": "app.modules.payroll.netherlands_service",
 }
 
 

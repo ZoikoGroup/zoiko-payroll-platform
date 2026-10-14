@@ -62,9 +62,10 @@ EXPECTED_CH_TABLES = {
     "payroll_ch_elm_submissions",
 }
 
-# ch_* profile columns added by LATER revisions, if any. This is the first CH
-# revision, so the set is empty — but kept for symmetry with the Italy test.
-LATER_REVISION_COLUMNS = set()
+# Columns the model declares that were added by revisions AFTER this one, so
+# this module can compare the model against what THIS migration creates.
+# CH Step 14 added ChElmSubmission.payload_xml (revision 6b5a4c3d2e1f).
+LATER_REVISION_COLUMNS = {"payload_xml"}
 
 # The four ALTERed tables, bare, as the baseline leaves them. The migration's
 # ADD COLUMN statements need these to attach to.
@@ -213,8 +214,10 @@ def test_new_table_matches_the_model_column_for_column(migrated, table, model):
     """Every column the model declares must exist in the migrated table with the
     same type and nullability. A missing column is the create_all-vs-Alembic
     split; a wrong length is a PostgreSQL truncation waiting to happen."""
+    from_model = {n: c for n, c in _model_columns(model).items()
+                  if n not in LATER_REVISION_COLUMNS}
     _assert_columns_match(
-        _migrated_columns(migrated, table), _model_columns(model), model.__name__)
+        _migrated_columns(migrated, table), from_model, model.__name__)
 
 
 def test_migration_adds_exactly_the_declared_ch_tables(migrated):

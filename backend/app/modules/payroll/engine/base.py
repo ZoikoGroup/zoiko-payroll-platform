@@ -914,6 +914,70 @@ class PayrollContext:
     it_meal_paper_count: Decimal = None
     it_meal_paper_value: Decimal = None
 
+    # ── Saudi Arabia (ZP-SA-ENG-001) — pre-resolved applicability facts ───────
+    # Resolved by the service layer from the worker's effective-dated
+    # EmployeeStatutoryProfile (sa_* columns) exactly the way
+    # sweden_*/italy_*/hk_* above are pre-resolved before dispatch.
+    # countries/saudi_arabia.py BLOCKS rather than guesses any that are missing
+    # (SA-001/SA-003/SA-004): the GOSI branch is a legal classification, never a
+    # fallback. Each is optional at the type level so every non-SA caller is
+    # unaffected.
+    sa_statutory_profile: object = None      # EmployeeStatutoryProfile | None
+    sa_organization_id: int = None
+    sa_employee_id: int = None
+    # The GOSI branch selector + the pension-system cohort the worker is on.
+    # Normally read off sa_statutory_profile; a service may pass them directly
+    # (and the profile may also carry them) — either source is accepted.
+    sa_worker_class: str = None              # SAUDI | NON_SAUDI (GCC / DOMESTIC are recorded but BLOCK)
+    sa_cohort: str = None                    # NEW | LEGACY (SAUDI only)
+    # Evidence backing the cohort assertion (national ID / GCC registration
+    # document); a cohort with no evidence BLOCKS (SA-003).
+    sa_cohort_evidence_ref: str = None
+    # The REGISTERED GOSI contributory wage for the month (spec §5, SA-011).
+    # None = derive from the pay components classified INCLUDED for GOSI
+    # (SA_EARNING_CLASS rows); an unclassified / REVIEW component blocks.
+    sa_contributory_wage: Decimal = None
+
+    # Labour & deductions (ZP-SA-ENG-001 §5/§6, SA-010). `sa_deduction_orders`
+    # is a list of plain dicts {id, type, amount, evidence_ref}; an
+    # unauthorised / over-cap order BLOCKS (never silently reduced).
+    # Overtime and hours are REPORTS only — the paid overtime amount arrives
+    # in ctx.overtime like any other earning, and overtime is EXCLUDED from
+    # the GOSI base, so neither affects the GOSI figures.
+    sa_deduction_orders: list = None
+    sa_overtime_hours: Decimal = None
+    sa_ramadan: bool = False
+    sa_work_hours_records: list = None
+    # Spec §11: approved overtime may be compensated by paid leave instead of
+    # pay only with the employee's recorded consent.
+    sa_overtime_comp_leave_consented: bool = False
+
+    # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
+    # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
+    # BLOCKS (NetherlandsCalculationBlockedError) rather than guess any that
+    # are missing; all default to None so every non-NL caller is unaffected.
+    nl_statutory_profile: object = None        # EmployeeStatutoryProfile (nl_* facts)
+    nl_organization_id: int = None
+    nl_employee_id: int = None
+    nl_payroll_period: str = None              # overrides pay_frequency for the table period
+    nl_with_tax_credit: bool = None            # signed instruction in force; None = no instruction
+    nl_tax_credit_instruction_id: int = None
+    nl_anonymous: bool = False                 # BSN missing/unverified -> anonymous rate (NL-008)
+    nl_wage_tax_table: dict = None             # {fileId, fileSha256, tableKey, rows}
+    nl_special_tax_table: dict = None          # same shape, SPECIAL_REMUNERATION file
+    nl_reference_annual_wage: Decimal = None   # special-remuneration reference wage (NL-010)
+    nl_contract: dict = None                   # contract version in force (AWf facts)
+    nl_premium_decision: dict = None           # ACTIVE employer premium decision
+    nl_vcr_before: dict = None                 # {family: committed VCR state}; {} = first period
+    nl_earnings: dict = None                   # {earning_code: amount}
+    nl_earning_classifications: dict = None    # {earning_code: classification dict}
+    nl_company_cars: list = None
+    nl_expat_decision: dict = None
+    nl_pension_scheme: dict = None
+    nl_sickness: dict = None                   # {first_sick_day, policy}
+    nl_period_hours: Decimal = None            # paid hours; None = contract hours
+    nl_vacation_balance_before: Decimal = None
+
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
     # affects a figure. None means "caller didn't supply one," in which
@@ -1478,6 +1542,52 @@ class PayrollResult:
     it_ytd_after: dict = None
     it_employee_total: Decimal = Decimal("0")
     it_calculation_trace: dict = None
+    # Switzerland (CH spec): the whole dict countries/switzerland.py returns
+    # (lines, totals, ch_calculation_trace) — one field rather than ~40, read
+    # by switzerland_service.ch_payslip_snapshot / post_ch_payslip_ytd. None
+    # for every other country.
+    ch_result: dict = None
+
+    # ── Switzerland (CH spec) ──────────────────────────────────────────────────
+    # Federal social insurance contributions (AHV/IV/EO/ALV).
+    ch_ahv_employee: Decimal = Decimal("0")
+    ch_ahv_employer: Decimal = Decimal("0")
+    ch_iv_employee: Decimal = Decimal("0")
+    ch_iv_employer: Decimal = Decimal("0")
+    ch_eo_employee: Decimal = Decimal("0")
+    ch_eo_employer: Decimal = Decimal("0")
+    ch_alv_employee: Decimal = Decimal("0")
+    ch_alv_employer: Decimal = Decimal("0")
+    # Compensation office admin cost (employer only).
+    ch_admin_cost_employer: Decimal = Decimal("0")
+    # Employee total (AHV+IV+EO+ALV employee shares) — deducted from gross.
+    ch_employee_total: Decimal = Decimal("0")
+    # Employer total (AHV+IV+EO+ALV employer shares + admin cost).
+    ch_employer_total: Decimal = Decimal("0")
+    # Family allowances (FAK federal minimums) — ADDED to net pay.
+    ch_family_allowance_total: Decimal = Decimal("0")
+    ch_fak_child_total: Decimal = Decimal("0")
+    ch_fak_education_total: Decimal = Decimal("0")
+    # Snapshot / trace (lines, bases, accumulators, hashes).
+    ch_calculation_trace: dict = None
+
+    # ── Saudi Arabia (ZP-SA-ENG-001) ───────────────────────────────────────────
+    # The whole dict countries/saudi_arabia.py returns (branch breakdown,
+    # totals, sa_calculation_trace) — one field rather than ~20, read by
+    # saudi_arabia_service.sa_payslip_snapshot / post_sa_payslip_ytd. None for
+    # every other country.
+    sa_result: dict = None
+    # Employer-only Occupational Hazards (2%) contribution — its own line
+    # (SANED maps to the generic social-security slots, pension to the
+    # employee/employer pension slots). 0 for every non-SA country.
+    employer_occupational_hazard: Decimal = Decimal("0")
+
+    # Netherlands (ZP-NL-ENG-001) — the whole dict countries/netherlands.py
+    # returns under 'nl_result' key (wage_tax, employee_insurance, whk, zvw,
+    # wkr, car_addition, labor_pay, net_pay, employer_cost, pack, parameters,
+    # minimum_wage_hourly, period_maximum, status, errors, warnings).
+    # None for every non-NL country.
+    nl_result: dict = None
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through

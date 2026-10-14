@@ -247,10 +247,35 @@ function Sweden() {
   );
 }
 
+// Switzerland — square (1:1) red field with an upright white cross, centered
+// in this landscape viewBox the same "recognizable, not vexillographic"
+// convention as every flag above.
+function Switzerland() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect x="4" width="16" height="16" fill="#D52B1E" />
+      <rect x="9.5" y="3" width="5" height="10" fill="#fff" />
+      <rect x="7" y="5.5" width="10" height="5" fill="#fff" />
+    </svg>
+  );
+}
+
+// Netherlands — horizontal tricolour, red / white / blue.
+function Netherlands() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="5.34" fill="#AE1C28" />
+      <rect y="5.33" width="24" height="5.34" fill="#fff" />
+      <rect y="10.67" width="24" height="5.33" fill="#21468B" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
-PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong,
+PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
+  NL: Netherlands,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

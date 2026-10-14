@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronDown, Loader2, RotateCcw } from "lucide-react";
+import { X, ChevronDown, Loader2, RotateCcw, ListTree } from "lucide-react";
 import { getRunById, getRunItems, getRunLeaveSummary, recalculateEmployeePayslip } from "../../../service/payrollService";
 import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
@@ -9,6 +9,7 @@ import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
 import HKRunPreflightPanel from "./HKRunPreflightPanel";
 import HKCorrectionRequestPanel from "./HKCorrectionRequestPanel";
+import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDrawer";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -274,8 +275,11 @@ function AttendanceLeaveBlock({ item, leave }) {
 function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculated }) {
   const [open, setOpen] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
   const { addToast } = useToast();
   const canRecalculate = EDITABLE_STATUSES.includes(runStatus);
+  // Switzerland: the engine's own statutory lines, frozen on the payslip
+  const chSnapshot = (item.country || item.countryCode) === "CH" ? item.chCalculationSnapshot : null;
 
   async function handleRecalculate(e) {
     e.stopPropagation();
@@ -328,7 +332,17 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
       {open && (
         <tr className="bg-background">
           <td colSpan={BREAKDOWN_COLUMNS.length} className="px-5 py-4">
-            <div className="flex items-center justify-end mb-3">
+            <div className="flex items-center justify-end gap-2 mb-3">
+              {chSnapshot?.trace && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setTraceOpen(true); }}
+                  className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-[10px] border border-border text-foreground transition-all duration-200 hover:border-primary hover:text-primary"
+                >
+                  <ListTree size={13} />
+                  Statutory trace
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleRecalculate}
@@ -342,6 +356,8 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
             </div>
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
+            <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
+              title={`Statutory trace — ${item.employee}`} subtitle="Switzerland · as frozen on this payslip" currency="CHF" />
           </td>
         </tr>
       )}

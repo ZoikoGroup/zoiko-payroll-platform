@@ -30,7 +30,10 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, hong_kong, india, singapore, sweden, uk, us
+from app.modules.payroll.engine.countries import (
+    australia, canada, germany, hong_kong, india, italy, netherlands,
+    saudi_arabia, singapore, sweden, switzerland, uk, us,
+)
 from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
@@ -44,6 +47,13 @@ _MODULES = {
     "singapore": singapore,
     "hong_kong": hong_kong,
     "sweden": sweden,
+    "switzerland": switzerland,
+    # Italy was referenced by the IT registry rows below but never listed here,
+    # which would make get_engine_fallback_inventory() raise KeyError on the
+    # Super Admin viewer. Added alongside SA (same one-line fix).
+    "italy": italy,
+    "saudi_arabia": saudi_arabia,
+    "netherlands": netherlands,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -323,6 +333,90 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_FIXED_PCT", "label": "TFR Revaluation — Fixed Part", "resolverKey": "it_tfr_revaluation_fixed_pct", "side": "employer", "note": "NO FALLBACK — 1.5% a year, pro-rated by month (§13 / c.c. art. 2120)."},
     {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_ISTAT_SHARE", "label": "TFR Revaluation — Share of ISTAT FOI Increase", "resolverKey": "it_tfr_revaluation_istat_share", "side": "employer", "note": "NO FALLBACK — 75% of the ISTAT FOI increase (§13); the index itself is authority data supplied per run."},
     {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_TAX_PCT", "label": "TFR Revaluation — Substitute Tax", "resolverKey": "it_tfr_revaluation_tax_pct", "side": "employee", "note": "NO FALLBACK — 17%, pending G1 review."},
+
+    # ── Switzerland ──────────────────────────────────────────────────────────
+    # Fail-closed from day one (CH spec + shared.py's _VALIDATION_ENABLED_COUNTRIES):
+    # every constant below is None — listed so the readiness check knows which
+    # keys a Swiss federal pack must configure. Switzerland has NO engine fallback;
+    # a missing row BLOCKS the calculation. Canton-scaffold keys are not registered
+    # here (they are inert NULL rows on canton packs until the canton publishes).
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal AHV Rate (Employee/Employer)", "resolverKey": "ch_ahv", "side": "employee", "note": "NO FALLBACK — federal AHV 8.7% (4.35%/4.35%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal IV Rate (Employee/Employer)", "resolverKey": "ch_iv", "side": "employee", "note": "NO FALLBACK — federal IV 1.4% (0.70%/0.70%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal EO Rate (Employee/Employer)", "resolverKey": "ch_eo", "side": "employee", "note": "NO FALLBACK — federal EO 0.5% (0.25%/0.25%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Federal ALV Rate (Employee/Employer)", "resolverKey": "ch_alv", "side": "employee", "note": "NO FALLBACK — federal ALV 2.2% (1.10%/1.10%) from Active CH-PAYROLL-2026 pack; a missing row BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "ALV Max Insured Annual Salary", "resolverKey": "ch_alv_ceiling", "note": "NO FALLBACK — CHF 148,200 from Active federal pack; ALV cap with YTD accumulator."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Compensation Office Admin Cost %", "resolverKey": "N/A — ch_admin_cost_pct (not a federal-pack row: read from LIVE COMPENSATION_OFFICE scheme rules; enforced by switzerland_service.resolve_ch_calc_inputs / the engine)", "side": "employer", "note": "NO FALLBACK — from LIVE COMPENSATION_OFFICE scheme rules; employer-only line."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "ALV Proration Method", "resolverKey": "N/A — ch_alv_proration_rule (not a federal-pack row: read from switzerland_content.CH_ALV_PRORATION_RULE; enforced by switzerland_service.resolve_ch_calc_inputs / the engine)", "note": "NO FALLBACK — 'monthly' or 'annual' from content rule; determines cap tracking."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "FAK Federal Child Minimum (Monthly)", "resolverKey": "ch_fak_child_min", "note": "NO FALLBACK — CHF 215 from Active federal pack; added to net pay."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "FAK Federal Education Minimum (Monthly)", "resolverKey": "ch_fak_education_min", "note": "NO FALLBACK — CHF 268 from Active federal pack; added to net pay."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "BVG Entry Threshold (Annual)", "resolverKey": "ch_bvg_entry_threshold", "note": "NO FALLBACK — BVG Eintrittsschwelle CHF 22,680 (2026) from Active federal pack; annual salary at/above it and age 17+ makes a worker BVG-insured."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "BVG Coordination Deduction (Annual)", "resolverKey": "ch_bvg_coordination_deduction", "note": "NO FALLBACK — BVG Koordinationsabzug CHF 26,460 (2026) from Active federal pack; deducted from annual salary for the coordinated (insured) salary."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "BVG Upper Insurable Salary (Annual)", "resolverKey": "ch_bvg_upper_salary", "note": "NO FALLBACK — max mandatory-BVG annual insurable salary CHF 90,720 (2026) from Active federal pack; compensation above it is only insurable via EXTRA_MANDATORY."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "BVG Minimum Coordinated Salary (Annual)", "resolverKey": "ch_bvg_min_coordinated", "note": "NO FALLBACK — statutory minimum coordinated salary CHF 3,780 (2026) from Active federal pack; a low coordinated result is floored here."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "UVG Max Insured Annual Salary", "resolverKey": "ch_uvg_ceiling", "note": "NO FALLBACK — statutory UVG ceiling from Active federal pack; BU and NBU insured earnings capped via the CH_UVG YTD accumulator."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "NBU Minimum Weekly Working Hours", "resolverKey": "ch_nbu_min_weekly_hours", "note": "NO FALLBACK — from Active federal pack (8 h/week); NBU applies only when the worker's weekly working time meets it."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "QST Model (MONTHLY/ANNUAL)", "resolverKey": "N/A — ch_qst_model (not a federal-pack row: read from the QST canton pack; enforced by switzerland_service.resolve_ch_calc_inputs / the engine)", "side": "employee", "note": "NO FALLBACK — canton pack ch_qst_model picks the MONTHLY or ANNUAL strategy the QST engine uses; a missing/unknown model BLOCKS."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "QST Tariff File (ACTIVE canton file)", "resolverKey": "N/A — ch_qst_tariff_file_id (not a federal-pack row: read from the QST canton pack; enforced by switzerland_service.resolve_ch_calc_inputs / the engine)", "side": "employee", "note": "NO FALLBACK — the service research lookup_qst_rate against the canton's ACTIVE tariff file and passes the row (rate/min_tax/row_id) in ctx; a SUPERSEDED file replays by id but is never used for a new period."},
+    {"country": "CH", "module": "switzerland", "attr": "CH_PARAMETER_KEYS", "label": "Swiss Rounding Rule", "resolverKey": "ch_rounding_rule", "note": "NO FALLBACK — nearest CHF 0.05 (5 Rappen) from Active federal pack."},
+
+    # ── Saudi Arabia ─────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-SA-ENG-001 §30 + shared.py's
+    # _VALIDATION_ENABLED_COUNTRIES): every constant is None — listed so the
+    # readiness check knows which scalar keys a Saudi pack must configure. The
+    # GOSI branch rows (rule_type="SA_GOSI_BRANCH") and may not be represented
+    # by a scalar key: saudi_arabia.py validates them at calculation time (an
+    # unconfigured worker class / branch / cohort BLOCKS — SA-002), so a
+    # national-key requirement would invite the generic fallback SA forbids.
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_RATE_SELECTION_BASIS", "label": "GOSI Rate Selection in a Contribution Month (SA-007)", "resolverKey": "sa_rate_selection_basis", "note": "NO FALLBACK — PENDING_G1 until signed; a month in which a branch rate changes BLOCKS while unsigned."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_GOSI_BELOW_MIN_BEHAVIOUR", "label": "GOSI Wage Below Branch Minimum (BLOCK/FLOOR)", "resolverKey": "sa_gosi_below_min_behaviour", "note": "NO FALLBACK — SA-010; a missing row BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "SA_PARAMETER_KEYS", "label": "SAR Rounding Mode (HALF_UP/DOWN/UP)", "resolverKey": "sa_rounding_mode", "note": "NO FALLBACK — SA-009 per-branch rounding; a missing row BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "SA_PARAMETER_KEYS", "label": "SAR Rounding Precision (decimals)", "resolverKey": "sa_rounding_precision", "note": "NO FALLBACK — SA-009 per-branch rounding; a missing row BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_NORMAL_HOURS_DAILY", "label": "Normal Daily Working Hours", "resolverKey": "sa_normal_hours_daily", "required": False, "note": "NO FALLBACK — spec §11; consumed by the hours check."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_NORMAL_HOURS_WEEKLY", "label": "Normal Weekly Working Hours", "resolverKey": "sa_normal_hours_weekly", "required": False, "note": "NO FALLBACK — spec §11; consumed by the hours check."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_RAMADAN_HOURS_DAILY", "label": "Ramadan Daily Working Hours", "resolverKey": "sa_ramadan_hours_daily", "required": False, "note": "NO FALLBACK — spec §11 reduced-hours window."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_RAMADAN_HOURS_WEEKLY", "label": "Ramadan Weekly Working Hours", "resolverKey": "sa_ramadan_hours_weekly", "required": False, "note": "NO FALLBACK — spec §11 reduced-hours window."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_OVERTIME_BASIC_PREMIUM_PCT", "label": "Overtime Premium (% of basic hourly wage)", "resolverKey": "sa_overtime_basic_premium_pct", "side": "employee", "required": False, "note": "NO FALLBACK — spec §11; approved overtime BLOCKS while missing."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_MONTHLY_HOURS_DIVISOR", "label": "Monthly Hours Divisor for Hourly Wage", "resolverKey": "sa_monthly_hours_divisor", "required": False, "note": "NO FALLBACK — PENDING_G1 (not stated by the spec); approved overtime BLOCKS while missing."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_LOAN_CAP_PCT", "label": "Employer Loan Recovery Cap (% of wage)", "resolverKey": "sa_loan_cap_pct", "side": "employee", "note": "NO FALLBACK — spec §11 (10%); a LOAN deduction BLOCKS while missing."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_DAMAGE_CAP_PCT", "label": "Damage Recovery Monthly Cap (% of wage)", "resolverKey": "sa_damage_cap_pct", "side": "employee", "required": False, "note": "NO FALLBACK — spec §11 special limit, value not stated — a DAMAGE deduction BLOCKS until G1 supplies it."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_AGGREGATE_DEDUCTION_CAP_PCT", "label": "Total Deductions Cap (% of due wage)", "resolverKey": "sa_aggregate_deduction_cap_pct", "side": "employee", "note": "NO FALLBACK — spec §11 (50%); a breach BLOCKS."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_GOSI_DUE_DAY", "label": "GOSI Payment Due Day of Following Month", "resolverKey": "sa_gosi_due_day", "required": False, "note": "NO FALLBACK — SA-022 remittance schedule, not a monthly-engine read."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_FIRST_5_YEARS_MONTHS", "label": "EOS — Months per Year, First 5 Years", "resolverKey": "sa_eos_first_5_years_months", "required": False, "note": "NO FALLBACK — spec §13 (0.5); consumed by eos.eos_award."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_AFTER_5_YEARS_MONTHS", "label": "EOS — Months per Year, After 5 Years", "resolverKey": "sa_eos_after_5_years_months", "required": False, "note": "NO FALLBACK — spec §13 (1.0); consumed by eos.eos_award."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_UNDER_2", "label": "EOS on Resignation — Under 2 Years", "resolverKey": "sa_eos_resign_frac_under_2", "required": False, "note": "NO FALLBACK — spec §13 (0); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_2_TO_5", "label": "EOS on Resignation — 2 to 5 Years", "resolverKey": "sa_eos_resign_frac_2_to_5", "required": False, "note": "NO FALLBACK — spec §13 (1/3); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_5_TO_10", "label": "EOS on Resignation — Over 5, Under 10 Years", "resolverKey": "sa_eos_resign_frac_5_to_10", "required": False, "note": "NO FALLBACK — spec §13 (2/3); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_EOS_RESIGN_FRAC_10_PLUS", "label": "EOS on Resignation — 10+ Years", "resolverKey": "sa_eos_resign_frac_10_plus", "required": False, "note": "NO FALLBACK — spec §13 (1); exact fraction in text_value."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_SETTLEMENT_DEADLINE_TERMINATION_DAYS", "label": "Final Settlement Deadline — Employer Termination (days)", "resolverKey": "sa_settlement_deadline_termination_days", "required": False, "note": "NO FALLBACK — spec §13 (7)."},
+    {"country": "SA", "module": "saudi_arabia", "attr": "_SA_SETTLEMENT_DEADLINE_RESIGNATION_DAYS", "label": "Final Settlement Deadline — Worker Termination (days)", "resolverKey": "sa_settlement_deadline_resignation_days", "required": False, "note": "NO FALLBACK — spec §13 (14)."},
+
+    # ── Netherlands ──────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-NL-ENG-001): every constant is None — listed
+    # so the readiness check knows which scalar keys a Netherlands pack must
+    # configure. The NL engine (engine/countries/netherlands.py) BLOCKS when a
+    # required key is missing from the active pack (no engine fallback). The
+    # NL-PAYROLL-2026 pack seeds ContributionRate/TaxSlab rows from
+    # netherlands_content.py; a missing row raises NLBlock.
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "AWf — Low Rate (written indefinite contract)", "resolverKey": "nl_awf_low_pct", "side": "employer", "note": "NO FALLBACK — spec §6 (2.74%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "AWf — High Rate", "resolverKey": "nl_awf_high_pct", "side": "employer", "note": "NO FALLBACK — spec §6 (7.74%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Aof — Low Rate (small employer)", "resolverKey": "nl_aof_low_pct", "side": "employer", "note": "NO FALLBACK — spec §6 (6.27%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Aof — High Rate (large employer)", "resolverKey": "nl_aof_high_pct", "side": "employer", "note": "NO FALLBACK — spec §6 (7.63%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Wko Surcharge", "resolverKey": "nl_wko_pct", "side": "employer", "note": "NO FALLBACK — spec §6 (0.50%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Zvw — Employer Levy", "resolverKey": "nl_zvw_employer_pct", "side": "employer", "note": "NO FALLBACK — spec §7 (6.10%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Zvw — Employee Contribution", "resolverKey": "nl_zvw_employee_pct", "side": "employee", "note": "NO FALLBACK — spec §7 (4.85%); a missing row BLOCKS."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Anonymous-Person Withholding Rate", "resolverKey": "nl_anonymous_rate_pct", "side": "employee", "note": "NO FALLBACK — spec §3 (52%); used when the BSN is missing (NL-008)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Vacation Allowance — Statutory Minimum %", "resolverKey": "nl_vacation_allowance_pct", "side": "employee", "note": "NO FALLBACK — spec §4/§14 (8%); NL-009."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Sick Pay — Statutory Minimum %", "resolverKey": "nl_sick_pay_pct", "side": "employee", "required": False, "note": "NO FALLBACK — spec §14 (70%); read only when a sickness event is in the period (NL-042)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Expat Facility — Maximum %", "resolverKey": "nl_expat_max_facility_pct", "side": "employee", "required": False, "note": "NO FALLBACK — spec §9 (30%); read only with a VERIFIED decision (NL-026)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Expat Facility — Salary Threshold", "resolverKey": "nl_expat_salary_threshold", "required": False, "note": "NO FALLBACK — spec §9 (EUR 48,013)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Expat Facility — Under-30 Master Threshold", "resolverKey": "nl_expat_salary_threshold_young_master", "required": False, "note": "NO FALLBACK — spec §9 (EUR 36,497)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Expat Facility — Maximum Allowance", "resolverKey": "nl_expat_allowance_cap", "required": False, "note": "NO FALLBACK — spec §9 (EUR 78,600)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "WNT Cap", "resolverKey": "nl_wnt_cap", "required": False, "note": "NO FALLBACK — spec §9 (EUR 262,000)."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Transition Payment — Cap", "resolverKey": "nl_transition_payment_cap", "required": False, "note": "NO FALLBACK — spec §14 (EUR 102,000 or one annual salary); termination workflow only."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Transition Payment — Months per Service Year", "resolverKey": "nl_transition_payment_month_frac", "required": False, "note": "NO FALLBACK — exact fraction (1/3) in text_value; termination workflow only."},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Wage-Tax Tables (white / special / derivation)", "resolverKey": "N/A — ACTIVE payroll_nl_tax_table_files rows (gate G1); a missing table BLOCKS the payslip", "note": ""},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Whk (WGA / ZW-flex)", "resolverKey": "N/A — employer-specific ACTIVE premium decision, never a pack rate (NL-017)", "note": ""},
+    {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "VCR Period Maxima / Minimum Wage / WKR Bands / Car Addition", "resolverKey": "N/A — NL_PERIOD_MAX / NL_MIN_WAGE / NL_WKR_BAND / NL_CAR_ADDITION TaxSlab rows; a missing row BLOCKS", "note": ""},
 ]
 
 

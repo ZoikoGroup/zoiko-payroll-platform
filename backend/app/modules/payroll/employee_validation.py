@@ -1297,6 +1297,151 @@ class CHEmployeeValidation(EmployeeValidationStrategy):
                                       "employee's AHV insurance card (AHV-Ausweis).")
 
 
+def sa_national_id_is_valid(value: str) -> bool:
+    """Saudi National ID — 10 digits, mod-10 check digit (Luhn variant).
+    Format: 10 digits. Weights: 2,1,2,1,2,1,2,1,2 from right to left
+    (positions 9..1). Double each, sum digits, total % 10 == 0."""
+    raw = re.sub(r"[\s-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{10}", raw):
+        return False
+    digits = [int(d) for d in raw]
+    total = 0
+    for i in range(9):
+        d = digits[i]
+        if (9 - i) % 2 == 1:  # odd position from right (weights 2,1,2,1...)
+            d = d * 2
+            if d > 9:
+                d = d - 9
+        total += d
+    check = (10 - (total % 10)) % 10
+    return check == digits[9]
+
+
+def sa_iban_mod97_valid(value: str) -> bool:
+    """Saudi IBAN — SA + 22 alphanumeric (2 country + 2 check + 18 BBAN).
+    Standard ISO 13616 mod-97 validation."""
+    raw = re.sub(r"[\s-]", "", str(value or "").upper())
+    if not re.fullmatch(r"SA\d{22}", raw):
+        return False
+    # Move first 4 chars to end: SA + 2 check -> end
+    rearranged = raw[4:] + raw[:4]
+    # Convert letters to numbers (A=10, B=11, ... Z=35)
+    numeric = ""
+    for ch in rearranged:
+        if ch.isdigit():
+            numeric += ch
+        else:
+            numeric += str(ord(ch) - 55)
+    # Compute mod 97
+    remainder = 0
+    for ch in numeric:
+        remainder = (remainder * 10 + int(ch)) % 97
+    return remainder == 1
+
+
+def sa_iqama_is_valid(value: str) -> bool:
+    """Saudi Iqama (resident permit) — 10 digits, same mod-10 as National ID.
+    Format: 2xxxxxxxxx (starts with 2 for residents)."""
+    raw = re.sub(r"[\s-]", "", str(value or ""))
+    if not re.fullmatch(r"2\d{9}", raw):
+        return False
+    return sa_national_id_is_valid(raw)
+
+
+class SAEmployeeValidation(EmployeeValidationStrategy):
+    """Saudi Arabia (ZP-SA-ENG-001) — National ID / Iqama + IBAN.
+
+    National ID (10 digits, mod-10) for Saudi citizens; Iqama (10 digits,
+    starts with 2, same mod-10) for residents. Both are SENSITIVE — masked
+    in API responses. The duplicate check uses national_id_iqama.
+    IBAN (SA + 22 chars) is validated via standard mod-97; stored in
+    compliance_fields, not the top-level bank_account column."""
+    country_code = "SA"
+    duplicate_field = "national_id_iqama"
+    SENSITIVE_FIELDS = ("national_id_iqama", "iban")
+    FIELD_SPECS = {
+        "national_id_iqama": {
+            "required": True,
+            "pattern": re.compile(r"^(?:\d{10}|2\d{9})$"),
+            "error": "National ID (10 digits) or Iqama (10 digits starting with 2) is required.",
+        },
+        "identity_type": {
+            "required": True,
+            "choices": ["NATIONAL_ID", "IQAMA"],
+            "error": "identity_type must be NATIONAL_ID or IQAMA.",
+        },
+        "iban": {
+            "pattern": re.compile(r"^SA\d{22}$"),
+            "error": "Saudi IBAN must be SA + 22 digits (e.g. SA1234567890123456789012).",
+        },
+        # Bank routing for Saudi (bank_routing.ROUTING_FIELDS["SA"]): SAMA
+        # clearing code (4 digits) + branch code (3 digits) + account (12-18).
+        "bank_code": {"pattern": re.compile(r"^\d{4}$"), "error": "SAMA clearing code must be 4 digits."},
+        "branch_code": {"pattern": re.compile(r"^\d{3}$"), "error": "Branch code must be 3 digits."},
+        "account_number": {"pattern": re.compile(r"^\d{12,18}$"), "error": "Account number must be 12–18 digits."},
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        nid = cleaned.get("national_id_iqama")
+        id_type = cleaned.get("identity_type")
+        if nid and id_type:
+            if id_type == "NATIONAL_ID" and not sa_national_id_is_valid(nid):
+                raise BadRequestException(f"National ID {nid!r} fails the mod-10 check digit.")
+            if id_type == "IQAMA" and not sa_iqama_is_valid(nid):
+                raise BadRequestException(f"Iqama {nid!r} fails the mod-10 check digit (must start with 2).")
+        iban = cleaned.get("iban")
+        if iban and not sa_iban_mod97_valid(iban):
+            raise BadRequestException(f"IBAN {iban!r} fails the mod-97 validation.")
+
+
+def bsn_is_valid(value: str) -> bool:
+    """Dutch BSN (Burgerservicenummer) — 9 digits validated by the
+    "elfproef" (eleven-test): sum(digit_i x weight_i) mod 11 == 0, with
+    weights 9,8,7,6,5,4,3,2,-1 (the ninth digit carries weight -1). Refuses
+    every other shape — a BSN is exactly 9 digits; the 8-digit written form is
+    not accepted here."""
+    raw = re.sub(r"[\s.-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{9}", raw):
+        return False
+    total = sum(int(d) * w for d, w in zip(raw, (9, 8, 7, 6, 5, 4, 3, 2, -1)))
+    return total % 11 == 0
+
+
+class NLEmployeeValidation(EmployeeValidationStrategy):
+    """Netherlands (ZP-NL-ENG-001) — BSN.
+
+    The BSN is validated in shape AND the elfproef, because a wrong one breaks
+    the loonaangifte / UWV Polisadministratie linkage and the jaaropgaaf — a
+    typo must be caught at entry against the identity document, never at the
+    first payroll return. It is SENSITIVE (masked in API responses) and the
+    duplicate-check key. No income-tax amount or tax-credit figure is captured
+    here: loonheffingskorting is a signed, effective-dated employee
+    instruction resolved against the wage-tax tables (NL-006/NL-031), and every
+    2026 statutory rate lives on the NL-PAYROLL-2026 canonical pack — never an
+    editable employee field. Bank details (IBAN/BIC) are handled by the
+    bank-routing layer, not this strategy (see the base class note on
+    SENSITIVE_FIELDS)."""
+    country_code = "NL"
+    duplicate_field = "bsn"
+    SENSITIVE_FIELDS = ('bsn',)
+    FIELD_SPECS = {
+        "bsn": {
+            "required": True,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "BSN must be the 9-digit Burgerservicenummer.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        n = cleaned.get("bsn")
+        if n and not bsn_is_valid(n):
+            raise BadRequestException("BSN fails the elfproef (eleven-test) check — check the "
+                                      "number against the employee's identity document.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1319,6 +1464,8 @@ _STRATEGIES = {
     "SE": SEEmployeeValidation,
     "IT": ITEmployeeValidation,
     "CH": CHEmployeeValidation,
+    "SA": SAEmployeeValidation,
+    "NL": NLEmployeeValidation,
 }
 
 

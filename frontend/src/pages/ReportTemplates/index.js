@@ -26,6 +26,8 @@ export { default as SGReportTemplatesPage } from "./SGReportTemplatesPage";
 export { default as HKReportTemplatesPage } from "./HKReportTemplatesPage";
 // Sweden (ZP-SE-ENG-001) — AGI individual-statement data extract.
 export { default as SEReportTemplatesPage } from "./SEReportTemplatesPage";
+// Switzerland (ZP-CH-PAYROLL-001) — per-employee Lohnausweis + ELM envelopes.
+export { default as CHReportTemplatesPage } from "./CHReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -56,4 +58,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   SG: "singapore",
   HK: "hong-kong",
   SE: "sweden",
+  CH: "switzerland",
 };
