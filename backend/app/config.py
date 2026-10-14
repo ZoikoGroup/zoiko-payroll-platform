@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     LOCAL_MAIL_SANDBOX_ENABLED: bool = False
     LOCAL_MAIL_SANDBOX_HOST: str = "127.0.0.1"
     LOCAL_MAIL_SANDBOX_PORT: int = 1025
+
+    # G5 F-6: audit rows are append-only. Organisation hard-delete purges that
+    # organisation's configuration / auth audit rows only while this is true
+    # (the previous behaviour, kept as the default). OPEN decision for
+    # Security and counsel (sign-off packets 03 / 04); false refuses the delete.
+    AUDIT_PURGE_ON_ORG_HARD_DELETE: bool = True
     # Optional public https URL of the email logo (a hosted copy of
     # app/email_assets/zoikopayroll-logo-email.png). Empty (default): the logo
     # is embedded in every message as an inline CID image, so it renders even

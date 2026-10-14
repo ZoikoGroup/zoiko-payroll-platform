@@ -166,8 +166,10 @@ def test_alembic_heads_is_single_head():
     # M1-M7): a straight single-child chain from c7d3e8f1a2b4, so no new branchpoint.
     # 8b14824fb575 (2026-10-13, HK launch readiness controls): additive; written
     # on b08f04497195 and re-parented onto main's 2f905bb1c296 when main was
-    # merged into nikhil (2026-10-14), so the chain stays linear — single head.
-    assert heads == ["8b14824fb575"]
+    # merged into nikhil (2026-10-14), so the chain stays linear.
+    # d1e5a7c3b9f2 (2026-10-14, G5 F-5/F-6): auth audit table + append-only
+    # audit triggers; additive, single child of 8b14824fb575 — single head.
+    assert heads == ["d1e5a7c3b9f2"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -179,7 +181,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["8b14824fb575"]
+    assert list(script.get_heads()) == ["d1e5a7c3b9f2"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -214,7 +216,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 190   # + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
+    assert len(revs) == 191   # + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
 
 
 def test_germany_head_chain_wiring_is_intact():

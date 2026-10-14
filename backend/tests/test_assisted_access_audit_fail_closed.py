@@ -98,10 +98,9 @@ def test_completion_row_carries_the_intent_id_and_gaps_raise_a_security_alert(db
     assert len(completion) == 1 and completion[0].payload["intent_id"] == done.state.assisted_intent_id
 
     assert svc.assisted_audit_gap_alerts(db) == []                            # inside the grace period
-    old = datetime.utcnow() - timedelta(minutes=30)
-    for e in db.query(AssistedAccessAuditEvent).filter(AssistedAccessAuditEvent.assisted_access_session_id == s.id):
-        e.recorded_at = old
-    db.commit()
+    # Audit rows are append-only (G5 F-6), so move the clock instead of the rows.
+    later = datetime.utcnow() + timedelta(minutes=30)
+    monkeypatch.setattr(svc, "_now", lambda: later)
     gaps = svc.assisted_audit_gap_alerts(db)
     assert gaps == [{"session_id": s.id, "unmatched_starts": 1, "first_event_id": missing.state.assisted_intent_id}]
 

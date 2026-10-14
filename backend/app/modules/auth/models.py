@@ -178,3 +178,28 @@ class AuthEmailEvent(Base):
 
     def __repr__(self):
         return f"<AuthEmailEvent id={self.id} event_type={self.event_type} outcome={self.outcome} recipient={self.recipient_email}>"
+
+
+class AuthAuditEvent(Base):
+    """G5 F-5: append-only login / authentication audit (immutable, F-6).
+
+    Never stores a password or token. An email that matches no account is kept
+    only as a SHA-256 (`email_sha256`), so typos of other people's addresses are
+    not collected in clear."""
+
+    __tablename__ = "auth_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    occurred_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    event_type = Column(String(40), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    organization_id = Column(Integer, nullable=True, index=True)
+    email_sha256 = Column(String(64), nullable=True)
+    reason = Column(String(80), nullable=True)
+    client_address = Column(String(64), nullable=True)
+    user_agent = Column(String(300), nullable=True)
+
+
+from app.core import audit_immutability as _audit_immutability  # noqa: E402
+
+_audit_immutability.register(Base.metadata)
