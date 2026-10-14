@@ -1033,14 +1033,19 @@ def test_wage_payment_timing_uses_the_pack_row_and_the_termination_rule(db, pack
     assert (on_time["daysAllowed"], on_time["latestPaymentDate"], on_time["onTime"]) == (7, "2026-06-07", True)
     late = pf.wage_payment_timing(date(2026, 6, 8), pe, rate_map)
     assert (late["latestPaymentDate"], late["daysUsed"], late["onTime"]) == ("2026-06-07", 8, False)
-    leaving = pf.wage_payment_timing(date(2026, 6, 30), pe, rate_map, date(2026, 6, 30))
-    assert leaving["terminationTriggered"] and leaving["terminationImmediateDue"]
+    # Final period (D-B, Concise Guide ch.9): termination payments within the pack's
+    # eo_termination_payment_days after the termination date, not "immediately".
+    leaving = pf.wage_payment_timing(date(2026, 5, 31), pe, rate_map, date(2026, 5, 26))
+    assert leaving["terminationTriggered"] and (leaving["latestPaymentDate"], leaving["onTime"]) == ("2026-06-02", True)
+    assert leaving["source"]["componentKey"] == "eo_termination_payment_days"
+    later = pf.wage_payment_timing(date(2026, 6, 7), pe, rate_map, date(2026, 6, 30))   # leaves after this period
+    assert not later["terminationTriggered"] and later["latestPaymentDate"] == "2026-06-07"
     # The source is the pack row, so the disclosure names the artifact.
     assert on_time["source"]["componentKey"] == "eo_wage_payment_days"
     assert on_time["source"]["sourceDocumentId"]
 
 
-def test_wage_payment_late_blocks_and_a_leaver_requires_immediate_payment(db, packs):
+def test_wage_payment_late_blocks_and_a_late_final_payment_blocks(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong import preflight as pf
 
     rate_map, _slabs, _pack = _inputs(db, date(2026, 6, 30))
@@ -1049,9 +1054,11 @@ def test_wage_payment_late_blocks_and_a_leaver_requires_immediate_payment(db, pa
     assert "2026-06-07" in late[0]["message"]
     ok = pf.wage_payment_checks(_emp(), date(2026, 6, 5), date(2026, 5, 31), rate_map)
     assert [c["code"] for c in ok] == ["EO_WAGE_PAYMENT_TIMING"] and ok[0]["severity"] == pf.INFO
-    leaver = pf.wage_payment_checks(_emp(), date(2026, 6, 5), date(2026, 5, 31), rate_map, date(2026, 6, 4))
-    assert [c["code"] for c in leaver] == ["EO_TERMINATION_WAGES_DUE_IMMEDIATELY"]
-    assert leaver[0]["severity"] == pf.BLOCK
+    leaver = pf.wage_payment_checks(_emp(), date(2026, 6, 5), date(2026, 5, 31), rate_map, date(2026, 5, 20))
+    assert [c["code"] for c in leaver] == ["EO_TERMINATION_PAYMENT_LATE"]          # due by 27 May
+    assert leaver[0]["severity"] == pf.BLOCK and "2026-05-27" in leaver[0]["action"]
+    on_time = pf.wage_payment_checks(_emp(), date(2026, 5, 31), date(2026, 5, 31), rate_map, date(2026, 5, 28))
+    assert [c["code"] for c in on_time] == ["EO_TERMINATION_PAYMENT_TIMING"] and on_time[0]["severity"] == pf.INFO
 
 
 def test_preflight_missing_hkid_blocks_but_a_passport_is_enough():

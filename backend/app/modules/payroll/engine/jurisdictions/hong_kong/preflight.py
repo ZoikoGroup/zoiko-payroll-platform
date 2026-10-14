@@ -85,21 +85,33 @@ def pack_checks(rate_map: dict) -> list:
 
 def wage_payment_timing(pay_date: date, period_end: date, rate_map: dict,
                         termination: date = None) -> dict:
-    """Employment Ordinance s.25: wages are due NOT LATER THAN SEVEN DAYS after
-    the end of the wage period, and on termination the residual wages fall due
-    IMMEDIATELY. The 7 comes from the pack row eo_wage_payment_days.
+    """When this run's wages must be paid (Employment Ordinance s.25).
+
+    * Ordinary wage period: wages are due at the end of the period and must be
+      paid not later than the pack's `eo_wage_payment_days` after it
+      (Labour Department Concise Guide ch.3).
+    * Final period (the employee's termination falls on or before this period's
+      end): termination payments, except severance, must be paid as soon as
+      practicable and not later than the pack's `eo_termination_payment_days`
+      after the termination date (Concise Guide ch.9). A termination date after
+      the period does not affect this run (gap audit D-B).
 
     Returns {latestPaymentDate, daysAllowed, daysUsed, onTime, terminationTriggered, source}.
     """
-    days, row = rate_value(rate_map, "eo_wage_payment_days")
+    final = termination is not None and termination <= period_end
+    if final:
+        days, row = rate_value(rate_map, "eo_termination_payment_days")
+        anchor = termination
+    else:
+        days, row = rate_value(rate_map, "eo_wage_payment_days")
+        anchor = period_end
     allowed = int(days)
-    latest = period_end + timedelta(days=allowed)
+    latest = anchor + timedelta(days=allowed)
     return {"latestPaymentDate": latest.isoformat(), "daysAllowed": allowed,
             "periodEnd": period_end.isoformat(), "payDate": pay_date.isoformat(),
-            "daysUsed": (pay_date - period_end).days, "onTime": pay_date <= latest,
-            "terminationTriggered": termination is not None,
-            "terminationImmediateDue": termination is not None,
-            "source": row_ref(row)}
+            "terminationDate": termination.isoformat() if final else None,
+            "daysUsed": (pay_date - anchor).days, "onTime": pay_date <= latest,
+            "terminationTriggered": final, "source": row_ref(row)}
 
 
 def identity_checks(employee: dict) -> list:
@@ -231,25 +243,34 @@ def continuous_contract_checks(employee: dict, cc: dict) -> list:
 
 def wage_payment_checks(employee: dict, pay_date: date, period_end: date, rate_map: dict,
                         termination: date = None) -> list:
-    """Employment Ordinance s.25 — wages are due not later than the pack's
-    eo_wage_payment_days after the wage period ends, and on termination the
-    residual wages fall due immediately."""
+    """Employment Ordinance s.25 payment deadline for this run (see
+    wage_payment_timing). A late payment BLOCKs approval and names the latest
+    lawful pay date; an on-time payment is INFO."""
     try:
         timing = wage_payment_timing(pay_date, period_end, rate_map, termination)
     except HongKongCalculationBlockedError as exc:
         return [engine_block_check(employee, exc)]
-    src = "Employment Ordinance s.25 (Labour Department Concise Guide ch.3)"
     if timing["terminationTriggered"]:
-        return [check("EO_TERMINATION_WAGES_DUE_IMMEDIATELY", BLOCK,
-                      f"the employee is leaving — residual wages are due IMMEDIATELY on {timing['payDate']}, not on the "
-                      f"ordinary {timing['daysAllowed']}-day cycle", employee, source=src,
-                      action="Pay the residual wages now, or record why the payment is deferred")]
+        src = "Employment Ordinance s.25 (Labour Department Concise Guide ch.9, Time of Making Termination Payments)"
+        if not timing["onTime"]:
+            return [check("EO_TERMINATION_PAYMENT_LATE", BLOCK,
+                          f"the employee's employment ended on {timing['terminationDate']}: termination payments "
+                          f"(except severance) are due by {timing['latestPaymentDate']} "
+                          f"({timing['daysAllowed']} days after termination), but this run pays on {timing['payDate']}",
+                          employee, source=src,
+                          action=f"Set this run's pay date on or before {timing['latestPaymentDate']}")]
+        return [check("EO_TERMINATION_PAYMENT_TIMING", INFO,
+                      f"final pay: termination payments (except severance) are due by {timing['latestPaymentDate']} "
+                      f"({timing['daysAllowed']} days after the termination on {timing['terminationDate']}); this run "
+                      f"pays on {timing['payDate']}. Severance payment is due within two months of the employee's "
+                      f"claim (Concise Guide ch.9).", employee, source=src)]
+    src = "Employment Ordinance s.25 (Labour Department Concise Guide ch.3)"
     if not timing["onTime"]:
         return [check("EO_WAGE_PAYMENT_LATE", BLOCK,
                       f"wages for the period ending {timing['periodEnd']} are due by {timing['latestPaymentDate']} "
                       f"but this run pays on {timing['payDate']} ({timing['daysUsed']} days after the period end, "
                       f"{timing['daysAllowed']} allowed)", employee, source=src,
-                      action="Correct the pay date, or record the reason for the late payment")]
+                      action=f"Set this run's pay date on or before {timing['latestPaymentDate']}")]
     return [check("EO_WAGE_PAYMENT_TIMING", INFO,
                   f"wages due by {timing['latestPaymentDate']} ({timing['daysAllowed']} days after the period end); "
                   f"this run pays on {timing['payDate']}", employee, source=src)]

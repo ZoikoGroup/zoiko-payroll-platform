@@ -1001,7 +1001,7 @@ def test_preflight_blocks_a_late_run_and_a_leaver(db, hk):
     db.commit()
     out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 2, 28))
     assert out["status"] == "BLOCKED"
-    assert "EO_TERMINATION_WAGES_DUE_IMMEDIATELY" in {c["code"] for c in out["checks"]}
+    assert "EO_TERMINATION_PAYMENT_LATE" in {c["code"] for c in out["checks"]}   # left 20 Feb, paid 28 Feb (> 7 days)
 
 
 def test_preflight_dry_runs_an_uncalculated_run_and_reports_the_ir56g_hold(db, hk):
@@ -1034,7 +1034,7 @@ def test_hk_preflight_block_refuses_approval_until_it_is_resolved(db, hk):
 
     _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 2, 28))
     run = _month(db, hk.org, 2, status=PayrollStatus.REVIEW)
-    hk.emp.date_of_leaving = date(2026, 2, 20)      # EO: residual wages due immediately
+    hk.emp.date_of_leaving = date(2026, 2, 20)      # paid 28 Feb: more than 7 days after termination (ch.9)
     db.commit()
     with pytest.raises(HTTPException) as blocked:
         service.advance_payroll_run_status(db, run.id, MAKER.id, hk.org.id)

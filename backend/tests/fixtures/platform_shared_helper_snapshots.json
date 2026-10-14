@@ -1,13 +1,13 @@
 {
  "__recorded_on__": "2026-10-05",
  "__recorded_on_by_key__": {
-  "hk_activation_evidence_refusal": "2026-10-13",
-  "hk_activation_readiness": "2026-10-13",
-  "hk_gate_state": "2026-10-13",
-  "hk_golden_check": "2026-10-13",
-  "hk_preview": "2026-10-13",
+  "hk_activation_evidence_refusal": "2026-10-14",
+  "hk_activation_readiness": "2026-10-14",
+  "hk_gate_state": "2026-10-14",
+  "hk_golden_check": "2026-10-14",
+  "hk_preview": "2026-10-14",
   "hk_registry_transition": "2026-10-13",
-  "hk_statutory_summary": "2026-10-13",
+  "hk_statutory_summary": "2026-10-14",
   "sg_statutory_summary": "2026-10-14"
  },
  "hk_activation_evidence_refusal": {
@@ -317,7 +317,7 @@
        "componentKey": "smw_hours_record_cap_monthly",
        "effectiveFrom": "2026-05-01",
        "packId": 2,
-       "rowId": 143,
+       "rowId": 145,
        "sourceDocumentId": 9
       },
       "monthlyCap": "17600.00",
@@ -514,7 +514,7 @@
   "audits": [],
   "result": {
    "activationReadiness": {
-    "asOf": "2026-10-13",
+    "asOf": "2026-10-14",
     "canOpen": false,
     "met": 1,
     "registry": "PLANNED",
@@ -562,7 +562,7 @@
       "met": false
      },
      {
-      "detail": "none in force on 2026-10-13",
+      "detail": "none in force on 2026-10-14",
       "key": "ACTIVE_PACK",
       "label": "an Active HK rule pack in force today",
       "met": false
@@ -844,7 +844,7 @@
       {
        "createdById": 101,
        "hasFile": true,
-       "id": 28,
+       "id": 29,
        "rejectionNotes": null,
        "reviewerId": 202,
        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -862,7 +862,7 @@
       {
        "createdById": 101,
        "hasFile": true,
-       "id": 29,
+       "id": 30,
        "rejectionNotes": null,
        "reviewerId": null,
        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -880,7 +880,7 @@
       {
        "createdById": 101,
        "hasFile": true,
-       "id": 30,
+       "id": 31,
        "rejectionNotes": null,
        "reviewerId": 101,
        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -1063,7 +1063,7 @@
    "packs": [
     {
      "approvedById": null,
-     "contributionRates": 84,
+     "contributionRates": 85,
      "effectiveFrom": "2025-04-01",
      "effectiveTo": "2026-03-31",
      "g1CertificationRows": 29,
@@ -1077,7 +1077,7 @@
     },
     {
      "approvedById": null,
-     "contributionRates": 82,
+     "contributionRates": 83,
      "effectiveFrom": "2026-04-01",
      "effectiveTo": "2027-03-31",
      "g1CertificationRows": 29,
@@ -1241,6 +1241,15 @@
      "agency": "Labour Department",
      "id": 20,
      "reviewed": false,
+     "sha256": "3ee3b5333bbe1eb0d9643be6f79919b0c6e9662f0cbab1d09958ebd98a041634",
+     "title": "Concise Guide — Ch.9 Termination of Contract of Employment (Time of Making Termination Payments)",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/09.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 21,
+     "reviewed": false,
      "sha256": "ef8fe29153964c3a4b9c8905d813fba18cc95d236a937fef262a9c29121037b0",
      "title": "Concise Guide — Ch.11 Severance Payment and Long Service Payment",
      "unverified": false,
@@ -1248,7 +1257,7 @@
     },
     {
      "agency": "Labour Department",
-     "id": 21,
+     "id": 22,
      "reviewed": false,
      "sha256": "dc9e32d8be3f5f48be21969621b090d9859782efefdf257f42e273edde3d6595",
      "title": "Concise Guide — Appendix 1: 12-Month Average Wages",
@@ -1257,7 +1266,7 @@
     },
     {
      "agency": "Labour Department",
-     "id": 25,
+     "id": 26,
      "reviewed": false,
      "sha256": "4c40afaa941fd852fc8fcf476c6729afcfe3981eb9557c17a888bf388e1f3c10",
      "title": "Abolition of MPF Offsetting — employment commencing before 1 May 2025",
@@ -1266,7 +1275,7 @@
     },
     {
      "agency": "Hong Kong specialist (G1) — pending",
-     "id": 27,
+     "id": 28,
      "reviewed": false,
      "sha256": null,
      "title": "[UNVERIFIED — G1] Employment Ordinance Cap. 57 s.2 definition of 'week' (continuous contract)",

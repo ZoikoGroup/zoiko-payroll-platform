@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal as D
 
 from tests.test_hong_kong_e2e import (  # noqa: F401  (hk is a fixture)
-    CHECKER, MAKER, _employee, _item, _month, _profile, _spaced_codes, hk,
+    CHECKER, MAKER, _employee, _hours, _item, _month, _profile, _spaced_codes, hk,
 )
 
 
@@ -61,3 +61,50 @@ def test_d_a_overtime_hours_without_a_contract_rate_pay_nothing_and_block(db, hk
     checks = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id)["checks"]
     block = [c for c in checks if c["code"] == "HK_OVERTIME_RATE_NOT_RECORDED" and c["employeeId"] == emp.id]
     assert block and block[0]["severity"] == "BLOCK" and "contractual overtime hourly rate" in block[0]["action"]
+
+
+# ── D-B: a leaver's final run is approvable once its real preconditions are met ────────────────
+# Labour Department Concise Guide ch.9 "Time of Making Termination Payments": all termination
+# payments except severance "as soon as practicable and in any case not later than seven days after
+# the date of termination" (archived sources/ld_cg_09, sha256 3ee3b5333bbe1eb0…). The old check
+# said "due IMMEDIATELY" and blocked every leaver with no way to clear it.
+
+def _final_run(db, hk, leaving):
+    from app.modules.payroll.models import PayrollStatus
+
+    _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 2, 28))
+    run = _month(db, hk.org, 2, status=PayrollStatus.REVIEW)       # pay date 28 Feb 2026
+    hk.emp.date_of_leaving = leaving
+    db.commit()
+    return run
+
+
+def test_d_b_leaver_paid_within_seven_days_of_termination_can_be_approved(db, hk):
+    from app.modules.payroll import hong_kong_service, service
+    from app.modules.payroll.models import PayrollStatus
+
+    run = _final_run(db, hk, date(2026, 2, 24))                    # latest payment 3 Mar; pays 28 Feb
+    checks = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 2, 28))["checks"]
+    timing = [c for c in checks if c["code"].startswith("EO_TERMINATION")]
+    assert [c["code"] for c in timing] == ["EO_TERMINATION_PAYMENT_TIMING"] and timing[0]["severity"] == "INFO"
+    assert "2026-03-03" in timing[0]["message"]
+    assert service.advance_payroll_run_status(db, run.id, MAKER.id, hk.org.id).status == PayrollStatus.APPROVED
+
+
+def test_d_b_late_final_payment_blocks_and_names_the_latest_date(db, hk):
+    from app.modules.payroll import hong_kong_service
+
+    run = _final_run(db, hk, date(2026, 2, 10))                    # latest payment 17 Feb; pays 28 Feb
+    checks = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 2, 28))["checks"]
+    late = [c for c in checks if c["code"] == "EO_TERMINATION_PAYMENT_LATE"]
+    assert late and late[0]["severity"] == "BLOCK"
+    assert "2026-02-17" in late[0]["message"] and "2026-02-17" in late[0]["action"]
+
+
+def test_d_b_a_later_leaving_date_does_not_block_an_earlier_period(db, hk):
+    from app.modules.payroll import hong_kong_service
+
+    run = _final_run(db, hk, date(2026, 6, 30))                    # leaves in June; February is ordinary
+    codes = {c["code"] for c in hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id,
+                                                                      today=date(2026, 2, 28))["checks"]}
+    assert "EO_WAGE_PAYMENT_TIMING" in codes and not {c for c in codes if c.startswith("EO_TERMINATION")}
