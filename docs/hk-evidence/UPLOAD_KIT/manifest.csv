@@ -9,7 +9,7 @@ G2/authority_documents.csv,HK-GATE-G2,DRAFT G2 authority document manifest,Zoiko
 G3/G3_parallel_payroll_reconciliation.md,HK-GATE-G3,DRAFT G3 reconciliation tool and template (PENDING two cycles),Zoiko internal – draft,991df30c3d932ccc1980472dfd739448effa801945fdd56fbb7a546bd72ff291,3386
 G4/G4_edge_case_test_report.md,HK-GATE-G4,"DRAFT G4 edge-case test report (50/50 passed, all rows end to end)",Zoiko internal – draft,7695dfc5beca5c4dfef937ca332e654834f70622b8864bade149e260af1c9fec,7344
 G4/G4_test_run_output.txt,HK-GATE-G4,G4 raw test run output,Zoiko internal – draft,e68061ff2d8ee08978c2761c08f29a980861d51d20ab3a285e9329c4327b9f98,10172
-G5/G5_security_privacy_assessment.md,HK-GATE-G5,DRAFT G5 security / privacy assessment,Zoiko internal – draft,5f8c183fc65d6ffe4ce880c2913cfba4113c69e02f45532d400b3b5d7fcd2a36,10205
+G5/G5_security_privacy_assessment.md,HK-GATE-G5,DRAFT G5 security / privacy assessment,Zoiko internal – draft,9b770fc855d5827002647ba0332ce62d14300d3ad8d675fb82b1c62db8453d05,11492
 G5/G5_retention_deletion_policy_draft.md,HK-GATE-G5,DRAFT G5 retention / deletion policy,Zoiko internal – draft,09721353352d047a857f6e77f6dd07e7361b0dbcb7459b6fa79e050b7cc64857,3522
 G5/G5_privileged_access_test_run_output.txt,HK-GATE-G5,G5 privileged-access test run output,Zoiko internal – draft,9d490ef04f42d43d7e0d31328d3f77e62b35bcdfde9683d6e024d13d4d1ee388,7878
 ops/DESIGN_F4_privileged_access_audit_fail_closed.md,HK-GATE-G5,DESIGN NOTE G5 F-4 assisted-access audit fail-closed (not implemented),Zoiko internal – draft,404cc0820440015bf6a5f034e9168e75d334d38733627460a07d3676622e2cf1,4092

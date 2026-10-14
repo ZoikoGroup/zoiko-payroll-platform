@@ -32,8 +32,28 @@ There is nothing non-additive: no DROP, RENAME, type change, NOT NULL on a popul
 * **Rehearsal on the schema-only copy (empty tables), 2026-10-13T06:41Z:** upgrade, downgrade and upgrade again were each well under a second (exit 0).
 * **Expected in production:** catalog changes are milliseconds. The only row-proportional step is the FK validation in #11 (a scan of all-NULL values). Seconds at most, unless the table is unexpectedly large.
 * **Recommended before deploy (read-only, by a human):**
-  * check the size: `SELECT count(*) FROM assisted_access_sessions;`
+  * check the size: run `python -m scripts.hk_production_readonly_verification --out pre_deploy.json` and read the check `pre_deploy_assisted_access_sessions_size`. It reports `exact_rows` (`count(*)`, one read-only scan under ACCESS SHARE), `estimated_rows` (`pg_class.reltuples`, no scan; -1 means the table has never been analysed) and `total_size`;
   * run the migration with `SET lock_timeout = '5s'`, so it fails fast instead of queueing behind a long transaction and blocking `users` writes.
+
+### 3a. Which statement scans, and the measured cost (added 2026-10-14)
+
+* **The statement:** #11, `ALTER TABLE assisted_access_sessions ADD COLUMN approved_by_user_id integer REFERENCES users(id)`.
+* **Why it scans:** adding a foreign key makes PostgreSQL validate it against every existing row. The column is brand new, so every value is NULL and none can fail, but PostgreSQL still reads the whole table, and does so while the ACCESS EXCLUSIVE lock from `ADD COLUMN` is held. No other statement scans existing rows. The new tables are empty, and the two `NOT NULL DEFAULT` columns are catalog-only on PostgreSQL 11+.
+* **Measured on a local copy of the production schema with 2,000,000 synthetic rows** (`scratchpad/rehearse/scan_test.py`, result `scan_test_2026-10-14.json`, SHA-256 `58d8670fadd6db42e4f54c6d35c77b5f94a04af24fdd39b7277dc27fd1e48d68`):
+
+| Variant | Rows read from `assisted_access_sessions` during the migration | Upgrade wall time (incl. Alembic start-up) | Constraint | Bad user id rejected afterwards |
+|---|---|---|---|---|
+| As committed | **2,000,000** (one sequential scan) | 2.61 s | validated | yes |
+| Patched (`patches/migration_lock_safety.patch`) | **0** | 3.32 s | `NOT VALID` (enforced for new writes) | yes |
+
+  Wall times are dominated by Alembic start-up. A separate `VALIDATE CONSTRAINT` on the patched copy took **0.29 s** for 2,000,000 rows, so the scan in the committed migration costs roughly that much at that size.
+* **Verdict:** the scan is real but cheap. A support-session table is expected to hold hundreds or thousands of rows, not millions. **The committed migration is acceptable** if the pre-deploy check shows a modest `exact_rows`. If `exact_rows` exceeds about 1,000,000, apply the patch first: the constraint is added `NOT VALID`, the scan is skipped, and the optional `ALTER TABLE assisted_access_sessions VALIDATE CONSTRAINT assisted_access_sessions_approved_by_user_id_fkey` can be run later under SHARE UPDATE EXCLUSIVE, which does not block reads or writes.
+* **Patch evidence (applied temporarily to the working tree, then reverted, 2026-10-14):**
+  * upgrade, downgrade and re-upgrade exit 0 on the production schema copy;
+  * `tests/test_alembic_metadata.py`, `test_assisted_access.py` and `test_platform_shared_helper_snapshots.py`: 25 passed (03:53Z);
+  * SQLite keeps the original path.
+
+  The patch is **not committed**. Applying it is the reviewer's decision.
 
 ## 4. Downgrade behaviour (`alembic downgrade b08f04497195`)
 

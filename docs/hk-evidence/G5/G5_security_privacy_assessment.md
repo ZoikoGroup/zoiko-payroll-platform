@@ -59,6 +59,8 @@ Added in this pass (all in the run above):
 | F-7 | No assisted-access test coverage | Medium | **CLOSED 2026-10-13:** `tests/test_assisted_access.py`, 6 tests, PASSED |
 | F-8 | Local storage fallback writes uploads to `/tmp/uploads` when GCS is not configured | Low (ops) | **CLOSED 2026-10-13 (third pass):** in production mode without Cloud Storage, evidence and HK document uploads are refused before any write, with a clear error and a `refused` audit row (cause NON_DURABLE_STORAGE). Tests cover the refusal and dev / test / production-with-GCS behaviour |
 | F-9 | Break-glass tenant notification could fail silently ("notified" recorded even when no email was sent) | Medium | **CLOSED 2026-10-13 (third pass):** synchronous send with delivery confirmed; on failure the session stays audited, a TENANT_NOTIFICATION_FAILED event is written, and a high-severity Security alert appears in Super Admin Alerts. Runbook #22 updated |
+| F-10 | Local test runs could deliver real email: a local backend reads `backend/.env` (real SMTP credentials) and nothing stopped a test / local backend from sending. One break-glass notice to `hkadmin@zoikotest.dev` confirmed (2026-10-13 11:59 UTC); earlier runs unknown | Medium (incident) | **ENGINEERING FIXED 2026-10-14; INCIDENT OPEN.** Outbound guard (`app/core/outbound.py`): test and local modes never deliver unless the local sandbox is explicitly enabled, and then only to it; run-wide SMTP tripwire in the test suite; test addresses moved to reserved domains. Human checks and the notification decision: `../ops/INCIDENT_F10_test_emails.md` §6 |
+| F-11 | The assisted-access request audit stores the query string after a redaction pattern that only matches `token=` / `code=` when preceded by `?` or `&`. `request.url.query` has no leading `?`, so a **first** `token=` parameter is stored unredacted in `assisted_access_audit_events.payload` (found 2026-10-14 by the F-4 tests) | Low–Medium | **OPEN.** The fix (anchor the pattern at the start of the string) is in `../ops/patches/f4_audit_fail_closed.patch`, which is not applied. To check existing rows: `SELECT count(*) FROM assisted_access_audit_events WHERE payload->>'query' ~* '^(token\|code)='` (read-only) |
 
 ## 4. Encryption and transport (from code)
 
@@ -88,7 +90,7 @@ The draft policy for the owner and counsel is in `G5_retention_deletion_policy_d
 | DPP1 Collection (purpose, PICS) | Only statutory identifiers needed for MPF / IRD are collected. PICS issuance is part of employer setup (runbook #1) | Counsel to confirm the PICS template; the product does not generate a PICS |
 | DPP2 Accuracy and retention | Identifiers validated (HKID check digit); retention periods owner-set and not yet decided | D-2 / D-3 |
 | DPP3 Use | Identifiers are used only for statutory outputs, which are masked | — |
-| DPP4 Security | Role gates, masking, access log, four-eyes on sensitive actions | F-1 to F-8 |
+| DPP4 Security | Role gates, masking, access log, four-eyes on sensitive actions | F-1 to F-10 |
 | DPP5 Openness | Not a product function | Customer policy |
 | DPP6 Access and correction | Runbook #26 (privacy request) | Counsel review |
 

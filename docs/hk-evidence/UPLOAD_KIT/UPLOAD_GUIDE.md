@@ -68,3 +68,5 @@ The kit was rehearsed on a local scratch database seeded with the canonical HK d
 * All 32 items were registered through the same API the panel uses (`rehearsal_scratch_receipt.json`; every server SHA-256 equals the manifest).
 * After upload it reported **32 MATCH, 0 reviewed** (exit 0) (`rehearsal_scratch_verify_report.json`).
 * With one manifest digest deliberately altered, it reported **1 DIGEST_MISMATCH** (exit 1).
+
+**Since the rehearsal (2026-10-14).** The G5 assessment gained findings F-10 and F-11, so its digest and the manifest changed. The manifest SHA-256 was `72b68649…` at rehearsal time and is now `5ad4685a1c7c5dd797ce539b7b21b23d57c5314285098c8a04a4e54086d21208`. The rehearsal receipts above record the earlier run and are kept unchanged. Repeat the rehearsal on a scratch database before the production upload (`../ops/HK_DEPLOY_RUNBOOK.md` §7).

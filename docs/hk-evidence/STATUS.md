@@ -1,4 +1,39 @@
-# Hong Kong launch work — STATUS (2026-10-13, third pass)
+# Hong Kong launch work: STATUS (2026-10-14, nikhil pass)
+
+## 0. This pass (2026-10-14)
+
+| Task | Result |
+|---|---|
+| 0 Move to `nikhil` | The 6 commits were cherry-picked onto local `nikhil` (`e9da6d4`, already up to date with `origin/nikhil`) **with no conflicts**. Each new commit's tree is identical to the original's. Single head `8b14824fb575`. Rehearsed on the production-schema copy: upgrade → downgrade → re-upgrade, exit 0. Re-parenting onto `main`'s head `2f905bb1c296` was also proven (needed when `nikhil` is merged into `main`; `ops/patches/reparent_8b14824fb575_onto_main_head.patch`). Focused tests 1291 passed; full suite **5212 passed, 0 failed, 7 skipped, 2 xfailed** on `b5b63b3` |
+| 1 F-10 email incident | Test and local modes now never deliver email unless a local sandbox is explicitly enabled. A run-wide test tripwire fails any real SMTP attempt. 382 test addresses on real domains were moved to `*.example.com`. Incident note: `ops/INCIDENT_F10_test_emails.md` |
+| 2 Owner pack | Proposal only, nothing committed: `ops/owner_pack_proposal/` (`gitattributes.proposed`, `MANIFEST.sha256` for 163 files) and `ops/OWNER_PACK_CSV_REVIEW.md` (255 existing rows: content columns unchanged against a regeneration; byte identity **not provable**; 2 added rows) |
+| 3 Migration scan | Statement #11 (`ADD COLUMN approved_by_user_id … REFERENCES users`) reads every `assisted_access_sessions` row. Measured: 2,000,000 rows read; the patched version (`NOT VALID`) reads 0. Validating 2M rows costs about 0.3 s. A read-only row-count check was added to `hk_production_readonly_verification.py` |
+| 4 Sign-off packets | `SIGNOFF_PACKETS/` (README + 9 packets) |
+| 5 Deploy runbook | `ops/HK_DEPLOY_RUNBOOK.md` |
+| 6 Draft code | `ops/patches/f4_audit_fail_closed.patch`, `ops/patches/f5_f6_audit_immutability.patch` (not applied; results in `ops/patches/README.md`). New finding F-11 (unredacted first `token=` in the assisted audit) |
+
+### Tests in this pass (throwaway SQLite; no `backend/.env`; mail disabled)
+
+| Run | Tree | Started (UTC) | Result | Log SHA-256 |
+|---|---|---|---|---|
+| Focused HK + SG | `nikhil` `b5b63b3` (after cherry-picks) | 03:09:14Z | 1291 passed, 0 failed, 1 skipped | `3f88995d…` |
+| Full suite | `nikhil` `b5b63b3` | 03:46:42Z | **5212 passed, 0 failed, 7 skipped, 2 xfailed** | `4935f74d…` |
+| Full suite | `b5b63b3` + everything committed in this pass | 04:08:01Z | **5231 passed, 0 failed, 7 skipped, 2 xfailed** | `f96a5ca0…` |
+| Commit a alone (import + focused + every changed test file) | `b5b63b3` + commit a | 05:33:34Z | 1792 passed, 0 failed, 1 skipped | `3e215a8d…` |
+| Commit a + b (same selection) | `b5b63b3` + a + b | 05:42:31Z | 1795 passed, 0 failed, 1 skipped | `046c6993…` |
+| F-4 patch, full suite | as row 3 + `f4_audit_fail_closed.patch` | 04:58:24Z | 5235 passed, 0 failed | `9c15e358…` |
+| F-5/F-6 patch, full suite | as row 3 + `f5_f6_audit_immutability.patch` | 05:15:22Z | 5239 passed, 0 failed | `615cc37d…` |
+
+Commits on local `nikhil` (not pushed): a `a0be05f` test/config: fail-closed outbound delivery in test and local (F-10); b `6131fbb` hk: production row-count check in read-only verification script; c is the commit containing this file (docs/ops).
+
+**Correction to section 2 below.** It said the second **and** third passes sent real email. Only one send is confirmed (2026-10-13 11:59:52 UTC, third pass). The second-pass break-glass runs (06:51–06:52 UTC) are **unknown**: their log was overwritten. See `ops/INCIDENT_F10_test_emails.md`.
+
+**Production schema copy.** The schema-only copy used for every rehearsal (`prod_schema.sql`) came from a read-only `pg_dump` that Claude itself ran against production on 2026-10-13. From now on, production is read only through scripts a human runs.
+
+---
+
+# Previous pass (2026-10-13, third pass)
+
 
 **Bottom line:** every engineering item that can be done safely is done and tested. The evidence drafts and upload kit are regenerated and rehearsed. The work is committed **locally** on `feature/hk-launch-readiness`: no push, no PR, no deploy, no production write. Nothing is accepted, signed, marked specialist-verified or activated. Launch remains blocked on the decision and external items in `BLOCKERS.md`.
 

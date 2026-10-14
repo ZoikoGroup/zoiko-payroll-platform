@@ -1,0 +1,25 @@
+diff --git a/backend/alembic/versions/8b14824fb575_hk_launch_readiness_controls.py b/backend/alembic/versions/8b14824fb575_hk_launch_readiness_controls.py
+index fedca1c..2fdf4a9 100644
+--- a/backend/alembic/versions/8b14824fb575_hk_launch_readiness_controls.py
++++ b/backend/alembic/versions/8b14824fb575_hk_launch_readiness_controls.py
+@@ -57,7 +57,19 @@ def upgrade() -> None:
+     op.add_column("assisted_access_sessions", sa.Column("approval_status", sa.String(20), nullable=False, server_default="APPROVED"))
+     op.add_column("assisted_access_sessions", sa.Column("requested_minutes", sa.Integer(), nullable=True))
+     op.add_column("assisted_access_sessions", sa.Column("request_expires_at", sa.DateTime(), nullable=True))
+-    op.add_column("assisted_access_sessions", sa.Column("approved_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
++    if op.get_bind().dialect.name == "postgresql":
++        # Lock safety: `ADD COLUMN ... REFERENCES` validates the new FK by
++        # reading every existing row while ACCESS EXCLUSIVE is held. The
++        # column is new (all NULL), so NOT VALID skips that pass; the
++        # constraint is still enforced for every insert / update. Optional,
++        # outside this migration: ALTER TABLE assisted_access_sessions
++        # VALIDATE CONSTRAINT assisted_access_sessions_approved_by_user_id_fkey
++        # (SHARE UPDATE EXCLUSIVE: does not block reads or writes).
++        op.add_column("assisted_access_sessions", sa.Column("approved_by_user_id", sa.Integer(), nullable=True))
++        op.execute("ALTER TABLE assisted_access_sessions ADD CONSTRAINT assisted_access_sessions_approved_by_user_id_fkey "
++                   "FOREIGN KEY (approved_by_user_id) REFERENCES users (id) NOT VALID")
++    else:
++        op.add_column("assisted_access_sessions", sa.Column("approved_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
+     op.add_column("assisted_access_sessions", sa.Column("approved_at", sa.DateTime(), nullable=True))
+     op.add_column("assisted_access_sessions", sa.Column("decision_reason", sa.Text(), nullable=True))
+     op.add_column("assisted_access_sessions", sa.Column("activated_at", sa.DateTime(), nullable=True))
