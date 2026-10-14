@@ -29,6 +29,8 @@ NL_CHAIN = [
     # M8 follows main's HK migration 8b14824fb575 (itself a child of M7).
     ("3b4e5c6d7e8f", "8b14824fb575"),
     ("4c5d6e7f8a9b", "3b4e5c6d7e8f"),
+    # Repair: replays the chain's DDL create-if-missing (creates nothing itself).
+    ("08f0f142574e", "4c5d6e7f8a9b"),
 ]
 
 
