@@ -9410,7 +9410,13 @@ def hard_delete_jurisdiction_pack(db: Session, pack_row_id: int) -> dict:
         {"previous_version_id": None}, synchronize_session=False,
     )
 
-    db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.jurisdiction_pack_id == pack.id).delete()
+    # G5 F-6: audit rows are append-only; deleting a never-used pack purges its
+    # own audit rows only inside an explicit, logged purge scope (same open
+    # Security / counsel decision as the organisation hard-delete).
+    from app.core.audit_immutability import audit_purge_scope
+
+    with audit_purge_scope(db, f"jurisdiction pack hard-delete {pack.pack_id} v{pack.version} (id {pack.id})"):
+        db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.jurisdiction_pack_id == pack.id).delete()
     db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
     db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
 
