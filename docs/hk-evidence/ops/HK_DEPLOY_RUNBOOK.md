@@ -51,7 +51,15 @@ If `main` gains more migrations before the merge, re-parent onto the new head an
 
 1. The deploy job restarts the backend. Watch the job to the end: earlier deploys failed at the SSH / restart step.
 2. Re-run the canonical HK seed **on the Draft packs only**, so the governed row `mpf_contribution_day_deferral` exists in production: `cd backend && python -m scripts.seed_hong_kong_canonical_pack`. The seed refuses non-Draft packs and keeps `HK_GENERAL_HOLIDAY` rows.
-3. Do **not** load general holidays until the specialist has supplied the official files (packet 01).
+3. Load the archived general-holiday lists into the Draft packs. The rows stay [G1], "sourced – pending specialist review":
+   ```bash
+   cd backend
+   for spec in "HK-PAYROLL-2025 2025" "HK-PAYROLL-2025 2026" "HK-PAYROLL-2026 2026" "HK-PAYROLL-2026 2027"; do set -- $spec
+     F=$(python -c "import csv;print([r['archived_as'] for r in csv.DictReader(open('../docs/hk-evidence/sources/archive/register.csv')) if r['doc_id']=='govhk_general_holidays_$2'][0])")
+     python -m scripts.hk_load_general_holidays --pack $1 --version 1.0 --year $2        --source-file ../docs/hk-evidence/sources/archive/$F --source-url https://www.gov.hk/en/about/abouthk/holiday/$2.htm        --dates-csv ../docs/hk-evidence/sources/general_holidays_$2_extracted.csv --actor-id <Super Admin user id>
+   done
+   ```
+   Then run Test Certification. It must still be PASS 11/11, as it was locally on 2026-10-14.
 
 ## 4. Smoke checks (after deploy)
 

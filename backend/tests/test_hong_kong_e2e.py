@@ -517,7 +517,7 @@ def test_general_holiday_loader_records_the_source_digest_and_drives_the_empf_de
     out = loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)
     assert out["loaded"] == 1 and out["sha256"] == hashlib.sha256(b"TEST-ONLY archived list").hexdigest()
     art = db.get(SourceArtifact, out["sourceArtifactId"])
-    assert art.checksum_sha256 == out["sha256"] and "[UNVERIFIED" in art.title
+    assert art.checksum_sha256 == out["sha256"] and "pending specialist review (G1)" in art.title
     with pytest.raises(loader.LoadRefused, match="already holds 1"):
         loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)
     assert db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_general_holiday_list").count() == 1

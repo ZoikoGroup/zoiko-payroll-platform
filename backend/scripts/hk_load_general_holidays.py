@@ -85,7 +85,7 @@ def load_general_holidays(db, *, pack_id: str, version: str, year: int, source_f
         raise LoadRefused("the source file is empty")
     digest = hashlib.sha256(data).hexdigest()
     art = service.create_source_artifact(db, SourceArtifactCreate(
-        agency="HKSAR Government", title=f"[UNVERIFIED — G1] General holidays {year} (archived official list)",
+        agency="HKSAR Government", title=f"[SOURCED — pending specialist review (G1)] General holidays {year} (archived official list)",
         sourceUrl=source_url or None, checksumSha256=digest), actor_id=actor_id)
     service.upload_source_artifact_file(db, art.id, Path(source_file).name,
                                         mimetypes.guess_type(str(source_file))[0] or "application/octet-stream",
