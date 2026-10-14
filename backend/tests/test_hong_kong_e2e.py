@@ -1170,7 +1170,9 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
     # Tables added later by the launch-readiness migration are created there
     # under their final name (no hkg_ history to rename).
     readiness = (versions / "8b14824fb575_hk_launch_readiness_controls.py").read_text(encoding="utf8")
-    created_later = {"payroll_hk_contribution_day_disruptions"}
+    overrides = (versions / "f4b8d2a6c9e1_hk_pre_transition_wage_overrides.py").read_text(encoding="utf8")
+    created_later = {"payroll_hk_contribution_day_disruptions": readiness,
+                     "payroll_hk_pre_transition_wage_overrides": overrides}
     # Columns added to existing tables by later, additive migrations.
     overtime = (versions / "e3a9c1f7b2d4_hk_contractual_overtime.py").read_text(encoding="utf8")
     added_later = {("payroll_employee_statutory_profiles", "hk_contractual_overtime_hourly_rate"): overtime,
@@ -1181,9 +1183,9 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
     checked = 0
     for name, table in Base.metadata.tables.items():
         if name in created_later:
-            assert f'"{name}"' in readiness, name
+            assert f'"{name}"' in created_later[name], name
             for col in table.columns:
-                assert f'"{col.name}"' in readiness, f"{name}.{col.name}"
+                assert f'"{col.name}"' in created_later[name], f"{name}.{col.name}"
             checked += 1
             continue
         if name.startswith("payroll_hk_") or name in shared:
@@ -1202,6 +1204,6 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
                     continue                                            # checked above
                 assert f"'{renamed_columns[(name, col.name)]}'" in foundation, f"{name}.{col.name}"
                 checked += 1
-    assert checked == 13 + 1 + 24 + 1, checked                          # 13 tables + 1 later table + 24 profile columns + trace
+    assert checked == 13 + 2 + 24 + 1, checked                          # 13 tables + 2 later tables + 24 profile columns + trace
     assert "down_revision: Union[str, Sequence[str], None] = '917a54ed2347'" in foundation
     assert convergence.down_revision == "cd62503afe26"

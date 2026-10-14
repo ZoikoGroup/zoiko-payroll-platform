@@ -108,3 +108,62 @@ def test_d_b_a_later_leaving_date_does_not_block_an_earlier_period(db, hk):
     codes = {c["code"] for c in hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id,
                                                                       today=date(2026, 2, 28))["checks"]}
     assert "EO_WAGE_PAYMENT_TIMING" in codes and not {c for c in codes if c.startswith("EO_TERMINATION")}
+
+
+# ── D-C: the frozen pre-1-May-2025 wage cannot be bypassed (HK-017) ─────────────────────────────
+# Wireframe HK-017: "Store a frozen pre-transition wage snapshot for employees employed before
+# 1 May 2025 ... do not recalculate it from later wages"; Labour Department MPF-offsetting page
+# (archived sources/ld_aoa, sha256 4c40afaa941fd852…). Before the fix, a profile without the frozen
+# wage let calculate_termination use whatever wage the request typed.
+
+_TERMINATION = {"terminationDate": "2027-03-31", "reason": "REDUNDANCY", "postTransitionWage": "30000"}
+
+
+def _pre_2025_hire(db, hk, code):
+    emp = _employee(db, hk.org.id, code, date_of_joining=date(2015, 5, 1))
+    _profile(db, emp, hk.org.id, "2015-05-01", hkgContractualWeeklyHours="44")      # no frozen wage recorded
+    return emp
+
+
+def test_d_c_a_typed_pre_transition_wage_is_refused_without_a_frozen_or_approved_value(db, hk):
+    import pytest
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import hong_kong_service
+
+    emp = _pre_2025_hire(db, hk, "DC1")
+    with pytest.raises(BadRequestException, match="HK-017"):
+        hong_kong_service.calculate_termination(db, hk.org.id, emp.id, {**_TERMINATION, "preTransitionWage": "40000"},
+                                                MAKER.id)
+
+
+def test_d_c_an_override_needs_reason_evidence_and_a_second_person_and_is_audited(db, hk):
+    import pytest
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    emp = _pre_2025_hire(db, hk, "DC2")
+    with pytest.raises(BadRequestException, match="reason and evidence"):
+        hong_kong_service.request_pre_transition_wage_override(
+            db, hk.org.id, emp.id, {"monthlyWage": "26000", "basis": "LAST_FULL_MONTH"}, MAKER.id)
+    ov = hong_kong_service.request_pre_transition_wage_override(
+        db, hk.org.id, emp.id, {"monthlyWage": "26000", "basis": "LAST_FULL_MONTH", "reason": "TEST April 2025 payslip",
+                                "evidenceRef": "PAYSLIP-2025-04"}, MAKER.id)
+    with pytest.raises(BadRequestException, match="HK-017"):                     # not usable until approved
+        hong_kong_service.calculate_termination(db, hk.org.id, emp.id, dict(_TERMINATION), MAKER.id)
+    with pytest.raises(BadRequestException, match="four-eyes"):
+        hong_kong_service.approve_pre_transition_wage_override(db, hk.org.id, ov.id, MAKER.id)
+    assert hong_kong_service.approve_pre_transition_wage_override(db, hk.org.id, ov.id, CHECKER.id).status == "APPROVED"
+    row = hong_kong_service.calculate_termination(db, hk.org.id, emp.id, dict(_TERMINATION), MAKER.id)
+    assert row.result["portions"]["preTransition"]["wage"] == "26000.00"
+    assert row.result["preTransitionWageSource"] == {"source": "APPROVED_OVERRIDE", "overrideId": ov.id,
+                                                     "evidenceRef": "PAYSLIP-2025-04", "basis": "LAST_FULL_MONTH"}
+    with pytest.raises(BadRequestException, match="HK-017"):                     # still never typed at termination
+        hong_kong_service.calculate_termination(db, hk.org.id, emp.id, {**_TERMINATION, "preTransitionWage": "40000"},
+                                                MAKER.id)
+    actions = {(a.entity_type, a.action) for a in db.query(TaxConfigurationAudit).filter(
+        TaxConfigurationAudit.entity_type == "hk_pre_transition_wage_override")}
+    assert ("hk_pre_transition_wage_override", "create") in actions
+    assert ("hk_pre_transition_wage_override", "status_change") in actions

@@ -4693,6 +4693,7 @@ def dashboard_breakdowns(
 from app.modules.payroll import hong_kong_service# noqa: E402
 from app.modules.payroll.schemas import (  # noqa: E402
     HKAnnualReturnRequest, HKAverageWageOverrideRequest, HKAverageWageRequest, HKDepartureChangeRequest,
+    HKPreTransitionWageOverrideRequest,
     HKDepartureRequest, HKEmpfPrepareRequest, HKEmpfTransitionRequest, HKEntitlementRequest, HKIr56gFiledRequest,
     HKCorrectionRequest, HKLegalHoldRequest, HKEmployeeCopyRequest, HKIrdAmendRequest, HKIrdTransitionRequest, HKReasonRequest, HKReleaseRequest, HKSalariesTaxEstimateRequest, HKTerminationRequest,
     HKWorkHoursRequest, HKPurposeRequest, HKPermissionGrantRequest,
@@ -4961,6 +4962,30 @@ def hk_termination(employee_id: int, data: HKTerminationRequest, db: Session = D
 def hk_termination_approve(result_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     row = hong_kong_service.approve_termination(db, current_user.organization_id, result_id, current_user.id)
     return {"id": row.id, "status": row.status}
+
+
+@payroll_router.get("/hong-kong/employees/{employee_id}/pre-transition-wage-overrides", dependencies=_HK_READ,
+                    summary="Pre-1-May-2025 wage overrides of an employee (HK-017)")
+def hk_pre_transition_overrides(employee_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return hong_kong_service.list_pre_transition_wage_overrides(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post("/hong-kong/employees/{employee_id}/pre-transition-wage-overrides", dependencies=_HK_WRITE,
+                     summary="Request a controlled pre-1-May-2025 wage override (reason + evidence; HK-017)")
+def hk_pre_transition_override_request(employee_id: int, data: HKPreTransitionWageOverrideRequest,
+                                       db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    row = hong_kong_service.request_pre_transition_wage_override(
+        db, current_user.organization_id, employee_id, data.model_dump(mode="json"), current_user.id)
+    return {"id": row.id, "status": row.status, "monthlyWage": str(row.monthly_wage)}
+
+
+@payroll_router.post("/hong-kong/pre-transition-wage-overrides/{override_id}/approve", dependencies=_HK_WRITE,
+                     summary="Approve a pre-1-May-2025 wage override (different operator; HK-017)")
+def hk_pre_transition_override_approve(override_id: int, db: Session = Depends(get_db),
+                                       current_user=Depends(get_current_user)):
+    row = hong_kong_service.approve_pre_transition_wage_override(db, current_user.organization_id, override_id,
+                                                                 current_user.id)
+    return {"id": row.id, "status": row.status, "monthlyWage": str(row.monthly_wage)}
 
 
 def _hk_empf_view(sub) -> dict:

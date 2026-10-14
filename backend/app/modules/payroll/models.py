@@ -7373,6 +7373,29 @@ class HongKongAverageWageSnapshot(Base):
     created_at               = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class HongKongPreTransitionWageOverride(Base):
+    """Controlled correction of an employee's frozen pre-1-May-2025 wage
+    (HK-017, gap audit D-C). The frozen value on the statutory profile can never
+    change; when it was never recorded or is shown to be wrong, a different
+    value is used ONLY through this record: requested with a reason and
+    evidence, approved by a different user (four-eyes), audited. A wage typed
+    at termination is never accepted."""
+    __tablename__ = "payroll_hk_pre_transition_wage_overrides"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    monthly_wage    = Column(Numeric(12, 2), nullable=False)
+    wage_basis      = Column(String(30), nullable=False)       # LAST_FULL_MONTH | TWELVE_MONTH_AVERAGE
+    reason          = Column(Text, nullable=False)
+    evidence_ref    = Column(String(200), nullable=False)
+    status          = Column(String(20), nullable=False, default="REQUESTED", server_default="REQUESTED")  # REQUESTED | APPROVED | SUPERSEDED
+    requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class HongKongTerminationResult(Base):
     """Statutory termination calculation (ZP-HK-ENG-001 §11,
     HKTerminationResult, HK-018): SP/LSP eligibility and base, pre/post

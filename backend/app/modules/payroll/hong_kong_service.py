@@ -78,6 +78,7 @@ from app.modules.payroll.models import (
     HongKongPayslipCorrection,
     HongKongTaxClearanceHold,
     HongKongTaxClearanceHoldLine,
+    HongKongPreTransitionWageOverride,
     HongKongTerminationResult,
     HongKongWorkHours,
     JurisdictionPack,
@@ -1275,13 +1276,8 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
     active_hold = db.query(HongKongTaxClearanceHold).filter(
         HongKongTaxClearanceHold.organization_id == organization_id, HongKongTaxClearanceHold.employee_id == employee_id,
         HongKongTaxClearanceHold.state.in_(hk_tc.HOLDING_STATES)).first() is not None
-    pre_wage = data.get("preTransitionWage")
-    frozen = facts.get("preTransitionMonthlyWage")
-    if frozen is not None:
-        if pre_wage is not None and dec(pre_wage) != dec(frozen):
-            raise BadRequestException("the pre-transition wage is frozen on the statutory profile (HK-017) — it cannot "
-                                      "be replaced at termination")
-        pre_wage = frozen
+    pre_wage, pre_wage_basis, pre_wage_source = _pre_transition_wage(db, organization_id, employee_id, facts,
+                                                                     data.get("preTransitionWage"))
     age = None
     if employee.date_of_birth:
         age = termination.year - employee.date_of_birth.year - (
@@ -1293,7 +1289,7 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
             pay_basis=data.get("payBasis") or facts.get("payBasis") or "MONTHLY", cc_status=cc["status"],
             params=params, post_wage=dec(data["postTransitionWage"]),
             pre_wage=dec(pre_wage) if pre_wage is not None else None,
-            pre_wage_basis=facts.get("preTransitionWageBasis") or data.get("preTransitionWageBasis"),
+            pre_wage_basis=pre_wage_basis,
             post_wage_basis=data.get("postTransitionWageBasis") or "LAST_FULL_MONTH",
             offsets=data.get("offsets") or [], age_at_termination=age,
             renewal_offer_refused=bool(data.get("renewalOfferRefused")),
@@ -1303,6 +1299,8 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
         raise _blocked(exc)
     result["continuousContract"] = {"status": cc["status"], "since": cc.get("continuousSince")}
     result["packId"] = pack.pack_id
+    if pre_wage_source is not None:
+        result["preTransitionWageSource"] = pre_wage_source
     for prior in db.query(HongKongTerminationResult).filter(HongKongTerminationResult.organization_id == organization_id,
                                                        HongKongTerminationResult.employee_id == employee_id,
                                                        HongKongTerminationResult.status == "CALCULATED"):
@@ -1319,6 +1317,90 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
            commit=False)
     db.commit()
     return row
+
+
+def _pre_transition_wage(db: Session, organization_id: int, employee_id: int, facts: dict, typed) -> tuple:
+    """(wage, basis, source) for the pre-1-May-2025 SP/LSP portion (HK-017, gap
+    audit D-C). The wage is the FROZEN value on the statutory profile, or an
+    APPROVED four-eyes override; never a value typed at termination. A typed
+    value is accepted only when it equals the value already in force."""
+    override = (db.query(HongKongPreTransitionWageOverride)
+                .filter(HongKongPreTransitionWageOverride.organization_id == organization_id,
+                        HongKongPreTransitionWageOverride.employee_id == employee_id,
+                        HongKongPreTransitionWageOverride.status == "APPROVED")
+                .order_by(HongKongPreTransitionWageOverride.id.desc()).first())
+    if override is not None:
+        wage, basis = override.monthly_wage, override.wage_basis
+        source = {"source": "APPROVED_OVERRIDE", "overrideId": override.id, "evidenceRef": override.evidence_ref,
+                  "basis": override.wage_basis}
+    elif facts.get("preTransitionMonthlyWage") is not None:
+        wage, basis = facts["preTransitionMonthlyWage"], facts.get("preTransitionWageBasis")
+        source = {"source": "FROZEN_PROFILE", "profileId": facts.get("profileId"),
+                  "evidenceRef": facts.get("preTransitionEvidenceRef"), "basis": basis}
+    else:
+        wage = basis = source = None
+    if typed is not None and (wage is None or dec(typed) != dec(wage)):
+        raise BadRequestException(
+            "the pre-transition wage cannot be typed at termination (HK-017): it comes from the frozen wage on the "
+            "statutory profile or an approved four-eyes override — record either before calculating")
+    return wage, basis, source
+
+
+def request_pre_transition_wage_override(db: Session, organization_id: int, employee_id: int, data: dict,
+                                         actor_id: Optional[int]) -> HongKongPreTransitionWageOverride:
+    """Request a controlled pre-transition wage (HK-017, D-C): a value, its
+    basis, a reason and evidence. Usable only once a different user approves."""
+    _employee(db, employee_id, organization_id)
+    if not (data.get("reason") or "").strip() or not (data.get("evidenceRef") or "").strip():
+        raise BadRequestException("a pre-transition wage override needs a reason and evidence (HK-017)")
+    basis = data.get("basis") or "LAST_FULL_MONTH"
+    if basis not in ("LAST_FULL_MONTH", "TWELVE_MONTH_AVERAGE"):
+        raise BadRequestException("basis must be LAST_FULL_MONTH or TWELVE_MONTH_AVERAGE")
+    wage = dec(data.get("monthlyWage"))
+    if wage <= ZERO:
+        raise BadRequestException("the monthly wage must be greater than 0")
+    row = HongKongPreTransitionWageOverride(organization_id=organization_id, employee_id=employee_id, monthly_wage=wage,
+                                            wage_basis=basis, reason=data["reason"].strip(),
+                                            evidence_ref=data["evidenceRef"].strip(), requested_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "create", "hk_pre_transition_wage_override", row.id,
+           new={"employeeId": employee_id, "monthlyWage": str(wage), "basis": basis, "evidence": row.evidence_ref},
+           reason=row.reason)
+    return row
+
+
+def approve_pre_transition_wage_override(db: Session, organization_id: int, override_id: int,
+                                         actor_id: Optional[int]) -> HongKongPreTransitionWageOverride:
+    row = (db.query(HongKongPreTransitionWageOverride)
+           .filter(HongKongPreTransitionWageOverride.id == override_id,
+                   HongKongPreTransitionWageOverride.organization_id == organization_id).first())
+    if row is None:
+        raise NotFoundException("Hong Kong pre-transition wage override", override_id)
+    if row.status != "REQUESTED":
+        raise BadRequestException(f"this override is {row.status}, not REQUESTED")
+    service.require_four_eyes(row.requested_by_id, actor_id, "A pre-transition wage override", db=db,
+                              entity_type="hk_pre_transition_wage_override", entity_id=row.id,
+                              current_status=row.status, attempted="approve")
+    for prior in (db.query(HongKongPreTransitionWageOverride)
+                  .filter(HongKongPreTransitionWageOverride.organization_id == organization_id,
+                          HongKongPreTransitionWageOverride.employee_id == row.employee_id,
+                          HongKongPreTransitionWageOverride.status == "APPROVED")):
+        prior.status = "SUPERSEDED"
+    row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, datetime.utcnow()
+    _audit(db, actor_id, "status_change", "hk_pre_transition_wage_override", row.id,
+           old={"status": "REQUESTED"}, new={"status": "APPROVED", "monthlyWage": str(row.monthly_wage)})
+    return row
+
+
+def list_pre_transition_wage_overrides(db: Session, organization_id: int, employee_id: int) -> list:
+    return [{"id": r.id, "monthlyWage": str(r.monthly_wage), "basis": r.wage_basis, "reason": r.reason,
+             "evidenceRef": r.evidence_ref, "status": r.status, "requestedById": r.requested_by_id,
+             "approvedById": r.approved_by_id, "approvedAt": _iso(r.approved_at)}
+            for r in db.query(HongKongPreTransitionWageOverride)
+            .filter(HongKongPreTransitionWageOverride.organization_id == organization_id,
+                    HongKongPreTransitionWageOverride.employee_id == employee_id)
+            .order_by(HongKongPreTransitionWageOverride.id.desc()).all()]
 
 
 def list_termination_results(db: Session, organization_id: int, employee_id: Optional[int] = None) -> list:
@@ -4920,6 +5002,7 @@ def _retained_record_label(db: Session, organization_id: int, employee_id: int) 
                          (HongKongWorkHours, "verified work hours"),
                          (HongKongAverageWageSnapshot, "average-wage snapshots"),
                          (HongKongTerminationResult, "termination results"),
+                         (HongKongPreTransitionWageOverride, "pre-transition wage overrides"),
                          (HongKongPayslipCorrection, "payroll corrections")):
         if db.query(model.id).filter(model.organization_id == organization_id, model.employee_id == employee_id).first():
             return label

@@ -29,7 +29,8 @@ import pytest
 
 from tests.test_hong_kong_e2e import MAKER, CHECKER, hk, _employee, _item, _month, _other_org, _profile  # noqa: F401
 
-HK_ROUTE_COUNT = 73           # 49 tenant /api/payroll/hong-kong/* + 24 Super Admin (pinned: review a new route's RBAC)
+HK_ROUTE_COUNT = 76           # 52 tenant /api/payroll/hong-kong/* + 24 Super Admin (pinned: review a new route's RBAC;
+                              # +3 2026-10-14 pre-transition wage override list/request/approve, operator-gated like termination)
 
 # FILED needs the external-submission record (how the employer submitted).
 INTERNAL_FILING = {"submissionMode": "INTERNAL_PREPARATION_ONLY", "authorizedSigner": "Director (test)"}

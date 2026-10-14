@@ -4355,6 +4355,14 @@ class HKAverageWageOverrideRequest(_HKBody):
     evidenceRef: str
 
 
+class HKPreTransitionWageOverrideRequest(_HKBody):
+    """HK-017 controlled correction of the frozen pre-1-May-2025 wage (gap audit D-C)."""
+    monthlyWage: Decimal
+    basis: str = "LAST_FULL_MONTH"
+    reason: str
+    evidenceRef: str
+
+
 class HKEntitlementRequest(_HKBody):
     benefit: str
     averageWageSnapshotId: int
