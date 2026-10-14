@@ -24,7 +24,7 @@ About half a day: 1–2 hours to read, under 10 minutes to re-run, and the remai
 
 * `../G4/G4_edge_case_test_report.md` — SHA-256 `7695dfc5beca5c4dfef937ca332e654834f70622b8864bade149e260af1c9fec`
 * `../G4/G4_test_run_output.txt` — SHA-256 `e68061ff2d8ee08978c2761c08f29a980861d51d20ab3a285e9329c4327b9f98`
-* `../STATUS.md` — SHA-256 `4a41111be5c7a576f91533160122156558884f41d221185094ffb4ead4fba574`
+* `../STATUS.md` — SHA-256 `380b8751dd20298cdc2d23a9c0a48e659f80f74e2bfe1e9405121b1127b50f8e`
 
 ## Sign-off
 

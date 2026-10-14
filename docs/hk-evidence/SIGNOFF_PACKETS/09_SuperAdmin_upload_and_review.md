@@ -24,8 +24,8 @@ About 1–2 hours for A (32 uploads), and about 1 hour per review session for B,
 
 ## Evidence
 
-* `../UPLOAD_KIT/UPLOAD_GUIDE.md` — SHA-256 `b302467b7bd3b238cf9f10f12b340644e143899d0dfc9805c0ac31f3293f2c68`
-* `../UPLOAD_KIT/manifest.csv` — SHA-256 `5ad4685a1c7c5dd797ce539b7b21b23d57c5314285098c8a04a4e54086d21208`
+* `../UPLOAD_KIT/UPLOAD_GUIDE.md` — SHA-256 `4612f92fb317b657e980c015283f95bfe565af2058a5b6ccd37aeac03bd75947`
+* `../UPLOAD_KIT/manifest.csv` — SHA-256 `97a7be989c3bcb72e716aa2918c647c112eff8170b6c6c1bbfd810c2492c729b`
 
 ## Sign-off (uploads done; reviews are recorded in the product)
 

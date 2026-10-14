@@ -33,8 +33,8 @@ About 30 minutes per signer once G1–G6 are accepted.
 ## Evidence
 
 * `../G7/G7_launch_approval_sheet.md` — SHA-256 `5af7cfc104754497aefc208b2fe8c88dba050602d8955c7bce00b168ca78fd3f`
-* `../STATUS.md` — SHA-256 `4a41111be5c7a576f91533160122156558884f41d221185094ffb4ead4fba574`
-* `../BLOCKERS.md` — SHA-256 `b405eeb6339be0d543da44c48a3e3b5788d32c137a6589dca1ceb6e69a0d2675`
+* `../STATUS.md` — SHA-256 `380b8751dd20298cdc2d23a9c0a48e659f80f74e2bfe1e9405121b1127b50f8e`
+* `../BLOCKERS.md` — SHA-256 `213f1e43aee57c219dee25fff6e705d96d4ab1a255cc9b49177e5d77a011be9d`
 
 ## Sign-off
 

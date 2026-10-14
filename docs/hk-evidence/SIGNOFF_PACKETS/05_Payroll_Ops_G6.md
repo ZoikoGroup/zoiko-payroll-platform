@@ -32,7 +32,7 @@ About 2–3 hours, plus the runbook edit.
 * `../G6/G6_operations_runbook_cover.md` — SHA-256 `e043f6ace1e09323dc431cdd511053c3aa377761dc2da59691cfe9d7c9679750`
 * `../G6/G6_contribution_day_calendar_2026_27.json` — SHA-256 `4b6795b9a07a8aa74b60655e201f550c3c01c4bb29ab2f886b831ea3fab8112a`
 * `../G3/G3_parallel_payroll_reconciliation.md` — SHA-256 `991df30c3d932ccc1980472dfd739448effa801945fdd56fbb7a546bd72ff291`
-* `../ops/HK_DEPLOY_RUNBOOK.md` — SHA-256 `c66127bb60905d86e42e03dbbec14c74186ebccd95d9c161d0ce57b3aa06bb1f`
+* `../ops/HK_DEPLOY_RUNBOOK.md` — SHA-256 `89ba33cf5726f7d27918341404f30b2a81fd32b40abe15a3f5bc142300bb29b3`
 * `../../HONG_KONG_RELEASE_EVIDENCE/G6/OPERATIONS_RUNBOOK.md` — SHA-256 `750cf2745c48a43fc8f9e25c20f20e475ea9f85c25cd34aaa0c35f5914492b46`
 
 ## Sign-off

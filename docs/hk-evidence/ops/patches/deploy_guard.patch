@@ -1,0 +1,88 @@
+diff --git a/.github/workflows/backend-deploy.yml b/.github/workflows/backend-deploy.yml
+index 3d156b5..307894e 100644
+--- a/.github/workflows/backend-deploy.yml
++++ b/.github/workflows/backend-deploy.yml
+@@ -2,13 +2,13 @@ name: Deploy Zoiko Payroll Backend
+ 
+ on:
+   push:
+-    branches: [main, rugvedh]
++    branches: [main]
+     paths:
+       - 'backend/**'
+       - '.github/workflows/**'
+       - 'scripts/**'
+   pull_request:
+-    branches: [main, rugvedh]
++    branches: [main]
+     paths:
+       - 'backend/**'
+       - '.github/workflows/**'
+@@ -38,7 +38,11 @@ jobs:
+ 
+   deploy:
+     needs: test
+-    if: github.event_name == 'push'
++    # Deploy guard: only a push to main deploys. A workflow_dispatch run (any
++    # ref) only tests. The `production` GitHub environment can additionally
++    # require a reviewer's approval (Settings -> Environments -> production).
++    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
++    environment: production
+     runs-on: ubuntu-latest
+     steps:
+       - name: Checkout code
+@@ -62,13 +66,38 @@ jobs:
+           script: |
+             set -euo pipefail
+             cd /var/www/zoiko-payroll/backend
+-            TARGET_BRANCH="${GITHUB_REF_NAME:-main}"
+-            git fetch origin "$TARGET_BRANCH"
+-            git checkout "$TARGET_BRANCH" || git checkout -b "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+-            git pull origin "$TARGET_BRANCH"
++
++            # Guard 1 (F-10 / runbook P-6): the service must run with
++            # ENVIRONMENT=production, or the outbound guard treats the server as
++            # local and blocks every email. Checked before anything changes.
++            SVC_ENV="$(systemctl show zoiko-payroll-backend --property=Environment --value || true)"
++            ENV_FILE="$(systemctl show zoiko-payroll-backend --property=EnvironmentFiles --value | awk '{print $1}' || true)"
++            if ! echo "$SVC_ENV" | tr ' ' '\n' | grep -qx 'ENVIRONMENT=production' && ! { [ -n "$ENV_FILE" ] && grep -Eqx 'ENVIRONMENT="?production"?' "$ENV_FILE"; }; then
++              echo "FAIL: zoiko-payroll-backend does not run with ENVIRONMENT=production; refusing to deploy."
++              exit 1
++            fi
++
++            # Guard 2: remember what is deployed now, so a failed migration can put
++            # the files back and code on disk always matches the running process.
++            PREVIOUS="$(git rev-parse HEAD)"
++            echo "Previously deployed commit: $PREVIOUS"
++            git fetch origin main
++            # Guard 3: never deploy a commit that deletes or renames a migration
++            # that the previously deployed commit had.
++            REMOVED="$(git diff --name-only --diff-filter=DR "$PREVIOUS" origin/main -- backend/alembic/versions || true)"
++            if [ -n "$REMOVED" ]; then
++              echo "FAIL: migration files present in $PREVIOUS are missing in origin/main:"; echo "$REMOVED"
++              exit 1
++            fi
++            git checkout main
++            git pull --ff-only origin main
+             cd backend
+             source venv/bin/activate
+             pip install -r requirements.txt
++            restore_previous() {
++              echo "!! Migration step failed - restoring the working tree to $PREVIOUS (service NOT restarted)."
++              cd /var/www/zoiko-payroll/backend && git checkout --detach "$PREVIOUS"
++            }
+ 
+             echo "--- Migration diagnostics (read-only) ---"
+             git rev-parse HEAD
+@@ -88,7 +117,10 @@ jobs:
+             PY
+ 
+             echo "--- Applying migrations (self-healing orphan revisions) ---"
+-            bash ../scripts/deploy_migrate.sh
++            if ! bash ../scripts/deploy_migrate.sh; then
++              restore_previous
++              exit 1
++            fi
+ 
+             echo "--- Post-migration verification ---"
+             echo "Repository heads:"

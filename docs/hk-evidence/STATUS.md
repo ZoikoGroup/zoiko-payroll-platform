@@ -1,4 +1,21 @@
-# Hong Kong launch work: STATUS (2026-10-14, nikhil pass)
+# Hong Kong launch work: STATUS (2026-10-14, after the failed production deploy)
+
+## 00. Deploy failure and this pass
+
+* **Production deploy failed (job 115732289310).** Production's `alembic_version` is **`4c5d6e7f8a9b`**, a revision found nowhere: no GitHub branch, no history, no reflog or dangling object, no other repository or file on the engineering machine, and no session log. Claude never authored it. `deploy_migrate.sh` correctly refused to stamp. The files on the server are now `main`, while the running process is the old code, so **do not restart the service** (`ops/DEPLOY_FAILURE_4c5d6e7f8a9b.md`). Decision-tree result: **(b) not found → no migration written.** Read-only forensics for a human: `backend/scripts/hk_prod_migration_forensics.sql`, plus references in `ops/forensics/`.
+* **The workflow cannot deploy branches other than `main`:** the server's `GITHUB_REF_NAME` is empty, so it falls back to `main`, and `workflow_dispatch` never deploys. The likely route is a developer machine whose `.env` points at production. `ops/patches/deploy_guard.patch` is proposed, not applied.
+* **Commits on local `nikhil` (not pushed):**
+  * `5c1f820`: CI migration-history checks;
+  * `3bf0634`: F-4 / F-11;
+  * `4c45af9`: F-5 / F-6, with migration `d1e5a7c3b9f2` and `AUDIT_PURGE_ON_ORG_HARD_DELETE` (default true, OPEN decision);
+  * the docs/ops commit containing this file.
+* **Tests:** commit a alone 1348 passed; a+b 1352 passed; a+b+c 1362 passed (focused, 0 failed each). **Full suite on the final code: 5735 passed, 0 failed, 40 skipped, 2 xfailed** (09:00:40Z, log SHA-256 `a8f5280a…`).
+* **HK readiness (local):** certification **PASS 11/11**; making HK available is refused with **30 unmet requirements** (`ACTIVATION_READINESS.md`).
+* **Retired:** `migration_lock_safety.patch` and the re-parent patch are OBSOLETE (BLOCKERS, "Retired patches").
+
+---
+
+# Earlier pass: STATUS (2026-10-14, nikhil pass)
 
 ## 0. This pass (2026-10-14)
 
