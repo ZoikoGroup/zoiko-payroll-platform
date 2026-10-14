@@ -167,7 +167,12 @@ def test_alembic_heads_is_single_head():
     # 8b14824fb575 (2026-10-13, HK launch readiness controls): additive; written
     # on b08f04497195 and re-parented onto main's 2f905bb1c296 when main was
     # merged into nikhil (2026-10-14), so the chain stays linear — single head.
-    assert heads == ["8b14824fb575"]
+    # 3b4e5c6d7e8f -> 4c5d6e7f8a9b (2026-10-14, Netherlands M8 loonaangifte /
+    # Digipoort / payment, M9 jaaropgaaf / SEPA): single children on top of
+    # 8b14824fb575, so no new branchpoint.
+    # 08f0f142574e (2026-10-14, reconcile partial NL schema): replays the
+    # c7d3e8f1a2b4..4c5d6e7f8a9b DDL create-if-missing; single child, single head.
+    assert heads == ["08f0f142574e"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -179,7 +184,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["8b14824fb575"]
+    assert list(script.get_heads()) == ["08f0f142574e"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -214,7 +219,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 190   # + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
+    assert len(revs) == 193   # + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
 
 
 def test_germany_head_chain_wiring_is_intact():
