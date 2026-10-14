@@ -227,9 +227,12 @@ def record_work_hours(db: Session, organization_id: int, employee_id: int, entri
     for entry in entries or []:
         day = date.fromisoformat(str(entry["date"]))
         hours = dec(entry["hours"])
+        overtime = dec(entry["overtimeHours"]) if entry.get("overtimeHours") not in (None, "") else None
         source = entry.get("source") or "VERIFIED_TIMESHEET"
         if hours < ZERO or hours > Decimal("24"):
             raise BadRequestException(f"hours on {day} must be between 0 and 24")
+        if overtime is not None and not (ZERO <= overtime <= hours):
+            raise BadRequestException(f"overtime hours on {day} must be between 0 and that day's hours ({hours})")
         if source not in HOURS_SOURCES:
             raise BadRequestException(f"hours source must be one of {', '.join(HOURS_SOURCES)}")
         current = (db.query(HongKongWorkHours)
@@ -238,7 +241,8 @@ def record_work_hours(db: Session, organization_id: int, employee_id: int, entri
         if current is not None and not reason:
             raise BadRequestException(f"{day} already has verified hours — a correction needs a reason")
         row = HongKongWorkHours(organization_id=organization_id, employee_id=employee_id, work_date=day, hours=hours,
-                           source=source, evidence_ref=entry.get("evidenceRef"), recorded_by_id=actor_id)
+                           overtime_hours=overtime, source=source, evidence_ref=entry.get("evidenceRef"),
+                           recorded_by_id=actor_id)
         db.add(row)
         db.flush()
         if current is not None:
@@ -246,7 +250,8 @@ def record_work_hours(db: Session, organization_id: int, employee_id: int, entri
         created.append(row)
         _audit(db, actor_id, "create", "payroll_hk_work_hours", row.id,
                old={"supersedes": current.id, "hours": str(current.hours)} if current else None,
-               new={"employeeId": employee_id, "date": day.isoformat(), "hours": str(hours), "source": source},
+               new={"employeeId": employee_id, "date": day.isoformat(), "hours": str(hours),
+                    "overtimeHours": None if overtime is None else str(overtime), "source": source},
                reason=reason, commit=False)
     db.commit()
     return created
@@ -268,6 +273,37 @@ def hours_input(db: Session, employee: PayrollEmployee, start: date, end: date, 
     last = min(end, date.fromisoformat(facts["terminationDate"])) if facts.get("terminationDate") else end
     expected = {(first + timedelta(days=i)).isoformat() for i in range((last - first).days + 1)}
     return {"days": days, "complete": expected <= set(days)}
+
+
+def overtime_pay(db: Session, employee: PayrollEmployee, start: date, end: date) -> tuple:
+    """(amount, facts) for contractual overtime in a wage period (gap audit D-A).
+
+    Wireframe §4 / §10: no statutory overtime premium is invented; overtime is
+    paid at the rate the contract or agreement sets (the statutory profile's
+    hk_contractual_overtime_hourly_rate, effective-dated), on the verified
+    overtime hours recorded with the day's hours (HK-016). The overtime hours
+    are already inside the day's total hours, so they count for minimum wage
+    and continuous contract; the amount is the `overtime` earning, classified
+    per obligation by the pack (EO wages, MPF relevant income, SMW, IRD).
+    Rounding: to the cent, half-up — the same documented HK money rule as MPF
+    (common.cents; a G1 review item), applied once to hours x rate."""
+    rows = (db.query(HongKongWorkHours)
+            .filter(HongKongWorkHours.organization_id == employee.organization_id,
+                    HongKongWorkHours.employee_id == employee.id, HongKongWorkHours.work_date >= start,
+                    HongKongWorkHours.work_date <= end, HongKongWorkHours.superseded_by_id.is_(None),
+                    HongKongWorkHours.overtime_hours.isnot(None)).all())
+    hours = sum((dec(r.overtime_hours) for r in rows), ZERO)
+    facts = worker_facts(db, employee, end) or {}
+    rate = facts.get("contractualOvertimeHourlyRate")
+    out = {"hours": str(hours), "days": len([r for r in rows if dec(r.overtime_hours) > ZERO]),
+           "basis": "verified overtime hours x the contractual overtime hourly rate (no statutory premium; wireframe §4)",
+           "hourlyRate": rate, "profileId": facts.get("profileId")}
+    if hours <= ZERO:
+        return ZERO, {**out, "status": "NONE"}
+    if rate is None:
+        return ZERO, {**out, "status": "RATE_NOT_RECORDED"}
+    amount = cents(hours * dec(rate))
+    return amount, {**out, "status": "PAID" if amount > ZERO else "NO_OVERTIME_PAY_UNDER_CONTRACT", "amount": str(amount)}
 
 
 # ── Payroll calculation inputs (called from service._compute_payslip_values) ─
@@ -4794,6 +4830,9 @@ def _hk_statutory_profile_errors(data) -> list:
     code = data.hk_mpf_exemption_code
     if code in ("EXEMPT_STATUTORY_SCHEME", "EXEMPT_ORSO", "EXEMPT_INBOUND") and not data.hk_mpf_exemption_evidence_ref:
         errors.append(f"{code} needs hk_mpf_exemption_evidence_ref (the exemption is never inferred).")
+    ot_rate = data.hk_contractual_overtime_hourly_rate
+    if ot_rate is not None and not (ZERO <= ot_rate <= Decimal("100000")):
+        errors.append("hk_contractual_overtime_hourly_rate must be between 0 and 100,000 (0 = the contract gives no overtime pay).")
     hours = data.hk_contractual_weekly_hours
     if hours is not None and not (0 <= hours <= 168):
         errors.append("hk_contractual_weekly_hours must be between 0 and 168.")

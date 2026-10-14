@@ -28,7 +28,9 @@ const DATES = ["hkgPermissionToStayUntil", "hkgEmploymentContinuityStart", "hkgA
 
 const SECTIONS = [
   ["Employment relationship", [["hkgEmploymentRelationship", "Relationship"], ["hkgPayBasis", "Pay basis"],
-    ["hkgContractualWeeklyHours", "Contractual weekly hours"], ["hkgEmploymentContinuityStart", "Continuous employment since (if not joining date)"]]],
+    ["hkgContractualWeeklyHours", "Contractual weekly hours"],
+    ["hkgContractualOvertimeHourlyRate", "Contractual overtime rate per hour (HK$; 0 = no overtime pay under the contract)"],
+    ["hkgEmploymentContinuityStart", "Continuous employment since (if not joining date)"]]],
   ["Identity & residency", [["hkgIdentityDocumentType", "Identity document"], ["hkgResidencyStatus", "Residency"],
     ["hkgVisaType", "Visa / permission type"], ["hkgEnteredForEmployment", "Entered HK for employment (s.11 IO)"],
     ["hkgArrivalDate", "Arrival date"], ["hkgPermissionToStayUntil", "Permission to stay until"]]],

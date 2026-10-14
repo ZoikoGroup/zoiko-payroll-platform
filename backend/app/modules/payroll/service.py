@@ -24952,6 +24952,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             facts["statutoryFactsApplied"] = {k: v for k, v in sg_month_facts.items()}
         if sg_fact_block:
             facts["statutoryChangeBlock"] = sg_fact_block
+    hk_overtime_facts = None
+    if country == "HK" and is_active:
+        # Gap audit D-A: contractual overtime (wireframe §4 / §10) — verified
+        # overtime hours x the profile's contractual rate; no statutory premium.
+        from app.modules.payroll import hong_kong_service as _hk_service
+
+        overtime, hk_overtime_facts = _hk_service.overtime_pay(
+            db, employee, run.period_start or run.pay_date.replace(day=1), run.period_end or run.pay_date)
     additional_compensation = (
         _sum_attendance_extras(db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records)
         if is_active else Decimal("0")
@@ -25104,6 +25112,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         if hk_post_leaving_days:
             hk_inputs["hk_worker_facts"]["postLeavingUnpaidDays"] = hk_post_leaving_days
             hk_inputs["hk_worker_facts"]["finalPeriodTerminationDate"] = hk_termination_date.isoformat()
+        if hk_overtime_facts is not None:
+            hk_inputs["hk_worker_facts"]["overtime"] = hk_overtime_facts
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,

@@ -311,6 +311,22 @@ def enrolment_checks(employee: dict, coverage: dict, enrolled: bool, today: date
                   action="Enrol through eMPF and record the MPF member account")]
 
 
+def overtime_checks(employee: dict, trace: dict) -> list:
+    """Gap audit D-A: overtime hours were verified for the period but no
+    contractual overtime rate is on the statutory profile — nothing was paid
+    for them, and the run must not be approved until the rate is recorded
+    (wireframe §4: overtime pay follows the contract; no statutory premium)."""
+    ot = (trace.get("workerFacts") or {}).get("overtime") or {}
+    if ot.get("status") != "RATE_NOT_RECORDED":
+        return []
+    return [check("HK_OVERTIME_RATE_NOT_RECORDED", BLOCK,
+                  f"{ot.get('hours')} verified overtime hours in this period, but no contractual overtime rate is "
+                  f"recorded, so they were not paid", employee,
+                  source="Wireframe §4 contractual overtime; Labour Department Concise Guide ch.3 (wages)",
+                  action="Record the contractual overtime hourly rate on the worker's statutory profile (0 if the "
+                         "contract gives no overtime pay), then regenerate the payslip")]
+
+
 def trace_checks(employee: dict, trace: dict, *, cc: dict = None, hold: dict = None,
                  ird_cases: list = None, rate_map: dict = None, pay_date: date = None,
                  period_end: date = None, termination: date = None, today: date = None,
@@ -323,6 +339,7 @@ def trace_checks(employee: dict, trace: dict, *, cc: dict = None, hold: dict = N
         out.extend(enrolment_checks(employee, (trace.get("mpf") or {}).get("coverage") or {}, enrolled,
                                     today or date.today()))
     out.extend(minimum_wage_checks(employee, trace.get("minimumWage") or {}))
+    out.extend(overtime_checks(employee, trace))
     out.extend(continuous_contract_checks(employee, cc))
     if rate_map is not None and pay_date is not None and period_end is not None:
         out.extend(wage_payment_checks(employee, pay_date, period_end, rate_map, termination))

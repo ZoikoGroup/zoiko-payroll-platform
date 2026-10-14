@@ -1171,6 +1171,13 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
     # under their final name (no hkg_ history to rename).
     readiness = (versions / "8b14824fb575_hk_launch_readiness_controls.py").read_text(encoding="utf8")
     created_later = {"payroll_hk_contribution_day_disruptions"}
+    # Columns added to existing tables by later, additive migrations.
+    overtime = (versions / "e3a9c1f7b2d4_hk_contractual_overtime.py").read_text(encoding="utf8")
+    added_later = {("payroll_employee_statutory_profiles", "hk_contractual_overtime_hourly_rate"): overtime,
+                   ("payroll_hk_work_hours", "overtime_hours"): overtime}
+    for (table_name, col_name), text in added_later.items():
+        assert col_name in Base.metadata.tables[table_name].columns, (table_name, col_name)
+        assert f'"{table_name}"' in text and f'"{col_name}"' in text, (table_name, col_name)
     checked = 0
     for name, table in Base.metadata.tables.items():
         if name in created_later:
@@ -1185,10 +1192,14 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
             for col in table.columns:
                 if name in shared and col.name == "jurisdiction_country":
                     continue                                            # added by 2d0cdeeeecc4
+                if (name, col.name) in added_later:
+                    continue                                            # checked above
                 assert f"'{col.name}'" in foundation, f"{name}.{col.name}"
             checked += 1
         for col in table.columns:
             if col.name.startswith("hk_") and not (name.startswith("payroll_hk_") or name in shared):
+                if (name, col.name) in added_later:
+                    continue                                            # checked above
                 assert f"'{renamed_columns[(name, col.name)]}'" in foundation, f"{name}.{col.name}"
                 checked += 1
     assert checked == 13 + 1 + 24 + 1, checked                          # 13 tables + 1 later table + 24 profile columns + trace
