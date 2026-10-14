@@ -20,7 +20,7 @@ from app.modules.auth.models import RevokedToken, User, UserRole
 @pytest.fixture()
 def user(db):
     u = User(
-        email="revoke-test@zoiko.dev",
+        email="revoke-test@zoiko-dev.example.com",
         hashed_password="x",
         role=UserRole.PAYROLL_ADMIN,
         organization_id=None,

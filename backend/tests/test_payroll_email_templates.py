@@ -63,7 +63,7 @@ ALL_TEMPLATES = NEW_TEMPLATES + RESTYLED_TEMPLATES
 
 BASE_CONTEXT = {
     "company_name": "Acme Payroll",
-    "support_email": "support@acme.com",
+    "support_email": "support@acme.example.com",
     "logo_url": "https://app.zoikopayroll.com/zoikopayroll-logo-light.png",
     "frontend_url": "https://app.zoikopayroll.com",
     "subject": "Test subject | Zoiko Payroll",
@@ -251,7 +251,7 @@ def test_leave_request_submission_notifies_org(db, organization, caplog, monkeyp
     monkeypatch.setattr(
         "app.core.code_generation.generate_business_code", lambda *a, **k: "LV-0001",
     )
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     emp = PayrollEmployee(
         organization_id=organization.id, employee_code="ZC-1704",
         name="Jane Doe", email="jane@example.com", country_code="IN",
@@ -267,7 +267,7 @@ def test_leave_request_submission_notifies_org(db, organization, caplog, monkeyp
         payroll_service.create_payroll_leave_request(db, data, organization.id)
     sent = _mock_send_templates(caplog)
     assert "leave_request_submitted.html" in sent, sent
-    assert any("admin@acme.com" in r.getMessage() for r in (_non_send_records(caplog) if False else caplog.records))
+    assert any("admin@acme.example.com" in r.getMessage() for r in (_non_send_records(caplog) if False else caplog.records))
 
 
 # ── Trigger wiring: run + payslip deletion (real service functions) ───────
@@ -285,7 +285,7 @@ def _draft_run(db, organization, period="Jan 2026"):
 
 
 def test_delete_payroll_run_notifies_org(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     run = _draft_run(db, organization)
     with caplog.at_level(logging.INFO):
         payroll_service.delete_payroll_run(db, run.id, organization.id)
@@ -318,7 +318,7 @@ def test_delete_payslip_notifies_employee(db, organization, caplog):
 # ── Trigger wiring: admin-facing helpers ─────────────────────────────────
 
 def test_payroll_run_created_notifies_org(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     run = _draft_run(db, organization)
     with caplog.at_level(logging.INFO):
         payroll_service._notify_payroll_run_created(db, run, organization.id)
@@ -327,7 +327,7 @@ def test_payroll_run_created_notifies_org(db, organization, caplog):
 
 
 def test_elster_blocked_notifies_org_with_blocked_variant(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     from app.modules.payroll.models import GermanyElsterTransmission
     row = GermanyElsterTransmission(
         organization_id=organization.id, transmission_type="LOHNSTEUER_ANMELDUNG",
@@ -350,16 +350,16 @@ def test_elster_submitted_variant_chosen_only_for_real_submitted_statuses(db, or
     decides the template — never the caller's intent."""
     with caplog.at_level(logging.INFO):
         send_elster_filing_status_email(
-            "admin@acme.com", "BLOCKED_EXTERNAL", "LOHNSTEUER_ANMELDUNG",
+            "admin@acme.example.com", "BLOCKED_EXTERNAL", "LOHNSTEUER_ANMELDUNG",
             "2026-01-01", "2026-01-31", blocked_reason="No ELSTER connector is authorized.",
             organization_id=organization.id, db=db,
         )
         send_elster_filing_status_email(
-            "admin@acme.com", "QUEUED", "LOHNSTEUER_ANMELDUNG",
+            "admin@acme.example.com", "QUEUED", "LOHNSTEUER_ANMELDUNG",
             "2026-01-01", "2026-01-31", organization_id=organization.id, db=db,
         )
         send_elster_filing_status_email(
-            "admin@acme.com", "REJECTED", "LOHNSTEUER_ANMELDUNG",
+            "admin@acme.example.com", "REJECTED", "LOHNSTEUER_ANMELDUNG",
             "2026-01-01", "2026-01-31", blocked_reason="Validation errors.",
             organization_id=organization.id, db=db,
         )
@@ -370,7 +370,7 @@ def test_elster_submitted_variant_chosen_only_for_real_submitted_statuses(db, or
 
 def test_jurisdiction_pack_change_fans_out_to_linked_org(db, organization, caplog):
     from app.modules.payroll.models import JurisdictionPack, CompanyComplianceDetails
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     pack = JurisdictionPack(
         pack_id="DE-TAX", version="2.0", jurisdiction_country="DE",
         jurisdiction_state=None, jurisdiction_locality=None,
@@ -406,7 +406,7 @@ def test_jurisdiction_pack_no_change_sends_nothing(db, organization, caplog):
 
 def test_report_generated_and_failed_variants(db, organization, caplog):
     from app.modules.payroll.models import GeneratedReport
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     report = GeneratedReport(
         organization_id=organization.id, report_template_id=1, template_version="1.3",
         report_type="PAYROLL_REGISTER", jurisdiction_country="DE", reporting_year="2026",
@@ -426,7 +426,7 @@ def test_report_generated_and_failed_variants(db, organization, caplog):
 
 
 def test_org_contact_email_helper(db, organization):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     db.commit()
-    assert _get_org_contact_email(db, organization.id) == "admin@acme.com"
+    assert _get_org_contact_email(db, organization.id) == "admin@acme.example.com"
     assert _get_org_contact_email(db, None) is None

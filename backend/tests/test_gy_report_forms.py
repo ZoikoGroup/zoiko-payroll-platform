@@ -182,8 +182,8 @@ def _build_gy_form_7b_template(db, creator, approver, key="GY-FORM-7B-TEST"):
 # ── GRA Form 5 ────────────────────────────────────────────────────────
 
 def test_generate_gy_form_5_aggregates_two_employees_across_multiple_runs_same_month(db, organization):
-    creator = _make_user(db, "creator_gyf5a@test.com")
-    approver = _make_user(db, "approver_gyf5a@test.com")
+    creator = _make_user(db, "creator_gyf5a@test.example.com")
+    approver = _make_user(db, "approver_gyf5a@test.example.com")
     _make_company(db, organization.id, country="GY")
     emp1 = _make_gy_employee(db, organization.id, code="GYF5A1", name="Amara Singh")
     emp2 = _make_gy_employee(db, organization.id, code="GYF5A2", name="Rohan Persaud")
@@ -217,8 +217,8 @@ def test_generate_gy_form_5_aggregates_two_employees_across_multiple_runs_same_m
 
 
 def test_generate_gy_form_5_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_gyf5b@test.com")
-    approver = _make_user(db, "approver_gyf5b@test.com")
+    creator = _make_user(db, "creator_gyf5b@test.example.com")
+    approver = _make_user(db, "approver_gyf5b@test.example.com")
     _make_company(db, organization.id, country="GY")
     employee = _make_gy_employee(db, organization.id, code="GYF5B")
 
@@ -235,8 +235,8 @@ def test_generate_gy_form_5_excludes_other_months_and_unfinalized_runs(db, organ
 
 
 def test_generate_gy_form_5_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_gyf5c@test.com")
-    approver = _make_user(db, "approver_gyf5c@test.com")
+    creator = _make_user(db, "creator_gyf5c@test.example.com")
+    approver = _make_user(db, "approver_gyf5c@test.example.com")
     _make_company(db, organization.id, country="GY")
     template = _build_template(db, creator, approver, country="GY", version="gyf5-neg")  # TDS, not GY_FORM_5
     with pytest.raises(BadRequestException):
@@ -244,8 +244,8 @@ def test_generate_gy_form_5_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_gy_form_5_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_gyf5d@test.com")
-    approver = _make_user(db, "approver_gyf5d@test.com")
+    creator = _make_user(db, "creator_gyf5d@test.example.com")
+    approver = _make_user(db, "approver_gyf5d@test.example.com")
     _make_company(db, organization.id, country="GY")
     employee = _make_gy_employee(db, organization.id, code="GYF5D")
     _make_gy_run_with_payslip(db, organization.id, employee.id, date(2026, 3, 10))
@@ -261,8 +261,8 @@ def test_generate_gy_form_5_regenerating_supersedes_prior(db, organization):
 # ── NIS Electronic Schedule ──────────────────────────────────────────
 
 def test_generate_gy_nis_schedule_aggregates_employees_for_the_month(db, organization):
-    creator = _make_user(db, "creator_gynis_a@test.com")
-    approver = _make_user(db, "approver_gynis_a@test.com")
+    creator = _make_user(db, "creator_gynis_a@test.example.com")
+    approver = _make_user(db, "approver_gynis_a@test.example.com")
     _make_company(db, organization.id, country="GY")
     emp1 = _make_gy_employee(db, organization.id, code="GYNISA1", name="Amara Singh", compliance_fields={"nis_number": "NIS-100"})
     emp2 = _make_gy_employee(db, organization.id, code="GYNISA2", name="Rohan Persaud", compliance_fields={"nis_number": "NIS-200"})
@@ -286,8 +286,8 @@ def test_generate_gy_nis_schedule_aggregates_employees_for_the_month(db, organiz
 
 
 def test_generate_gy_nis_schedule_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_gynis_b@test.com")
-    approver = _make_user(db, "approver_gynis_b@test.com")
+    creator = _make_user(db, "creator_gynis_b@test.example.com")
+    approver = _make_user(db, "approver_gynis_b@test.example.com")
     _make_company(db, organization.id, country="GY")
     template = _build_template(db, creator, approver, country="GY", version="gynis-neg")
     with pytest.raises(BadRequestException):
@@ -297,8 +297,8 @@ def test_generate_gy_nis_schedule_rejects_wrong_report_type(db, organization):
 # ── Form 7B (generic mapper reuse) ───────────────────────────────────
 
 def test_generate_gy_form_7b_sums_ytd_via_generic_mapper(db, organization):
-    creator = _make_user(db, "creator_gy7b_a@test.com")
-    approver = _make_user(db, "approver_gy7b_a@test.com")
+    creator = _make_user(db, "creator_gy7b_a@test.example.com")
+    approver = _make_user(db, "approver_gy7b_a@test.example.com")
     _make_company(db, organization.id, country="GY")
     employee = _make_gy_employee(db, organization.id, code="GY7BA", name="Amara Singh")
 

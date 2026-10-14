@@ -57,7 +57,7 @@ db.add(org)
 db.flush()
 
 user = __import__("app.modules.auth.models", fromlist=["User"]).User(
-    email="bulk-admin@zoiko.dev",
+    email="bulk-admin@zoiko-dev.example.com",
     hashed_password="x",
     role="org_admin",
     organization_id=org.id,
@@ -118,9 +118,9 @@ def test_bulk_employee_import_and_update_lifecycle():
     # ── 1. Bulk create: 2 valid + 1 duplicate-email within the batch ──
     payload = {
         "employees": [
-            employee("asha@zoiko.dev", "Asha Rao", panNumber="AASPR0001A"),
-            employee("bharat@zoiko.dev", "Bharat Menon", panNumber="ABCPR0002B"),
-            employee("asha@zoiko.dev", "Asha Duplicate", panNumber="AASPR0003C"),
+            employee("asha@zoiko-dev.example.com", "Asha Rao", panNumber="AASPR0001A"),
+            employee("bharat@zoiko-dev.example.com", "Bharat Menon", panNumber="ABCPR0002B"),
+            employee("asha@zoiko-dev.example.com", "Asha Duplicate", panNumber="AASPR0003C"),
         ]
     }
     r = client.post("/api/payroll/employees/bulk", json=payload)
@@ -131,9 +131,9 @@ def test_bulk_employee_import_and_update_lifecycle():
     assert "already exists" in body["failed"][0]["reason"], body
     assert len(body["employees"]) == 2, body
     created = {e["email"]: e for e in body["employees"]}
-    assert created["asha@zoiko.dev"]["countryCode"] == "IN", body
-    asha_id = created["asha@zoiko.dev"]["id"]
-    bharat_id = created["bharat@zoiko.dev"]["id"]
+    assert created["asha@zoiko-dev.example.com"]["countryCode"] == "IN", body
+    asha_id = created["asha@zoiko-dev.example.com"]["id"]
+    bharat_id = created["bharat@zoiko-dev.example.com"]["id"]
 
     # ── 2. Re-submitting the same rows must fail as duplicates ────────
     r = client.post("/api/payroll/employees/bulk", json=payload)
@@ -156,7 +156,7 @@ def test_bulk_employee_import_and_update_lifecycle():
     # ── 4. Jurisdiction validation failure (US missing required SSN) ──
     r = client.post(
         "/api/payroll/employees/bulk",
-        json={"employees": [employee("us@zoiko.dev", "US Person", countryCode="US")]},
+        json={"employees": [employee("us@zoiko-dev.example.com", "US Person", countryCode="US")]},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -168,8 +168,8 @@ def test_bulk_employee_import_and_update_lifecycle():
         "/api/payroll/employees/bulk",
         json={
             "employees": [
-                employee("pan1@zoiko.dev", "PAN One", panNumber="ABCDE1234F"),
-                employee("pan2@zoiko.dev", "PAN Two", panNumber="ABCDE1234F"),
+                employee("pan1@zoiko-dev.example.com", "PAN One", panNumber="ABCDE1234F"),
+                employee("pan2@zoiko-dev.example.com", "PAN Two", panNumber="ABCDE1234F"),
             ]
         },
     )
@@ -182,7 +182,7 @@ def test_bulk_employee_import_and_update_lifecycle():
     r = client.get("/api/payroll/employees")
     assert r.status_code == 200, r.text
     emails = {e["email"] for e in r.json()}
-    assert {"asha@zoiko.dev", "bharat@zoiko.dev", "pan1@zoiko.dev"} <= emails, emails
+    assert {"asha@zoiko-dev.example.com", "bharat@zoiko-dev.example.com", "pan1@zoiko-dev.example.com"} <= emails, emails
 
     # ── 7. Bulk update: change department + designation ─────────────────
     r = client.post(
@@ -192,11 +192,11 @@ def test_bulk_employee_import_and_update_lifecycle():
                 {
                     "id": asha_id,
                     "name": "Asha Rao",
-                    "email": "asha@zoiko.dev",
+                    "email": "asha@zoiko-dev.example.com",
                     "department": "Design",
                     "designation": "Senior Engineer",
                 },
-                {"id": 999999, "name": "Ghost", "email": "ghost@zoiko.dev", "department": "Ops"},
+                {"id": 999999, "name": "Ghost", "email": "ghost@zoiko-dev.example.com", "department": "Ops"},
             ]
         },
     )
@@ -215,4 +215,4 @@ def test_bulk_employee_import_and_update_lifecycle():
 
     # ── 8. Single employee fetch by id still consistent ──────────────────
     r = client.get(f"/api/payroll/employees/{bharat_id}")
-    assert r.status_code == 200 and r.json()["email"] == "bharat@zoiko.dev", r.text
+    assert r.status_code == 200 and r.json()["email"] == "bharat@zoiko-dev.example.com", r.text

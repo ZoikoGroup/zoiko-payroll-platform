@@ -94,8 +94,8 @@ def _build_bs_c10_template(db, creator, approver, key="BS-C10-TEST"):
 
 
 def test_generate_bs_c10_aggregates_two_employees_across_multiple_runs_same_month(db, organization):
-    creator = _make_user(db, "creator_bsc10a@test.com")
-    approver = _make_user(db, "approver_bsc10a@test.com")
+    creator = _make_user(db, "creator_bsc10a@test.example.com")
+    approver = _make_user(db, "approver_bsc10a@test.example.com")
     _make_company(db, organization.id, country="BS")
     emp1 = _make_bs_employee(db, organization.id, code="BSC10A1", name="Latoya Pinder")
     emp2 = _make_bs_employee(db, organization.id, code="BSC10A2", name="Anton Rolle")
@@ -122,8 +122,8 @@ def test_generate_bs_c10_aggregates_two_employees_across_multiple_runs_same_mont
 
 
 def test_generate_bs_c10_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_bsc10b@test.com")
-    approver = _make_user(db, "approver_bsc10b@test.com")
+    creator = _make_user(db, "creator_bsc10b@test.example.com")
+    approver = _make_user(db, "approver_bsc10b@test.example.com")
     _make_company(db, organization.id, country="BS")
     employee = _make_bs_employee(db, organization.id, code="BSC10B")
 
@@ -138,8 +138,8 @@ def test_generate_bs_c10_excludes_other_months_and_unfinalized_runs(db, organiza
 
 
 def test_generate_bs_c10_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_bsc10c@test.com")
-    approver = _make_user(db, "approver_bsc10c@test.com")
+    creator = _make_user(db, "creator_bsc10c@test.example.com")
+    approver = _make_user(db, "approver_bsc10c@test.example.com")
     _make_company(db, organization.id, country="BS")
     template = _build_template(db, creator, approver, country="BS", version="bsc10-neg")
     with pytest.raises(BadRequestException):
@@ -147,8 +147,8 @@ def test_generate_bs_c10_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_bs_c10_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_bsc10d@test.com")
-    approver = _make_user(db, "approver_bsc10d@test.com")
+    creator = _make_user(db, "creator_bsc10d@test.example.com")
+    approver = _make_user(db, "approver_bsc10d@test.example.com")
     _make_company(db, organization.id, country="BS")
     employee = _make_bs_employee(db, organization.id, code="BSC10D")
     _make_bs_run_with_payslip(db, organization.id, employee.id, date(2026, 8, 10))

@@ -33,7 +33,7 @@ def _make_us_employee(db, organization_id, code="ENHR1", work_state="CA", date_o
 
 def test_create_employee_auto_creates_pending_new_hire_report_for_us(db, organization):
     payload = EmployeeCreate(
-        employee_code="AUTOHIRE1", name="Auto Hire", email="auto.hire@test.com", designation="Engineer",
+        employee_code="AUTOHIRE1", name="Auto Hire", email="auto.hire@test.example.com", designation="Engineer",
         dateOfJoining="2026-05-01", ctc=70000, countryCode="US",
         complianceFields={
             "ssn": "123-45-6789", "flsa_status": "Exempt", "state_tax_jurisdiction": "TX",
@@ -52,7 +52,7 @@ def test_create_employee_auto_creates_pending_new_hire_report_for_us(db, organiz
 
 def test_create_employee_does_not_create_new_hire_report_for_non_us(db, organization):
     payload = EmployeeCreate(
-        employee_code="AUTOHIRE2", name="India Hire", email="india.hire@test.com", designation="Engineer",
+        employee_code="AUTOHIRE2", name="India Hire", email="india.hire@test.example.com", designation="Engineer",
         dateOfJoining="2026-05-01", ctc=700000, countryCode="IN",
     )
     employee = service.create_employee(db, payload, organization.id)

@@ -62,7 +62,7 @@ class _WireSMTP:
 
 
 @pytest.fixture()
-def wire(monkeypatch):
+def wire(monkeypatch, fake_smtp_transport):
     monkeypatch.setattr(email_service, "_get_smtp_settings", lambda db=None: {
         "host": "smtp.test.invalid", "port": 587, "username": "", "password": "",
         "from_email": "noreply@test.invalid", "use_tls": "true",

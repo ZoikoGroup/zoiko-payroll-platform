@@ -58,7 +58,7 @@ class _WireSMTP:
 
 
 @pytest.fixture()
-def sent_html(monkeypatch):
+def sent_html(monkeypatch, fake_smtp_transport):
     from app.config import settings
 
     monkeypatch.setattr(email_service, "_get_smtp_settings", lambda db=None: {

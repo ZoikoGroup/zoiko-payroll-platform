@@ -130,8 +130,8 @@ def test_generate_au_stp_report_end_to_end(db, organization):
     generic generate_report_from_template engine (already proven for
     CA/IN/UK/US) produces correct AU figures with zero AU-specific
     branching anywhere in that function."""
-    creator = _make_user(db, "au-stp-creator@test.com")
-    approver = _make_user(db, "au-stp-approver@test.com")
+    creator = _make_user(db, "au-stp-creator@test.example.com")
+    approver = _make_user(db, "au-stp-approver@test.example.com")
     _make_au_company(db, organization.id)
     run, employee, item = _make_au_run_with_payslip(db, organization.id, status="Approved")
     template = _build_au_stp_template(db, creator, approver)
@@ -158,8 +158,8 @@ def test_au_stp_submission_tracking_lifecycle(db, organization):
     lifecycle UK's FPS/EPS/P45 already use (never a real ATO
     transmission — see RtiSubmission's own docstring), plus the new
     schema_version column closing AU-AC23."""
-    creator = _make_user(db, "au-stp-submit-creator@test.com")
-    approver = _make_user(db, "au-stp-submit-approver@test.com")
+    creator = _make_user(db, "au-stp-submit-creator@test.example.com")
+    approver = _make_user(db, "au-stp-submit-approver@test.example.com")
     _make_au_company(db, organization.id)
     run, employee, item = _make_au_run_with_payslip(db, organization.id, status="Approved")
     template = _build_au_stp_template(db, creator, approver)
@@ -185,8 +185,8 @@ def test_au_stp_appears_in_rti_forms_summary(db, organization):
     """_RTI_FORMS_SUMMARY_REPORT_TYPES's widened set gives Super Admin
     cross-org visibility into AU STP generation, the same way India's
     Form 130/138/123 were widened in 2026-09-10 — no schema change."""
-    creator = _make_user(db, "au-stp-summary-creator@test.com")
-    approver = _make_user(db, "au-stp-summary-approver@test.com")
+    creator = _make_user(db, "au-stp-summary-creator@test.example.com")
+    approver = _make_user(db, "au-stp-summary-approver@test.example.com")
     _make_au_company(db, organization.id)
     run, employee, item = _make_au_run_with_payslip(db, organization.id, status="Approved")
     template = _build_au_stp_template(db, creator, approver)

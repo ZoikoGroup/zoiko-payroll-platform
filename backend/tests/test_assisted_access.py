@@ -35,10 +35,10 @@ def people(db, organization):
     db.commit()
     return SimpleNamespace(
         org=organization, other=other,
-        sa1=_user(db, "sa1@zoikotest.dev", UserRole.SUPER_ADMIN), sa2=_user(db, "sa2@zoikotest.dev", UserRole.SUPER_ADMIN),
-        admin=_user(db, "admin@zoikotest.dev", UserRole.ORG_ADMIN, organization.id),
-        other_admin=_user(db, "other@zoikotest.dev", UserRole.ORG_ADMIN, other.id),
-        payroll=_user(db, "payroll@zoikotest.dev", UserRole.PAYROLL_ADMIN, organization.id),
+        sa1=_user(db, "sa1@zoikotest.example.com", UserRole.SUPER_ADMIN), sa2=_user(db, "sa2@zoikotest.example.com", UserRole.SUPER_ADMIN),
+        admin=_user(db, "admin@zoikotest.example.com", UserRole.ORG_ADMIN, organization.id),
+        other_admin=_user(db, "other@zoikotest.example.com", UserRole.ORG_ADMIN, other.id),
+        payroll=_user(db, "payroll@zoikotest.example.com", UserRole.PAYROLL_ADMIN, organization.id),
     )
 
 
@@ -152,7 +152,7 @@ def test_break_glass_needs_a_second_super_admin_is_time_limited_and_notifies_the
     svc.approve_assisted_access(db, s, approver=people.sa2, decision_reason="TEST: confirmed P1")
     assert s.approval_status == "APPROVED" and s.activated_at is not None
     assert s.expires_at - s.started_at == timedelta(minutes=60)
-    assert sent == [("admin@zoikotest.dev", people.admin.id)] and s.tenant_notified_at is not None
+    assert sent == [("admin@zoikotest.example.com", people.admin.id)] and s.tenant_notified_at is not None
     ev = _events(db, s.id)
     assert ev.count("ASSISTED_ACCESS_REFUSED") == 2
     assert ev[-3:] == ["ASSISTED_ACCESS_APPROVED", "ASSISTED_ACCESS_STARTED", "ASSISTED_ACCESS_TENANT_NOTIFIED"]

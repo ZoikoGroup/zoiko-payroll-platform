@@ -90,8 +90,8 @@ def test_generate_au_state_payroll_tax_return_sums_across_multiple_runs(db, orga
     finalized run's own employer_payroll_tax within the date range, not
     just the single most-recent run (the same cross-run requirement
     generate_india_form_138 already proves for a different jurisdiction)."""
-    creator = _make_user(db, "au-state-tax-creator@test.com")
-    approver = _make_user(db, "au-state-tax-approver@test.com")
+    creator = _make_user(db, "au-state-tax-creator@test.example.com")
+    approver = _make_user(db, "au-state-tax-approver@test.example.com")
     _make_au_company(db, organization.id)
     _make_au_run_with_payslip(
         db, organization.id, period_label="Jul 2026", period_start=date(2026, 7, 1), period_end=date(2026, 7, 31),
@@ -117,8 +117,8 @@ def test_generate_au_state_payroll_tax_return_sums_across_multiple_runs(db, orga
 
 
 def test_generate_au_state_payroll_tax_return_excludes_other_states(db, organization):
-    creator = _make_user(db, "au-state-tax-other-creator@test.com")
-    approver = _make_user(db, "au-state-tax-other-approver@test.com")
+    creator = _make_user(db, "au-state-tax-other-creator@test.example.com")
+    approver = _make_user(db, "au-state-tax-other-approver@test.example.com")
     _make_au_company(db, organization.id)
     _make_au_run_with_payslip(
         db, organization.id, period_label="Jul 2026", period_start=date(2026, 7, 1), period_end=date(2026, 7, 31),
@@ -138,8 +138,8 @@ def test_generate_au_state_payroll_tax_return_excludes_other_states(db, organiza
 
 
 def test_generate_au_state_payroll_tax_return_rejects_mismatched_state(db, organization):
-    creator = _make_user(db, "au-state-tax-mismatch-creator@test.com")
-    approver = _make_user(db, "au-state-tax-mismatch-approver@test.com")
+    creator = _make_user(db, "au-state-tax-mismatch-creator@test.example.com")
+    approver = _make_user(db, "au-state-tax-mismatch-approver@test.example.com")
     _make_au_company(db, organization.id)
     _make_au_run_with_payslip(
         db, organization.id, period_label="Jul 2026", period_start=date(2026, 7, 1), period_end=date(2026, 7, 31),

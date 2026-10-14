@@ -79,7 +79,7 @@ def _make_company(db, organization_id, country="IN"):
 def _make_run_with_payslip(db, organization_id, status="Approved"):
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
     employee = PayrollEmployee(
-        organization_id=organization_id, employee_code="E001", name="Asha Rao", email="asha@acme.com",
+        organization_id=organization_id, employee_code="E001", name="Asha Rao", email="asha@acme.example.com",
     )
     db.add(employee)
     db.commit()
@@ -137,10 +137,10 @@ def _build_template(db, creator, approver, country="IN", version="1.0"):
 
 def test_report_generated_email_via_real_generation_pipeline(db, organization, caplog):
     from app.modules.payroll import service as payroll_service
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     db.commit()
-    creator = _make_user(db, "creator-report@acme.com")
-    approver = _make_user(db, "approver-report@acme.com")
+    creator = _make_user(db, "creator-report@acme.example.com")
+    approver = _make_user(db, "approver-report@acme.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_template(db, creator, approver)
@@ -161,10 +161,10 @@ def test_report_generated_email_via_real_generation_pipeline(db, organization, c
 
 def test_report_generation_failed_email_via_real_unfinalized_run(db, organization, caplog):
     from app.modules.payroll import service as payroll_service
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     db.commit()
-    creator = _make_user(db, "creator-report2@acme.com")
-    approver = _make_user(db, "approver-report2@acme.com")
+    creator = _make_user(db, "creator-report2@acme.example.com")
+    approver = _make_user(db, "approver-report2@acme.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Draft")  # not finalized
     template = _build_template(db, creator, approver)
@@ -188,7 +188,7 @@ def test_report_generation_failed_email_via_real_unfinalized_run(db, organizatio
 def test_password_reset_self_service_email_via_generate_random_password(db, organization, caplog):
     from app.core.security import verify_password
     from app.modules.auth import service as auth_service
-    user = _make_user(db, "selfservice@acme.com", organization_id=organization.id)
+    user = _make_user(db, "selfservice@acme.example.com", organization_id=organization.id)
     old_hash = user.hashed_password
 
     with caplog.at_level(logging.INFO):
@@ -208,7 +208,7 @@ def test_password_reset_self_service_email_via_generate_random_password(db, orga
 def test_password_reset_completed_email_via_real_token_flow(db, organization, caplog):
     from app.modules.auth import service as auth_service
     from app.modules.auth.models import SecurityActionPurpose
-    user = _make_user(db, "resetflow@acme.com", organization_id=organization.id)
+    user = _make_user(db, "resetflow@acme.example.com", organization_id=organization.id)
 
     raw_token, _expires_at = auth_service._issue_action_token(
         db, user.email, user.organization_id, SecurityActionPurpose.RESET,
@@ -239,8 +239,8 @@ def test_handoff_emails_via_real_confirm_handoff_flow(db, organization, caplog, 
     # template) when neither ASSIST_SUPPORT_EMAIL nor SMTP_FROM_EMAIL is
     # configured. Pin it explicitly rather than relying on whatever another
     # test in the same session left the shared settings singleton at.
-    monkeypatch.setattr(settings, "ASSIST_SUPPORT_EMAIL", "support@acme.com")
-    user = _make_user(db, "handoff-user@acme.com", organization_id=organization.id)
+    monkeypatch.setattr(settings, "ASSIST_SUPPORT_EMAIL", "support@acme.example.com")
+    user = _make_user(db, "handoff-user@acme.example.com", organization_id=organization.id)
     payload = {
         "destination": "PAYROLL_SUPPORT",
         "reason_code": "COMPLEX_TAX_QUESTION",
@@ -271,7 +271,7 @@ def test_send_approval_email_missing_template_fails_loudly(caplog):
     from app.services.email_service import send_approval_email
     with caplog.at_level(logging.WARNING):
         result = send_approval_email(
-            "someone@acme.com", "this_template_does_not_exist.html", {"subject": "x"},
+            "someone@acme.example.com", "this_template_does_not_exist.html", {"subject": "x"},
         )
     # Must report failure explicitly, never silently report success for a
     # template that doesn't exist.
@@ -289,7 +289,7 @@ def test_update_form_invite_email_via_real_send_form(db, organization, caplog):
     from app.modules.payroll.models import PayrollEmployee
 
     employee = PayrollEmployee(
-        organization_id=organization.id, employee_code="E100", name="Priya Nair", email="priya@acme.com",
+        organization_id=organization.id, employee_code="E100", name="Priya Nair", email="priya@acme.example.com",
     )
     db.add(employee)
     db.commit()

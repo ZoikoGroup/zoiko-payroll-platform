@@ -62,7 +62,7 @@ ALL_TEMPLATES = NEW_TEMPLATES + RESTYLED_TEMPLATES
 
 BASE_CONTEXT = {
     "company_name": "Acme Payroll",
-    "support_email": "support@acme.com",
+    "support_email": "support@acme.example.com",
     "logo_url": "https://app.zoikopayroll.com/zoikopayroll-logo-light.png",
     "frontend_url": "https://app.zoikopayroll.com",
     "subject": "Test subject | Zoiko Payroll",
@@ -189,7 +189,7 @@ def test_rejected_template_notes_block_is_conditional():
 # ── Trigger wiring: enterprise jurisdiction lifecycle (real service) ───────
 
 def test_add_jurisdiction_notifies_org(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     from app.modules.payroll.enterprise import service as ent_service
     with caplog.at_level(logging.INFO):
         row = ent_service.add_jurisdiction(db, organization.id, "DE")
@@ -199,7 +199,7 @@ def test_add_jurisdiction_notifies_org(db, organization, caplog):
 
 
 def test_update_jurisdiction_config_notifies_with_diff(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     row = EnterpriseJurisdiction(
         organization_id=organization.id, country_code="DE",
         status=JurisdictionStatus.DRAFT.value,
@@ -219,7 +219,7 @@ def test_update_jurisdiction_config_notifies_with_diff(db, organization, caplog)
 
 
 def test_update_jurisdiction_config_no_change_sends_nothing(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     row = EnterpriseJurisdiction(
         organization_id=organization.id, country_code="DE",
         status=JurisdictionStatus.DRAFT.value,
@@ -238,7 +238,7 @@ def test_update_jurisdiction_config_no_change_sends_nothing(db, organization, ca
 
 
 def test_verify_jurisdiction_notifies(db, organization, caplog, monkeypatch):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     row = EnterpriseJurisdiction(
         organization_id=organization.id, country_code="DE",
         status=JurisdictionStatus.CONFIGURED.value,
@@ -264,7 +264,7 @@ def test_verify_jurisdiction_notifies(db, organization, caplog, monkeypatch):
 
 
 def test_remove_jurisdiction_notifies(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     row = EnterpriseJurisdiction(organization_id=organization.id, country_code="DE")
     db.add(row)
     db.commit()
@@ -305,7 +305,7 @@ def _mk_policy(db, organization):
 
 
 def test_update_policy_name_notifies(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     policy = _mk_policy(db, organization)
     from app.modules.payroll.policy import service as policy_service
     from app.modules.payroll.policy.schemas import PayrollPolicyUpdate
@@ -316,7 +316,7 @@ def test_update_policy_name_notifies(db, organization, caplog):
 
 
 def test_update_policy_no_change_sends_nothing(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     policy = _mk_policy(db, organization)
     from app.modules.payroll.policy import service as policy_service
     from app.modules.payroll.policy.schemas import PayrollPolicyUpdate
@@ -326,7 +326,7 @@ def test_update_policy_no_change_sends_nothing(db, organization, caplog):
 
 
 def test_set_integration_enabled_notifies(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     policy = _mk_policy(db, organization)
     from app.modules.payroll.policy import service as policy_service
     with caplog.at_level(logging.INFO):
@@ -405,7 +405,7 @@ def test_public_form_submission_notifies_employee(db, organization, caplog):
 # ── Trigger wiring: billing override (real service) ────────────────────────
 
 def test_entitlement_override_notifies_org(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     from app.modules.billing.entitlements import create_entitlement_override
     with caplog.at_level(logging.INFO):
         create_entitlement_override(
@@ -420,7 +420,7 @@ def test_entitlement_override_notifies_org(db, organization, caplog):
 # ── Trigger wiring: super admin currency (real service) ────────────────────
 
 def test_org_currency_change_notifies(db, organization, caplog):
-    organization.email = "admin@acme.com"
+    organization.email = "admin@acme.example.com"
     organization.organization_name = "Acme GmbH"
     organization.currency = "INR"
     db.commit()
@@ -448,7 +448,7 @@ def test_org_suspended_sender(db, organization, caplog):
     from app.services.email_service import send_organization_suspended_email
     with caplog.at_level(logging.INFO):
         send_organization_suspended_email(
-            "admin@acme.com", "Acme GmbH", suspended=True,
+            "admin@acme.example.com", "Acme GmbH", suspended=True,
             reason="", organization_id=organization.id, db=db,
         )
     sent = _mock_send_templates(caplog)
@@ -458,7 +458,7 @@ def test_org_suspended_sender(db, organization, caplog):
 def test_org_deleted_sender(db, organization, caplog):
     from app.services.email_service import send_organization_deleted_email
     with caplog.at_level(logging.INFO):
-        send_organization_deleted_email("admin@acme.com", "Acme GmbH", db=db)
+        send_organization_deleted_email("admin@acme.example.com", "Acme GmbH", db=db)
     sent = _mock_send_templates(caplog)
     assert "organization_deleted.html" in sent, sent
 
@@ -478,7 +478,7 @@ def test_policy_assigned_sender(db, organization, caplog):
     from app.services.email_service import send_policy_assigned_to_organization_email
     with caplog.at_level(logging.INFO):
         send_policy_assigned_to_organization_email(
-            "admin@acme.com", "DE-PAYROLL-2026-V1", version="2.1",
+            "admin@acme.example.com", "DE-PAYROLL-2026-V1", version="2.1",
             country_label="Germany", organization_id=organization.id, db=db,
         )
     sent = _mock_send_templates(caplog)
@@ -501,7 +501,7 @@ def test_org_created_sender_has_heading_and_cta(db, organization, caplog):
     from app.services.email_service import send_organization_created_email
     with caplog.at_level(logging.INFO):
         send_organization_created_email(
-            "admin@acme.com", "Jane", "Acme GmbH", reference_id="ORG-ABCD-INIT",
+            "admin@acme.example.com", "Jane", "Acme GmbH", reference_id="ORG-ABCD-INIT",
             setup_link="https://app.zoikopayroll.com/login",
             organization_id=organization.id, db=db,
         )

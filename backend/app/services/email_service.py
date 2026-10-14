@@ -27,6 +27,8 @@ from email.mime.text import MIMEText
 
 import certifi
 
+from app.core import outbound
+
 logger = logging.getLogger("zoiko_payroll")
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "email_templates")
@@ -524,12 +526,23 @@ def send_approval_email(
         logger.debug(f"[email] Body content:\n{_html_to_text(body)}")
         return True
 
+    # F-10: test and local modes never reach the configured server (whatever
+    # .env or platform_settings say); only the opt-in local sandbox, if on.
+    target = outbound.smtp_target(smtp)
+    if target is None:
+        outbound.log_blocked("email", email, f"subject='{subject}' | template={template_name}")
+        return True
+    smtp = target
+
     try:
         port = int(smtp["port"])
         use_tls = str(smtp.get("use_tls", "true")).strip().lower() in ("1", "true", "yes")
         context_ssl = ssl.create_default_context(cafile=certifi.where())
 
-        if use_tls and port != 465:
+        if smtp.get("sandbox"):
+            with smtplib.SMTP(smtp["host"], port, timeout=30) as server:
+                server.sendmail(envelope_from, email, msg.as_string())
+        elif use_tls and port != 465:
             with smtplib.SMTP(smtp["host"], port, timeout=30) as server:
                 server.starttls(context=context_ssl)
                 if smtp["username"] and smtp["password"]:
@@ -541,7 +554,8 @@ def send_approval_email(
                     server.login(smtp["username"], smtp["password"])
                 server.sendmail(envelope_from, email, msg.as_string())
 
-        logger.info(f"[email] Sent to {email} | template={template_name}")
+        where = " (local sandbox, not delivered to the recipient)" if smtp.get("sandbox") else ""
+        logger.info(f"[email] Sent to {email}{where} | template={template_name}")
         return True
     except Exception as e:
         logger.error(f"[email] Failed to send to {email} | template={template_name} | error={e}")

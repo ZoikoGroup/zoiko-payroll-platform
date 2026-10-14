@@ -220,8 +220,8 @@ def _users(db, org_id):
         db.add(u)
         db.commit()
         return u
-    return (mk("admin-a@zoikotest.dev", UserRole.ORG_ADMIN), mk("admin-b@zoikotest.dev", UserRole.ORG_ADMIN),
-            mk("filer@zoikotest.dev", UserRole.PAYROLL_ADMIN), mk("clerk@zoikotest.dev", UserRole.PAYROLL_ADMIN))
+    return (mk("admin-a@zoikotest.example.com", UserRole.ORG_ADMIN), mk("admin-b@zoikotest.example.com", UserRole.ORG_ADMIN),
+            mk("filer@zoikotest.example.com", UserRole.PAYROLL_ADMIN), mk("clerk@zoikotest.example.com", UserRole.PAYROLL_ADMIN))
 
 
 def _events(db, action="REVEAL_MPF_MEMBER_ACCOUNT"):

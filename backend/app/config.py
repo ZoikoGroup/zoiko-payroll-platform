@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "no-reply@payroll.zoiko.example"
     SMTP_USE_TLS: str = "true"
+    # F-10: in test and local modes (see app/core/outbound.py) nothing is
+    # delivered unless this is true, and then only to the sandbox below
+    # (e.g. Mailpit: docker run -p 1025:1025 -p 8025:8025 axllent/mailpit).
+    LOCAL_MAIL_SANDBOX_ENABLED: bool = False
+    LOCAL_MAIL_SANDBOX_HOST: str = "127.0.0.1"
+    LOCAL_MAIL_SANDBOX_PORT: int = 1025
     # Optional public https URL of the email logo (a hosted copy of
     # app/email_assets/zoikopayroll-logo-email.png). Empty (default): the logo
     # is embedded in every message as an inline CID image, so it renders even
