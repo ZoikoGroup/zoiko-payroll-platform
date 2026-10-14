@@ -167,3 +167,38 @@ def test_d_c_an_override_needs_reason_evidence_and_a_second_person_and_is_audite
         TaxConfigurationAudit.entity_type == "hk_pre_transition_wage_override")}
     assert ("hk_pre_transition_wage_override", "create") in actions
     assert ("hk_pre_transition_wage_override", "status_change") in actions
+
+
+# ── D-D: recording an IR56G as filed is four-eyes, like every other IRD filing ──────────────────
+# Wireframe §15 "RBAC and four-eyes: separate prepare/approve/submit/release roles for ... IRD";
+# §7 IR56G "file IR56G, activate statutory hold". Before the fix record_ir56g_filed set the case
+# FILED directly — no four-eyes, no submission record (IRD employer obligations, archived
+# sources/ird_employers sha256 f3c47471346d…; PAM 46(e) ird_pam46e).
+
+def test_d_d_ir56g_filing_needs_a_second_person_and_a_submission_record(db, hk):
+    import pytest
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase, TaxConfigurationAudit
+    from tests.test_hong_kong_e2e import INTERNAL_FILING
+
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 8, 31), actor_id=MAKER.id)
+    case = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).one()
+    with pytest.raises(BadRequestException, match="four-eyes"):
+        hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 7, 20), "IR56G-REF", MAKER.id,
+                                             submission=INTERNAL_FILING)
+    refusals = db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_ird_reporting_case",
+                                                      TaxConfigurationAudit.entity_id == case.id,
+                                                      TaxConfigurationAudit.action == "refused").count()
+    assert refusals >= 1
+    with pytest.raises(BadRequestException, match="submission mode"):
+        hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 7, 20), "IR56G-REF", CHECKER.id)
+    db.refresh(case)
+    assert case.status != "FILED" and hold.state != "IR56G_FILED_HOLD_ACTIVE"
+    hold = hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 7, 20), "IR56G-REF", CHECKER.id,
+                                                submission=INTERNAL_FILING)
+    db.refresh(case)
+    assert hold.state == "IR56G_FILED_HOLD_ACTIVE"
+    assert (case.status, case.filing_reference, case.approved_by_id, case.submission_mode) == (
+        "FILED", "IR56G-REF", CHECKER.id, "INTERNAL_PREPARATION_ONLY")

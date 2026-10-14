@@ -115,7 +115,16 @@ function TaxClearance({ employees }) {
                     <div className="flex flex-wrap gap-1">
                       <input aria-label="IR56G filed on" type="date" className={input} onChange={setS(c.id, "filedOn")} />
                       <input aria-label="IR56G filing reference" placeholder="Filing reference" className={input} onChange={setS(c.id, "filingReference")} />
-                      <button type="button" className={btn} onClick={() => act(() => recordHkIr56gFiled(c.id, { filedOn: s.filedOn, filingReference: s.filingReference }), "IR56G filed — hold active.")}>Record filing</button>
+                      <select aria-label="IR56G submission mode" className={input} defaultValue="" onChange={setS(c.id, "submissionMode")}>
+                        <option value="" disabled>Submission mode…</option>
+                        <option value="INTERNAL_PREPARATION_ONLY">Prepared here, filed by the employer on IRD's channel</option>
+                        <option value="ONLINE_MODE">Online mode (eTAX)</option>
+                        <option value="MIXED_MODE">Mixed mode (control list)</option>
+                      </select>
+                      <input aria-label="IR56G authorized signer" placeholder="Authorized signer" className={input} onChange={setS(c.id, "authorizedSigner")} />
+                      <button type="button" className={btn} title="A different operator from the one who identified the departure (four-eyes)"
+                        onClick={() => act(() => recordHkIr56gFiled(c.id, { filedOn: s.filedOn, filingReference: s.filingReference,
+                          submissionMode: s.submissionMode, authorizedSigner: s.authorizedSigner }), "IR56G filed — hold active.")}>Record filing</button>
                     </div>
                   )}
                   {["IR56G_FILED_HOLD_ACTIVE", "DEPARTURE_CANCELLED_OR_CHANGED"].includes(c.state) && (

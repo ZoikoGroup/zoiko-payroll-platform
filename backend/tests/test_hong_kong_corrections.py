@@ -181,7 +181,7 @@ def test_positive_delta_for_a_departing_employee_is_held_or_blocked_never_paid(d
     corr = _approve(db, hk, _request(db, hk, _item(db, runs[4], hk.emp)))
     run, delta = db.get(PayrollRun, corr.correction_run_id), db.get(PayslipItem, corr.delta_payslip_id)
     assert hong_kong_service.payment_treatment(db, hk.org.id, run, [delta])[delta.id][0] == "FINAL_PAY_BLOCKED"
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 1), "IR56G-REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 1), "IR56G-REF", CHECKER.id, submission=INTERNAL_FILING)
     corr.approved_at = corr.approved_at.replace(year=2026, month=6, day=15)                 # released after filing
     db.commit()
     assert hong_kong_service.payment_treatment(db, hk.org.id, run, [delta])[delta.id][0] == "HELD"

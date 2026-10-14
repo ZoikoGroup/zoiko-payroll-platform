@@ -4739,7 +4739,10 @@ def hk_identify_departure(data: HKDepartureRequest, db: Session = Depends(get_db
 def hk_ir56g_filed(hold_id: int, data: HKIr56gFiledRequest, db: Session = Depends(get_db),
                    current_user=Depends(get_current_user)):
     hold = hong_kong_service.record_ir56g_filed(db, current_user.organization_id, hold_id, data.filedOn, data.filingReference,
-                                         current_user.id)
+                                         current_user.id, submission=data.model_dump(
+                                             mode="json", include={"submissionMode", "authorizedSigner",
+                                                                   "transactionReference", "controlListReference",
+                                                                   "submittedOn"}, exclude_none=True))
     return hong_kong_service.serialize_hold(db, hold)
 
 

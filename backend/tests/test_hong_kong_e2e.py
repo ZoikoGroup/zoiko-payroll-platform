@@ -257,7 +257,7 @@ def test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release(db, hk):
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
                                          identified_on=date(2026, 6, 26))          # 35 days ahead
     assert (hold.state, hold.filing_deadline) == ("DEPARTURE_IDENTIFIED", date(2026, 6, 30))
-    hold = hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 28), "IR56G-REF-1", MAKER.id)
+    hold = hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 28), "IR56G-REF-1", CHECKER.id, submission=INTERNAL_FILING)
     assert hold.state == "IR56G_FILED_HOLD_ACTIVE" and hold.statutory_hold_expiry == date(2026, 7, 28)
     june = _month(db, hk.org, 6)
     item = _item(db, june, hk.emp)
@@ -282,7 +282,7 @@ def test_bank_export_leaves_out_held_payslips(db, hk, monkeypatch):
 
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
                                          identified_on=date(2026, 6, 1))
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", CHECKER.id, submission=INTERNAL_FILING)
     june = _month(db, hk.org, 6)
     other = _employee(db, hk.org.id, "HK2", date_of_joining=date(2025, 1, 1))
     _profile(db, other, hk.org.id, "2025-01-01")
@@ -300,7 +300,7 @@ def test_changed_departure_keeps_holding_until_release(db, hk):
     from app.modules.payroll import hong_kong_service
 
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id, identified_on=date(2026, 6, 1))
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", CHECKER.id, submission=INTERNAL_FILING)
     _month(db, hk.org, 6)
     with pytest.raises(BadRequestException, match="evidence"):
         hong_kong_service.change_departure(db, hk.org.id, hold.id, "cancelled", None, MAKER.id)
@@ -1127,7 +1127,7 @@ def test_audit_trail_for_profile_hold_and_filing(db, hk):
     from app.modules.payroll.models import TaxConfigurationAudit
 
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 8, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 8, 20), "REF", CHECKER.id, submission=INTERNAL_FILING)
     types = {a.entity_type for a in db.query(TaxConfigurationAudit).all()}
     assert {"employee_statutory_profile", "hk_tax_clearance_hold", "jurisdiction_pack"} <= types
 

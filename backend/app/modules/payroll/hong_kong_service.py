@@ -424,18 +424,37 @@ def identify_departure(db: Session, organization_id: int, employee_id: int, expe
 
 
 def record_ir56g_filed(db: Session, organization_id: int, hold_id: int, filed_on: date, filing_reference: str,
-                       actor_id: Optional[int]) -> HongKongTaxClearanceHold:
+                       actor_id: Optional[int], submission: Optional[dict] = None) -> HongKongTaxClearanceHold:
     """The operator filed IR56G through IRD's own channel: the hold becomes
-    ACTIVE from the filing date (withhold all moneys payable)."""
+    ACTIVE from the filing date (withhold all moneys payable).
+
+    Gap audit D-D (wireframe §15 four-eyes for IRD filings): the same controls
+    as every other IRD filing — a different user from the one who prepared the
+    IR56G case (refusal audited), the external-submission record (mode and
+    authorized signer) and the filing reference — all checked before anything
+    changes."""
     hold = _hold(db, organization_id, hold_id)
     if not filing_reference:
         raise BadRequestException("the IR56G filing reference is required")
+    case = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).first()
+    if case is None:
+        raise BadRequestException("the departure has no IR56G reporting case — identify the departure first")
+    if case.status in hk_ird.FILED_STATES:
+        raise BadRequestException(f"the IR56G case #{case.id} is already {case.status}")
+    service.require_four_eyes(case.prepared_by_id, actor_id, "Filing an IR56G departure notification", db=db,
+                              entity_type="hk_ird_reporting_case", entity_id=case.id, current_status=case.status,
+                              attempted="FILED")
+    _record_submission(db, case, submission, actor_id)
     hold.filed_date = filed_on
     hold.statutory_hold_expiry = hk_tc.statutory_hold_expiry(filed_on, reporting_timing(db, filed_on))
     _transition(db, hold, "IR56G_FILED_HOLD_ACTIVE", actor_id, reason=f"IR56G filed {filed_on} ref {filing_reference}")
-    case = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).first()
-    if case is not None and case.status not in hk_ird.FILED_STATES:
-        case.status, case.filing_reference, case.filed_at = "FILED", filing_reference, datetime.utcnow()
+    old_status = case.status
+    case.status, case.filing_reference, case.filed_at = "FILED", filing_reference, datetime.utcnow()
+    case.approved_by_id = actor_id
+    _audit(db, actor_id, "status_change", "hk_ird_reporting_case", case.id, old={"status": old_status},
+           new={"status": "FILED", "filingReference": filing_reference,
+                "submission": {"mode": case.submission_mode, "authorizedSigner": case.authorized_signer,
+                               "submittedOn": _iso(case.submitted_on)}}, commit=False)
     refresh_hold_lines(db, hold)
     db.commit()
     return hold

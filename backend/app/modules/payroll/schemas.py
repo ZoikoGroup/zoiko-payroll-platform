@@ -4280,6 +4280,12 @@ class HKDepartureRequest(_HKBody):
 class HKIr56gFiledRequest(_HKBody):
     filedOn: date
     filingReference: str
+    # External-submission record, as for every IRD filing (gap audit D-D).
+    submissionMode: Optional[str] = None
+    authorizedSigner: Optional[str] = None
+    transactionReference: Optional[str] = None
+    controlListReference: Optional[str] = None
+    submittedOn: Optional[date] = None
 
 
 class HKReleaseRequest(_HKBody):
