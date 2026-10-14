@@ -1004,6 +1004,17 @@ def list_alerts(
             "link": "/super-admin/security-audit",
         })
 
+    from app.modules.assisted_access.service import assisted_audit_gap_alerts
+
+    for gap in assisted_audit_gap_alerts(db):
+        alerts.append({
+            "severity": "high",
+            "category": "security",
+            "message": f"Assisted-access session #{gap['session_id']}: {gap['unmatched_starts']} request(s) started but "
+                       "their completion audit row is missing; review the session's audit trail",
+            "link": "/super-admin/security-audit",
+        })
+
     for org in _suspended_dunning_orgs(db):
         protected = org["in_flight_run_guard"]
         alerts.append({
