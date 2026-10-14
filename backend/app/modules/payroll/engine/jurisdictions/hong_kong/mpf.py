@@ -101,7 +101,55 @@ def first_contribution_day(sixty_day: date, contribution_day: int) -> date:
 
 
 def period_contribution_day(period_end: date, contribution_day: int) -> date:
+    """The BASE contribution day (day `contribution_day` of the month after the
+    wage period). The governed deferral is applied by contribution_due_date."""
     return add_months(period_end.replace(day=1), 1).replace(day=contribution_day)
+
+
+# Governed contribution-day deferral (pack row mpf_contribution_day_deferral,
+# [G1] UNVERIFIED until the Hong Kong specialist certifies it against the MPFA
+# contribution-day guidance, S3). The rule name is data, not a code default:
+# a pack without the row keeps the base day and says so.
+DEFERRAL_NEXT_WORKING_DAY = "NEXT_DAY_NOT_SAT_SUN_OR_GENERAL_HOLIDAY"
+DEFERRAL_RULES = (DEFERRAL_NEXT_WORKING_DAY,)
+
+
+def deferral_rule(rate_map: dict) -> tuple:
+    """(rule or None, row) — optional pack row; an unknown rule BLOCKS."""
+    rule, row = text_value(rate_map, "mpf_contribution_day_deferral", required=False)
+    if rule and rule not in DEFERRAL_RULES:
+        raise HongKongCalculationBlockedError(
+            "mpf_contribution_day_deferral", f"unknown MPF contribution-day deferral rule {rule!r}")
+    return rule, row
+
+
+def contribution_due_date(base: date, rule, holidays=(), disruption_days=(), holiday_years=None) -> tuple:
+    """(due date, steps) — `base` moved forward, one day at a time, past every
+    Saturday, Sunday, holiday in `holidays` and operator-recorded disruption
+    day (black rainstorm / No. 8+ signal) while `rule` is the governed
+    next-working-day rule. Without a rule the base day stands. `holiday_years`
+    (the years the holiday calendar covers) lets a missing calendar be
+    disclosed rather than silently treated as "no holidays"."""
+    if not rule:
+        return base, [{"date": base.isoformat(), "kept": "no deferral rule in the pack (base day kept)"}]
+    holidays, disruptions = set(holidays or ()), set(disruption_days or ())
+    due, steps = base, []
+    while True:
+        why = ("Saturday" if due.weekday() == 5 else "Sunday" if due.weekday() == 6 else
+               "holiday" if due in holidays else "disruption (operator-recorded)" if due in disruptions else None)
+        if why is None:
+            break
+        steps.append({"date": due.isoformat(), "skipped": why})
+        due += timedelta(days=1)
+    if holiday_years is not None and due.year not in holiday_years:
+        steps.append({"date": due.isoformat(), "flag": "GENERAL_HOLIDAY_LIST_NOT_LOADED",
+                      "warning": f"general-holiday list not loaded for {due.year} — only Saturdays, Sundays and "
+                                 "recorded signal days were applied"})
+    return due, steps
+
+
+def general_holiday_list_missing(steps: list) -> bool:
+    return any(s.get("flag") == "GENERAL_HOLIDAY_LIST_NOT_LOADED" for s in steps or [])
 
 
 def resolve_coverage(facts: dict, period_start: date, period_end: date, params: dict) -> dict:

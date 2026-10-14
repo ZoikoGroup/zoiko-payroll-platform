@@ -45,6 +45,27 @@ def statutory_holidays(slabs: list, year: int) -> list:
             for r in sorted(rows, key=lambda r: r.tax_formula)]
 
 
+GENERAL_HOLIDAY = "HK_GENERAL_HOLIDAY"
+
+
+def holiday_calendar(slabs: list) -> tuple:
+    """(set of general-holiday dates, set of years the general-holiday list
+    covers) for the MPF contribution-day deferral. ONLY the governed
+    general-holiday rows (rule_type HK_GENERAL_HOLIDAY: filing_status = the
+    year, tax_formula = the ISO date, rate_label = the name, source-linked) —
+    loaded from an archived official list by scripts/hk_load_general_holidays.py,
+    never typed in. Statutory-holiday rows are a different list (Employment
+    Ordinance holidays) and are not used here. A year with no rows is reported
+    by the caller as "general-holiday list not loaded"."""
+    dates, years = set(), set()
+    for s in slabs or []:
+        if getattr(s, "rule_type", None) == GENERAL_HOLIDAY and getattr(s, "tax_formula", None):
+            d = date.fromisoformat(str(s.tax_formula)[:10])
+            dates.add(d)
+            years.add(d.year)
+    return dates, years
+
+
 def annual_leave_days(slabs: list, service_year: int) -> tuple:
     """Days for the given completed year of continuous-contract service
     (1st → 7 … 9th or later → 14). rule_type HK_ANNUAL_LEAVE_SCALE:

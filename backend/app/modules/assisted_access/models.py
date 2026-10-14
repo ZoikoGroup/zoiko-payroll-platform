@@ -58,6 +58,22 @@ class AssistedAccessSession(Base):
     # EXPIRED (sweep) | MANUAL_END (POST .../end).
     ended_reason = Column(String(20), nullable=True)
 
+    # Consent / break-glass (launch-readiness G5). CONSENT: a tenant org admin
+    # approves before any token exists. BREAK_GLASS: a second Super Admin
+    # approves (never the requester), the tenant is notified at once, and the
+    # session is time-limited. Sessions created before this existed are
+    # CONSENT / APPROVED (server defaults), i.e. unchanged.
+    access_mode = Column(String(20), nullable=False, default="CONSENT", server_default="CONSENT")
+    # PENDING | APPROVED | REJECTED | EXPIRED (approval window passed) | CANCELLED
+    approval_status = Column(String(20), nullable=False, default="APPROVED", server_default="APPROVED")
+    requested_minutes = Column(Integer, nullable=True)
+    request_expires_at = Column(DateTime, nullable=True)      # the approval window
+    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    decision_reason = Column(Text, nullable=True)
+    activated_at = Column(DateTime, nullable=True)            # token issued; started_at/expires_at reset here
+    tenant_notified_at = Column(DateTime, nullable=True)
+
     def __repr__(self):
         return f"<AssistedAccessSession id={self.id} org={self.organization_id} active={self.ended_at is None}>"
 

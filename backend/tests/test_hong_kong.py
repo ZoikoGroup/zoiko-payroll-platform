@@ -281,6 +281,74 @@ def test_case_g_wage_period_crossing_1_may_2026_splits_rates(db, packs):
     assert r.net_pay == D("10000") - r.employee_pension          # never silently topped up
 
 
+def test_case_g_unequal_hours_price_each_side_of_1_may_2026_at_its_own_rate(db, packs):
+    """Wireframe §16 row 4, directional: 10h/day before 1 May and 6h/day from 1 May. A swapped
+    before/after mapping would give 150×43.10 + 90×42.10 = 10,254.00 instead of 10,194.00."""
+    days = {(date(2026, 4, 16) + timedelta(days=i)).isoformat(): ("10" if i < 15 else "6") for i in range(30)}
+    r = _calc(db, "10000", pay=date(2026, 5, 15), ps=date(2026, 4, 16), pe=date(2026, 5, 15),
+              hours={"days": days, "complete": True})
+    smw = r.hk_calculation_trace["minimumWage"]
+    seg = {s["rate"]: s for s in smw["segments"]}
+    assert D(seg["42.10"]["hours"]) == D("150") and D(seg["43.10"]["hours"]) == D("90")
+    assert seg["43.10"]["from"] == "2026-05-01"
+    assert seg["42.10"]["to"] is None or seg["42.10"]["to"] <= "2026-04-30"
+    assert D(smw["minimumDue"]) == D("150") * D("42.10") + D("90") * D("43.10") == D("10194.00")
+    assert D(smw["minimumDue"]) < D("150") * D("43.10") + D("90") * D("42.10")
+
+
+def test_contribution_day_deferral_weekend_holiday_chain_and_disruption():
+    """Governed deferral (pack row mpf_contribution_day_deferral, [G1] UNVERIFIED): the base day moves past
+    Saturdays, Sundays, holidays and operator-recorded signal days; without the rule the base day stands.
+    The holiday / disruption dates here are TEST data for the date logic, not statutory calendars."""
+    from app.modules.payroll.engine.jurisdictions.hong_kong import mpf
+
+    rule = mpf.DEFERRAL_NEXT_WORKING_DAY
+    assert mpf.contribution_due_date(date(2026, 5, 10), rule)[0] == date(2026, 5, 11)               # Sunday -> Monday
+    assert mpf.contribution_due_date(date(2026, 10, 10), rule)[0] == date(2026, 10, 12)             # Saturday -> Monday
+    assert mpf.contribution_due_date(date(2026, 6, 10), rule)[0] == date(2026, 6, 10)               # Wednesday stays
+    assert mpf.contribution_due_date(date(2026, 6, 10), rule, {date(2026, 6, 10)})[0] == date(2026, 6, 11)  # holiday
+    due, steps = mpf.contribution_due_date(date(2027, 4, 10), rule, {date(2027, 4, 12)})            # Sat, Sun, holiday Mon
+    assert due == date(2027, 4, 13) and [s["skipped"] for s in steps] == ["Saturday", "Sunday", "holiday"]
+    due, steps = mpf.contribution_due_date(date(2026, 7, 10), rule, (), {date(2026, 7, 10)})       # Fri signal day
+    assert due == date(2026, 7, 13) and steps[0]["skipped"].startswith("disruption")
+    assert mpf.contribution_due_date(date(2026, 5, 10), None)[0] == date(2026, 5, 10)               # no rule: base kept
+    _due, steps = mpf.contribution_due_date(date(2030, 1, 10), rule, set(), holiday_years={2026})
+    assert "general-holiday list not loaded for 2030" in steps[-1]["warning"]
+    with pytest.raises(Exception, match="unknown MPF contribution-day deferral rule"):
+        mpf.deferral_rule({"mpf_contribution_day_deferral": type("R", (), {"text_value": "LAST_FRIDAY"})()})
+
+
+def test_deferral_uses_only_general_holidays_and_flags_an_unloaded_list():
+    """General-holiday rows (HK_GENERAL_HOLIDAY) drive the deferral; statutory-holiday rows do not; an empty
+    general-holiday list behaves as weekends only and is flagged. Dates are TEST data, not a real calendar."""
+    from types import SimpleNamespace as NS
+
+    from app.modules.payroll.engine.jurisdictions.hong_kong import entitlements, mpf
+
+    rule = mpf.DEFERRAL_NEXT_WORKING_DAY
+    gh = [NS(rule_type="HK_GENERAL_HOLIDAY", tax_formula="2026-06-10"), NS(rule_type="HK_GENERAL_HOLIDAY", tax_formula="2027-04-12"),
+          NS(rule_type="HK_STATUTORY_HOLIDAY", tax_formula="2026-07-10")]
+    holidays, years = entitlements.holiday_calendar(gh)
+    assert holidays == {date(2026, 6, 10), date(2027, 4, 12)} and years == {2026, 2027}       # statutory row ignored
+    due, steps = mpf.contribution_due_date(date(2026, 6, 10), rule, holidays, holiday_years=years)   # loaded holiday
+    assert due == date(2026, 6, 11) and steps[0]["skipped"] == "holiday" and not mpf.general_holiday_list_missing(steps)
+    due, steps = mpf.contribution_due_date(date(2027, 4, 10), rule, holidays, holiday_years=years)   # Sat, Sun, holiday Mon
+    assert due == date(2027, 4, 13) and [s["skipped"] for s in steps] == ["Saturday", "Sunday", "holiday"]
+    assert mpf.contribution_due_date(date(2026, 7, 10), rule, holidays, holiday_years=years)[0] == date(2026, 7, 10)
+    empty, none_years = entitlements.holiday_calendar([gh[2]])                                   # list not loaded
+    due, steps = mpf.contribution_due_date(date(2026, 10, 10), rule, empty, holiday_years=none_years)
+    assert due == date(2026, 10, 12) and mpf.general_holiday_list_missing(steps)                  # weekends only
+    assert "general-holiday list not loaded for 2026" in steps[-1]["warning"]
+
+
+def test_payroll_trace_applies_the_governed_deferral_from_the_pack(db, packs):
+    r = _calc(db, "20000", pay=date(2026, 4, 30), ps=date(2026, 4, 1), pe=date(2026, 4, 30))
+    mpf_trace = r.hk_calculation_trace["mpf"]
+    assert mpf_trace["contributionDayBase"] == "2026-05-10" and mpf_trace["contributionDay"] == "2026-05-11"
+    assert mpf_trace["contributionDayRule"] == "NEXT_DAY_NOT_SAT_SUN_OR_GENERAL_HOLIDAY"
+    assert "UNVERIFIED" in mpf_trace["contributionDayNote"]
+
+
 def test_smw_historical_rate_resolves_from_the_2025_pack(db, packs):
     days = {(date(2025, 4, 1) + timedelta(days=i)).isoformat(): "8" for i in range(30)}
     r = _calc(db, "12000", pay=date(2025, 4, 30), ps=date(2025, 4, 1), pe=date(2025, 4, 30),
@@ -463,6 +531,33 @@ def test_sickness_allowance_ld_example_2_and_conditions(db, packs):
     assert short["status"] == "NOT_ENTITLED" and "less than 4" in short["failedConditions"][0]
     preg = entitlements.sickness_allowance(rate_map, _cc_result("2024-01-01"), avg, 1, 1, True, D("20"), True)
     assert preg["status"] == "ENTITLED"
+
+
+def test_sickness_allowance_from_a_lookback_with_unpaid_and_part_paid_periods(db, packs):
+    """Wireframe §16 row 9 (LD Concise Guide Appendix 1): a 12-month lookback holding 10 days of
+    unpaid leave and 5 days of sick leave paid at less than full pay. Both periods are disregarded
+    — their days AND the sums paid for them — and the sickness allowance is 4/5 of the resulting
+    average daily wage. Wage figures are TEST data, not statutory values."""
+    from app.modules.payroll.engine.jurisdictions.hong_kong import average_wage, entitlements
+
+    rate_map, _s, _p = _inputs(db, date(2026, 7, 15))
+    slips = [_slip(i, 2025 + (6 + i) // 12, (6 + i) % 12 + 1, "15000") for i in range(12)]   # Jul 2025 – Jun 2026
+    slips[2]["eoWages"] = "10000"                    # Sep 2025: 10 unpaid days already not paid
+    disregarded = [
+        {"from": "2025-09-10", "to": "2025-09-19", "reason": "UNPAID_LEAVE", "amountPaid": "0"},
+        {"from": "2025-11-03", "to": "2025-11-07", "reason": "SICK_LEAVE_FOUR_FIFTHS_PAY", "amountPaid": "2000"},
+    ]
+    avg = average_wage.calculate(date(2026, 7, 15), date(2020, 1, 1), slips, disregarded, "SICKNESS", rate_map=rate_map)
+    assert avg["lookbackStart"] == "2025-07-01" and avg["lookbackEnd"] == "2026-06-30"
+    assert avg["totalDays"] == 365 and avg["excludedDays"] == 15 and avg["includedDays"] == 350
+    assert D(avg["excludedAmount"]) == D("2000.00") and D(avg["wagesUsed"]) == D("173000.00")
+    adw = (D("175000") - D("2000")) / D("350")
+    assert D(avg["averageDailyWage"]) == adw.quantize(D("0.0001"))
+    assert D(avg["averageDailyWage"]) > (D("175000") / D("365")).quantize(D("0.0001"))   # exclusions raise it
+    out = entitlements.sickness_allowance(rate_map, _cc_result("2020-01-01"), avg, 5, 5, True, D("20"))
+    daily = D(avg["averageDailyWage"]) * D("4") / D("5")
+    assert out["status"] == "ENTITLED" and D(out["dailyRate"]) == daily.quantize(D("0.01"))
+    assert D(out["amount"]) == (daily * 5).quantize(D("0.01"))
 
 
 def test_paid_sickness_day_accrual_2_then_4_capped_at_120(db, packs):

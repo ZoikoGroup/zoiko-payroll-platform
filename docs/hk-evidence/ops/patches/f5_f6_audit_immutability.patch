@@ -1,0 +1,576 @@
+diff --git a/backend/app/modules/auth/models.py b/backend/app/modules/auth/models.py
+index f2adf32..b2ee42e 100644
+--- a/backend/app/modules/auth/models.py
++++ b/backend/app/modules/auth/models.py
+@@ -178,3 +178,28 @@ class AuthEmailEvent(Base):
+ 
+     def __repr__(self):
+         return f"<AuthEmailEvent id={self.id} event_type={self.event_type} outcome={self.outcome} recipient={self.recipient_email}>"
++
++
++class AuthAuditEvent(Base):
++    """G5 F-5: append-only login / authentication audit (immutable, F-6).
++
++    Never stores a password or token. An email that matches no account is kept
++    only as a SHA-256 (`email_sha256`), so typos of other people's addresses are
++    not collected in clear."""
++
++    __tablename__ = "auth_audit_events"
++
++    id = Column(Integer, primary_key=True, index=True)
++    occurred_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
++    event_type = Column(String(40), nullable=False, index=True)
++    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
++    organization_id = Column(Integer, nullable=True, index=True)
++    email_sha256 = Column(String(64), nullable=True)
++    reason = Column(String(80), nullable=True)
++    client_address = Column(String(64), nullable=True)
++    user_agent = Column(String(300), nullable=True)
++
++
++from app.core import audit_immutability as _audit_immutability  # noqa: E402
++
++_audit_immutability.register(Base.metadata)
+diff --git a/backend/app/modules/auth/router.py b/backend/app/modules/auth/router.py
+index 3a3e290..41c1fe3 100644
+--- a/backend/app/modules/auth/router.py
++++ b/backend/app/modules/auth/router.py
+@@ -112,7 +112,7 @@ def _action_form_page(title: str, token: str, action_path: str) -> HTMLResponse:
+ @router.post("/login", response_model=TokenResponse, summary="Login and get access token")
+ @limiter.limit("10/minute")
+ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
+-    return service.login_user(db, data.email, data.password)
++    return service.login_user(db, data.email, data.password, request=request)
+ 
+ 
+ @router.post("/register", response_model=TokenResponse, summary="Register a new organization")
+@@ -128,8 +128,8 @@ def register_trial(request: Request, data: TrialRegisterRequest, background_task
+ 
+ 
+ @router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
+-def refresh_token(data: RefreshRequest, db: Session = Depends(get_db)):
+-    return service.refresh_user_token(db, data.refresh_token)
++def refresh_token(request: Request, data: RefreshRequest, db: Session = Depends(get_db)):
++    return service.refresh_user_token(db, data.refresh_token, request=request)
+ 
+ 
+ @router.get("/me", response_model=UserResponse, summary="Get current logged-in user")
+@@ -151,12 +151,13 @@ def get_me_trial_status(
+ 
+ @router.post("/logout", response_model=SuccessResponse, summary="Logout")
+ def logout(
++    request: Request,
+     data: LogoutRequest = None,
+     token: str = Depends(oauth2_scheme),
+     current_user=Depends(get_current_user),
+     db: Session = Depends(get_db),
+ ):
+-    service.logout_user(db, token, data.refresh_token if data else None)
++    service.logout_user(db, token, data.refresh_token if data else None, user=current_user, request=request)
+     logger.info("User %s logged out", current_user.email)
+     return {"message": "Logged out successfully."}
+ 
+diff --git a/backend/app/modules/auth/service.py b/backend/app/modules/auth/service.py
+index 83dd330..6b148ef 100644
+--- a/backend/app/modules/auth/service.py
++++ b/backend/app/modules/auth/service.py
+@@ -130,7 +130,7 @@ def run_revoked_token_cleanup_sweep(db: Session) -> dict:
+     return {"deleted": deleted}
+ 
+ 
+-def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = None) -> None:
++def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = None, *, user=None, request=None) -> None:
+     """Revokes the access token that authenticated this request, and the
+     refresh token too if the caller sends one (frontend's choice -- a
+     refresh token that's never presented here simply expires naturally
+@@ -144,6 +144,10 @@ def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = N
+         if refresh_payload and refresh_payload.get("jti"):
+             revoke_token(db, refresh_payload["jti"], datetime.utcfromtimestamp(refresh_payload["exp"]))
+ 
++    from app.modules.auth import audit as auth_audit
++
++    auth_audit.record(db, auth_audit.LOGOUT, user=user, request=request)
++
+ 
+ # ── Action tokens (invite / password reset) ────────────────────────────────
+ 
+@@ -568,6 +572,10 @@ def complete_action_token(db: Session, raw_token: str, purpose, new_password: st
+         user.is_verified = True
+     db.commit()
+     db.refresh(user)
++    from app.modules.auth import audit as auth_audit
++
++    auth_audit.record(db, auth_audit.PASSWORD_RESET if purpose == SecurityActionPurpose.RESET
++                      else auth_audit.INVITATION_ACCEPTED, user=user)
+     logger.info(
+         "identity_audit event=%s recipient=%s user_id=%s",
+         "identity.password_reset_completed" if purpose == SecurityActionPurpose.RESET
+@@ -596,21 +604,31 @@ def complete_action_token(db: Session, raw_token: str, purpose, new_password: st
+ 
+ # ── Login ───────────────────────────────────────────────────────────────────
+ 
+-def login_user(db: Session, email: str, password: str) -> dict:
++def login_user(db: Session, email: str, password: str, request=None) -> dict:
++    from app.modules.auth import audit as auth_audit
++
+     user = db.query(User).filter(User.email == email).first()
+-    if user is None or not verify_password(password, user.hashed_password):
++    if user is None:
++        auth_audit.record(db, auth_audit.LOGIN_FAILED, email=email, request=request, reason="UNKNOWN_EMAIL")
++        raise UnauthorizedException("Invalid email or password.")
++    if not verify_password(password, user.hashed_password):
++        auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request, reason="BAD_PASSWORD")
+         raise UnauthorizedException("Invalid email or password.")
+ 
+     if user.organization_id:
+         org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+         if org is not None and not org.is_active:
++            auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request, reason="ORGANIZATION_SUSPENDED")
+             raise UnauthorizedException(
+                 "Your organization has been suspended. Please contact support."
+             )
+ 
+     if not user.is_active:
++        auth_audit.record(db, auth_audit.ACCOUNT_INACTIVE, user=user, request=request, reason="ACCOUNT_DEACTIVATED")
+         raise UnauthorizedException("Your account has been deactivated.")
+ 
++    auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
++
+     token_payload = {
+         "sub": user.email,
+         "role": user.role.value,
+@@ -629,22 +647,28 @@ def login_user(db: Session, email: str, password: str) -> dict:
+     }
+ 
+ 
+-def refresh_user_token(db: Session, refresh_token: str) -> dict:
++def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
+     from app.core.security import decode_refresh_token
++    from app.modules.auth import audit as auth_audit
+ 
+     payload = decode_refresh_token(refresh_token)
+     if payload is None:
++        auth_audit.record(db, auth_audit.REFRESH_FAILED, request=request, reason="INVALID_TOKEN")
+         raise UnauthorizedException("Invalid or expired refresh token.")
+ 
+     user = db.query(User).filter(User.id == payload.get("user_id")).first()
+     if user is None or not user.is_active:
++        auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="USER_MISSING_OR_INACTIVE")
+         raise UnauthorizedException("User not found or inactive.")
+ 
+     if user.organization_id:
+         org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+         if org is not None and not org.is_active:
++            auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="ORGANIZATION_SUSPENDED")
+             raise UnauthorizedException("Your organization has been suspended.")
+ 
++    auth_audit.record(db, auth_audit.REFRESH, user=user, request=request, required=True)
++
+     new_access = create_access_token(data={
+         "sub": user.email,
+         "role": user.role.value,
+diff --git a/backend/app/modules/organizations/router.py b/backend/app/modules/organizations/router.py
+index 5399b6b..2f2e74a 100644
+--- a/backend/app/modules/organizations/router.py
++++ b/backend/app/modules/organizations/router.py
+@@ -831,13 +831,24 @@ def delete_organization(
+     # purely by actor_id (NO ACTION FK to users), so it must be cleared by
+     # actor before the users delete below or that delete is blocked.
+     if "payroll_tax_configuration_audit" in existing_tables:
+-        db.execute(
+-            text(
+-                'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
+-                '(SELECT id FROM "users" WHERE organization_id = :org_id)'
+-            ),
+-            {"org_id": organization_id},
+-        )
++        # G5 F-6: audit rows are append-only; this hard-delete is the one
++        # explicit, logged purge (decision pending: sign-off packet 03).
++        from app.core.audit_immutability import audit_purge_scope
++
++        with audit_purge_scope(db, f"organization hard-delete {organization_id} by {current_user.email}"):
++            db.execute(
++                text(
++                    'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
++                    '(SELECT id FROM "users" WHERE organization_id = :org_id)'
++                ),
++                {"org_id": organization_id},
++            )
++            if "auth_audit_events" in existing_tables:
++                db.execute(
++                    text('DELETE FROM "auth_audit_events" WHERE user_id IN '
++                         '(SELECT id FROM "users" WHERE organization_id = :org_id)'),
++                    {"org_id": organization_id},
++                )
+ 
+     # Login users + their action tokens (users has ondelete CASCADE from org).
+     db.execute(
+diff --git a/backend/tests/test_alembic_metadata.py b/backend/tests/test_alembic_metadata.py
+index 2d53b6e..892b434 100644
+--- a/backend/tests/test_alembic_metadata.py
++++ b/backend/tests/test_alembic_metadata.py
+@@ -156,8 +156,9 @@ def test_alembic_heads_is_single_head():
+     # Arabia foundation), brought from venu byte-identical because production
+     # is already at b08f04497195; linear on f898189cb4e3.
+     # 8b14824fb575 (2026-10-13, HK launch readiness controls): additive, single
+-    # child of b08f04497195 — single head.
+-    assert heads == ["8b14824fb575"]
++    # child of b08f04497195. d1e5a7c3b9f2 (draft, G5 F-5/F-6): auth audit +
++    # append-only audit triggers, single child of 8b14824fb575 — single head.
++    assert heads == ["d1e5a7c3b9f2"]
+ 
+ 
+ def test_real_alembic_script_directory_loads_single_head():
+@@ -169,7 +170,7 @@ def test_real_alembic_script_directory_loads_single_head():
+     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
+     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
+     script = ScriptDirectory.from_config(cfg)
+-    assert list(script.get_heads()) == ["8b14824fb575"]
++    assert list(script.get_heads()) == ["d1e5a7c3b9f2"]
+ 
+ 
+ def test_alembic_branchpoints_are_only_the_known_existing_ones():
+@@ -204,7 +205,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
+ def test_no_duplicate_revision_ids_in_versions_directory():
+     revs = _parse_revisions()
+     assert len(revs) == len(set(revs))
+-    assert len(revs) == 182   # + 8b14824fb575 (HK launch readiness) + b08f04497195 (Saudi foundation) + 6b5a4c3d2e1f (CH ELM payload) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
++    assert len(revs) == 183   # + d1e5a7c3b9f2 (auth audit / immutable audit) + 8b14824fb575 (HK launch readiness) + b08f04497195 (Saudi foundation) + 6b5a4c3d2e1f (CH ELM payload) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
+ 
+ 
+ def test_germany_head_chain_wiring_is_intact():
+diff --git a/backend/app/core/audit_immutability.py b/backend/app/core/audit_immutability.py
+new file mode 100644
+index 0000000..37b7757
+--- /dev/null
++++ b/backend/app/core/audit_immutability.py
+@@ -0,0 +1,75 @@
++"""
++G5 F-6: audit rows are append-only at the database level.
++
++PostgreSQL: migration d1e5a7c3b9f2 installs zoiko_reject_audit_mutation() and a
++BEFORE UPDATE OR DELETE trigger on every table in AUDIT_TABLES. SQLite (tests):
++the same rule is installed after `metadata.create_all` (listener below), so the
++unit suite enforces it too.
++
++The only way to remove audit rows is an explicit, logged purge scope
++(`audit_purge_scope`): PostgreSQL sets the transaction-local setting
++zoiko.audit_purge=on, which the trigger function honours for DELETE only;
++SQLite uses a one-row flag table. UPDATE is never allowed. Today the only
++caller is the Super Admin organisation hard-delete; retention purges will use
++it once D-2 / D-3 are decided. Whether hard-delete may purge audit rows at all
++is a Security / counsel decision (sign-off packet 03).
++"""
++
++import logging
++from contextlib import contextmanager
++
++from sqlalchemy import event, inspect, text
++
++logger = logging.getLogger("zoiko_payroll.audit_immutability")
++
++AUDIT_TABLES = (
++    "payroll_tax_configuration_audit",
++    "assisted_access_audit_events",
++    "payroll_personal_data_access_events",
++    "auth_audit_events",
++)
++_SQLITE_FLAG = "zoiko_audit_purge_flag"
++
++
++def install_sqlite_triggers(connection) -> None:
++    connection.execute(text(f"CREATE TABLE IF NOT EXISTS {_SQLITE_FLAG} (reason TEXT)"))
++    have = set(inspect(connection).get_table_names())
++    for table in AUDIT_TABLES:
++        if table not in have:
++            continue
++        connection.execute(text(
++            f"CREATE TRIGGER IF NOT EXISTS {table}_no_update BEFORE UPDATE ON {table} "
++            f"BEGIN SELECT RAISE(ABORT, 'audit rows are append-only ({table})'); END"))
++        connection.execute(text(
++            f"CREATE TRIGGER IF NOT EXISTS {table}_no_delete BEFORE DELETE ON {table} "
++            f"WHEN (SELECT count(*) FROM {_SQLITE_FLAG}) = 0 "
++            f"BEGIN SELECT RAISE(ABORT, 'audit rows are append-only ({table})'); END"))
++
++
++def register(metadata) -> None:
++    @event.listens_for(metadata, "after_create")
++    def _after_create(target, connection, **kw):
++        if connection.dialect.name == "sqlite":
++            install_sqlite_triggers(connection)
++
++
++@contextmanager
++def audit_purge_scope(db, reason: str):
++    """Allow DELETE (never UPDATE) of audit rows inside this block only."""
++    dialect = db.get_bind().dialect.name
++    logger.warning("[audit] purge scope opened: %s", reason)
++    if dialect == "postgresql":
++        db.execute(text("SELECT set_config('zoiko.audit_purge', 'on', true)"))
++        try:
++            yield
++        finally:
++            db.execute(text("SELECT set_config('zoiko.audit_purge', 'off', true)"))
++    elif dialect == "sqlite":
++        db.execute(text(f"CREATE TABLE IF NOT EXISTS {_SQLITE_FLAG} (reason TEXT)"))
++        db.execute(text(f"INSERT INTO {_SQLITE_FLAG} (reason) VALUES (:r)"), {"r": reason[:200]})
++        try:
++            yield
++        finally:
++            db.execute(text(f"DELETE FROM {_SQLITE_FLAG}"))
++    else:
++        yield
+diff --git a/backend/app/modules/auth/audit.py b/backend/app/modules/auth/audit.py
+new file mode 100644
+index 0000000..db41d8d
+--- /dev/null
++++ b/backend/app/modules/auth/audit.py
+@@ -0,0 +1,54 @@
++"""G5 F-5: write one auth_audit_events row per authentication event.
++
++`required=True` (successful login / refresh): if the row cannot be written the
++caller refuses the request (503) - no session without an audit record.
++Otherwise (failures, logout, reset): best effort, logged on error."""
++
++import hashlib
++import logging
++
++from sqlalchemy.orm import Session
++
++from app.core.exceptions import ZoikoException
++
++logger = logging.getLogger("zoiko_payroll.auth.audit")
++
++LOGIN_SUCCESS = "LOGIN_SUCCESS"
++LOGIN_FAILED = "LOGIN_FAILED"
++ACCOUNT_INACTIVE = "ACCOUNT_INACTIVE"
++REFRESH = "REFRESH"
++REFRESH_FAILED = "REFRESH_FAILED"
++LOGOUT = "LOGOUT"
++PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
++PASSWORD_RESET = "PASSWORD_RESET"
++INVITATION_ACCEPTED = "INVITATION_ACCEPTED"
++
++
++def email_sha256(email) -> str:
++    return hashlib.sha256((email or "").strip().lower().encode("utf-8")).hexdigest()
++
++
++def record(db: Session, event_type: str, *, user=None, email=None, request=None, reason=None,
++           required: bool = False) -> None:
++    from app.modules.auth.models import AuthAuditEvent
++
++    audit_db = Session(bind=db.get_bind())
++    try:
++        audit_db.add(AuthAuditEvent(
++            event_type=event_type,
++            user_id=getattr(user, "id", None),
++            organization_id=getattr(user, "organization_id", None),
++            email_sha256=email_sha256(email) if (email and user is None) else None,
++            reason=(reason or None) and str(reason)[:80],
++            client_address=(getattr(getattr(request, "client", None), "host", None) or None),
++            user_agent=(request.headers.get("user-agent", "")[:300] or None) if request is not None else None,
++        ))
++        audit_db.commit()
++    except Exception:  # noqa: BLE001
++        audit_db.rollback()
++        logger.exception("[auth-audit] could not record %s", event_type)
++        if required:
++            raise ZoikoException(503, "AUTH_AUDIT_UNAVAILABLE",
++                                 "Sign-in is temporarily unavailable: the audit record could not be written.")
++    finally:
++        audit_db.close()
+diff --git a/backend/alembic/versions/d1e5a7c3b9f2_auth_audit_and_immutable_audit_rows.py b/backend/alembic/versions/d1e5a7c3b9f2_auth_audit_and_immutable_audit_rows.py
+new file mode 100644
+index 0000000..42502eb
+--- /dev/null
++++ b/backend/alembic/versions/d1e5a7c3b9f2_auth_audit_and_immutable_audit_rows.py
+@@ -0,0 +1,66 @@
++"""auth audit events (G5 F-5) and append-only audit tables (G5 F-6)
++
++Revision ID: d1e5a7c3b9f2
++Revises: 8b14824fb575
++Create Date: 2026-10-14
++
++Additive: one new table, one function, two triggers per audit table. No
++existing row is read or rewritten. CREATE TRIGGER takes SHARE ROW EXCLUSIVE on
++each audit table briefly (blocks writes to that table for the DDL only).
++"""
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "d1e5a7c3b9f2"
++down_revision = "8b14824fb575"
++branch_labels = None
++depends_on = None
++
++AUDIT_TABLES = ("payroll_tax_configuration_audit", "assisted_access_audit_events",
++                "payroll_personal_data_access_events", "auth_audit_events")
++
++
++def upgrade() -> None:
++    op.create_table(
++        "auth_audit_events",
++        sa.Column("id", sa.Integer(), primary_key=True),
++        sa.Column("occurred_at", sa.DateTime(), nullable=False),
++        sa.Column("event_type", sa.String(40), nullable=False),
++        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
++        sa.Column("organization_id", sa.Integer(), nullable=True),
++        sa.Column("email_sha256", sa.String(64), nullable=True),
++        sa.Column("reason", sa.String(80), nullable=True),
++        sa.Column("client_address", sa.String(64), nullable=True),
++        sa.Column("user_agent", sa.String(300), nullable=True),
++    )
++    for col in ("id", "occurred_at", "event_type", "user_id", "organization_id"):
++        op.create_index(f"ix_auth_audit_events_{col}", "auth_audit_events", [col])
++
++    if op.get_bind().dialect.name != "postgresql":
++        return
++    op.execute("""
++        CREATE OR REPLACE FUNCTION zoiko_reject_audit_mutation() RETURNS trigger
++        LANGUAGE plpgsql AS $$
++        BEGIN
++            IF TG_OP = 'DELETE' AND current_setting('zoiko.audit_purge', true) = 'on' THEN
++                RETURN OLD;
++            END IF;
++            RAISE EXCEPTION 'audit rows are append-only (%: % refused)', TG_TABLE_NAME, TG_OP
++                USING ERRCODE = 'insufficient_privilege';
++        END;
++        $$
++    """)
++    for t in AUDIT_TABLES:
++        op.execute(f"CREATE TRIGGER {t}_append_only BEFORE UPDATE OR DELETE ON {t} "
++                   f"FOR EACH ROW EXECUTE FUNCTION zoiko_reject_audit_mutation()")
++
++
++def downgrade() -> None:
++    if op.get_bind().dialect.name == "postgresql":
++        for t in AUDIT_TABLES:
++            op.execute(f"DROP TRIGGER IF EXISTS {t}_append_only ON {t}")
++        op.execute("DROP FUNCTION IF EXISTS zoiko_reject_audit_mutation()")
++    for col in ("organization_id", "user_id", "event_type", "occurred_at", "id"):
++        op.drop_index(f"ix_auth_audit_events_{col}", table_name="auth_audit_events")
++    op.drop_table("auth_audit_events")
+diff --git a/backend/tests/test_auth_audit_and_immutable_audit_rows.py b/backend/tests/test_auth_audit_and_immutable_audit_rows.py
+new file mode 100644
+index 0000000..f963ba6
+--- /dev/null
++++ b/backend/tests/test_auth_audit_and_immutable_audit_rows.py
+@@ -0,0 +1,116 @@
++"""G5 F-5 / F-6 (draft for Security review). TEST-ONLY data; app modules imported lazily."""
++import hashlib
++
++import pytest
++
++
++def _user(db, email="f5user@zoikotest.example.com", active=True, org_id=None, password="Corr3ct-Horse!"):
++    from app.core.security import hash_password
++    from app.modules.auth.models import User, UserRole
++
++    u = User(email=email, hashed_password=hash_password(password), role=UserRole.ORG_ADMIN, organization_id=org_id,
++             first_name="T", last_name="User", is_active=active)
++    db.add(u)
++    db.commit()
++    return u
++
++
++def _events(db):
++    from app.modules.auth.models import AuthAuditEvent
++
++    return [(e.event_type, e.user_id, e.email_sha256, e.reason) for e in db.query(AuthAuditEvent).order_by(AuthAuditEvent.id)]
++
++
++def test_each_auth_event_writes_exactly_one_row_and_never_a_secret(db, organization):
++    from app.core.exceptions import UnauthorizedException
++    from app.modules.auth import service
++    from app.modules.auth.models import AuthAuditEvent
++
++    u = _user(db, org_id=organization.id)
++    out = service.login_user(db, u.email, "Corr3ct-Horse!")
++    with pytest.raises(UnauthorizedException):
++        service.login_user(db, u.email, "wrong")
++    with pytest.raises(UnauthorizedException):
++        service.login_user(db, "Nobody@Elsewhere.example.com", "x")
++    service.refresh_user_token(db, out["refresh_token"])
++    service.logout_user(db, out["access_token"], out["refresh_token"], user=u)
++    assert _events(db) == [
++        ("LOGIN_SUCCESS", u.id, None, None),
++        ("LOGIN_FAILED", u.id, None, "BAD_PASSWORD"),
++        ("LOGIN_FAILED", None, hashlib.sha256(b"nobody@elsewhere.example.com").hexdigest(), "UNKNOWN_EMAIL"),
++        ("REFRESH", u.id, None, None),
++        ("LOGOUT", u.id, None, None),
++    ]
++    blob = " ".join(str(v) for e in db.query(AuthAuditEvent) for v in e.__dict__.values())
++    for secret in ("Corr3ct-Horse!", "wrong", out["access_token"], out["refresh_token"], "Nobody@Elsewhere"):
++        assert secret not in blob
++
++
++def test_inactive_account_is_recorded(db):
++    from app.core.exceptions import UnauthorizedException
++    from app.modules.auth import service
++
++    u = _user(db, email="inactive@zoikotest.example.com", active=False)
++    with pytest.raises(UnauthorizedException):
++        service.login_user(db, u.email, "Corr3ct-Horse!")
++    assert _events(db) == [("ACCOUNT_INACTIVE", u.id, None, "ACCOUNT_DEACTIVATED")]
++
++
++def test_login_is_refused_when_the_audit_row_cannot_be_written(db, monkeypatch):
++    from sqlalchemy.orm import Session
++
++    from app.core.exceptions import ZoikoException
++    from app.modules.auth import service
++
++    u = _user(db, email="audit-down@zoikotest.example.com")
++    real_commit = Session.commit
++
++    def failing(self):
++        if any(type(o).__name__ == "AuthAuditEvent" for o in self.new):
++            raise RuntimeError("audit store down")
++        return real_commit(self)
++
++    monkeypatch.setattr(Session, "commit", failing)
++    with pytest.raises(ZoikoException) as exc:
++        service.login_user(db, u.email, "Corr3ct-Horse!")
++    assert exc.value.status_code == 503
++
++
++@pytest.mark.parametrize("table", ["payroll_tax_configuration_audit", "assisted_access_audit_events",
++                                   "payroll_personal_data_access_events", "auth_audit_events"])
++def test_audit_tables_reject_update_and_delete_but_accept_insert(db, table):
++    from sqlalchemy import text
++    from sqlalchemy.exc import IntegrityError, OperationalError
++
++    from app.modules.auth import audit as auth_audit
++
++    names = {r[0] for r in db.execute(text("SELECT name FROM sqlite_master WHERE type='trigger'"))}
++    assert {f"{table}_no_update", f"{table}_no_delete"} <= names
++    if table == "auth_audit_events":
++        auth_audit.record(db, auth_audit.LOGOUT)                                  # INSERT works
++        for stmt in ("UPDATE auth_audit_events SET reason = 'x'", "DELETE FROM auth_audit_events"):
++            with pytest.raises((IntegrityError, OperationalError), match="append-only"):
++                db.execute(text(stmt))
++            db.rollback()
++        assert db.execute(text("SELECT count(*) FROM auth_audit_events")).scalar() == 1
++
++
++def test_the_purge_scope_allows_delete_only_inside_it(db):
++    from sqlalchemy import text
++    from sqlalchemy.exc import IntegrityError, OperationalError
++
++    from app.core.audit_immutability import audit_purge_scope
++    from app.modules.auth import audit as auth_audit
++
++    auth_audit.record(db, auth_audit.LOGOUT)
++    with audit_purge_scope(db, "TEST purge"):
++        with pytest.raises((IntegrityError, OperationalError), match="append-only"):
++            db.execute(text("UPDATE auth_audit_events SET reason = 'x'"))           # UPDATE never allowed
++    db.rollback()
++    with audit_purge_scope(db, "TEST purge"):
++        db.execute(text("DELETE FROM auth_audit_events"))
++    db.commit()
++    assert db.execute(text("SELECT count(*) FROM auth_audit_events")).scalar() == 0
++    with pytest.raises((IntegrityError, OperationalError), match="append-only"):
++        auth_audit.record(db, auth_audit.LOGOUT)
++        db.execute(text("DELETE FROM auth_audit_events"))                           # scope closed again

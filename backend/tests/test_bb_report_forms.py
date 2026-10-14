@@ -141,8 +141,8 @@ def _build_bb_nis_schedule_template(db, creator, approver, key="BB-NIS-EARNINGS-
 # ── TAMIS Monthly PAYE return ─────────────────────────────────────────
 
 def test_generate_bb_tamis_monthly_paye_aggregates_two_employees_across_multiple_runs_same_month(db, organization):
-    creator = _make_user(db, "creator_bbtamisa@test.com")
-    approver = _make_user(db, "approver_bbtamisa@test.com")
+    creator = _make_user(db, "creator_bbtamisa@test.example.com")
+    approver = _make_user(db, "approver_bbtamisa@test.example.com")
     _make_company(db, organization.id, country="BB")
     emp1 = _make_bb_employee(db, organization.id, code="BBTAMISA1", name="Shonda Griffith")
     emp2 = _make_bb_employee(db, organization.id, code="BBTAMISA2", name="Dario Forde")
@@ -168,8 +168,8 @@ def test_generate_bb_tamis_monthly_paye_aggregates_two_employees_across_multiple
 
 
 def test_generate_bb_tamis_monthly_paye_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_bbtamisb@test.com")
-    approver = _make_user(db, "approver_bbtamisb@test.com")
+    creator = _make_user(db, "creator_bbtamisb@test.example.com")
+    approver = _make_user(db, "approver_bbtamisb@test.example.com")
     _make_company(db, organization.id, country="BB")
     employee = _make_bb_employee(db, organization.id, code="BBTAMISB")
 
@@ -184,8 +184,8 @@ def test_generate_bb_tamis_monthly_paye_excludes_other_months_and_unfinalized_ru
 
 
 def test_generate_bb_tamis_monthly_paye_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_bbtamisc@test.com")
-    approver = _make_user(db, "approver_bbtamisc@test.com")
+    creator = _make_user(db, "creator_bbtamisc@test.example.com")
+    approver = _make_user(db, "approver_bbtamisc@test.example.com")
     _make_company(db, organization.id, country="BB")
     template = _build_template(db, creator, approver, country="BB", version="bbtamis-neg")
     with pytest.raises(BadRequestException):
@@ -193,8 +193,8 @@ def test_generate_bb_tamis_monthly_paye_rejects_wrong_report_type(db, organizati
 
 
 def test_generate_bb_tamis_monthly_paye_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_bbtamisd@test.com")
-    approver = _make_user(db, "approver_bbtamisd@test.com")
+    creator = _make_user(db, "creator_bbtamisd@test.example.com")
+    approver = _make_user(db, "approver_bbtamisd@test.example.com")
     _make_company(db, organization.id, country="BB")
     employee = _make_bb_employee(db, organization.id, code="BBTAMISD")
     _make_bb_run_with_payslip(db, organization.id, employee.id, date(2026, 7, 10))
@@ -210,8 +210,8 @@ def test_generate_bb_tamis_monthly_paye_regenerating_supersedes_prior(db, organi
 # ── NIS Earnings Schedule ─────────────────────────────────────────────
 
 def test_generate_bb_nis_earnings_schedule_buckets_weeks_and_aggregates_employees(db, organization):
-    creator = _make_user(db, "creator_bbnis_a@test.com")
-    approver = _make_user(db, "approver_bbnis_a@test.com")
+    creator = _make_user(db, "creator_bbnis_a@test.example.com")
+    approver = _make_user(db, "approver_bbnis_a@test.example.com")
     _make_company(db, organization.id, country="BB")
     emp1 = _make_bb_employee(db, organization.id, code="BBNISA1", name="Shonda Griffith", compliance_fields={"nis_number": "NIS-100"})
 
@@ -237,8 +237,8 @@ def test_generate_bb_nis_earnings_schedule_buckets_weeks_and_aggregates_employee
 
 
 def test_generate_bb_nis_earnings_schedule_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_bbnis_b@test.com")
-    approver = _make_user(db, "approver_bbnis_b@test.com")
+    creator = _make_user(db, "creator_bbnis_b@test.example.com")
+    approver = _make_user(db, "approver_bbnis_b@test.example.com")
     _make_company(db, organization.id, country="BB")
     template = _build_template(db, creator, approver, country="BB", version="bbnis-neg")
     with pytest.raises(BadRequestException):

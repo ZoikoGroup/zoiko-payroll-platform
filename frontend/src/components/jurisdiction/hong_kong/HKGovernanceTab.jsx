@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import {
   compareHongKongReportTemplates, getHongKongStatutorySummary, transitionHongKongServiceRegistry,
 } from "../../../service/superAdminService";
 import { hkLabel } from "./hkLabels";
+import HKEvidencePanel from "./HKEvidencePanel";
 
 // Hong Kong activation & governance (final jurisdiction completion program).
 // Everything shown is computed server-side (GET statutory-summary →
@@ -15,7 +16,7 @@ const td = "px-2 py-1.5 text-[12px] text-foreground";
 const btn = "rounded-lg border border-border px-3 py-1.5 text-[12px] font-semibold text-foreground hover:bg-surface-muted disabled:opacity-40";
 const input = "rounded-lg border border-border bg-surface px-2 py-1 text-[12px] text-foreground";
 const STATE_LABEL = { ACTIVE: "Active", DRAFT: "Draft only", MISSING: "No template" };
-const DECISION_LABEL = { OPEN: "Open", SUBMITTED: "Submitted (awaiting independent review)", RECORDED: "Recorded" };
+const DECISION_LABEL = { OPEN: "Open", SUBMITTED: "Submitted (awaiting independent review)", REJECTED: "Rejected (supersede with a corrected document)", RECORDED: "Recorded" };
 // Display only: "HK_EMPF_REMITTANCE" → "EMPF REMITTANCE", "PER_EMPLOYEE" → "PER EMPLOYEE".
 const human = (v) => String(v ?? "—").replace(/^HK_/, "").replace(/_/g, " ");
 
@@ -26,6 +27,7 @@ export default function HKGovernanceTab() {
   const [reason, setReason] = useState("");
   const [cmp, setCmp] = useState({ from: "", to: "" });
   const [diff, setDiff] = useState(null);
+  const [openDecision, setOpenDecision] = useState(null);
 
   const load = useCallback(() => getHongKongStatutorySummary().then(setData).catch((e) => setError(e?.message || "Could not load.")), []);
   useEffect(() => { load(); }, [load]);
@@ -107,16 +109,27 @@ export default function HKGovernanceTab() {
       <section className={card} aria-labelledby="hk-decisions">
         <h3 id="hk-decisions" className="mb-1 text-[14px] font-semibold text-foreground">Owner decisions</h3>
         <p className="mb-2 text-[12px] text-foreground-secondary">
-          A decision is recorded only when its document (tag shown) is uploaded under Source Evidence and reviewed by a different Super Admin.
+          A decision is recorded only when its signed document (tag shown) is submitted here and accepted by a different Super Admin.
         </p>
         <table className="w-full" aria-label="Owner decisions">
-          <thead><tr><th className={th}>Decision</th><th className={th}>Subject</th><th className={th}>Blocks launch</th><th className={th}>State</th><th className={th}>Evidence tag</th></tr></thead>
+          <thead><tr><th className={th}>Decision</th><th className={th}>Subject</th><th className={th}>Blocks launch</th><th className={th}>State</th><th className={th}>Evidence tag</th><th className={th}>Evidence</th></tr></thead>
           <tbody>
             {data.ownerDecisions.map((d) => (
-              <tr key={d.key} className="border-t border-border">
-                <td className={td}>{d.key}</td><td className={td}>{d.label}</td><td className={td}>{d.blocksLaunch ? "Yes" : "No"}</td>
-                <td className={td}>{DECISION_LABEL[d.state]}</td><td className={td}><code>{d.evidenceTag}</code></td>
-              </tr>
+              <Fragment key={d.key}>
+                <tr className="border-t border-border">
+                  <td className={td}>{d.key}</td><td className={td}>{d.label}</td><td className={td}>{d.blocksLaunch ? "Yes" : "No"}</td>
+                  <td className={td}>{DECISION_LABEL[d.state]}</td><td className={td}><code>{d.evidenceTag}</code></td>
+                  <td className={td}>
+                    <button type="button" className="text-[12px] font-semibold text-primary underline" aria-expanded={openDecision === d.key}
+                      onClick={() => setOpenDecision(openDecision === d.key ? null : d.key)}>
+                      {openDecision === d.key ? "Hide" : `Evidence (${(d.evidence || []).length})`}
+                    </button>
+                  </td>
+                </tr>
+                {openDecision === d.key && (
+                  <tr><td colSpan={6} className="px-2 pb-2"><HKEvidencePanel tag={d.evidenceTag} items={d.evidence} onChanged={load} /></td></tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

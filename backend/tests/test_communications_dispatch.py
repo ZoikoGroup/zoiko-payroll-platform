@@ -54,22 +54,22 @@ def test_base_key_is_byte_identical_to_auths_historical_format():
 
 
 def test_related_object_and_missing_template_segments():
-    key = comms.idempotency_key(3, "payroll.run_approved", "e@x.com", None, "run:42")
-    assert key == "3|payroll.run_approved|e@x.com|-|v2|obj:run:42"
+    key = comms.idempotency_key(3, "payroll.run_approved", "e@x.example.com", None, "run:42")
+    assert key == "3|payroll.run_approved|e@x.example.com|-|v2|obj:run:42"
 
 
 def test_repeatable_key_collapses_within_window_and_splits_across_windows():
     from datetime import datetime, timedelta
 
     t0 = datetime(2026, 9, 25, 10, 0, 0)
-    same = comms.repeatable_idempotency_key(1, "e", "a@x.com", None, "org:1", {"is_active": False}, now=t0)
+    same = comms.repeatable_idempotency_key(1, "e", "a@x.example.com", None, "org:1", {"is_active": False}, now=t0)
     also_same = comms.repeatable_idempotency_key(
-        1, "e", "a@x.com", None, "org:1", {"is_active": False}, now=t0 + timedelta(minutes=5),
+        1, "e", "a@x.example.com", None, "org:1", {"is_active": False}, now=t0 + timedelta(minutes=5),
     )
     later = comms.repeatable_idempotency_key(
-        1, "e", "a@x.com", None, "org:1", {"is_active": False}, now=t0 + timedelta(minutes=25),
+        1, "e", "a@x.example.com", None, "org:1", {"is_active": False}, now=t0 + timedelta(minutes=25),
     )
-    other_change = comms.repeatable_idempotency_key(1, "e", "a@x.com", None, "org:1", {"is_active": True}, now=t0)
+    other_change = comms.repeatable_idempotency_key(1, "e", "a@x.example.com", None, "org:1", {"is_active": True}, now=t0)
     assert same == also_same
     assert same != later
     assert same != other_change
@@ -90,7 +90,7 @@ def test_dispatch_audits_before_send_and_records_sent(db):
         seen_outcomes.extend(r.outcome for r in _rows(db, recipient_email=email))
         return True
 
-    assert comms.dispatch_email("payroll", "t.event", None, "a@x.com", "k1", send, "a@x.com", db=db) is True
+    assert comms.dispatch_email("payroll", "t.event", None, "a@x.example.com", "k1", send, "a@x.example.com", db=db) is True
     assert seen_outcomes == ["pending"]
     (row,) = _rows(db)
     assert (row.outcome, row.attempt_count, row.module, row.provider_response) == ("sent", 1, "payroll", None)
@@ -103,8 +103,8 @@ def test_dispatch_duplicate_key_sends_once(db):
         calls.append(1)
         return True
 
-    assert comms.dispatch_email("billing", "t.event", None, "a@x.com", "dup", send, db=db) is True
-    assert comms.dispatch_email("billing", "t.event", None, "a@x.com", "dup", send, db=db) is False
+    assert comms.dispatch_email("billing", "t.event", None, "a@x.example.com", "dup", send, db=db) is True
+    assert comms.dispatch_email("billing", "t.event", None, "a@x.example.com", "dup", send, db=db) is False
     assert len(calls) == 1
     outcomes = [r.outcome for r in _rows(db)]
     assert outcomes == ["sent", "skipped_duplicate"]
@@ -112,7 +112,7 @@ def test_dispatch_duplicate_key_sends_once(db):
 
 
 def test_dispatch_false_return_is_permanent_failure(db, _no_backoff):
-    assert comms.dispatch_email("payroll", "t.event", None, "a@x.com", "k", lambda db=None: False, db=db) is False
+    assert comms.dispatch_email("payroll", "t.event", None, "a@x.example.com", "k", lambda db=None: False, db=db) is False
     (row,) = _rows(db)
     assert (row.outcome, row.attempt_count) == ("failed", 1)
     assert "returned False" in row.provider_response
@@ -124,9 +124,9 @@ def test_dispatch_false_return_is_permanent_failure(db, _no_backoff):
     (socket.timeout("timed out"), True),
     (smtplib.SMTPServerDisconnected("gone"), True),
     (smtplib.SMTPConnectError(421, b"busy"), True),
-    (smtplib.SMTPSenderRefused(451, b"try later", "from@x.com"), True),
-    (smtplib.SMTPRecipientsRefused({"a@x.com": (450, b"mailbox busy")}), True),
-    (smtplib.SMTPRecipientsRefused({"a@x.com": (550, b"no such user")}), False),
+    (smtplib.SMTPSenderRefused(451, b"try later", "from@x.example.com"), True),
+    (smtplib.SMTPRecipientsRefused({"a@x.example.com": (450, b"mailbox busy")}), True),
+    (smtplib.SMTPRecipientsRefused({"a@x.example.com": (550, b"no such user")}), False),
     (smtplib.SMTPAuthenticationError(535, b"bad credentials"), False),
     (smtplib.SMTPDataError(554, b"rejected"), False),
     (ssl.SSLError("handshake failure"), False),
@@ -171,7 +171,7 @@ class _FakeSMTP:
 
 
 @pytest.fixture()
-def real_smtp_path(monkeypatch):
+def real_smtp_path(monkeypatch, fake_smtp_transport):
     from app.services import email_service
 
     monkeypatch.setattr(email_service, "_get_smtp_settings", lambda db=None: {
@@ -235,7 +235,7 @@ def test_direct_callers_keep_bool_contract(real_smtp_path):
 
 class _Actor:
     id = 1
-    email = "sa@zoiko.dev"
+    email = "sa@zoiko-dev.example.com"
 
 
 def test_organizations_duplicate_deactivate_sends_once(db, organization, monkeypatch):
@@ -378,6 +378,6 @@ def test_deactivate_organization_response_precedes_email_send(db, organization, 
 def test_queue_email_runs_inline_without_a_request(db):
     calls = []
     result = comms.queue_email(
-        "payroll", "t.inline", None, "a@x.com", "inline-key", lambda db=None: calls.append(1) or True, db=db,
+        "payroll", "t.inline", None, "a@x.example.com", "inline-key", lambda db=None: calls.append(1) or True, db=db,
     )
     assert result is True and calls == [1]

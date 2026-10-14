@@ -199,7 +199,7 @@ def test_admin_reset_uses_iam007_admin_variant_and_is_audited(db, organization, 
         organization_id=organization.id, first_name="Mem", last_name="Ber", is_active=True,
     )
     admin = User(
-        email="sa@zoiko.dev", hashed_password=hash_password("x-Pass-2!"), role=UserRole.SUPER_ADMIN,
+        email="sa@zoiko-dev.example.com", hashed_password=hash_password("x-Pass-2!"), role=UserRole.SUPER_ADMIN,
         first_name="Super", last_name="Admin", is_active=True,
     )
     db.add_all([target, admin])

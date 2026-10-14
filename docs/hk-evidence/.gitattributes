@@ -1,0 +1,2 @@
+# Evidence files are hashed (UPLOAD_KIT/manifest.csv): keep their exact bytes on every checkout.
+* -text

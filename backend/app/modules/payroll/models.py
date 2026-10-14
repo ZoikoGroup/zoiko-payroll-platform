@@ -7557,6 +7557,44 @@ class HongKongIrdSoftwareApproval(Base):
     updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class HongKongContributionDayDisruption(Base):
+    """An operator-recorded day on which a black rainstorm warning or a No. 8
+    or higher tropical cyclone signal was in force — the MPF contribution-day
+    deferral (pack row mpf_contribution_day_deferral) skips it. Territory-wide,
+    so platform-level (Super Admin), with a mandatory reason; every record is
+    audited. Never derived automatically from a weather feed."""
+
+    __tablename__ = "payroll_hk_contribution_day_disruptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    disruption_date = Column(Date, nullable=False, unique=True)
+    signal = Column(String(40), nullable=False)          # BLACK_RAINSTORM | TYPHOON_SIGNAL_8_OR_ABOVE
+    reason = Column(Text, nullable=False)
+    evidence_reference = Column(String(300), nullable=True)
+    recorded_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PayrollUserPermission(Base):
+    """An explicit, revocable permission granted to one tenant user on top of
+    the role (e.g. HK_MPF_ACCOUNT_REVEAL — read a full MPF member account
+    number for trustee / eMPF filing). Granted and revoked by an org admin of
+    the same organisation (never by the grantee), each step audited."""
+
+    __tablename__ = "payroll_user_permissions"
+    __table_args__ = (Index("ix_payroll_user_permissions_user_perm", "user_id", "permission"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    permission = Column(String(60), nullable=False)
+    reason = Column(Text, nullable=False)
+    granted_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    granted_at = Column(DateTime, nullable=False)
+    revoked_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
 class HongKongEmpfConfiguration(Base):
     """Versioned eMPF integration configuration (Super Admin). Holds STATUSES
     and non-secret descriptors only — never a credential, key or certificate

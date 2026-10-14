@@ -26,7 +26,7 @@ def _make_in_employee(db, org_id, code="F1"):
     return emp
 
 
-def _make_approver(db, email="approver_forms@test.com"):
+def _make_approver(db, email="approver_forms@test.example.com"):
     from app.modules.auth.models import User, UserRole
     user = User(email=email, hashed_password="x", role=UserRole.PAYROLL_ADMIN, first_name="A", last_name="B")
     db.add(user)
@@ -39,7 +39,7 @@ def _make_approver(db, email="approver_forms@test.com"):
 
 def test_declaration_lifecycle_draft_submit_approve(db, organization):
     emp = _make_in_employee(db, organization.id)
-    approver = _make_approver(db, "approver_f122a@test.com")
+    approver = _make_approver(db, "approver_f122a@test.example.com")
 
     declaration = service.create_salary_tds_declaration(
         db, organization.id, emp.id, "2026-27",
@@ -57,7 +57,7 @@ def test_declaration_lifecycle_draft_submit_approve(db, organization):
 
 def test_declaration_cannot_approve_before_submit(db, organization):
     emp = _make_in_employee(db, organization.id)
-    approver = _make_approver(db, "approver_f122b@test.com")
+    approver = _make_approver(db, "approver_f122b@test.example.com")
     declaration = service.create_salary_tds_declaration(db, organization.id, emp.id, "2026-27")
     with pytest.raises(BadRequestException):
         service.approve_salary_tds_declaration(db, organization.id, declaration.id, approver.id)
@@ -65,7 +65,7 @@ def test_declaration_cannot_approve_before_submit(db, organization):
 
 def test_declaration_approving_new_one_supersedes_prior_approved(db, organization):
     emp = _make_in_employee(db, organization.id)
-    approver = _make_approver(db, "approver_f122c@test.com")
+    approver = _make_approver(db, "approver_f122c@test.example.com")
 
     first = service.create_salary_tds_declaration(db, organization.id, emp.id, "2026-27", other_income=Decimal("1000"))
     service.submit_salary_tds_declaration(db, organization.id, first.id)
@@ -91,7 +91,7 @@ def test_claim_rejects_unknown_claim_type(db, organization):
 
 def test_claim_lifecycle_submit_approve(db, organization):
     emp = _make_in_employee(db, organization.id)
-    approver = _make_approver(db, "approver_f124a@test.com")
+    approver = _make_approver(db, "approver_f124a@test.example.com")
     claim = service.create_salary_tds_claim(
         db, organization.id, emp.id, "2026-27", "SECTION_80C", Decimal("150000"), evidence_reference="LIC receipt #123",
     )
@@ -111,7 +111,7 @@ def test_claim_reject_records_reason(db, organization):
 
 def test_only_approved_claims_count_toward_tds_inputs(db, organization):
     emp = _make_in_employee(db, organization.id)
-    approver = _make_approver(db, "approver_f124b@test.com")
+    approver = _make_approver(db, "approver_f124b@test.example.com")
     approved_claim = service.create_salary_tds_claim(db, organization.id, emp.id, "2026-27", "SECTION_80C", Decimal("100000"))
     service.submit_salary_tds_claim(db, organization.id, approved_claim.id)
     service.approve_salary_tds_claim(db, organization.id, approved_claim.id, approver.id)

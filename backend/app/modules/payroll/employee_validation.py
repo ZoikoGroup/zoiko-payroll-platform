@@ -1107,7 +1107,10 @@ class HKEmployeeValidation(EmployeeValidationStrategy):
     Statutory FACTS (MPF exemption, residency, departure …) are NOT here:
     they live on the effective-dated EmployeeStatutoryProfile hk_* columns."""
     country_code = "HK"
-    SENSITIVE_FIELDS = ("hkid", "passport_number")
+    # mpf_member_account: masked (last 4) in every API response; the full value
+    # is read only through the audited, permission-gated reveal
+    # (hong_kong_service.reveal_mpf_member_account, HK_MPF_ACCOUNT_REVEAL).
+    SENSITIVE_FIELDS = ("hkid", "passport_number", "mpf_member_account")
     duplicate_field = "hkid"
     FIELD_SPECS = {
         "hkid": {
@@ -1502,9 +1505,18 @@ def mask_nric_fin(value) -> Optional[str]:
     return "*" * (len(value) - 4) + value[-4:] if len(value) > 4 else "*" * len(value)
 
 
-# Field-specific maskers — only Singapore's nric_fin differs from the
-# shared mask_identifier; every other field (and country) is unchanged.
-_FIELD_MASKERS = {"nric_fin": mask_nric_fin}
+def mask_account_last4(value) -> Optional[str]:
+    """Account numbers (Hong Kong MPF member account): only the last 4
+    characters are kept — no leading character. MB-0012345 -> ******2345."""
+    if value is None or value == "":
+        return None
+    value = str(value)
+    return "*" * (len(value) - 4) + value[-4:] if len(value) > 4 else "*" * len(value)
+
+
+# Field-specific maskers — Singapore's nric_fin and Hong Kong's MPF member
+# account differ from the shared mask_identifier; every other field is unchanged.
+_FIELD_MASKERS = {"nric_fin": mask_nric_fin, "mpf_member_account": mask_account_last4}
 
 
 def _mask_field(key, value):

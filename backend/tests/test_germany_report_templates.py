@@ -189,8 +189,8 @@ def test_available_report_data_fields_de_includes_steuer_id_and_iban():
 # ── LSTB (per-employee, no run — generate_uk_employee_report) ────────────
 
 def test_generate_de_lstb_resolves_employee_and_ytd_fields(db, organization):
-    creator = _make_user(db, "creator_de1@test.com")
-    approver = _make_user(db, "approver_de1@test.com")
+    creator = _make_user(db, "creator_de1@test.example.com")
+    approver = _make_user(db, "approver_de1@test.example.com")
     _make_company(db, organization.id, country="DE")
     run, employee, item = _make_de_run_with_payslip(db, organization.id, status="Approved")
     employee.compliance_fields = {"steuer_id": "12 345 678 901", "iban": "DE89370400440532013000"}
@@ -234,8 +234,8 @@ def test_generate_de_lstb_lohnsteuer_field_label_and_value_are_consistent(db, or
     Uses a payslip where tds != soli (both non-zero and distinct) so a
     field that silently collapsed to Soli-only, or to zero, or to some
     other confusion, could not accidentally pass by coincidence."""
-    creator = _make_user(db, "creator_de_label@test.com")
-    approver = _make_user(db, "approver_de_label@test.com")
+    creator = _make_user(db, "creator_de_label@test.example.com")
+    approver = _make_user(db, "approver_de_label@test.example.com")
     _make_company(db, organization.id, country="DE")
 
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
@@ -304,8 +304,8 @@ def test_generate_de_lstb_lohnsteuer_field_label_and_value_are_consistent(db, or
 def test_generate_de_lstb_certificate_pdf_renders(db, organization):
     """Same PDF-rendering reuse UK P60/Canada T4 already proved — no new
     renderer code needed for Germany's per-employee document either."""
-    creator = _make_user(db, "creator_de2@test.com")
-    approver = _make_user(db, "approver_de2@test.com")
+    creator = _make_user(db, "creator_de2@test.example.com")
+    approver = _make_user(db, "approver_de2@test.example.com")
     _make_company(db, organization.id, country="DE")
     run, employee, item = _make_de_run_with_payslip(db, organization.id, status="Approved")
     template = _build_de_lstb_template(db, creator, approver, key="DE-LSTB-CERT")
@@ -318,8 +318,8 @@ def test_generate_de_lstb_certificate_pdf_renders(db, organization):
 def test_generate_de_lstb_rejects_jurisdiction_mismatch(db, organization):
     """A UK employee (org's default jurisdiction) cannot generate against
     a Germany LSTB template — same guard as every other jurisdiction."""
-    creator = _make_user(db, "creator_de3@test.com")
-    approver = _make_user(db, "approver_de3@test.com")
+    creator = _make_user(db, "creator_de3@test.example.com")
+    approver = _make_user(db, "approver_de3@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_de_run_with_payslip(db, organization.id, status="Approved")
     employee.country_code = None  # falls back to the org's UK default
@@ -334,8 +334,8 @@ def test_generate_de_lstb_rejects_wrong_report_type(db, organization):
     now, but still rejects an unrelated Germany report_type (DE_PAYROLL_
     SUMMARY, AGGREGATE) — the extension didn't accidentally widen the
     gate to "anything goes"."""
-    creator = _make_user(db, "creator_de7@test.com")
-    approver = _make_user(db, "approver_de7@test.com")
+    creator = _make_user(db, "creator_de7@test.example.com")
+    approver = _make_user(db, "approver_de7@test.example.com")
     _make_company(db, organization.id, country="DE")
     run, employee, item = _make_de_run_with_payslip(db, organization.id, status="Approved")
     template = _build_de_payroll_summary_template(db, creator, approver, key="DE-SUMMARY-WRONGTYPE")
@@ -346,8 +346,8 @@ def test_generate_de_lstb_rejects_wrong_report_type(db, organization):
 # ── Germany Payroll Summary (aggregate, run-based — generic mapper) ──────
 
 def test_generate_de_payroll_summary_end_to_end(db, organization):
-    creator = _make_user(db, "creator_de4@test.com")
-    approver = _make_user(db, "approver_de4@test.com")
+    creator = _make_user(db, "creator_de4@test.example.com")
+    approver = _make_user(db, "approver_de4@test.example.com")
     _make_company(db, organization.id, country="DE")
     run, employee, item = _make_de_run_with_payslip(db, organization.id, status="Approved")
 
@@ -394,8 +394,8 @@ def test_generate_de_payroll_summary_end_to_end(db, organization):
 
 
 def test_de_payroll_summary_listed_for_de_org_not_other_jurisdictions(db, organization):
-    creator = _make_user(db, "creator_de5@test.com")
-    approver = _make_user(db, "approver_de5@test.com")
+    creator = _make_user(db, "creator_de5@test.example.com")
+    approver = _make_user(db, "approver_de5@test.example.com")
     _make_company(db, organization.id, country="DE")
     _build_de_payroll_summary_template(db, creator, approver, key="DE-SUMMARY-LIST")
 
@@ -411,8 +411,8 @@ def test_de_template_not_resolved_for_non_de_organization(db, organization):
     """Cross-jurisdiction isolation: an org configured for a different
     country never resolves Germany's own Active template, even though
     both templates share the same reporting_year string."""
-    creator = _make_user(db, "creator_de6@test.com")
-    approver = _make_user(db, "approver_de6@test.com")
+    creator = _make_user(db, "creator_de6@test.example.com")
+    approver = _make_user(db, "approver_de6@test.example.com")
     _make_company(db, organization.id, country="CA")
     _build_de_payroll_summary_template(db, creator, approver, key="DE-SUMMARY-ISOLATION")
 

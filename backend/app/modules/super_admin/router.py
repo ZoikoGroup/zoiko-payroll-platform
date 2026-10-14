@@ -35,7 +35,7 @@ from app.modules.super_admin.schemas import (
     SgDecisionCreate,
     HkConfigRowUpdate,
     HkNewVersionRequest, HkSoftwareApprovalTransition, HkEmpfConfigurationCreate, HkRetentionProposal, HkReasonBody,
-    HkServiceRegistryTransition,
+    HkServiceRegistryTransition, HkEvidenceReview, HkContributionDayDisruption,
     ServiceRegistryTransition,
     SgServiceRegistryResponse,
     SgServiceRegistryTransition,
@@ -4425,6 +4425,43 @@ def hong_kong_configuration_new_version(pack_row_id: int, payload: HkNewVersionR
 
     pack = hong_kong_service.new_version(db, pack_row_id, payload.version, payload.reason, current_user.id)
     return {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status}
+
+
+@router.put(
+    "/compliance/hong-kong/evidence/{id}/review", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Hong Kong gate / decision / production-verification evidence: record the independent review outcome "
+            "(ACCEPTED, or REJECTED with notes). Maker-checker; immutable; audited",
+)
+def review_hk_evidence(
+    id: int,
+    payload: HkEvidenceReview,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import hong_kong_service
+
+    row = hong_kong_service.review_evidence(db, id, payload.outcome, payload.notes, actor_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.get("/compliance/hong-kong/contribution-day-disruptions",
+            summary="Black-rainstorm / No. 8+ signal days recorded for the MPF contribution-day deferral")
+def hk_contribution_day_disruptions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return {"disruptions": hong_kong_service.contribution_day_disruptions(db)}
+
+
+@router.post("/compliance/hong-kong/contribution-day-disruptions",
+             summary="Record a black-rainstorm / No. 8+ signal day (reason required, audited); the MPF "
+                     "contribution-day deferral skips it")
+def record_hk_contribution_day_disruption(payload: HkContributionDayDisruption,
+                                          current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    row = hong_kong_service.record_contribution_day_disruption(
+        db, payload.disruptionDate, payload.signal, payload.reason, current_user.id, payload.evidenceReference)
+    return {"id": row.id, "date": row.disruption_date.isoformat(), "signal": row.signal}
 
 
 # ── HK platform control records (IRD software approval / eMPF / retention / readiness) ──

@@ -43,7 +43,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
-from app.modules.payroll.engine.jurisdictions.hong_kong import minimum_wage, mpf
+from app.modules.payroll.engine.jurisdictions.hong_kong import entitlements, minimum_wage, mpf
 from app.modules.payroll.engine.jurisdictions.hong_kong.common import (
     HongKongCalculationBlockedError, ZERO, cents, dec, month_end, row_ref, year_of_assessment,
 )
@@ -147,6 +147,30 @@ def _period_contribution(params, frequency, ps, pe, relevant_income, start) -> d
     return mpf.contributions(relevant_income, params, levels, holiday)
 
 
+def _contribution_day_trace(ctx: PayrollContext, period_end: date, params: dict, coverage: dict) -> dict:
+    """The contribution day of this wage period under the governed deferral
+    rule (weekends + the pack's holiday rows). Dates only — never an amount.
+    Operator-recorded disruption days (black rainstorm / No. 8+) are applied
+    to the eMPF batch deadline by the service, which can read them."""
+    rule, row = mpf.deferral_rule(ctx.rate_map)
+    holidays, years = entitlements.holiday_calendar(ctx.slabs)
+    base = mpf.period_contribution_day(period_end, int(params["values"]["mpf_contribution_day"]))
+    due, steps = mpf.contribution_due_date(base, rule, holidays, holiday_years=years)
+    out = {"contributionDay": due.isoformat(), "contributionDayBase": base.isoformat(),
+           "contributionDayRule": rule or "NONE", "contributionDaySteps": steps,
+           "generalHolidayListLoaded": not mpf.general_holiday_list_missing(steps) if rule else None,
+           "contributionDayNote": ("governed deferral rule [G1 — UNVERIFIED]; black rainstorm / No. 8+ signal days are "
+                                   "applied to the eMPF batch deadline" if rule else
+                                   "no deferral rule in this pack — base day kept (disclosed)")}
+    if rule and coverage.get("firstContributionDay"):
+        first, _steps = mpf.contribution_due_date(date.fromisoformat(coverage["firstContributionDay"]), rule, holidays,
+                                                  holiday_years=years)
+        coverage["firstContributionDay"] = first.isoformat()
+    if row is not None:
+        out["contributionDayRuleRef"] = row_ref(row)
+    return out
+
+
 def calculate(ctx: PayrollContext) -> dict:
     facts = dict(getattr(ctx, "hk_worker_facts", None) or {})
     if not facts.get("profileId"):
@@ -185,8 +209,7 @@ def calculate(ctx: PayrollContext) -> dict:
     mpf_trace = {
         "coverage": coverage, "currentPeriod": current, "catchUp": catch_up,
         "employer": str(cents(employer)), "employee": str(cents(employee)),
-        "contributionDay": mpf.period_contribution_day(pe, int(params["values"]["mpf_contribution_day"])).isoformat(),
-        "contributionDayNote": "statutory extension for non-working / suspension days is not applied (disclosed)",
+        **_contribution_day_trace(ctx, pe, params, coverage),
         "thresholdBasis": mpf.thresholds(params, frequency, ps, pe)["basis"],
         "rounding": "half-up to the cent (G1 certification item)",
         "refs": params["refs"],

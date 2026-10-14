@@ -170,8 +170,8 @@ def _build_pr_940_template(db, creator, approver, key="PR-940-TEST"):
 # ── Form 499 R-1B ─────────────────────────────────────────────────────
 
 def test_generate_pr_499r1b_aggregates_two_employees_in_the_quarter(db, organization):
-    creator = _make_user(db, "creator_pr499a@test.com")
-    approver = _make_user(db, "approver_pr499a@test.com")
+    creator = _make_user(db, "creator_pr499a@test.example.com")
+    approver = _make_user(db, "approver_pr499a@test.example.com")
     _make_company(db, organization.id, country="PR")
     emp1 = _make_pr_employee(db, organization.id, code="PR499A1", name="Maria Rivera")
     emp2 = _make_pr_employee(db, organization.id, code="PR499A2", name="Jose Ortiz")
@@ -193,8 +193,8 @@ def test_generate_pr_499r1b_aggregates_two_employees_in_the_quarter(db, organiza
 
 
 def test_generate_pr_499r1b_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_pr499b@test.com")
-    approver = _make_user(db, "approver_pr499b@test.com")
+    creator = _make_user(db, "creator_pr499b@test.example.com")
+    approver = _make_user(db, "approver_pr499b@test.example.com")
     _make_company(db, organization.id, country="PR")
     template = _build_template(db, creator, approver, country="PR", version="pr499-neg")  # TDS, not PR_499R1B
     with pytest.raises(BadRequestException):
@@ -202,8 +202,8 @@ def test_generate_pr_499r1b_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_pr_499r1b_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_pr499c@test.com")
-    approver = _make_user(db, "approver_pr499c@test.com")
+    creator = _make_user(db, "creator_pr499c@test.example.com")
+    approver = _make_user(db, "approver_pr499c@test.example.com")
     _make_company(db, organization.id, country="PR")
     employee = _make_pr_employee(db, organization.id, code="PR499C")
     _make_pr_run_with_payslip(db, organization.id, employee.id, date(2026, 2, 10))
@@ -220,8 +220,8 @@ def test_generate_pr_499r1b_never_touches_a_us_payslip(db, organization):
     """A US-country-code payslip in the same org/period must never be
     swept into a PR filing — the whole point of never reusing the US
     filter/generator."""
-    creator = _make_user(db, "creator_pr499d@test.com")
-    approver = _make_user(db, "approver_pr499d@test.com")
+    creator = _make_user(db, "creator_pr499d@test.example.com")
+    approver = _make_user(db, "approver_pr499d@test.example.com")
     _make_company(db, organization.id, country="PR")
     pr_employee = _make_pr_employee(db, organization.id, code="PR499D1", name="Maria Rivera")
     us_employee = PayrollEmployee(organization_id=organization.id, employee_code="PR499D-US", name="John Smith")
@@ -253,8 +253,8 @@ def test_generate_pr_499r1b_never_touches_a_us_payslip(db, organization):
 # ── Federal Form 941 ──────────────────────────────────────────────────
 
 def test_generate_pr_941_computes_ss_wages_from_canonical_rate(db, organization):
-    creator = _make_user(db, "creator_pr941a@test.com")
-    approver = _make_user(db, "approver_pr941a@test.com")
+    creator = _make_user(db, "creator_pr941a@test.example.com")
+    approver = _make_user(db, "approver_pr941a@test.example.com")
     _make_company(db, organization.id, country="PR")
     _make_pr_ss_canonical_rate(db)
     employee = _make_pr_employee(db, organization.id, code="PR941A")
@@ -275,8 +275,8 @@ def test_generate_pr_941_computes_ss_wages_from_canonical_rate(db, organization)
 
 
 def test_generate_pr_941_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_pr941b@test.com")
-    approver = _make_user(db, "approver_pr941b@test.com")
+    creator = _make_user(db, "creator_pr941b@test.example.com")
+    approver = _make_user(db, "approver_pr941b@test.example.com")
     _make_company(db, organization.id, country="PR")
     template = _build_template(db, creator, approver, country="PR", version="pr941-neg")
     with pytest.raises(BadRequestException):
@@ -286,8 +286,8 @@ def test_generate_pr_941_rejects_wrong_report_type(db, organization):
 # ── Federal Form 940 (FUTA-equivalent) ───────────────────────────────
 
 def test_generate_pr_940_caps_futa_wages_per_employee(db, organization):
-    creator = _make_user(db, "creator_pr940a@test.com")
-    approver = _make_user(db, "approver_pr940a@test.com")
+    creator = _make_user(db, "creator_pr940a@test.example.com")
+    approver = _make_user(db, "approver_pr940a@test.example.com")
     _make_company(db, organization.id, country="PR")
     employee = _make_pr_employee(db, organization.id, code="PR940A")
     # Two runs in the same year for the same employee — gross sums to
@@ -306,8 +306,8 @@ def test_generate_pr_940_caps_futa_wages_per_employee(db, organization):
 
 
 def test_generate_pr_940_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_pr940b@test.com")
-    approver = _make_user(db, "approver_pr940b@test.com")
+    creator = _make_user(db, "creator_pr940b@test.example.com")
+    approver = _make_user(db, "approver_pr940b@test.example.com")
     _make_company(db, organization.id, country="PR")
     template = _build_template(db, creator, approver, country="PR", version="pr940-neg")
     with pytest.raises(BadRequestException):
@@ -432,8 +432,8 @@ def _build_pr_dtrh_quarterly_template(db, creator, approver, key="PR-DTRH-QUARTE
 # ── Form 499R-2/W-2PR ─────────────────────────────────────────────────
 
 def test_generate_pr_w2pr_sums_the_calendar_year(db, organization):
-    creator = _make_user(db, "creator_prw2a@test.com")
-    approver = _make_user(db, "approver_prw2a@test.com")
+    creator = _make_user(db, "creator_prw2a@test.example.com")
+    approver = _make_user(db, "approver_prw2a@test.example.com")
     _make_company(db, organization.id, country="PR")
     employee = _make_pr_employee(db, organization.id, code="PRW2A", name="Maria Rivera")
     _make_pr_run_with_payslip(
@@ -468,8 +468,8 @@ def test_generate_pr_w2pr_sums_the_calendar_year(db, organization):
 
 
 def test_generate_pr_w2pr_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_prw2b@test.com")
-    approver = _make_user(db, "approver_prw2b@test.com")
+    creator = _make_user(db, "creator_prw2b@test.example.com")
+    approver = _make_user(db, "approver_prw2b@test.example.com")
     _make_company(db, organization.id, country="PR")
     employee = _make_pr_employee(db, organization.id, code="PRW2B")
     template = _build_template(db, creator, approver, country="PR", version="prw2pr-neg")
@@ -478,8 +478,8 @@ def test_generate_pr_w2pr_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_pr_w2pr_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_prw2c@test.com")
-    approver = _make_user(db, "approver_prw2c@test.com")
+    creator = _make_user(db, "creator_prw2c@test.example.com")
+    approver = _make_user(db, "approver_prw2c@test.example.com")
     _make_company(db, organization.id, country="PR")
     employee = _make_pr_employee(db, organization.id, code="PRW2C")
     _make_pr_run_with_payslip(db, organization.id, employee.id, date(2026, 2, 10))
@@ -496,8 +496,8 @@ def test_generate_pr_w2pr_never_touches_a_us_payslip(db, organization):
     """Same employee-isolation guarantee as generate_pr_499r1b's own
     isolation test — a US-country-code payslip must never leak into a PR
     employee's W-2PR totals."""
-    creator = _make_user(db, "creator_prw2d@test.com")
-    approver = _make_user(db, "approver_prw2d@test.com")
+    creator = _make_user(db, "creator_prw2d@test.example.com")
+    approver = _make_user(db, "approver_prw2d@test.example.com")
     _make_company(db, organization.id, country="PR")
     employee = _make_pr_employee(db, organization.id, code="PRW2D", name="Maria Rivera")
     _make_pr_run_with_payslip(
@@ -528,8 +528,8 @@ def test_generate_pr_w2pr_never_touches_a_us_payslip(db, organization):
 # ── DTRH quarterly wage/contribution return ──────────────────────────
 
 def test_generate_pr_dtrh_quarterly_aggregates_two_employees_and_caps_wage_bases(db, organization):
-    creator = _make_user(db, "creator_prdtrha@test.com")
-    approver = _make_user(db, "approver_prdtrha@test.com")
+    creator = _make_user(db, "creator_prdtrha@test.example.com")
+    approver = _make_user(db, "approver_prdtrha@test.example.com")
     _make_company(db, organization.id, country="PR")
     emp1 = _make_pr_employee(db, organization.id, code="PRDTRHA1", name="Maria Rivera")
     emp2 = _make_pr_employee(db, organization.id, code="PRDTRHA2", name="Jose Ortiz")
@@ -570,8 +570,8 @@ def test_generate_pr_dtrh_quarterly_aggregates_two_employees_and_caps_wage_bases
 
 
 def test_generate_pr_dtrh_quarterly_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_prdtrhb@test.com")
-    approver = _make_user(db, "approver_prdtrhb@test.com")
+    creator = _make_user(db, "creator_prdtrhb@test.example.com")
+    approver = _make_user(db, "approver_prdtrhb@test.example.com")
     _make_company(db, organization.id, country="PR")
     template = _build_template(db, creator, approver, country="PR", version="prdtrh-neg")
     with pytest.raises(BadRequestException):
@@ -579,8 +579,8 @@ def test_generate_pr_dtrh_quarterly_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_pr_dtrh_quarterly_never_touches_a_us_payslip(db, organization):
-    creator = _make_user(db, "creator_prdtrhc@test.com")
-    approver = _make_user(db, "approver_prdtrhc@test.com")
+    creator = _make_user(db, "creator_prdtrhc@test.example.com")
+    approver = _make_user(db, "approver_prdtrhc@test.example.com")
     _make_company(db, organization.id, country="PR")
     pr_employee = _make_pr_employee(db, organization.id, code="PRDTRHC1", name="Maria Rivera")
     us_employee = PayrollEmployee(organization_id=organization.id, employee_code="PRDTRHC-US", name="John Smith")

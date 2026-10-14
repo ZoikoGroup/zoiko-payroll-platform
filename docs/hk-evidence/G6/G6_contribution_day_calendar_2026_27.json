@@ -1,0 +1,114 @@
+{
+ "pack": "HK-PAYROLL-2026 v1.0",
+ "rule": "NEXT_DAY_NOT_SAT_SUN_OR_GENERAL_HOLIDAY",
+ "holidayYears": [],
+ "holidaysInWindow": [],
+ "calendar": [
+  {
+   "wagePeriod": "2026-04",
+   "base": "2026-05-10",
+   "baseWeekday": "Sun",
+   "due": "2026-05-11",
+   "dueWeekday": "Mon",
+   "skipped": [
+    "Sunday"
+   ]
+  },
+  {
+   "wagePeriod": "2026-05",
+   "base": "2026-06-10",
+   "baseWeekday": "Wed",
+   "due": "2026-06-10",
+   "dueWeekday": "Wed",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2026-06",
+   "base": "2026-07-10",
+   "baseWeekday": "Fri",
+   "due": "2026-07-10",
+   "dueWeekday": "Fri",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2026-07",
+   "base": "2026-08-10",
+   "baseWeekday": "Mon",
+   "due": "2026-08-10",
+   "dueWeekday": "Mon",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2026-08",
+   "base": "2026-09-10",
+   "baseWeekday": "Thu",
+   "due": "2026-09-10",
+   "dueWeekday": "Thu",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2026-09",
+   "base": "2026-10-10",
+   "baseWeekday": "Sat",
+   "due": "2026-10-12",
+   "dueWeekday": "Mon",
+   "skipped": [
+    "Saturday",
+    "Sunday"
+   ]
+  },
+  {
+   "wagePeriod": "2026-10",
+   "base": "2026-11-10",
+   "baseWeekday": "Tue",
+   "due": "2026-11-10",
+   "dueWeekday": "Tue",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2026-11",
+   "base": "2026-12-10",
+   "baseWeekday": "Thu",
+   "due": "2026-12-10",
+   "dueWeekday": "Thu",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2026-12",
+   "base": "2027-01-10",
+   "baseWeekday": "Sun",
+   "due": "2027-01-11",
+   "dueWeekday": "Mon",
+   "skipped": [
+    "Sunday"
+   ]
+  },
+  {
+   "wagePeriod": "2027-01",
+   "base": "2027-02-10",
+   "baseWeekday": "Wed",
+   "due": "2027-02-10",
+   "dueWeekday": "Wed",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2027-02",
+   "base": "2027-03-10",
+   "baseWeekday": "Wed",
+   "due": "2027-03-10",
+   "dueWeekday": "Wed",
+   "skipped": []
+  },
+  {
+   "wagePeriod": "2027-03",
+   "base": "2027-04-10",
+   "baseWeekday": "Sat",
+   "due": "2027-04-12",
+   "dueWeekday": "Mon",
+   "skipped": [
+    "Saturday",
+    "Sunday"
+   ]
+  }
+ ]
+}

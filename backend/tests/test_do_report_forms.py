@@ -179,8 +179,8 @@ def _build_do_ir13_template(db, creator, approver, key="DO-IR13-TEST"):
 # ── DGII IR-3 ────────────────────────────────────────────────────────
 
 def test_generate_do_ir3_aggregates_two_employees_across_multiple_runs_same_month(db, organization):
-    creator = _make_user(db, "creator_doir3a@test.com")
-    approver = _make_user(db, "approver_doir3a@test.com")
+    creator = _make_user(db, "creator_doir3a@test.example.com")
+    approver = _make_user(db, "approver_doir3a@test.example.com")
     _make_company(db, organization.id, country="DO")
     emp1 = _make_do_employee(db, organization.id, code="DOIR3A1", name="Yolanda Peña")
     emp2 = _make_do_employee(db, organization.id, code="DOIR3A2", name="Rafael Cruz")
@@ -206,8 +206,8 @@ def test_generate_do_ir3_aggregates_two_employees_across_multiple_runs_same_mont
 
 
 def test_generate_do_ir3_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_doir3b@test.com")
-    approver = _make_user(db, "approver_doir3b@test.com")
+    creator = _make_user(db, "creator_doir3b@test.example.com")
+    approver = _make_user(db, "approver_doir3b@test.example.com")
     _make_company(db, organization.id, country="DO")
     employee = _make_do_employee(db, organization.id, code="DOIR3B")
 
@@ -222,8 +222,8 @@ def test_generate_do_ir3_excludes_other_months_and_unfinalized_runs(db, organiza
 
 
 def test_generate_do_ir3_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_doir3c@test.com")
-    approver = _make_user(db, "approver_doir3c@test.com")
+    creator = _make_user(db, "creator_doir3c@test.example.com")
+    approver = _make_user(db, "approver_doir3c@test.example.com")
     _make_company(db, organization.id, country="DO")
     template = _build_template(db, creator, approver, country="DO", version="doir3-neg")
     with pytest.raises(BadRequestException):
@@ -231,8 +231,8 @@ def test_generate_do_ir3_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_do_ir3_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_doir3d@test.com")
-    approver = _make_user(db, "approver_doir3d@test.com")
+    creator = _make_user(db, "creator_doir3d@test.example.com")
+    approver = _make_user(db, "approver_doir3d@test.example.com")
     _make_company(db, organization.id, country="DO")
     employee = _make_do_employee(db, organization.id, code="DOIR3D")
     _make_do_run_with_payslip(db, organization.id, employee.id, date(2026, 3, 10))
@@ -248,8 +248,8 @@ def test_generate_do_ir3_regenerating_supersedes_prior(db, organization):
 # ── TSS/SUIR ─────────────────────────────────────────────────────────
 
 def test_generate_do_tss_suir_aggregates_employees_for_the_month(db, organization):
-    creator = _make_user(db, "creator_dotss_a@test.com")
-    approver = _make_user(db, "approver_dotss_a@test.com")
+    creator = _make_user(db, "creator_dotss_a@test.example.com")
+    approver = _make_user(db, "approver_dotss_a@test.example.com")
     _make_company(db, organization.id, country="DO")
     emp1 = _make_do_employee(db, organization.id, code="DOTSSA1", name="Yolanda Peña")
     emp2 = _make_do_employee(db, organization.id, code="DOTSSA2", name="Rafael Cruz")
@@ -269,8 +269,8 @@ def test_generate_do_tss_suir_aggregates_employees_for_the_month(db, organizatio
 
 
 def test_generate_do_tss_suir_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_dotss_b@test.com")
-    approver = _make_user(db, "approver_dotss_b@test.com")
+    creator = _make_user(db, "creator_dotss_b@test.example.com")
+    approver = _make_user(db, "approver_dotss_b@test.example.com")
     _make_company(db, organization.id, country="DO")
     template = _build_template(db, creator, approver, country="DO", version="dotss-neg")
     with pytest.raises(BadRequestException):
@@ -280,8 +280,8 @@ def test_generate_do_tss_suir_rejects_wrong_report_type(db, organization):
 # ── IR-13 (generic mapper reuse) ─────────────────────────────────────
 
 def test_generate_do_ir13_sums_ytd_via_generic_mapper(db, organization):
-    creator = _make_user(db, "creator_doir13_a@test.com")
-    approver = _make_user(db, "approver_doir13_a@test.com")
+    creator = _make_user(db, "creator_doir13_a@test.example.com")
+    approver = _make_user(db, "approver_doir13_a@test.example.com")
     _make_company(db, organization.id, country="DO")
     employee = _make_do_employee(db, organization.id, code="DOIR13A", name="Yolanda Peña")
 

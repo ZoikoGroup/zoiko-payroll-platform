@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listHkAccessEvents, listHkLegalHolds, placeHkLegalHold, releaseHkLegalHold } from "../../../service/payrollService";
 import { hkLabel } from "../../../components/jurisdiction/hong_kong/hkLabels";
+import { MpfRevealPermissions } from "./HKMpfAccessControls";
 
 // Hong Kong privacy controls (gap-closure D-19): legal holds (no HK record in
 // scope can be deleted while one is active; release needs a different user)
@@ -45,6 +46,7 @@ export default function HKPrivacyPanel({ employees = [] }) {
       <p className="text-[12px] text-foreground-secondary">
         A legal hold stops any Hong Kong record in its scope from being deleted. Retention periods are not set here.
       </p>
+      <MpfRevealPermissions />
       <form className={`${card} grid grid-cols-1 gap-3 sm:grid-cols-4`} aria-label="Place a legal hold"
         onSubmit={(e) => {
           e.preventDefault();

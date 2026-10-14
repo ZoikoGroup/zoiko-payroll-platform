@@ -40,7 +40,7 @@ from app.modules.payroll import jurisdiction_hooks
 from app.modules.payroll.models import LegalHold, PersonalDataAccessEvent, RetentionPolicy
 
 ACCESS_ACTIONS = ("VIEW_REPORT", "DOWNLOAD_CERTIFICATE", "DOWNLOAD_CERTIFICATES_ZIP", "VIEW_STATUTORY_PROFILE",
-                  "DOWNLOAD_PAYSLIP", "DOWNLOAD_PAYSLIPS_ZIP", "DOWNLOAD_BANK_FILE")
+                  "DOWNLOAD_PAYSLIP", "DOWNLOAD_PAYSLIPS_ZIP", "DOWNLOAD_BANK_FILE", "REVEAL_MPF_MEMBER_ACCOUNT")
 
 
 @dataclass(frozen=True)
@@ -215,7 +215,8 @@ def release_legal_hold(db: Session, country: str, organization_id: int, hold_id:
     reason = (reason or "").strip()
     if not reason:
         raise BadRequestException("releasing a legal hold needs a reason")
-    require_four_eyes(hold.placed_by_id, actor_id, "Releasing a legal hold")
+    require_four_eyes(hold.placed_by_id, actor_id, "Releasing a legal hold", db=db, entity_type="legal_hold",
+                      entity_id=hold.id, current_status=hold.status, attempted="release")
     hold.status, hold.released_by_id, hold.release_reason = "RELEASED", actor_id, reason
     hold.released_at = datetime.utcnow().replace(microsecond=0)
     _audit(db, cfg, actor_id, "status_change", "legal_hold", hold.id, old={"status": "ACTIVE"},

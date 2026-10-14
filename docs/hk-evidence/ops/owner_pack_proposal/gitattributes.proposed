@@ -1,0 +1,4 @@
+# PROPOSED rule for the repository root .gitattributes (not applied).
+# Keeps every byte of the owner-controlled HK release-evidence pack exactly as signed:
+# no CRLF/LF conversion on checkout or commit, so recorded SHA-256 digests stay valid.
+docs/HONG_KONG_RELEASE_EVIDENCE/** -text

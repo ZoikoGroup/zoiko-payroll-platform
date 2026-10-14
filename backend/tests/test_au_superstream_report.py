@@ -87,8 +87,8 @@ def _build_au_superstream_template(db, creator, approver):
 
 
 def test_generate_au_superstream_report_end_to_end(db, organization):
-    creator = _make_user(db, "au-superstream-creator@test.com")
-    approver = _make_user(db, "au-superstream-approver@test.com")
+    creator = _make_user(db, "au-superstream-creator@test.example.com")
+    approver = _make_user(db, "au-superstream-approver@test.example.com")
     _make_au_company(db, organization.id)
     run, employee, item, liability = _make_au_run_with_sg_liability(db, organization.id, status="Approved")
     template = _build_au_superstream_template(db, creator, approver)
@@ -118,8 +118,8 @@ def test_generate_au_superstream_report_empty_when_no_liabilities(db, organizati
     report" handling."""
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
 
-    creator = _make_user(db, "au-superstream-empty-creator@test.com")
-    approver = _make_user(db, "au-superstream-empty-approver@test.com")
+    creator = _make_user(db, "au-superstream-empty-creator@test.example.com")
+    approver = _make_user(db, "au-superstream-empty-approver@test.example.com")
     _make_au_company(db, organization.id)
     employee = PayrollEmployee(organization_id=organization.id, employee_code="AU-E003", name="No SG Employee")
     db.add(employee)
@@ -148,8 +148,8 @@ def test_generate_au_superstream_report_empty_when_no_liabilities(db, organizati
 
 
 def test_generate_au_superstream_report_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "au-superstream-wrongtype-creator@test.com")
-    approver = _make_user(db, "au-superstream-wrongtype-approver@test.com")
+    creator = _make_user(db, "au-superstream-wrongtype-creator@test.example.com")
+    approver = _make_user(db, "au-superstream-wrongtype-approver@test.example.com")
     _make_au_company(db, organization.id)
     run, employee, item, liability = _make_au_run_with_sg_liability(db, organization.id, status="Approved")
 

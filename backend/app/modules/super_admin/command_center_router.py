@@ -993,6 +993,17 @@ def list_alerts(
             "link": "/super-admin/service-health",
         })
 
+    from app.modules.assisted_access.service import break_glass_notification_alerts
+
+    for bg in break_glass_notification_alerts(db):
+        alerts.append({
+            "severity": "high",
+            "category": "security",
+            "message": f"{bg['organization_name']}: break-glass session #{bg['session_id']} — tenant notification "
+                       "FAILED; notify the tenant manually and record it",
+            "link": "/super-admin/security-audit",
+        })
+
     for org in _suspended_dunning_orgs(db):
         protected = org["in_flight_run_guard"]
         alerts.append({

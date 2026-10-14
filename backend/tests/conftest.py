@@ -117,8 +117,8 @@ def _isolated_redis_cache():
 def _no_real_smtp(monkeypatch):
     """Guarantee no test ever opens a real SMTP connection.
 
-    backend/.env carries live SMTP credentials (info@zoikopayroll.com /
-    smtpout.secureserver.net:465) and the app reads them eagerly via
+    backend/.env carries live SMTP credentials (the company's real
+    mailbox on its hosted SMTP server) and the app reads them eagerly via
     app.config at first import. Several auth flows (reset link, invite,
     and now the notification sends) fire through email_service at normal
     call sites; without this neutralizer a single unpatched test would
@@ -147,6 +147,50 @@ def _no_real_smtp(monkeypatch):
     from app.services import email_service
 
     monkeypatch.setattr(email_service, "_get_smtp_settings", _fake_get_smtp_settings)
+
+
+# ── F-10: a test run must never attempt real delivery ──────────────────────
+REAL_DELIVERY_ATTEMPTS: list = []
+
+
+class RealDeliveryAttempted(AssertionError):
+    pass
+
+
+class _SmtpTripwire:
+    """Stands in for smtplib.SMTP / SMTP_SSL for the whole run. Any test that
+    reaches a real SMTP constructor without faking it fails here, and the
+    attempt is recorded so the session fails too (pytest_sessionfinish)."""
+
+    def __init__(self, host="", port=0, *args, **kwargs):
+        REAL_DELIVERY_ATTEMPTS.append(f"smtp {host}:{port}")
+        raise RealDeliveryAttempted(f"test attempted real SMTP delivery to {host}:{port} (F-10)")
+
+
+@pytest.fixture(autouse=True)
+def _smtp_tripwire(monkeypatch):
+    import smtplib
+
+    monkeypatch.setattr(smtplib, "SMTP", _SmtpTripwire)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", _SmtpTripwire)
+
+
+@pytest.fixture()
+def fake_smtp_transport(monkeypatch):
+    """Explicit opt-in for tests that replace smtplib with a fake to prove
+    delivery mechanics: lets the F-10 outbound guard pass the configured
+    (fake) endpoint through. The tripwire above still fails any test that
+    opts in but forgets to fake smtplib."""
+    from app.core import outbound
+
+    monkeypatch.setattr(outbound, "real_delivery_allowed", lambda channel: True)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if REAL_DELIVERY_ATTEMPTS:
+        session.exitstatus = 1
+        print(f"\nF-10: {len(REAL_DELIVERY_ATTEMPTS)} real outbound delivery attempt(s) in this test run: "
+              f"{REAL_DELIVERY_ATTEMPTS[:5]}")
 
 
 @pytest.fixture()

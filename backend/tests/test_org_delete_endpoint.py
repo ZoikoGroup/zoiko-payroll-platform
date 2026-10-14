@@ -61,7 +61,7 @@ _seed_db.close()
 
 class FakeSuperAdmin:
     id = 1
-    email = "sa@zoiko.dev"
+    email = "sa@zoiko-dev.example.com"
     role = "super_admin"
     organization_id = None
 

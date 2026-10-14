@@ -1,0 +1,333 @@
+diff --git a/backend/app/core/dependencies.py b/backend/app/core/dependencies.py
+index f07b994..7339068 100644
+--- a/backend/app/core/dependencies.py
++++ b/backend/app/core/dependencies.py
+@@ -22,13 +22,13 @@ from datetime import datetime
+ from dataclasses import dataclass, field
+ from typing import Optional
+ 
+-from fastapi import Depends
++from fastapi import Depends, Request
+ from fastapi.security import OAuth2PasswordBearer
+ from sqlalchemy.orm import Session
+ 
+ from app.database import get_db
+ from app.core.security import decode_access_token, decode_assisted_access_token
+-from app.core.exceptions import ForbiddenException, UnauthorizedException
++from app.core.exceptions import ForbiddenException, UnauthorizedException, ZoikoException
+ 
+ # Tokens are issued by this platform only (see core/security.py).
+ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+@@ -102,7 +102,7 @@ def role_value(user) -> str:
+     return _role_value(user)
+ 
+ 
+-def _resolve_assisted_principal(token: str, db: Session):
++def _resolve_assisted_principal(token: str, db: Session, request: Optional[Request] = None):
+     """Validate a SafeGuard assisted-access token and build its principal.
+ 
+     Every gate that matters lives here, not in the endpoint that happens to
+@@ -140,6 +140,9 @@ def _resolve_assisted_principal(token: str, db: Session):
+     if sa is None or not sa.is_active:
+         raise UnauthorizedException("The requesting Super Admin is no longer active.")
+ 
++    if request is not None:
++        _record_assisted_intent(db, session, request)
++
+     return AssistedAccessPrincipal(
+         id=sa.id,
+         email=sa.email,
+@@ -152,6 +155,46 @@ def _resolve_assisted_principal(token: str, db: Session):
+     )
+ 
+ 
++def _record_assisted_intent(db: Session, session, request: Request) -> None:
++    """G5 F-4 (fail closed): before any endpoint runs under an assisted-access
++    token, commit an ORG_API_CALL_STARTED audit row on its own session. If it
++    cannot be written, the request is refused (503) — no assisted action
++    happens without an audit record. The post-response ORG_API_CALL row
++    (assisted_access/audit.py) carries this row's id as `intent_id`; a start
++    with no completion raises a Super Admin security alert."""
++    import logging
++
++    from sqlalchemy.orm import Session as _Session
++
++    from app.modules.assisted_access.audit import redact
++    from app.modules.assisted_access.models import AssistedAccessAuditEvent
++
++    if getattr(request.state, "assisted_intent_id", None):
++        return  # already recorded for this request
++    audit_db = _Session(bind=db.get_bind())
++    try:
++        event = AssistedAccessAuditEvent(
++            assisted_access_session_id=session.id,
++            organization_id=session.organization_id,
++            actor_user_id=session.requested_by_user_id,
++            event_type="ORG_API_CALL_STARTED",
++            method=request.method,
++            path=redact(request.url.path)[:300],
++            payload={"query": redact(request.url.query), "assisting": True},
++        )
++        audit_db.add(event)
++        audit_db.commit()
++        request.state.assisted_intent_id = event.id
++    except Exception:  # noqa: BLE001
++        audit_db.rollback()
++        logging.getLogger("zoiko_payroll.assisted_access.audit").exception(
++            "[assisted-access] intent audit write failed - request refused (F-4 fail closed)")
++        raise ZoikoException(503, "ASSISTED_AUDIT_UNAVAILABLE",
++                             "Assisted access is unavailable: the audit record could not be written. Nothing was changed.")
++    finally:
++        audit_db.close()
++
++
+ def _resolve_access_user(db: Session, payload: dict):
+     """Look up and validate the User behind a normal access token."""
+     from app.modules.auth.service import is_token_revoked
+@@ -220,6 +263,7 @@ def get_current_user(
+ 
+ 
+ def get_current_org_scoped_principal(
++    request: Request,
+     token: str = Depends(oauth2_scheme),
+     db: Session = Depends(get_db),
+ ):
+@@ -229,7 +273,7 @@ def get_current_org_scoped_principal(
+     raw = decode_access_token(token)
+     if raw is not None:
+         return _resolve_access_user(db, raw)
+-    return _resolve_assisted_principal(token, db)
++    return _resolve_assisted_principal(token, db, request)
+ 
+ 
+ def get_current_super_admin(current_user=Depends(get_current_user)):
+diff --git a/backend/app/modules/assisted_access/audit.py b/backend/app/modules/assisted_access/audit.py
+index 08da9d4..1bee7f8 100644
+--- a/backend/app/modules/assisted_access/audit.py
++++ b/backend/app/modules/assisted_access/audit.py
+@@ -9,9 +9,12 @@ request (method/path/status) that was made under the session. This is the
+ single chokepoint that makes "nobody can claim they didn't know what the
+ session touched" structurally true: it needs no per-endpoint cooperation.
+ 
+-Implemented as a FastAPI middleware (see main.py). Failure to audit must
+-never break the underlying request, so everything here is best-effort and
+-swallows its own exceptions.
++Implemented as a FastAPI middleware (see main.py). This post-response row is
++the completion record; the request already ran, so a failure here cannot undo
++it and is logged. Since G5 F-4 the request is preceded by an
++ORG_API_CALL_STARTED row (core/dependencies.py, fail closed); this row carries
++its id as `intent_id`, and a start without a completion raises a Super Admin
++security alert (assisted_access.service.assisted_audit_gap_alerts).
+ """
+ 
+ import logging
+@@ -22,7 +25,14 @@ from app.core.security import decode_assisted_access_token
+ logger = logging.getLogger("zoiko_payroll.assisted_access.audit")
+ 
+ # Never scribe security tokens that may appear in a query string.
+-_REDACT_RE = re.compile(r"(?i)([?&](?:token|code)=)[^&\s\"']+")
++# Anchored at the start too: request.url.query carries no leading "?", so the
++# old [?&]-only pattern left a first `token=` parameter unredacted (found by the
++# F-4 tests).
++_REDACT_RE = re.compile(r"(?i)((?:^|[?&])(?:token|code)=)[^&\s\"']+")
++
++
++def redact(value: str) -> str:
++    return _REDACT_RE.sub(r"[REDACTED]", value or "")
+ 
+ 
+ def record_request_if_assisted(request, status_code: int) -> None:
+@@ -50,7 +60,8 @@ def record_request_if_assisted(request, status_code: int) -> None:
+     db = SessionLocal()
+     try:
+         session = db.query(AssistedAccessSession).filter(AssistedAccessSession.id == session_id).first()
+-        if session is None or session.ended_at is not None:
++        intent_id = getattr(getattr(request, "state", None), "assisted_intent_id", None)
++        if session is None or (session.ended_at is not None and not intent_id):
+             return
+ 
+         path = _REDACT_RE.sub(r"\1[REDACTED]", request.url.path)
+@@ -65,6 +76,7 @@ def record_request_if_assisted(request, status_code: int) -> None:
+             payload={
+                 "query": _REDACT_RE.sub(r"\1[REDACTED]", request.url.query),
+                 "assisting": True,
++                "intent_id": intent_id,
+             },
+         ))
+         db.commit()
+diff --git a/backend/app/modules/assisted_access/service.py b/backend/app/modules/assisted_access/service.py
+index cae4ede..fd25a43 100644
+--- a/backend/app/modules/assisted_access/service.py
++++ b/backend/app/modules/assisted_access/service.py
+@@ -242,6 +242,25 @@ def break_glass_notification_alerts(db: Session, days: int = 7) -> list:
+     return [{"session_id": s.id, "organization_name": name, "activated_at": s.activated_at} for s, name in rows]
+ 
+ 
++def assisted_audit_gap_alerts(db: Session, days: int = 7, grace_minutes: int = 5) -> list:
++    """G5 F-4: assisted requests whose STARTED row has no completion row
++    (ORG_API_CALL with payload.intent_id) after `grace_minutes`. Fed into the
++    Super Admin Alerts page."""
++    from app.modules.assisted_access.models import AssistedAccessAuditEvent
++
++    now = _now()
++    rows = (db.query(AssistedAccessAuditEvent)
++            .filter(AssistedAccessAuditEvent.event_type.in_(("ORG_API_CALL_STARTED", "ORG_API_CALL")),
++                    AssistedAccessAuditEvent.recorded_at >= now - timedelta(days=days)).all())
++    done = {(r.payload or {}).get("intent_id") for r in rows if r.event_type == "ORG_API_CALL"}
++    gaps = {}
++    for r in rows:
++        at = r.recorded_at.replace(tzinfo=None) if r.recorded_at and r.recorded_at.tzinfo else r.recorded_at
++        if r.event_type == "ORG_API_CALL_STARTED" and r.id not in done and at and at <= now - timedelta(minutes=grace_minutes):
++            gaps.setdefault(r.assisted_access_session_id, []).append(r.id)
++    return [{"session_id": sid, "unmatched_starts": len(ids), "first_event_id": min(ids)} for sid, ids in sorted(gaps.items())]
++
++
+ def activate_assisted_access(db: Session, session, *, requested_by, _break_glass_grant: bool = False):
+     """Start the approved session and issue its token. CONSENT: only the
+     requester, inside the approval window. BREAK_GLASS: started at approval
+diff --git a/backend/app/modules/super_admin/command_center_router.py b/backend/app/modules/super_admin/command_center_router.py
+index b84f42b..ea10c25 100644
+--- a/backend/app/modules/super_admin/command_center_router.py
++++ b/backend/app/modules/super_admin/command_center_router.py
+@@ -1004,6 +1004,17 @@ def list_alerts(
+             "link": "/super-admin/security-audit",
+         })
+ 
++    from app.modules.assisted_access.service import assisted_audit_gap_alerts
++
++    for gap in assisted_audit_gap_alerts(db):
++        alerts.append({
++            "severity": "high",
++            "category": "security",
++            "message": f"Assisted-access session #{gap['session_id']}: {gap['unmatched_starts']} request(s) started but "
++                       "their completion audit row is missing; review the session's audit trail",
++            "link": "/super-admin/security-audit",
++        })
++
+     for org in _suspended_dunning_orgs(db):
+         protected = org["in_flight_run_guard"]
+         alerts.append({
+diff --git a/backend/tests/test_assisted_access_audit_fail_closed.py b/backend/tests/test_assisted_access_audit_fail_closed.py
+new file mode 100644
+index 0000000..f8a6a53
+--- /dev/null
++++ b/backend/tests/test_assisted_access_audit_fail_closed.py
+@@ -0,0 +1,118 @@
++"""G5 F-4 (draft for Security review): no assisted action without an audit record.
++TEST-ONLY data. App modules are imported inside the tests (collection-order hazard)."""
++from datetime import datetime, timedelta
++from types import SimpleNamespace
++
++import pytest
++
++from tests.test_assisted_access import people  # noqa: F401  (fixture)
++
++
++def _request(path="/api/payroll/employees", method="GET", query=""):
++    from starlette.requests import Request
++
++    return Request({"type": "http", "method": method, "path": path, "query_string": query.encode(), "headers": [],
++                    "server": ("test", 80), "scheme": "http", "root_path": ""})
++
++
++def _active_token(db, people):
++    from app.modules.assisted_access import service as svc
++
++    s = svc.request_assisted_access(db, organization_id=people.org.id, requested_by=people.sa1, reason="TEST: F-4")
++    svc.approve_assisted_access(db, s, approver=people.admin, decision_reason="TEST ok")
++    s, token = svc.activate_assisted_access(db, s, requested_by=people.sa1)
++    return s, token
++
++
++def _rows(db, session_id, event_type):
++    from app.modules.assisted_access.models import AssistedAccessAuditEvent
++
++    return db.query(AssistedAccessAuditEvent).filter(AssistedAccessAuditEvent.assisted_access_session_id == session_id,
++                                                     AssistedAccessAuditEvent.event_type == event_type).all()
++
++
++def test_assisted_request_writes_a_started_row_before_the_endpoint_once_per_request(db, people):
++    from app.core.dependencies import get_current_org_scoped_principal
++
++    s, token = _active_token(db, people)
++    req = _request(query="token=secret&x=1")
++    principal = get_current_org_scoped_principal(req, token=token, db=db)
++    assert principal.organization_id == people.org.id
++    started = _rows(db, s.id, "ORG_API_CALL_STARTED")
++    assert len(started) == 1 and started[0].method == "GET" and started[0].path == "/api/payroll/employees"
++    assert "secret" not in str(started[0].payload)
++    assert req.state.assisted_intent_id == started[0].id
++    get_current_org_scoped_principal(req, token=token, db=db)                 # same request again: no duplicate
++    assert len(_rows(db, s.id, "ORG_API_CALL_STARTED")) == 1
++
++
++def test_a_failed_intent_write_refuses_the_request_with_503(db, people, monkeypatch):
++    from sqlalchemy.orm import Session
++
++    from app.core.dependencies import get_current_org_scoped_principal
++    from app.core.exceptions import ZoikoException
++
++    s, token = _active_token(db, people)
++    real_commit = Session.commit
++
++    def failing_commit(self):
++        if any(getattr(o, "event_type", None) == "ORG_API_CALL_STARTED" for o in self.new):
++            raise RuntimeError("audit store down")
++        return real_commit(self)
++
++    monkeypatch.setattr(Session, "commit", failing_commit)
++    ran = []
++    with pytest.raises(ZoikoException) as exc:
++        get_current_org_scoped_principal(_request(method="POST"), token=token, db=db)
++        ran.append("endpoint")                                                # never reached
++    monkeypatch.setattr(Session, "commit", real_commit)
++    assert exc.value.status_code == 503 and ran == []
++    assert _rows(db, s.id, "ORG_API_CALL_STARTED") == []
++
++
++def test_completion_row_carries_the_intent_id_and_gaps_raise_a_security_alert(db, people, monkeypatch):
++    from app.core.dependencies import get_current_org_scoped_principal
++    from app.modules.assisted_access import audit, service as svc
++    from app.modules.assisted_access.models import AssistedAccessAuditEvent
++
++    s, token = _active_token(db, people)
++    done = _request(path="/api/payroll/runs")
++    get_current_org_scoped_principal(done, token=token, db=db)
++    missing = _request(path="/api/payroll/employees/7", method="DELETE")
++    get_current_org_scoped_principal(missing, token=token, db=db)
++
++    class _NoClose:                                     # the middleware's own session, bound to the test DB
++        def __init__(self):
++            self._db = db
++
++        def __getattr__(self, name):
++            return getattr(self._db, name)
++
++        def close(self):
++            pass
++
++    monkeypatch.setattr("app.database.SessionLocal", _NoClose)
++    done.scope["headers"] = [(b"authorization", f"Bearer {token}".encode())]
++    audit.record_request_if_assisted(done, 200)
++    completion = _rows(db, s.id, "ORG_API_CALL")
++    assert len(completion) == 1 and completion[0].payload["intent_id"] == done.state.assisted_intent_id
++
++    assert svc.assisted_audit_gap_alerts(db) == []                            # inside the grace period
++    old = datetime.utcnow() - timedelta(minutes=30)
++    for e in db.query(AssistedAccessAuditEvent).filter(AssistedAccessAuditEvent.assisted_access_session_id == s.id):
++        e.recorded_at = old
++    db.commit()
++    gaps = svc.assisted_audit_gap_alerts(db)
++    assert gaps == [{"session_id": s.id, "unmatched_starts": 1, "first_event_id": missing.state.assisted_intent_id}]
++
++
++def test_normal_tokens_write_no_assisted_audit_rows(db, people):
++    from app.core.dependencies import get_current_org_scoped_principal
++    from app.core.security import create_access_token
++    from app.modules.assisted_access.models import AssistedAccessAuditEvent
++
++    token = create_access_token({"sub": people.admin.email, "user_id": people.admin.id, "role": people.admin.role.value,
++                                 "organization_id": people.org.id})
++    before = db.query(AssistedAccessAuditEvent).count()
++    user = get_current_org_scoped_principal(_request(), token=token, db=db)
++    assert user.id == people.admin.id and db.query(AssistedAccessAuditEvent).count() == before

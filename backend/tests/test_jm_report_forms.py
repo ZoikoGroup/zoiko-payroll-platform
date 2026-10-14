@@ -145,8 +145,8 @@ def _build_jm_s02_template(db, creator, approver, key="JM-S02-TEST"):
 # ── S01 ────────────────────────────────────────────────────────────────
 
 def test_generate_jm_s01_aggregates_two_employees_and_attributes_heart_employer_only(db, organization):
-    creator = _make_user(db, "creator_jms01a@test.com")
-    approver = _make_user(db, "approver_jms01a@test.com")
+    creator = _make_user(db, "creator_jms01a@test.example.com")
+    approver = _make_user(db, "approver_jms01a@test.example.com")
     _make_company(db, organization.id, country="JM")
     emp1 = _make_jm_employee(db, organization.id, code="JMS01A1", name="Andrea Clarke")
     emp2 = _make_jm_employee(db, organization.id, code="JMS01A2", name="Tyrone Bailey")
@@ -173,8 +173,8 @@ def test_generate_jm_s01_aggregates_two_employees_and_attributes_heart_employer_
 
 
 def test_generate_jm_s01_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_jms01b@test.com")
-    approver = _make_user(db, "approver_jms01b@test.com")
+    creator = _make_user(db, "creator_jms01b@test.example.com")
+    approver = _make_user(db, "approver_jms01b@test.example.com")
     _make_company(db, organization.id, country="JM")
     employee = _make_jm_employee(db, organization.id, code="JMS01B")
 
@@ -189,8 +189,8 @@ def test_generate_jm_s01_excludes_other_months_and_unfinalized_runs(db, organiza
 
 
 def test_generate_jm_s01_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_jms01c@test.com")
-    approver = _make_user(db, "approver_jms01c@test.com")
+    creator = _make_user(db, "creator_jms01c@test.example.com")
+    approver = _make_user(db, "approver_jms01c@test.example.com")
     _make_company(db, organization.id, country="JM")
     template = _build_template(db, creator, approver, country="JM", version="jms01-neg")
     with pytest.raises(BadRequestException):
@@ -198,8 +198,8 @@ def test_generate_jm_s01_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_jm_s01_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_jms01d@test.com")
-    approver = _make_user(db, "approver_jms01d@test.com")
+    creator = _make_user(db, "creator_jms01d@test.example.com")
+    approver = _make_user(db, "approver_jms01d@test.example.com")
     _make_company(db, organization.id, country="JM")
     employee = _make_jm_employee(db, organization.id, code="JMS01D")
     _make_jm_run_with_payslip(db, organization.id, employee.id, date(2026, 5, 10))
@@ -215,8 +215,8 @@ def test_generate_jm_s01_regenerating_supersedes_prior(db, organization):
 # ── S02 ────────────────────────────────────────────────────────────────
 
 def test_generate_jm_s02_aggregates_across_the_full_calendar_year(db, organization):
-    creator = _make_user(db, "creator_jms02a@test.com")
-    approver = _make_user(db, "approver_jms02a@test.com")
+    creator = _make_user(db, "creator_jms02a@test.example.com")
+    approver = _make_user(db, "approver_jms02a@test.example.com")
     _make_company(db, organization.id, country="JM")
     employee = _make_jm_employee(db, organization.id, code="JMS02A", name="Andrea Clarke")
 
@@ -239,8 +239,8 @@ def test_generate_jm_s02_aggregates_across_the_full_calendar_year(db, organizati
 
 
 def test_generate_jm_s02_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_jms02b@test.com")
-    approver = _make_user(db, "approver_jms02b@test.com")
+    creator = _make_user(db, "creator_jms02b@test.example.com")
+    approver = _make_user(db, "approver_jms02b@test.example.com")
     _make_company(db, organization.id, country="JM")
     template = _build_template(db, creator, approver, country="JM", version="jms02-neg")
     with pytest.raises(BadRequestException):

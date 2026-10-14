@@ -1,0 +1,370 @@
+{
+ "checkedAt": "2026-10-13T12:00:33.173112+00:00",
+ "database": {
+  "host": "127.0.0.1",
+  "name": "hk_evidence"
+ },
+ "manifest": "../docs/hk-evidence/UPLOAD_KIT/manifest.csv",
+ "manifestSha256": "72b686491f3353e8acefbfd4f0d2c5f39f4de39d63201c1f4a4d0401ba81d6ed",
+ "counts": {
+  "MATCH": 32,
+  "DIGEST_MISMATCH": 0,
+  "NOT_UPLOADED": 0,
+  "MISSING": 0
+ },
+ "results": [
+  {
+   "file": "G1/G1_statutory_content_review_memo.md",
+   "tag": "HK-GATE-G1",
+   "title": "DRAFT G1 statutory content review memo",
+   "expectedSha256": "ab1d81cc4e11dacfa713e944838ba6a0280442d1fc6335f49f16e0acb6656b0a",
+   "status": "MATCH",
+   "artifactId": 83,
+   "storedSha256": "ab1d81cc4e11dacfa713e944838ba6a0280442d1fc6335f49f16e0acb6656b0a",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G1/G1_governed_values_worksheet.csv",
+   "tag": "HK-GATE-G1",
+   "title": "DRAFT G1 governed values worksheet (305 values + 4 open items, 2 packs)",
+   "expectedSha256": "2f1d25fe4867fd0e50a097cdeced7668d38c30c742be00791bade3aff94b0901",
+   "status": "MATCH",
+   "artifactId": 84,
+   "storedSha256": "2f1d25fe4867fd0e50a097cdeced7668d38c30c742be00791bade3aff94b0901",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G1/G1_export_run.json",
+   "tag": "HK-GATE-G1",
+   "title": "DRAFT G1 worksheet export run record",
+   "expectedSha256": "6b4e7433926b628ef91e42d23ed16b7fc2bd42265b965e95321dc48b681f8c2e",
+   "status": "MATCH",
+   "artifactId": 85,
+   "storedSha256": "6b4e7433926b628ef91e42d23ed16b7fc2bd42265b965e95321dc48b681f8c2e",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-G1-internal-review-in-lieu-of-specialist.md",
+   "tag": "HK-GATE-G1",
+   "title": "OPTIONAL decision: G1 internal review in lieu of specialist (undecided)",
+   "expectedSha256": "5b1c0b111a327b4318d41e6db422627310a37013221989627cbc10b2595459c8",
+   "status": "MATCH",
+   "artifactId": 86,
+   "storedSha256": "5b1c0b111a327b4318d41e6db422627310a37013221989627cbc10b2595459c8",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G2/hk_authority_document_register.md",
+   "tag": "HK-GATE-G2",
+   "title": "DRAFT G2 authority documents and workflows",
+   "expectedSha256": "0e3979e59807b62082357558d029b7ba1e744c793a84af03a39299c0ddaa428c",
+   "status": "MATCH",
+   "artifactId": 87,
+   "storedSha256": "0e3979e59807b62082357558d029b7ba1e744c793a84af03a39299c0ddaa428c",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G2/G2_conformance_test_plan.md",
+   "tag": "HK-GATE-G2",
+   "title": "DRAFT G2 IRD / eMPF conformance test plan (PENDING credentials)",
+   "expectedSha256": "d166bb42f1f65a7ca3b22203e9c2d6e581309ae66ee8720866a59311d9da8556",
+   "status": "MATCH",
+   "artifactId": 88,
+   "storedSha256": "d166bb42f1f65a7ca3b22203e9c2d6e581309ae66ee8720866a59311d9da8556",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G2/authority_documents.csv",
+   "tag": "HK-GATE-G2",
+   "title": "DRAFT G2 authority document manifest",
+   "expectedSha256": "4b4cf0ce54a6fda93865b9bc934f900911c4432b10f1fed7fbb07da77743bb2e",
+   "status": "MATCH",
+   "artifactId": 89,
+   "storedSha256": "4b4cf0ce54a6fda93865b9bc934f900911c4432b10f1fed7fbb07da77743bb2e",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G3/G3_parallel_payroll_reconciliation.md",
+   "tag": "HK-GATE-G3",
+   "title": "DRAFT G3 reconciliation tool and template (PENDING two cycles)",
+   "expectedSha256": "991df30c3d932ccc1980472dfd739448effa801945fdd56fbb7a546bd72ff291",
+   "status": "MATCH",
+   "artifactId": 90,
+   "storedSha256": "991df30c3d932ccc1980472dfd739448effa801945fdd56fbb7a546bd72ff291",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G4/G4_edge_case_test_report.md",
+   "tag": "HK-GATE-G4",
+   "title": "DRAFT G4 edge-case test report (50/50 passed, all rows end to end)",
+   "expectedSha256": "7695dfc5beca5c4dfef937ca332e654834f70622b8864bade149e260af1c9fec",
+   "status": "MATCH",
+   "artifactId": 91,
+   "storedSha256": "7695dfc5beca5c4dfef937ca332e654834f70622b8864bade149e260af1c9fec",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G4/G4_test_run_output.txt",
+   "tag": "HK-GATE-G4",
+   "title": "G4 raw test run output",
+   "expectedSha256": "e68061ff2d8ee08978c2761c08f29a980861d51d20ab3a285e9329c4327b9f98",
+   "status": "MATCH",
+   "artifactId": 92,
+   "storedSha256": "e68061ff2d8ee08978c2761c08f29a980861d51d20ab3a285e9329c4327b9f98",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G5/G5_security_privacy_assessment.md",
+   "tag": "HK-GATE-G5",
+   "title": "DRAFT G5 security / privacy assessment",
+   "expectedSha256": "5f8c183fc65d6ffe4ce880c2913cfba4113c69e02f45532d400b3b5d7fcd2a36",
+   "status": "MATCH",
+   "artifactId": 93,
+   "storedSha256": "5f8c183fc65d6ffe4ce880c2913cfba4113c69e02f45532d400b3b5d7fcd2a36",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G5/G5_retention_deletion_policy_draft.md",
+   "tag": "HK-GATE-G5",
+   "title": "DRAFT G5 retention / deletion policy",
+   "expectedSha256": "09721353352d047a857f6e77f6dd07e7361b0dbcb7459b6fa79e050b7cc64857",
+   "status": "MATCH",
+   "artifactId": 94,
+   "storedSha256": "09721353352d047a857f6e77f6dd07e7361b0dbcb7459b6fa79e050b7cc64857",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G5/G5_privileged_access_test_run_output.txt",
+   "tag": "HK-GATE-G5",
+   "title": "G5 privileged-access test run output",
+   "expectedSha256": "9d490ef04f42d43d7e0d31328d3f77e62b35bcdfde9683d6e024d13d4d1ee388",
+   "status": "MATCH",
+   "artifactId": 95,
+   "storedSha256": "9d490ef04f42d43d7e0d31328d3f77e62b35bcdfde9683d6e024d13d4d1ee388",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "ops/DESIGN_F4_privileged_access_audit_fail_closed.md",
+   "tag": "HK-GATE-G5",
+   "title": "DESIGN NOTE G5 F-4 assisted-access audit fail-closed (not implemented)",
+   "expectedSha256": "404cc0820440015bf6a5f034e9168e75d334d38733627460a07d3676622e2cf1",
+   "status": "MATCH",
+   "artifactId": 96,
+   "storedSha256": "404cc0820440015bf6a5f034e9168e75d334d38733627460a07d3676622e2cf1",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "ops/DESIGN_F5_F6_login_audit_and_immutable_audit_rows.md",
+   "tag": "HK-GATE-G5",
+   "title": "DESIGN NOTE G5 F-5/F-6 login audit and immutable audit rows (not implemented)",
+   "expectedSha256": "519f09f630e74415cf6ee9fb3d23e85f6d6232f8174dc8facfc264d37e78582e",
+   "status": "MATCH",
+   "artifactId": 97,
+   "storedSha256": "519f09f630e74415cf6ee9fb3d23e85f6d6232f8174dc8facfc264d37e78582e",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G6/G6_operations_runbook_cover.md",
+   "tag": "HK-GATE-G6",
+   "title": "DRAFT G6 runbook cover and filing / payment calendar",
+   "expectedSha256": "e043f6ace1e09323dc431cdd511053c3aa377761dc2da59691cfe9d7c9679750",
+   "status": "MATCH",
+   "artifactId": 98,
+   "storedSha256": "e043f6ace1e09323dc431cdd511053c3aa377761dc2da59691cfe9d7c9679750",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G6/G6_contribution_day_calendar_2026_27.json",
+   "tag": "HK-GATE-G6",
+   "title": "G6 MPF contribution-day calendar 2026/27 (computed)",
+   "expectedSha256": "4b6795b9a07a8aa74b60655e201f550c3c01c4bb29ab2f886b831ea3fab8112a",
+   "status": "MATCH",
+   "artifactId": 99,
+   "storedSha256": "4b6795b9a07a8aa74b60655e201f550c3c01c4bb29ab2f886b831ea3fab8112a",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "G7/G7_launch_approval_sheet.md",
+   "tag": "HK-GATE-G7",
+   "title": "DRAFT G7 launch approval sheet (unsigned)",
+   "expectedSha256": "5af7cfc104754497aefc208b2fe8c88dba050602d8955c7bce00b168ca78fd3f",
+   "status": "MATCH",
+   "artifactId": 100,
+   "storedSha256": "5af7cfc104754497aefc208b2fe8c88dba050602d8955c7bce00b168ca78fd3f",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-1_decision_record.md",
+   "tag": "HK-DECISION-D-1",
+   "title": "DRAFT D-1 decision record (undecided)",
+   "expectedSha256": "e169546be5b08816cad298ac90daefab503228653398b03e45c07d20ceff29f8",
+   "status": "MATCH",
+   "artifactId": 101,
+   "storedSha256": "e169546be5b08816cad298ac90daefab503228653398b03e45c07d20ceff29f8",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-2_decision_record.md",
+   "tag": "HK-DECISION-D-2",
+   "title": "DRAFT D-2 decision record (undecided)",
+   "expectedSha256": "823446ef96f0f0fd0a3a30fd33ab7a07bb035de2c2b839bb9d842771bd7742aa",
+   "status": "MATCH",
+   "artifactId": 102,
+   "storedSha256": "823446ef96f0f0fd0a3a30fd33ab7a07bb035de2c2b839bb9d842771bd7742aa",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-3_decision_record.md",
+   "tag": "HK-DECISION-D-3",
+   "title": "DRAFT D-3 decision record (undecided)",
+   "expectedSha256": "82c84428025a3bac01205c38cc9ed3b0f1cbd86b92c4bfe5e4885882e4e74b1a",
+   "status": "MATCH",
+   "artifactId": 103,
+   "storedSha256": "82c84428025a3bac01205c38cc9ed3b0f1cbd86b92c4bfe5e4885882e4e74b1a",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-4_decision_record.md",
+   "tag": "HK-DECISION-D-4",
+   "title": "DRAFT D-4 decision record (undecided)",
+   "expectedSha256": "6b55f9d65ffa9458d5443ae174b95a552a980687b7ee00259386f0a23410cd2e",
+   "status": "MATCH",
+   "artifactId": 104,
+   "storedSha256": "6b55f9d65ffa9458d5443ae174b95a552a980687b7ee00259386f0a23410cd2e",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-5_decision_record.md",
+   "tag": "HK-DECISION-D-5",
+   "title": "DRAFT D-5 decision record (undecided)",
+   "expectedSha256": "6a0393d985dbc33a10c70ef01d3292eb53da4a32b294da0b01b12d1e0f0623ce",
+   "status": "MATCH",
+   "artifactId": 105,
+   "storedSha256": "6a0393d985dbc33a10c70ef01d3292eb53da4a32b294da0b01b12d1e0f0623ce",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-6_decision_record.md",
+   "tag": "HK-DECISION-D-6",
+   "title": "DRAFT D-6 decision record (undecided)",
+   "expectedSha256": "45b2aed9aa855e97c0fc4a75ce1e592f1affb7d2618b05704e5b976d0f3d2995",
+   "status": "MATCH",
+   "artifactId": 106,
+   "storedSha256": "45b2aed9aa855e97c0fc4a75ce1e592f1affb7d2618b05704e5b976d0f3d2995",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-7_decision_record.md",
+   "tag": "HK-DECISION-D-7",
+   "title": "DRAFT D-7 decision record (undecided)",
+   "expectedSha256": "674c70c879bfedba0956cb368100efafad648d515738ca8b2a77fcec0d3de5e3",
+   "status": "MATCH",
+   "artifactId": 107,
+   "storedSha256": "674c70c879bfedba0956cb368100efafad648d515738ca8b2a77fcec0d3de5e3",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-8_decision_record.md",
+   "tag": "HK-DECISION-D-8",
+   "title": "DRAFT D-8 decision record (undecided)",
+   "expectedSha256": "0edaab157c6e738f7ace1e7b3f1e3eefe3acd05b9f21f58f5c793c2a519e4200",
+   "status": "MATCH",
+   "artifactId": 108,
+   "storedSha256": "0edaab157c6e738f7ace1e7b3f1e3eefe3acd05b9f21f58f5c793c2a519e4200",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-9_decision_record.md",
+   "tag": "HK-DECISION-D-9",
+   "title": "DRAFT D-9 decision record (undecided)",
+   "expectedSha256": "59a4e3d77647166a168c46c3a20293e9dbdd3bf8aabea09c2cfec4cb37d2742b",
+   "status": "MATCH",
+   "artifactId": 109,
+   "storedSha256": "59a4e3d77647166a168c46c3a20293e9dbdd3bf8aabea09c2cfec4cb37d2742b",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-10_decision_record.md",
+   "tag": "HK-DECISION-D-10",
+   "title": "DRAFT D-10 decision record (undecided)",
+   "expectedSha256": "8796e34c6714e68d15ffa91367ec52c6a949a14f00aed822160c143b94b3ac3b",
+   "status": "MATCH",
+   "artifactId": 110,
+   "storedSha256": "8796e34c6714e68d15ffa91367ec52c6a949a14f00aed822160c143b94b3ac3b",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-11_decision_record.md",
+   "tag": "HK-DECISION-D-11",
+   "title": "DRAFT D-11 decision record (undecided)",
+   "expectedSha256": "34cb6a8ad7b23347254ad5c8db1558a499cff505e80ef42c4c6a4fa77d37c72f",
+   "status": "MATCH",
+   "artifactId": 111,
+   "storedSha256": "34cb6a8ad7b23347254ad5c8db1558a499cff505e80ef42c4c6a4fa77d37c72f",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-12_decision_record.md",
+   "tag": "HK-DECISION-D-12",
+   "title": "DRAFT D-12 decision record (undecided)",
+   "expectedSha256": "4df011167688431a511ae3eeebe75c02a97363b43ddd0bd0921d13884b1060fa",
+   "status": "MATCH",
+   "artifactId": 112,
+   "storedSha256": "4df011167688431a511ae3eeebe75c02a97363b43ddd0bd0921d13884b1060fa",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-13_decision_record.md",
+   "tag": "HK-DECISION-D-13",
+   "title": "DRAFT D-13 decision record (undecided)",
+   "expectedSha256": "0ea94b6a37420f0804e0b20ed41f649949968157ae60329924cc47d0bdc34c13",
+   "status": "MATCH",
+   "artifactId": 113,
+   "storedSha256": "0ea94b6a37420f0804e0b20ed41f649949968157ae60329924cc47d0bdc34c13",
+   "reviewed": false,
+   "independentReview": false
+  },
+  {
+   "file": "decisions/D-14_decision_record.md",
+   "tag": "HK-DECISION-D-14",
+   "title": "DRAFT D-14 decision record (undecided)",
+   "expectedSha256": "da09b9c97e4ec6f90330251d75a5d7957415e1790a3b2f8b935804d03fa9b6fa",
+   "status": "MATCH",
+   "artifactId": 114,
+   "storedSha256": "da09b9c97e4ec6f90330251d75a5d7957415e1790a3b2f8b935804d03fa9b6fa",
+   "reviewed": false,
+   "independentReview": false
+  }
+ ],
+ "reportSha256": "85f005a0e17c7aa97d79c468a1847a87a6d43ab16e5ea30f3143cb602b9807f3"
+}

@@ -125,6 +125,8 @@ def _resolve_assisted_principal(token: str, db: Session):
     session = db.query(AssistedAccessSession).filter(AssistedAccessSession.id == session_id).first()
     if session is None:
         raise UnauthorizedException("Assisted access session not found.")
+    if getattr(session, "approval_status", "APPROVED") != "APPROVED":
+        raise UnauthorizedException("This assisted access session has not been approved.")
     if session.ended_at is not None:
         raise UnauthorizedException("This assisted access session has ended.")
     if session.expires_at <= datetime.utcnow():

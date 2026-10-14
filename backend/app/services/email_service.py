@@ -27,6 +27,8 @@ from email.mime.text import MIMEText
 
 import certifi
 
+from app.core import outbound
+
 logger = logging.getLogger("zoiko_payroll")
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "email_templates")
@@ -524,12 +526,23 @@ def send_approval_email(
         logger.debug(f"[email] Body content:\n{_html_to_text(body)}")
         return True
 
+    # F-10: test and local modes never reach the configured server (whatever
+    # .env or platform_settings say); only the opt-in local sandbox, if on.
+    target = outbound.smtp_target(smtp)
+    if target is None:
+        outbound.log_blocked("email", email, f"subject='{subject}' | template={template_name}")
+        return True
+    smtp = target
+
     try:
         port = int(smtp["port"])
         use_tls = str(smtp.get("use_tls", "true")).strip().lower() in ("1", "true", "yes")
         context_ssl = ssl.create_default_context(cafile=certifi.where())
 
-        if use_tls and port != 465:
+        if smtp.get("sandbox"):
+            with smtplib.SMTP(smtp["host"], port, timeout=30) as server:
+                server.sendmail(envelope_from, email, msg.as_string())
+        elif use_tls and port != 465:
             with smtplib.SMTP(smtp["host"], port, timeout=30) as server:
                 server.starttls(context=context_ssl)
                 if smtp["username"] and smtp["password"]:
@@ -541,7 +554,8 @@ def send_approval_email(
                     server.login(smtp["username"], smtp["password"])
                 server.sendmail(envelope_from, email, msg.as_string())
 
-        logger.info(f"[email] Sent to {email} | template={template_name}")
+        where = " (local sandbox, not delivered to the recipient)" if smtp.get("sandbox") else ""
+        logger.info(f"[email] Sent to {email}{where} | template={template_name}")
         return True
     except Exception as e:
         logger.error(f"[email] Failed to send to {email} | template={template_name} | error={e}")
@@ -770,6 +784,24 @@ def send_employee_sensitive_fields_changed_email(
         "employee_name": employee_name,
         "details_panel": _change_cells(changes),
     }, organization_id=organization_id, db=db, accent=PALETTE["warning"])
+
+
+def send_break_glass_access_notice_email(
+    email: str, session_id: int, reason: str, starts_at: str, expires_at: str, organization_id=None, db=None,
+) -> bool:
+    """Immediate tenant notice of an emergency (break-glass) assisted-access
+    session — sent to each active org admin when the second Super Admin
+    approves it."""
+    return _payroll_send(email, "privileged_access_break_glass.html", {
+        "subject": "Emergency support access to your payroll workspace | Zoiko Payroll",
+        "preheader": "Zoiko support was granted emergency access to your organisation.",
+        "heading": "Emergency support access granted",
+        "details_panel": _details_rows([
+            ("Session", f"#{session_id}"),
+            ("Reason given", reason),
+            ("Access window (UTC)", f"{starts_at} – {expires_at}"),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["error"])
 
 
 def send_payroll_run_created_email(

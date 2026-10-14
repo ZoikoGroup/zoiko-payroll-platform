@@ -1,8 +1,18 @@
 {
- "__recorded_on__": "2026-10-12",
+ "__recorded_on__": "2026-10-05",
+ "__recorded_on_by_key__": {
+  "hk_activation_evidence_refusal": "2026-10-13",
+  "hk_activation_readiness": "2026-10-13",
+  "hk_gate_state": "2026-10-13",
+  "hk_golden_check": "2026-10-13",
+  "hk_preview": "2026-10-13",
+  "hk_registry_transition": "2026-10-13",
+  "hk_statutory_summary": "2026-10-13",
+  "sg_statutory_summary": "2026-10-14"
+ },
  "hk_activation_evidence_refusal": {
   "audits": [],
-  "result": "HK-PAYROLL-2026 v1.0 still holds values that are not source-verified: 1 SOURCE_HASH_REQUIRED (eo_week_start_day); 27 UNVERIFIED — G1 (HK_EARNING_CLASS, eo_average_wage_days_per_year, eo_overtime_aw_test_share_pct, mpf_partial_month_threshold_basis). Link each to a reviewed, hashed source in a Draft version before activating."
+  "result": "HK-PAYROLL-2026 v1.0 still holds values that are not source-verified: 1 SOURCE_HASH_REQUIRED (eo_week_start_day); 28 UNVERIFIED — G1 (HK_EARNING_CLASS, eo_average_wage_days_per_year, eo_overtime_aw_test_share_pct, mpf_contribution_day_deferral, …). Link each to a reviewed, hashed source in a Draft version before activating."
  },
  "hk_activation_readiness": {
   "audits": [],
@@ -73,6 +83,78 @@
      "met": false
     },
     {
+     "detail": "OPEN",
+     "key": "DECISION_D-1",
+     "label": "owner decision D-1 recorded (eMPF submission interface at launch)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-2",
+     "label": "owner decision D-2 recorded (Retention period per data category)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-3",
+     "label": "owner decision D-3 recorded (Deletion vs anonymisation at end of retention)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-4",
+     "label": "owner decision D-4 recorded (Encryption at rest)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-5",
+     "label": "owner decision D-5 recorded (Production HK identity-token secret)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-6",
+     "label": "owner decision D-6 recorded (Bilingual output a launch requirement)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-7",
+     "label": "owner decision D-7 recorded (Launch-scope exclusions)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-8",
+     "label": "owner decision D-8 recorded (HK payroll-run approval four-eyes)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-9",
+     "label": "owner decision D-9 recorded (Legal-hold policy)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-10",
+     "label": "owner decision D-10 recorded (Privileged (assisted) access policy)",
+     "met": false
+    },
+    {
+     "detail": "OPEN",
+     "key": "DECISION_D-11",
+     "label": "owner decision D-11 recorded (Future-year template publication owner)",
+     "met": false
+    },
+    {
+     "detail": "not configured — HKID tokens fall back to a key derived from PAYROLL_SECRET_KEY",
+     "key": "IDENTITY_TOKEN_KEY",
+     "label": "HK_IDENTITY_TOKEN_KEY configured as a dedicated secret (D-5)",
+     "met": false
+    },
+    {
      "detail": "no Active template",
      "key": "TEMPLATE_HK_BIR56A",
      "label": "BIR56A 2026/27: an Active template with reviewed source evidence and an independent approval",
@@ -121,7 +203,7 @@
      "met": false
     }
    ],
-   "total": 18
+   "total": 30
   }
  },
  "hk_gate_state": {
@@ -235,7 +317,7 @@
        "componentKey": "smw_hours_record_cap_monthly",
        "effectiveFrom": "2026-05-01",
        "packId": 2,
-       "rowId": 141,
+       "rowId": 143,
        "sourceDocumentId": 9
       },
       "monthlyCap": "17600.00",
@@ -247,13 +329,25 @@
     "mpf": {
      "catchUp": [],
      "contributionDay": "2026-07-10",
-     "contributionDayNote": "statutory extension for non-working / suspension days is not applied (disclosed)",
+     "contributionDayBase": "2026-07-10",
+     "contributionDayNote": "governed deferral rule [G1 — UNVERIFIED]; black rainstorm / No. 8+ signal days are applied to the eMPF batch deadline",
+     "contributionDayRule": "NEXT_DAY_NOT_SAT_SUN_OR_GENERAL_HOLIDAY",
+     "contributionDayRuleRef": {
+      "componentKey": "mpf_contribution_day_deferral"
+     },
+     "contributionDaySteps": [
+      {
+       "date": "2026-07-10",
+       "flag": "GENERAL_HOLIDAY_LIST_NOT_LOADED",
+       "warning": "general-holiday list not loaded for 2026 — only Saturdays, Sundays and recorded signal days were applied"
+      }
+     ],
      "coverage": {
       "ageAtPeriodEnd": 36,
       "ageAtPeriodStart": 36,
       "employmentStart": "2024-01-01",
       "exemptionCode": "NONE",
-      "firstContributionDay": "2024-03-10",
+      "firstContributionDay": "2024-03-11",
       "reason": "regular employee from 2024-01-01 (60th day 2024-02-29)",
       "sixtyDayDate": "2024-02-29",
       "status": "COVERED"
@@ -269,6 +363,7 @@
      },
      "employee": "1500.00",
      "employer": "1500.00",
+     "generalHolidayListLoaded": false,
      "refs": {
       "mpf_contribution_day": {
        "componentKey": "mpf_contribution_day"
@@ -419,7 +514,7 @@
   "audits": [],
   "result": {
    "activationReadiness": {
-    "asOf": "2026-10-12",
+    "asOf": "2026-10-13",
     "canOpen": false,
     "met": 1,
     "registry": "PLANNED",
@@ -467,7 +562,7 @@
       "met": false
      },
      {
-      "detail": "none in force on 2026-10-12",
+      "detail": "none in force on 2026-10-13",
       "key": "ACTIVE_PACK",
       "label": "an Active HK rule pack in force today",
       "met": false
@@ -482,6 +577,78 @@
       "detail": "EVIDENCE_REQUIRED",
       "key": "PRODUCTION_VERIFICATION",
       "label": "production read-only verification and restore rehearsal recorded (HK-PRODUCTION-VERIFICATION)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-1",
+      "label": "owner decision D-1 recorded (eMPF submission interface at launch)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-2",
+      "label": "owner decision D-2 recorded (Retention period per data category)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-3",
+      "label": "owner decision D-3 recorded (Deletion vs anonymisation at end of retention)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-4",
+      "label": "owner decision D-4 recorded (Encryption at rest)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-5",
+      "label": "owner decision D-5 recorded (Production HK identity-token secret)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-6",
+      "label": "owner decision D-6 recorded (Bilingual output a launch requirement)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-7",
+      "label": "owner decision D-7 recorded (Launch-scope exclusions)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-8",
+      "label": "owner decision D-8 recorded (HK payroll-run approval four-eyes)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-9",
+      "label": "owner decision D-9 recorded (Legal-hold policy)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-10",
+      "label": "owner decision D-10 recorded (Privileged (assisted) access policy)",
+      "met": false
+     },
+     {
+      "detail": "OPEN",
+      "key": "DECISION_D-11",
+      "label": "owner decision D-11 recorded (Future-year template publication owner)",
+      "met": false
+     },
+     {
+      "detail": "not configured — HKID tokens fall back to a key derived from PAYROLL_SECRET_KEY",
+      "key": "IDENTITY_TOKEN_KEY",
+      "label": "HK_IDENTITY_TOKEN_KEY configured as a dedicated secret (D-5)",
       "met": false
      },
      {
@@ -533,7 +700,7 @@
       "met": false
      }
     ],
-    "total": 18
+    "total": 30
    },
    "architecture": {
     "calculator": "engine/countries/hong_kong.py via the shared StandardStrategy",
@@ -541,6 +708,7 @@
     "payrollWithholding": "NONE — Salaries Tax is employee-assessed (no PAYE)"
    },
    "certificationItems": [
+    "HK-PAYROLL-2025: mpf_contribution_day_deferral",
     "HK-PAYROLL-2025: mpf_partial_month_threshold_basis",
     "HK-PAYROLL-2025: eo_week_start_day",
     "HK-PAYROLL-2025: eo_average_wage_days_per_year",
@@ -569,6 +737,7 @@
     "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-MPF_RI [G1]",
     "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-SMW_WAGES [G1]",
     "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-IRD [G1]",
+    "HK-PAYROLL-2026: mpf_contribution_day_deferral",
     "HK-PAYROLL-2026: mpf_partial_month_threshold_basis",
     "HK-PAYROLL-2026: eo_week_start_day",
     "HK-PAYROLL-2026: eo_average_wage_days_per_year",
@@ -671,52 +840,103 @@
    ],
    "gates": [
     {
+     "evidence": [
+      {
+       "createdById": 101,
+       "hasFile": true,
+       "id": 28,
+       "rejectionNotes": null,
+       "reviewerId": 202,
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "status": "ACCEPTED",
+       "title": "TEST HK-GATE-G1"
+      }
+     ],
      "evidenceTag": "HK-GATE-G1",
      "gate": "G1",
      "requirement": "Statutory content — Hong Kong specialist signs wage, MPF, Employment Ordinance and IRD mappings",
      "state": "PASS"
     },
     {
+     "evidence": [
+      {
+       "createdById": 101,
+       "hasFile": true,
+       "id": 29,
+       "rejectionNotes": null,
+       "reviewerId": null,
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "status": "AWAITING_REVIEW",
+       "title": "TEST HK-GATE-G2"
+      }
+     ],
      "evidenceTag": "HK-GATE-G2",
      "gate": "G2",
      "requirement": "Authority conformance — current IRD XML schemas / test files and eMPF workflows pass end-to-end",
      "state": "SUBMITTED"
     },
     {
+     "evidence": [
+      {
+       "createdById": 101,
+       "hasFile": true,
+       "id": 30,
+       "rejectionNotes": null,
+       "reviewerId": 101,
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "status": "AWAITING_REVIEW",
+       "title": "TEST HK-GATE-G3"
+      }
+     ],
      "evidenceTag": "HK-GATE-G3",
      "gate": "G3",
      "requirement": "Parallel payroll — two representative parallel cycles with no unexplained material variance",
      "state": "SUBMITTED"
     },
     {
+     "evidence": [],
      "evidenceTag": "HK-GATE-G4",
      "gate": "G4",
      "requirement": "Edge cases — 60-day MPF, contribution holiday, non-monthly, 468 rule, SMW crossover, departure hold, SP/LSP",
      "state": "EVIDENCE_REQUIRED"
     },
     {
+     "evidence": [],
      "evidenceTag": "HK-GATE-G5",
      "gate": "G5",
      "requirement": "Security / privacy — PDPO / HR privacy review, privileged access, retention, encryption, audit",
      "state": "EVIDENCE_REQUIRED"
     },
     {
+     "evidence": [],
      "evidenceTag": "HK-GATE-G6",
      "gate": "G6",
      "requirement": "Operations — filing / payment responsibilities, maker-checker, reconciliation, runbooks approved",
      "state": "EVIDENCE_REQUIRED"
     },
     {
+     "evidence": [],
      "evidenceTag": "HK-GATE-G7",
      "gate": "G7",
      "requirement": "Launch authority — Product, Engineering, QA, Payroll Ops, Security/Privacy, local reviewer approve",
      "state": "EVIDENCE_REQUIRED"
     }
    ],
+   "goldenCertification": {
+    "detail": "No Hong Kong golden-vector certification run recorded — run Test Certification for HK.",
+    "eligibleForActivation": false,
+    "failedCases": 0,
+    "passedCases": 0,
+    "runAt": null,
+    "runId": null,
+    "status": "NOT_RUN",
+    "totalCases": 0
+   },
    "ownerDecisions": [
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-1",
      "key": "D-1",
      "label": "eMPF submission interface at launch",
@@ -725,6 +945,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-2",
      "key": "D-2",
      "label": "Retention period per data category",
@@ -733,6 +954,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-3",
      "key": "D-3",
      "label": "Deletion vs anonymisation at end of retention",
@@ -741,6 +963,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-4",
      "key": "D-4",
      "label": "Encryption at rest",
@@ -749,6 +972,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-5",
      "key": "D-5",
      "label": "Production HK identity-token secret",
@@ -757,6 +981,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-6",
      "key": "D-6",
      "label": "Bilingual output a launch requirement",
@@ -765,6 +990,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-7",
      "key": "D-7",
      "label": "Launch-scope exclusions",
@@ -773,6 +999,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-8",
      "key": "D-8",
      "label": "HK payroll-run approval four-eyes",
@@ -781,6 +1008,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-9",
      "key": "D-9",
      "label": "Legal-hold policy",
@@ -789,6 +1017,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-10",
      "key": "D-10",
      "label": "Privileged (assisted) access policy",
@@ -797,6 +1026,7 @@
     {
      "artifactId": null,
      "blocksLaunch": true,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-11",
      "key": "D-11",
      "label": "Future-year template publication owner",
@@ -805,6 +1035,7 @@
     {
      "artifactId": null,
      "blocksLaunch": false,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-12",
      "key": "D-12",
      "label": "Per-value reviewer columns (shared platform)",
@@ -813,6 +1044,7 @@
     {
      "artifactId": null,
      "blocksLaunch": false,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-13",
      "key": "D-13",
      "label": "Platform-wide template compare (shared platform)",
@@ -821,6 +1053,7 @@
     {
      "artifactId": null,
      "blocksLaunch": false,
+     "evidence": [],
      "evidenceTag": "HK-DECISION-D-14",
      "key": "D-14",
      "label": "Audit correlation id (shared platform)",
@@ -830,10 +1063,10 @@
    "packs": [
     {
      "approvedById": null,
-     "contributionRates": 83,
+     "contributionRates": 84,
      "effectiveFrom": "2025-04-01",
      "effectiveTo": "2026-03-31",
-     "g1CertificationRows": 28,
+     "g1CertificationRows": 29,
      "id": 1,
      "packId": "HK-PAYROLL-2025",
      "status": "Draft",
@@ -844,10 +1077,10 @@
     },
     {
      "approvedById": null,
-     "contributionRates": 81,
+     "contributionRates": 82,
      "effectiveFrom": "2026-04-01",
      "effectiveTo": "2027-03-31",
-     "g1CertificationRows": 28,
+     "g1CertificationRows": 29,
      "id": 2,
      "packId": "HK-PAYROLL-2026",
      "status": "Draft",
@@ -857,6 +1090,7 @@
      "yearOfAssessment": "2026/27"
     }
    ],
+   "productionVerificationEvidence": [],
    "serviceRegistry": "PLANNED",
    "sources": [
     {
@@ -1554,11 +1788,11 @@
       "availability": "PLANNED",
       "country": "SG"
      },
-     "reason": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['2f905bb1c296']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
+     "reason": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['f898189cb4e3']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
     }
    ],
    "error": "BadRequestException",
-   "message": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['2f905bb1c296']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
+   "message": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['f898189cb4e3']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
   }
  },
  "sg_statutory_summary": {
@@ -1917,7 +2151,7 @@
      },
      {
       "basis": "runtime",
-      "evidence": "database [] vs code ['2f905bb1c296']",
+      "evidence": "database [] vs code ['8b14824fb575']",
       "key": "migration",
       "label": "Migration",
       "status": "BLOCKED"
@@ -2009,7 +2243,7 @@
        "met": true
       },
       {
-       "detail": "database [] vs code ['2f905bb1c296']",
+       "detail": "database [] vs code ['8b14824fb575']",
        "key": "migration",
        "label": "Database at the code's Alembic head",
        "met": false

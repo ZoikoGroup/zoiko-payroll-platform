@@ -70,7 +70,7 @@ from app.modules.payroll.models import (
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
 from app.modules.payroll.employee_validation import (
-    get_employee_validation_strategy, _STRATEGIES, mask_identifier, restore_masked_compliance_fields,
+    get_employee_validation_strategy, _STRATEGIES, mask_identifier, mask_account_last4, restore_masked_compliance_fields,
     restore_masked_employee_columns,
     mask_nric_fin,
 )
@@ -3423,6 +3423,8 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
         )
     if _is_sg_gate_evidence(row):
         _sg_refuse_if_rejected(db, row, "review", reviewer_id)
+    if _is_hk_evidence(row):
+        jurisdiction_hooks.call("HK", "evidence_review_refusal", db, row, reviewer_id)
     row.reviewer_id = reviewer_id
     row.reviewer_approved_at = datetime.utcnow()
     db.commit()
@@ -3493,6 +3495,13 @@ def upload_source_artifact_file(
         raise BadRequestException(message)
     ext = os.path.splitext(filename or "")[1][:20]
     old_ref = row.file_path
+    refusal = object_storage.durable_storage_refusal("Evidence upload")
+    if refusal:                                  # F-8: never write evidence to non-durable disk in production
+        record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="source_artifact", entity_id=row.id,
+                         old_value={"formNumber": row.form_number},
+                         new_value={"attempted": "upload", "result": "REFUSED", "cause": "NON_DURABLE_STORAGE"},
+                         reason=refusal)
+        raise BadRequestException(refusal)
     new_ref = object_storage.save_upload(
         subdir="source_artifacts", filename=f"{_uuid.uuid4().hex}{ext}", data=data,
     )
@@ -15281,14 +15290,23 @@ def _sg_authority_errors(status: str, errors: Optional[list]) -> list:
     return cleaned
 
 
-def require_four_eyes(preparer: Optional[int], approver: Optional[int], what: str) -> None:
+def require_four_eyes(preparer: Optional[int], approver: Optional[int], what: str, *, db: Optional[Session] = None,
+                      entity_type: Optional[str] = None, entity_id: Optional[int] = None,
+                      current_status: Optional[str] = None, attempted: str = "approve") -> None:
     """Shared maker-checker check: ``what`` needs an identified approver who is
-    not its preparer. Raises BadRequestException; the caller decides whether
-    the refusal is also audited (refuse_with_audit)."""
+    not its preparer. Raises BadRequestException. When ``db`` and the entity
+    are given, the refused attempt is first audited ("refused") through
+    refuse_with_audit — a refused privileged action always leaves its record."""
+    message = None
     if approver is None:
-        raise BadRequestException(f"{what} needs an approver.")
-    if preparer is not None and approver == preparer:
-        raise BadRequestException(f"{what}: the approver must be a different person from the preparer (four-eyes).")
+        message = f"{what} needs an approver."
+    elif preparer is not None and approver == preparer:
+        message = f"{what}: the approver must be a different person from the preparer (four-eyes)."
+    if message is None:
+        return
+    if db is not None and entity_type is not None and entity_id is not None:
+        refuse_with_audit(db, entity_type, entity_id, approver, current_status, attempted, message)
+    raise BadRequestException(message)
 
 
 def refuse_with_audit(db: Session, entity_type: str, entity_id: int, actor_id: Optional[int],
@@ -32725,7 +32743,7 @@ def _payslip_identity_rows(country: str, data: dict) -> list:
         # Three slots like every country (the layout unpacks three rows): the
         # third is the HKICL bank-branch code in the bank-file format.
         "HK": [("HKID", mask_identifier(cf.get("hkid") or cf.get("passport_number"))),
-               ("MPF Account", mask_identifier(cf.get("mpf_member_account"))),
+               ("MPF Account", mask_account_last4(cf.get("mpf_member_account"))),
                ("Bank-Branch Code", "-".join(v for v in (cf.get("bank_code"), cf.get("branch_code")) if v) or None)],
     }
     return rows_by_country.get(country, [("Tax ID", None), ("Reference", None), ("Routing", None)])

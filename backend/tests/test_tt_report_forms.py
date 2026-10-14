@@ -175,8 +175,8 @@ def _build_tt_td4_template(db, creator, approver, key="TT-TD4-TEST"):
 # ── Monthly PAYE / Health Surcharge Return ───────────────────────────
 
 def test_generate_tt_monthly_return_aggregates_two_employees_across_multiple_runs_same_month(db, organization):
-    creator = _make_user(db, "creator_ttmra@test.com")
-    approver = _make_user(db, "approver_ttmra@test.com")
+    creator = _make_user(db, "creator_ttmra@test.example.com")
+    approver = _make_user(db, "approver_ttmra@test.example.com")
     _make_company(db, organization.id, country="TT")
     emp1 = _make_tt_employee(db, organization.id, code="TTMRA1", name="Kavita Ramnarine")
     emp2 = _make_tt_employee(db, organization.id, code="TTMRA2", name="Marcus Bharath")
@@ -203,8 +203,8 @@ def test_generate_tt_monthly_return_aggregates_two_employees_across_multiple_run
 
 
 def test_generate_tt_monthly_return_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_ttmrb@test.com")
-    approver = _make_user(db, "approver_ttmrb@test.com")
+    creator = _make_user(db, "creator_ttmrb@test.example.com")
+    approver = _make_user(db, "approver_ttmrb@test.example.com")
     _make_company(db, organization.id, country="TT")
     employee = _make_tt_employee(db, organization.id, code="TTMRB")
 
@@ -219,8 +219,8 @@ def test_generate_tt_monthly_return_excludes_other_months_and_unfinalized_runs(d
 
 
 def test_generate_tt_monthly_return_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_ttmrc@test.com")
-    approver = _make_user(db, "approver_ttmrc@test.com")
+    creator = _make_user(db, "creator_ttmrc@test.example.com")
+    approver = _make_user(db, "approver_ttmrc@test.example.com")
     _make_company(db, organization.id, country="TT")
     template = _build_template(db, creator, approver, country="TT", version="ttmr-neg")
     with pytest.raises(BadRequestException):
@@ -228,8 +228,8 @@ def test_generate_tt_monthly_return_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_tt_monthly_return_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_ttmrd@test.com")
-    approver = _make_user(db, "approver_ttmrd@test.com")
+    creator = _make_user(db, "creator_ttmrd@test.example.com")
+    approver = _make_user(db, "approver_ttmrd@test.example.com")
     _make_company(db, organization.id, country="TT")
     employee = _make_tt_employee(db, organization.id, code="TTMRD")
     _make_tt_run_with_payslip(db, organization.id, employee.id, date(2026, 4, 10))
@@ -245,8 +245,8 @@ def test_generate_tt_monthly_return_regenerating_supersedes_prior(db, organizati
 # ── NIBTT contribution data ───────────────────────────────────────────
 
 def test_generate_tt_nibtt_data_buckets_weeks_and_aggregates_employees(db, organization):
-    creator = _make_user(db, "creator_ttnis_a@test.com")
-    approver = _make_user(db, "approver_ttnis_a@test.com")
+    creator = _make_user(db, "creator_ttnis_a@test.example.com")
+    approver = _make_user(db, "approver_ttnis_a@test.example.com")
     _make_company(db, organization.id, country="TT")
     emp1 = _make_tt_employee(db, organization.id, code="TTNISA1", name="Kavita Ramnarine", compliance_fields={"nibtt_number": "NIBTT-100"})
 
@@ -275,8 +275,8 @@ def test_generate_tt_nibtt_data_buckets_weeks_and_aggregates_employees(db, organ
 
 
 def test_generate_tt_nibtt_data_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_ttnis_b@test.com")
-    approver = _make_user(db, "approver_ttnis_b@test.com")
+    creator = _make_user(db, "creator_ttnis_b@test.example.com")
+    approver = _make_user(db, "approver_ttnis_b@test.example.com")
     _make_company(db, organization.id, country="TT")
     template = _build_template(db, creator, approver, country="TT", version="ttnis-neg")
     with pytest.raises(BadRequestException):
@@ -286,8 +286,8 @@ def test_generate_tt_nibtt_data_rejects_wrong_report_type(db, organization):
 # ── TD4 (generic mapper reuse) ────────────────────────────────────────
 
 def test_generate_tt_td4_sums_ytd_via_generic_mapper(db, organization):
-    creator = _make_user(db, "creator_tttd4_a@test.com")
-    approver = _make_user(db, "approver_tttd4_a@test.com")
+    creator = _make_user(db, "creator_tttd4_a@test.example.com")
+    approver = _make_user(db, "approver_tttd4_a@test.example.com")
     _make_company(db, organization.id, country="TT")
     employee = _make_tt_employee(db, organization.id, code="TTTD4A", name="Kavita Ramnarine")
 

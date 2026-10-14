@@ -115,7 +115,7 @@ def _build_template(db, creator, approver, country="IN", state=None, year="2026-
 
 
 def test_upsert_report_field_rejects_unknown_column(db, organization):
-    creator = _make_user(db, "creator@test.com")
+    creator = _make_user(db, "creator@test.example.com")
     template = service.upsert_report_template(
         db, ReportTemplateUpsert(
             templateKey="IN-TDS-SALARY", name="Salary TDS Report", reportType="TDS",
@@ -135,7 +135,7 @@ def test_upsert_report_field_rejects_unknown_column(db, organization):
 
 
 def test_status_transition_requires_distinct_approver(db, organization):
-    creator = _make_user(db, "creator2@test.com")
+    creator = _make_user(db, "creator2@test.example.com")
     template = service.upsert_report_template(
         db, ReportTemplateUpsert(
             templateKey="IN-TDS-SALARY-2", name="Salary TDS Report", reportType="TDS",
@@ -152,8 +152,8 @@ def test_status_transition_requires_distinct_approver(db, organization):
 
 
 def test_list_available_reports_for_org(db, organization):
-    creator = _make_user(db, "creator6@test.com")
-    approver = _make_user(db, "approver6@test.com")
+    creator = _make_user(db, "creator6@test.example.com")
+    approver = _make_user(db, "approver6@test.example.com")
     _make_company(db, organization.id, country="IN")
 
     # Before any template is Published/Active, nothing is offered.
@@ -168,8 +168,8 @@ def test_list_available_reports_for_org(db, organization):
 
 
 def test_generate_report_end_to_end_with_reconciliation(db, organization):
-    creator = _make_user(db, "creator3@test.com")
-    approver = _make_user(db, "approver3@test.com")
+    creator = _make_user(db, "creator3@test.example.com")
+    approver = _make_user(db, "approver3@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
 
@@ -205,8 +205,8 @@ def test_generate_report_end_to_end_with_reconciliation(db, organization):
 
 
 def test_generate_report_blocked_for_unfinalized_run(db, organization):
-    creator = _make_user(db, "creator4@test.com")
-    approver = _make_user(db, "approver4@test.com")
+    creator = _make_user(db, "creator4@test.example.com")
+    approver = _make_user(db, "approver4@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Draft")
     template = _build_template(db, creator, approver)
@@ -220,8 +220,8 @@ def test_generate_report_uk_p60(db, organization):
     for UK (P60) with no backend changes — only the field/component
     catalogs differ per jurisdiction, confirming the design is genuinely
     jurisdiction-agnostic rather than India-specific."""
-    creator = _make_user(db, "creator_uk@test.com")
-    approver = _make_user(db, "approver_uk@test.com")
+    creator = _make_user(db, "creator_uk@test.example.com")
+    approver = _make_user(db, "approver_uk@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     item.tds = 0
@@ -263,7 +263,7 @@ def test_generate_report_uk_p60(db, organization):
 # PAYROLL_EMPLOYEE data source + tax-year-exact SUM_YTD ──────────────────
 
 def test_upsert_report_field_accepts_payroll_employee_source(db, organization):
-    creator = _make_user(db, "creator_pe1@test.com")
+    creator = _make_user(db, "creator_pe1@test.example.com")
     template = service.upsert_report_template(
         db, ReportTemplateUpsert(
             templateKey="UK-FPS-TEST", name="FPS", reportType="FPS",
@@ -284,7 +284,7 @@ def test_upsert_report_field_accepts_payroll_employee_source(db, organization):
 
 
 def test_upsert_report_field_rejects_unknown_payroll_employee_column(db, organization):
-    creator = _make_user(db, "creator_pe2@test.com")
+    creator = _make_user(db, "creator_pe2@test.example.com")
     template = service.upsert_report_template(
         db, ReportTemplateUpsert(
             templateKey="UK-FPS-TEST2", name="FPS", reportType="FPS",
@@ -305,8 +305,8 @@ def test_upsert_report_field_rejects_unknown_payroll_employee_column(db, organiz
 
 
 def test_generate_report_resolves_payroll_employee_fields(db, organization):
-    creator = _make_user(db, "creator_pe3@test.com")
-    approver = _make_user(db, "approver_pe3@test.com")
+    creator = _make_user(db, "creator_pe3@test.example.com")
+    approver = _make_user(db, "approver_pe3@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     employee.compliance_fields = {"nino": "QQ123456C"}
@@ -347,8 +347,8 @@ def test_generate_report_resolves_payroll_employee_fields(db, organization):
 
 
 def test_generate_report_payroll_employee_field_none_when_unset(db, organization):
-    creator = _make_user(db, "creator_pe4@test.com")
-    approver = _make_user(db, "approver_pe4@test.com")
+    creator = _make_user(db, "creator_pe4@test.example.com")
+    approver = _make_user(db, "approver_pe4@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     # compliance_fields defaults to {} — nino deliberately left unset.
@@ -387,8 +387,8 @@ def test_sum_ytd_is_tax_year_exact_for_uk_not_calendar_year(db, organization):
     though both dates share the same calendar year."""
     from app.modules.payroll.models import PayrollRun, PayslipItem
 
-    creator = _make_user(db, "creator_ytd1@test.com")
-    approver = _make_user(db, "approver_ytd1@test.com")
+    creator = _make_user(db, "creator_ytd1@test.example.com")
+    approver = _make_user(db, "approver_ytd1@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     run.period_end = date(2026, 4, 10)
@@ -447,8 +447,8 @@ def test_sum_ytd_calendar_year_unchanged_for_non_uk(db, organization):
     boundary changed."""
     from app.modules.payroll.models import PayrollRun, PayslipItem
 
-    creator = _make_user(db, "creator_ytd2@test.com")
-    approver = _make_user(db, "approver_ytd2@test.com")
+    creator = _make_user(db, "creator_ytd2@test.example.com")
+    approver = _make_user(db, "approver_ytd2@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     run.period_end = date(2026, 2, 10)
@@ -497,8 +497,8 @@ def test_sum_ytd_calendar_year_unchanged_for_non_uk(db, organization):
 
 
 def test_historical_immutability_across_template_versions(db, organization):
-    creator = _make_user(db, "creator5@test.com")
-    approver = _make_user(db, "approver5@test.com")
+    creator = _make_user(db, "creator5@test.example.com")
+    approver = _make_user(db, "approver5@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
 
@@ -567,8 +567,8 @@ def _build_per_employee_template(db, creator, approver, template_key="IN-FORM-13
 
 
 def test_certificate_pdf_renders_for_per_employee_template(db, organization):
-    creator = _make_user(db, "creator7@test.com")
-    approver = _make_user(db, "approver7@test.com")
+    creator = _make_user(db, "creator7@test.example.com")
+    approver = _make_user(db, "approver7@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_per_employee_template(db, creator, approver)
@@ -588,8 +588,8 @@ def test_certificate_pdf_renders_for_per_employee_template(db, organization):
 
 
 def test_certificate_pdf_rejects_aggregate_template(db, organization):
-    creator = _make_user(db, "creator8@test.com")
-    approver = _make_user(db, "approver8@test.com")
+    creator = _make_user(db, "creator8@test.example.com")
+    approver = _make_user(db, "approver8@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     # _build_template() (existing helper) creates an AGGREGATE (default) template.
@@ -604,7 +604,7 @@ def test_certificate_pdf_rejects_aggregate_template(db, organization):
 # ── Phase 3: statutory filing calendar ────────────────────────────────────
 
 def test_filing_calendar_seed_idempotent_and_overlap_guarded(db, organization):
-    admin = _make_user(db, "filingadmin@test.com")
+    admin = _make_user(db, "filingadmin@test.example.com")
 
     entry = service.upsert_filing_calendar_entry(
         db, FilingCalendarUpsert(
@@ -652,7 +652,7 @@ def test_filing_calendar_seed_idempotent_and_overlap_guarded(db, organization):
 
 
 def test_get_upcoming_filing_dates_for_org(db, organization):
-    admin = _make_user(db, "filingadmin2@test.com")
+    admin = _make_user(db, "filingadmin2@test.example.com")
     _make_company(db, organization.id, country="IN")
 
     past = service.upsert_filing_calendar_entry(
@@ -690,8 +690,8 @@ def test_india_esi_test_vector_echoed_in_report(db, organization):
     unchanged."""
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
 
-    creator = _make_user(db, "creator9@test.com")
-    approver = _make_user(db, "approver9@test.com")
+    creator = _make_user(db, "creator9@test.example.com")
+    approver = _make_user(db, "approver9@test.example.com")
     _make_company(db, organization.id, country="IN")
 
     employee = PayrollEmployee(organization_id=organization.id, employee_code="E002", name="Ravi Kumar")
@@ -747,8 +747,8 @@ def test_uk_nic_category_a_test_vector_echoed_in_report(db, organization):
     £1,000 -> employee NIC £58.66, employer NIC £135.60."""
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
 
-    creator = _make_user(db, "creator10@test.com")
-    approver = _make_user(db, "approver10@test.com")
+    creator = _make_user(db, "creator10@test.example.com")
+    approver = _make_user(db, "approver10@test.example.com")
     _make_company(db, organization.id, country="UK")
 
     employee = PayrollEmployee(organization_id=organization.id, employee_code="E003", name="Alex Doe")
@@ -840,8 +840,8 @@ def _build_uk_p60_template(db, creator, approver, key="UK-P60-GEN-TEST"):
 
 
 def test_generate_uk_employee_report_p60_resolves_employee_and_ytd_fields(db, organization):
-    creator = _make_user(db, "creator_p60a@test.com")
-    approver = _make_user(db, "approver_p60a@test.com")
+    creator = _make_user(db, "creator_p60a@test.example.com")
+    approver = _make_user(db, "approver_p60a@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     run.period_end = date(2027, 3, 20)
@@ -865,8 +865,8 @@ def test_generate_uk_employee_report_certificate_pdf_renders(db, organization):
     """Confirms P60's "employees": [...] shape is genuinely compatible
     with the EXISTING generate_report_certificate_pdf_bytes renderer —
     no new PDF-rendering code needed for P45/P60."""
-    creator = _make_user(db, "creator_p60cert@test.com")
-    approver = _make_user(db, "approver_p60cert@test.com")
+    creator = _make_user(db, "creator_p60cert@test.example.com")
+    approver = _make_user(db, "approver_p60cert@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_uk_p60_template(db, creator, approver, key="UK-P60-CERT")
@@ -877,8 +877,8 @@ def test_generate_uk_employee_report_certificate_pdf_renders(db, organization):
 
 
 def test_generate_uk_employee_report_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_p60b@test.com")
-    approver = _make_user(db, "approver_p60b@test.com")
+    creator = _make_user(db, "creator_p60b@test.example.com")
+    approver = _make_user(db, "approver_p60b@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_template(db, creator, approver, country="UK", version="9.0")  # TDS, not P45/P60
@@ -887,8 +887,8 @@ def test_generate_uk_employee_report_rejects_wrong_report_type(db, organization)
 
 
 def test_generate_uk_employee_report_rejects_jurisdiction_mismatch(db, organization):
-    creator = _make_user(db, "creator_p60c@test.com")
-    approver = _make_user(db, "approver_p60c@test.com")
+    creator = _make_user(db, "creator_p60c@test.example.com")
+    approver = _make_user(db, "approver_p60c@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     # Employee has no explicit country_code -> resolves to the org's IN default.
@@ -898,8 +898,8 @@ def test_generate_uk_employee_report_rejects_jurisdiction_mismatch(db, organizat
 
 
 def test_generate_uk_employee_report_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_p60d@test.com")
-    approver = _make_user(db, "approver_p60d@test.com")
+    creator = _make_user(db, "creator_p60d@test.example.com")
+    approver = _make_user(db, "approver_p60d@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_uk_p60_template(db, creator, approver, key="UK-P60-SUPERSEDE")
@@ -937,8 +937,8 @@ def _build_uk_eps_template(db, creator, approver, key="UK-EPS-GEN-TEST"):
 def test_generate_uk_eps_is_org_level_with_no_run_or_employee(db, organization):
     from app.modules.payroll.models import OrganizationYtdAccumulator
 
-    creator = _make_user(db, "creator_eps1@test.com")
-    approver = _make_user(db, "approver_eps1@test.com")
+    creator = _make_user(db, "creator_eps1@test.example.com")
+    approver = _make_user(db, "approver_eps1@test.example.com")
     _make_company(db, organization.id, country="UK")
     db.add(OrganizationYtdAccumulator(
         organization_id=organization.id, tax_year="UK-TY-2026-27", tax_component="uk_employer_ni_total",
@@ -961,8 +961,8 @@ def test_generate_uk_eps_is_org_level_with_no_run_or_employee(db, organization):
 
 
 def test_generate_uk_eps_no_employees_paid_flag(db, organization):
-    creator = _make_user(db, "creator_eps2@test.com")
-    approver = _make_user(db, "approver_eps2@test.com")
+    creator = _make_user(db, "creator_eps2@test.example.com")
+    approver = _make_user(db, "approver_eps2@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-NOEMP")
     generated = service.generate_uk_eps(
@@ -974,8 +974,8 @@ def test_generate_uk_eps_no_employees_paid_flag(db, organization):
 
 
 def test_generate_uk_eps_regenerating_same_period_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_eps3@test.com")
-    approver = _make_user(db, "approver_eps3@test.com")
+    creator = _make_user(db, "creator_eps3@test.example.com")
+    approver = _make_user(db, "approver_eps3@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-SUPERSEDE")
     first = service.generate_uk_eps(db, organization.id, template.id, "2026-27", "M08", actor_id=creator.id)
@@ -986,8 +986,8 @@ def test_generate_uk_eps_regenerating_same_period_supersedes_prior(db, organizat
 
 
 def test_generate_uk_eps_includes_recovered_statutory_pay_when_declared(db, organization):
-    creator = _make_user(db, "creator_eps5@test.com")
-    approver = _make_user(db, "approver_eps5@test.com")
+    creator = _make_user(db, "creator_eps5@test.example.com")
+    approver = _make_user(db, "approver_eps5@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-RECOVERY")
     from decimal import Decimal as D
@@ -999,8 +999,8 @@ def test_generate_uk_eps_includes_recovered_statutory_pay_when_declared(db, orga
 
 
 def test_generate_uk_eps_omits_recovery_field_when_not_declared(db, organization):
-    creator = _make_user(db, "creator_eps6@test.com")
-    approver = _make_user(db, "approver_eps6@test.com")
+    creator = _make_user(db, "creator_eps6@test.example.com")
+    approver = _make_user(db, "approver_eps6@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-NORECOVERY")
     generated = service.generate_uk_eps(db, organization.id, template.id, "2026-27", "M17", actor_id=creator.id)
@@ -1008,8 +1008,8 @@ def test_generate_uk_eps_omits_recovery_field_when_not_declared(db, organization
 
 
 def test_generate_uk_eps_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_eps4@test.com")
-    approver = _make_user(db, "approver_eps4@test.com")
+    creator = _make_user(db, "creator_eps4@test.example.com")
+    approver = _make_user(db, "approver_eps4@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_p60_template(db, creator, approver, key="UK-EPS-WRONGTYPE")
     with pytest.raises(BadRequestException):
@@ -1019,8 +1019,8 @@ def test_generate_uk_eps_rejects_wrong_report_type(db, organization):
 # ── RTI XML rendering + RtiSubmission tracking (Part 9, 2026-09-09) ──────
 
 def test_generate_rti_xml_bytes_fps_shape(db, organization):
-    creator = _make_user(db, "creator_xml1@test.com")
-    approver = _make_user(db, "approver_xml1@test.com")
+    creator = _make_user(db, "creator_xml1@test.example.com")
+    approver = _make_user(db, "approver_xml1@test.example.com")
     _make_company(db, organization.id, country="UK")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     item.ni_employee = 58.66
@@ -1058,8 +1058,8 @@ def test_generate_rti_xml_bytes_fps_shape(db, organization):
 
 
 def test_generate_rti_xml_bytes_eps_shape(db, organization):
-    creator = _make_user(db, "creator_xml2@test.com")
-    approver = _make_user(db, "approver_xml2@test.com")
+    creator = _make_user(db, "creator_xml2@test.example.com")
+    approver = _make_user(db, "approver_xml2@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-XML-TEST")
     generated = service.generate_uk_eps(
@@ -1072,8 +1072,8 @@ def test_generate_rti_xml_bytes_eps_shape(db, organization):
 
 
 def test_generate_rti_xml_bytes_rejects_unsupported_report_type(db, organization):
-    creator = _make_user(db, "creator_xml3@test.com")
-    approver = _make_user(db, "approver_xml3@test.com")
+    creator = _make_user(db, "creator_xml3@test.example.com")
+    approver = _make_user(db, "approver_xml3@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_template(db, creator, approver, country="IN", version="8.0")  # TDS
@@ -1085,8 +1085,8 @@ def test_generate_rti_xml_bytes_rejects_unsupported_report_type(db, organization
 
 
 def test_rti_submission_lifecycle_draft_to_ready_to_submitted_to_acknowledged(db, organization):
-    creator = _make_user(db, "creator_rti1@test.com")
-    approver = _make_user(db, "approver_rti1@test.com")
+    creator = _make_user(db, "creator_rti1@test.example.com")
+    approver = _make_user(db, "approver_rti1@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-RTI1")
     generated = service.generate_uk_eps(db, organization.id, template.id, "2026-27", "M11", actor_id=creator.id)
@@ -1109,8 +1109,8 @@ def test_rti_submission_lifecycle_draft_to_ready_to_submitted_to_acknowledged(db
 
 
 def test_rti_submission_rejects_invalid_transition(db, organization):
-    creator = _make_user(db, "creator_rti2@test.com")
-    approver = _make_user(db, "approver_rti2@test.com")
+    creator = _make_user(db, "creator_rti2@test.example.com")
+    approver = _make_user(db, "approver_rti2@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-RTI2")
     generated = service.generate_uk_eps(db, organization.id, template.id, "2026-27", "M12", actor_id=creator.id)
@@ -1120,8 +1120,8 @@ def test_rti_submission_rejects_invalid_transition(db, organization):
 
 
 def test_rti_submission_rejected_can_return_to_ready(db, organization):
-    creator = _make_user(db, "creator_rti3@test.com")
-    approver = _make_user(db, "approver_rti3@test.com")
+    creator = _make_user(db, "creator_rti3@test.example.com")
+    approver = _make_user(db, "approver_rti3@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-RTI3")
     generated = service.generate_uk_eps(db, organization.id, template.id, "2026-27", "M13", actor_id=creator.id)
@@ -1136,8 +1136,8 @@ def test_rti_submission_rejected_can_return_to_ready(db, organization):
 
 
 def test_rti_submission_rejects_non_rti_report_type(db, organization):
-    creator = _make_user(db, "creator_rti4@test.com")
-    approver = _make_user(db, "approver_rti4@test.com")
+    creator = _make_user(db, "creator_rti4@test.example.com")
+    approver = _make_user(db, "approver_rti4@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_template(db, creator, approver, country="IN", version="7.0")  # TDS
@@ -1149,8 +1149,8 @@ def test_rti_submission_rejects_non_rti_report_type(db, organization):
 
 
 def test_list_rti_submissions_filters_by_status(db, organization):
-    creator = _make_user(db, "creator_rti5@test.com")
-    approver = _make_user(db, "approver_rti5@test.com")
+    creator = _make_user(db, "creator_rti5@test.example.com")
+    approver = _make_user(db, "approver_rti5@test.example.com")
     _make_company(db, organization.id, country="UK")
     template = _build_uk_eps_template(db, creator, approver, key="UK-EPS-RTI5")
     g1 = service.generate_uk_eps(db, organization.id, template.id, "2026-27", "M14", actor_id=creator.id)
@@ -1203,8 +1203,8 @@ def _build_india_form_130_template(db, creator, approver, key="IN-FORM-130-GEN-T
 
 
 def test_generate_india_form_130_via_widened_uk_employee_report(db, organization):
-    creator = _make_user(db, "creator_f130a@test.com")
-    approver = _make_user(db, "approver_f130a@test.com")
+    creator = _make_user(db, "creator_f130a@test.example.com")
+    approver = _make_user(db, "approver_f130a@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     run.period_end = date(2026, 6, 15)
@@ -1231,8 +1231,8 @@ def test_india_report_ytd_uses_april_fy_not_calendar_year(db, organization):
     # for UK before that fix.
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
 
-    creator = _make_user(db, "creator_f130b@test.com")
-    approver = _make_user(db, "approver_f130b@test.com")
+    creator = _make_user(db, "creator_f130b@test.example.com")
+    approver = _make_user(db, "approver_f130b@test.example.com")
     _make_company(db, organization.id, country="IN")
 
     employee = PayrollEmployee(organization_id=organization.id, employee_code="E130", name="Priya Nair")
@@ -1335,8 +1335,8 @@ def test_india_quarter_date_range_rejects_unknown_period_or_year():
 
 
 def test_generate_india_form_138_sums_tds_across_quarter_runs(db, organization):
-    creator = _make_user(db, "creator_f138a@test.com")
-    approver = _make_user(db, "approver_f138a@test.com")
+    creator = _make_user(db, "creator_f138a@test.example.com")
+    approver = _make_user(db, "approver_f138a@test.example.com")
     _make_company(db, organization.id, country="IN")
     from app.modules.payroll.models import PayrollEmployee
 
@@ -1368,8 +1368,8 @@ def test_generate_india_form_138_sums_tds_across_quarter_runs(db, organization):
 
 
 def test_generate_india_form_138_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_f138b@test.com")
-    approver = _make_user(db, "approver_f138b@test.com")
+    creator = _make_user(db, "creator_f138b@test.example.com")
+    approver = _make_user(db, "approver_f138b@test.example.com")
     _make_company(db, organization.id, country="IN")
     template = _build_template(db, creator, approver, country="IN", version="8.0")  # TDS, not FORM_138
     with pytest.raises(BadRequestException):
@@ -1377,8 +1377,8 @@ def test_generate_india_form_138_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_india_form_138_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_f138c@test.com")
-    approver = _make_user(db, "approver_f138c@test.com")
+    creator = _make_user(db, "creator_f138c@test.example.com")
+    approver = _make_user(db, "approver_f138c@test.example.com")
     _make_company(db, organization.id, country="IN")
     template = _build_india_form_138_template(db, creator, approver, key="IN-FORM-138-SUPERSEDE")
 
@@ -1394,8 +1394,8 @@ def test_generate_india_form_138_regenerating_supersedes_prior(db, organization)
 # FPS/EPS/P45/P60 rows.
 
 def test_rti_forms_summary_includes_india_forms(db, organization):
-    creator = _make_user(db, "creator_summary1@test.com")
-    approver = _make_user(db, "approver_summary1@test.com")
+    creator = _make_user(db, "creator_summary1@test.example.com")
+    approver = _make_user(db, "approver_summary1@test.example.com")
     _make_company(db, organization.id, country="IN")
     template = _build_india_form_138_template(db, creator, approver, key="IN-FORM-138-SUMMARY")
     service.generate_india_form_138(db, organization.id, template.id, "2026-27", "Q1")
@@ -1407,8 +1407,8 @@ def test_rti_forms_summary_includes_india_forms(db, organization):
 
 
 def test_rti_forms_summary_includes_ca_forms(db, organization):
-    creator = _make_user(db, "creator_summary3@test.com")
-    approver = _make_user(db, "approver_summary3@test.com")
+    creator = _make_user(db, "creator_summary3@test.example.com")
+    approver = _make_user(db, "approver_summary3@test.example.com")
     _make_company(db, organization.id, country="CA")
     template = _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-SUMMARY")
     service.generate_ca_pd7a(db, organization.id, template.id, date(2026, 1, 1), date(2026, 1, 31))
@@ -1420,8 +1420,8 @@ def test_rti_forms_summary_includes_ca_forms(db, organization):
 
 
 def test_rti_forms_summary_excludes_unrelated_report_types(db, organization):
-    creator = _make_user(db, "creator_summary2@test.com")
-    approver = _make_user(db, "approver_summary2@test.com")
+    creator = _make_user(db, "creator_summary2@test.example.com")
+    approver = _make_user(db, "approver_summary2@test.example.com")
     _make_company(db, organization.id, country="IN")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     template = _build_template(db, creator, approver, country="IN", version="11.0")  # plain "TDS", not a tracked type
@@ -1460,8 +1460,8 @@ def _build_india_form_123_template(db, creator, approver, key="IN-FORM-123-GEN-T
 def test_generate_india_form_123_sources_from_issued_benefit_valuations(db, organization):
     from app.modules.payroll.models import PayrollEmployee
 
-    creator = _make_user(db, "creator_f123a@test.com")
-    approver = _make_user(db, "approver_f123a@test.com")
+    creator = _make_user(db, "creator_f123a@test.example.com")
+    approver = _make_user(db, "approver_f123a@test.example.com")
     _make_company(db, organization.id, country="IN")
     employee = PayrollEmployee(organization_id=organization.id, employee_code="F123", name="Ravi Kumar", country_code="IN")
     db.add(employee)
@@ -1485,8 +1485,8 @@ def test_generate_india_form_123_sources_from_issued_benefit_valuations(db, orga
 
 
 def test_generate_india_form_123_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_f123b@test.com")
-    approver = _make_user(db, "approver_f123b@test.com")
+    creator = _make_user(db, "creator_f123b@test.example.com")
+    approver = _make_user(db, "approver_f123b@test.example.com")
     _make_company(db, organization.id, country="IN")
     template = _build_template(db, creator, approver, country="IN", version="10.0")  # TDS, not FORM_123
     with pytest.raises(BadRequestException):
@@ -1538,8 +1538,8 @@ def _build_ca_t4_template(db, creator, approver, key="CA-T4-GEN-TEST", report_ty
 
 
 def test_generate_ca_t4_via_widened_uk_employee_report(db, organization):
-    creator = _make_user(db, "creator_t4a@test.com")
-    approver = _make_user(db, "approver_t4a@test.com")
+    creator = _make_user(db, "creator_t4a@test.example.com")
+    approver = _make_user(db, "approver_t4a@test.example.com")
     _make_company(db, organization.id, country="CA")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     run.period_end = date(2026, 6, 15)
@@ -1568,8 +1568,8 @@ def test_generate_ca_rl1_and_roe_reuse_same_widened_function(db, organization):
     # RL-1 and ROE are just two more entries on generate_uk_employee_
     # report's report_type allow-list — this proves both are actually
     # reachable, not merely documented.
-    creator = _make_user(db, "creator_t4b@test.com")
-    approver = _make_user(db, "approver_t4b@test.com")
+    creator = _make_user(db, "creator_t4b@test.example.com")
+    approver = _make_user(db, "approver_t4b@test.example.com")
     _make_company(db, organization.id, country="CA")
     run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
     run.period_end = date(2026, 6, 15)
@@ -1642,8 +1642,8 @@ def _make_ca_period_run(db, organization_id, employee_id, period_end, *, tds, cp
 def test_generate_ca_pd7a_sums_across_period_runs(db, organization):
     from app.modules.payroll.models import PayrollEmployee
 
-    creator = _make_user(db, "creator_pd7a1@test.com")
-    approver = _make_user(db, "approver_pd7a1@test.com")
+    creator = _make_user(db, "creator_pd7a1@test.example.com")
+    approver = _make_user(db, "approver_pd7a1@test.example.com")
     _make_company(db, organization.id, country="CA")
     employee = PayrollEmployee(organization_id=organization.id, employee_code="ECA1", name="Remittance Employee")
     db.add(employee)
@@ -1675,8 +1675,8 @@ def test_generate_ca_pd7a_sums_across_period_runs(db, organization):
 
 
 def test_generate_ca_pd7a_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_pd7a2@test.com")
-    approver = _make_user(db, "approver_pd7a2@test.com")
+    creator = _make_user(db, "creator_pd7a2@test.example.com")
+    approver = _make_user(db, "approver_pd7a2@test.example.com")
     _make_company(db, organization.id, country="CA")
     template = _build_template(db, creator, approver, country="CA", version="12.0")  # TDS, not PD7A
     with pytest.raises(BadRequestException):
@@ -1684,8 +1684,8 @@ def test_generate_ca_pd7a_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_ca_pd7a_rejects_inverted_date_range(db, organization):
-    creator = _make_user(db, "creator_pd7a3@test.com")
-    approver = _make_user(db, "approver_pd7a3@test.com")
+    creator = _make_user(db, "creator_pd7a3@test.example.com")
+    approver = _make_user(db, "approver_pd7a3@test.example.com")
     _make_company(db, organization.id, country="CA")
     template = _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-INVERTED")
     with pytest.raises(BadRequestException):
@@ -1693,8 +1693,8 @@ def test_generate_ca_pd7a_rejects_inverted_date_range(db, organization):
 
 
 def test_generate_ca_pd7a_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_pd7a4@test.com")
-    approver = _make_user(db, "approver_pd7a4@test.com")
+    creator = _make_user(db, "creator_pd7a4@test.example.com")
+    approver = _make_user(db, "approver_pd7a4@test.example.com")
     _make_company(db, organization.id, country="CA")
     template = _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-SUPERSEDE")
 
@@ -1841,8 +1841,8 @@ def _make_us_employee(db, organization_id, code="EUSW2"):
 
 
 def test_generate_us_w2_computes_boxes_from_ytd_payslips(db, organization):
-    creator = _make_user(db, "creator_w2a@test.com")
-    approver = _make_user(db, "approver_w2a@test.com")
+    creator = _make_user(db, "creator_w2a@test.example.com")
+    approver = _make_user(db, "approver_w2a@test.example.com")
     company = _make_company(db, organization.id, country="US")
     company.employer_id = "12-3456789"
     db.commit()
@@ -1876,8 +1876,8 @@ def test_generate_us_w2_computes_boxes_from_ytd_payslips(db, organization):
 def test_generate_us_w2_caps_box3_at_social_security_wage_base(db, organization):
     from app.modules.payroll.hardcoded_defaults import _US_SOCIAL_SECURITY_WAGE_BASE
 
-    creator = _make_user(db, "creator_w2b@test.com")
-    approver = _make_user(db, "approver_w2b@test.com")
+    creator = _make_user(db, "creator_w2b@test.example.com")
+    approver = _make_user(db, "approver_w2b@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2B")
 
@@ -1892,8 +1892,8 @@ def test_generate_us_w2_caps_box3_at_social_security_wage_base(db, organization)
 
 
 def test_generate_us_w2_handles_multiple_states_as_repeating_groups(db, organization):
-    creator = _make_user(db, "creator_w2c@test.com")
-    approver = _make_user(db, "approver_w2c@test.com")
+    creator = _make_user(db, "creator_w2c@test.example.com")
+    approver = _make_user(db, "approver_w2c@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2C")
 
@@ -1910,8 +1910,8 @@ def test_generate_us_w2_handles_multiple_states_as_repeating_groups(db, organiza
 
 
 def test_generate_us_w2_includes_local_and_box14_lines(db, organization):
-    creator = _make_user(db, "creator_w2d@test.com")
-    approver = _make_user(db, "approver_w2d@test.com")
+    creator = _make_user(db, "creator_w2d@test.example.com")
+    approver = _make_user(db, "approver_w2d@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2D")
 
@@ -1929,8 +1929,8 @@ def test_generate_us_w2_includes_local_and_box14_lines(db, organization):
 
 
 def test_generate_us_w2_excludes_other_years_non_us_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_w2e@test.com")
-    approver = _make_user(db, "approver_w2e@test.com")
+    creator = _make_user(db, "creator_w2e@test.example.com")
+    approver = _make_user(db, "approver_w2e@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2E")
 
@@ -1951,8 +1951,8 @@ def test_generate_us_w2_excludes_other_years_non_us_and_unfinalized_runs(db, org
 
 
 def test_generate_us_w2_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_w2f@test.com")
-    approver = _make_user(db, "approver_w2f@test.com")
+    creator = _make_user(db, "creator_w2f@test.example.com")
+    approver = _make_user(db, "approver_w2f@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2F")
     template = _build_template(db, creator, approver, country="US", version="w2-neg")  # TDS, not W2
@@ -1961,8 +1961,8 @@ def test_generate_us_w2_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_us_w2_rejects_invalid_tax_year(db, organization):
-    creator = _make_user(db, "creator_w2g@test.com")
-    approver = _make_user(db, "approver_w2g@test.com")
+    creator = _make_user(db, "creator_w2g@test.example.com")
+    approver = _make_user(db, "approver_w2g@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2G")
     template = _build_us_w2_template(db, creator, approver, key="US-W2-BADYEAR-TEST")
@@ -1975,8 +1975,8 @@ def test_us_w2_certificate_pdf_renders_via_shared_renderer(db, organization):
     # certificate_pdf_bytes) reads templateSnapshot.components/fields to
     # know what to print — this confirms generate_us_w2 actually populates
     # that structure (not just a flat values dict the renderer can't see).
-    creator = _make_user(db, "creator_w2i@test.com")
-    approver = _make_user(db, "approver_w2i@test.com")
+    creator = _make_user(db, "creator_w2i@test.example.com")
+    approver = _make_user(db, "approver_w2i@test.example.com")
     company = _make_company(db, organization.id, country="US")
     company.employer_id = "98-7654321"
     db.commit()
@@ -1993,8 +1993,8 @@ def test_us_w2_certificate_pdf_renders_via_shared_renderer(db, organization):
 
 
 def test_generate_us_w2_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_w2h@test.com")
-    approver = _make_user(db, "approver_w2h@test.com")
+    creator = _make_user(db, "creator_w2h@test.example.com")
+    approver = _make_user(db, "approver_w2h@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="EUSW2H")
     _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 5, 31))
@@ -2074,8 +2074,8 @@ def _build_us_941_template(db, creator, approver, key="US-941-GEN-TEST"):
 
 
 def test_generate_us_941_sums_quarter_wages_and_taxes(db, organization):
-    creator = _make_user(db, "creator_941a@test.com")
-    approver = _make_user(db, "approver_941a@test.com")
+    creator = _make_user(db, "creator_941a@test.example.com")
+    approver = _make_user(db, "approver_941a@test.example.com")
     company = _make_company(db, organization.id, country="US")
     company.employer_id = "11-2223334"
     db.commit()
@@ -2104,8 +2104,8 @@ def test_generate_us_941_sums_quarter_wages_and_taxes(db, organization):
 
 
 def test_generate_us_941_excludes_other_quarters_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_941b@test.com")
-    approver = _make_user(db, "approver_941b@test.com")
+    creator = _make_user(db, "creator_941b@test.example.com")
+    approver = _make_user(db, "approver_941b@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="E941B")
 
@@ -2121,8 +2121,8 @@ def test_generate_us_941_excludes_other_quarters_and_unfinalized_runs(db, organi
 
 
 def test_generate_us_941_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_941c@test.com")
-    approver = _make_user(db, "approver_941c@test.com")
+    creator = _make_user(db, "creator_941c@test.example.com")
+    approver = _make_user(db, "approver_941c@test.example.com")
     _make_company(db, organization.id, country="US")
     template = _build_template(db, creator, approver, country="US", version="941-neg")  # TDS, not 941
     with pytest.raises(BadRequestException):
@@ -2130,8 +2130,8 @@ def test_generate_us_941_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_us_941_rejects_invalid_quarter(db, organization):
-    creator = _make_user(db, "creator_941d@test.com")
-    approver = _make_user(db, "approver_941d@test.com")
+    creator = _make_user(db, "creator_941d@test.example.com")
+    approver = _make_user(db, "approver_941d@test.example.com")
     _make_company(db, organization.id, country="US")
     template = _build_us_941_template(db, creator, approver, key="US-941-BADQ-TEST")
     with pytest.raises(BadRequestException):
@@ -2139,8 +2139,8 @@ def test_generate_us_941_rejects_invalid_quarter(db, organization):
 
 
 def test_generate_us_941_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_941e@test.com")
-    approver = _make_user(db, "approver_941e@test.com")
+    creator = _make_user(db, "creator_941e@test.example.com")
+    approver = _make_user(db, "approver_941e@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="E941E")
     _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 1, 15))
@@ -2200,8 +2200,8 @@ def _build_us_940_template(db, creator, approver, key="US-940-GEN-TEST"):
 def test_generate_us_940_caps_futa_wages_per_employee(db, organization):
     from app.modules.payroll.hardcoded_defaults import _US_FUTA_WAGE_BASE
 
-    creator = _make_user(db, "creator_940a@test.com")
-    approver = _make_user(db, "approver_940a@test.com")
+    creator = _make_user(db, "creator_940a@test.example.com")
+    approver = _make_user(db, "approver_940a@test.example.com")
     company = _make_company(db, organization.id, country="US")
     company.employer_id = "22-3334445"
     db.commit()
@@ -2228,8 +2228,8 @@ def test_generate_us_940_caps_futa_wages_per_employee(db, organization):
 
 
 def test_generate_us_940_sums_multiple_employees(db, organization):
-    creator = _make_user(db, "creator_940b@test.com")
-    approver = _make_user(db, "approver_940b@test.com")
+    creator = _make_user(db, "creator_940b@test.example.com")
+    approver = _make_user(db, "approver_940b@test.example.com")
     _make_company(db, organization.id, country="US")
     emp1 = _make_us_employee(db, organization.id, code="E940B1")
     emp2 = _make_us_employee(db, organization.id, code="E940B2")
@@ -2246,8 +2246,8 @@ def test_generate_us_940_sums_multiple_employees(db, organization):
 
 
 def test_generate_us_940_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_940c@test.com")
-    approver = _make_user(db, "approver_940c@test.com")
+    creator = _make_user(db, "creator_940c@test.example.com")
+    approver = _make_user(db, "approver_940c@test.example.com")
     _make_company(db, organization.id, country="US")
     template = _build_template(db, creator, approver, country="US", version="940-neg")  # TDS, not 940
     with pytest.raises(BadRequestException):
@@ -2255,8 +2255,8 @@ def test_generate_us_940_rejects_wrong_report_type(db, organization):
 
 
 def test_generate_us_940_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_940d@test.com")
-    approver = _make_user(db, "approver_940d@test.com")
+    creator = _make_user(db, "creator_940d@test.example.com")
+    approver = _make_user(db, "approver_940d@test.example.com")
     _make_company(db, organization.id, country="US")
     employee = _make_us_employee(db, organization.id, code="E940D")
     _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 5, 31), employer_futa=48)

@@ -154,6 +154,22 @@ class HkNewVersionRequest(BaseModel):
     reason: str
 
 
+class HkContributionDayDisruption(BaseModel):
+    """A black-rainstorm / No. 8+ signal day for the MPF contribution-day deferral."""
+    model_config = ConfigDict(extra="forbid")
+    disruptionDate: date
+    signal: str                                # BLACK_RAINSTORM | TYPHOON_SIGNAL_8_OR_ABOVE
+    reason: str
+    evidenceReference: Optional[str] = None
+
+
+class HkEvidenceReview(BaseModel):
+    """Hong Kong gate / decision / production-verification evidence review outcome (never the registrant)."""
+    model_config = ConfigDict(extra="forbid")
+    outcome: str                  # ACCEPTED | REJECTED
+    notes: Optional[str] = None   # required for REJECTED
+
+
 class HkSoftwareApprovalTransition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target: str

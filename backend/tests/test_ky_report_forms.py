@@ -148,8 +148,8 @@ def _build_ky_pension_submission_template(db, creator, approver, key="KY-PENSION
 # ── Wage/Gratuity Statement (generic mapper reuse) ────────────────────
 
 def test_generate_ky_wage_gratuity_statement_via_generic_mapper(db, organization):
-    creator = _make_user(db, "creator_kywg_a@test.com")
-    approver = _make_user(db, "approver_kywg_a@test.com")
+    creator = _make_user(db, "creator_kywg_a@test.example.com")
+    approver = _make_user(db, "approver_kywg_a@test.example.com")
     _make_company(db, organization.id, country="KY")
     employee = _make_ky_employee(db, organization.id, code="KYWGA", name="Trevor Ebanks")
     run, item = _make_ky_run_with_payslip(db, organization.id, employee.id, date(2026, 10, 31), gross_pay=80000, employee_pension=4000, employer_pension=4000, employee_name="Trevor Ebanks")
@@ -162,8 +162,8 @@ def test_generate_ky_wage_gratuity_statement_via_generic_mapper(db, organization
 
 
 def test_generate_ky_wage_gratuity_statement_blocked_for_unfinalized_run(db, organization):
-    creator = _make_user(db, "creator_kywg_b@test.com")
-    approver = _make_user(db, "approver_kywg_b@test.com")
+    creator = _make_user(db, "creator_kywg_b@test.example.com")
+    approver = _make_user(db, "approver_kywg_b@test.example.com")
     _make_company(db, organization.id, country="KY")
     employee = _make_ky_employee(db, organization.id, code="KYWGB")
     run, item = _make_ky_run_with_payslip(db, organization.id, employee.id, date(2026, 10, 31), status="Draft")
@@ -176,8 +176,8 @@ def test_generate_ky_wage_gratuity_statement_blocked_for_unfinalized_run(db, org
 # ── Monthly Pension contribution submission ───────────────────────────
 
 def test_generate_ky_pension_submission_aggregates_two_employees_across_multiple_runs_same_month(db, organization):
-    creator = _make_user(db, "creator_kyps_a@test.com")
-    approver = _make_user(db, "approver_kyps_a@test.com")
+    creator = _make_user(db, "creator_kyps_a@test.example.com")
+    approver = _make_user(db, "approver_kyps_a@test.example.com")
     _make_company(db, organization.id, country="KY")
     emp1 = _make_ky_employee(db, organization.id, code="KYPSA1", name="Trevor Ebanks")
     emp2 = _make_ky_employee(db, organization.id, code="KYPSA2", name="Marlene Bodden")
@@ -204,8 +204,8 @@ def test_generate_ky_pension_submission_aggregates_two_employees_across_multiple
 
 
 def test_generate_ky_pension_submission_excludes_other_months_and_unfinalized_runs(db, organization):
-    creator = _make_user(db, "creator_kyps_b@test.com")
-    approver = _make_user(db, "approver_kyps_b@test.com")
+    creator = _make_user(db, "creator_kyps_b@test.example.com")
+    approver = _make_user(db, "approver_kyps_b@test.example.com")
     _make_company(db, organization.id, country="KY")
     employee = _make_ky_employee(db, organization.id, code="KYPSB")
 
@@ -220,8 +220,8 @@ def test_generate_ky_pension_submission_excludes_other_months_and_unfinalized_ru
 
 
 def test_generate_ky_pension_submission_rejects_wrong_report_type(db, organization):
-    creator = _make_user(db, "creator_kyps_c@test.com")
-    approver = _make_user(db, "approver_kyps_c@test.com")
+    creator = _make_user(db, "creator_kyps_c@test.example.com")
+    approver = _make_user(db, "approver_kyps_c@test.example.com")
     _make_company(db, organization.id, country="KY")
     template = _build_template(db, creator, approver, country="KY", version="kyps-neg")
     with pytest.raises(BadRequestException):
@@ -229,8 +229,8 @@ def test_generate_ky_pension_submission_rejects_wrong_report_type(db, organizati
 
 
 def test_generate_ky_pension_submission_regenerating_supersedes_prior(db, organization):
-    creator = _make_user(db, "creator_kyps_d@test.com")
-    approver = _make_user(db, "approver_kyps_d@test.com")
+    creator = _make_user(db, "creator_kyps_d@test.example.com")
+    approver = _make_user(db, "approver_kyps_d@test.example.com")
     _make_company(db, organization.id, country="KY")
     employee = _make_ky_employee(db, organization.id, code="KYPSD")
     _make_ky_run_with_payslip(db, organization.id, employee.id, date(2026, 11, 10))

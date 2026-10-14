@@ -28,6 +28,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "platform_shared_helper_snapshots
 AS_OF = date(2026, 10, 1)
 A, B = 101, 202
 _TS = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+_REVISION = re.compile(r"\b[0-9a-f]{12}\b")
 
 
 def _norm(value):
@@ -79,19 +80,24 @@ def _check(name, observed):
     recorded = json.loads(FIXTURE.read_text(encoding="utf8")) if FIXTURE.is_file() else {}
     if os.environ.get("PLATFORM_SNAPSHOT_RECORD") == "1":
         recorded[name] = observed
-        recorded["__recorded_on__"] = date.today().isoformat()
+        recorded.setdefault("__recorded_on_by_key__", {})[name] = date.today().isoformat()
         FIXTURE.parent.mkdir(exist_ok=True)
         FIXTURE.write_text(json.dumps(recorded, indent=1, sort_keys=True, ensure_ascii=False), encoding="utf8")
         return
     assert name in recorded, f"no recorded snapshot for {name} (record before refactoring)"
     # A summary computed "as of today" carries the run date: the recording day
     # on one side and today on the other is the same point in its own run.
-    then, now = recorded.get("__recorded_on__", ""), date.today().isoformat()
+    then = recorded.get("__recorded_on_by_key__", {}).get(name) or recorded.get("__recorded_on__", "")
+    now = date.today().isoformat()
     expected = json.dumps(recorded[name], sort_keys=True, ensure_ascii=False)
     actual = json.dumps(observed, sort_keys=True, ensure_ascii=False)
     if then:
         expected = expected.replace(then, "<run-date>")
-    assert actual.replace(now, "<run-date>") == expected, name
+    # Summaries report the code's Alembic head; a later, unrelated migration is
+    # not a behaviour change of these helpers, so revision ids are masked.
+    actual = _REVISION.sub("<alembic-revision>", actual.replace(now, "<run-date>"))
+    expected = _REVISION.sub("<alembic-revision>", expected)
+    assert actual == expected, name
 
 
 def _art(db, tag, *, file_path="evidence.pdf", created_by=A, reviewer=None):
