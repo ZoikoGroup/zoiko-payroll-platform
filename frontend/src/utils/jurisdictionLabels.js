@@ -34,6 +34,9 @@ const INCOME_TAX_LABELS = {
   // tariffs are ingested as QST tariff files (ZP-CH-PAYROLL-001). Matches
   // the backend's own PDF wording "Source tax (Quellensteuer) withheld".
   CH: "Source Tax (QST)",
+  // Netherlands — loonheffing: wage tax and national insurance withheld
+  // together, from the Belastingdienst tables (ZP-NL-ENG-001).
+  NL: "Loonheffing (wage tax)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -132,6 +135,7 @@ const TAX_ID_LABELS = {
   AU: "Tax File Number (TFN/ABN)",
   DE: "Tax Registration No. (Steuernummer / USt-IdNr.)",
   CA: "Business Number (BN)",
+  NL: "KVK / RSIN / Loonheffingennummer",
   HK: "Business Registration No. / IRD Employer's File No.",
   CH: "UID (Business Identification No.)",
 };
@@ -146,6 +150,7 @@ const STATE_RULE_NOTES = {
   CA: "Statutory deductions such as provincial income tax vary by province.",
   DE: "Statutory contribution rates can vary by state (Bundesland).",
   UK: "Statutory rates are generally uniform nationwide, but some allowances vary by region.",
+  NL: "One national regime: loonheffing, employee insurance and Zvw do not vary by province.",
   HK: "One territory-wide regime: MPF is deducted through payroll; Salaries Tax is assessed by the IRD on the employee and is never withheld from pay.",
 };
 
@@ -182,6 +187,8 @@ const IDENTITY_FIELD = {
   IT: { label: "Codice fiscale", get: (p) => p.complianceFields?.codice_fiscale },
   // Masked server-side (SENSITIVE_FIELDS), same as HKID above.
   CH: { label: "AHV No.", get: (p) => p.complianceFields?.ahv_number },
+  // Masked server-side (SENSITIVE_FIELDS), same as HKID above.
+  NL: { label: "BSN", get: (p) => p.complianceFields?.bsn },
 };
 
 export function getIdentityField(payslip) {

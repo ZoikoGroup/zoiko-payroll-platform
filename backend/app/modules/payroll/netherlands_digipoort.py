@@ -265,6 +265,18 @@ def submit_return(
         PayrollNlEmployerProfile.id == ret.employer_profile_id).one_or_none()
     cert_fp = employer.pki_cert_fingerprint if employer else "unknown"
 
+    # NL-052: never blind-resend. A return may only be sent again when every
+    # earlier attempt was definitively REJECTED; an UNKNOWN one is reconciled
+    # first (retry_submission), and an ACK means it already arrived.
+    open_attempt = (db.query(PayrollNlDigipoortSubmission)
+                    .filter(PayrollNlDigipoortSubmission.return_id == return_id,
+                            PayrollNlDigipoortSubmission.transport_status != TransportStatus.REJECTED.value)
+                    .order_by(PayrollNlDigipoortSubmission.attempt_no.desc()).first())
+    if open_attempt is not None:
+        raise DigipoortError(
+            f"return {return_id} already has submission attempt {open_attempt.attempt_no} in status "
+            f"{open_attempt.transport_status}; reconcile it (UNKNOWN) or file a correction — it is never resent blindly")
+
     # Next attempt number
     last_attempt = db.query(func.max(PayrollNlDigipoortSubmission.attempt_no)).filter(
         PayrollNlDigipoortSubmission.return_id == return_id).scalar() or 0
@@ -376,9 +388,16 @@ def retry_submission(db: Session, submission_id: int, channel: Optional[Digipoor
     if sub.transport_status not in (TransportStatus.REJECTED.value, TransportStatus.UNKNOWN.value):
         raise DigipoortError(f"Cannot retry submission with status {sub.transport_status}")
 
-    # Reconcile first if UNKNOWN
+    # Reconcile first if UNKNOWN, then resend ONLY if it was definitively
+    # rejected: an ACK means the return already arrived, and a still-UNKNOWN
+    # outcome must not be replayed blindly (NL-052).
     if sub.transport_status == TransportStatus.UNKNOWN.value:
         reconcile_unknown_submissions(db, max_age_hours=0)
+        db.refresh(sub)
+        if sub.transport_status != TransportStatus.REJECTED.value:
+            raise DigipoortError(
+                f"submission {sub.id} reconciled as {sub.transport_status}; it is not resent "
+                "(ACK = already delivered, UNKNOWN = outcome still unproven)")
 
     ret = db.query(PayrollNlLoonaangifteReturn).filter(
         PayrollNlLoonaangifteReturn.id == sub.return_id).one_or_none()

@@ -91,6 +91,16 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "mudad_id", label: "Mudad ID", pattern: "^[A-Za-z0-9-]{8,30}$", example: "MUDAD-001234", primary: false },
     ],
   },
+  // Netherlands — mirrors backend core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.NL
+  // (schema only; live Dutch payroll stays gated until gates G1–G8 are evidenced).
+  NL: {
+    label: "KVK / RSIN / Loonheffingennummer",
+    fields: [
+      { key: "kvk_number", label: "KVK (Chamber of Commerce) number", pattern: "^\\d{8}$", example: "12345678", primary: true },
+      { key: "rsin", label: "RSIN (legal-entity identification number)", pattern: "^\\d{9}$", example: "123456789", primary: false },
+      { key: "loonheffingennummer", label: "Loonheffingennummer (payroll-tax number)", pattern: "^\\d{9}L\\d{2}$", example: "123456789L01", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -107,6 +117,8 @@ const COUNTRY_NAME_TO_CODE = {
   "saudi arabia": "SA",
   saudi: "SA",
   ksa: "SA",
+  netherlands: "NL",
+  "the netherlands": "NL",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -119,6 +131,7 @@ const CODE_TO_COUNTRY_NAME = {
   FR: "France",
   IE: "Ireland",
   SA: "Saudi Arabia",
+  NL: "Netherlands",
 };
 
 export function getJurisdictionCode(country) {

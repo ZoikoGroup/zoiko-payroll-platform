@@ -13,6 +13,8 @@ import USForm941Panel from "./USForm941Panel";
 import USForm940Panel from "./USForm940Panel";
 import USNewHireReportingPanel from "./USNewHireReportingPanel";
 import CHElmSubmissionsPanel from "./CHElmSubmissionsPanel";
+import NLLoonaangiftePanel from "./NLLoonaangiftePanel";
+import NLJaaropgaafPanel from "./NLJaaropgaafPanel";
 import { normalizeCountryCode } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
@@ -38,6 +40,10 @@ const IN_FORM_138_TAB = { id: "in-form-138", label: "India Form 138", icon: File
 // PayrollRun — same reasoning as the India Form 138 tab above.
 const CA_PD7A_TAB = { id: "ca-pd7a", label: "Canada PD7A", icon: Landmark };
 const CH_ELM_TAB = { id: "ch-elm", label: "Swiss ELM submissions", icon: Landmark };
+// Netherlands payroll-tax returns and annual statements — period/year-level,
+// employer-wide, never tied to a single PayrollRun (same reasoning as PD7A).
+const NL_LOONAANGIFTE_TAB = { id: "nl-loonaangifte", label: "Loonaangifte", icon: Landmark };
+const NL_JAAROPGAAF_TAB = { id: "nl-jaaropgaaf", label: "Jaaropgaaf", icon: FileText };
 // Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
 // reasoning as the PD7A tab above.
 const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark };
@@ -69,6 +75,7 @@ export default function ReportsPage() {
   const isUs = jurisdictionCountry === "US";
   const isPr = jurisdictionCountry === "PR";
   const isSwitzerland = normalizeCountryCode(jurisdictionCountry) === "CH";
+  const isNetherlands = normalizeCountryCode(jurisdictionCountry) === "NL";
   const tabs = [
     ...BASE_TABS,
     ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
@@ -77,6 +84,7 @@ export default function ReportsPage() {
     ...(isUs ? [US_941_TAB, US_940_TAB, US_NEW_HIRE_TAB] : []),
     ...(isPr ? [PR_ASUME_TAB] : []),
     ...(isSwitzerland ? [CH_ELM_TAB] : []),
+    ...(isNetherlands ? [NL_LOONAANGIFTE_TAB, NL_JAAROPGAAF_TAB] : []),
   ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
@@ -319,6 +327,8 @@ export default function ReportsPage() {
       {isIndia && activeTab === "in-form-138" && <INForm138Panel />}
       {isCanada && activeTab === "ca-pd7a" && <CAPd7aPanel />}
       {isSwitzerland && activeTab === "ch-elm" && <CHElmSubmissionsPanel />}
+      {isNetherlands && activeTab === "nl-loonaangifte" && <NLLoonaangiftePanel />}
+      {isNetherlands && activeTab === "nl-jaaropgaaf" && <NLJaaropgaafPanel />}
       {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
       {isUs && activeTab === "us-941" && <USForm941Panel />}
       {isUs && activeTab === "us-940" && <USForm940Panel />}

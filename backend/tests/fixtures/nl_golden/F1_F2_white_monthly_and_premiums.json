@@ -1,0 +1,82 @@
+{
+  "id": "F1-F2",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-NL-ENG-001 v1.0 \u00a718. NOT an official golden vector: the wage-tax row is SYNTHETIC (the spec's own published F1 result), not the official 2026 Belastingdienst table. Replace with an OFFICIAL vector generated from the official tables and independently reviewed once gate G1 is signed (NL-054).",
+  "source": {
+    "spec": "ZP-NL-ENG-001 v1.0 \u00a718 F1 + F2",
+    "tableRow": {
+      "kind": "SYNTHETIC",
+      "wage_from": "5000",
+      "wage_to": null,
+      "aow_cohort": "BELOW_AOW",
+      "with_tax_credit": true,
+      "withholding_amount": "1325.08"
+    },
+    "formulas": {
+      "wageTax": "table row (synthetic) = 1325.08",
+      "netPay": "5000.00 - 1325.08 = 3674.92",
+      "awf": "5000.00 x 2.74% = 137.00",
+      "aof": "5000.00 x 6.27% = 313.50",
+      "wko": "5000.00 x 0.50% = 25.00",
+      "zvwEmployer": "5000.00 x 6.10% = 305.00",
+      "whk": "5000.00 x (0.50% WGA + 0.20% ZW-flex) = 35.00 (fixture employer decision)"
+    }
+  },
+  "periods": [
+    {
+      "inputs": {
+        "gross": "5000",
+        "payDate": "2026-01-31",
+        "contract": "LOW",
+        "withTaxCredit": true
+      },
+      "expected": {
+        "tds": "1325.08",
+        "nl.totals.netPay": "3674.92",
+        "nl.employeeInsurance.awfClass": "LOW",
+        "nl.employeeInsurance.awf": "137.00",
+        "nl.employeeInsurance.aof": "313.50",
+        "nl.employeeInsurance.wko": "25.00",
+        "nl.zvw.employerLevy": "305.00",
+        "nl.totals.employerPremiums": "780.50"
+      },
+      "intermediates": {
+        "trace.BASES.tableWage": "5000.00",
+        "trace.BASES.eiWage": "5000.00",
+        "trace.BASES.zvwWage": "5000.00",
+        "nl.vcr.after.EI.cumulative_max": "6617.41",
+        "nl.vcr.after.EI.cumulative_base": "5000.00",
+        "nl.vcr.increments.EI": "5000.00"
+      },
+      "traceCodes": [
+        "BASES",
+        "AWF",
+        "AOF",
+        "WKO",
+        "AWF_CLASS",
+        "ZVW"
+      ]
+    }
+  ],
+  "loonaangifte": {
+    "month": 3,
+    "periodCode": "202603",
+    "line": {
+      "wage_lb_phf": "5000.00",
+      "wage_sv": "5000.00",
+      "wage_zvw": "5000.00",
+      "hours": "173.33",
+      "awf_class": "LOW",
+      "wage_tax": "1325.08"
+    },
+    "totals": {
+      "total_wage_tax": "1325.08",
+      "total_awf": "137.00",
+      "total_aof": "313.50",
+      "total_wko": "25.00",
+      "total_zvw_employer": "305.00",
+      "total_whk": "35.00",
+      "total_final_levies": "0.00"
+    }
+  }
+}

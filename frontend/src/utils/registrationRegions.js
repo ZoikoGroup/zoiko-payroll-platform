@@ -126,11 +126,11 @@ const STATES_BY_COUNTRY = {
   // getStatesForCountryName("Ireland") return [] and Ireland resolve as
   // country-level, matching how every Ireland pack is stored
   // (jurisdiction_state = NULL).
-  "Netherlands": [
-    "Drenthe", "Flevoland", "Friesland", "Gelderland", "Groningen", "Limburg",
-    "North Brabant", "North Holland", "Overijssel", "South Holland", "Utrecht",
-    "Zeeland",
-  ],
+  // Netherlands: deliberately absent, for the same reason as Ireland above.
+  // Loonheffing, employee insurance and Zvw are national; no Dutch province
+  // has a payroll rule, and every NL pack is country-level
+  // (jurisdiction_state = NULL). Listing the 12 provinces implied a state
+  // dimension the Netherlands engine does not have.
   "Italy": [
     "Abruzzo", "Apulia", "Basilicata", "Calabria", "Campania",
     "Emilia-Romagna", "Friuli-Venezia Giulia", "Lazio", "Liguria", "Lombardy",

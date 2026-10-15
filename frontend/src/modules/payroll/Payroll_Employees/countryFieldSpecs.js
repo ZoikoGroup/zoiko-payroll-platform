@@ -48,7 +48,21 @@ export const COUNTRIES = [
   // Switzerland (ZP-CH-PAYROLL-001) — mirrors employee_validation.py's
   // CHEmployeeValidation exactly. AHV number is SENSITIVE and EAN-13-validated.
   { code: "CH", name: "Switzerland" },
+  // Netherlands (ZP-NL-ENG-001) — mirrors employee_validation.py's
+  // NLEmployeeValidation (BSN) plus bank_routing.py's NL IBAN/BIC. Tax-credit
+  // instruction, contract (AWf) and insurance facts live on the Netherlands
+  // statutory profile (employee detail → "Manage"), never here.
+  { code: "NL", name: "Netherlands" },
 ];
+
+// Dutch BSN eleven-test (mirrors employee_validation.py's bsn_is_valid):
+// sum(digit × weight) with weights 9..2 and -1 must be divisible by 11.
+function bsnPassesElfproef(value) {
+  if (!/^\d{9}$/.test(value)) return false;
+  const weights = [9, 8, 7, 6, 5, 4, 3, 2, -1];
+  const total = value.split("").reduce((sum, d, i) => sum + Number(d) * weights[i], 0);
+  return total % 11 === 0;
+}
 
 export const COUNTRY_FIELD_SPECS = {
   IN: [
@@ -300,6 +314,13 @@ export const COUNTRY_FIELD_SPECS = {
       error: "AHV number must be the 13-digit AHV/AVS number 756.XXXX.XXXX.XX from the AHV insurance card.",
     },
   ],
+  // Netherlands — the server also runs the BSN eleven-test (elfproef); the
+  // same check runs here so a typo is caught at entry.
+  NL: [
+    { key: "bsn", label: "BSN (Burgerservicenummer)", type: "text", placeholder: "9 digits", required: true, strip: ". -", pattern: /^\d{9}$/, check: bsnPassesElfproef, error: "BSN must be the 9-digit Burgerservicenummer and pass the eleven-test — check it against the identity document." },
+    { key: "iban", label: "IBAN", type: "text", placeholder: "NL + 16 characters", upper: true, strip: " ", pattern: /^NL\d{2}[A-Z]{4}\d{10}$/, error: "Dutch IBAN must be NL, 2 check digits, a 4-letter bank code and 10 digits." },
+    { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -354,7 +375,7 @@ export function validateComplianceFields(countryCode, complianceFields) {
     }
     // Sensitive identifiers come back from the API masked (e.g. S****567D);
     // a round-tripped mask is resolved server-side against the stored value.
-    if (spec.pattern && !raw.includes("*") && !spec.pattern.test(raw)) {
+    if (spec.pattern && !raw.includes("*") && (!spec.pattern.test(raw) || (spec.check && !spec.check(raw)))) {
       errors.push(`${spec.error} (got "${raw}")`);
     }
   }

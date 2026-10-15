@@ -1,0 +1,28 @@
+{
+  "id": "F4",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-NL-ENG-001 v1.0 \u00a718. NOT an official golden vector: the wage-tax row is SYNTHETIC (the spec's own published F1 result), not the official 2026 Belastingdienst table. Replace with an OFFICIAL vector generated from the official tables and independently reviewed once gate G1 is signed (NL-054).",
+  "source": {
+    "spec": "ZP-NL-ENG-001 v1.0 \u00a718 F4 / NL-016",
+    "formulas": {
+      "awf": "5000.00 x 7.74% = 387.00"
+    }
+  },
+  "periods": [
+    {
+      "inputs": {
+        "gross": "5000",
+        "payDate": "2026-01-31",
+        "contract": "FIXED",
+        "withTaxCredit": true
+      },
+      "expected": {
+        "nl.employeeInsurance.awfClass": "HIGH",
+        "nl.employeeInsurance.awf": "387.00"
+      },
+      "traceCodes": [
+        "AWF_CLASS"
+      ]
+    }
+  ]
+}

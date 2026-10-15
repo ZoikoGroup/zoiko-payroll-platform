@@ -11,6 +11,7 @@ Builds credit-transfer batches from committed payslips. Supports:
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -136,8 +137,10 @@ def create_salary_payment_batch(
         raise PaymentServiceError("Run must be committed before payment batch creation")
 
     if idempotency_key is None:
-        idempotency_key = f"salary-batch-{run_id}-{actor_id}-{datetime.utcnow().isoformat()}"
-        idempotency_key = hashlib.sha256(idempotency_key.encode()).hexdigest()[:100]
+        # One salary batch per run unless the caller deliberately supplies a new
+        # key: a retried request must return the same batch, never pay twice
+        # (spec T8 duplicate payment). The key never depends on time or actor.
+        idempotency_key = hashlib.sha256(f"nl-salary-batch-run-{run_id}".encode()).hexdigest()[:100]
 
     existing = db.query(PayrollNlPaymentBatch).filter(
         PayrollNlPaymentBatch.idempotency_key == idempotency_key
@@ -269,8 +272,10 @@ def create_authority_payment_batch(
     xml_sha256 = hashlib.sha256(xml.encode("utf-8")).hexdigest()
 
     if idempotency_key is None:
-        idempotency_key = f"auth-batch-{organization_id}-{actor_id}-{datetime.utcnow().isoformat()}"
-        idempotency_key = hashlib.sha256(idempotency_key.encode()).hexdigest()[:100]
+        # Same payments to the same authorities = the same batch (never paid twice).
+        canonical = json.dumps(sorted(authority_payments, key=lambda p: json.dumps(p, sort_keys=True, default=str)),
+                               sort_keys=True, default=str)
+        idempotency_key = hashlib.sha256(f"nl-authority-batch-{organization_id}-{canonical}".encode()).hexdigest()[:100]
 
     existing = db.query(PayrollNlPaymentBatch).filter(
         PayrollNlPaymentBatch.idempotency_key == idempotency_key
