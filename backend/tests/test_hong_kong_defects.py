@@ -230,3 +230,29 @@ def test_d_f_bir56a_reconciles_when_an_ir56b_is_suppressed_by_a_filed_ir56f(db, 
     assert D(rec["lessReportedOnIr56fIr56g"]) == D("49999.95")      # the leaver's Jan-Mar committed pay
     assert D(rec["expectedReportable"]) == D(rec["reportedTotal"]) == D("49999.95")   # the other employee only
     assert D(rec["committedPayrollGross"]) == D("99999.90") and D(rec["variance"]) == D("0")
+
+
+# ── D-G: IR56B equals the engine's committed results, including unpaid absence ──────────────────
+# Audit hypothesis: IR56B uses gross_pay - attendance_deduction while the engine prices unpaid
+# absence with its own 30-day divisor, so the two could differ. Checked on a 31-day month.
+
+def test_d_g_ir56b_equals_payslip_paid_gross_and_engine_reportable_with_unpaid_days(db, hk):
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import PayslipItem
+
+    _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 3, 31))
+    for m in (1, 2):
+        _month(db, hk.org, m)
+    hk.emp.date_of_leaving = date(2026, 3, 20)          # 11 unpaid days after termination in a 31-day month
+    db.commit()
+    march = _month(db, hk.org, 3)
+    items = db.query(PayslipItem).filter(PayslipItem.employee_id == hk.emp.id).all()
+    paid = sum((D(str(i.gross_pay)) - D(str(i.attendance_deduction or 0)) for i in items), D("0"))
+    engine = sum((D(v) for i in items for v in (i.hk_calculation_trace["ird"]["reportable"]).values()), D("0"))
+    m_item = _item(db, march, hk.emp)
+    absence = [l for l in m_item.hk_calculation_trace["classification"]["IRD"]["lines"] if l["component"] == "unpaid_absence"]
+    assert absence and D(absence[0]["amount"]) == -D(str(m_item.attendance_deduction))   # same figure both sides
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
+    row = out["employees"][0]
+    case = hong_kong_service._case(db, hk.org.id, row["caseId"])
+    assert row["validationErrors"] == [] and D(case.payload["total"]) == paid == engine
