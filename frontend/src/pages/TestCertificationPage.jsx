@@ -26,6 +26,9 @@ const JURISDICTIONS = [
   // independent reference calculator on SYNTHETIC data (ch_golden/README.md).
   // A PASS here is supporting information only, never release-gate evidence.
   { value: "CH", label: "Switzerland (BSV / ESTV / cantons)", fixturesPath: "backend/tests/fixtures/ch_golden/README.md" },
+  // Netherlands (ZP-NL-ENG-001) — golden cases for loonheffing, premies,
+  // vakantiegeld, WKR, minimumloon, ziektewet, transitievergoeding, pensioen.
+  { value: "NL", label: "Netherlands (Belastingdienst / UWV)", fixturesPath: "backend/tests/fixtures/nl_golden/README.md" },
 ];
 
 export default function TestCertificationPage() {

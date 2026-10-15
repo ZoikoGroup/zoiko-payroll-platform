@@ -1,19 +1,24 @@
 """auth audit events (G5 F-5) and append-only audit tables (G5 F-6)
 
 Revision ID: d1e5a7c3b9f2
-Revises: 8b14824fb575
+Revises: 08f0f142574e
 Create Date: 2026-10-14
 
 Additive: one new table, one function, two triggers per audit table. No
 existing row is read or rewritten. CREATE TRIGGER takes SHARE ROW EXCLUSIVE on
 each audit table briefly (blocks writes to that table for the DDL only).
+
+Re-parented 2026-10-15 from 8b14824fb575 onto main's 08f0f142574e when
+origin/main was merged into nikhil: written in parallel with the Netherlands
+M8/M9 chain on the same parent, never on main and never applied to
+production, so moving its parent keeps the history linear (no merge revision).
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "d1e5a7c3b9f2"
-down_revision = "8b14824fb575"
+down_revision = "08f0f142574e"
 branch_labels = None
 depends_on = None
 

@@ -8642,7 +8642,7 @@ class PayrollNlEmployerProfile(Base):
         sa.CheckConstraint("wkr_mode IN ('STANDALONE', 'CONCERN')", name="ck_nl_emp_wkr_mode"),
         sa.CheckConstraint("standard_pay_day IS NULL OR (standard_pay_day >= 1 AND standard_pay_day <= 31)", name="ck_nl_emp_pay_day"),
         sa.Index("ix_nl_employer_profiles_org_open", "organization_id", unique=True,
-                 postgresql_where=sa.text("effective_to IS NULL")),
+                 postgresql_where=sa.text("effective_to IS NULL"), sqlite_where=sa.text("effective_to IS NULL")),
     )
 
     def __repr__(self):
@@ -9148,6 +9148,243 @@ class PayrollNlAwfRevision(Base):
         UniqueConstraint("organization_id", "employee_id", "contract_version_id", "tax_year", "trigger_code",
                          name="uq_nl_awf_revision_trigger"),
     )
+
+
+# ── Netherlands (ZP-NL-ENG-001) Phase 9 — Loonaangifte, SBR/Digipoort, Payment ──────
+# These models mirror migration M8 (3b4e5c6d7e8f). Transport acknowledgement,
+# statutory acceptance and payment are three separate states (NL-038).
+
+
+class PayrollNlLoonaangifteReturn(Base):
+    """Loonaangifte return header — one per employer/period/tax_year/version.
+    Status machine: OPEN -> READY -> FILED -> ACCEPTED / REJECTED.
+    Correction chain via correction_of_id (NL-036)."""
+    __tablename__ = "payroll_nl_loonaangifte_returns"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id       = Column(Integer, ForeignKey("payroll_nl_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    loonheffingennummer       = Column(String(20), nullable=False, index=True)
+    tax_year                  = Column(SmallInteger, nullable=False, index=True)
+    period_code               = Column(String(10), nullable=False)  # e.g., 202601, 2026Q1
+    period_start              = Column(Date, nullable=False)
+    period_end                = Column(Date, nullable=False)
+    due_date                  = Column(Date, nullable=False)
+    payment_due_date          = Column(Date, nullable=False)
+    version                   = Column(SmallInteger, nullable=False, default=1)
+    return_type               = Column(String(20), nullable=False, default="REGULAR")  # REGULAR / NIL / ZERO / RESEND / CORRECTION
+    correction_of_id          = Column(Integer, ForeignKey("payroll_nl_loonaangifte_returns.id", ondelete="SET NULL"), nullable=True, index=True)
+    status                    = Column(String(20), nullable=False, default="OPEN")  # OPEN / READY / FILED / ACCEPTED / CORRECTED / REJECTED
+    total_wage_tax            = Column(Numeric(14, 2), nullable=False, default=0)
+    total_awf                 = Column(Numeric(14, 2), nullable=False, default=0)
+    total_aof                 = Column(Numeric(14, 2), nullable=False, default=0)
+    total_whk                 = Column(Numeric(14, 2), nullable=False, default=0)
+    total_wko                 = Column(Numeric(14, 2), nullable=False, default=0)
+    total_zvw_employer        = Column(Numeric(14, 2), nullable=False, default=0)
+    total_zvw_employee        = Column(Numeric(14, 2), nullable=False, default=0)
+    total_final_levies        = Column(Numeric(14, 2), nullable=False, default=0)
+    total_payable             = Column(Numeric(14, 2), nullable=False, default=0)
+    spec_version              = Column(String(20), nullable=False, default="2026.1")
+    payload_xml               = Column(Text, nullable=True)
+    payload_sha256            = Column(String(64), nullable=True)
+    journal_reconciled        = Column(Boolean, nullable=False, default=False)
+    reconciliation_report     = Column(_NL_JSON, nullable=True)
+    idempotency_key           = Column(String(100), nullable=False, unique=True, index=True)
+    statutory_filing_id       = Column(Integer, nullable=True, index=True)
+    created_by                = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by               = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    filed_by                  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("return_type IN ('REGULAR', 'NIL', 'ZERO', 'RESEND', 'CORRECTION')", name="ck_nl_loonaangifte_return_type"),
+        sa.CheckConstraint("status IN ('OPEN', 'READY', 'FILED', 'ACCEPTED', 'CORRECTED', 'REJECTED')", name="ck_nl_loonaangifte_status"),
+        Index("ix_nl_loonaangifte_org_year_period", "organization_id", "tax_year", "period_code"),
+        Index("ix_nl_loonaangifte_emp_profile_period", "employer_profile_id", "tax_year", "period_code"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlLoonaangifteReturn org={self.organization_id} {self.tax_year}{self.period_code} v{self.version} {self.status}>"
+
+
+class PayrollNlLoonaangifteLine(Base):
+    """Employee-level line in a loonaangifte return (NL-036).
+    Official field names copied from Gegevensspecificaties; never invented."""
+    __tablename__ = "payroll_nl_loonaangifte_lines"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    return_id                 = Column(Integer, ForeignKey("payroll_nl_loonaangifte_returns.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id    = Column(Integer, ForeignKey("payroll_nl_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True)
+    personnel_number          = Column(String(50), nullable=False)
+    line_type                 = Column(String(20), nullable=False, default="ORIGINAL")  # ORIGINAL / CORRECTION
+    correction_of_line_id     = Column(Integer, ForeignKey("payroll_nl_loonaangifte_lines.id", ondelete="SET NULL"), nullable=True, index=True)
+    wage_lb_phf               = Column(Numeric(14, 2), nullable=False, default=0)  # loonbelasting/premievolksverzekeringen
+    wage_sv                   = Column(Numeric(14, 2), nullable=False, default=0)      # socialeverzekeringen (AWf, Aof, Whk, Wko)
+    wage_zvw                  = Column(Numeric(14, 2), nullable=False, default=0)      # ZVW
+    hours                     = Column(Numeric(7, 2), nullable=False, default=0)
+    contract_flags            = Column(_NL_JSON, nullable=True)  # {"is_director": true, "is_fixed_term": false, ...}
+    awf_class                 = Column(String(10), nullable=True)  # LOW / HIGH
+    premium_amounts           = Column(_NL_JSON, nullable=True)  # {"awf": 137.00, "aof": 313.50, "whk": 100.00, "wko": 25.00, "zvw_employer": 305.00, "zvw_employee": 242.50}
+    wage_tax                  = Column(Numeric(14, 2), nullable=False, default=0)
+    zvw                       = Column(Numeric(14, 2), nullable=False, default=0)
+    official_codes            = Column(_NL_JSON, nullable=True)  # Belastingdienst field codes per Gegevensspecificaties
+    line_sha256               = Column(String(64), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("line_type IN ('ORIGINAL', 'CORRECTION')", name="ck_nl_loonaangifte_line_type"),
+        Index("ix_nl_loonaangifte_lines_return_emp", "return_id", "employee_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlLoonaangifteLine return={self.return_id} emp={self.employee_id} {self.line_type}>"
+
+
+class PayrollNlDigipoortSubmission(Base):
+    """Digipoort transport tracking (NL-038, NL-052).
+    Validation-service/sandbox mode and live transport; live locked until G3.
+    After timeout -> UNKNOWN, reconciled before retry."""
+    __tablename__ = "payroll_nl_digipoort_submissions"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    return_id               = Column(Integer, ForeignKey("payroll_nl_loonaangifte_returns.id", ondelete="CASCADE"), nullable=False, index=True)
+    attempt_no              = Column(SmallInteger, nullable=False, default=1)
+    channel                 = Column(String(20), nullable=False, default="DIGIPOORT")  # DIGIPOORT / SBR / VALIDATION_SERVICE
+    cert_fingerprint        = Column(String(64), nullable=True)
+    payload_sha256          = Column(String(64), nullable=False)
+    sent_at                 = Column(DateTime(timezone=True), nullable=True)
+    transport_status        = Column(String(20), nullable=False, default="PREPARED")  # PREPARED / SENT / ACK / REJECTED / UNKNOWN
+    digipoort_reference     = Column(String(100), nullable=True)
+    ack_payload             = Column(Text, nullable=True)
+    error_codes             = Column(_NL_JSON, nullable=True)
+    reconciled_at           = Column(DateTime(timezone=True), nullable=True)
+    idempotency_key         = Column(String(100), nullable=False, unique=True, index=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("transport_status IN ('PREPARED', 'SENT', 'ACK', 'REJECTED', 'UNKNOWN')", name="ck_nl_digipoort_transport_status"),
+        sa.CheckConstraint("channel IN ('DIGIPOORT', 'SBR', 'VALIDATION_SERVICE')", name="ck_nl_digipoort_channel"),
+        Index("ix_nl_digipoort_return_attempt", "return_id", "attempt_no"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlDigipoortSubmission return={self.return_id} attempt={self.attempt_no} {self.transport_status}>"
+
+
+class PayrollNlAuthorityPayment(Base):
+    """Authority payment tracking (NL-038).
+    PREPARED -> RELEASED -> SETTLED / FAILED / UNKNOWN."""
+    __tablename__ = "payroll_nl_authority_payments"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    return_id               = Column(Integer, ForeignKey("payroll_nl_loonaangifte_returns.id", ondelete="SET NULL"), nullable=True, index=True)
+    amount                  = Column(Numeric(14, 2), nullable=False)
+    payment_reference       = Column(String(100), nullable=False, index=True)
+    bank_reference          = Column(String(100), nullable=True)
+    value_date              = Column(Date, nullable=False)
+    status                  = Column(String(20), nullable=False, default="PREPARED")  # PREPARED / RELEASED / SETTLED / FAILED / UNKNOWN
+    settlement_evidence     = Column(Text, nullable=True)
+    prepared_by             = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    released_by             = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reconciled_at           = Column(DateTime(timezone=True), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PREPARED', 'RELEASED', 'SETTLED', 'FAILED', 'UNKNOWN')", name="ck_nl_auth_payment_status"),
+        Index("ix_nl_auth_payment_org_return", "organization_id", "return_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlAuthorityPayment org={self.organization_id} {self.amount} {self.status}>"
+
+
+# ── Netherlands (ZP-NL-ENG-001) Phase 10 — Annual statement, SEPA, Jaaropgaaf ──────
+
+
+class PayrollNlAnnualStatement(Base):
+    """Jaaropgaaf (annual wage/tax statement) — generated from committed year-to-date
+    totals only, never from current employee record (NL-048)."""
+    __tablename__ = "payroll_nl_annual_statements"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    income_relationship_id    = Column(Integer, ForeignKey("payroll_nl_income_relationships.id", ondelete="SET NULL"), nullable=True, index=True)
+    tax_year                  = Column(SmallInteger, nullable=False, index=True)
+    version                   = Column(SmallInteger, nullable=False, default=1)
+    supersedes_id             = Column(Integer, ForeignKey("payroll_nl_annual_statements.id", ondelete="SET NULL"), nullable=True, index=True)
+    fiscal_wage               = Column(Numeric(14, 2), nullable=False, default=0)
+    wage_tax_withheld         = Column(Numeric(14, 2), nullable=False, default=0)
+    applied_employment_credit = Column(Numeric(14, 2), nullable=False, default=0)
+    tax_credit_applied        = Column(Numeric(14, 2), nullable=False, default=0)
+    zvw_wage                  = Column(Numeric(14, 2), nullable=False, default=0)
+    zvw_contribution          = Column(Numeric(14, 2), nullable=False, default=0)
+    source_ledger_sha256      = Column(String(64), nullable=False)
+    document_ref              = Column(String(200), nullable=True)
+    status                    = Column(String(20), nullable=False, default="DRAFT")  # DRAFT / ISSUED / AMENDED
+    delivered_at              = Column(DateTime(timezone=True), nullable=True)
+    delivery_channel          = Column(String(50), nullable=True)  # PORTAL / EMAIL / DIGIPOORT
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    idempotency_key           = Column(String(100), nullable=False, unique=True, index=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ISSUED', 'AMENDED')", name="ck_nl_annual_status"),
+        UniqueConstraint("organization_id", "employee_id", "tax_year", "version", name="uq_nl_annual_org_emp_year_ver"),
+        Index("ix_nl_annual_org_year", "organization_id", "tax_year"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlAnnualStatement org={self.organization_id} emp={self.employee_id} {self.tax_year} v{self.version} {self.status}>"
+
+
+class PayrollNlPaymentBatch(Base):
+    """SEPA payment batch (pain.001 credit transfer)."""
+    __tablename__ = "payroll_nl_payment_batches"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id          = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    pain001_sha256          = Column(String(64), nullable=False, unique=True, index=True)
+    message_id              = Column(String(100), nullable=False, index=True)
+    status                  = Column(String(20), nullable=False, default="SUBMITTED")  # SUBMITTED / ACCEPTED / SETTLED / REJECTED / RETURNED / UNKNOWN
+    submitted_at            = Column(DateTime(timezone=True), nullable=True)
+    reconciled_at           = Column(DateTime(timezone=True), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    idempotency_key         = Column(String(100), nullable=False, unique=True, index=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('SUBMITTED', 'ACCEPTED', 'SETTLED', 'REJECTED', 'RETURNED', 'UNKNOWN')", name="ck_nl_payment_batch_status"),
+        Index("ix_nl_payment_batch_org_run", "organization_id", "payroll_run_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlPaymentBatch org={self.organization_id} run={self.payroll_run_id} {self.status}>"
+
+
+class PayrollNlPaymentItem(Base):
+    """Individual payment item within a SEPA batch."""
+    __tablename__ = "payroll_nl_payment_items"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    batch_id                = Column(Integer, ForeignKey("payroll_nl_payment_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    iban_token              = Column(String(200), nullable=False)
+    amount                  = Column(Numeric(14, 2), nullable=False)
+    end_to_end_id           = Column(String(100), nullable=False)
+    status                  = Column(String(20), nullable=False, default="PENDING")  # PENDING / SENT / SETTLED / RETURNED / REJECTED
+    return_reason           = Column(String(200), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'SENT', 'SETTLED', 'RETURNED', 'REJECTED')", name="ck_nl_payment_item_status"),
+        Index("ix_nl_payment_item_batch_emp", "batch_id", "employee_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNlPaymentItem batch={self.batch_id} emp={self.employee_id} {self.amount} {self.status}>"
 
 
 def _refuse_nl_ledger_mutation(mapper, connection, target):
