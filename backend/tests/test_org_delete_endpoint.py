@@ -109,3 +109,47 @@ def test_org_delete_endpoint_cascades_and_is_idempotent_404():
     # Second delete -> 404.
     r = client.delete(f"/api/organizations/{oid}")
     assert r.status_code == 404, r.text
+
+
+def _org_with_audited_user(name):
+    """An organisation whose admin wrote one configuration-audit row (G5 F-6)."""
+    r = client.post("/api/organizations/", json={"organization_name": name, "country": "IN"})
+    assert r.status_code == 200, r.text
+    oid = r.json()["id"]
+    from app.modules.auth.models import User, UserRole
+
+    user = User(email=f"{name.lower().replace(' ', '-')}@zoikotest.example.com", hashed_password="x",
+                role=UserRole.ORG_ADMIN, organization_id=oid, first_name="T", last_name="User", is_active=True)
+    db.add(user)
+    db.commit()
+    uid = user.id
+    db.execute(text("INSERT INTO payroll_tax_configuration_audit (actor_id, action, entity_type, entity_id) "
+                    "VALUES (:u, 'update', 'jurisdiction_pack', 1)"), {"u": uid})
+    db.commit()
+    return oid, uid
+
+
+def _audit_rows(uid):
+    return db.execute(text("SELECT COUNT(*) FROM payroll_tax_configuration_audit WHERE actor_id = :u"), {"u": uid}).scalar()
+
+
+def test_org_hard_delete_still_purges_its_audit_rows_by_default():
+    """G5 F-6 keeps the previous behaviour behind AUDIT_PURGE_ON_ORG_HARD_DELETE (default true)."""
+    import app.config as app_config
+
+    assert app_config.settings.AUDIT_PURGE_ON_ORG_HARD_DELETE is True
+    oid, uid = _org_with_audited_user("Purge Default Org")
+    r = client.delete(f"/api/organizations/{oid}")
+    assert r.status_code == 200, r.text
+    assert _audit_rows(uid) == 0
+
+
+def test_org_hard_delete_is_refused_when_audit_purge_is_disabled(monkeypatch):
+    import app.config as app_config
+
+    oid, uid = _org_with_audited_user("Purge Disabled Org")
+    monkeypatch.setattr(app_config.settings, "AUDIT_PURGE_ON_ORG_HARD_DELETE", False)
+    r = client.delete(f"/api/organizations/{oid}")
+    assert r.status_code == 409 and "AUDIT_PURGE_ON_ORG_HARD_DELETE" in r.text, r.text
+    assert _audit_rows(uid) == 1
+    assert db.execute(text("SELECT COUNT(*) FROM organizations WHERE id = :o"), {"o": oid}).scalar() == 1

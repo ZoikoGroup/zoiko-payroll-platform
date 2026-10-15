@@ -269,6 +269,7 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     hk_employment_continuity_start: Optional[date] = Field(None, validation_alias="hkgEmploymentContinuityStart")
     hk_pay_basis: Optional[str] = Field(None, validation_alias="hkgPayBasis")
     hk_contractual_weekly_hours: Optional[Decimal] = Field(None, validation_alias="hkgContractualWeeklyHours")
+    hk_contractual_overtime_hourly_rate: Optional[Decimal] = Field(None, validation_alias="hkgContractualOvertimeHourlyRate")
     hk_likely_chargeable: Optional[bool] = Field(None, validation_alias="hkgLikelyChargeable")
     hk_arrival_date: Optional[date] = Field(None, validation_alias="hkgArrivalDate")
     hk_expected_departure_date: Optional[date] = Field(None, validation_alias="hkgExpectedDepartureDate")
@@ -447,6 +448,7 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     hkgEmploymentContinuityStart: Optional[date] = Field(None, validation_alias="hk_employment_continuity_start", serialization_alias="hkgEmploymentContinuityStart")
     hkgPayBasis: Optional[str] = Field(None, validation_alias="hk_pay_basis", serialization_alias="hkgPayBasis")
     hkgContractualWeeklyHours: Optional[Decimal] = Field(None, validation_alias="hk_contractual_weekly_hours", serialization_alias="hkgContractualWeeklyHours")
+    hkgContractualOvertimeHourlyRate: Optional[Decimal] = Field(None, validation_alias="hk_contractual_overtime_hourly_rate", serialization_alias="hkgContractualOvertimeHourlyRate")
     hkgLikelyChargeable: Optional[bool] = Field(None, validation_alias="hk_likely_chargeable", serialization_alias="hkgLikelyChargeable")
     hkgArrivalDate: Optional[date] = Field(None, validation_alias="hk_arrival_date", serialization_alias="hkgArrivalDate")
     hkgExpectedDepartureDate: Optional[date] = Field(None, validation_alias="hk_expected_departure_date", serialization_alias="hkgExpectedDepartureDate")
@@ -4278,6 +4280,12 @@ class HKDepartureRequest(_HKBody):
 class HKIr56gFiledRequest(_HKBody):
     filedOn: date
     filingReference: str
+    # External-submission record, as for every IRD filing (gap audit D-D).
+    submissionMode: Optional[str] = None
+    authorizedSigner: Optional[str] = None
+    transactionReference: Optional[str] = None
+    controlListReference: Optional[str] = None
+    submittedOn: Optional[date] = None
 
 
 class HKReleaseRequest(_HKBody):
@@ -4353,6 +4361,14 @@ class HKAverageWageOverrideRequest(_HKBody):
     evidenceRef: str
 
 
+class HKPreTransitionWageOverrideRequest(_HKBody):
+    """HK-017 controlled correction of the frozen pre-1-May-2025 wage (gap audit D-C)."""
+    monthlyWage: Decimal
+    basis: str = "LAST_FULL_MONTH"
+    reason: str
+    evidenceRef: str
+
+
 class HKEntitlementRequest(_HKBody):
     benefit: str
     averageWageSnapshotId: int
@@ -4365,6 +4381,10 @@ class HKEntitlementRequest(_HKBody):
     availablePaidSicknessDays: Optional[Decimal] = None
     noticeGiven: bool = False
     documentProvided: bool = False
+    # Paternity (Concise Guide ch.7; gap audit D-M): the leave window and the document deadline.
+    expectedDeliveryDate: Optional[date] = None
+    actualDeliveryDate: Optional[date] = None
+    documentProvidedOn: Optional[date] = None
 
 
 class HKTerminationRequest(_HKBody):

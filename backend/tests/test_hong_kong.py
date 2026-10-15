@@ -251,7 +251,8 @@ def test_unclassified_earning_component_blocks_mpf(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
     from app.modules.payroll.models import TaxSlab
 
-    db.query(TaxSlab).filter(TaxSlab.rule_type == "HK_EARNING_CLASS", TaxSlab.filing_status == "overtime",
+    # The catalogue (STEP 3): the overtime code's MPF mapping is missing -> the calculation blocks.
+    db.query(TaxSlab).filter(TaxSlab.rule_type == "HK_EARNING_CODE", TaxSlab.filing_status == "HK_OVERTIME_CONTRACT",
                              TaxSlab.tax_regime == "MPF_RI").delete()
     db.commit()
     with pytest.raises(HongKongCalculationBlockedError, match="overtime"):
@@ -586,12 +587,14 @@ def test_paternity_leave_pay_5_days_40_weeks(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
 
     rate_map, _s, _p = _inputs(db, date(2026, 6, 30))
+    # The window needs the delivery dates (gap audit D-M; Concise Guide ch.7).
+    window = dict(expected_delivery=date(2026, 5, 20), actual_delivery=date(2026, 5, 18))
     out = entitlements.paternity_leave_pay(rate_map, _cc_result("2025-01-01"), {"averageDailyWage": "500"},
-                                           date(2026, 6, 1), 5, True)
+                                           date(2026, 6, 1), 5, True, **window)
     assert out["status"] == "ENTITLED" and D(out["amount"]) == D("2000.00")
     with pytest.raises(HongKongCalculationBlockedError):
         entitlements.paternity_leave_pay(rate_map, _cc_result("2025-01-01"), {"averageDailyWage": "500"},
-                                         date(2026, 6, 1), 6, True)
+                                         date(2026, 6, 1), 6, True, **window)
 
 
 def test_statutory_holidays_2026_are_15_with_easter_monday(db, packs):
@@ -880,8 +883,11 @@ def test_case_j_ir56b_suppressed_after_filed_ir56f_for_the_same_income():
     assert out["action"] == "SUPPRESS" and "twice" in out["message"]
     partial = ird.ir56b_suppression("2025/26", (date(2025, 4, 1), date(2026, 3, 31)), prior)
     assert partial["action"] == "RESOLVE"
+    # Gap audit D-L: an unfiled IR56F no longer lets an IR56B through silently — it is named for resolution.
     unfiled = ird.ir56b_suppression("2025/26", (date(2025, 4, 1), date(2025, 12, 31)), [{**prior[0], "status": "PREPARED"}])
-    assert unfiled["action"] == "FILE"
+    assert unfiled["action"] == "RESOLVE" and "case #7 (PREPARED)" in unfiled["message"]
+    cancelled = ird.ir56b_suppression("2025/26", (date(2025, 4, 1), date(2025, 12, 31)), [{**prior[0], "status": "CANCELLED"}])
+    assert cancelled["action"] == "FILE"
 
 
 def test_ir56g_not_required_for_frequent_travellers_or_short_absence(db, packs):
@@ -1033,14 +1039,19 @@ def test_wage_payment_timing_uses_the_pack_row_and_the_termination_rule(db, pack
     assert (on_time["daysAllowed"], on_time["latestPaymentDate"], on_time["onTime"]) == (7, "2026-06-07", True)
     late = pf.wage_payment_timing(date(2026, 6, 8), pe, rate_map)
     assert (late["latestPaymentDate"], late["daysUsed"], late["onTime"]) == ("2026-06-07", 8, False)
-    leaving = pf.wage_payment_timing(date(2026, 6, 30), pe, rate_map, date(2026, 6, 30))
-    assert leaving["terminationTriggered"] and leaving["terminationImmediateDue"]
+    # Final period (D-B, Concise Guide ch.9): termination payments within the pack's
+    # eo_termination_payment_days after the termination date, not "immediately".
+    leaving = pf.wage_payment_timing(date(2026, 5, 31), pe, rate_map, date(2026, 5, 26))
+    assert leaving["terminationTriggered"] and (leaving["latestPaymentDate"], leaving["onTime"]) == ("2026-06-02", True)
+    assert leaving["source"]["componentKey"] == "eo_termination_payment_days"
+    later = pf.wage_payment_timing(date(2026, 6, 7), pe, rate_map, date(2026, 6, 30))   # leaves after this period
+    assert not later["terminationTriggered"] and later["latestPaymentDate"] == "2026-06-07"
     # The source is the pack row, so the disclosure names the artifact.
     assert on_time["source"]["componentKey"] == "eo_wage_payment_days"
     assert on_time["source"]["sourceDocumentId"]
 
 
-def test_wage_payment_late_blocks_and_a_leaver_requires_immediate_payment(db, packs):
+def test_wage_payment_late_blocks_and_a_late_final_payment_blocks(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong import preflight as pf
 
     rate_map, _slabs, _pack = _inputs(db, date(2026, 6, 30))
@@ -1049,9 +1060,11 @@ def test_wage_payment_late_blocks_and_a_leaver_requires_immediate_payment(db, pa
     assert "2026-06-07" in late[0]["message"]
     ok = pf.wage_payment_checks(_emp(), date(2026, 6, 5), date(2026, 5, 31), rate_map)
     assert [c["code"] for c in ok] == ["EO_WAGE_PAYMENT_TIMING"] and ok[0]["severity"] == pf.INFO
-    leaver = pf.wage_payment_checks(_emp(), date(2026, 6, 5), date(2026, 5, 31), rate_map, date(2026, 6, 4))
-    assert [c["code"] for c in leaver] == ["EO_TERMINATION_WAGES_DUE_IMMEDIATELY"]
-    assert leaver[0]["severity"] == pf.BLOCK
+    leaver = pf.wage_payment_checks(_emp(), date(2026, 6, 5), date(2026, 5, 31), rate_map, date(2026, 5, 20))
+    assert [c["code"] for c in leaver] == ["EO_TERMINATION_PAYMENT_LATE"]          # due by 27 May
+    assert leaver[0]["severity"] == pf.BLOCK and "2026-05-27" in leaver[0]["action"]
+    on_time = pf.wage_payment_checks(_emp(), date(2026, 5, 31), date(2026, 5, 31), rate_map, date(2026, 5, 28))
+    assert [c["code"] for c in on_time] == ["EO_TERMINATION_PAYMENT_TIMING"] and on_time[0]["severity"] == pf.INFO
 
 
 def test_preflight_missing_hkid_blocks_but_a_passport_is_enough():

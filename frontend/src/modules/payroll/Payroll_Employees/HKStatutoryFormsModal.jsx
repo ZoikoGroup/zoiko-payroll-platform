@@ -89,7 +89,10 @@ export default function HKStatutoryFormsModal({ employee, onClose }) {
     averageWageSnapshotId: snapshot?.id, date: ent.date || undefined,
     days: ent.days || undefined, sicknessDays: ent.sicknessDays ? Number(ent.sicknessDays) : undefined,
     consecutiveDays: ent.sicknessDays ? Number(ent.sicknessDays) : undefined,
-    medicallyCertified: ent.medicallyCertified, noticeGiven: ent.noticeGiven, documentProvided: ent.documentProvided,
+    medicallyCertified: ent.medicallyCertified, noticeGiven: ent.noticeGiven,
+    documentProvided: Boolean(ent.documentProvidedOn),
+    expectedDeliveryDate: ent.expectedDeliveryDate || undefined, actualDeliveryDate: ent.actualDeliveryDate || undefined,
+    documentProvidedOn: ent.documentProvidedOn || undefined,
   });
 
   return (
@@ -170,7 +173,11 @@ export default function HKStatutoryFormsModal({ employee, onClose }) {
                   <label className="flex items-center gap-2 text-[12px]"><input type="checkbox" checked={ent.noticeGiven} onChange={(e) => setEnt({ ...ent, noticeGiven: e.target.checked })} /> Notice of pregnancy given</label>
                 )}
                 {aw.benefitType === "PATERNITY_LEAVE_PAY" && (
-                  <label className="flex items-center gap-2 text-[12px]"><input type="checkbox" checked={ent.documentProvided} onChange={(e) => setEnt({ ...ent, documentProvided: e.target.checked })} /> Birth document provided</label>
+                  <>
+                    <Field id="hk-e-edd" text="Expected date of delivery"><input id="hk-e-edd" type="date" className={input} value={ent.expectedDeliveryDate || ""} onChange={(e) => setEnt({ ...ent, expectedDeliveryDate: e.target.value })} /></Field>
+                    <Field id="hk-e-add" text="Actual date of delivery"><input id="hk-e-add" type="date" className={input} value={ent.actualDeliveryDate || ""} onChange={(e) => setEnt({ ...ent, actualDeliveryDate: e.target.value })} /></Field>
+                    <Field id="hk-e-doc" text="Birth document provided on"><input id="hk-e-doc" type="date" className={input} value={ent.documentProvidedOn || ""} onChange={(e) => setEnt({ ...ent, documentProvidedOn: e.target.value })} /></Field>
+                  </>
                 )}
                 <div className="flex items-end"><button type="button" className={btn} onClick={async () => setEntOut(await run(() => calculateHkEntitlement(employee.id, { benefit: aw.benefitType, ...entPayload() })))}>Calculate entitlement</button></div>
               </div>
@@ -234,7 +241,7 @@ export default function HKStatutoryFormsModal({ employee, onClose }) {
           <section className={card} aria-labelledby="hk-ird">
             <div className="flex items-center justify-between">
               <h3 id="hk-ird" className={h}>IRD notifications and tax clearance</h3>
-              <button type="button" className={btn} onClick={async () => { if (await run(() => createHkIrdEventCases(employee.id), "IR56 cases created where an event is due.")) loadCases(); }}>
+              <button type="button" className={btn} onClick={async () => { const out = await run(() => createHkIrdEventCases(employee.id), "IR56 cases created where an event is due."); if (out) { const controls = out?.data?.controls || out?.controls || []; loadCases(); if (controls.length) setNotice(`IR56 cases checked. ${controls.map((c) => c.message).join(" ")}`); } }}>
                 Create due IR56 cases
               </button>
             </div>

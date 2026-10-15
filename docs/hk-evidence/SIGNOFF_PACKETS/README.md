@@ -33,11 +33,11 @@ deploy (HK_DEPLOY_RUNBOOK) ─> 09 A uploads drafts
 ## Packets
 
 * `01_HK_specialist.md` — SHA-256 `146c2b3dba0e47684ec4322dc3f7c1136d3da451a094f25408aad9f17554ef35`
-* `02_QA_lead_G4.md` — SHA-256 `639ccc71993385677d02fd1846de358d62a5f1e9cd903153702f5805e930c907`
-* `03_Security_lead_G5.md` — SHA-256 `bf8fa26298e9046f1581a875139fb41f45c9d002175a47e3914e657d30f67587`
-* `04_Legal_counsel_retention.md` — SHA-256 `c2812c0964c0ee472569f6f37530de9b831cc127ac3913a80fd36c50f2219e37`
-* `05_Payroll_Ops_G6.md` — SHA-256 `1fd94785e0e1082571c5c7b1b905f98b38173f72413e583e0ae9c1d8f5257edd`
+* `02_QA_lead_G4.md` — SHA-256 `239c19df7ce31fa46b9e228358d5bee00e71cfb3b4dfcbf356c734d9ea34e91d`
+* `03_Security_lead_G5.md` — SHA-256 `542949bdc7d02823ce94ab64d0abb964cb71fb57b5afe2644967b8fa9d346318`
+* `04_Legal_counsel_retention.md` — SHA-256 `4172eacf6477822d3512d1c1547a43e289f3a100eda0d69f3933b815c27c4b4b`
+* `05_Payroll_Ops_G6.md` — SHA-256 `9043f63defc7cdde11f0b8fdaecec4beacade28336ede31dca0414609a1c118c`
 * `06_Owner_D1_to_D14.md` — SHA-256 `3d4bd70db81ad62550756e1bd8dbc046512196d551c599b0d32d4eb51eb69a22`
-* `07_Engineering_G2_G3_plan.md` — SHA-256 `97f4583d879b901d548ea81e471e4337ce65cf47d71923be78261eee6a1b82a9`
-* `08_G7_launch_signers.md` — SHA-256 `77839498290b1b8886f95859737f261d91fa1d0e58653e8fb59dd084874c1891`
-* `09_SuperAdmin_upload_and_review.md` — SHA-256 `fb4c794e5bd81fdcce196be9c9be418c07e05cb8a1cd48b6a4e1a3e97f9f9868`
+* `07_Engineering_G2_G3_plan.md` — SHA-256 `3a0964bc4cf648d0a14877425691bd849dd5a4c4be5eee1ea46e0a0f2803bc39`
+* `08_G7_launch_signers.md` — SHA-256 `de7cff9ce6f6f8adce7abbb915416c41b70a30d8ab583f38404763505355bbd3`
+* `09_SuperAdmin_upload_and_review.md` — SHA-256 `8833ca945dee2703c8ef0e168dafa5ec20971d11eae7b9fd4bfe335a22f1715c`

@@ -15,7 +15,7 @@
 Then run the G2 test plan. Engineering also has three builds to schedule:
 * build the eMPF submission builder (BLOCKERS B-28). It must take rows only from `hong_kong_service.empf_filing_view`; a test enforces this;
 * implement Security's choices for F-4, F-5 and F-6 (draft patches in `../ops/patches/`);
-* apply or drop `../ops/patches/migration_lock_safety.patch`, per the pre-deploy row count.
+* if the pre-deploy row count is very large, write a new lock-safe migration (the old lock-safety patch is OBSOLETE).
 
 ### G3: two parallel cycles
 
@@ -46,7 +46,7 @@ No G2 or G3 result exists yet. Every test in the G2 plan is marked PENDING, and 
 * `../G2/hk_authority_document_register.md` — SHA-256 `0e3979e59807b62082357558d029b7ba1e744c793a84af03a39299c0ddaa428c`
 * `../G2/authority_documents.csv` — SHA-256 `4b4cf0ce54a6fda93865b9bc934f900911c4432b10f1fed7fbb07da77743bb2e`
 * `../G3/G3_parallel_payroll_reconciliation.md` — SHA-256 `991df30c3d932ccc1980472dfd739448effa801945fdd56fbb7a546bd72ff291`
-* `../BLOCKERS.md` — SHA-256 `b405eeb6339be0d543da44c48a3e3b5788d32c137a6589dca1ceb6e69a0d2675`
+* `../BLOCKERS.md` — SHA-256 `213f1e43aee57c219dee25fff6e705d96d4ab1a255cc9b49177e5d77a011be9d`
 
 ## Sign-off (plan agreed; results are signed in the G2 / G3 evidence later)
 

@@ -38,7 +38,8 @@ def test_every_hk_configuration_row_is_governed_documented_sourced_consumed_and_
         for domain in out["domains"]:
             for r in domain["rows"]:
                 where = f"{pack.pack_id}:{r['key']}:{r['label']}"
-                if r["key"] != "HK_EARNING_CLASS" and documented and r["key"] not in documented:
+                # Earning-code rows are documented in the catalogue itself (code, mapping, source, question).
+                if r["key"] not in ("HK_EARNING_CLASS", "HK_EARNING_CODE", "HK_EARNING_SOURCE") and documented                         and r["key"] not in documented:
                     failures.append(("undocumented", where))
                 if not r["source"]:
                     failures.append(("no source artifact", where))

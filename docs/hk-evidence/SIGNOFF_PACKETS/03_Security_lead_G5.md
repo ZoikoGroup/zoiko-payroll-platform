@@ -4,7 +4,7 @@
 
 ## What you need to do
 
-Choose an option for each finding below (or write your own), then sign. Engineering implements the choices. F-4 and F-5 / F-6 already have draft code saved as patch files for your review, **not applied**: `../ops/patches/`.
+Choose an option for each finding below (or write your own), then sign. **Since 2026-10-14 the recommended options for F-4, F-5, F-6 and F-11 are implemented on `nikhil`** (commits `3bf0634` and `4c45af9`, not yet deployed). Your sign-off confirms or reverses them.
 
 | Finding | Problem in one line | Options | Engineering recommendation | Your choice |
 |---|---|---|---|---|
@@ -14,6 +14,7 @@ Choose an option for each finding below (or write your own), then sign. Engineer
 | **F-6** | Audit rows can be changed by anyone with database write access | A: a database trigger rejects UPDATE / DELETE, with purges only through a retention function · B: revoke grants · C: hash chain | A now, C later | |
 | **F-10** | Local test runs sent real email through the company SMTP account (one confirmed notice to `hkadmin@zoikotest.dev`) | Engineering fixed: test and local modes never deliver. **Open:** pull the mail sent log, check who owns `zoikotest.dev`, decide on notification, remove real credentials from local `.env` files and rotate the password | Follow the checklist in the incident note §6 | |
 | **F-11** | The assisted-access audit can store a first `token=` query parameter unredacted | apply the one-line fix (in the F-4 patch) on its own or with F-4 | apply now | |
+| **F-6 purge rule** (OPEN) | Organisation hard-delete still purges that organisation's configuration and login audit rows, as before, behind the setting `AUDIT_PURGE_ON_ORG_HARD_DELETE` (default true) | keep true (audit rows of a deleted tenant are purged) / set false (hard-delete is refused while audit rows exist; offboarding then needs a retention-based purge) | none: a policy decision with counsel (packet 04) | |
 | **D-5** | Production `HK_IDENTITY_TOKEN_KEY` | provision a separate secret / keep the derived key | Provision a separate secret before launch | |
 | **D-10** | Who may grant privileged (assisted) access, and for how long | per Security | Keep the time-boxed module: tenant consent, plus second-Super-Admin break-glass with tenant notice | |
 
@@ -29,7 +30,7 @@ About 2–3 hours to read and decide. F-10 needs the mail administrator for abou
 
 ## Evidence
 
-* `../G5/G5_security_privacy_assessment.md` — SHA-256 `9b770fc855d5827002647ba0332ce62d14300d3ad8d675fb82b1c62db8453d05`
+* `../G5/G5_security_privacy_assessment.md` — SHA-256 `c6b272d9af62d71d8d4ec577a82a76def25ae498396531a7ea1e7b7561dade9f`
 * `../G5/G5_privileged_access_test_run_output.txt` — SHA-256 `9d490ef04f42d43d7e0d31328d3f77e62b35bcdfde9683d6e024d13d4d1ee388`
 * `../ops/DESIGN_F4_privileged_access_audit_fail_closed.md` — SHA-256 `404cc0820440015bf6a5f034e9168e75d334d38733627460a07d3676622e2cf1`
 * `../ops/DESIGN_F5_F6_login_audit_and_immutable_audit_rows.md` — SHA-256 `519f09f630e74415cf6ee9fb3d23e85f6d6232f8174dc8facfc264d37e78582e`

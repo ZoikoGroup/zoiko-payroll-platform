@@ -130,7 +130,7 @@ def run_revoked_token_cleanup_sweep(db: Session) -> dict:
     return {"deleted": deleted}
 
 
-def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = None) -> None:
+def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = None, *, user=None, request=None) -> None:
     """Revokes the access token that authenticated this request, and the
     refresh token too if the caller sends one (frontend's choice -- a
     refresh token that's never presented here simply expires naturally
@@ -143,6 +143,10 @@ def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = N
         refresh_payload = decode_refresh_token(refresh_token)
         if refresh_payload and refresh_payload.get("jti"):
             revoke_token(db, refresh_payload["jti"], datetime.utcfromtimestamp(refresh_payload["exp"]))
+
+    from app.modules.auth import audit as auth_audit
+
+    auth_audit.record(db, auth_audit.LOGOUT, user=user, request=request)
 
 
 # ── Action tokens (invite / password reset) ────────────────────────────────
@@ -568,6 +572,10 @@ def complete_action_token(db: Session, raw_token: str, purpose, new_password: st
         user.is_verified = True
     db.commit()
     db.refresh(user)
+    from app.modules.auth import audit as auth_audit
+
+    auth_audit.record(db, auth_audit.PASSWORD_RESET if purpose == SecurityActionPurpose.RESET
+                      else auth_audit.INVITATION_ACCEPTED, user=user)
     logger.info(
         "identity_audit event=%s recipient=%s user_id=%s",
         "identity.password_reset_completed" if purpose == SecurityActionPurpose.RESET
@@ -596,20 +604,30 @@ def complete_action_token(db: Session, raw_token: str, purpose, new_password: st
 
 # ── Login ───────────────────────────────────────────────────────────────────
 
-def login_user(db: Session, email: str, password: str) -> dict:
+def login_user(db: Session, email: str, password: str, request=None) -> dict:
+    from app.modules.auth import audit as auth_audit
+
     user = db.query(User).filter(User.email == email).first()
-    if user is None or not verify_password(password, user.hashed_password):
+    if user is None:
+        auth_audit.record(db, auth_audit.LOGIN_FAILED, email=email, request=request, reason="UNKNOWN_EMAIL")
+        raise UnauthorizedException("Invalid email or password.")
+    if not verify_password(password, user.hashed_password):
+        auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request, reason="BAD_PASSWORD")
         raise UnauthorizedException("Invalid email or password.")
 
     if user.organization_id:
         org = db.query(Organization).filter(Organization.id == user.organization_id).first()
         if org is not None and not org.is_active:
+            auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request, reason="ORGANIZATION_SUSPENDED")
             raise UnauthorizedException(
                 "Your organization has been suspended. Please contact support."
             )
 
     if not user.is_active:
+        auth_audit.record(db, auth_audit.ACCOUNT_INACTIVE, user=user, request=request, reason="ACCOUNT_DEACTIVATED")
         raise UnauthorizedException("Your account has been deactivated.")
+
+    auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
 
     token_payload = {
         "sub": user.email,
@@ -629,21 +647,27 @@ def login_user(db: Session, email: str, password: str) -> dict:
     }
 
 
-def refresh_user_token(db: Session, refresh_token: str) -> dict:
+def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
     from app.core.security import decode_refresh_token
+    from app.modules.auth import audit as auth_audit
 
     payload = decode_refresh_token(refresh_token)
     if payload is None:
+        auth_audit.record(db, auth_audit.REFRESH_FAILED, request=request, reason="INVALID_TOKEN")
         raise UnauthorizedException("Invalid or expired refresh token.")
 
     user = db.query(User).filter(User.id == payload.get("user_id")).first()
     if user is None or not user.is_active:
+        auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="USER_MISSING_OR_INACTIVE")
         raise UnauthorizedException("User not found or inactive.")
 
     if user.organization_id:
         org = db.query(Organization).filter(Organization.id == user.organization_id).first()
         if org is not None and not org.is_active:
+            auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="ORGANIZATION_SUSPENDED")
             raise UnauthorizedException("Your organization has been suspended.")
+
+    auth_audit.record(db, auth_audit.REFRESH, user=user, request=request, required=True)
 
     new_access = create_access_token(data={
         "sub": user.email,

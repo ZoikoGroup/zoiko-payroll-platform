@@ -128,6 +128,17 @@ class HkServiceRegistryTransition(BaseModel):
     reason: str
 
 
+class HkCatalogueRowSplit(BaseModel):
+    """Effective-dated change of one HK earning-code catalogue row (HK-006): reason + source required."""
+    model_config = ConfigDict(extra="forbid")
+    reason: str
+    sourceDocumentId: int
+    effectiveFrom: str
+    treatment: Optional[str] = None
+    irdField: Optional[str] = None
+    code: Optional[str] = None
+
+
 class HkConfigRowUpdate(BaseModel):
     """Governed edit of one HK statutory row: a reason and a source document are required."""
     model_config = ConfigDict(extra="forbid")
@@ -143,6 +154,8 @@ class HkConfigRowUpdate(BaseModel):
     taxFormula: Optional[str] = None
     effectiveFrom: Optional[str] = None
     effectiveTo: Optional[str] = None
+    # HK earning-code catalogue rows only: the treatment the specialist's answer sets.
+    treatment: Optional[str] = None
     # Records the HK specialist's (G1) confirmation of a value seeded "[G1]";
     # accepted only with a stored, hashed, independently reviewed source.
     specialistVerified: Optional[bool] = None

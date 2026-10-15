@@ -1,4 +1,4 @@
-import { Calculator, ClipboardList, FileCheck2, FileText, Gauge, Landmark, Lock, Settings2, ShieldCheck, ToggleRight } from "lucide-react";
+import { Calculator, ClipboardList, Coins, FileCheck2, FileText, Gauge, Landmark, Lock, Settings2, ShieldCheck, ToggleRight } from "lucide-react";
 import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 import TestCertificationPanel from "../../components/jurisdiction/TestCertificationPanel";
@@ -7,6 +7,7 @@ import HKStatutorySummaryTab from "../../components/jurisdiction/hong_kong/HKSta
 import HKCalculationPreviewTab from "../../components/jurisdiction/hong_kong/HKCalculationPreviewTab";
 import HKGovernanceTab from "../../components/jurisdiction/hong_kong/HKGovernanceTab";
 import HKStatutoryConfigurationTab from "../../components/jurisdiction/hong_kong/HKStatutoryConfigurationTab";
+import HKEarningCodesTab from "../../components/jurisdiction/hong_kong/HKEarningCodesTab";
 import { HKIrdEmpfControlTab, HKReadinessCenterTab, HKRetentionTab } from "../../components/jurisdiction/hong_kong/HKControlTabs";
 
 // Hong Kong (ZP-HK-ENG-001) — a thin wrapper over the shared
@@ -36,7 +37,9 @@ const hkComplianceConfig = {
       render: () => <HKStatutorySummaryTab /> },
     { key: "hk-config", label: "Statutory Configuration", icon: Settings2, after: "hk-summary", isVisible: isTax,
       render: () => <HKStatutoryConfigurationTab /> },
-    { key: "hk-governance", label: "Activation & Governance", icon: ToggleRight, after: "hk-config", isVisible: isTax,
+    { key: "hk-earning-codes", label: "Earning Codes", icon: Coins, after: "hk-config", isVisible: isTax,
+      render: () => <HKEarningCodesTab /> },
+    { key: "hk-governance", label: "Activation & Governance", icon: ToggleRight, after: "hk-earning-codes", isVisible: isTax,
       render: () => <HKGovernanceTab /> },
     { key: "hk-evidence", label: "Source Evidence", icon: FileCheck2, after: "hk-governance", isVisible: isTax,
       render: () => <SourceEvidencePanel /> },

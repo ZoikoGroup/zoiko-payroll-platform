@@ -112,7 +112,7 @@ def _action_form_page(title: str, token: str, action_path: str) -> HTMLResponse:
 @router.post("/login", response_model=TokenResponse, summary="Login and get access token")
 @limiter.limit("10/minute")
 def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
-    return service.login_user(db, data.email, data.password)
+    return service.login_user(db, data.email, data.password, request=request)
 
 
 @router.post("/register", response_model=TokenResponse, summary="Register a new organization")
@@ -128,8 +128,8 @@ def register_trial(request: Request, data: TrialRegisterRequest, background_task
 
 
 @router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
-def refresh_token(data: RefreshRequest, db: Session = Depends(get_db)):
-    return service.refresh_user_token(db, data.refresh_token)
+def refresh_token(request: Request, data: RefreshRequest, db: Session = Depends(get_db)):
+    return service.refresh_user_token(db, data.refresh_token, request=request)
 
 
 @router.get("/me", response_model=UserResponse, summary="Get current logged-in user")
@@ -151,12 +151,13 @@ def get_me_trial_status(
 
 @router.post("/logout", response_model=SuccessResponse, summary="Logout")
 def logout(
+    request: Request,
     data: LogoutRequest = None,
     token: str = Depends(oauth2_scheme),
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    service.logout_user(db, token, data.refresh_token if data else None)
+    service.logout_user(db, token, data.refresh_token if data else None, user=current_user, request=request)
     logger.info("User %s logged out", current_user.email)
     return {"message": "Logged out successfully."}
 

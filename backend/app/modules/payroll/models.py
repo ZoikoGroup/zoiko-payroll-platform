@@ -866,6 +866,10 @@ class EmployeeStatutoryProfile(Base):
     hk_employment_continuity_start   = Column(Date, nullable=True)
     hk_pay_basis                     = Column(String(20), nullable=True)   # MONTHLY | DAILY | HOURLY | PIECE
     hk_contractual_weekly_hours      = Column(Numeric(6, 2), nullable=True)
+    # Contract / agreement overtime rate per overtime hour (wireframe §4: no
+    # statutory overtime premium is invented). NULL = not recorded (overtime
+    # hours then block the run); 0 = the contract gives no overtime pay.
+    hk_contractual_overtime_hourly_rate = Column(Numeric(10, 2), nullable=True)
     hk_likely_chargeable             = Column(Boolean, nullable=True)      # likely chargeable to Salaries Tax (IR56E trigger)
     hk_arrival_date                  = Column(Date, nullable=True)
     hk_expected_departure_date       = Column(Date, nullable=True)         # leaving HK for > 1 month (IR56G trigger)
@@ -7176,6 +7180,9 @@ class HongKongWorkHours(Base):
     employee_id      = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
     work_date        = Column(Date, nullable=False)
     hours            = Column(Numeric(6, 2), nullable=False)
+    # Part of `hours` that is overtime under the contract (§4/§10): still hours
+    # worked for SMW and continuous contract; paid at the contractual rate.
+    overtime_hours   = Column(Numeric(6, 2), nullable=True)
     source           = Column(String(30), nullable=False)       # TIME_ATTENDANCE | VERIFIED_TIMESHEET | MANUAL_VERIFIED
     evidence_ref     = Column(String(200), nullable=True)
     superseded_by_id = Column(Integer, ForeignKey("payroll_hk_work_hours.id"), nullable=True)
@@ -7364,6 +7371,29 @@ class HongKongAverageWageSnapshot(Base):
     override_approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at               = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HongKongPreTransitionWageOverride(Base):
+    """Controlled correction of an employee's frozen pre-1-May-2025 wage
+    (HK-017, gap audit D-C). The frozen value on the statutory profile can never
+    change; when it was never recorded or is shown to be wrong, a different
+    value is used ONLY through this record: requested with a reason and
+    evidence, approved by a different user (four-eyes), audited. A wage typed
+    at termination is never accepted."""
+    __tablename__ = "payroll_hk_pre_transition_wage_overrides"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    monthly_wage    = Column(Numeric(12, 2), nullable=False)
+    wage_basis      = Column(String(30), nullable=False)       # LAST_FULL_MONTH | TWELVE_MONTH_AVERAGE
+    reason          = Column(Text, nullable=False)
+    evidence_ref    = Column(String(200), nullable=False)
+    status          = Column(String(20), nullable=False, default="REQUESTED", server_default="REQUESTED")  # REQUESTED | APPROVED | SUPERSEDED
+    requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class HongKongTerminationResult(Base):

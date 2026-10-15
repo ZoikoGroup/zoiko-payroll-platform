@@ -9,9 +9,12 @@ request (method/path/status) that was made under the session. This is the
 single chokepoint that makes "nobody can claim they didn't know what the
 session touched" structurally true: it needs no per-endpoint cooperation.
 
-Implemented as a FastAPI middleware (see main.py). Failure to audit must
-never break the underlying request, so everything here is best-effort and
-swallows its own exceptions.
+Implemented as a FastAPI middleware (see main.py). This post-response row is
+the completion record; the request already ran, so a failure here cannot undo
+it and is logged. Since G5 F-4 the request is preceded by an
+ORG_API_CALL_STARTED row (core/dependencies.py, fail closed); this row carries
+its id as `intent_id`, and a start without a completion raises a Super Admin
+security alert (assisted_access.service.assisted_audit_gap_alerts).
 """
 
 import logging
@@ -22,7 +25,14 @@ from app.core.security import decode_assisted_access_token
 logger = logging.getLogger("zoiko_payroll.assisted_access.audit")
 
 # Never scribe security tokens that may appear in a query string.
-_REDACT_RE = re.compile(r"(?i)([?&](?:token|code)=)[^&\s\"']+")
+# Anchored at the start too: request.url.query carries no leading "?", so the
+# old [?&]-only pattern left a first `token=` parameter unredacted (found by the
+# F-4 tests).
+_REDACT_RE = re.compile(r"(?i)((?:^|[?&])(?:token|code)=)[^&\s\"']+")
+
+
+def redact(value: str) -> str:
+    return _REDACT_RE.sub(r"[REDACTED]", value or "")
 
 
 def record_request_if_assisted(request, status_code: int) -> None:
@@ -50,7 +60,8 @@ def record_request_if_assisted(request, status_code: int) -> None:
     db = SessionLocal()
     try:
         session = db.query(AssistedAccessSession).filter(AssistedAccessSession.id == session_id).first()
-        if session is None or session.ended_at is not None:
+        intent_id = getattr(getattr(request, "state", None), "assisted_intent_id", None)
+        if session is None or (session.ended_at is not None and not intent_id):
             return
 
         path = _REDACT_RE.sub(r"\1[REDACTED]", request.url.path)
@@ -65,6 +76,7 @@ def record_request_if_assisted(request, status_code: int) -> None:
             payload={
                 "query": _REDACT_RE.sub(r"\1[REDACTED]", request.url.query),
                 "assisting": True,
+                "intent_id": intent_id,
             },
         ))
         db.commit()

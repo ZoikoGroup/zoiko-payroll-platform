@@ -9410,7 +9410,13 @@ def hard_delete_jurisdiction_pack(db: Session, pack_row_id: int) -> dict:
         {"previous_version_id": None}, synchronize_session=False,
     )
 
-    db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.jurisdiction_pack_id == pack.id).delete()
+    # G5 F-6: audit rows are append-only; deleting a never-used pack purges its
+    # own audit rows only inside an explicit, logged purge scope (same open
+    # Security / counsel decision as the organisation hard-delete).
+    from app.core.audit_immutability import audit_purge_scope
+
+    with audit_purge_scope(db, f"jurisdiction pack hard-delete {pack.pack_id} v{pack.version} (id {pack.id})"):
+        db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.jurisdiction_pack_id == pack.id).delete()
     db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
     db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
 
@@ -20636,6 +20642,26 @@ def _sum_attendance_extras(db: Session, organization_id: int, employee_id: int,
     return _round2(total)
 
 
+def _hk_attendance_extras_by_kind(db: Session, organization_id: int, employee_id: int,
+                                  period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> dict:
+    """Hong Kong earning-code catalogue (gap audit STEP 3): the same attendance
+    extras _sum_attendance_extras folds into additional compensation, kept
+    apart by kind so each can be bound to its own HK earning code."""
+    if records is None:
+        records = db.query(PayrollAttendanceRecord).filter(
+            PayrollAttendanceRecord.organization_id == organization_id,
+            PayrollAttendanceRecord.employee_id == employee_id,
+            PayrollAttendanceRecord.date >= period_start,
+            PayrollAttendanceRecord.date <= period_end,
+        ).all()
+    out = {}
+    for kind in ("rewards", "bonus", "other_compensation"):
+        total = sum((Decimal(str(getattr(r, kind) or 0)) for r in records), Decimal("0"))
+        if total:
+            out[f"attendance:{kind}"] = _round2(total)
+    return out
+
+
 def _sum_attendance_bonus_only(db: Session, organization_id: int, employee_id: int,
                                 period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> Decimal:
     """Phase 8T — Germany SONSTB routing (ZP-TAX-DE-2026-001 §15 "Bonus /
@@ -22289,6 +22315,14 @@ def _sg_employment_inputs(db: Session, organization_id: int, employee, period_st
                                      "employmentClass": cf.get("employment_class"),
                                      # MOM part-time LQS: monthly gross ÷ total hours worked in the month.
                                      "hoursWorked": hours_worked}}
+
+
+def _hk_left_before_period(db: Session, organization_id: int, employee, period_start) -> bool:
+    """A Hong Kong employee whose employment ended before the wage period has
+    nothing payable in it (gap audit D-J) — shared by the run's selection and
+    the HK preflight so the two can never disagree."""
+    return bool(period_start and employee.date_of_leaving and employee.date_of_leaving < period_start
+                and _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None)) == "HK")
 
 
 def _sg_mid_period_joiners(db: Session, organization_id: int, period_start, period_end, employee_ids=None) -> list:
@@ -24946,6 +24980,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             facts["statutoryFactsApplied"] = {k: v for k, v in sg_month_facts.items()}
         if sg_fact_block:
             facts["statutoryChangeBlock"] = sg_fact_block
+    hk_overtime_facts = None
+    if country == "HK" and is_active:
+        # Gap audit D-A: contractual overtime (wireframe §4 / §10) — verified
+        # overtime hours x the profile's contractual rate; no statutory premium.
+        from app.modules.payroll import hong_kong_service as _hk_service
+
+        overtime, hk_overtime_facts = _hk_service.overtime_pay(
+            db, employee, run.period_start or run.pay_date.replace(day=1), run.period_end or run.pay_date)
     additional_compensation = (
         _sum_attendance_extras(db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records)
         if is_active else Decimal("0")
@@ -25098,6 +25140,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         if hk_post_leaving_days:
             hk_inputs["hk_worker_facts"]["postLeavingUnpaidDays"] = hk_post_leaving_days
             hk_inputs["hk_worker_facts"]["finalPeriodTerminationDate"] = hk_termination_date.isoformat()
+        if hk_overtime_facts is not None:
+            hk_inputs["hk_worker_facts"]["overtime"] = hk_overtime_facts
+        # Earning-code catalogue (gap audit STEP 3): named allowances by key and
+        # attendance extras by kind, so each binds to its own HK earning code.
+        hk_sources = {f"allowance:{i['key']}": i["amount"] for i in allowance_items if i["amount"]}
+        if is_active:
+            hk_sources.update(_hk_attendance_extras_by_kind(
+                db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records))
+        hk_inputs["hk_earning_sources"] = {k: str(v) for k, v in hk_sources.items()}
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,
@@ -26442,6 +26493,12 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
         )
     )
     employees = employees_query.all()
+    # Hong Kong (gap audit D-J): employment that ended BEFORE this wage period
+    # earns nothing in it — the final wage period is the one containing the
+    # termination date (wireframe §11 S11-1; Concise Guide ch.9), where the
+    # days after termination are already unpaid. Selecting by status alone paid
+    # a still-ACTIVE leaver a full month after leaving.
+    employees = [e for e in employees if not _hk_left_before_period(db, organization_id, e, run.period_start)]
     # Singapore joiners within the period (incomplete-month salary) — SG only.
     employees += _sg_mid_period_joiners(db, organization_id, run.period_start, run.period_end, employee_ids)
 

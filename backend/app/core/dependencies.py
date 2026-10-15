@@ -22,13 +22,13 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.core.security import decode_access_token, decode_assisted_access_token
-from app.core.exceptions import ForbiddenException, UnauthorizedException
+from app.core.exceptions import ForbiddenException, UnauthorizedException, ZoikoException
 
 # Tokens are issued by this platform only (see core/security.py).
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -102,7 +102,7 @@ def role_value(user) -> str:
     return _role_value(user)
 
 
-def _resolve_assisted_principal(token: str, db: Session):
+def _resolve_assisted_principal(token: str, db: Session, request: Optional[Request] = None):
     """Validate a SafeGuard assisted-access token and build its principal.
 
     Every gate that matters lives here, not in the endpoint that happens to
@@ -140,6 +140,9 @@ def _resolve_assisted_principal(token: str, db: Session):
     if sa is None or not sa.is_active:
         raise UnauthorizedException("The requesting Super Admin is no longer active.")
 
+    if request is not None:
+        _record_assisted_intent(db, session, request)
+
     return AssistedAccessPrincipal(
         id=sa.id,
         email=sa.email,
@@ -150,6 +153,46 @@ def _resolve_assisted_principal(token: str, db: Session):
         organization_id=session.organization_id,
         assisted_access_session=session,
     )
+
+
+def _record_assisted_intent(db: Session, session, request: Request) -> None:
+    """G5 F-4 (fail closed): before any endpoint runs under an assisted-access
+    token, commit an ORG_API_CALL_STARTED audit row on its own session. If it
+    cannot be written, the request is refused (503) — no assisted action
+    happens without an audit record. The post-response ORG_API_CALL row
+    (assisted_access/audit.py) carries this row's id as `intent_id`; a start
+    with no completion raises a Super Admin security alert."""
+    import logging
+
+    from sqlalchemy.orm import Session as _Session
+
+    from app.modules.assisted_access.audit import redact
+    from app.modules.assisted_access.models import AssistedAccessAuditEvent
+
+    if getattr(request.state, "assisted_intent_id", None):
+        return  # already recorded for this request
+    audit_db = _Session(bind=db.get_bind())
+    try:
+        event = AssistedAccessAuditEvent(
+            assisted_access_session_id=session.id,
+            organization_id=session.organization_id,
+            actor_user_id=session.requested_by_user_id,
+            event_type="ORG_API_CALL_STARTED",
+            method=request.method,
+            path=redact(request.url.path)[:300],
+            payload={"query": redact(request.url.query), "assisting": True},
+        )
+        audit_db.add(event)
+        audit_db.commit()
+        request.state.assisted_intent_id = event.id
+    except Exception:  # noqa: BLE001
+        audit_db.rollback()
+        logging.getLogger("zoiko_payroll.assisted_access.audit").exception(
+            "[assisted-access] intent audit write failed - request refused (F-4 fail closed)")
+        raise ZoikoException(503, "ASSISTED_AUDIT_UNAVAILABLE",
+                             "Assisted access is unavailable: the audit record could not be written. Nothing was changed.")
+    finally:
+        audit_db.close()
 
 
 def _resolve_access_user(db: Session, payload: dict):
@@ -220,6 +263,7 @@ def get_current_user(
 
 
 def get_current_org_scoped_principal(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
@@ -229,7 +273,7 @@ def get_current_org_scoped_principal(
     raw = decode_access_token(token)
     if raw is not None:
         return _resolve_access_user(db, raw)
-    return _resolve_assisted_principal(token, db)
+    return _resolve_assisted_principal(token, db, request)
 
 
 def get_current_super_admin(current_user=Depends(get_current_user)):

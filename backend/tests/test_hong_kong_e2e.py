@@ -257,7 +257,7 @@ def test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release(db, hk):
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
                                          identified_on=date(2026, 6, 26))          # 35 days ahead
     assert (hold.state, hold.filing_deadline) == ("DEPARTURE_IDENTIFIED", date(2026, 6, 30))
-    hold = hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 28), "IR56G-REF-1", MAKER.id)
+    hold = hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 28), "IR56G-REF-1", CHECKER.id, submission=INTERNAL_FILING)
     assert hold.state == "IR56G_FILED_HOLD_ACTIVE" and hold.statutory_hold_expiry == date(2026, 7, 28)
     june = _month(db, hk.org, 6)
     item = _item(db, june, hk.emp)
@@ -282,7 +282,7 @@ def test_bank_export_leaves_out_held_payslips(db, hk, monkeypatch):
 
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
                                          identified_on=date(2026, 6, 1))
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", CHECKER.id, submission=INTERNAL_FILING)
     june = _month(db, hk.org, 6)
     other = _employee(db, hk.org.id, "HK2", date_of_joining=date(2025, 1, 1))
     _profile(db, other, hk.org.id, "2025-01-01")
@@ -300,7 +300,7 @@ def test_changed_departure_keeps_holding_until_release(db, hk):
     from app.modules.payroll import hong_kong_service
 
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id, identified_on=date(2026, 6, 1))
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", CHECKER.id, submission=INTERNAL_FILING)
     _month(db, hk.org, 6)
     with pytest.raises(BadRequestException, match="evidence"):
         hong_kong_service.change_departure(db, hk.org.id, hold.id, "cancelled", None, MAKER.id)
@@ -517,7 +517,7 @@ def test_general_holiday_loader_records_the_source_digest_and_drives_the_empf_de
     out = loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)
     assert out["loaded"] == 1 and out["sha256"] == hashlib.sha256(b"TEST-ONLY archived list").hexdigest()
     art = db.get(SourceArtifact, out["sourceArtifactId"])
-    assert art.checksum_sha256 == out["sha256"] and "[UNVERIFIED" in art.title
+    assert art.checksum_sha256 == out["sha256"] and "pending specialist review (G1)" in art.title
     with pytest.raises(loader.LoadRefused, match="already holds 1"):
         loader.load_general_holidays(db, dates_csv_text=csv_ok, **kw)
     assert db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "hk_general_holiday_list").count() == 1
@@ -1001,7 +1001,7 @@ def test_preflight_blocks_a_late_run_and_a_leaver(db, hk):
     db.commit()
     out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 2, 28))
     assert out["status"] == "BLOCKED"
-    assert "EO_TERMINATION_WAGES_DUE_IMMEDIATELY" in {c["code"] for c in out["checks"]}
+    assert "EO_TERMINATION_PAYMENT_LATE" in {c["code"] for c in out["checks"]}   # left 20 Feb, paid 28 Feb (> 7 days)
 
 
 def test_preflight_dry_runs_an_uncalculated_run_and_reports_the_ir56g_hold(db, hk):
@@ -1034,7 +1034,7 @@ def test_hk_preflight_block_refuses_approval_until_it_is_resolved(db, hk):
 
     _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 2, 28))
     run = _month(db, hk.org, 2, status=PayrollStatus.REVIEW)
-    hk.emp.date_of_leaving = date(2026, 2, 20)      # EO: residual wages due immediately
+    hk.emp.date_of_leaving = date(2026, 2, 20)      # paid 28 Feb: more than 7 days after termination (ch.9)
     db.commit()
     with pytest.raises(HTTPException) as blocked:
         service.advance_payroll_run_status(db, run.id, MAKER.id, hk.org.id)
@@ -1127,7 +1127,7 @@ def test_audit_trail_for_profile_hold_and_filing(db, hk):
     from app.modules.payroll.models import TaxConfigurationAudit
 
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
-    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 8, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 8, 20), "REF", CHECKER.id, submission=INTERNAL_FILING)
     types = {a.entity_type for a in db.query(TaxConfigurationAudit).all()}
     assert {"employee_statutory_profile", "hk_tax_clearance_hold", "jurisdiction_pack"} <= types
 
@@ -1170,13 +1170,22 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
     # Tables added later by the launch-readiness migration are created there
     # under their final name (no hkg_ history to rename).
     readiness = (versions / "8b14824fb575_hk_launch_readiness_controls.py").read_text(encoding="utf8")
-    created_later = {"payroll_hk_contribution_day_disruptions"}
+    overrides = (versions / "f4b8d2a6c9e1_hk_pre_transition_wage_overrides.py").read_text(encoding="utf8")
+    created_later = {"payroll_hk_contribution_day_disruptions": readiness,
+                     "payroll_hk_pre_transition_wage_overrides": overrides}
+    # Columns added to existing tables by later, additive migrations.
+    overtime = (versions / "e3a9c1f7b2d4_hk_contractual_overtime.py").read_text(encoding="utf8")
+    added_later = {("payroll_employee_statutory_profiles", "hk_contractual_overtime_hourly_rate"): overtime,
+                   ("payroll_hk_work_hours", "overtime_hours"): overtime}
+    for (table_name, col_name), text in added_later.items():
+        assert col_name in Base.metadata.tables[table_name].columns, (table_name, col_name)
+        assert f'"{table_name}"' in text and f'"{col_name}"' in text, (table_name, col_name)
     checked = 0
     for name, table in Base.metadata.tables.items():
         if name in created_later:
-            assert f'"{name}"' in readiness, name
+            assert f'"{name}"' in created_later[name], name
             for col in table.columns:
-                assert f'"{col.name}"' in readiness, f"{name}.{col.name}"
+                assert f'"{col.name}"' in created_later[name], f"{name}.{col.name}"
             checked += 1
             continue
         if name.startswith("payroll_hk_") or name in shared:
@@ -1185,12 +1194,16 @@ def test_every_hk_table_and_column_is_created_by_the_migration():
             for col in table.columns:
                 if name in shared and col.name == "jurisdiction_country":
                     continue                                            # added by 2d0cdeeeecc4
+                if (name, col.name) in added_later:
+                    continue                                            # checked above
                 assert f"'{col.name}'" in foundation, f"{name}.{col.name}"
             checked += 1
         for col in table.columns:
             if col.name.startswith("hk_") and not (name.startswith("payroll_hk_") or name in shared):
+                if (name, col.name) in added_later:
+                    continue                                            # checked above
                 assert f"'{renamed_columns[(name, col.name)]}'" in foundation, f"{name}.{col.name}"
                 checked += 1
-    assert checked == 13 + 1 + 24 + 1, checked                          # 13 tables + 1 later table + 24 profile columns + trace
+    assert checked == 13 + 2 + 24 + 1, checked                          # 13 tables + 2 later tables + 24 profile columns + trace
     assert "down_revision: Union[str, Sequence[str], None] = '917a54ed2347'" in foundation
     assert convergence.down_revision == "cd62503afe26"

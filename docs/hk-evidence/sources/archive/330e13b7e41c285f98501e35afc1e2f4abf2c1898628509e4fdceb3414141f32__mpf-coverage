@@ -1,0 +1,2602 @@
+<!DOCTYPE html>
+<!--[if IE 9]><html lang="en" class="ie9 no-js"><![endif]-->
+<!--[if !IE]><!-->
+<html lang="en" lang-code="en">
+<!--<![endif]-->
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta http-equiv="Content-type" content="text/html; charset=utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+
+    <title>MPF Coverage - MPFA</title>
+
+
+    <meta property="og:title" content="" />
+    <meta property="og:url" content="https://www.mpfa.org.hk/en/mpf-system/mpf-coverage" />
+    <meta property="og:image" content="https://www.mpfa.org.hk" />
+    <meta property="og:type" content="website" />
+    <meta property="og:description" content="" />
+
+    <!-- Latest compiled and minified JavaScript -->
+        <script src="/scripts/chunks/ie-polyfill.js"  nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0="></script>
+    <script src="/scripts/chunks/apps.js"  nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0="></script>
+
+    <link rel="canonical" href="https://www.mpfa.org.hk/en/mpf-system/mpf-coverage" />
+    
+        <link href="/styles/template.css" rel="stylesheet" />
+    <link href="/styles/styles.min.css" rel="stylesheet" />
+
+    
+
+    
+
+
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-JH74LGEGHB"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config','G-JH74LGEGHB');
+</script>
+    <!-- Latest compiled and minified JavaScript -->
+</head>
+<body class="header-static  homepage en " data-site data-js-path="/scripts/">
+    <div class="whole-page-content">
+        <div id="fb-root"></div>
+        
+        
+        <header class="header " data-header="">
+            <div style="width:200px; position:fixed; top:5px; left:10px; z-index:100;">
+                <a href="#mainContent" class="sr-only sr-only-focusable skipLink" tabindex="0">Skip to Content</a>
+            </div>
+            
+<div class="header__wrapping padding-nopadding">
+    
+<div class="utility-bar d-lg-block d-none padding-nopadding">
+    <div class="container">
+        <div class="d-flex align-items-center justify-content-between">
+            <div class="utility-bar__left">
+                    <ul>
+                    <li>
+                            <a class="--active " href="/en/home/info-centre" title="Information Centre">
+                                    <span>Information Centre</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/enquiries" title="Contact Us">
+                                    <span>Contact Us</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/useful-tools" title="Useful Tools">
+                                    <span>Useful Tools</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/subscription" title="Subscription">
+                                    <span>Subscription</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/glossary" title="Glossary">
+                                    <span>Glossary</span>
+                            </a>
+                    </li>
+    </ul>
+
+            </div>
+            <div class="utility-bar__right d-flex">
+                
+
+<ul class="nav-accessibility">
+    
+    <li>
+        <a href="/en/text-size" title="Text Size" target="">
+            Text Size
+        </a>
+    </li>
+
+    
+
+</ul>
+
+                
+<div class="language" data-language>
+    <div class="icon" tabindex="0">
+            <span>
+                <a class="underline" href="/en/mpf-system/mpf-coverage" title="en" onclick="return SwitchToLanguage('en', 'en', '/en/mpf-system/mpf-coverage')"><span>EN</span></a>
+            </span>
+            <span>
+                <a class="" href="/mpf-system/mpf-coverage" title="zh-TW" onclick="return SwitchToLanguage('zh-TW', 'en', '/mpf-system/mpf-coverage')"><span>繁</span></a>
+            </span>
+            <span>
+                <a class="" href="/sc/mpf-system/mpf-coverage" title="zh-CN" onclick="return SwitchToLanguage('zh-CN', 'en', '/sc/mpf-system/mpf-coverage')"><span>简</span></a>
+            </span>
+    </div>
+</div>
+            </div>
+        </div>
+    </div>
+</div>
+    
+<div class="navigation-bar padding-nopadding">
+    <div class="container">
+        <div class="navigation-bar__wrapper d-flex align-items-center justify-content-between">
+            <div class="menu-mobile d-lg-none" data-menu-mobile>
+                <div class="btn-menu-mobile" data-btn-menu-mobile><span class="line line-top"></span><span class="line line-mid"></span><span class="line line-bot"></span></div>
+                <div class="menu-mobile__wrapper" data-menu-wrapper>
+                    <div class="inner" data-inner-menu>
+                        
+<div class="search-mobile">
+<form action="/en/search" class="search-form" method="get" role="search">        <label for="keyword" class="sr-only">Keyword</label><input id="keyword" class="form-control" placeholder="Search " name="query" spellcheck="false">
+        <button class="btn-search" title="Search " type="submit"></button>
+        <a class="adv-link-search" href="/en/advancesearch"><span>Advanced Search</span></a>
+</form></div>
+                        <div class="menu-mobile__nav" data-mobile-nav>
+                            <ul>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>MPFA</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/mpfa/mission-and-role" target="" title="" class="sub-menu-item">
+                                                                        <span>Mission and Role</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/corporate-governance-and-corporate-social-responsibility" target="" title="" class="sub-menu-item">
+                                                                        <span>Corporate Governance and Corporate Social Responsibility</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/blog" target="" title="" class="sub-menu-item">
+                                                                        <span>Blog</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/corporate-events" target="" title="" class="sub-menu-item">
+                                                                        <span>Corporate Events</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/friends-of-mpf" target="" title="" class="sub-menu-item">
+                                                                        <span>Friends of MPF</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/social-media" target="" title="" class="sub-menu-item">
+                                                                        <span>Social Media</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/joining-mpfa" target="" title="" class="sub-menu-item">
+                                                                        <span>Joining MPFA</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/internal-staff-communication" target="" title="" class="sub-menu-item">
+                                                                        <span>Internal Staff Communication</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpfa/approved-supplier-lists" target="" title="" class="sub-menu-item">
+                                                                        <span>Approved Supplier Lists</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>MPF System</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/mpf-system/background" target="" title="" class="sub-menu-item">
+                                                                        <span>Background</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/types-of-mpf-schemes" target="" title="" class="sub-menu-item">
+                                                                        <span>Types of MPF Schemes</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/mpf-coverage" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Coverage</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/enrolment-and-termination" target="" title="" class="sub-menu-item">
+                                                                        <span>Enrolment and Termination</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/mandatory-contributions" target="" title="" class="sub-menu-item">
+                                                                        <span>Mandatory Contributions</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/voluntary-contributions-or-tax-deductible-voluntary-contributions" target="" title="" class="sub-menu-item">
+                                                                        <span>Voluntary Contributions / Tax Deductible Voluntary Contributions&#160;</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/mpf-tax-matters" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Tax Matters</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/mpf-account-management" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Account Management</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/withdrawal-of-mpf" target="" title="" class="sub-menu-item">
+                                                                        <span>Withdrawal of MPF</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/long-service-and-severance-payments" target="" title="" class="sub-menu-item">
+                                                                        <span>Arrangements for Offsetting Long Service Payment and Severance Payment&#160;</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-system/anniversaries-of-mpf-system" target="" title="" class="sub-menu-item">
+                                                                        <span>Anniversaries of MPF System</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>MPF Investment</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/investment-operation" target="" title="" class="sub-menu-item">
+                                                                        <span>Investment Operation</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/principles-of-fund-investment" target="" title="" class="sub-menu-item">
+                                                                        <span>Principles of Fund Investment</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/fund-types-and-features" target="" title="" class="sub-menu-item">
+                                                                        <span>Fund Types and Features</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/portfolio" target="" title="" class="sub-menu-item">
+                                                                        <span>Investment Portfolios</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/sustainable-investing" target="" title="" class="sub-menu-item">
+                                                                        <span>Sustainable Investing</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/investment-regulations-and-disclosure" target="" title="" class="sub-menu-item">
+                                                                        <span>Investment Regulations and Disclosure</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/retirement-planning-calculator" target="" title="" class="sub-menu-item">
+                                                                        <span>Retirement Planning Calculator</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/mpf-investment-education-thematic-website" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Investment Education Thematic Website</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/mpf-investment/education-centre" target="" title="" class="sub-menu-item">
+                                                                        <span>Education Centre</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>ORSO</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/orso/overview" target="" title="" class="sub-menu-item">
+                                                                        <span>Overview</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/orso/features" target="" title="" class="sub-menu-item">
+                                                                        <span>Features</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/orso/statutory-requirements-for-exemption" target="" title="" class="sub-menu-item">
+                                                                        <span>Statutory Requirements for Exemption</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/orso/basic-requirements" target="" title="" class="sub-menu-item">
+                                                                        <span>Basic Requirements</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/orso/appeal-boards" target="" title="" class="sub-menu-item">
+                                                                        <span>Appeal Boards</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/orso/useful-forms-and-information" target="" title="" class="sub-menu-item">
+                                                                        <span>Useful Forms and Information</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>Supervision</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/supervision/mpf-trustees" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Trustees</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/supervision/mpf-intermediaries" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Intermediaries</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>Enforcement</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/enforcement/overview" target="" title="" class="sub-menu-item">
+                                                                        <span>Overview</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/enforcement-against-employers" target="" title="" class="sub-menu-item">
+                                                                        <span>Employers</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/plan-members" target="" title="" class="sub-menu-item">
+                                                                        <span>Scheme Members</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/self-employed" target="" title="" class="sub-menu-item">
+                                                                        <span>Self-employed Persons</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/mpf-intermediary" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Intermediaries</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/mpf-trustees" target="" title="" class="sub-menu-item">
+                                                                        <span>MPF Trustees</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/orso-employers-and-administrators" target="" title="" class="sub-menu-item">
+                                                                        <span>ORSO Employers and Administrators</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/enforcement-statistics" target="" title="" class="sub-menu-item">
+                                                                        <span>Enforcement Statistics</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/beware-of-scams" target="" title="" class="sub-menu-item">
+                                                                        <span>Beware of Scams</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/enforcement/enforcement-alerts" target="" title="" class="sub-menu-item">
+                                                                        <span>Enforcement Alerts</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                                                <li class="has-sub">
+                                                    <a class="--active" href="javascript:" title="">
+                                                            <span>eMPF Platform</span>
+                                                    </a>
+                                                    <ul>
+                                                            <li>
+                                                                <a href="/en/empf/empf-platform" target="" title="" class="sub-menu-item">
+                                                                        <span>eMPF Platform</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a href="/en/empf/oversight-information" target="" title="" class="sub-menu-item">
+                                                                        <span>Oversight Information</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                </li>
+                            </ul>
+                        </div>
+                        <div class="utility-bar__mobile">
+                            <div class="utility-bar__mobile-nav">
+                                    <ul>
+                    <li>
+                            <a class="--active " href="/en/home/info-centre" title="Information Centre">
+                                    <span>Information Centre</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/enquiries" title="Contact Us">
+                                    <span>Contact Us</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/useful-tools" title="Useful Tools">
+                                    <span>Useful Tools</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/subscription" title="Subscription">
+                                    <span>Subscription</span>
+                            </a>
+                    </li>
+                    <li>
+                            <a class="--active " href="/en/home/glossary" title="Glossary">
+                                    <span>Glossary</span>
+                            </a>
+                    </li>
+    </ul>
+
+                            </div>
+                        </div>
+                    </div>
+                    <div class="utility-bar__mobile-wrapper-language" data-wrapper-lang>
+                        
+<div class="utility-bar__mobile-language">
+    <div class="text">Language</div>
+    <ul>
+            <li>
+                <a class="underline" href="/en/mpf-system/mpf-coverage" title="en" onclick="return SwitchToLanguage('en', 'en', '/en/mpf-system/mpf-coverage')"><span>EN</span></a>
+            </li>
+            <li>
+                <a class="" href="/mpf-system/mpf-coverage" title="zh-TW" onclick="return SwitchToLanguage('zh-TW', 'en', '/mpf-system/mpf-coverage')"><span>繁</span></a>
+            </li>
+            <li>
+                <a class="" href="/sc/mpf-system/mpf-coverage" title="zh-CN" onclick="return SwitchToLanguage('zh-CN', 'en', '/sc/mpf-system/mpf-coverage')"><span>简</span></a>
+            </li>
+    </ul>
+</div>
+                        
+
+<div class="utility-bar__mobile-accessibility">
+    <div class="text">Others</div>
+    <ul>
+        
+
+        
+    <li>
+        <a href="/en/text-size" title="Text Size" target="">
+            Text Size
+        </a>
+    </li>
+
+    </ul>
+</div>
+                    </div>
+                </div>
+            </div>
+            
+
+    <div class="logo">
+        <a href="/en" title="MPFA" data-text-only-item="">
+                <img src="/en/-/media/mpfa/images/logo/logo_english.svg" alt="MPFA" width="148" height="54" />
+            <span class="text-only__text">Mandatory Provident Fund Schemes Authority</span>
+        </a>
+    </div>
+
+            <div class="menu-desktop">
+                <div class="menu-desktop__wrapper d-flex align-item-center">
+                    <div class="menu-desktop__nav d-lg-block d-none" data-menu-desktop>
+                        <ul>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>MPFA</span>
+                                            </a>
+                                            <div class="menu-desktop__child-col-3 menu-desktop__child">
+                                                                                                                                                    <ul class="menu-desktop__first-col">
+                                                                <li>
+                                                                    <a href="/en/mpfa/mission-and-role" target="" title="">
+                                                                            <span>Mission and Role</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpfa/corporate-governance-and-corporate-social-responsibility" target="" title="">
+                                                                            <span>Corporate Governance and Corporate Social Responsibility</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpfa/blog" target="" title="">
+                                                                            <span>Blog</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpfa/corporate-events" target="" title="">
+                                                                            <span>Corporate Events</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                                <li>
+                                                                    <a href="/en/mpfa/friends-of-mpf" target="" title="">
+                                                                            <span>Friends of MPF</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpfa/social-media" target="" title="">
+                                                                            <span>Social Media</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpfa/joining-mpfa" target="" title="">
+                                                                            <span>Joining MPFA</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpfa/internal-staff-communication" target="" title="">
+                                                                            <span>Internal Staff Communication</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__third-col">
+                                                                <li>
+                                                                    <a href="/en/mpfa/approved-supplier-lists" target="" title="">
+                                                                            <span>Approved Supplier Lists</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                            </div>
+                                        </li>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>MPF System</span>
+                                            </a>
+                                            <div class="menu-desktop__child-col-3 menu-desktop__child">
+                                                                                                                                                    <ul class="menu-desktop__first-col">
+                                                                <li>
+                                                                    <a href="/en/mpf-system/background" target="" title="">
+                                                                            <span>Background</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/types-of-mpf-schemes" target="" title="">
+                                                                            <span>Types of MPF Schemes</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/mpf-coverage" target="" title="">
+                                                                            <span>MPF Coverage</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/enrolment-and-termination" target="" title="">
+                                                                            <span>Enrolment and Termination</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                                <li>
+                                                                    <a href="/en/mpf-system/mandatory-contributions" target="" title="">
+                                                                            <span>Mandatory Contributions</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/voluntary-contributions-or-tax-deductible-voluntary-contributions" target="" title="">
+                                                                            <span>Voluntary Contributions / Tax Deductible Voluntary Contributions&#160;</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/mpf-tax-matters" target="" title="">
+                                                                            <span>MPF Tax Matters</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/mpf-account-management" target="" title="">
+                                                                            <span>MPF Account Management</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__third-col">
+                                                                <li>
+                                                                    <a href="/en/mpf-system/withdrawal-of-mpf" target="" title="">
+                                                                            <span>Withdrawal of MPF</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/long-service-and-severance-payments" target="" title="">
+                                                                            <span>Arrangements for Offsetting Long Service Payment and Severance Payment&#160;</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-system/anniversaries-of-mpf-system" target="" title="">
+                                                                            <span>Anniversaries of MPF System</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                            </div>
+                                        </li>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>MPF Investment</span>
+                                            </a>
+                                            <div class="menu-desktop__child-col-3 menu-desktop__child">
+                                                                                                                                                    <ul class="menu-desktop__first-col">
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/investment-operation" target="" title="">
+                                                                            <span>Investment Operation</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/principles-of-fund-investment" target="" title="">
+                                                                            <span>Principles of Fund Investment</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/fund-types-and-features" target="" title="">
+                                                                            <span>Fund Types and Features</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/portfolio" target="" title="">
+                                                                            <span>Investment Portfolios</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/sustainable-investing" target="" title="">
+                                                                            <span>Sustainable Investing</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/investment-regulations-and-disclosure" target="" title="">
+                                                                            <span>Investment Regulations and Disclosure</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/retirement-planning-calculator" target="" title="">
+                                                                            <span>Retirement Planning Calculator</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/mpf-investment-education-thematic-website" target="" title="">
+                                                                            <span>MPF Investment Education Thematic Website</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__third-col">
+                                                                <li>
+                                                                    <a href="/en/mpf-investment/education-centre" target="" title="">
+                                                                            <span>Education Centre</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                            </div>
+                                        </li>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>ORSO</span>
+                                            </a>
+                                            <div class="menu-desktop__child">
+                                                                                                    <ul class="menu-desktop__first-col">
+                                                                <li>
+                                                                    <a href="/en/orso/overview" target="" title="">
+                                                                            <span>Overview</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/orso/features" target="" title="">
+                                                                            <span>Features</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/orso/statutory-requirements-for-exemption" target="" title="">
+                                                                            <span>Statutory Requirements for Exemption</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/orso/basic-requirements" target="" title="">
+                                                                            <span>Basic Requirements</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                                <li>
+                                                                    <a href="/en/orso/appeal-boards" target="" title="">
+                                                                            <span>Appeal Boards</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/orso/useful-forms-and-information" target="" title="">
+                                                                            <span>Useful Forms and Information</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                                                            </div>
+                                        </li>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>Supervision</span>
+                                            </a>
+                                            <div class="menu-desktop__child">
+                                                    <ul class="menu-desktop__first-col">
+                                                            <li>
+                                                                <a href="/en/supervision/mpf-trustees" target="" title="">
+                                                                        <span>MPF Trustees</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                            <li>
+                                                                <a href="/en/supervision/mpf-intermediaries" target="" title="">
+                                                                        <span>MPF Intermediaries</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                                                                                                            </div>
+                                        </li>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>Enforcement</span>
+                                            </a>
+                                            <div class="menu-desktop__child-col-3 menu-desktop__child">
+                                                                                                                                                    <ul class="menu-desktop__first-col">
+                                                                <li>
+                                                                    <a href="/en/enforcement/overview" target="" title="">
+                                                                            <span>Overview</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/enforcement-against-employers" target="" title="">
+                                                                            <span>Employers</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/plan-members" target="" title="">
+                                                                            <span>Scheme Members</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/self-employed" target="" title="">
+                                                                            <span>Self-employed Persons</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                                <li>
+                                                                    <a href="/en/enforcement/mpf-intermediary" target="" title="">
+                                                                            <span>MPF Intermediaries</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/mpf-trustees" target="" title="">
+                                                                            <span>MPF Trustees</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/orso-employers-and-administrators" target="" title="">
+                                                                            <span>ORSO Employers and Administrators</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/enforcement-statistics" target="" title="">
+                                                                            <span>Enforcement Statistics</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__third-col">
+                                                                <li>
+                                                                    <a href="/en/enforcement/beware-of-scams" target="" title="">
+                                                                            <span>Beware of Scams</span>
+                                                                    </a>
+                                                                </li>
+                                                                <li>
+                                                                    <a href="/en/enforcement/enforcement-alerts" target="" title="">
+                                                                            <span>Enforcement Alerts</span>
+                                                                    </a>
+                                                                </li>
+                                                    </ul>
+                                            </div>
+                                        </li>
+                                        <li class="has-sub">
+                                            <a class="--active" href="javascript:" title="">
+                                                    <span>eMPF Platform</span>
+                                            </a>
+                                            <div class="menu-desktop__child">
+                                                    <ul class="menu-desktop__first-col">
+                                                            <li>
+                                                                <a href="/en/empf/empf-platform" target="" title="">
+                                                                        <span>eMPF Platform</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                    <ul class="menu-desktop__second-col">
+                                                            <li>
+                                                                <a href="/en/empf/oversight-information" target="" title="">
+                                                                        <span>Oversight Information</span>
+                                                                </a>
+                                                            </li>
+                                                    </ul>
+                                                                                                                                            </div>
+                                        </li>
+                        </ul>
+                    </div>
+                        
+    <div class="menu-desktop__search d-lg-block d-none" data-search-desktop>
+        <a href="/en/advancesearch"><span class="sr-only">Advanced Search</span><div class="icon"></div></a>
+        
+    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div>
+
+        </header>
+        <main role="main" id="mainContent" tabindex="-1">
+            <section class="padding-bottom-small">
+    
+
+        <section class="hero hero__page padding-nopadding">
+            <div class="hero-wrapper">
+                                <div class="hero__item">
+                                    <div class="hero__image">
+
+                                            <picture>
+                                                <source media="(max-width: 767px)" srcset="/en/-/media/images/mpf-system/mpf-coverage/2-3_header_m.jpg">
+                                                <source media="(max-width: 991px)" srcset="/en/-/media/images/mpf-system/mpf-coverage/2-3_header_t.jpg">
+                                                <img class="hero__img" src="/en/-/media/images/mpf-system/mpf-coverage/2-3_header_d.jpg" alt="">
+                                            </picture>
+
+                                    </div>
+                                        <div class="hero__wrap">
+                                            <div class="container">
+                                                <div class="hero__textbox hero__textbox-long">
+                                                        <h1 class="title1">MPF System</h1>
+                                                        <h2 class="title2 title2-long">MPF Coverage</h2>
+                                                </div>
+                                            </div>
+                                        </div>
+                                </div>
+
+            </div>
+        </section>
+
+</section>
+<div class="breadcrumb-social padding-medium">
+    <div class="container">
+        <div class="d-md-flex align-items-center justify-content-sm-end justify-content-md-between">
+                <div class="d-md-block breadcrumb-social__breadcrumb">
+        <ul class="d-flex align-items-center">
+            <li>
+                    <span>Your Position</span>
+            </li>
+                            <li class="has-link"><a href=/en><span>Homepage</span></a></li>
+                            <li class="has-link"><a ><span>MPF System</span></a></li>
+                            <li class="has-link"><span>MPF Coverage</span></li>
+        </ul>
+    </div>
+
+            
+<div class="breadcrumb-social__social d-sm-block d-md-flex" data-social>
+    <p class="breadcrumb-social__social-share d-md-none" data-text-only-item data-icon data-share>
+
+                <img src="/en/-/media/images/miscellaneous/icons/icon-share.svg" alt="share" />
+            <span class="text-only__text">Share</span>
+    </p>
+    <div class="breadcrumb-social__social-wrapper" data-list-social>
+        <ul class="d-md-flex breadcrumb-social__social-list">
+                            <li class="breadcrumb-social__social-item">
+                                <a href="https://www.facebook.com/sharer.php?u=https://www.mpfa.org.hk/en/mpf-system/mpf-coverage" title="Facebook" target="_blank" data-text-only-item="">
+                                        <img src="/en/-/media/images/miscellaneous/icons/icon-facebook.svg" alt="MPFA facebook" />
+                                    <span class="text-only__text">Facebook</span>
+                                </a>
+                            </li>
+                            <li class="breadcrumb-social__social-item">
+                                <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://www.mpfa.org.hk/en/mpf-system/mpf-coverage" title="LinkedIn" target="_blank" data-text-only-item="">
+                                        <img src="/en/-/media/images/miscellaneous/icons/icon-linkedin.svg" alt="MPFA linkedin" />
+                                    <span class="text-only__text">LinkedIn</span>
+                                </a>
+                            </li>
+                            <li class="breadcrumb-social__social-item">
+                                <a href="https://api.whatsapp.com/send?text=https://www.mpfa.org.hk/" title="WhatsApp" target="_blank" data-text-only-item="">
+                                        <img src="/en/-/media/images/miscellaneous/icons/icon-whatsapp.svg" alt="WhatsApp" />
+                                    <span class="text-only__text">WhatsApp</span>
+                                </a>
+                            </li>
+                            <li class="breadcrumb-social__social-item">
+                                <a href="mailto:mpfa@mpfa.org.hk?subject=Mandatory Provident Fud Schemes Authority (MPFA)&amp;body=https://www.mpfa.org.hk/en/mpf-system/mpf-coverage" title="Email" target="_blank" data-text-only-item="">
+                                        <img src="/en/-/media/images/miscellaneous/icons/icon-mail.svg" alt="Mail to MPFA" />
+                                    <span class="text-only__text">Email</span>
+                                </a>
+                            </li>
+                            <li class="breadcrumb-social__social-item copied">
+                                <a href="javascript:" title="Copy Address" data-copy-link data-text-copied="URL copied!" data-text-only-item="">
+                                        <img src="/en/-/media/images/miscellaneous/icons/icon-copy-link.svg" alt="Copy Address" />
+                                    <span class="text-only__text" data-copy-text>Copy Address</span>
+                                </a>
+                                <div class="popup-copied" data-popup-copied>
+                                    <span>URL copied! </span>
+                                </div>
+                            </li>
+                            <li class="d-sm-none d-md-block breadcrumb-social__social-item print">
+                                <a href="javascript:" title="Print This Page" data-print data-text-only-item="">
+                                        <img src="/en/-/media/images/miscellaneous/icons/icon-print.svg" alt="Print This Page" />
+                                    <span class="text-only__text">Print This Page</span>
+                                </a>
+                            </li>
+        </ul>
+    </div>
+</div>
+        </div>
+    </div>
+</div><section>
+  
+
+<section class="text-editor padding-nopadding" data-text-editor>
+        <div class="container">
+            
+
+        <div class="padding-nopadding">
+                                <div class=" padding-bottom-large">Except for exempt persons, employees and self-employed persons aged 18 to 64 are required to join an MPF scheme under the MPFSO.&nbsp;&nbsp;</div>
+
+        </div>
+
+        </div>
+</section>
+
+<section class="text-editor padding-nopadding" id="employees" data-text-editor>
+        <div class="bgd-grey">
+            <div class="container">
+                
+
+        <div class="padding-nopadding">
+                        <h2 class="padding-top-large">Employees</h2>
+                                <div class=" padding-small">An employee is a person engaged by an employer under an employment contract (which can be made in writing or orally and includes express or implied terms).</div>
+
+        </div>
+
+            </div>
+        </div>
+</section>        <section class="image padding-bottom-nopadding" data-image>
+            <div class="padding-nopadding">
+                <div class="image__wrapper-list  bgd-grey">
+                    <div class="container padding-large">
+                        <div class="image__list">
+                            
+
+        <script nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0=">
+            document.addEventListener('readystatechange', function(event){
+                 if (event.target.readyState === "complete") {
+                    AddClassModule("home-variation", "home-variation", "{DE87BB42-B3BF-49AF-9651-CA087296C665}");
+                    //AddImageAlignment("image__left", "image__left", "{DE87BB42-B3BF-49AF-9651-CA087296C665}");
+                    //AddClassModule("two-images", "two-images", "{DE87BB42-B3BF-49AF-9651-CA087296C665}");
+                    //AddClassModule("image__full-width", "image__full-width", "{DE87BB42-B3BF-49AF-9651-CA087296C665}")
+                    AddClassModule("has-desc", "has-desc", "{DE87BB42-B3BF-49AF-9651-CA087296C665}")
+                }
+            });
+        </script>
+            <div class="image__item two-images  ">
+
+                    <div target="" id-item="{DE87BB42-B3BF-49AF-9651-CA087296C665}"
+                         title="" class="
+                         
+                         two-images  ">
+                    </div>
+
+                <div class="image__img">
+                    <p class="text-only" data-text-only-item>
+                        <picture>
+                            <source media="(max-width: 767px)" srcset="/en/-/media/images/mpf-system/mpf-coverage/2-3_01_d.png?h=253&amp;w=446&amp;hash=7B0B465716D5ED264E92A7B0751A3A74">
+                            <source media="(max-width: 991px)" srcset="/en/-/media/images/mpf-system/mpf-coverage/2-3_01_d.png?h=253&amp;w=446&amp;hash=7B0B465716D5ED264E92A7B0751A3A74">
+
+                                <img class="hero__img" src="/en/-/media/images/mpf-system/mpf-coverage/2-3_01_d.png?h=253&amp;w=446&amp;hash=7B0B465716D5ED264E92A7B0751A3A74" alt="Regular employees">
+                            <span class="text-only__text"></span>
+                        </picture>
+                    </p>
+                </div>
+
+                <div class="image__info">
+                        <div class="image__title">
+                            <div style="color: #147B6B">
+                                Regular employees
+                            </div>
+                        </div>
+
+                        <div class="image__desc">
+                            <div>Regular employees are employees aged 18 to 64 and have been employed in any industry for a continuous period of <a href="/en/mpf-system/enrolment-and-termination/employers-enrolment-for-employees#anchor1">60 days</a>&nbsp;or more.</div>
+                        </div>
+
+                </div>
+            </div>
+
+
+        <script nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0=">
+            document.addEventListener('readystatechange', function(event){
+                 if (event.target.readyState === "complete") {
+                    AddClassModule("home-variation", "home-variation", "{B633108E-76B8-4C61-8B84-E3240814CA1F}");
+                    //AddImageAlignment("image__left", "image__left", "{B633108E-76B8-4C61-8B84-E3240814CA1F}");
+                    //AddClassModule("two-images", "two-images", "{B633108E-76B8-4C61-8B84-E3240814CA1F}");
+                    //AddClassModule("image__full-width", "image__full-width", "{B633108E-76B8-4C61-8B84-E3240814CA1F}")
+                    AddClassModule("has-desc", "has-desc", "{B633108E-76B8-4C61-8B84-E3240814CA1F}")
+                }
+            });
+        </script>
+            <div class="image__item two-images  ">
+
+                    <div target="" id-item="{B633108E-76B8-4C61-8B84-E3240814CA1F}"
+                         title="" class="
+                         
+                         two-images  has-desc">
+                    </div>
+
+                <div class="image__img">
+                    <p class="text-only" data-text-only-item>
+                        <picture>
+                            <source media="(max-width: 767px)" srcset="/en/-/media/images/mpf-system/mpf-coverage/2-3_02_d.png?h=253&amp;w=460&amp;hash=6100C545EC1D6D9E24672E026509BDD8">
+                            <source media="(max-width: 991px)" srcset="/en/-/media/images/mpf-system/mpf-coverage/2-3_02_d.png?h=253&amp;w=460&amp;hash=6100C545EC1D6D9E24672E026509BDD8">
+
+                                <img class="hero__img" src="/en/-/media/images/mpf-system/mpf-coverage/2-3_02_d.png?h=253&amp;w=460&amp;hash=6100C545EC1D6D9E24672E026509BDD8" alt="Casual employees">
+                            <span class="text-only__text"></span>
+                        </picture>
+                    </p>
+                </div>
+
+                <div class="image__info">
+                        <div class="image__title">
+                            <div style="color: #147B6B">
+                                Casual employees
+                            </div>
+                        </div>
+
+                        <div class="image__desc">
+                            <div>Casual employees are employees aged 18 to 64 and employed in the construction industry or the catering industry on a day-to-day basis or for a fixed period of less than <a href="/en/mpf-system/enrolment-and-termination/employers-enrolment-for-employees#anchor1">60 days</a>.</div>
+                        </div>
+
+                </div>
+            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+<section class="text-editor padding-large" id="self_employed_persons" data-text-editor>
+        <div class="container">
+            
+
+        <div class="padding-nopadding">
+                        <h3 class="padding-bottom-nopadding">Self-employed Persons</h3>
+                                <div class=" padding-top-small"><p>Under the MPF System, self-employed persons are those who earn income from the production of or trade of goods or services in a capacity other than that of an employee (i.e. those who work for themselves).</p>
+<p>&nbsp;</p>
+<p>Sole proprietors and partners in a partnership are regarded as self-employed persons.</p></div>
+
+        </div>
+
+        </div>
+</section>
+
+<section class="text-editor padding-nopadding" id="exempt_persons" data-text-editor>
+        <div class="bgd-grey">
+            <div class="container">
+                
+
+        <div class="padding-top-nopadding">
+                        <h2 class="padding-top-large">Exempt Persons</h2>
+                                <div class=" padding-small"><p><strong>The following are exempt persons who are not required to join an MPF scheme:</strong></p></div>
+
+        </div>
+
+            </div>
+        </div>
+</section>
+
+<section class="text-editor padding-bottom-nopadding" data-text-editor>
+        <div class="bgd-grey">
+            <div class="container">
+                
+
+        <div class="padding-nopadding">
+                            <div class="has-column2__body2">
+                                <div class="row">
+                                    <div class="col-12 col-md-6 padding-bottom-large">
+                                        <div class=""><ul>
+    <li>employees and self-employed persons who are under 18 or over 65 years of age</li>
+    <li>domestic employees<sup>1</sup></li>
+    <li>self-employed hawkers</li>
+    <li>people covered by statutory pension or provident fund schemes, such as civil servants and subsidized or grant school teachers</li>
+</ul></div>
+                                    </div>
+                                    <div class="col-12 col-md-6 padding-bottom-large">
+                                        <div class=""><ul><li>members of occupational retirement schemes which have been granted MPF exemption certificates</li>
+    <li>persons who enter Hong Kong under section 11 of the Immigration Ordinance for the purpose of employment (1) for not more than 13 months or (2) who are members of a retirement scheme of a place outside Hong Kong</li>
+    <li>employees of the European Union Office of the European Commission in Hong Kong</li>
+</ul></div>
+                                    </div>
+                                </div>
+                            </div>
+
+        </div>
+
+            </div>
+        </div>
+</section>
+
+<section class="text-editor padding-nopadding" data-text-editor>
+        <div class="container">
+            
+
+        <div class="padding-top-large">
+                        <h2 class="padding-nopadding">Examples Illustrating Coverage of the MPF System</h2>
+                                <div class=" padding-top-small">The following list illustrates examples of jobs with explanations as to why these jobs are generally included in or excluded from the MPF System.</div>
+
+        </div>
+
+        </div>
+</section>
+<section class="accordion-container padding-nopadding" data-accordion>
+    <div class="container">
+        <div class="accordion-container__wrapper">
+                <p class="accordion-container__button">
+                        <span tabindex="0" data-toggle-accordion="" data-expand="">Expand All</span>
+                        <span tabindex="0" data-toggle-accordion="" data-collapse="">Close All</span>
+                </p>
+            <div class="accordion-container__list">
+                        <div class="accordion-container__item " data-item>
+                                <div tabindex="0" class="accordion-container__header" id="anchor1" title="Domestic Employees&#185;" data-header>
+                                        <div class="accordion-container__title">1. Domestic Employees&#185;	</div>
+                                    <span class="icon icon-arrow-green-down " data-arrow></span>
+                                </div>
+                                                            <div class="accordion-container__body" data-body>
+                                    
+
+<section class="table-container padding-nopadding">
+    <div class="container">
+            <table class="table-editor " data-table>
+                <thead>
+                    <tr>
+                        
+
+        <th data-table-head style="width: 50%" >
+                <div class="table-editor__title padding-nopadding">Job Characteristics</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Covered by MPF? (Y/N)</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Remarks</div>
+        </th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                    
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Baby sitters, domestic servants and gardeners who render their services at the employer’s household</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Services rendered in a
+residential premises</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Baby sitters, domestic servants and gardeners whose services are not rendered at the employer’s household</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y
+</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Services not rendered in a
+residential premises</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Chauffeurs, bodyguards and boat-boys employed by an individual</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Services not rendered in a
+residential premises</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Licensed caretakers employed by Owners Incorporation</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Services not rendered in a
+residential premises</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Security guards employed by an individual to provide security services for his/her residential premises</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Services are substantially rendered in the residential premises of the employer</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+        </tr>
+
+
+                </tbody>
+            </table>
+    </div>
+</section>
+
+                                </div>
+                        </div>
+                        <div class="accordion-container__item " data-item>
+                                <div tabindex="0" class="accordion-container__header" id="Short-termEmployees" title="Short-term Employees" data-header>
+                                        <div class="accordion-container__title">2. Short-term Employees</div>
+                                    <span class="icon icon-arrow-green-down " data-arrow></span>
+                                </div>
+                                                            <div class="accordion-container__body" data-body>
+                                    
+
+<section class="table-container padding-nopadding">
+    <div class="container">
+            <table class="table-editor " data-table>
+                <thead>
+                    <tr>
+                        
+
+        <th data-table-head style="width: 50%" >
+                <div class="table-editor__title padding-nopadding">Job Characteristics</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Covered by MPF? (Y/N)</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Remarks</div>
+        </th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                    
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class="note padding-nopadding">Employees, part-time workers and summer job workers whose employment is terminated within 60 days but are re-employed by the same employer. The employment is considered a continuous contract (as defined in the Employment Ordinance) with employment period not less than 60 days&nbsp;</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Please seek advice from the Labour Department if you are in doubt of what constitutes a continuous contract</div>
+        </td>
+
+        </tr>
+
+
+                </tbody>
+            </table>
+    </div>
+</section>
+
+                                </div>
+                        </div>
+                        <div class="accordion-container__item " data-item>
+                                <div tabindex="0" class="accordion-container__header" id="anchor3" title="Overseas Employees" data-header>
+                                        <div class="accordion-container__title">3. Employees from places outside Hong Kong</div>
+                                    <span class="icon icon-arrow-green-down " data-arrow></span>
+                                </div>
+                                                            <div class="accordion-container__body" data-body>
+                                    
+
+<section class="table-container padding-nopadding">
+    <div class="container">
+            <table class="table-editor " data-table>
+                <thead>
+                    <tr>
+                        
+
+        <th data-table-head style="width: 50%" >
+                <div class="table-editor__title padding-nopadding">Job Characteristics</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Covered by MPF? (Y/N)</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Remarks</div>
+        </th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                    
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Employees entering Hong Kong with a dependant visa<br /><b>&nbsp;</b></div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">They are not entering Hong Kong for the purpose of employment</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Employees entering Hong Kong with an employment visa under section 11 of the Immigration Ordinance, with permission to stay for a period not exceeding 13 months which is extended such that the total period of stay exceeds 13 months</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N &ndash; for the<br />
+first 13 months in<br />
+Hong Kong<br />
+<br />
+Y - After the first 13<br />
+months in Hong Kong<br /></div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">After the first 13 months, employees are no longer exempted. Employers must enrol them in an MPF scheme within 60 days from the day on which the employees ceased to be exempted.</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+                <div class="text-editor">
+                    
+                    <div class=" padding-nopadding"><p>Employees entering Hong Kong with an employment visa under section 11 of the Immigration Ordinance, with permission to stay, and is participating in one of the following schemes outside Hong Kong:<br />
+</p>
+<p>&nbsp;</p>
+<ul>
+    <li>provident fund schemes; or</li>
+    <li>pension fund schemes; or</li>
+    <li>retirement or superannuation schemes</li>
+</ul></div>
+
+                </div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">---</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Employees employed in or from Hong Kong by companies engaging in business in Hong Kong, working in Hong Kong but are residing outside Hong Kong</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">For example, employees
+living in Shenzhen but
+commute to Hong Kong on a daily basis</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Employees employed outside Hong Kong by foreign<br />companies and are working outside Hong Kong</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Whether the employees are residents of Hong Kong is irrelevant</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+                <div class="text-editor">
+                    
+                    <div class=" padding-nopadding"><p>Students entering Hong Kong with a student visa and having fulfilled the following requirements:<br /></p><p><br /></p>
+<ul>
+    <li>applied for a visa under the Immigration Arrangements for Non-local Graduates (IANG) immediately after graduation and is allowed to work in Hong Kong; and</li>
+    <li>the validity period of the student visa combined with that of the subsequent IANG visa is more than 13 months in total</li></ul>
+<p><strong></strong></p></div>
+
+                </div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Employers must enrol the student in an MPF scheme within 60 days of their employment</div>
+        </td>
+
+        </tr>
+
+
+                </tbody>
+            </table>
+    </div>
+</section>
+
+                                </div>
+                        </div>
+                        <div class="accordion-container__item " data-item>
+                                <div tabindex="0" class="accordion-container__header" id="anchor4" title="Industry Schemes (catering and construction industries)" data-header>
+                                        <div class="accordion-container__title">4. Industry Schemes (catering and construction industries)</div>
+                                    <span class="icon icon-arrow-green-down " data-arrow></span>
+                                </div>
+                                                            <div class="accordion-container__body" data-body>
+                                    
+
+<section class="table-container padding-nopadding">
+    <div class="container">
+            <table class="table-editor " data-table>
+                <thead>
+                    <tr>
+                        
+
+        <th data-table-head style="width: 50%" >
+                <div class="table-editor__title padding-nopadding">Job Characteristics</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Covered by MPF? (Y/N)</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Remarks</div>
+        </th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                    
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Substitute workers in the catering and construction industries</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are casual workers doing another person’s job for a few days and are paid by that person in cash for their services</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Summer job workers in the catering or construction industries</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">---</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Recruiters in the catering industry</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are self-employed agents responsible for recruiting
+casual workers for banquets</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Recruiters in the construction industry</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are employees of the specialist contractors (bar-bending & electrical works) responsible for recruiting workers on site</div>
+        </td>
+
+        </tr>
+
+
+                </tbody>
+            </table>
+    </div>
+</section>
+
+                                </div>
+                        </div>
+                        <div class="accordion-container__item " data-item>
+                                <div tabindex="0" class="accordion-container__header" id="anchor4" title="Self-employed Persons&#160;(SEPs)" data-header>
+                                        <div class="accordion-container__title">5. Self-employed Persons&#160;(SEPs)</div>
+                                    <span class="icon icon-arrow-green-down " data-arrow></span>
+                                </div>
+                                                            <div class="accordion-container__body" data-body>
+                                    
+
+<section class="table-container padding-nopadding">
+    <div class="container">
+            <table class="table-editor " data-table>
+                <thead>
+                    <tr>
+                        
+
+        <th data-table-head style="width: 50%" >
+                <div class="table-editor__title padding-nopadding">Job Characteristics</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Covered by MPF? (Y/N)</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Remarks</div>
+        </th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                    
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Overseas partners of a partnership engaging in business in Hong Kong</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">---</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Farmers, fishermen</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are SEPs unless employed by another farmer or fisherman</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Drivers of taxis, public light buses and vans who are not owners of the vehicles</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are SEPs</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Owners of taxis, public light buses and vans whose income is derived from renting the vehicles to other drivers</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are&nbsp;<span style="background-color: rgb(249, 249, 249);">SEPs</span></div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Private tutors and music teachers giving private lessons</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Usually they are SEPs</div>
+        </td>
+
+        </tr>
+
+
+                </tbody>
+            </table>
+    </div>
+</section>
+
+                                </div>
+                        </div>
+                        <div class="accordion-container__item " data-item>
+                                <div tabindex="0" class="accordion-container__header" id="Others" title="Others" data-header>
+                                        <div class="accordion-container__title">6. Others</div>
+                                    <span class="icon icon-arrow-green-down " data-arrow></span>
+                                </div>
+                                                            <div class="accordion-container__body" data-body>
+                                    
+
+<section class="table-container padding-nopadding">
+    <div class="container">
+            <table class="table-editor " data-table>
+                <thead>
+                    <tr>
+                        
+
+        <th data-table-head style="width: 50%" >
+                <div class="table-editor__title padding-nopadding">Job Characteristics</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Covered by MPF? (Y/N)</div>
+        </th>
+
+
+        <th data-table-head style="width: 25%" >
+                <div class="table-editor__title padding-nopadding">Remarks</div>
+        </th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                    
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Civil servants who are not appointed on pensionable terms</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">---</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Local staff of Consulate General</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">---</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Teachers and other staff members of a private school</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Y</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">---</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Shareholders whose only source of income is the dividend received&nbsp;</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Neither an employee nor an SEP</div>
+        </td>
+
+        </tr>
+
+
+
+        <tr data-table-row>
+            
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Landlords whose only source of income is the rent of their properties but they are not carrying on a business of renting out properties.</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">N</div>
+        </td>
+
+
+
+
+        <td class="" data-table-cell>
+
+                    <div class=" padding-nopadding">Neither an employee nor an SEP</div>
+        </td>
+
+        </tr>
+
+
+                </tbody>
+            </table>
+    </div>
+</section>
+
+                                </div>
+                        </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="text-editor padding-nopadding" data-text-editor>
+        <div class="container">
+            
+
+        <div class="padding-nopadding">
+                                <div class="note padding-bottom-small"><sup>1</sup>“Domestic employee” is defined as an employee whose contract of employment is wholly or substantially for the provision of domestic services in the residential premises of the employer. “Domestic” means “of or relating to the home or family affairs or relations".</div>
+
+        </div>
+
+        </div>
+</section>
+</section>
+        </main>
+        <footer class="bg-dark">
+            
+            
+
+<div class="footer padding-nopadding" data-footer="">
+    <div class="footer-top">
+        <div class="container">
+            
+
+        <div class="d-flex align-items-center justify-content-between">
+            
+
+<div class="revision-date">
+        <span>Last Review / Revision Date: 20/07/2026</span>
+
+</div>
+
+            <div class="back-to-top">
+                <span tabindex="0">Back To Top</span>
+            </div>
+        </div>
+
+        </div>
+    </div>
+    <div class="footer-main">
+        <div class="container">
+            <div class="footer-main__wrapper d-flex align-items-start align-items-md-center justify-content-md-between flex-lg-row flex flex-md-column flex-sm-row flex-row flex-xs-nowrap flex-wrap">
+                <div class="footer-logo">
+                    
+
+<ul>
+            <li>
+                    <a href="https://www.pcpd.org.hk/privacyfriendlyawards/en/index.html" title="Privacy-Friendly Awards 2025 Gold" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/logo_pfa_gold.png" alt="Privacy-Friendly Awards 2025 Gold">
+                            <span class="text-only__text">Privacy-Friendly Awards 2023 Gold</span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.web-accessibility.hk/en/" title="Web Accessibility Recognition Scheme" target="mpfa-wars">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/logo_wars_triplegold.png" alt="Web Accessibility Recognition Scheme">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                <p class="text-only" data-text-only-item="">
+                        <img src="/en/-/media/images/miscellaneous/footer-logo/partner2.png" alt="Family-Friendly Employers">
+                    <span class="text-only__text"></span>
+                </p>
+            </li>
+            <li>
+                    <a href="https://www.hkgcsmb.org.hk/basic-01" title="友商有良Partner Employer Award嘉許計劃" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/logo_peaward.png" alt="友商有良Partner Employer Award嘉許計劃">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.erb.org/md/en/Main/" title="Manpower Developer Award Scheme " target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/partner4.png" alt="Manpower Developer Award Scheme ">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://esgpledge.org.hk/en/" title="ESG Pledge 3 Years" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/logo_esg_pledge_3years.png" alt="ESG Pledge 3 Years">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.caringcompany.org.hk/en_index.php" title="Caring Organisation Logo " target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/partner5.png" alt="Caring Organisation Logo ">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.hkworkhappiness.com" title="Happy Organisation" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/happy-organisation.png" alt="Happy Organisation">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.lwb.gov.hk/en/highlights/charter_scheme/index.html" title="Talent-Wise Employment Charter and Inclusive Organisations Recognition Scheme" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/partner7.png" alt="Talent-Wise Employment Charter and Inclusive Organisations Recognition Scheme">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.hkgoc.gov.hk/en-hk/energywise-certificate.html" title="Energywi$e Certificate" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/ew_logo.png" alt="Energywi$e Certificate">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href=" https://platformforinclusion.hk/en/recognition" title="“Caring Employer” Medal" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/logo_caring_employer.png" alt="Caring Employer">
+                            <span class="text-only__text">“Caring Employer” Medal</span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.mpfa.org.hk/en/cpas" title="CPAS" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/partner10.jpg" alt="Corruption Prevention Advisory Service">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+            <li>
+                    <a href="https://www.organdonation.gov.hk/eng/home.html" title="Support organ donation" target="_blank">
+                        <p class="text-only" data-text-only-item="">
+                            <img src="/en/-/media/images/miscellaneous/footer-logo/homepage_footer_od-banner-white-version_-dec-2020.jpg" alt="Support organ donation">
+                            <span class="text-only__text"></span>
+                        </p>
+                    </a>
+
+            </li>
+</ul>
+
+                </div>
+                
+
+<div class="social-media ">
+    <ul>
+                <li>
+                        <a href="https://www.linkedin.com/company/mandatory-provident-fund-schemes-authority/" title="" target="_blank">
+                            <p class="text-only" data-text-only-item="">
+                                <img src="/en/-/media/images/miscellaneous/linkedin.svg" alt="LinkedIn">
+                                <span class="text-only__text"></span>
+                            </p>
+                        </a>
+
+                </li>
+                <li>
+                        <a href="https://www.facebook.com/mpfa.hk/" title="" target="_blank">
+                            <p class="text-only" data-text-only-item="">
+                                <img src="/en/-/media/images/miscellaneous/facebook.svg" alt="facebook page">
+                                <span class="text-only__text"></span>
+                            </p>
+                        </a>
+
+                </li>
+                <li>
+                        <a href="https://www.youtube.com/user/TheMPFAchannel" title="" target="_blank">
+                            <p class="text-only" data-text-only-item="">
+                                <img src="/en/-/media/images/miscellaneous/ytb.svg" alt="YouTube Channel">
+                                <span class="text-only__text"></span>
+                            </p>
+                        </a>
+
+                </li>
+    </ul>
+</div>
+                <div class="hot-links">
+                    
+
+<div class="utility-bar__right d-flex">
+    <ul class="nav-accessibility">
+                <li>
+                    <a class="--active " href="/en/disclaimer" target="" title="">
+                        <span>Disclaimer</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="--active " href="/en/privacy-policy" target="" title="">
+                        <span>Privacy Policy</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="--active " href="/en/copyright-notice" target="" title="">
+                        <span>Copyright Notice</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="--active " href="/en/access-to-information" target="" title="">
+                        <span>Access to Information</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="--active " href="/en/accessibility" target="" title="Accessibility Statement">
+                        <span>Accessibility</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="--active " href="/en/sitemap" target="" title="">
+                        <span>Sitemap</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="--active " href="/en/system-requirements" target="" title="">
+                        <span>System Requirements</span>
+                    </a>
+                </li>
+    </ul>
+</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        <div class="container">
+            <div class="copyright">
+                
+
+  <p>&copy; 2026 Mandatory Provident Fund Schemes Authority. <br />
+All rights reserved</p>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+        </footer>
+        <div class="modal" id="popupA" data-modal tabindex="-1">
+            <div class="modal__overlay overlay modal-toggle"></div>
+            <div class="modal__body">
+                <span class="modal__close-btn modal-toggle" tabindex="0"></span>
+                <div class="modal__content">
+                </div>
+            </div>
+        </div>
+        <div class="modal" id="popupB" data-modal tabindex="-1">
+            <div class="modal__overlay overlay modal-toggle"></div>
+            <div class="modal__body">
+                <span class="modal__close-btn modal-toggle" tabindex="0"></span>
+                <div class="modal__content">
+                </div>
+            </div>
+        </div>
+        <div class="modal customize-modal" id="customizeModal" data-modal tabindex="-1">
+            <div class="modal__overlay overlay modal-toggle"></div>
+            <div class="modal__body">
+                <span class="modal__close-btn modal-toggle" tabindex="0"></span>
+                <div class="modal__content">
+                </div>
+            </div>
+        </div>
+        <div class="modal" id="popupCalculator" data-modal tabindex="-1">
+            <div class="modal__overlay overlay modal-toggle"></div>
+            <div class="modal__body">
+                <span class="modal__close-btn modal-toggle" tabindex="0"></span>
+                <div class="modal__content">
+                </div>
+            </div>
+        </div>
+        <div class="overlay" data-overlay></div>
+        <div class="loading" data-loading>
+            <div class="loading__loader"><img src="/images/loading.gif" alt=""></div>
+        </div>
+            <script src="/scripts/scripts.min.js"  nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0="></script>
+    <script src="/scripts/MPFA.js"  nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0="></script>
+    <script src="/scripts/Search/search.js"  nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0="></script>
+<script nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0=">
+jQuery(document).ready(function() {
+(function (t, e) {
+    function getParameterByName(name, url) {
+        if (!url) url = window.location.href;
+        name = name.replace(/[\[\]]/g, '\\$&');
+        var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'),
+            results = regex.exec(url);
+        if (!results) return null;
+        if (!results[2]) return '';
+        return decodeURIComponent(results[2].replace(/\+/g, ' '));
+    }
+    let bot = getParameterByName("bot") 
+    let id = getParameterByName("id")
+    var ssEr = function (t) {
+        try {
+            var r = e.head || e.getElementsByTagName("head")[0];
+            a = e.createElement("script");
+            a.setAttribute("type", "text/javascript");
+            a.setAttribute("src", t);
+            r.appendChild(a);
+        } catch (t) {}
+    };
+
+    t.SSconfigwidget = {
+        id:"chat-widget",
+        default_lang:"en_US",
+        header_title:"MPFA Ambassador",
+        primary_colour:"#ff8200",
+        pill_colour:"#ff8200",
+        bot_id:"202101222106137240HVOPDR4BW",
+        page_id:"mpfa-9u3hots",
+        header_visible:"true",
+        open_triggers:"",
+        default_state:"close",
+        launcher_icon:"https://chatbot.com.hk/hosting/web/v2/mpfa/EN_v2.png",
+        launcher_icon_style:"width:254px;height:138px",
+        position:"5%,5%",
+        chat_avatar:"https://chatbot.com.hk/hosting/web/v2/mpfa/Special_Use_Logo_Pantone_(1).jpg",
+        api_url:"https://7ab07kkkhb.execute-api.us-west-2.amazonaws.com/botengine-redis/pusher_webhook/session_begin",
+        persist_user:"false",
+        api_key:"d8a3be38f7cdd7d79bd2",
+        platform:"pusher",
+        swiper_button:"disable",
+        pill_wrap:"true",
+        scrollbar_visible:"true",
+        avatar_border_radius:"false",
+        uid_prefix:"MPFA_MPF_System",
+        first_survey_prefix:"statistics",
+        first_survey_header_en:"Thank you for chatting with Jack.  Are you satisfied with our service?",
+        first_survey_menu_en:"Very nice 😃|Acceptable 😐|Not acceptable 😔",
+        first_survey_header_hk:"感謝你和阿積對話，請問對此服務是否感到滿意?",
+        first_survey_menu_hk:"非常好😃|可接受😐|不滿意😔",
+        first_survey_header_cn:"感谢你和阿积对话，请问对此服务是否感到满意？",
+        first_survey_menu_cn:"非常好😃|可接受😐|不满意😔",
+        second_survey_trigger_option:"Not acceptable 😔|不滿意😔|不满意😔" ,
+        second_survey_prefix:"comments",
+        second_survey_type:"text",
+        second_survey_header_en:"Can you share with us your comments for our future improvement of the chatbot service?" ,
+        second_survey_header_hk:"可否分享你對我們的服務的意見? 讓我們可持續改進服務。",
+        second_survey_header_cn:"可否分享你对我们的服务的意见? 让我们可持续改进服务。",
+        survey_thanks_msg_en:"Thank you for your feedback." ,
+        survey_thanks_msg_hk:"多謝你的意見。" ,
+        survey_thanks_msg_cn:"多谢你的意见。"   
+   }
+    ssEr("https://s3-ap-northeast-1.amazonaws.com/web-v1/mpfa/index.js");
+})(window, document);
+});
+</script>
+    <script src="/scripts/language/language.js"  nonce="1+3ydDxdmdBjdMQ4PPVf9sRMtF0="></script>
+
+    </div>
+</body>
+</html>

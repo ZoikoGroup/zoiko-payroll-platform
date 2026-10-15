@@ -28,8 +28,10 @@ be retrieved or the interpretation needs the Hong Kong specialist sign-off:
   * eo_week_start_day (Cap. 57 s.2 "week"; statutory text not retrievable),
   * mpf_partial_month_threshold_basis (monthly levels for a monthly-paid
     employee's incomplete first/last month),
-  * every HK_EARNING_CLASS row (spec "Open implementation decisions": a
-    specialist must certify earning classifications).
+  * every HK_EARNING_CODE row of the earning-code catalogue (spec "Open
+    implementation decisions": a specialist must certify earning
+    classifications); rows whose interpretation is open are also [PENDING]
+    with the question in formula_expression.
 
 Nothing is ever set Active here: activation goes through Super Admin
 maker-checker, linked evidence, G1 acceptance and a passing HK golden run
@@ -41,6 +43,7 @@ Usage (local / disposable databases only — scripts/_local_db_guard):
     python -m scripts.seed_hong_kong_canonical_pack
 """
 import sys
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -116,6 +119,21 @@ SOURCES = {
     "ld_cg_07": ("Labour Department", "Concise Guide — Ch.7 Paternity Leave",
                  "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/07.pdf",
                  "bb4ada8c1ac3c472c69c577d3d27b84b8ed972668149fe0f2922e40ff6bea0e2", None),
+    "ird_ir56b_notes": ("Inland Revenue Department", "Notes and instructions for Form IR56B (items 11(a)–11(l))",
+                        "https://www.ird.gov.hk/eng/pdf/ir56b_notes_e.pdf",
+                        "d43073a7431585d103904e5564c2edcc161f745a26ab03fd0ab496f999a1dd23", None),
+    "ird_ir56b_completion": ("Inland Revenue Department",
+                             "Guide to completion of Employer's Return of Remuneration and Pensions (IR56B)",
+                             "https://www.ird.gov.hk/eng/pdf/ir56b_completion_e.pdf",
+                             "d8071558d3abaf683c9e2482889ba766aa4fff23427b5ce89eb07722b052f360", None),
+    "mpfa_ri": ("Mandatory Provident Fund Schemes Authority",
+                "Mandatory Contributions — Employees: Relevant income (examples table; copy archived 2026-10-14)",
+                "https://www.mpfa.org.hk/en/mpf-system/mandatory-contributions/employees",
+                "0068f8fde7b2626fb709d78b8aa184c8e83f1d93ead81c2963da0aa3c4875e44", None),
+    "ld_cg_09": ("Labour Department", "Concise Guide — Ch.9 Termination of Contract of Employment (Time of Making "
+                                      "Termination Payments)",
+                 "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/09.pdf",
+                 "3ee3b5333bbe1eb0d9643be6f79919b0c6e9662f0cbab1d09958ebd98a041634", None),
     "ld_cg_11": ("Labour Department", "Concise Guide — Ch.11 Severance Payment and Long Service Payment",
                  "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/11.pdf",
                  "ef8fe29153964c3a4b9c8905d813fba18cc95d236a937fef262a9c29121037b0", None),
@@ -196,7 +214,18 @@ COMMON_RATES = [
     ("eo_maternity_weeks_11_14_cap", "Maternity leave pay — cap for weeks 11 to 14", "ld_cg_06", dict(flat_amount="80000")),
     ("eo_paternity_leave_days", "Paternity leave — days", "ld_cg_07", dict(flat_amount="5")),
     ("eo_paternity_pay_cc_weeks", "Paternity leave pay — continuous contract weeks before leave", "ld_cg_07", dict(flat_amount="40")),
+    # Concise Guide ch.7 (gap audit D-M): the leave window and the document deadline.
+    ("eo_paternity_window_weeks_before_edd", "Paternity leave — window opens, weeks before the expected date of delivery",
+     "ld_cg_07", dict(flat_amount="4")),
+    ("eo_paternity_window_weeks_after_delivery", "Paternity leave — window closes, weeks beginning on the actual date of delivery",
+     "ld_cg_07", dict(flat_amount="14")),
+    ("eo_paternity_document_months_after_leave", "Paternity leave pay — document due, months after the first day of leave",
+     "ld_cg_07", dict(flat_amount="12")),
+    ("eo_paternity_document_months_after_cessation", "Paternity leave pay — document due, months after cessation (if earlier)",
+     "ld_cg_07", dict(flat_amount="6")),
     ("eo_wage_payment_days", "Wages — latest payment, days after the wage period ends", "ld_cg_03", dict(flat_amount="7")),
+    ("eo_termination_payment_days", "Termination payments (except severance) — latest payment, days after termination",
+     "ld_cg_09", dict(flat_amount="7")),
     ("sp_lsp_monthly_wage_cap", "SP/LSP monthly wage ceiling", "ld_cg_11", dict(flat_amount="22500")),
     ("sp_lsp_wage_fraction", "SP/LSP wage fraction (2/3)", "ld_cg_11", dict(text_value="2/3")),
     ("sp_lsp_overall_cap", "SP/LSP overall maximum", "ld_cg_11", dict(flat_amount="390000")),
@@ -329,22 +358,136 @@ HOLIDAYS = {
         ("2027-12-27", "The first weekday after Christmas Day")]),
 }
 
-# Earning classification [G1] — (component, obligation) -> (basis, IRD field, source key)
+# Earning-code catalogue (HK-006, gap audit STEP 3) [G1].
+# code -> (label, {obligation: (treatment, IR56B field, source key, status, basis / question)}).
+# status SOURCED = the treatment is quoted from the archived source (still pending specialist
+# review, never specialist-verified); PENDING = an interpretation the specialist must answer —
+# the engine never applies a PENDING mapping as certified (MPF blocks, EO/SMW REVIEW, IRD
+# UNMAPPED_REQUIRES_CLASSIFICATION). Questions are mirrored in SIGNOFF_PACKETS/01_HK_specialist.md.
 _EO, _MPF, _SMW, _IRD = "EO_WAGES", "MPF_RI", "SMW_WAGES", "IRD"
-EARNING_CLASSES = {
-    "basic": {_EO: ("INCLUDED", None, "ld_cg_03"), _MPF: ("INCLUDED", None, "mpfa_employees"),
-              _SMW: ("INCLUDED", None, "ld_smw"), _IRD: ("INCLUDED", "SALARY_WAGES", "ird_employers")},
-    "hra": {_EO: ("INCLUDED", None, "ld_cg_03"), _MPF: ("INCLUDED", None, "mpfa_employees"),
-            _SMW: ("INCLUDED", None, "ld_smw"), _IRD: ("INCLUDED", "OTHER_REWARDS_ALLOWANCES", "ird_employers")},
-    "special_allowance": {_EO: ("INCLUDED", None, "ld_cg_03"), _MPF: ("INCLUDED", None, "mpfa_employees"),
-                          _SMW: ("INCLUDED", None, "ld_smw"), _IRD: ("INCLUDED", "OTHER_REWARDS_ALLOWANCES", "ird_employers")},
-    "named_allowances": {_EO: ("REVIEW", None, "ld_cg_03"), _MPF: ("INCLUDED", None, "mpfa_employees"),
-                         _SMW: ("REVIEW", None, "ld_smw"), _IRD: ("INCLUDED", "OTHER_REWARDS_ALLOWANCES", "ird_employers")},
-    "overtime": {_EO: ("INCLUDED", None, "ld_cg_03"), _MPF: ("INCLUDED", None, "mpfa_employees"),
-                 _SMW: ("INCLUDED", None, "ld_smw"), _IRD: ("INCLUDED", "SALARY_WAGES", "ird_employers")},
-    "additional_compensation": {_EO: ("REVIEW", None, "ld_cg_03"), _MPF: ("INCLUDED", None, "mpfa_employees"),
-                                _SMW: ("REVIEW", None, "ld_smw"),
-                                _IRD: ("INCLUDED", "UNMAPPED_REQUIRES_CLASSIFICATION", "ird_employers")},
+_SALARY, _ALLOW, _COMM, _BONUS, _BACKPAY = (
+    "SALARY_WAGES", "OTHER_REWARDS_ALLOWANCES", "COMMISSION_FEES", "BONUS", "BACK_PAY_PILON_GRATUITY")
+IRD_ITEMS = {_SALARY: "11(a)", _COMM: "11(d)", _BONUS: "11(e)", _BACKPAY: "11(f)", _ALLOW: "11(k)"}
+_WAGES = "Concise Guide ch.3: 'wages' = all remuneration, earnings, allowances, tips and service charges payable in respect of work done"
+_SMW_FOLLOWS_EO = "SMW countable wages follow the EO wages definition (Statutory Minimum Wage page; Concise Guide ch.3)"
+_MPF_ALL = "MPFA: relevant income = all monetary payments paid or payable by an employer to an employee (wages, salary, leave pay, fees, commissions, bonuses, gratuities, perquisites or allowances)"
+S, P = "SOURCED", "PENDING"
+EARNING_CODES = {
+    "HK_BASIC_SALARY": ("Basic salary / wages", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, _WAGES),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, _MPF_ALL),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _SALARY, "ird_ir56b_notes", S, "IR56B note 3(d): gross salary reported at item 11(a)")}),
+    "HK_OVERTIME_CONTRACT": ("Overtime pay at the contractual rate", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3: commission and overtime pay are within the definition of wages"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, _MPF_ALL),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _SALARY, "ird_ir56b_notes", P,
+               "The archived IR56B notes do not name overtime pay. Is contractual overtime pay reported in item 11(a) "
+               "Salary/Wages (or another item)?")}),
+    "HK_HOUSING_CASH": ("Housing allowance paid in cash", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, _WAGES + "; only accommodation PROVIDED (in kind) is excluded"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: cash allowance — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _ALLOW, "ird_ir56b_notes", S, "IR56B note 10(b): cash allowances for ... housing — item 11(k)")}),
+    "HK_CASH_ALLOWANCE": ("Cash allowance (contractual, recurrent)", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, _WAGES),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: cash allowance — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _ALLOW, "ird_ir56b_notes", S, "IR56B note 10(b): cash allowances for food, cost of living, etc. — item 11(k)")}),
+    "HK_TRAVEL_ALLOWANCE": ("Travelling allowance (recurrent, contractual)", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3: travelling allowances are within wages (non-recurrent / actual-expense ones are not)"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: cash allowance / car subsidy in cash — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _ALLOW, "ird_ir56b_notes", S, "IR56B note 10(b): cash allowances for travelling — item 11(k)")}),
+    "HK_EXPENSE_REIMB": ("Reimbursement of expenses incurred in the employment", {
+        _EO: ("EXCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3 exclusions 4–5: travelling allowance for actual expenses; sums to defray special expenses"),
+        _MPF: ("EXCLUDED", None, "mpfa_ri", S, "MPFA examples: reimbursement of expenses necessary in the performance of employment duties — N"),
+        _SMW: ("EXCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("EXCLUDED", None, "ird_ir56b_notes", P,
+               "IR56B note 10(d) reports reimbursement of PERSONAL expenses in item 11(k). Are receipted reimbursements of "
+               "expenses incurred in performing the employment duties left off the IR56B?")}),
+    "HK_COMMISSION": ("Commission (contractual)", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3: commission is within the definition of wages"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: commission — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _COMM, "ird_ir56b_notes", S, "IR56B note 4: commission / fees — item 11(d), the year the employee became entitled")}),
+    "HK_COMMISSION_DISC": ("Commission (gratuitous / at the employer's discretion)", {
+        _EO: ("EXCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3 exclusion 3: commission of a gratuitous nature or payable only at the employer's discretion"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, _MPF_ALL),
+        _SMW: ("EXCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _COMM, "ird_ir56b_notes", S, "IR56B note 4: commission / fees — item 11(d)")}),
+    "HK_BONUS_CONTRACT": ("Bonus / 13th-month pay due under the contract", {
+        _EO: ("INCLUDED", None, "ld_cg_03", P,
+              "Concise Guide ch.3 excludes only gratuitous / discretionary end-of-year payments from wages. Is a contractual "
+              "annual bonus or 13th-month pay 'wages' (e.g. for 12-month average wages and holiday pay)?"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: 13th month pay (double pay) — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", P,
+               "Does a contractual annual bonus count towards SMW wages of the wage period in which it is paid?"),
+        _IRD: ("INCLUDED", _BONUS, "ird_ir56b_notes", S, "IR56B note 5: bonus — item 11(e), the year the employee became entitled")}),
+    "HK_BONUS_DISC": ("Discretionary / performance bonus", {
+        _EO: ("EXCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3 exclusion 6: end-of-year payment or annual bonus of a gratuitous nature or at the employer's discretion"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: bonus at employer's discretion / performance linked — Y"),
+        _SMW: ("EXCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _BONUS, "ird_ir56b_notes", S, "IR56B note 5: bonus — item 11(e)")}),
+    "HK_ATTENDANCE_ALLOW": ("Attendance allowance (contractual)", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3: attendance allowances are within wages (gratuitous ones are not)"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: cash allowance — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _ALLOW, "ird_ir56b_notes", P,
+               "Is a contractual attendance allowance reported in item 11(k) (other rewards / allowances) or in item 11(a)?")}),
+    "HK_TIPS_SERVICE": ("Tips / service charges distributed by the employer", {
+        _EO: ("INCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3: wages include tips and service charges"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: tips collected by the employer — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _ALLOW, "ird_ir56b_notes", S, "IR56B note 10(e): tips — item 11(k)")}),
+    "HK_LEAVE_PAY": ("Holiday / annual leave / sickness allowance pay", {
+        _EO: ("INCLUDED", None, "ld_cg_03", P,
+              "Is statutory holiday / annual leave pay / sickness allowance itself 'wages' for the EO wages base of later "
+              "entitlements (12-month average), or excluded from that base?"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: paid leave allowance (annual / sick leave) — Y"),
+        _SMW: ("INCLUDED", None, "ld_smw", P, "How are paid leave days and their pay treated in the SMW hours / wages test?"),
+        _IRD: ("INCLUDED", _SALARY, "ird_ir56b_notes", P,
+               "The archived IR56B notes do not describe item 11(b) Leave pay. Is paid leave reported in 11(b) or within 11(a)?")}),
+    "HK_PILON": ("Payment in lieu of notice", {
+        _EO: ("EXCLUDED", None, "ld_cg_03", P, "Is payment in lieu of notice excluded from the EO wages base used for other entitlements?"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", P,
+               "The archived MPFA examples table does not list payment in lieu of notice. Is it relevant income?"),
+        _SMW: ("EXCLUDED", None, "ld_smw", P, "Is payment in lieu of notice excluded from SMW wages?"),
+        _IRD: ("INCLUDED", _BACKPAY, "ird_ir56b_notes", S, "IR56B note 6(a)(ii): payment in lieu of notice — item 11(f)")}),
+    "HK_EOC_GRATUITY": ("Gratuity on completion / termination of the contract", {
+        _EO: ("EXCLUDED", None, "ld_cg_03", S, "Concise Guide ch.3 exclusion 7: gratuity payable on completion or termination of a contract"),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, "MPFA examples: end-of-contract gratuity — Y"),
+        _SMW: ("EXCLUDED", None, "ld_smw", S, _SMW_FOLLOWS_EO),
+        _IRD: ("INCLUDED", _BACKPAY, "ird_ir56b_notes", S, "IR56B note 6(a)(i): gratuities on termination — item 11(f)")}),
+    "HK_SEVERANCE_LSP": ("Statutory severance / long service payment", {
+        _EO: ("EXCLUDED", None, "ld_cg_03", P, "Confirm statutory SP / LSP is not 'wages' (it is calculated FROM wages)."),
+        _MPF: ("EXCLUDED", None, "mpfa_ri", S, "MPFA: relevant income excludes severance / long service payments under the EO"),
+        _SMW: ("EXCLUDED", None, "ld_smw", P, "Confirm statutory SP / LSP is excluded from SMW wages."),
+        _IRD: ("EXCLUDED", None, "ird_ir56b_notes", S, "IR56B note 6(b): statutory SP / LSP is NOT reported (only any excess)")}),
+    "HK_ALLOWANCE_UNSPEC": ("Named allowance not yet given its own code", {
+        _EO: ("INCLUDED", None, "ld_cg_03", P,
+              "Classify each named allowance: contractual (wages), gratuitous / discretionary, or reimbursement of expenses."),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, _MPF_ALL),
+        _SMW: ("INCLUDED", None, "ld_smw", P, "As for EO wages: classify each named allowance before it counts for SMW."),
+        _IRD: ("INCLUDED", _ALLOW, "ird_ir56b_notes", S, "IR56B note 10(b): cash allowances — item 11(k)")}),
+    "HK_OTHER_UNCLASS": ("Other earnings not yet classified", {
+        _EO: ("INCLUDED", None, "ld_cg_03", P, "Classify this earning (which code?) before it counts for EO wages."),
+        _MPF: ("INCLUDED", None, "mpfa_ri", S, _MPF_ALL),
+        _SMW: ("INCLUDED", None, "ld_smw", P, "Classify this earning before it counts for SMW."),
+        _IRD: ("INCLUDED", "UNMAPPED_REQUIRES_CLASSIFICATION", "ird_ir56b_notes", P,
+               "Which IR56B item does this earning belong to?")}),
+}
+# Default source bindings: which platform pay source carries which code. Employer configuration
+# (an organisation may override with its own rows); allowance:* / attendance:* sources without a
+# binding of their own use their family's (named_allowances / additional_compensation).
+EARNING_SOURCES = {
+    "basic": "HK_BASIC_SALARY", "hra": "HK_HOUSING_CASH", "special_allowance": "HK_CASH_ALLOWANCE",
+    "overtime": "HK_OVERTIME_CONTRACT", "named_allowances": "HK_ALLOWANCE_UNSPEC",
+    "additional_compensation": "HK_OTHER_UNCLASS",
+    "allowance:transport": "HK_TRAVEL_ALLOWANCE", "allowance:commission": "HK_COMMISSION",
+    "attendance:bonus": "HK_BONUS_DISC", "attendance:rewards": "HK_OTHER_UNCLASS",
+    "attendance:other_compensation": "HK_OTHER_UNCLASS",
 }
 
 
@@ -528,14 +671,23 @@ def seed_hong_kong(db, spec=None) -> JurisdictionPack:
             # (row effective dates would hide every holiday but the as-of day).
             _add_slab(db, pack, s, "HK_STATUTORY_HOLIDAY", ids[source], rate_label=name[:100],
                       filing_status=str(year), tax_formula=iso)
-    for component, obligations in EARNING_CLASSES.items():
-        for obligation, (basis, ird_field, source) in obligations.items():
+    for code, (label, obligations) in EARNING_CODES.items():
+        for obligation, (basis, ird_field, source, status, note) in obligations.items():
             s += 1
-            _add_slab(db, pack, s, "HK_EARNING_CLASS", ids[source], filing_status=component, tax_regime=obligation,
+            meta = {"label": label, "status": status, "irdItem": IRD_ITEMS.get(ird_field) if obligation == _IRD else None,
+                    "basis": note if status == S else None, "question": note if status == P else None}
+            _add_slab(db, pack, s, "HK_EARNING_CODE", ids[source], filing_status=code, tax_regime=obligation,
                       assessment_basis=basis,
-                      # IRD rows: tax_formula = the IR56 field the amount is reported in.
-                      tax_formula=ird_field if obligation == _IRD else f"{obligation}: {basis}",
-                      rate_label=f"HKCLS-{spec['tax_year']}-{component}-{obligation} [G1]"[:100])
+                      # IRD rows: tax_formula = the IR56B field; the others carry the treatment.
+                      tax_formula=(ird_field or "NOT_REPORTED") if obligation == _IRD else f"{obligation}: {basis}",
+                      formula_expression=json.dumps(meta, sort_keys=True),
+                      rate_label=(f"HKEC-{code}-{obligation} [G1]" + (" [PENDING]" if status == P else ""))[:100])
+    for source_key, code in EARNING_SOURCES.items():
+        s += 1
+        # The code is in tax_regime (a field every row reader carries, incl. the golden-check adapter).
+        _add_slab(db, pack, s, "HK_EARNING_SOURCE", ids["ld_cg_03"], filing_status=source_key, tax_regime=code,
+                  tax_formula=code,
+                  rate_label=f"HKES-{source_key} -> {code} [default binding — employer confirms]"[:100])
     # General holidays are NOT canonical seed data: they are loaded from an
     # archived official list (scripts/hk_load_general_holidays.py). Re-stage the
     # pack's existing rows unchanged so the reconcile keeps them (identical rows
