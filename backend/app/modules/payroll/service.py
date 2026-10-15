@@ -32624,6 +32624,8 @@ def _get_currency_symbol(country: str) -> str:
         "IE": "\u20ac", "FR": "\u20ac",
         # Netherlands uses the euro too.
         "NL": "\u20ac",
+        # Mexico (ZP-MX-ENG-001): Mexican peso — same symbol as the "MXN" row above.
+        "MX": "MX$",
     }.get(country, "$")
 
 
@@ -32651,6 +32653,8 @@ def _get_currency_code(country: str) -> str:
         "IE": "EUR", "FR": "EUR",
         # Netherlands uses the euro.
         "NL": "EUR",
+        # Mexico (ZP-MX-ENG-001): Mexican peso.
+        "MX": "MXN",
     }.get(country, "USD")
 
 

@@ -109,6 +109,16 @@ def calculate_payroll(
             "NL_SIMPLE_MODE_UNSUPPORTED",
             "Netherlands payroll cannot use simple calculation mode; use standard or enterprise.",
         )
+    if (ctx.country or "").upper() == "MX" and key == "simple":
+        # Mexico (ZP-MX-ENG-001): simple mode would silently skip ISR (Annex 8
+        # tariffs), the employment subsidy, every IMSS branch, CEAV,
+        # INFONAVIT and state ISN — all statutory, no fallback (MX-001).
+        from app.modules.payroll.engine.countries.mexico import MexicoCalculationBlockedError
+
+        raise MexicoCalculationBlockedError(
+            "MX_SIMPLE_MODE_UNSUPPORTED",
+            "Mexico payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
 
     strategy = resolve_strategy(calculation_mode)
     try:
@@ -231,6 +241,7 @@ def build_context_from_employee(
     italy_inputs: dict | None = None,
     saudi_inputs: dict | None = None,
     netherlands_inputs: dict | None = None,
+    mexico_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -421,4 +432,7 @@ def build_context_from_employee(
         # Netherlands (ZP-NL-ENG-001): nl_statutory_profile + nl_* context
         # fields resolved by netherlands_service.resolve_nl_calc_inputs.
         **(netherlands_inputs or {}),
+        # Mexico (ZP-MX-ENG-001): the mx_* context fields resolved by
+        # mexico_service (Phase 6).
+        **(mexico_inputs or {}),
     )
