@@ -20642,6 +20642,26 @@ def _sum_attendance_extras(db: Session, organization_id: int, employee_id: int,
     return _round2(total)
 
 
+def _hk_attendance_extras_by_kind(db: Session, organization_id: int, employee_id: int,
+                                  period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> dict:
+    """Hong Kong earning-code catalogue (gap audit STEP 3): the same attendance
+    extras _sum_attendance_extras folds into additional compensation, kept
+    apart by kind so each can be bound to its own HK earning code."""
+    if records is None:
+        records = db.query(PayrollAttendanceRecord).filter(
+            PayrollAttendanceRecord.organization_id == organization_id,
+            PayrollAttendanceRecord.employee_id == employee_id,
+            PayrollAttendanceRecord.date >= period_start,
+            PayrollAttendanceRecord.date <= period_end,
+        ).all()
+    out = {}
+    for kind in ("rewards", "bonus", "other_compensation"):
+        total = sum((Decimal(str(getattr(r, kind) or 0)) for r in records), Decimal("0"))
+        if total:
+            out[f"attendance:{kind}"] = _round2(total)
+    return out
+
+
 def _sum_attendance_bonus_only(db: Session, organization_id: int, employee_id: int,
                                 period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> Decimal:
     """Phase 8T — Germany SONSTB routing (ZP-TAX-DE-2026-001 §15 "Bonus /
@@ -25122,6 +25142,13 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             hk_inputs["hk_worker_facts"]["finalPeriodTerminationDate"] = hk_termination_date.isoformat()
         if hk_overtime_facts is not None:
             hk_inputs["hk_worker_facts"]["overtime"] = hk_overtime_facts
+        # Earning-code catalogue (gap audit STEP 3): named allowances by key and
+        # attendance extras by kind, so each binds to its own HK earning code.
+        hk_sources = {f"allowance:{i['key']}": i["amount"] for i in allowance_items if i["amount"]}
+        if is_active:
+            hk_sources.update(_hk_attendance_extras_by_kind(
+                db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records))
+        hk_inputs["hk_earning_sources"] = {k: str(v) for k, v in hk_sources.items()}
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,

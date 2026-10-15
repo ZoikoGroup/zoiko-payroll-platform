@@ -43,7 +43,10 @@ def test_d_a_contractual_overtime_is_paid_and_counted_in_every_base(db, hk, monk
     current = trace["mpf"]["currentPeriod"]
     assert D(current["relevantIncome"]) == D("23000.00") and current["branch"] == "WITHIN_LEVELS"
     assert D(trace["mpf"]["employee"]) == D("1150.00") and D(trace["mpf"]["employer"]) == D("1150.00")
-    assert D(trace["ird"]["reportable"]["SALARY_WAGES"]) == D("11000.00")    # basic 8,000 + overtime 3,000
+    # Overtime is reported to the IRD; its IR56B item is PENDING in the earning-code catalogue (STEP 3),
+    # so it stays visibly unmapped until the specialist answers — never silently dropped.
+    assert D(trace["ird"]["reportable"]["SALARY_WAGES"]) == D("8000.00")
+    assert D(trace["ird"]["reportable"]["UNMAPPED_REQUIRES_CLASSIFICATION"]) == D("3000.00")
     assert D(trace["result"]["gross"]) == D("23000.00")
 
 

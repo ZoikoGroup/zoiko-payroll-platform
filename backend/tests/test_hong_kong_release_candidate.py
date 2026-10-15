@@ -29,8 +29,10 @@ import pytest
 
 from tests.test_hong_kong_e2e import MAKER, CHECKER, hk, _employee, _item, _month, _other_org, _profile  # noqa: F401
 
-HK_ROUTE_COUNT = 76           # 52 tenant /api/payroll/hong-kong/* + 24 Super Admin (pinned: review a new route's RBAC;
-                              # +3 2026-10-14 pre-transition wage override list/request/approve, operator-gated like termination)
+HK_ROUTE_COUNT = 78           # 52 tenant /api/payroll/hong-kong/* + 26 Super Admin (pinned: review a new route's RBAC;
+                              # +3 2026-10-14 pre-transition wage override list/request/approve, operator-gated like termination;
+                              # +2 2026-10-15 earning-code catalogue: GET (read-only) and POST row split (governed
+                              # edit: Draft pack, reason + source, audited) — both get_current_super_admin)
 
 # FILED needs the external-submission record (how the employer submitted).
 INTERNAL_FILING = {"submissionMode": "INTERNAL_PREPARATION_ONLY", "authorizedSigner": "Director (test)"}
@@ -74,7 +76,7 @@ def _call(client, method, path):
 def test_hk_route_inventory_is_pinned():
     routes = _hk_routes()
     assert len(routes) == HK_ROUTE_COUNT, routes
-    assert sum(1 for _m, p in routes if p.startswith("/api/payroll/hong-kong")) == HK_ROUTE_COUNT - 24
+    assert sum(1 for _m, p in routes if p.startswith("/api/payroll/hong-kong")) == HK_ROUTE_COUNT - 26
 
 
 def test_every_hk_route_refuses_an_unauthenticated_caller_over_http(db):

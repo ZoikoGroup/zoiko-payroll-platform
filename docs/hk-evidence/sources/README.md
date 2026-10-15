@@ -16,7 +16,7 @@ Fetched 2026-10-14 with `python -m scripts.hk_archive_authority_documents --mani
 
 **No mismatch** between the wireframe and the archived official sources.
 
-## Register (30 documents; 23 identical to the hashes the seed recorded on 2026-09-30)
+## Register (30 documents on 2026-10-14; 23 identical to the hashes the seed recorded on 2026-09-30 — see the later sections for documents added since)
 
 | Id | Authority | Title | URL | Retrieved (UTC) | SHA-256 | Against the seed's 2026-09-30 hash |
 |---|---|---|---|---|---|---|
@@ -59,3 +59,20 @@ The three changed pages (two MPFA pages and the PCPD HR code) are dynamic HTML. 
 
 * **Local check:** loaded on a local scratch database through `scripts/hk_load_general_holidays.py`, the governed path (Draft packs only; archived file uploaded; SHA-256 recorded; audit row; rows marked [G1]). After loading, the golden-vector certification still gives **PASS 11/11**.
 * **Production:** a person runs the same loader for HK-PAYROLL-2025 (years 2025, 2026) and HK-PAYROLL-2026 (years 2026, 2027) after the deploy. The commands are in `../ops/HK_DEPLOY_RUNBOOK.md`.
+
+## Earning-code catalogue sources (added 2026-10-15)
+
+Archived the same way (official IRD domain, `scripts.hk_archive_authority_documents --fetch` on a two-row manifest, then merged into `archive/register.*` and `sources_manifest.csv`):
+
+| Id | Authority | Title | URL | Retrieved (UTC) | SHA-256 |
+|---|---|---|---|---|---|
+| `ird_ir56b_notes` | Inland Revenue Department | Notes and instructions for Form IR56B | <https://www.ird.gov.hk/eng/pdf/ir56b_notes_e.pdf> | 2026-10-15T03:23:30Z | `d43073a7431585d1…` |
+| `ird_ir56b_completion` | Inland Revenue Department | Guide to completion of Employer's Return of Remuneration and Pensions (IR56B) | <https://www.ird.gov.hk/eng/pdf/ir56b_completion_e.pdf> | 2026-10-15T03:23:30Z | `d8071558d3abaf68…` |
+
+The catalogue (`backend/scripts/seed_hong_kong_canonical_pack.py`, `EARNING_CODES`) quotes:
+
+* **IR56B items** from `ird_ir56b_notes`: gross salary at 11(a) (note 3(d)); commission / fees 11(d) (note 4); bonus 11(e) (note 5); back pay, payment in lieu of notice and gratuities 11(f), statutory SP / LSP not reported (note 6); cash allowances, tips and perquisites 11(k) (note 10). The notes do not describe 11(b) leave pay or say where overtime pay goes: those mappings are **PENDING** with the question in sign-off packet 01.
+* **MPF relevant income** from the **2026-10-14 copy** of the MPFA employees page (`mpfa_employees` in `archive/register.csv`, SHA-256 `0068f8fde7b2626f…`, seed key `mpfa_ri`): its definition and Y / N examples table. The seed's older `mpfa_employees` hash (2026-09-30) is not the copy these mappings were checked against.
+* **EO wages** from Concise Guide ch.3 (`ld_cg_03`): the definition and its seven exclusions. **SMW countable wages** follow the EO wages definition (`ld_smw`); the specialist is asked to confirm that rule.
+
+Every catalogue mapping stays *sourced – pending specialist review*; nothing is marked specialist-verified.

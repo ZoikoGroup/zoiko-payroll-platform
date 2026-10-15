@@ -690,6 +690,10 @@ export const getHkConfigResolution = (on) => apiFetch(`${HK_CFG}/resolution`, { 
 export const compareHkConfig = (fromId, toId) => apiFetch(`${HK_CFG}/compare`, { params: { from: fromId, to: toId } });
 export const updateHkConfigRow = (kind, rowId, payload) =>
   apiFetch(`${HK_CFG}/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+// Hong Kong earning-code catalogue (HK-006): read, and a governed dated change of one row.
+export const getHkEarningCodes = (on) => apiFetch(`${HK_CFG}/earning-codes`, { params: on ? { on } : {} });
+export const splitHkEarningCodeRow = (rowId, payload) =>
+  apiFetch(`${HK_CFG}/earning-codes/rows/${rowId}/split`, { method: "POST", body: payload });
 export const createHkConfigVersion = (packRowId, version, reason) =>
   apiFetch(`${HK_CFG}/packs/${packRowId}/new-version`, { method: "POST", body: { version, reason } });
 // Hong Kong platform control records (Super Admin only)

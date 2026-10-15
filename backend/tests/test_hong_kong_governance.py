@@ -432,7 +432,7 @@ def test_every_hk_route_authorizes_the_right_role(db, hk):
                         if (m, p) in permission_gated and "HK_MPF_ACCOUNT_REVEAL" in res.text:
                             continue
                         refused.append((m, p, res.status_code))
-    assert len(routes) == 76 and refused == [], refused
+    assert len(routes) == 78 and refused == [], refused
 
 
 def test_a_future_year_cannot_activate_without_vectors_and_never_reaches_current_payroll(db, hk):

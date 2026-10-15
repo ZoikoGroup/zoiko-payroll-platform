@@ -527,6 +527,10 @@ class PayrollContext:
     hk_worker_facts: dict = None
     hk_hours: dict = None
     hk_rule_segments: dict = None
+    #   hk_earning_sources — the folded pay split by recorded source for the
+    #                        HK earning-code catalogue: {"allowance:<key>":
+    #                        amount, "attendance:<kind>": amount}.
+    hk_earning_sources: dict = None
     # The payroll run's period (employment period). Read by Singapore only
     # (SG-011: OW belongs to the employment month when payable by the 14th
     # of the following month). None for callers without a run period.

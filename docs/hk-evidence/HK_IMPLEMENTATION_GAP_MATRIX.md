@@ -24,19 +24,35 @@ The key findings were re-checked by hand in the code (marked ✔).
 * S12-5 entitlement lifecycle (entitlements are calculated but never stored or paid);
 * S14-4 pay-result drawer.
 
-**Defects found during the audit** (wrong behaviour, not just gaps):
+## Delta 2026-10-15 (STEP 1–3 of the HK programme, `nikhil`, not pushed)
+
+| Row | Before | After | By |
+|---|---|---|---|
+| S4-1 | PARTIAL | IMPLEMENTED | earning-code catalogue (STEP 3) |
+| S4-2 | PARTIAL | IMPLEMENTED | D-A |
+| S10-4 | PARTIAL | IMPLEMENTED | D-A (overtime hours count for SMW and continuous contract) |
+| S11-1 | PARTIAL (defective) | IMPLEMENTED | D-B, D-J |
+| S7-2 | IMPLEMENTED | IMPLEMENTED (gap closed) | D-L |
+| S7-4 / S7-5 / S7-9 / HK-017 / S15-6 | PARTIAL | PARTIAL (defect fixed, other gaps remain) | D-H / D-D / D-F / D-C / D-E |
+
+**Totals after the delta:** 31 IMPLEMENTED, 65 PARTIAL, 4 MISSING (was 27 / 69 / 4).
+
+**Defects found during the audit** (wrong behaviour, not just gaps; fix commits on `nikhil`):
 
 | # | Defect | Where | Effect |
 |---|---|---|---|
-| D-A ✔ | HK overtime pay is hard-wired to 0 in the payroll run (only Singapore computes it) | `service.py` ~24928 | Contractual overtime can never be paid through an HK run |
-| D-B ✔ | Any employee with a leaving date raises the BLOCK `EO_TERMINATION_WAGES_DUE_IMMEDIATELY`, with no way to clear it | `preflight.py:242-246` | A leaver's final payroll run can never be approved |
-| D-C ✔ | When the profile has no frozen pre-transition wage, `calculate_termination` uses the wage typed in the request | `hong_kong_service.py:1242-1248` | HK-017 can be bypassed |
-| D-D ✔ | `record_ir56g_filed` sets the IRD case FILED directly | `hong_kong_service.py:389-404` | IR56G filing skips four-eyes, submission record and validation |
-| D-E ✔ | Deleting a Draft pack deletes its `payroll_tax_configuration_audit` rows. Since `4c45af9` (F-6 append-only triggers) that delete is refused | `service.py:9413` | **A regression in our own unpushed commit:** Draft-pack delete fails once audit rows exist |
-| D-F | The BIR56A reconciliation compares reported totals (suppressed and excluded amounts removed) with full committed gross | `hong_kong_service.py` ~670 / 3864 | Shows a false "Variance" whenever an IR56B is suppressed or an amount excluded |
-| D-G | IR56B gross = `gross_pay − attendance_deduction`, while the engine's unpaid-absence figure uses a hard-coded 30-day divisor | `countries/hong_kong.py` `_PAYROLL_DAYS_DEFAULT` | Possible reconciliation mismatch |
-| D-H | IR56F can coexist with an IR56G departure case; the check uses only a profile fact, not an open hold | `hong_kong_service.py:626-628` | Wrong form filed |
-| D-I | `HongKongEmpfSubmission.amends_submission_id` is never written | models / service | eMPF correction chain incomplete |
+| D-A ✔ | HK overtime pay is hard-wired to 0 in the payroll run (only Singapore computes it) | `service.py` ~24928 | Contractual overtime can never be paid through an HK run — **fixed `b57ede2`** |
+| D-B ✔ | Any employee with a leaving date raises the BLOCK `EO_TERMINATION_WAGES_DUE_IMMEDIATELY`, with no way to clear it | `preflight.py:242-246` | A leaver's final payroll run can never be approved — **fixed `f06b198`** |
+| D-C ✔ | When the profile has no frozen pre-transition wage, `calculate_termination` uses the wage typed in the request | `hong_kong_service.py:1242-1248` | HK-017 can be bypassed — **fixed `2be8076`** |
+| D-D ✔ | `record_ir56g_filed` sets the IRD case FILED directly | `hong_kong_service.py:389-404` | IR56G filing skips four-eyes, submission record and validation — **fixed `582fa70`** |
+| D-E ✔ | Deleting a Draft pack deletes its `payroll_tax_configuration_audit` rows. Since `4c45af9` (F-6 append-only triggers) that delete is refused | `service.py:9413` | **A regression in our own unpushed commit:** Draft-pack delete fails once audit rows exist — **fixed `30ab73d`** |
+| D-F | The BIR56A reconciliation compares reported totals (suppressed and excluded amounts removed) with full committed gross | `hong_kong_service.py` ~670 / 3864 | Shows a false "Variance" whenever an IR56B is suppressed or an amount excluded — **fixed `3af5575`** |
+| D-G | IR56B gross = `gross_pay − attendance_deduction`, while the engine's unpaid-absence figure uses a hard-coded 30-day divisor | `countries/hong_kong.py` `_PAYROLL_DAYS_DEFAULT` | Possible reconciliation mismatch — **not reproduced**: the D-G regression test (`6d60fce`) passes; the 30-day divisor is a specialist question (packet 01) |
+| D-H | IR56F can coexist with an IR56G departure case; the check uses only a profile fact, not an open hold | `hong_kong_service.py:626-628` | Wrong form filed — **fixed `9caad5b`** |
+| D-I | `HongKongEmpfSubmission.amends_submission_id` is never written | models / service | eMPF correction chain incomplete — open (scheduled later) |
+| D-J | A leaver whose employment ended before the wage period (still status ACTIVE) is selected by the run and paid a full month; the preflight selected the same way | `service._generate_payslips_for_run`; `_hk_run_employees` | Overpayment after leaving (found by the synthetic-company harness) — **fixed `aa7b110`** |
+| D-K | The HK approval gate skipped mid-period joiners the run pays | `_hk_run_employees` | A joiner's BLOCKs (e.g. no HKID) never applied — **fixed `a8ae74d`** |
+| D-L | An IR56B is prepared clean beside an open (unfiled) IR56F / IR56G for the same cessation | `ird.ir56b_suppression` | Duplicate forms once both are filed — **fixed `c8510a4`** |
 
 ## Sections 3–6
 
@@ -52,8 +68,8 @@ The key findings were re-checked by hand in the code (marked ✔).
 | S3-8 | eMPF default channel | PARTIAL | `EMPF_METHODS`; eMPF configuration | test_empf_configuration_holds_no_secrets… | No default config; batch ignores configuration; nothing transmitted (G2) |
 | S3-9 | Worker resolver states | PARTIAL | `EmployeeStatutoryProfile.hk_*`; `mpf.resolve_coverage` | test_mpf_exemptions_fail_closed…; test_mpf_inbound_13_month_rule | Domestic / casual / contractor only BLOCK; visa type unused; no overseas-scheme evidence field; no per-employee wage period or work pattern |
 | HK-004 | MPF coverage ≠ continuous contract | IMPLEMENTED | `mpf.resolve_coverage` never reads CC | test_mpf_coverage_never_inferred_from_part_time_status | No explicit "COVERED while NOT_CONTINUOUS" test |
-| S4-1 | Classification per obligation and effective date; default HK earning-code set | PARTIAL | `countries/hong_kong.earning_components/classify`; SEED HK_EARNING_CLASS (G1) | test_one_earning_classified_per_obligation | **No HK earning-code set** (only 6 generic components); effective-dating only per pack; all unverified; additional_compensation unmapped for IRD |
-| S4-2 | Contract overtime, OT hours count for SMW | PARTIAL | verified daily hours | — | **D-A**: overtime pay 0; no OT-hours field; no test |
+| S4-1 | Classification per obligation and effective date; default HK earning-code set | IMPLEMENTED (was PARTIAL) — 18 default codes × EO / MPF / SMW / IR56B, each sourced (archived SHA-256) or PENDING with the specialist question; pay sources bound by rows; row-level effective dating with a governed dated split; unknown / unbound / pending-MPF fail closed (`countries/hong_kong._classify_by_code`; `earning_code_catalogue`; Super Admin "Earning Codes" tab; `tests/test_hong_kong_earning_codes.py`). Remaining: per-employee variable-pay entry by code needs its own table (migration waits for the main merge); all mappings G1-unverified. Previously: | `countries/hong_kong.earning_components/classify`; SEED HK_EARNING_CLASS (G1) | test_one_earning_classified_per_obligation | **No HK earning-code set** (only 6 generic components); effective-dating only per pack; all unverified; additional_compensation unmapped for IRD |
+| S4-2 | Contract overtime, OT hours count for SMW | IMPLEMENTED (was PARTIAL; D-A) | verified daily hours | — | **D-A**: overtime pay 0; no OT-hours field; no test |
 | HK-007 | 7-day payment deadline flag | IMPLEMENTED | `preflight.wage_payment_timing/checks`; approval gate | test_wage_payment_timing_uses_the_pack_row…; e2e test_preflight_blocks_a_late_run… | Flagged at run preflight, not at calendar set-up |
 | S5-1 | Coverage 18–64, 60 days, enrol in 60 days, HK-008 | PARTIAL | `mpf.resolve_coverage`; catch-up; `enrolment_checks` | test_case_f_leaver_before_60_days…; test_case_e_catch_up…; RC enrolment tests | Age 18/65 boundary inside a period BLOCKS instead of apportioning; no eMPF enrolment workflow |
 | S5-2 | Employer 5% from day 1 | IMPLEMENTED | `mpf.contributions` | test_mpf_employer_still_pays_5_percent… | — |
@@ -77,7 +93,7 @@ The key findings were re-checked by hand in the code (marked ✔).
 | ID | Requirement | Status | Code location(s) | Test(s) | What is missing |
 |---|---|---|---|---|---|
 | S7-1 | BIR56A + IR56B, one row per employee, due date | IMPLEMENTED | `generate_annual_return`; `ird.due_date` | e2e test_annual_return_from_committed_payroll…; RPT bir56a tests | Manual trigger only; issue date assumed 1 April |
-| S7-2 | No IR56B where IR56F/G covers the year | IMPLEMENTED | `ird.ir56b_suppression` | test_case_j_ir56b_suppressed… | Partial coverage only flags; a PREPARED IR56F doesn't suppress |
+| S7-2 | No IR56B where IR56F/G covers the year | IMPLEMENTED | `ird.ir56b_suppression` | test_case_j_ir56b_suppressed… | Partial coverage only flags; ~~a PREPARED IR56F doesn't suppress~~ an open IR56F / IR56G now holds the IR56B for resolution (D-L) |
 | S7-3 | IR56E within 3 months (event-driven) | PARTIAL | `create_event_cases` | test_ir56e_event_case_from_profile_facts | Manual trigger, not event-driven; no payload |
 | S7-4 | IR56F one month before cessation | PARTIAL | same | test_ird_event_deadlines | Manual; **D-H**; no payload |
 | S7-5 | IR56G one month before departure; hold | PARTIAL | `identify_departure`; `record_ir56g_filed` | e2e case I tests | **D-D**; no payload; changed departure doesn't move the case due date |
@@ -101,9 +117,9 @@ The key findings were re-checked by hand in the code (marked ✔).
 | S10-1 | SMW 43.10 / 42.10 split | IMPLEMENTED | as S3-3 | as S3-3 | — |
 | S10-2 | SMW test + top-up | PARTIAL | `minimum_wage.assess`; preflight BLOCK | test_preflight_smw_breach_blocks_with_the_top_up_amount | No top-up earning line |
 | S10-3 | Hours-record trigger | IMPLEMENTED | as S3-4 | as S3-4 | — |
-| S10-4 | OT hours count for SMW | PARTIAL | daily hours | — | No OT-hours field or test |
+| S10-4 | OT hours count for SMW | IMPLEMENTED (was PARTIAL; D-A) | daily hours | — | No OT-hours field or test |
 | HK-016 | T&A intervals / verified totals | PARTIAL | `record_work_hours` | test_work_hours_are_append_only | Daily totals only, no intervals |
-| S11-1 | Final wages deadline, subject to hold | PARTIAL (defective) | preflight; `payment_treatment` | preflight leaver tests | **D-B** |
+| S11-1 | Final wages deadline, subject to hold | IMPLEMENTED (was PARTIAL, defective; D-B, D-J) | preflight; `payment_treatment` | preflight leaver tests | **D-B** |
 | S11-2 | Unused leave / statutory amounts on termination | PARTIAL | `termination.calculate` inputs | e2e case K | Typed by the operator, not calculated |
 | S11-3 | SP/LSP eligibility | PARTIAL | `termination.eligibility` | test_sp_lsp_eligibility | Ill-health certificate, lay-off definition, LSP on death |
 | S11-4 | 2/3 base, 12-month election, 22,500 → 15,000 | PARTIAL | `termination._portion_base` | case K | Wage typed by hand; not derived from payroll or the average-wage engine |

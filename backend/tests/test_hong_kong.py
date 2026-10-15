@@ -251,7 +251,8 @@ def test_unclassified_earning_component_blocks_mpf(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
     from app.modules.payroll.models import TaxSlab
 
-    db.query(TaxSlab).filter(TaxSlab.rule_type == "HK_EARNING_CLASS", TaxSlab.filing_status == "overtime",
+    # The catalogue (STEP 3): the overtime code's MPF mapping is missing -> the calculation blocks.
+    db.query(TaxSlab).filter(TaxSlab.rule_type == "HK_EARNING_CODE", TaxSlab.filing_status == "HK_OVERTIME_CONTRACT",
                              TaxSlab.tax_regime == "MPF_RI").delete()
     db.commit()
     with pytest.raises(HongKongCalculationBlockedError, match="overtime"):

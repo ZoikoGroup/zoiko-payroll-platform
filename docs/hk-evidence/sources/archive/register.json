@@ -431,11 +431,45 @@
    "retrieved_at": "2026-10-14T11:03:45.978060+00:00",
    "archived_as": "96ab5bcaec9830809cbee65f5c902894d6eba38903516ba4af988ebfce39d342__10.pdf",
    "note": "fetched: HTTP 200, application/pdf"
+  },
+  {
+   "doc_id": "ird_ir56b_completion",
+   "authority": "Inland Revenue Department",
+   "title": "Guide to completion of Employer's Return of Remuneration and Pensions (IR56B)",
+   "url": "https://www.ird.gov.hk/eng/pdf/ir56b_completion_e.pdf",
+   "status": "ARCHIVED",
+   "sha256": "d8071558d3abaf683c9e2482889ba766aa4fff23427b5ce89eb07722b052f360",
+   "bytes": 1301824,
+   "retrieved_at": "2026-10-15T03:23:30.114016+00:00",
+   "archived_as": "d8071558d3abaf683c9e2482889ba766aa4fff23427b5ce89eb07722b052f360__ir56b_completion_e.pdf",
+   "note": "fetched: HTTP 200, application/pdf"
+  },
+  {
+   "doc_id": "ird_ir56b_notes",
+   "authority": "Inland Revenue Department",
+   "title": "Notes and instructions for Form IR56B",
+   "url": "https://www.ird.gov.hk/eng/pdf/ir56b_notes_e.pdf",
+   "status": "ARCHIVED",
+   "sha256": "d43073a7431585d103904e5564c2edcc161f745a26ab03fd0ab496f999a1dd23",
+   "bytes": 248759,
+   "retrieved_at": "2026-10-15T03:23:30.621135+00:00",
+   "archived_as": "d43073a7431585d103904e5564c2edcc161f745a26ab03fd0ab496f999a1dd23__ir56b_notes_e.pdf",
+   "note": "fetched: HTTP 200, application/pdf"
   }
  ],
- "archived": 33,
+ "archived": 35,
  "missing": 0,
  "appendedAt": "2026-10-14T11:03:45.978060+00:00",
  "note": "ld_cg_08/09/10 appended 2026-10-14 from a separate fetch of the same archiver (for gap-audit defect D-B)",
- "registerSha256": "898bc6752c78502b5bb223d159301bfc7406897546af4ebb4e82f3fe413accfa"
+ "appended": [
+  {
+   "at": "2026-10-15",
+   "docIds": [
+    "ird_ir56b_completion",
+    "ird_ir56b_notes"
+   ],
+   "by": "scripts.hk_archive_authority_documents (separate manifest), merged"
+  }
+ ],
+ "registerSha256": "e06781b94863da3c967ba9a71ac563b88ea211c3a9c0b0cb253d1a06dad9d52b"
 }

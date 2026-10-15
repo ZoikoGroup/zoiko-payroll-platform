@@ -11,6 +11,10 @@ the cross-output reconciliations every later domain extends:
   * IRD accumulator (BIR56A / IR56B) = committed pay;
   * no duplicate IR forms.
 
+Earning-code catalogue cases (STEP 3): an org-wide contractual commission and
+travelling allowance (named allowance components) and a discretionary bonus
+(attendance record) for the below-minimum employee in June.
+
 Local SQLite only (conftest `db`); app.* imported lazily (collection-order hazard).
 """
 from datetime import date, timedelta
@@ -84,6 +88,21 @@ def build_company(db, hk, monkeypatch):
     e.veteran = _new(db, org, "SC8", "Synthetic Pre-2025 Hire", "300000", date(2024, 3, 1))
     _profile(db, e.veteran, org, "2024-03-01", hkgContractualWeeklyHours="40", hkgPreTransitionMonthlyWage="24000",
              hkgPreTransitionWageBasis="LAST_FULL_MONTH", hkgPreTransitionEvidenceRef="SYNTHETIC-PAYROLL-2025-04")
+
+    # Earning-code catalogue cases (STEP 3): commission + travelling allowance for everyone (named
+    # allowance components, carved out of the special allowance), a discretionary bonus for SC2 in June.
+    from app.modules.payroll.models import PayrollAttendanceRecord
+    from app.modules.payroll.policy.models import PolicyAllowanceComponent
+    from app.modules.payroll.policy.service import get_active_policy
+
+    policy = get_active_policy(db, org)
+    db.add_all([PolicyAllowanceComponent(policy_id=policy.id, key="commission", label="Sales commission (contractual)",
+                                         flat_amount=D("1000")),
+                PolicyAllowanceComponent(policy_id=policy.id, key="transport", label="Travelling allowance",
+                                         flat_amount=D("300"))])
+    db.add(PayrollAttendanceRecord(organization_id=org, employee_id=e.low.id, date=date(2026, 6, 15), status="present",
+                                   bonus=D("5000"), rewards=D("0"), other_compensation=D("0")))
+    db.commit()
 
     start, end = date(2026, 3, 1), date(2026, 6, 30)
     for emp, per_day, weekdays in ((e.high, 8, range(5)), (e.low, 4, range(5)), (e.hourly, 5, range(4)),
@@ -247,8 +266,9 @@ def test_each_synthetic_scenario_behaves_as_hand_checked(db, hk, monkeypatch):
     for m in MONTHS:
         # above the HK$30,000 maximum relevant income: HK$1,500 each side
         assert (it[m][e.high.id].employee_pension, it[m][e.high.id].employer_pension) == (D("1500.00"), D("1500.00"))
-        # below the HK$7,100 minimum: employee nil, employer 5% (HK$300)
-        assert (it[m][e.low.id].employee_pension, it[m][e.low.id].employer_pension) == (D("0.00"), D("300.00"))
+        # below the HK$7,100 minimum: employee nil, employer 5% (HK$300) — June adds a bonus (see the catalogue test)
+        if m != 6:
+            assert (it[m][e.low.id].employee_pension, it[m][e.low.id].employer_pension) == (D("0.00"), D("300.00"))
     # SMW across 1 May 2026: HK$42.10 for April's hours, HK$43.10 from May (pack rows, sourced).
     for m, rate in ((4, D("42.10")), (5, D("43.10")), (6, D("43.10"))):
         smw = it[m][e.hourly.id].hk_calculation_trace["minimumWage"]
@@ -269,3 +289,26 @@ def test_each_synthetic_scenario_behaves_as_hand_checked(db, hk, monkeypatch):
     assert it[6][e.departing.id].net_pay == D("33500.00")
     # Pre-1-May-2025 hire is paid normally.
     assert it[6][e.veteran.id].gross_pay == D("25000.00")
+
+
+def test_earning_code_cases_flow_to_each_base_and_ir56b_item(db, hk, monkeypatch):
+    """STEP 3 catalogue through the committed quarter: commission -> IR56B 11(d) and every wage base;
+    travelling allowance -> 11(k); SC2's June discretionary bonus counts for MPF (lifting relevant
+    income above the HK$7,100 minimum) but not for EO / SMW wages, and is reported in 11(e)."""
+    q = quarter(db, hk, monkeypatch)
+    e, it = q.e, q.items
+    for m in MONTHS:
+        for emp_id, item in it[m].items():
+            ird = item.hk_calculation_trace["ird"]["reportable"]
+            assert D(ird["COMMISSION_FEES"]) == D("1000.00"), (m, emp_id)
+            lines = {l["component"]: l for l in item.hk_calculation_trace["classification"]["EO_WAGES"]["lines"]}
+            assert lines["allowance:commission"]["code"] == "HK_COMMISSION"
+            assert lines["allowance:transport"]["code"] == "HK_TRAVEL_ALLOWANCE"
+    june = it[6][e.low.id]
+    cls = june.hk_calculation_trace["classification"]
+    assert june.gross_pay == D("11000.00")                                   # 6,000 + 5,000 bonus
+    assert D(cls["MPF_RI"]["included"]) == D("11000.00")
+    assert (june.employee_pension, june.employer_pension) == (D("550.00"), D("550.00"))   # now above the minimum
+    assert D(cls["EO_WAGES"]["excluded"]) == D("5000.00") and D(cls["SMW_WAGES"]["excluded"]) == D("5000.00")
+    assert D(june.hk_calculation_trace["ird"]["reportable"]["BONUS"]) == D("5000.00")
+    assert it[5][e.low.id].employee_pension == D("0.00")                    # May: still below the minimum

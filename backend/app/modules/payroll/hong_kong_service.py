@@ -28,6 +28,7 @@ the dependency direction is: shared platform <- hong_kong_service <- engine.
 import copy
 import hashlib
 import re
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -41,6 +42,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestException, NotFoundException, ZoikoException
 from app.modules.payroll import jurisdiction_hooks, retention_service, service
 from app.modules.payroll.employee_validation import mask_account_last4, mask_identifier
+from app.modules.payroll.engine.countries import hong_kong as _hk_calc
 from app.modules.payroll.engine.jurisdictions.hong_kong import (
     average_wage as hk_average_wage,
     continuous_contract as hk_cc,
@@ -1962,8 +1964,9 @@ DOMAINS = [
     ("salaries_tax", "Salaries Tax — informational",
      lambda k: k.startswith(("hk_allowance_", "hk_deduction_", "hk_tax_")) or k.startswith("HK_SALARIES_TAX"),
      _ENG + "salaries_tax.py"),
-    ("earning_classification", "Earning Classification", lambda k: k == "HK_EARNING_CLASS",
-     "app/modules/payroll/hong_kong_service.py; report generators (IR56B)"),
+    ("earning_classification", "Earning Codes & Classification",
+     lambda k: k in ("HK_EARNING_CLASS", "HK_EARNING_CODE", "HK_EARNING_SOURCE"),
+     "app/modules/payroll/engine/countries/hong_kong.py; report generators (IR56B)"),
 ]
 SALARIES_TAX_NOTICE = "Informational calculation only — Salaries Tax is not withheld from monthly HK payroll."
 EDITABLE = ("Draft", "In Review", "QA", "Approved")
@@ -2069,11 +2072,18 @@ def _slab_row(db: Session, pack, s) -> dict:
     elif s.rule_type == "HK_EARNING_CLASS":
         display, unit = (s.tax_formula or "").split(": ")[-1] if s.tax_regime != "IRD" else (s.tax_formula or ""), "treatment"
         label = f"{s.filing_status} → {s.tax_regime}"
+    elif s.rule_type == "HK_EARNING_CODE":
+        display, unit = (s.tax_formula or "") if s.tax_regime == "IRD" else s.assessment_basis, "treatment"
+        label = f"{s.filing_status} → {s.tax_regime}"
+    elif s.rule_type == "HK_EARNING_SOURCE":
+        display, unit, label = s.tax_regime, "earning code", f"pay source {s.filing_status}"
     else:
         display, unit, label = s.tax_formula or s.rate_label, "", s.rate_label
     src = _source(db, s.source_document_id)
     g1 = "[G1]" in (s.rate_label or "") or bool(src and src["unverified"])
     status = ("SOURCE_HASH_REQUIRED" if not (src and src["sha256"]) else "UNVERIFIED — G1" if g1 else "SOURCED")
+    if s.rule_type == "HK_EARNING_CODE" and _hk_calc.code_meta(s).get("status") == "PENDING":
+        status = "PENDING — specialist question"
     return {"kind": "slab", "id": s.id, "key": s.rule_type, "label": label, "domain": dkey, "domainLabel": dlabel,
             "value": display, "unit": unit,
             "raw": {"minAmount": str(s.min_amount) if s.min_amount is not None else None,
@@ -2094,6 +2104,61 @@ def _rows(db: Session, pack) -> list:
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None))
              .order_by(TaxSlab.rule_type, TaxSlab.sort_order).all())
     return [_rate_row(db, pack, r) for r in rates] + [_slab_row(db, pack, s) for s in slabs]
+
+
+def earning_code_catalogue(db: Session, on: Optional[date] = None, pack_row_id: Optional[int] = None) -> dict:
+    """HK-006 earning-code catalogue as the configuration screen shows it: for
+    each code, its mapping per obligation (treatment, IR56B field / item,
+    SOURCED or PENDING, the archived source with its SHA-256, the basis quoted
+    or the specialist question) and the pay sources bound to it — read from the
+    governed pack rows in force on `on` (default today) of the pack in force
+    then (or of `pack_row_id`)."""
+    from app.modules.payroll.models import JurisdictionPack, TaxSlab
+
+    on = on or date.today()
+    if pack_row_id is not None:
+        pack = _pack(db, pack_row_id)
+    else:
+        pack = (db.query(JurisdictionPack)
+                .filter(JurisdictionPack.jurisdiction_country == HK, JurisdictionPack.pack_type == "tax",
+                        or_(JurisdictionPack.effective_from == None, JurisdictionPack.effective_from <= on),  # noqa: E711
+                        or_(JurisdictionPack.effective_to == None, JurisdictionPack.effective_to >= on))  # noqa: E711
+                .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.version.desc()).first())
+    if pack is None:
+        raise NotFoundException("No Hong Kong pack covers that date")
+    rows = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None),
+                                     TaxSlab.rule_type.in_(("HK_EARNING_CODE", "HK_EARNING_SOURCE")),
+                                     or_(TaxSlab.effective_from == None, TaxSlab.effective_from <= on),  # noqa: E711
+                                     or_(TaxSlab.effective_to == None, TaxSlab.effective_to >= on))  # noqa: E711
+            .order_by(TaxSlab.sort_order).all())
+    codes = {}
+    for r in rows:
+        if r.rule_type != "HK_EARNING_CODE":
+            continue
+        meta = _hk_calc.code_meta(r)
+        entry = codes.setdefault(r.filing_status, {"code": r.filing_status, "label": meta.get("label"), "mappings": {},
+                                                   "boundSources": [], "pendingCount": 0})
+        entry["mappings"][r.tax_regime] = {
+            "rowId": r.id, "treatment": r.assessment_basis,
+            "irdField": r.tax_formula if r.tax_regime == "IRD" else None, "irdItem": meta.get("irdItem"),
+            "status": meta.get("status") or "SOURCED", "basis": meta.get("basis"), "question": meta.get("question"),
+            "effectiveFrom": _iso(r.effective_from or pack.effective_from), "effectiveTo": _iso(r.effective_to or pack.effective_to),
+            "source": _source(db, r.source_document_id)}
+        entry["pendingCount"] += 1 if meta.get("status") == "PENDING" else 0
+    bindings = []
+    for r in rows:
+        if r.rule_type == "HK_EARNING_SOURCE":
+            bindings.append({"source": r.filing_status, "code": r.tax_regime, "rowId": r.id,
+                             "knownCode": r.tax_regime in codes})
+            if r.tax_regime in codes:
+                codes[r.tax_regime]["boundSources"].append(r.filing_status)
+    return {"pack": {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status},
+            "asOf": on.isoformat(), "obligations": list(_hk_calc.OBLIGATIONS), "codes": list(codes.values()),
+            "bindings": bindings,
+            "rules": ["A pay source with no binding, or a code with no mapping in force, blocks the calculation.",
+                      "A PENDING mapping is never applied as certified: MPF blocks; EO / SMW count as REVIEW; IRD is "
+                      "reported as UNMAPPED_REQUIRES_CLASSIFICATION, which the IR56B must resolve before filing."],
+            "specialistVerified": False}
 
 
 def domains(db: Session, pack_row_id: int) -> dict:
@@ -2246,6 +2311,11 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
                 "textValue": "text_value", "effectiveFrom": "effective_from", "effectiveTo": "effective_to"} if kind == "rate" else
                {"minAmount": "min_amount", "maxAmount": "max_amount", "ratePct": "rate_pct", "flatAmount": "flat_amount",
                 "taxFormula": "tax_formula", "effectiveFrom": "effective_from", "effectiveTo": "effective_to"})
+    if kind == "slab" and row.rule_type == "HK_EARNING_CODE":
+        # Earning-code catalogue: the specialist's answer may change the treatment.
+        allowed = {**allowed, "treatment": "assessment_basis"}
+        if data.get("treatment") not in (None, "INCLUDED", "EXCLUDED", "REVIEW"):
+            raise BadRequestException("treatment must be INCLUDED, EXCLUDED or REVIEW")
     unknown = set(data) - set(allowed) - {"reason", "sourceDocumentId", "specialistVerified"}
     if unknown:
         raise BadRequestException(f"not editable here: {', '.join(sorted(unknown))}")
@@ -2256,7 +2326,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
         value = data[field]
         if column.startswith("effective_"):
             value = date.fromisoformat(value) if value else None
-        elif column in ("text_value", "tax_formula"):
+        elif column in ("text_value", "tax_formula", "assessment_basis"):
             value = value if value not in ("",) else None
         else:
             value = Decimal(str(value)) if value not in (None, "") else None
@@ -2276,6 +2346,16 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
         old["label"] = getattr(row, label_col)
         setattr(row, label_col, " ".join(getattr(row, label_col).replace("[G1]", " ").split()))
         new["label"], new["specialistVerified"] = getattr(row, label_col), True
+    if kind == "slab" and row.rule_type == "HK_EARNING_CODE":
+        meta = _hk_calc.code_meta(row)
+        if verify and meta.get("status") == "PENDING":
+            # The specialist answered the catalogue question: recorded with the
+            # change reason (their answer) and the reviewed source; never silent.
+            old["mappingStatus"], new["mappingStatus"] = "PENDING", "SOURCED"
+            meta.update(status="SOURCED", answeredQuestion=meta.get("question"), question=None,
+                        basis=f"specialist answer: {data['reason']}")
+            row.formula_expression = json.dumps(meta, sort_keys=True)
+            row.rate_label = " ".join((row.rate_label or "").replace("[PENDING]", " ").split())
     _invalidate_pack_approval_on_edit(pack)
     # Maker identity: the pack's last editor is whoever changed its statutory
     # substance (the approve / activate maker-checker checks read
@@ -2289,6 +2369,75 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
                      old_value=old, new_value=new, reason=reason, auto_commit=False)
     db.commit()
     return (_rate_row if kind == "rate" else _slab_row)(db, pack, row)
+
+
+CATALOGUE_RULE_TYPES = ("HK_EARNING_CODE", "HK_EARNING_SOURCE")
+
+
+def split_catalogue_row(db: Session, row_id: int, data: dict, actor_id: Optional[int]) -> dict:
+    """Effective-dated change of one earning-code catalogue row (HK-006): the
+    row in force ends the day before `effectiveFrom` and a new row carries the
+    change from that date — so payroll before the date keeps the old mapping
+    and payroll from it uses the new one. Draft (editable) packs only; a reason
+    and an existing source document are required; audited like every governed
+    edit and the pack's approval is invalidated."""
+    from app.modules.payroll.models import SourceArtifact, TaxSlab
+    from app.modules.payroll.service import _invalidate_pack_approval_on_edit, _require_editable_pack, record_tax_audit
+
+    row = db.get(TaxSlab, row_id)
+    if row is None or row.jurisdiction_country != HK or row.rule_type not in CATALOGUE_RULE_TYPES:
+        raise NotFoundException("Hong Kong earning-code catalogue row", row_id)
+    pack = db.get(JurisdictionPack, row.jurisdiction_pack_id)
+    _require_editable_pack(pack)
+    if not (data.get("reason") or "").strip():
+        raise BadRequestException("A statutory change needs a change reason.")
+    source = db.get(SourceArtifact, data.get("sourceDocumentId")) if data.get("sourceDocumentId") else None
+    if source is None:
+        raise BadRequestException("A statutory change needs the official source document (an existing SourceArtifact).")
+    try:
+        starts = date.fromisoformat(str(data.get("effectiveFrom")))
+    except ValueError:
+        raise BadRequestException("effectiveFrom (YYYY-MM-DD) is required")
+    window_from, window_to = row.effective_from or pack.effective_from, row.effective_to or pack.effective_to
+    if not (window_from and starts > window_from and (window_to is None or starts <= window_to)):
+        raise BadRequestException(f"effectiveFrom must fall after {window_from} and within the row's window")
+    changes = {}
+    if row.rule_type == "HK_EARNING_CODE":
+        if data.get("treatment") is not None:
+            if data["treatment"] not in ("INCLUDED", "EXCLUDED", "REVIEW"):
+                raise BadRequestException("treatment must be INCLUDED, EXCLUDED or REVIEW")
+            changes["assessment_basis"] = data["treatment"]
+        if data.get("irdField") is not None:
+            if row.tax_regime != "IRD":
+                raise BadRequestException("only an IRD mapping carries an IR56B field")
+            changes["tax_formula"] = data["irdField"]
+    elif data.get("code") is not None:
+        changes["tax_regime"] = changes["tax_formula"] = data["code"]
+    if not changes:
+        raise BadRequestException("nothing to change: give treatment / irdField (code row) or code (source binding)")
+    bookkeeping = {"id", "created_at", "updated_at"}
+    successor = TaxSlab(**{c.name: getattr(row, c.name) for c in TaxSlab.__table__.columns if c.name not in bookkeeping})
+    for column, value in changes.items():
+        setattr(successor, column, value)
+    successor.effective_from, successor.effective_to = starts, window_to
+    successor.source_document_id = source.id
+    row.effective_to = starts - timedelta(days=1)
+    if row.effective_from is None:
+        row.effective_from = window_from
+    db.add(successor)
+    _invalidate_pack_approval_on_edit(pack)
+    if actor_id is not None:
+        pack.updated_by_id = actor_id
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="hk_statutory_slab", entity_id=row.id,
+                     jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference="HK earning-code catalogue",
+                     reason=data["reason"].strip(), auto_commit=False, old_value={"effectiveTo": _iso(window_to)},
+                     new_value={"effectiveTo": _iso(row.effective_to), "successorRowId": successor.id,
+                                "successorFrom": starts.isoformat(),
+                                "changes": {k: str(v) for k, v in changes.items()}, "sourceDocumentId": source.id})
+    db.commit()
+    return {"endedRowId": row.id, "endedOn": _iso(row.effective_to), "newRowId": successor.id,
+            "effectiveFrom": starts.isoformat(), "changes": changes}
 
 
 def statutory_editors(db: Session, pack) -> set:
@@ -4178,7 +4327,7 @@ def generate_hong_kong_ir56b(
         "knownGaps": [
             _HK_LAYOUT_DISCLOSURE,
             "Reportable field labels are the pack's own IRD field keys; the certified field numbering and "
-            "the [G1] specialist sign-off over the HK_EARNING_CLASS mapping are still outstanding.",
+            "the [G1] specialist sign-off over the earning-code catalogue mappings are still outstanding.",
             "Identity is MASKED on this report (HK-022 / PCPD HR Code, the same rule the HK payslips apply): "
             "the unmasked HKID is never written into a GeneratedReport, so the official IRD copy still has to "
             "be produced from the employee record through the filing channel.",
