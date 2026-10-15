@@ -292,3 +292,31 @@ def test_d_h_an_open_ir56f_blocks_identifying_an_ir56g_departure_until_it_is_can
     hong_kong_service.transition_ird_case(db, hk.org.id, ir56f.id, "CANCELLED", MAKER.id)
     hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 8, 31), actor_id=MAKER.id)
     assert db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).one().form_type == "IR56G"
+
+
+# ── D-J: an employee whose employment ended BEFORE the wage period is not paid for it ─────────
+# Found by the synthetic-company harness (STEP 2). Wireframe §11 "Final wages" (S11-1): the final
+# wage period is the one that contains the termination date; Labour Department Concise Guide ch.9
+# (archived ld_cg_09) — termination payments are settled from the termination date. The run
+# selected employees by status alone, so a leaver still ACTIVE in the HR record was paid a full
+# month for a period after leaving.
+
+def test_d_j_a_leaver_is_not_paid_for_a_period_after_the_termination(db, hk, monkeypatch):
+    from app.modules.payroll.models import PayslipItem
+
+    _spaced_codes(monkeypatch)
+    stayer = _employee(db, hk.org.id, "DJ0", ctc=D("240000"))
+    _profile(db, stayer, hk.org.id, "2026-01-16")
+    hk.emp.date_of_leaving = date(2026, 5, 29)
+    db.commit()
+    _profile(db, hk.emp, hk.org.id, "2026-05-01", hkgTerminationDate="2026-05-29", hkgTerminationReason="RESIGNATION")
+    may = _month(db, hk.org, 5)
+    assert _item(db, may, hk.emp).hk_calculation_trace["workerFacts"]["postLeavingUnpaidDays"] == 2   # final period
+    june = _month(db, hk.org, 6)
+    paid = {i.employee_id for i in db.query(PayslipItem).filter(PayslipItem.payroll_run_id == june.id)}
+    assert paid == {stayer.id}                                     # nothing payable after 29 May
+    # The approval gate checks the same selection: no termination-timing block for a past leaver.
+    from app.modules.payroll import hong_kong_service
+
+    out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, june.id, today=date(2026, 6, 30))
+    assert out["employeeCount"] == 1 and not [c for c in out["checks"] if c["code"].startswith("EO_TERMINATION")]

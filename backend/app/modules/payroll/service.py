@@ -22297,6 +22297,14 @@ def _sg_employment_inputs(db: Session, organization_id: int, employee, period_st
                                      "hoursWorked": hours_worked}}
 
 
+def _hk_left_before_period(db: Session, organization_id: int, employee, period_start) -> bool:
+    """A Hong Kong employee whose employment ended before the wage period has
+    nothing payable in it (gap audit D-J) — shared by the run's selection and
+    the HK preflight so the two can never disagree."""
+    return bool(period_start and employee.date_of_leaving and employee.date_of_leaving < period_start
+                and _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None)) == "HK")
+
+
 def _sg_mid_period_joiners(db: Session, organization_id: int, period_start, period_end, employee_ids=None) -> list:
     """Active Singapore employees who join AFTER the period's first day but
     within it (Phase 5.2). The shared selection keeps only employees who had
@@ -26458,6 +26466,12 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
         )
     )
     employees = employees_query.all()
+    # Hong Kong (gap audit D-J): employment that ended BEFORE this wage period
+    # earns nothing in it — the final wage period is the one containing the
+    # termination date (wireframe §11 S11-1; Concise Guide ch.9), where the
+    # days after termination are already unpaid. Selecting by status alone paid
+    # a still-ACTIVE leaver a full month after leaving.
+    employees = [e for e in employees if not _hk_left_before_period(db, organization_id, e, run.period_start)]
     # Singapore joiners within the period (incomplete-month salary) — SG only.
     employees += _sg_mid_period_joiners(db, organization_id, run.period_start, run.period_end, employee_ids)
 

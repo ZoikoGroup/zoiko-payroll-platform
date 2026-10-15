@@ -4226,7 +4226,8 @@ def _hk_run_employees(db: Session, run: PayrollRun) -> list:
         PayrollEmployee.status == EmployeeStatus.ACTIVE,
         or_(PayrollEmployee.date_of_joining == None, PayrollEmployee.date_of_joining <= run.period_start),  # noqa: E711
     ).all()
-    return [e for e in rows if service._resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "HK"]
+    return [e for e in rows if service._resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "HK"
+            and not service._hk_left_before_period(db, run.organization_id, e, run.period_start)]
 
 
 def _hk_dry_run_trace(db: Session, run: PayrollRun, employee, cache: dict, calculation_mode,
