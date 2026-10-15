@@ -4,6 +4,8 @@ are imported inside the tests (collection-order hazard)."""
 from datetime import date
 from decimal import Decimal as D
 
+import pytest
+
 from tests.test_hong_kong_e2e import (  # noqa: F401  (hk is a fixture)
     CHECKER, MAKER, _employee, _hours, _item, _month, _profile, _spaced_codes, hk,
 )
@@ -320,3 +322,27 @@ def test_d_j_a_leaver_is_not_paid_for_a_period_after_the_termination(db, hk, mon
 
     out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, june.id, today=date(2026, 6, 30))
     assert out["employeeCount"] == 1 and not [c for c in out["checks"] if c["code"].startswith("EO_TERMINATION")]
+
+
+# ── D-K: the HK approval gate checks every employee the run pays, joiners included ─────────────
+# Found by the synthetic-company harness. Wireframe §5 / HK-008 (MPF from the first day: a joiner's
+# first wage period exists) and §15 "pre-flight validation ... blocks approval": the run pays a
+# mid-period joiner (service._sg_mid_period_joiners), but the preflight selected only employees
+# who had joined by the period start — a joiner's BLOCKs (e.g. no identity document) never applied.
+
+def test_d_k_a_mid_period_joiner_is_checked_by_the_approval_gate(db, hk, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.modules.payroll import hong_kong_service, service
+    from app.modules.payroll.models import PayrollStatus
+
+    _spaced_codes(monkeypatch)
+    joiner = _employee(db, hk.org.id, "DK1", date_of_joining=date(2026, 4, 13), compliance_fields={})   # no HKID
+    _profile(db, joiner, hk.org.id, "2026-04-13")
+    run = _month(db, hk.org, 4, status=PayrollStatus.REVIEW)
+    assert _item(db, run, joiner).gross_pay > 0                                   # the run pays the joiner
+    out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 4, 30))
+    assert out["employeeCount"] == 2
+    assert [c for c in out["checks"] if c["code"] == "HK_IDENTITY_MISSING" and c["severity"] == "BLOCK"]
+    with pytest.raises(HTTPException, match="HK_IDENTITY_MISSING"):
+        service.advance_payroll_run_status(db, run.id, MAKER.id, hk.org.id)

@@ -4226,6 +4226,8 @@ def _hk_run_employees(db: Session, run: PayrollRun) -> list:
         PayrollEmployee.status == EmployeeStatus.ACTIVE,
         or_(PayrollEmployee.date_of_joining == None, PayrollEmployee.date_of_joining <= run.period_start),  # noqa: E711
     ).all()
+    # Gap audit D-K: the run also pays mid-period joiners — the gate must check them too.
+    rows += service._sg_mid_period_joiners(db, run.organization_id, run.period_start, run.period_end)
     return [e for e in rows if service._resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "HK"
             and not service._hk_left_before_period(db, run.organization_id, e, run.period_start)]
 
