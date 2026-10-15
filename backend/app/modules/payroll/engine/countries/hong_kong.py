@@ -27,7 +27,16 @@ carries:
   3. IRD reportable remuneration for the year of assessment ending 31 March
      (HK-011), by IR56 field, from the earning classification.
 
-Earning classification (HK-006): per component and per obligation (EO wages,
+Earning-code catalogue (HK-006, gap audit STEP 3): pack rows rule_type
+HK_EARNING_SOURCE bind each pay source (basic, hra, overtime, allowance:<key>,
+attendance:<kind>, ...) to an HK earning code (tax_regime); HK_EARNING_CODE
+rows map the code per obligation (filing_status = code, tax_regime =
+obligation, assessment_basis = treatment, tax_formula = IR56B field,
+formula_expression = {status, question, irdItem, basis}), effective-dated by
+the row's own window. See _classify_by_code.
+
+Earlier per-component classification (still read when a pack carries no
+catalogue): per component and per obligation (EO wages,
 MPF relevant income, SMW countable wages, IRD field) from pack rows
 rule_type HK_EARNING_CLASS — filing_status = component, tax_regime =
 obligation, assessment_basis = INCLUDED | EXCLUDED | REVIEW, tax_formula =
@@ -61,6 +70,7 @@ _HK_MPF_MAX_RI_MONTHLY = None
 _HK_MPF_MIN_RI_DAILY = None
 _HK_MPF_MAX_RI_DAILY = None
 EARNING_CLASS = "HK_EARNING_CLASS"
+EARNING_CODE, EARNING_SOURCE = "HK_EARNING_CODE", "HK_EARNING_SOURCE"
 OBLIGATIONS = ("EO_WAGES", "MPF_RI", "SMW_WAGES", "IRD")
 _PAYROLL_DAYS_DEFAULT = 30
 
@@ -106,8 +116,127 @@ def _classification_rows(slabs: list) -> dict:
     return rows
 
 
+def earning_sources(ctx: PayrollContext) -> dict:
+    """earning_components with the folded amounts split into the sources the
+    service recorded (gap audit STEP 3): each named allowance by its key
+    (`allowance:<key>`) and each attendance extra by its kind
+    (`attendance:<kind>`). Whatever the recorded sources do not explain stays
+    in the generic component, so the parts always add back to gross."""
+    parts = earning_components(ctx)
+    recorded = {k: dec(v) for k, v in (getattr(ctx, "hk_earning_sources", None) or {}).items() if dec(v) != ZERO}
+    for family, prefix in (("named_allowances", "allowance:"), ("additional_compensation", "attendance:")):
+        mine = {k: v for k, v in recorded.items() if k.startswith(prefix)}
+        if not mine:
+            continue
+        rest = parts.get(family, ZERO) - sum(mine.values(), ZERO)
+        if rest < ZERO:
+            raise HongKongCalculationBlockedError(
+                f"earning_sources:{family}", f"the recorded {prefix}* earnings exceed the {family} in gross")
+        parts.pop(family, None)
+        parts.update(mine)
+        if rest != ZERO:
+            parts[family] = rest
+    return parts
+
+
+def _code_catalogue(slabs: list, as_of) -> tuple:
+    """({(code, obligation): row}, {source: row}) from the pinned pack's
+    HK_EARNING_CODE / HK_EARNING_SOURCE rows in force on `as_of`. Two rows in
+    force for one key is a configuration error (fail closed)."""
+    codes, bindings = {}, {}
+    for s in slabs or []:
+        kind = getattr(s, "rule_type", None)
+        if kind not in (EARNING_CODE, EARNING_SOURCE):
+            continue
+        start, end = getattr(s, "effective_from", None), getattr(s, "effective_to", None)
+        if as_of and ((start and start > as_of) or (end and end < as_of)):
+            continue
+        target, key = (codes, (s.filing_status, s.tax_regime)) if kind == EARNING_CODE else (bindings, s.filing_status)
+        if key in target:
+            raise HongKongCalculationBlockedError(f"earning_code:{key}", f"two {kind} rows in force for {key}")
+        target[key] = s
+    return codes, bindings
+
+
+def code_meta(row) -> dict:
+    """The catalogue metadata stored with a code row (status, question, IR56B item, basis)."""
+    import json
+
+    try:
+        return json.loads(getattr(row, "formula_expression", None) or "{}")
+    except ValueError:
+        return {}
+
+
+def _classify_by_code(ctx: PayrollContext, codes: dict, bindings: dict) -> dict:
+    """HK-006 earning-code catalogue: source -> code (binding row) -> per-obligation
+    mapping (code row). Generic, never per code:
+      * an unbound `allowance:*` / `attendance:*` source uses its family's binding;
+      * a source with no binding, or a code with no mapping for an obligation in
+        force, BLOCKS (unknown codes fail closed);
+      * a PENDING mapping is never applied as if certified: MPF BLOCKS (money),
+        EO / SMW count as REVIEW, IRD is reported as UNMAPPED_REQUIRES_CLASSIFICATION
+        (the IR56B then cannot be filed until it is classified)."""
+    out = {o: {"included": ZERO, "excluded": ZERO, "review": ZERO, "lines": []} for o in OBLIGATIONS}
+    ird_fields = {}
+    family = {"allowance:": "named_allowances", "attendance:": "additional_compensation"}
+    for source, amount in earning_sources(ctx).items():
+        # An unpaid absence reduces what basic pay counts for.
+        lookup = "basic" if source == "unpaid_absence" else source
+        binding = bindings.get(lookup)
+        if binding is None:
+            fallback = next((f for p, f in family.items() if lookup.startswith(p)), None)
+            binding = bindings.get(fallback) if fallback else None
+        if binding is None:
+            raise HongKongCalculationBlockedError(
+                f"earning_code:{source}", f"earning source {source!r} is not bound to a Hong Kong earning code")
+        code = binding.tax_regime
+        for obligation in OBLIGATIONS:
+            row = codes.get((code, obligation))
+            if row is None:
+                raise HongKongCalculationBlockedError(
+                    f"earning_code:{code}", f"earning code {code!r} (source {source!r}) has no {obligation} mapping in "
+                    "force — an unknown or unmapped code fails closed")
+            meta = code_meta(row)
+            pending = meta.get("status") == "PENDING"
+            basis = row.assessment_basis
+            if basis not in ("INCLUDED", "EXCLUDED", "REVIEW"):
+                raise HongKongCalculationBlockedError(
+                    f"earning_code:{code}", f"invalid treatment {basis!r} for {obligation}")
+            # The IR56B field (tax_formula); a row reader that does not carry it reports UNMAPPED.
+            field = (getattr(row, "tax_formula", None) or "UNMAPPED") if obligation == "IRD" else None
+            if pending:
+                if obligation == "MPF_RI":
+                    raise HongKongCalculationBlockedError(
+                        f"earning_code:{code}", f"the MPF relevant-income treatment of {code!r} (source {source!r}) is "
+                        f"pending specialist review — {meta.get('question') or 'see the earning-code catalogue'}")
+                if obligation == "IRD":
+                    basis, field = "INCLUDED", "UNMAPPED_REQUIRES_CLASSIFICATION"
+                else:
+                    basis = "REVIEW"
+            bucket = {"INCLUDED": "included", "EXCLUDED": "excluded", "REVIEW": "review"}[basis]
+            out[obligation][bucket] += amount
+            line = {"component": source, "code": code, "amount": str(cents(amount)), "treatment": basis,
+                    "mappingStatus": meta.get("status") or "SOURCED", "ref": row_ref(row)}
+            if obligation == "IRD":
+                line["irdField"], line["proposedField"] = field, getattr(row, "tax_formula", None)
+            out[obligation]["lines"].append(line)
+            if obligation == "IRD" and basis == "INCLUDED":
+                ird_fields[field] = ird_fields.get(field, ZERO) + amount
+    for o in OBLIGATIONS:
+        for k in ("included", "excluded", "review"):
+            out[o][k] = cents(out[o][k])
+    return {"obligations": out, "irdFields": {k: cents(v) for k, v in sorted(ird_fields.items())}}
+
+
 def classify(ctx: PayrollContext) -> dict:
-    """{obligation: {included, excluded, review, lines}} + IRD field totals."""
+    """{obligation: {included, excluded, review, lines}} + IRD field totals.
+    Uses the earning-code catalogue when the pinned pack carries one; rows
+    of the earlier per-component classification (HK_EARNING_CLASS, e.g. in
+    frozen traces and the certified golden vectors) keep their own path."""
+    codes, bindings = _code_catalogue(ctx.slabs, ctx.pay_date)
+    if codes or bindings:
+        return _classify_by_code(ctx, codes, bindings)
     rows = _classification_rows(ctx.slabs)
     out = {o: {"included": ZERO, "excluded": ZERO, "review": ZERO, "lines": []} for o in OBLIGATIONS}
     ird_fields = {}

@@ -1,0 +1,251 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+<noscript>
+  <meta HTTP-EQUIV="refresh" CONTENT="0; url=/checkconfig/submitClientConfig.do?applicationId=RA001&javascriptEnabled=false&appletLoadFailed=true&_CSRF_TOKEN=XBfsU07bf4LyQhs8iw7s">
+</noscript>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+<meta HTTP-EQUIV="X-UA-Compatible" content="IE=Edge">
+<title>Hong Kong e-Legislation</title>
+<link rel="stylesheet" href="/checkconfig/sinclude/css/checkclientconfig.css"/>
+<style type="text/css">
+  td, tr, p {
+    margin: 0;
+    padding: 0;
+  }
+</style>
+<script type="text/javascript">
+<!--
+function getCookie( name ) { 
+  var start = document.cookie.indexOf( name + "=" );
+  var len = start + name.length + 1;
+  if ( ( !start ) && ( name != document.cookie.substring( 0, name.length ) ) ) {
+    return null;
+  }
+  if ( start == -1 ) return null;
+  var end = document.cookie.indexOf( ";", len );
+  if ( end == -1 ) end = document.cookie.length;
+  return unescape( document.cookie.substring( len, end ) );
+}
+
+function setCookie( name, value, expires, path, domain, secure ) {
+  var today = new Date();
+  today.setTime( today.getTime() );
+  if ( expires ) {
+    expires = expires * 1000 * 60 * 60 * 24;
+  }
+  var expires_date = new Date( today.getTime() + (expires) );
+  document.cookie = name + "=" +escape( value ) +
+    ( ( expires ) ? ";expires=" + expires_date.toGMTString() : "" ) +
+    ( ( path ) ? ";path=" + path : "" ) + 
+    ( ( domain ) ? ";domain=" + domain : "" ) +
+    ( ( secure ) ? ";secure" : "" );
+}
+
+function deleteCookie( name, path, domain ) {
+  if ( getCookie( name ) ) document.cookie = name + "=" +
+      ( ( path ) ? ";path=" + path : "") +
+      ( ( domain ) ? ";domain=" + domain : "" ) +
+      ";expires=Thu, 01-Jan-1970 00:00:01 GMT";
+}
+
+function getCookieEnabled() {
+  setCookie( 'testcookie', 'none', '', '/', '', '' );
+  if ( getCookie( 'testcookie' ) ) {
+    deleteCookie('testcookie', '/', '');
+    return true;
+  }
+  else
+    return false;
+}  
+// -->
+</script>
+
+
+<script language="JavaScript">
+<!--
+
+
+
+
+
+
+	var debug = false;
+	var trace = "";
+
+  var count = 0;
+  function formOnLoad() {
+
+
+    document.forms[0].appletLoadFailed.value = true;
+
+
+		document.forms[0].appletLoadFailed.value = false;
+    	setTimeout("doChecking()", 50);
+
+
+  }
+
+  
+
+  function doChecking() {
+
+    var jvmVendor = "";
+    var jvmVersion = "";
+    
+	// changed if (navigator.javaenabled()) to if (false)
+	// because Edge 42 return this function call as true, while it will throw script error in later line
+    // As we don't need to use applet feature, change it to false directly and retain the existing code for reference
+ /* if (false) {
+
+      // check whether the applet is loaded
+	  // checkAppletLoaded();
+
+      if (document.applets[0]) {       
+        trace += "6";
+        
+        try {
+          if (document.applets[0].isActive()) {
+            trace += "7";
+ */
+            
+ /*           if (debug) trace += "c";
+              jvmVendor = document.applets[0].getJavaVendor();
+              if (debug) trace += "d";
+              jvmVersion = document.applets[0].getJavaVersion();
+ */       
+                    
+ /*       } else {
+            document.forms[0].appletLoadFailed.value = true;
+            trace += "8";
+          }
+        } catch (e) {
+          if (debug) trace += "e";
+          document.forms[0].appletLoadFailed.value = true;
+        }
+      }   
+    }        
+ */
+    
+    document.forms[0].jvmVendor.value = jvmVendor;
+    document.forms[0].jvmVersion.value = jvmVersion;
+    document.forms[0].javascriptEnabled.value = true;
+    document.forms[0].cookieEnabled.value = getCookieEnabled();    
+    if (debug) alert("/checkconfig/submitClientConfig.do");
+    if (debug) alert("trace=" + trace);
+    
+    if (! debug)
+    	document.forms[0].submit();
+    return true;
+  }
+
+ 
+  
+	//resize to maximum
+//	top.window.x=0;
+//	top.window.y=0;
+	top.window.moveTo(0,0);
+	if (document.all) {
+		top.window.resizeTo(screen.availWidth,screen.availHeight);
+	}else if (document.layers||document.getElementById) {
+		if (top.window.outerHeight<screen.availHeight){
+			top.window.outerHeight = screen.availHeight;
+		}
+		if(top.window.outerWidth<screen.availWidth){
+			top.window.outerWidth = screen.availWidth;
+		}
+	}  
+//-->
+</script>
+</head>
+<body bgcolor="#eeeeee" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0" onLoad="javascript:formOnLoad();">
+<img src="/checkconfig/images/en_US/spacer.gif" width="20" height="20"><br>
+<table width="750" border="0" align="center" cellpadding="0" cellspacing="0">
+  <tr>
+    <td><img src="/checkconfig/images/en_US/spacer.gif" width="20" height="20"><br>
+      	<img src="/checkconfig/images/en_US/body_top_original.gif" width="750" height="20"></td>
+  </tr>
+  <tr>
+    <td>
+    	<table width="750" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+          <td width="1" bgcolor="#888888"><img src="/checkconfig/images/en_US/spacer.gif" width="1" height="10"></td>
+          <td width="10" bgcolor="#ffffff"><img src="/checkconfig/images/en_US/spacer.gif" width="10" height="10"></td>
+          <td width="728" align="left" valign="top" bgcolor="#ffffff"><p> </p>
+            <table width="653" height="122" border="0" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="139" height="14">&nbsp;</td>
+                <td width="514">&nbsp;</td>
+              </tr>
+              <tr>
+                <td>&nbsp;</td>
+                <td><div align="center">
+                
+                <img src="/checkconfig/images/en_US/spacer.gif" width="20" height="1"><br>
+                <span class="content_bold"><strong>Loading required resource. Please wait</strong>&nbsp;<img src="/checkconfig/images/en_US/loading.gif"></span><br>
+                </div></td>
+              </tr>
+            </table>
+            <p align="center" class="content">&nbsp;</p></td>
+          <td width="10" bgcolor="#ffffff"><img src="/checkconfig/images/en_US/spacer.gif" width="10" height="10"></td>
+          <td width="1" bgcolor="#888888"><img src="/checkconfig/images/en_US/spacer.gif" width="1" height="1"></td>
+        </tr>
+   		</table>
+   	</td>
+  </tr>
+  <tr>
+    <td><p><img src="/checkconfig/images/en_US/body_bottom_original.gif" width="750" height="25"></p></td>
+    <td>
+	    <!--  try to load the image and cached into browser -->
+	    
+    </td>
+  </tr>
+</table>
+
+
+
+<form name="ClientConfigForm" action="/checkconfig/submitClientConfig.do" method="post">
+	 <input type="hidden" name="applicationId" value="RA001"/>
+	 <input type="hidden" name="branchCode" value="00"/>
+	 <input type="hidden" name="jvmVendor" value=""/>
+	 <input type="hidden" name="jvmVersion" value=""/>
+	 <input type="hidden" name="javascriptEnabled" value="true"/>
+	 <input type="hidden" name="cookieEnabled" value=""/>
+	 <input type="hidden" name="appletLoadFailed" value=""/>
+	 <input type="hidden" name="isIpv4Verified" value=""/>
+	 <input type="hidden" name="isIpv6Verified" value=""/>
+	 <input type="hidden" name="language" value=""/>
+	 <input type="hidden" name="country" value=""/> 
+	 <input type="hidden" name="_CSRF_TOKEN" value="XBfsU07bf4LyQhs8iw7s"/> 
+
+</form>
+</body>
+</html>

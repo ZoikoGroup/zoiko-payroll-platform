@@ -45,7 +45,7 @@ CHECKS = [
      "pg_size_pretty(pg_total_relation_size('assisted_access_sessions'::regclass)) AS total_size "
      "FROM assisted_access_sessions",
      "small; measured locally: 2,000,000 rows take about 0.3 s to validate. Above 1,000,000 apply "
-     "docs/hk-evidence/ops/patches/migration_lock_safety.patch (NOT VALID) before deploy"),
+     "a NEW migration (constraint NOT VALID + separate VALIDATE) before deploy; never edit 8b14824fb575"),
     ("hk_service_registry", "SELECT availability FROM jurisdiction_service_registry WHERE country = 'HK'",
      "PLANNED until G1–G7 are accepted and launch is authorised"),
     ("hk_packs", "SELECT pack_id, version, status, effective_from, effective_to FROM payroll_jurisdiction_packs "

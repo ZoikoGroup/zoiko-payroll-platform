@@ -29,7 +29,7 @@ If `main` gains more migrations before the merge, re-parent onto the new head an
 | # | Check | How | Pass when |
 |---|---|---|---|
 | P-1 | Production revision and HK state | `cd backend && python -m scripts.hk_production_readonly_verification --out pre_deploy.json` (read-only session, SELECT-only; `../ops/HK_production_readonly_verification_instructions.md`) | `alembic_version` is a revision on `main`'s chain (expected `b08f04497195` or later); HK registry PLANNED; no HK pack Active |
-| P-2 | Row count for the migration's only scan | the same report, check `pre_deploy_assisted_access_sessions_size` | `exact_rows` is modest. Measured locally: 2,000,000 rows validate in about 0.3 s. Above about 1,000,000, apply `patches/migration_lock_safety.patch` (constraint `NOT VALID`, no scan) |
+| P-2 | Row count for the migration's only scan | the same report, check `pre_deploy_assisted_access_sessions_size` | `exact_rows` is modest. Measured locally: 2,000,000 rows validate in about 0.3 s. Above about 1,000,000 rows, stop: engineering writes a **new** migration (constraint `NOT VALID`, `VALIDATE` later). `8b14824fb575` itself must not be edited, and the old lock-safety patch is OBSOLETE |
 | P-3 | Exactly one Alembic head on the merge commit | `cd backend && alembic heads` | one line: `8b14824fb575 (head)` |
 | P-4 | Backup | Take a provider snapshot / branch or a point-in-time restore marker of the production database, and **test that it can be restored** (to a scratch instance) | restore point recorded (time + id) |
 | P-5 | Identity key | `HK_IDENTITY_TOKEN_KEY` provisioned as a separate secret in production (`HK_IDENTITY_TOKEN_KEY_provisioning.md`, decision D-5) | present in the production environment; never in the repository |
@@ -51,7 +51,15 @@ If `main` gains more migrations before the merge, re-parent onto the new head an
 
 1. The deploy job restarts the backend. Watch the job to the end: earlier deploys failed at the SSH / restart step.
 2. Re-run the canonical HK seed **on the Draft packs only**, so the governed row `mpf_contribution_day_deferral` exists in production: `cd backend && python -m scripts.seed_hong_kong_canonical_pack`. The seed refuses non-Draft packs and keeps `HK_GENERAL_HOLIDAY` rows.
-3. Do **not** load general holidays until the specialist has supplied the official files (packet 01).
+3. Load the archived general-holiday lists into the Draft packs. The rows stay [G1], "sourced – pending specialist review":
+   ```bash
+   cd backend
+   for spec in "HK-PAYROLL-2025 2025" "HK-PAYROLL-2025 2026" "HK-PAYROLL-2026 2026" "HK-PAYROLL-2026 2027"; do set -- $spec
+     F=$(python -c "import csv;print([r['archived_as'] for r in csv.DictReader(open('../docs/hk-evidence/sources/archive/register.csv')) if r['doc_id']=='govhk_general_holidays_$2'][0])")
+     python -m scripts.hk_load_general_holidays --pack $1 --version 1.0 --year $2        --source-file ../docs/hk-evidence/sources/archive/$F --source-url https://www.gov.hk/en/about/abouthk/holiday/$2.htm        --dates-csv ../docs/hk-evidence/sources/general_holidays_$2_extracted.csv --actor-id <Super Admin user id>
+   done
+   ```
+   Then run Test Certification. It must still be PASS 11/11, as it was locally on 2026-10-14.
 
 ## 4. Smoke checks (after deploy)
 
@@ -64,6 +72,10 @@ If `main` gains more migrations before the merge, re-parent onto the new head an
 | S-5 | Super Admin → Alerts | the page loads; no unexpected Security alerts |
 | S-6 | Email | one routine notification to an internal mailbox. The server log shows `[email] Sent to …`, **not** `[outbound] BLOCKED` |
 | S-7 | Upload storage | a test evidence upload on a scratch tag is stored in GCS. Remove it afterwards through supersession, not deletion |
+
+**S-8 (after a successful deploy):** a Super Admin runs Test Certification for HK (Hong Kong → Test Certification → Run Now). Expect **PASS 11/11**, then the blocker list in `../ACTIVATION_READINESS.md` (30 items on 2026-10-14) under Statutory Summary & Gates.
+
+**Deploy blocked (2026-10-14):** production is at an unknown revision `4c5d6e7f8a9b`. Do not deploy, restart or migrate until `DEPLOY_FAILURE_4c5d6e7f8a9b.md` is resolved.
 
 ## 5. Upload kit
 

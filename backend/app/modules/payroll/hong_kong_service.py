@@ -28,6 +28,7 @@ the dependency direction is: shared platform <- hong_kong_service <- engine.
 import copy
 import hashlib
 import re
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -41,6 +42,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestException, NotFoundException, ZoikoException
 from app.modules.payroll import jurisdiction_hooks, retention_service, service
 from app.modules.payroll.employee_validation import mask_account_last4, mask_identifier
+from app.modules.payroll.engine.countries import hong_kong as _hk_calc
 from app.modules.payroll.engine.jurisdictions.hong_kong import (
     average_wage as hk_average_wage,
     continuous_contract as hk_cc,
@@ -78,6 +80,7 @@ from app.modules.payroll.models import (
     HongKongPayslipCorrection,
     HongKongTaxClearanceHold,
     HongKongTaxClearanceHoldLine,
+    HongKongPreTransitionWageOverride,
     HongKongTerminationResult,
     HongKongWorkHours,
     JurisdictionPack,
@@ -227,9 +230,12 @@ def record_work_hours(db: Session, organization_id: int, employee_id: int, entri
     for entry in entries or []:
         day = date.fromisoformat(str(entry["date"]))
         hours = dec(entry["hours"])
+        overtime = dec(entry["overtimeHours"]) if entry.get("overtimeHours") not in (None, "") else None
         source = entry.get("source") or "VERIFIED_TIMESHEET"
         if hours < ZERO or hours > Decimal("24"):
             raise BadRequestException(f"hours on {day} must be between 0 and 24")
+        if overtime is not None and not (ZERO <= overtime <= hours):
+            raise BadRequestException(f"overtime hours on {day} must be between 0 and that day's hours ({hours})")
         if source not in HOURS_SOURCES:
             raise BadRequestException(f"hours source must be one of {', '.join(HOURS_SOURCES)}")
         current = (db.query(HongKongWorkHours)
@@ -238,7 +244,8 @@ def record_work_hours(db: Session, organization_id: int, employee_id: int, entri
         if current is not None and not reason:
             raise BadRequestException(f"{day} already has verified hours — a correction needs a reason")
         row = HongKongWorkHours(organization_id=organization_id, employee_id=employee_id, work_date=day, hours=hours,
-                           source=source, evidence_ref=entry.get("evidenceRef"), recorded_by_id=actor_id)
+                           overtime_hours=overtime, source=source, evidence_ref=entry.get("evidenceRef"),
+                           recorded_by_id=actor_id)
         db.add(row)
         db.flush()
         if current is not None:
@@ -246,7 +253,8 @@ def record_work_hours(db: Session, organization_id: int, employee_id: int, entri
         created.append(row)
         _audit(db, actor_id, "create", "payroll_hk_work_hours", row.id,
                old={"supersedes": current.id, "hours": str(current.hours)} if current else None,
-               new={"employeeId": employee_id, "date": day.isoformat(), "hours": str(hours), "source": source},
+               new={"employeeId": employee_id, "date": day.isoformat(), "hours": str(hours),
+                    "overtimeHours": None if overtime is None else str(overtime), "source": source},
                reason=reason, commit=False)
     db.commit()
     return created
@@ -268,6 +276,37 @@ def hours_input(db: Session, employee: PayrollEmployee, start: date, end: date, 
     last = min(end, date.fromisoformat(facts["terminationDate"])) if facts.get("terminationDate") else end
     expected = {(first + timedelta(days=i)).isoformat() for i in range((last - first).days + 1)}
     return {"days": days, "complete": expected <= set(days)}
+
+
+def overtime_pay(db: Session, employee: PayrollEmployee, start: date, end: date) -> tuple:
+    """(amount, facts) for contractual overtime in a wage period (gap audit D-A).
+
+    Wireframe §4 / §10: no statutory overtime premium is invented; overtime is
+    paid at the rate the contract or agreement sets (the statutory profile's
+    hk_contractual_overtime_hourly_rate, effective-dated), on the verified
+    overtime hours recorded with the day's hours (HK-016). The overtime hours
+    are already inside the day's total hours, so they count for minimum wage
+    and continuous contract; the amount is the `overtime` earning, classified
+    per obligation by the pack (EO wages, MPF relevant income, SMW, IRD).
+    Rounding: to the cent, half-up — the same documented HK money rule as MPF
+    (common.cents; a G1 review item), applied once to hours x rate."""
+    rows = (db.query(HongKongWorkHours)
+            .filter(HongKongWorkHours.organization_id == employee.organization_id,
+                    HongKongWorkHours.employee_id == employee.id, HongKongWorkHours.work_date >= start,
+                    HongKongWorkHours.work_date <= end, HongKongWorkHours.superseded_by_id.is_(None),
+                    HongKongWorkHours.overtime_hours.isnot(None)).all())
+    hours = sum((dec(r.overtime_hours) for r in rows), ZERO)
+    facts = worker_facts(db, employee, end) or {}
+    rate = facts.get("contractualOvertimeHourlyRate")
+    out = {"hours": str(hours), "days": len([r for r in rows if dec(r.overtime_hours) > ZERO]),
+           "basis": "verified overtime hours x the contractual overtime hourly rate (no statutory premium; wireframe §4)",
+           "hourlyRate": rate, "profileId": facts.get("profileId")}
+    if hours <= ZERO:
+        return ZERO, {**out, "status": "NONE"}
+    if rate is None:
+        return ZERO, {**out, "status": "RATE_NOT_RECORDED"}
+    amount = cents(hours * dec(rate))
+    return amount, {**out, "status": "PAID" if amount > ZERO else "NO_OVERTIME_PAY_UNDER_CONTRACT", "amount": str(amount)}
 
 
 # ── Payroll calculation inputs (called from service._compute_payslip_values) ─
@@ -363,6 +402,15 @@ def identify_departure(db: Session, organization_id: int, employee_id: int, expe
                          HongKongTaxClearanceHold.state != "CASE_CLOSED").first())
     if open_case is not None:
         raise BadRequestException(f"an open IR56G case (#{open_case.id}, {open_case.state}) already exists — change it instead")
+    cessation = _live_cases(db, organization_id, employee_id, "IR56F")
+    if cessation:
+        # Gap audit D-H: an employee leaving Hong Kong is notified on IR56G, not IR56F.
+        c = cessation[0]
+        raise BadRequestException(
+            f"IR56F case #{c.id} ({c.status}) already covers this employee's cessation. An employee leaving Hong Kong "
+            f"is notified on IR56G instead (IRD PAM 46(e)). Cancel the IR56F case with a reason"
+            + (" — or, if it was already filed, contact the IRD and record the outcome —" if c.status in hk_ird.FILED_STATES
+               else "") + " before identifying the departure.")
     hold = HongKongTaxClearanceHold(organization_id=organization_id, employee_id=employee_id,
                                expected_departure_date=expected_departure, identified_on=identified_on,
                                filing_deadline=hk_tc.filing_deadline(expected_departure, timing),
@@ -387,18 +435,37 @@ def identify_departure(db: Session, organization_id: int, employee_id: int, expe
 
 
 def record_ir56g_filed(db: Session, organization_id: int, hold_id: int, filed_on: date, filing_reference: str,
-                       actor_id: Optional[int]) -> HongKongTaxClearanceHold:
+                       actor_id: Optional[int], submission: Optional[dict] = None) -> HongKongTaxClearanceHold:
     """The operator filed IR56G through IRD's own channel: the hold becomes
-    ACTIVE from the filing date (withhold all moneys payable)."""
+    ACTIVE from the filing date (withhold all moneys payable).
+
+    Gap audit D-D (wireframe §15 four-eyes for IRD filings): the same controls
+    as every other IRD filing — a different user from the one who prepared the
+    IR56G case (refusal audited), the external-submission record (mode and
+    authorized signer) and the filing reference — all checked before anything
+    changes."""
     hold = _hold(db, organization_id, hold_id)
     if not filing_reference:
         raise BadRequestException("the IR56G filing reference is required")
+    case = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).first()
+    if case is None:
+        raise BadRequestException("the departure has no IR56G reporting case — identify the departure first")
+    if case.status in hk_ird.FILED_STATES:
+        raise BadRequestException(f"the IR56G case #{case.id} is already {case.status}")
+    service.require_four_eyes(case.prepared_by_id, actor_id, "Filing an IR56G departure notification", db=db,
+                              entity_type="hk_ird_reporting_case", entity_id=case.id, current_status=case.status,
+                              attempted="FILED")
+    _record_submission(db, case, submission, actor_id)
     hold.filed_date = filed_on
     hold.statutory_hold_expiry = hk_tc.statutory_hold_expiry(filed_on, reporting_timing(db, filed_on))
     _transition(db, hold, "IR56G_FILED_HOLD_ACTIVE", actor_id, reason=f"IR56G filed {filed_on} ref {filing_reference}")
-    case = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).first()
-    if case is not None and case.status not in hk_ird.FILED_STATES:
-        case.status, case.filing_reference, case.filed_at = "FILED", filing_reference, datetime.utcnow()
+    old_status = case.status
+    case.status, case.filing_reference, case.filed_at = "FILED", filing_reference, datetime.utcnow()
+    case.approved_by_id = actor_id
+    _audit(db, actor_id, "status_change", "hk_ird_reporting_case", case.id, old={"status": old_status},
+           new={"status": "FILED", "filingReference": filing_reference,
+                "submission": {"mode": case.submission_mode, "authorizedSigner": case.authorized_signer,
+                               "submittedOn": _iso(case.submitted_on)}}, commit=False)
     refresh_hold_lines(db, hold)
     db.commit()
     return hold
@@ -587,19 +654,34 @@ def _committed_hk_payslips(db, organization_id, start: date, end: date, employee
     return q.all()
 
 
-def create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int]) -> list:
+IR56F_IR56G_SOURCE = ("IRD PAM 46(e): leaving Hong Kong -> IR56G; not leaving Hong Kong -> IR56F not later than one "
+                      "month before termination; wireframe §7 'do not use [IR56F] if departure IR56G applies'")
+
+
+def _live_cases(db: Session, organization_id: int, employee_id: int, form: str) -> list:
+    return (db.query(HongKongIrdReportingCase)
+            .filter(HongKongIrdReportingCase.organization_id == organization_id,
+                    HongKongIrdReportingCase.employee_id == employee_id, HongKongIrdReportingCase.form_type == form,
+                    HongKongIrdReportingCase.status.notin_(("CANCELLED", "SUPPRESSED", "AMENDED")))
+            .order_by(HongKongIrdReportingCase.id).all())
+
+
+def create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int],
+                       controls: Optional[list] = None) -> list:
     """IR56E / IR56F from the effective profile facts (IR56G is created by
     identify_departure). Idempotent per (form, event date) — also under
     concurrency: uq_payroll_hk_ird_event_case refuses the second insert, and the run is
-    repeated once, finding the concurrent request's rows."""
+    repeated once, finding the concurrent request's rows. A case NOT created
+    because a control applies is reported in `controls` (gap audit D-H)."""
     try:
-        return _create_event_cases(db, organization_id, employee_id, actor_id)
+        return _create_event_cases(db, organization_id, employee_id, actor_id, controls)
     except IntegrityError:
         db.rollback()
-        return _create_event_cases(db, organization_id, employee_id, actor_id)
+        return _create_event_cases(db, organization_id, employee_id, actor_id, controls)
 
 
-def _create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int]) -> list:
+def _create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int],
+                        controls: Optional[list] = None) -> list:
     employee = _employee(db, employee_id, organization_id)
     facts = worker_facts(db, employee, date.today()) or {}
     created = []
@@ -624,8 +706,20 @@ year_of_assessment=year_of_assessment(event), event_date=event,
     if employee.date_of_joining and facts.get("likelyChargeable"):
         ensure("IR56E", employee.date_of_joining)
     termination = facts.get("terminationDate")
-    if termination and not facts.get("expectedDepartureDate"):
-        ensure("IR56F", date.fromisoformat(termination))
+    if termination:
+        departure = _live_cases(db, organization_id, employee_id, "IR56G")
+        if departure or facts.get("expectedDepartureDate"):
+            # Gap audit D-H: the employee is leaving Hong Kong — the cessation is
+            # notified on the IR56G, never on an IR56F as well.
+            if controls is not None:
+                controls.append({"form": "IR56F", "control": "IR56G_DEPARTURE_APPLIES",
+                                 "message": ("no IR56F: an IR56G departure " +
+                                             (f"case #{departure[0].id} ({departure[0].status})" if departure
+                                              else "is recorded on the statutory profile (expected departure)") +
+                                             " covers this cessation — the IR56G is filed instead"),
+                                 "source": IR56F_IR56G_SOURCE})
+        else:
+            ensure("IR56F", date.fromisoformat(termination))
     db.commit()
     return created
 
@@ -654,6 +748,8 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
     identifiers = (company.tax_identifiers or {}) if company else {}
     results, grand_total, payroll_total = [], ZERO, ZERO
+    # Gap audit D-F: what the reported total must equal, item by item.
+    suppressed_gross, excluded_total = ZERO, ZERO
     cover_filed = (db.query(HongKongIrdReportingCase.id)
                    .filter(HongKongIrdReportingCase.organization_id == organization_id, HongKongIrdReportingCase.form_type == "BIR56A",
                            HongKongIrdReportingCase.year_of_assessment == ya,
@@ -687,7 +783,11 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
         if existing is not None and existing.status in hk_ird.FILED_STATES + ("SUPPRESSED",):
             results.append({"employeeId": employee_id, "caseId": existing.id, "status": existing.status,
                             "message": "already filed — never regenerated (amend instead)"})
-            grand_total += reported if existing.status != "SUPPRESSED" else ZERO
+            if existing.status == "SUPPRESSED":
+                suppressed_gross += gross
+            else:
+                grand_total += reported
+                excluded_total += _excluded_ird(pairs)
             continue
         if existing is not None and existing.status == "REJECTED":
             # The rejected return keeps its filed evidence until an operator
@@ -695,6 +795,7 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
             results.append({"employeeId": employee_id, "caseId": existing.id, "status": existing.status,
                             "message": "rejected by the IRD — choose Prepare again before regenerating"})
             grand_total += reported
+            excluded_total += _excluded_ird(pairs)
             continue
         errors = []
         cf = (employee.compliance_fields or {}) if employee else {}
@@ -723,11 +824,13 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
         row.reported_income = payload["fields"]
         if decision["action"] == "SUPPRESS":
             row.status, row.suppression_reason, row.validation_errors = "SUPPRESSED", decision["message"], []
+            suppressed_gross += gross
         else:
             if decision["action"] == "RESOLVE":
                 errors.append(decision["message"])
             row.status, row.validation_errors = "PREPARED", errors
             grand_total += reported
+            excluded_total += _excluded_ird(pairs)
         db.flush()
         results.append({"employeeId": employee_id, "caseId": row.id, "status": row.status,
                         "message": decision["message"], "validationErrors": row.validation_errors})
@@ -754,9 +857,22 @@ def _generate_annual_return(db: Session, organization_id: int, ya: str, actor_id
     _audit(db, actor_id, "create", "hk_ird_annual_return", cover.id,
            new={"yearOfAssessment": ya, "employees": len(results), "total": str(cents(grand_total))}, commit=False)
     db.commit()
+    expected = payroll_total - suppressed_gross - excluded_total
+    reconciliation = {
+        "committedPayrollGross": str(cents(payroll_total)),
+        "lessReportedOnIr56fIr56g": str(cents(suppressed_gross)),
+        "lessExcludedFromIrd": str(cents(excluded_total)),
+        "expectedReportable": str(cents(expected)),
+        "reportedTotal": str(cents(grand_total)),
+        "variance": str(cents(grand_total - expected)),
+        "status": "Reconciled" if cents(grand_total) == cents(expected) else "Variance",
+        "basis": "committed HK payroll for the year of assessment, less income already reported on a filed IR56F / "
+                 "IR56G, less amounts the classification excludes from (or holds for review in) IRD reporting, must "
+                 "equal the reported total exactly (HK-011)",
+    }
     return {"yearOfAssessment": ya, "bir56aCaseId": cover.id, "employees": results,
             "reportedTotal": str(cents(grand_total)), "committedPayrollGross": str(cents(payroll_total)),
-            "schemaStatus": hk_ird.SCHEMA_STATUS}
+            "reconciliation": reconciliation, "schemaStatus": hk_ird.SCHEMA_STATUS}
 
 
 def _excluded_ird(pairs) -> Decimal:
@@ -1239,13 +1355,8 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
     active_hold = db.query(HongKongTaxClearanceHold).filter(
         HongKongTaxClearanceHold.organization_id == organization_id, HongKongTaxClearanceHold.employee_id == employee_id,
         HongKongTaxClearanceHold.state.in_(hk_tc.HOLDING_STATES)).first() is not None
-    pre_wage = data.get("preTransitionWage")
-    frozen = facts.get("preTransitionMonthlyWage")
-    if frozen is not None:
-        if pre_wage is not None and dec(pre_wage) != dec(frozen):
-            raise BadRequestException("the pre-transition wage is frozen on the statutory profile (HK-017) — it cannot "
-                                      "be replaced at termination")
-        pre_wage = frozen
+    pre_wage, pre_wage_basis, pre_wage_source = _pre_transition_wage(db, organization_id, employee_id, facts,
+                                                                     data.get("preTransitionWage"))
     age = None
     if employee.date_of_birth:
         age = termination.year - employee.date_of_birth.year - (
@@ -1257,7 +1368,7 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
             pay_basis=data.get("payBasis") or facts.get("payBasis") or "MONTHLY", cc_status=cc["status"],
             params=params, post_wage=dec(data["postTransitionWage"]),
             pre_wage=dec(pre_wage) if pre_wage is not None else None,
-            pre_wage_basis=facts.get("preTransitionWageBasis") or data.get("preTransitionWageBasis"),
+            pre_wage_basis=pre_wage_basis,
             post_wage_basis=data.get("postTransitionWageBasis") or "LAST_FULL_MONTH",
             offsets=data.get("offsets") or [], age_at_termination=age,
             renewal_offer_refused=bool(data.get("renewalOfferRefused")),
@@ -1267,6 +1378,8 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
         raise _blocked(exc)
     result["continuousContract"] = {"status": cc["status"], "since": cc.get("continuousSince")}
     result["packId"] = pack.pack_id
+    if pre_wage_source is not None:
+        result["preTransitionWageSource"] = pre_wage_source
     for prior in db.query(HongKongTerminationResult).filter(HongKongTerminationResult.organization_id == organization_id,
                                                        HongKongTerminationResult.employee_id == employee_id,
                                                        HongKongTerminationResult.status == "CALCULATED"):
@@ -1283,6 +1396,90 @@ def calculate_termination(db: Session, organization_id: int, employee_id: int, d
            commit=False)
     db.commit()
     return row
+
+
+def _pre_transition_wage(db: Session, organization_id: int, employee_id: int, facts: dict, typed) -> tuple:
+    """(wage, basis, source) for the pre-1-May-2025 SP/LSP portion (HK-017, gap
+    audit D-C). The wage is the FROZEN value on the statutory profile, or an
+    APPROVED four-eyes override; never a value typed at termination. A typed
+    value is accepted only when it equals the value already in force."""
+    override = (db.query(HongKongPreTransitionWageOverride)
+                .filter(HongKongPreTransitionWageOverride.organization_id == organization_id,
+                        HongKongPreTransitionWageOverride.employee_id == employee_id,
+                        HongKongPreTransitionWageOverride.status == "APPROVED")
+                .order_by(HongKongPreTransitionWageOverride.id.desc()).first())
+    if override is not None:
+        wage, basis = override.monthly_wage, override.wage_basis
+        source = {"source": "APPROVED_OVERRIDE", "overrideId": override.id, "evidenceRef": override.evidence_ref,
+                  "basis": override.wage_basis}
+    elif facts.get("preTransitionMonthlyWage") is not None:
+        wage, basis = facts["preTransitionMonthlyWage"], facts.get("preTransitionWageBasis")
+        source = {"source": "FROZEN_PROFILE", "profileId": facts.get("profileId"),
+                  "evidenceRef": facts.get("preTransitionEvidenceRef"), "basis": basis}
+    else:
+        wage = basis = source = None
+    if typed is not None and (wage is None or dec(typed) != dec(wage)):
+        raise BadRequestException(
+            "the pre-transition wage cannot be typed at termination (HK-017): it comes from the frozen wage on the "
+            "statutory profile or an approved four-eyes override — record either before calculating")
+    return wage, basis, source
+
+
+def request_pre_transition_wage_override(db: Session, organization_id: int, employee_id: int, data: dict,
+                                         actor_id: Optional[int]) -> HongKongPreTransitionWageOverride:
+    """Request a controlled pre-transition wage (HK-017, D-C): a value, its
+    basis, a reason and evidence. Usable only once a different user approves."""
+    _employee(db, employee_id, organization_id)
+    if not (data.get("reason") or "").strip() or not (data.get("evidenceRef") or "").strip():
+        raise BadRequestException("a pre-transition wage override needs a reason and evidence (HK-017)")
+    basis = data.get("basis") or "LAST_FULL_MONTH"
+    if basis not in ("LAST_FULL_MONTH", "TWELVE_MONTH_AVERAGE"):
+        raise BadRequestException("basis must be LAST_FULL_MONTH or TWELVE_MONTH_AVERAGE")
+    wage = dec(data.get("monthlyWage"))
+    if wage <= ZERO:
+        raise BadRequestException("the monthly wage must be greater than 0")
+    row = HongKongPreTransitionWageOverride(organization_id=organization_id, employee_id=employee_id, monthly_wage=wage,
+                                            wage_basis=basis, reason=data["reason"].strip(),
+                                            evidence_ref=data["evidenceRef"].strip(), requested_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "create", "hk_pre_transition_wage_override", row.id,
+           new={"employeeId": employee_id, "monthlyWage": str(wage), "basis": basis, "evidence": row.evidence_ref},
+           reason=row.reason)
+    return row
+
+
+def approve_pre_transition_wage_override(db: Session, organization_id: int, override_id: int,
+                                         actor_id: Optional[int]) -> HongKongPreTransitionWageOverride:
+    row = (db.query(HongKongPreTransitionWageOverride)
+           .filter(HongKongPreTransitionWageOverride.id == override_id,
+                   HongKongPreTransitionWageOverride.organization_id == organization_id).first())
+    if row is None:
+        raise NotFoundException("Hong Kong pre-transition wage override", override_id)
+    if row.status != "REQUESTED":
+        raise BadRequestException(f"this override is {row.status}, not REQUESTED")
+    service.require_four_eyes(row.requested_by_id, actor_id, "A pre-transition wage override", db=db,
+                              entity_type="hk_pre_transition_wage_override", entity_id=row.id,
+                              current_status=row.status, attempted="approve")
+    for prior in (db.query(HongKongPreTransitionWageOverride)
+                  .filter(HongKongPreTransitionWageOverride.organization_id == organization_id,
+                          HongKongPreTransitionWageOverride.employee_id == row.employee_id,
+                          HongKongPreTransitionWageOverride.status == "APPROVED")):
+        prior.status = "SUPERSEDED"
+    row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, datetime.utcnow()
+    _audit(db, actor_id, "status_change", "hk_pre_transition_wage_override", row.id,
+           old={"status": "REQUESTED"}, new={"status": "APPROVED", "monthlyWage": str(row.monthly_wage)})
+    return row
+
+
+def list_pre_transition_wage_overrides(db: Session, organization_id: int, employee_id: int) -> list:
+    return [{"id": r.id, "monthlyWage": str(r.monthly_wage), "basis": r.wage_basis, "reason": r.reason,
+             "evidenceRef": r.evidence_ref, "status": r.status, "requestedById": r.requested_by_id,
+             "approvedById": r.approved_by_id, "approvedAt": _iso(r.approved_at)}
+            for r in db.query(HongKongPreTransitionWageOverride)
+            .filter(HongKongPreTransitionWageOverride.organization_id == organization_id,
+                    HongKongPreTransitionWageOverride.employee_id == employee_id)
+            .order_by(HongKongPreTransitionWageOverride.id.desc()).all()]
 
 
 def list_termination_results(db: Session, organization_id: int, employee_id: Optional[int] = None) -> list:
@@ -1755,7 +1952,8 @@ DOMAINS = [
     ("average_wage", "Average Wage", lambda k: k.startswith(("eo_average_wage_", "eo_overtime_aw_")) or k == "eo_four_fifths_factor",
      _ENG + "average_wage.py"),
     ("eo_entitlements", "Employment Ordinance Entitlements",
-     lambda k: k.startswith(("eo_sickness_", "eo_maternity_", "eo_paternity_", "eo_holiday_pay_", "eo_wage_payment_")),
+     lambda k: k.startswith(("eo_sickness_", "eo_maternity_", "eo_paternity_", "eo_holiday_pay_", "eo_wage_payment_",
+                             "eo_termination_payment_")),
      _ENG + "entitlements.py"),
     ("leave_holidays", "Leave & Holidays", lambda k: k in ("HK_ANNUAL_LEAVE_SCALE", "HK_STATUTORY_HOLIDAY",
                                                             "HK_GENERAL_HOLIDAY"),
@@ -1766,8 +1964,9 @@ DOMAINS = [
     ("salaries_tax", "Salaries Tax — informational",
      lambda k: k.startswith(("hk_allowance_", "hk_deduction_", "hk_tax_")) or k.startswith("HK_SALARIES_TAX"),
      _ENG + "salaries_tax.py"),
-    ("earning_classification", "Earning Classification", lambda k: k == "HK_EARNING_CLASS",
-     "app/modules/payroll/hong_kong_service.py; report generators (IR56B)"),
+    ("earning_classification", "Earning Codes & Classification",
+     lambda k: k in ("HK_EARNING_CLASS", "HK_EARNING_CODE", "HK_EARNING_SOURCE"),
+     "app/modules/payroll/engine/countries/hong_kong.py; report generators (IR56B)"),
 ]
 SALARIES_TAX_NOTICE = "Informational calculation only — Salaries Tax is not withheld from monthly HK payroll."
 EDITABLE = ("Draft", "In Review", "QA", "Approved")
@@ -1873,11 +2072,18 @@ def _slab_row(db: Session, pack, s) -> dict:
     elif s.rule_type == "HK_EARNING_CLASS":
         display, unit = (s.tax_formula or "").split(": ")[-1] if s.tax_regime != "IRD" else (s.tax_formula or ""), "treatment"
         label = f"{s.filing_status} → {s.tax_regime}"
+    elif s.rule_type == "HK_EARNING_CODE":
+        display, unit = (s.tax_formula or "") if s.tax_regime == "IRD" else s.assessment_basis, "treatment"
+        label = f"{s.filing_status} → {s.tax_regime}"
+    elif s.rule_type == "HK_EARNING_SOURCE":
+        display, unit, label = s.tax_regime, "earning code", f"pay source {s.filing_status}"
     else:
         display, unit, label = s.tax_formula or s.rate_label, "", s.rate_label
     src = _source(db, s.source_document_id)
     g1 = "[G1]" in (s.rate_label or "") or bool(src and src["unverified"])
     status = ("SOURCE_HASH_REQUIRED" if not (src and src["sha256"]) else "UNVERIFIED — G1" if g1 else "SOURCED")
+    if s.rule_type == "HK_EARNING_CODE" and _hk_calc.code_meta(s).get("status") == "PENDING":
+        status = "PENDING — specialist question"
     return {"kind": "slab", "id": s.id, "key": s.rule_type, "label": label, "domain": dkey, "domainLabel": dlabel,
             "value": display, "unit": unit,
             "raw": {"minAmount": str(s.min_amount) if s.min_amount is not None else None,
@@ -1898,6 +2104,61 @@ def _rows(db: Session, pack) -> list:
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None))
              .order_by(TaxSlab.rule_type, TaxSlab.sort_order).all())
     return [_rate_row(db, pack, r) for r in rates] + [_slab_row(db, pack, s) for s in slabs]
+
+
+def earning_code_catalogue(db: Session, on: Optional[date] = None, pack_row_id: Optional[int] = None) -> dict:
+    """HK-006 earning-code catalogue as the configuration screen shows it: for
+    each code, its mapping per obligation (treatment, IR56B field / item,
+    SOURCED or PENDING, the archived source with its SHA-256, the basis quoted
+    or the specialist question) and the pay sources bound to it — read from the
+    governed pack rows in force on `on` (default today) of the pack in force
+    then (or of `pack_row_id`)."""
+    from app.modules.payroll.models import JurisdictionPack, TaxSlab
+
+    on = on or date.today()
+    if pack_row_id is not None:
+        pack = _pack(db, pack_row_id)
+    else:
+        pack = (db.query(JurisdictionPack)
+                .filter(JurisdictionPack.jurisdiction_country == HK, JurisdictionPack.pack_type == "tax",
+                        or_(JurisdictionPack.effective_from == None, JurisdictionPack.effective_from <= on),  # noqa: E711
+                        or_(JurisdictionPack.effective_to == None, JurisdictionPack.effective_to >= on))  # noqa: E711
+                .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.version.desc()).first())
+    if pack is None:
+        raise NotFoundException("No Hong Kong pack covers that date")
+    rows = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None),
+                                     TaxSlab.rule_type.in_(("HK_EARNING_CODE", "HK_EARNING_SOURCE")),
+                                     or_(TaxSlab.effective_from == None, TaxSlab.effective_from <= on),  # noqa: E711
+                                     or_(TaxSlab.effective_to == None, TaxSlab.effective_to >= on))  # noqa: E711
+            .order_by(TaxSlab.sort_order).all())
+    codes = {}
+    for r in rows:
+        if r.rule_type != "HK_EARNING_CODE":
+            continue
+        meta = _hk_calc.code_meta(r)
+        entry = codes.setdefault(r.filing_status, {"code": r.filing_status, "label": meta.get("label"), "mappings": {},
+                                                   "boundSources": [], "pendingCount": 0})
+        entry["mappings"][r.tax_regime] = {
+            "rowId": r.id, "treatment": r.assessment_basis,
+            "irdField": r.tax_formula if r.tax_regime == "IRD" else None, "irdItem": meta.get("irdItem"),
+            "status": meta.get("status") or "SOURCED", "basis": meta.get("basis"), "question": meta.get("question"),
+            "effectiveFrom": _iso(r.effective_from or pack.effective_from), "effectiveTo": _iso(r.effective_to or pack.effective_to),
+            "source": _source(db, r.source_document_id)}
+        entry["pendingCount"] += 1 if meta.get("status") == "PENDING" else 0
+    bindings = []
+    for r in rows:
+        if r.rule_type == "HK_EARNING_SOURCE":
+            bindings.append({"source": r.filing_status, "code": r.tax_regime, "rowId": r.id,
+                             "knownCode": r.tax_regime in codes})
+            if r.tax_regime in codes:
+                codes[r.tax_regime]["boundSources"].append(r.filing_status)
+    return {"pack": {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status},
+            "asOf": on.isoformat(), "obligations": list(_hk_calc.OBLIGATIONS), "codes": list(codes.values()),
+            "bindings": bindings,
+            "rules": ["A pay source with no binding, or a code with no mapping in force, blocks the calculation.",
+                      "A PENDING mapping is never applied as certified: MPF blocks; EO / SMW count as REVIEW; IRD is "
+                      "reported as UNMAPPED_REQUIRES_CLASSIFICATION, which the IR56B must resolve before filing."],
+            "specialistVerified": False}
 
 
 def domains(db: Session, pack_row_id: int) -> dict:
@@ -2050,6 +2311,11 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
                 "textValue": "text_value", "effectiveFrom": "effective_from", "effectiveTo": "effective_to"} if kind == "rate" else
                {"minAmount": "min_amount", "maxAmount": "max_amount", "ratePct": "rate_pct", "flatAmount": "flat_amount",
                 "taxFormula": "tax_formula", "effectiveFrom": "effective_from", "effectiveTo": "effective_to"})
+    if kind == "slab" and row.rule_type == "HK_EARNING_CODE":
+        # Earning-code catalogue: the specialist's answer may change the treatment.
+        allowed = {**allowed, "treatment": "assessment_basis"}
+        if data.get("treatment") not in (None, "INCLUDED", "EXCLUDED", "REVIEW"):
+            raise BadRequestException("treatment must be INCLUDED, EXCLUDED or REVIEW")
     unknown = set(data) - set(allowed) - {"reason", "sourceDocumentId", "specialistVerified"}
     if unknown:
         raise BadRequestException(f"not editable here: {', '.join(sorted(unknown))}")
@@ -2060,7 +2326,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
         value = data[field]
         if column.startswith("effective_"):
             value = date.fromisoformat(value) if value else None
-        elif column in ("text_value", "tax_formula"):
+        elif column in ("text_value", "tax_formula", "assessment_basis"):
             value = value if value not in ("",) else None
         else:
             value = Decimal(str(value)) if value not in (None, "") else None
@@ -2080,6 +2346,16 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
         old["label"] = getattr(row, label_col)
         setattr(row, label_col, " ".join(getattr(row, label_col).replace("[G1]", " ").split()))
         new["label"], new["specialistVerified"] = getattr(row, label_col), True
+    if kind == "slab" and row.rule_type == "HK_EARNING_CODE":
+        meta = _hk_calc.code_meta(row)
+        if verify and meta.get("status") == "PENDING":
+            # The specialist answered the catalogue question: recorded with the
+            # change reason (their answer) and the reviewed source; never silent.
+            old["mappingStatus"], new["mappingStatus"] = "PENDING", "SOURCED"
+            meta.update(status="SOURCED", answeredQuestion=meta.get("question"), question=None,
+                        basis=f"specialist answer: {data['reason']}")
+            row.formula_expression = json.dumps(meta, sort_keys=True)
+            row.rate_label = " ".join((row.rate_label or "").replace("[PENDING]", " ").split())
     _invalidate_pack_approval_on_edit(pack)
     # Maker identity: the pack's last editor is whoever changed its statutory
     # substance (the approve / activate maker-checker checks read
@@ -2093,6 +2369,87 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id: Option
                      old_value=old, new_value=new, reason=reason, auto_commit=False)
     db.commit()
     return (_rate_row if kind == "rate" else _slab_row)(db, pack, row)
+
+
+CATALOGUE_RULE_TYPES = ("HK_EARNING_CODE", "HK_EARNING_SOURCE")
+
+
+def split_catalogue_row(db: Session, row_id: int, data: dict, actor_id: Optional[int]) -> dict:
+    """Effective-dated change of one earning-code catalogue row (HK-006): the
+    row in force ends the day before `effectiveFrom` and a new row carries the
+    change from that date — so payroll before the date keeps the old mapping
+    and payroll from it uses the new one. Draft (editable) packs only; a reason
+    and an existing source document are required; audited like every governed
+    edit and the pack's approval is invalidated."""
+    from app.modules.payroll.models import SourceArtifact, TaxSlab
+    from app.modules.payroll.service import _invalidate_pack_approval_on_edit, _require_editable_pack, record_tax_audit
+
+    row = db.get(TaxSlab, row_id)
+    if row is None or row.jurisdiction_country != HK or row.rule_type not in CATALOGUE_RULE_TYPES:
+        raise NotFoundException("Hong Kong earning-code catalogue row", row_id)
+    pack = db.get(JurisdictionPack, row.jurisdiction_pack_id)
+    _require_editable_pack(pack)
+    if not (data.get("reason") or "").strip():
+        raise BadRequestException("A statutory change needs a change reason.")
+    source = db.get(SourceArtifact, data.get("sourceDocumentId")) if data.get("sourceDocumentId") else None
+    if source is None:
+        raise BadRequestException("A statutory change needs the official source document (an existing SourceArtifact).")
+    try:
+        starts = date.fromisoformat(str(data.get("effectiveFrom")))
+    except ValueError:
+        raise BadRequestException("effectiveFrom (YYYY-MM-DD) is required")
+    window_from, window_to = row.effective_from or pack.effective_from, row.effective_to or pack.effective_to
+    if not (window_from and starts > window_from and (window_to is None or starts <= window_to)):
+        raise BadRequestException(f"effectiveFrom must fall after {window_from} and within the row's window")
+    changes = {}
+    if row.rule_type == "HK_EARNING_CODE":
+        if data.get("treatment") is not None:
+            if data["treatment"] not in ("INCLUDED", "EXCLUDED", "REVIEW"):
+                raise BadRequestException("treatment must be INCLUDED, EXCLUDED or REVIEW")
+            changes["assessment_basis"] = data["treatment"]
+        if data.get("irdField") is not None:
+            if row.tax_regime != "IRD":
+                raise BadRequestException("only an IRD mapping carries an IR56B field")
+            changes["tax_formula"] = data["irdField"]
+    elif data.get("code") is not None:
+        changes["tax_regime"] = changes["tax_formula"] = data["code"]
+    if not changes:
+        raise BadRequestException("nothing to change: give treatment / irdField (code row) or code (source binding)")
+    bookkeeping = {"id", "created_at", "updated_at"}
+    successor = TaxSlab(**{c.name: getattr(row, c.name) for c in TaxSlab.__table__.columns if c.name not in bookkeeping})
+    for column, value in changes.items():
+        setattr(successor, column, value)
+    if row.rule_type == "HK_EARNING_CODE":
+        # The successor's own metadata: why it changed, and — for a new IR56B field — that
+        # field's item as the catalogue's other rows record it (never the old row's item).
+        meta = _hk_calc.code_meta(row)
+        meta["basis"] = f"dated change from {starts.isoformat()}: {data['reason'].strip()}"
+        if "tax_formula" in changes:
+            meta["irdItem"] = next(
+                (_hk_calc.code_meta(r).get("irdItem") for r in db.query(TaxSlab).filter(
+                    TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.rule_type == "HK_EARNING_CODE",
+                    TaxSlab.tax_regime == "IRD", TaxSlab.tax_formula == changes["tax_formula"]).all()
+                 if _hk_calc.code_meta(r).get("irdItem")), None)
+        successor.formula_expression = json.dumps(meta, sort_keys=True)
+    successor.effective_from, successor.effective_to = starts, window_to
+    successor.source_document_id = source.id
+    row.effective_to = starts - timedelta(days=1)
+    if row.effective_from is None:
+        row.effective_from = window_from
+    db.add(successor)
+    _invalidate_pack_approval_on_edit(pack)
+    if actor_id is not None:
+        pack.updated_by_id = actor_id
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="hk_statutory_slab", entity_id=row.id,
+                     jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference="HK earning-code catalogue",
+                     reason=data["reason"].strip(), auto_commit=False, old_value={"effectiveTo": _iso(window_to)},
+                     new_value={"effectiveTo": _iso(row.effective_to), "successorRowId": successor.id,
+                                "successorFrom": starts.isoformat(),
+                                "changes": {k: str(v) for k, v in changes.items()}, "sourceDocumentId": source.id})
+    db.commit()
+    return {"endedRowId": row.id, "endedOn": _iso(row.effective_to), "newRowId": successor.id,
+            "effectiveFrom": starts.isoformat(), "changes": changes}
 
 
 def statutory_editors(db: Session, pack) -> set:
@@ -3862,7 +4219,7 @@ def generate_hong_kong_bir56a(
         ],
     }
     reconciliation = {
-        "status": "Reconciled" if outcome.get("reportedTotal") == outcome.get("committedPayrollGross") else "Variance",
+        **(outcome.get("reconciliation") or {}),
         "reportedTotal": outcome.get("reportedTotal"),
         "committedPayrollGross": outcome.get("committedPayrollGross"),
         "tolerance": None,
@@ -3982,7 +4339,7 @@ def generate_hong_kong_ir56b(
         "knownGaps": [
             _HK_LAYOUT_DISCLOSURE,
             "Reportable field labels are the pack's own IRD field keys; the certified field numbering and "
-            "the [G1] specialist sign-off over the HK_EARNING_CLASS mapping are still outstanding.",
+            "the [G1] specialist sign-off over the earning-code catalogue mappings are still outstanding.",
             "Identity is MASKED on this report (HK-022 / PCPD HR Code, the same rule the HK payslips apply): "
             "the unmasked HKID is never written into a GeneratedReport, so the official IRD copy still has to "
             "be produced from the employee record through the filing channel.",
@@ -4030,7 +4387,10 @@ def _hk_run_employees(db: Session, run: PayrollRun) -> list:
         PayrollEmployee.status == EmployeeStatus.ACTIVE,
         or_(PayrollEmployee.date_of_joining == None, PayrollEmployee.date_of_joining <= run.period_start),  # noqa: E711
     ).all()
-    return [e for e in rows if service._resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "HK"]
+    # Gap audit D-K: the run also pays mid-period joiners — the gate must check them too.
+    rows += service._sg_mid_period_joiners(db, run.organization_id, run.period_start, run.period_end)
+    return [e for e in rows if service._resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "HK"
+            and not service._hk_left_before_period(db, run.organization_id, e, run.period_start)]
 
 
 def _hk_dry_run_trace(db: Session, run: PayrollRun, employee, cache: dict, calculation_mode,
@@ -4794,6 +5154,9 @@ def _hk_statutory_profile_errors(data) -> list:
     code = data.hk_mpf_exemption_code
     if code in ("EXEMPT_STATUTORY_SCHEME", "EXEMPT_ORSO", "EXEMPT_INBOUND") and not data.hk_mpf_exemption_evidence_ref:
         errors.append(f"{code} needs hk_mpf_exemption_evidence_ref (the exemption is never inferred).")
+    ot_rate = data.hk_contractual_overtime_hourly_rate
+    if ot_rate is not None and not (ZERO <= ot_rate <= Decimal("100000")):
+        errors.append("hk_contractual_overtime_hourly_rate must be between 0 and 100,000 (0 = the contract gives no overtime pay).")
     hours = data.hk_contractual_weekly_hours
     if hours is not None and not (0 <= hours <= 168):
         errors.append("hk_contractual_weekly_hours must be between 0 and 168.")
@@ -4880,6 +5243,7 @@ def _retained_record_label(db: Session, organization_id: int, employee_id: int) 
                          (HongKongWorkHours, "verified work hours"),
                          (HongKongAverageWageSnapshot, "average-wage snapshots"),
                          (HongKongTerminationResult, "termination results"),
+                         (HongKongPreTransitionWageOverride, "pre-transition wage overrides"),
                          (HongKongPayslipCorrection, "payroll corrections")):
         if db.query(model.id).filter(model.organization_id == organization_id, model.employee_id == employee_id).first():
             return label

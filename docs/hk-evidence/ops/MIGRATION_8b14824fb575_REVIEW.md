@@ -44,7 +44,7 @@ There is nothing non-additive: no DROP, RENAME, type change, NOT NULL on a popul
 | Variant | Rows read from `assisted_access_sessions` during the migration | Upgrade wall time (incl. Alembic start-up) | Constraint | Bad user id rejected afterwards |
 |---|---|---|---|---|
 | As committed | **2,000,000** (one sequential scan) | 2.61 s | validated | yes |
-| Patched (`patches/migration_lock_safety.patch`) | **0** | 3.32 s | `NOT VALID` (enforced for new writes) | yes |
+| Patched (`patches/migration_lock_safety.patch`, now OBSOLETE: the migration is on `main` and must not be edited) | **0** | 3.32 s | `NOT VALID` (enforced for new writes) | yes |
 
   Wall times are dominated by Alembic start-up. A separate `VALIDATE CONSTRAINT` on the patched copy took **0.29 s** for 2,000,000 rows, so the scan in the committed migration costs roughly that much at that size.
 * **Verdict:** the scan is real but cheap. A support-session table is expected to hold hundreds or thousands of rows, not millions. **The committed migration is acceptable** if the pre-deploy check shows a modest `exact_rows`. If `exact_rows` exceeds about 1,000,000, apply the patch first: the constraint is added `NOT VALID`, the scan is skipped, and the optional `ALTER TABLE assisted_access_sessions VALIDATE CONSTRAINT assisted_access_sessions_approved_by_user_id_fkey` can be run later under SHARE UPDATE EXCLUSIVE, which does not block reads or writes.

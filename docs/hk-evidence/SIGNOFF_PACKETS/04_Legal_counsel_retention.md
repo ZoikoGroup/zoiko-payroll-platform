@@ -7,8 +7,9 @@
 1. **D-2, retention periods.** For each Hong Kong data category in the retention draft (section 2), state the retention period and the legal basis (for example the Employment Ordinance, the Inland Revenue Ordinance, the MPF Schemes Ordinance, or PDPO DPP2). Engineering has deliberately proposed **no** periods.
 2. **D-3, end of retention.** Choose deletion or anonymisation, and who runs it (a new shared subsystem, or a manual procedure).
 3. **D-9, legal hold.** State who may place and release a hold, and how often holds are reviewed. Release by a different person is already enforced and audited.
-4. **F-10 input.** Advise the Security lead whether the test emails (packet 03, incident note §6c) require any notification.
-5. Sign. The signed records are uploaded under `HK-DECISION-D-2`, `D-3` and `D-9`.
+4. **Audit rows on tenant hard-delete (F-6).** Today a Super Admin hard-delete of an organisation also purges that organisation's configuration and login audit rows (setting `AUDIT_PURGE_ON_ORG_HARD_DELETE`, default true). Advise whether audit rows may be purged that way, or must be kept for a retention period (D-2) and purged only through the retention process.
+5. **F-10 input.** Advise the Security lead whether the test emails (packet 03, incident note §6c) require any notification.
+6. Sign. The signed records are uploaded under `HK-DECISION-D-2`, `D-3` and `D-9`.
 
 ## What to check
 
@@ -22,7 +23,7 @@ About half a day to 1 day, depending on how many categories need research.
 ## Evidence
 
 * `../G5/G5_retention_deletion_policy_draft.md` — SHA-256 `09721353352d047a857f6e77f6dd07e7361b0dbcb7459b6fa79e050b7cc64857`
-* `../G5/G5_security_privacy_assessment.md` — SHA-256 `9b770fc855d5827002647ba0332ce62d14300d3ad8d675fb82b1c62db8453d05`
+* `../G5/G5_security_privacy_assessment.md` — SHA-256 `c6b272d9af62d71d8d4ec577a82a76def25ae498396531a7ea1e7b7561dade9f`
 * `../decisions/D-2_decision_record.md` — SHA-256 `823446ef96f0f0fd0a3a30fd33ab7a07bb035de2c2b839bb9d842771bd7742aa`
 * `../decisions/D-3_decision_record.md` — SHA-256 `82c84428025a3bac01205c38cc9ed3b0f1cbd86b92c4bfe5e4885882e4e74b1a`
 * `../decisions/D-9_decision_record.md` — SHA-256 `59a4e3d77647166a168c46c3a20293e9dbdd3bf8aabea09c2cfec4cb37d2742b`

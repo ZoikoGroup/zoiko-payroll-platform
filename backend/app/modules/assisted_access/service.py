@@ -242,6 +242,25 @@ def break_glass_notification_alerts(db: Session, days: int = 7) -> list:
     return [{"session_id": s.id, "organization_name": name, "activated_at": s.activated_at} for s, name in rows]
 
 
+def assisted_audit_gap_alerts(db: Session, days: int = 7, grace_minutes: int = 5) -> list:
+    """G5 F-4: assisted requests whose STARTED row has no completion row
+    (ORG_API_CALL with payload.intent_id) after `grace_minutes`. Fed into the
+    Super Admin Alerts page."""
+    from app.modules.assisted_access.models import AssistedAccessAuditEvent
+
+    now = _now()
+    rows = (db.query(AssistedAccessAuditEvent)
+            .filter(AssistedAccessAuditEvent.event_type.in_(("ORG_API_CALL_STARTED", "ORG_API_CALL")),
+                    AssistedAccessAuditEvent.recorded_at >= now - timedelta(days=days)).all())
+    done = {(r.payload or {}).get("intent_id") for r in rows if r.event_type == "ORG_API_CALL"}
+    gaps = {}
+    for r in rows:
+        at = r.recorded_at.replace(tzinfo=None) if r.recorded_at and r.recorded_at.tzinfo else r.recorded_at
+        if r.event_type == "ORG_API_CALL_STARTED" and r.id not in done and at and at <= now - timedelta(minutes=grace_minutes):
+            gaps.setdefault(r.assisted_access_session_id, []).append(r.id)
+    return [{"session_id": sid, "unmatched_starts": len(ids), "first_event_id": min(ids)} for sid, ids in sorted(gaps.items())]
+
+
 def activate_assisted_access(db: Session, session, *, requested_by, _break_glass_grant: bool = False):
     """Start the approved session and issue its token. CONSENT: only the
     requester, inside the approval window. BREAK_GLASS: started at approval

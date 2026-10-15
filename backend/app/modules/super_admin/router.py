@@ -33,6 +33,7 @@ from app.modules.super_admin.schemas import (
     FinanceByOrganizationResponse,
     PolicyStatusUpdate,
     SgDecisionCreate,
+    HkCatalogueRowSplit,
     HkConfigRowUpdate,
     HkNewVersionRequest, HkSoftwareApprovalTransition, HkEmpfConfigurationCreate, HkRetentionProposal, HkReasonBody,
     HkServiceRegistryTransition, HkEvidenceReview, HkContributionDayDisruption,
@@ -4399,6 +4400,15 @@ def hong_kong_configuration_resolution(on: date = Query(...), current_user=Depen
     return hong_kong_service.explain_resolution(db, on)
 
 
+@router.get("/compliance/hong-kong/configuration/earning-codes",
+            summary="HK earning-code catalogue (HK-006): each code's EO / MPF / SMW / IR56B mapping, status and source")
+def hong_kong_earning_codes(on: Optional[date] = Query(None), pack_row_id: Optional[int] = Query(None, alias="pack"),
+                            current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.earning_code_catalogue(db, on=on, pack_row_id=pack_row_id)
+
+
 @router.get("/compliance/hong-kong/configuration/compare",
             summary="Row-level diff of two HK statutory versions (rates and slabs)")
 def hong_kong_configuration_compare(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
@@ -4415,6 +4425,15 @@ def hong_kong_configuration_update_row(kind: str, row_id: int, payload: HkConfig
     from app.modules.payroll import hong_kong_service
 
     return hong_kong_service.update_row(db, kind, row_id, payload.model_dump(exclude_none=True), current_user.id)
+
+
+@router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
+             summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
+def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import hong_kong_service
+
+    return hong_kong_service.split_catalogue_row(db, row_id, payload.model_dump(exclude_none=True), current_user.id)
 
 
 @router.post("/compliance/hong-kong/configuration/packs/{pack_row_id}/new-version",

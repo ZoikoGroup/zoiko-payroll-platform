@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
+from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException, ZoikoException
 from app.modules.auth.schemas import SuccessResponse
 from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_ENTITIES, MULTI_ENTITY, MULTI_CURRENCY
@@ -835,13 +835,39 @@ def delete_organization(
     # purely by actor_id (NO ACTION FK to users), so it must be cleared by
     # actor before the users delete below or that delete is blocked.
     if "payroll_tax_configuration_audit" in existing_tables:
-        db.execute(
-            text(
-                'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
-                '(SELECT id FROM "users" WHERE organization_id = :org_id)'
-            ),
+        # G5 F-6: audit rows are append-only. Organisation hard-delete keeps its
+        # previous behaviour (it purges the org's configuration / auth audit rows)
+        # only while settings.AUDIT_PURGE_ON_ORG_HARD_DELETE is true (default) -
+        # an OPEN decision for Security and counsel (sign-off packets 03 / 04).
+        # When false, the hard-delete is refused and nothing is deleted.
+        from app.config import settings as _settings
+        from app.core.audit_immutability import audit_purge_scope
+
+        has_audit_rows = db.execute(
+            text('SELECT 1 FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
+                 '(SELECT id FROM "users" WHERE organization_id = :org_id) LIMIT 1'),
             {"org_id": organization_id},
-        )
+        ).first() is not None
+        if has_audit_rows and not _settings.AUDIT_PURGE_ON_ORG_HARD_DELETE:
+            db.rollback()
+            raise ZoikoException(
+                409, "AUDIT_PURGE_DISABLED",
+                "This organisation has audit records, and purging audit records on hard-delete is disabled "
+                "(AUDIT_PURGE_ON_ORG_HARD_DELETE=false). Nothing was deleted.")
+        with audit_purge_scope(db, f"organization hard-delete {organization_id} by {current_user.email}"):
+            db.execute(
+                text(
+                    'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
+                    '(SELECT id FROM "users" WHERE organization_id = :org_id)'
+                ),
+                {"org_id": organization_id},
+            )
+            if "auth_audit_events" in existing_tables:
+                db.execute(
+                    text('DELETE FROM "auth_audit_events" WHERE user_id IN '
+                         '(SELECT id FROM "users" WHERE organization_id = :org_id)'),
+                    {"org_id": organization_id},
+                )
 
     if "payroll_ch_scheme_profiles" in existing_tables:
         db.execute(

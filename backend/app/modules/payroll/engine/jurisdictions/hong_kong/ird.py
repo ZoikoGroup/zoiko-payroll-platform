@@ -75,9 +75,23 @@ def ir56b_suppression(ya: str, employee_period: tuple, prior_cases: list) -> dic
 
     employee_period: (start, end) of the employee's employment within the
     year. prior_cases: [{id, formType, status, incomePeriodStart, incomePeriodEnd}].
-    Returns {action: FILE | SUPPRESS | RESOLVE, message}."""
+    Returns {action: FILE | SUPPRESS | RESOLVE, message}.
+
+    Gap audit D-L: an IR56F / IR56G that is open but NOT yet filed is about to
+    report the same cessation income — the IR56B is RESOLVE (named, explained)
+    rather than silently prepared next to it. Filing the IR56F/G turns this into
+    SUPPRESS; cancelling it turns it back into FILE."""
     covering = [c for c in prior_cases if c["formType"] in ("IR56F", "IR56G") and c["status"] in FILED_STATES]
     if not covering:
+        pending = [c for c in prior_cases if c["formType"] in ("IR56F", "IR56G")
+                   and c["status"] not in FILED_STATES + ("CANCELLED", "SUPPRESSED", "AMENDED")]
+        if pending:
+            c = pending[0]
+            return {"action": "RESOLVE", "coveringCaseId": c["id"],
+                    "message": (f"{c['formType']} case #{c['id']} ({c['status']}) is open for this employee's {ya} "
+                                f"cessation and will report the same income — file it (this IR56B is then "
+                                f"suppressed) or cancel it with a reason (this IR56B is then filed); an IR56B is "
+                                f"not prepared beside it")}
         return {"action": "FILE", "message": None}
     start, end = employee_period
     for c in covering:
