@@ -154,6 +154,13 @@ def test_a_mapping_change_mid_year_applies_from_its_effective_date(db, hk, monke
     db.commit()
     out = hong_kong_service.split_catalogue_row(db, row.id, change, MAKER.id)
     assert (out["endedOn"], out["effectiveFrom"]) == ("2026-05-31", "2026-06-01")
+    # The new row carries the new field's IR56B item (found during the browser check: it kept 11(k)).
+    june_ird = {c["code"]: c for c in hong_kong_service.earning_code_catalogue(db, on=date(2026, 6, 15))["codes"]}
+    may_ird = {c["code"]: c for c in hong_kong_service.earning_code_catalogue(db, on=date(2026, 5, 15))["codes"]}
+    assert (june_ird["HK_CASH_ALLOWANCE"]["mappings"]["IRD"]["irdField"],
+            june_ird["HK_CASH_ALLOWANCE"]["mappings"]["IRD"]["irdItem"]) == ("SALARY_WAGES", "11(a)")
+    assert "dated change from 2026-06-01" in june_ird["HK_CASH_ALLOWANCE"]["mappings"]["IRD"]["basis"]
+    assert may_ird["HK_CASH_ALLOWANCE"]["mappings"]["IRD"]["irdItem"] == "11(k)"
     assert db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_id == row.id,
                                                   TaxConfigurationAudit.entity_type == "hk_statutory_slab").count() == 1
     p26.status = "Active"                                            # TEST-only, as the hk fixture does

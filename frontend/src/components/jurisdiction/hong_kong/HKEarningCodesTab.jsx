@@ -23,16 +23,16 @@ function Mapping({ m, onSplit }) {
         {m.irdField ? `${m.irdField}${m.irdItem ? ` (${m.irdItem})` : ""}` : m.treatment}
         {m.irdField && m.treatment !== "INCLUDED" ? ` — ${m.treatment}` : ""}
       </div>
-      <div className={`text-[11px] ${pending ? "text-amber-600" : "text-foreground-secondary"}`}>
-        {pending ? "Pending — specialist question" : "Sourced — pending specialist review"}
+      {/* Sourced: the quoted basis is one hover away; Pending: the specialist's question is shown in full. */}
+      <div className={`text-[11px] ${pending ? "text-amber-600" : "text-foreground-secondary"}`} title={pending ? undefined : m.basis || ""}>
+        {pending ? "Pending — specialist question" : "Sourced — pending specialist review ⓘ"}
       </div>
-      <div className="text-[11px] text-foreground-secondary">{pending ? m.question : m.basis}</div>
+      {pending && <div className="text-[11px] text-foreground-secondary">{m.question}</div>}
       {m.source && (
-        <div className="text-[10px] text-foreground-muted" title={m.source.url}>
-          {m.source.agency} · sha256 {String(m.source.sha256 || "").slice(0, 12)}…
+        <div className="text-[10px] text-foreground-muted" title={`${m.source.agency} — ${m.source.title || ""}\n${m.source.url || ""}\nsha256 ${m.source.sha256 || ""}`}>
+          sha256 {String(m.source.sha256 || "").slice(0, 8)}… · {m.effectiveFrom} → {m.effectiveTo || "open"}
         </div>
       )}
-      <div className="text-[10px] text-foreground-muted">{m.effectiveFrom} → {m.effectiveTo || "open"}</div>
       <button type="button" className="text-[11px] font-semibold text-primary underline" onClick={() => onSplit(m)}>
         Change from a date…
       </button>

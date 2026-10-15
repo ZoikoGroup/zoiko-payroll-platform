@@ -2419,6 +2419,18 @@ def split_catalogue_row(db: Session, row_id: int, data: dict, actor_id: Optional
     successor = TaxSlab(**{c.name: getattr(row, c.name) for c in TaxSlab.__table__.columns if c.name not in bookkeeping})
     for column, value in changes.items():
         setattr(successor, column, value)
+    if row.rule_type == "HK_EARNING_CODE":
+        # The successor's own metadata: why it changed, and — for a new IR56B field — that
+        # field's item as the catalogue's other rows record it (never the old row's item).
+        meta = _hk_calc.code_meta(row)
+        meta["basis"] = f"dated change from {starts.isoformat()}: {data['reason'].strip()}"
+        if "tax_formula" in changes:
+            meta["irdItem"] = next(
+                (_hk_calc.code_meta(r).get("irdItem") for r in db.query(TaxSlab).filter(
+                    TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.rule_type == "HK_EARNING_CODE",
+                    TaxSlab.tax_regime == "IRD", TaxSlab.tax_formula == changes["tax_formula"]).all()
+                 if _hk_calc.code_meta(r).get("irdItem")), None)
+        successor.formula_expression = json.dumps(meta, sort_keys=True)
     successor.effective_from, successor.effective_to = starts, window_to
     successor.source_document_id = source.id
     row.effective_to = starts - timedelta(days=1)
