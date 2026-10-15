@@ -33,6 +33,7 @@ The key findings were re-checked by hand in the code (marked ✔).
 | S10-4 | PARTIAL | IMPLEMENTED | D-A (overtime hours count for SMW and continuous contract) |
 | S11-1 | PARTIAL (defective) | IMPLEMENTED | D-B, D-J |
 | S7-2 | IMPLEMENTED | IMPLEMENTED (gap closed) | D-L |
+| D-M | Paternity leave pay granted for leave outside the statutory window (4 weeks before the expected date of delivery to 14 weeks beginning on the actual date); the document deadline was a yes/no flag | `entitlements.paternity_leave_pay` | Pay for leave the EO does not cover — **fixed (staged 2026-10-15)** |
 | S7-4 / S7-5 / S7-9 / HK-017 / S15-6 | PARTIAL | PARTIAL (defect fixed, other gaps remain) | D-H / D-D / D-F / D-C / D-E |
 
 **Totals after the delta:** 31 IMPLEMENTED, 65 PARTIAL, 4 MISSING (was 27 / 69 / 4).
@@ -110,7 +111,7 @@ The key findings were re-checked by hand in the code (marked ✔).
 | S9-3 | Annual leave 7→14 days, accrual, pro-rata, final pay | PARTIAL | `entitlements.annual_leave_days/pay` | test_annual_leave_scale_7_to_14_days | `annual_leave_days` never called by the service; no leave ledger or balance; no pro-rata or payout |
 | S9-4 | Sickness 4/5, 120 days | PARTIAL | `entitlements.sickness_*` | sickness tests | No ledger (used days not subtracted); evidence boolean only; not paid |
 | S9-5 | Maternity 14 weeks | PARTIAL | `entitlements.maternity_leave_pay` | test_maternity_leave_pay_14_weeks… | No reimbursement claim; not stored or paid |
-| S9-6 | Paternity 5 days | PARTIAL | `entitlements.paternity_leave_pay` | test_paternity_leave_pay_5_days_40_weeks | 40 weeks measured to the leave date, not the birth date (EO measures to birth); no per-birth day tracking |
+| S9-6 | Paternity 5 days | PARTIAL | `entitlements.paternity_leave_pay` | test_paternity_leave_pay_5_days_40_weeks; test_d_m_* | ~~40 weeks measured to the leave date, not the birth date~~ — corrected 2026-10-15: the archived Concise Guide ch.7 measures the 40 weeks "immediately before the day of paternity leave", as the code does. Leave window and document deadline now enforced (**D-M**). Remaining: no per-birth day tracking (5 days across separate leave requests); not paid through payroll |
 | S9-7 | Average wage engine | IMPLEMENTED | `average_wage.py`; snapshot table | average-wage tests | Straddling payslip blocks instead of apportioning; exclusions typed by hand |
 | HK-014 | Committed history, reasons, controlled override | IMPLEMENTED | `_average_wage_rows`; override four-eyes | e2e override test | Free-text reasons, not a statutory list |
 | HK-015 | Two CC algorithms | IMPLEMENTED | `continuous_contract.py` | CC tests | 4-week window literal |

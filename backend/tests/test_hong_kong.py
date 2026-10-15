@@ -587,12 +587,14 @@ def test_paternity_leave_pay_5_days_40_weeks(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
 
     rate_map, _s, _p = _inputs(db, date(2026, 6, 30))
+    # The window needs the delivery dates (gap audit D-M; Concise Guide ch.7).
+    window = dict(expected_delivery=date(2026, 5, 20), actual_delivery=date(2026, 5, 18))
     out = entitlements.paternity_leave_pay(rate_map, _cc_result("2025-01-01"), {"averageDailyWage": "500"},
-                                           date(2026, 6, 1), 5, True)
+                                           date(2026, 6, 1), 5, True, **window)
     assert out["status"] == "ENTITLED" and D(out["amount"]) == D("2000.00")
     with pytest.raises(HongKongCalculationBlockedError):
         entitlements.paternity_leave_pay(rate_map, _cc_result("2025-01-01"), {"averageDailyWage": "500"},
-                                         date(2026, 6, 1), 6, True)
+                                         date(2026, 6, 1), 6, True, **window)
 
 
 def test_statutory_holidays_2026_are_15_with_easter_monday(db, packs):
