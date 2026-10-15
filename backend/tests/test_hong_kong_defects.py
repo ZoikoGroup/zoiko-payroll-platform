@@ -346,3 +346,23 @@ def test_d_k_a_mid_period_joiner_is_checked_by_the_approval_gate(db, hk, monkeyp
     assert [c for c in out["checks"] if c["code"] == "HK_IDENTITY_MISSING" and c["severity"] == "BLOCK"]
     with pytest.raises(HTTPException, match="HK_IDENTITY_MISSING"):
         service.advance_payroll_run_status(db, run.id, MAKER.id, hk.org.id)
+
+
+# ── D-L: no IR56B is prepared beside an open IR56F for the same cessation ──────────────────────
+# Found by the synthetic-company harness; gap matrix S7-2 "a PREPARED IR56F doesn't suppress".
+# Wireframe §7 "no duplicate forms"; IRD PAM 46(e) (archived ird_pam46e): the cessation income is
+# reported on IR56F. Before: an IR56F still DUE let a clean PREPARED IR56B through for the same income.
+
+def test_d_l_an_open_ir56f_holds_the_ir56b_for_resolution_until_it_is_filed(db, hk):
+    from app.modules.payroll import hong_kong_service
+
+    hk.emp.date_of_leaving = date(2026, 5, 29)
+    db.commit()
+    _profile(db, hk.emp, hk.org.id, "2026-05-01", hkgTerminationDate="2026-05-29", hkgTerminationReason="RESIGNATION")
+    _month(db, hk.org, 4)
+    _month(db, hk.org, 5)
+    [ir56f] = [c for c in hong_kong_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id) if c.form_type == "IR56F"]
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2026/27", MAKER.id)
+    [row] = [r for r in out["employees"] if r["employeeId"] == hk.emp.id]
+    assert any(f"IR56F case #{ir56f.id}" in e for e in row["validationErrors"])     # named, not silently prepared
+    assert out["reconciliation"]["status"] == "Reconciled"

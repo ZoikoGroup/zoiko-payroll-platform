@@ -880,8 +880,11 @@ def test_case_j_ir56b_suppressed_after_filed_ir56f_for_the_same_income():
     assert out["action"] == "SUPPRESS" and "twice" in out["message"]
     partial = ird.ir56b_suppression("2025/26", (date(2025, 4, 1), date(2026, 3, 31)), prior)
     assert partial["action"] == "RESOLVE"
+    # Gap audit D-L: an unfiled IR56F no longer lets an IR56B through silently — it is named for resolution.
     unfiled = ird.ir56b_suppression("2025/26", (date(2025, 4, 1), date(2025, 12, 31)), [{**prior[0], "status": "PREPARED"}])
-    assert unfiled["action"] == "FILE"
+    assert unfiled["action"] == "RESOLVE" and "case #7 (PREPARED)" in unfiled["message"]
+    cancelled = ird.ir56b_suppression("2025/26", (date(2025, 4, 1), date(2025, 12, 31)), [{**prior[0], "status": "CANCELLED"}])
+    assert cancelled["action"] == "FILE"
 
 
 def test_ir56g_not_required_for_frequent_travellers_or_short_absence(db, packs):
