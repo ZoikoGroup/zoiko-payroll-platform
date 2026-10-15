@@ -76,6 +76,7 @@ from app.modules.payroll.engine.countries import italy as _italy
 from app.modules.payroll.engine.countries import switzerland as _switzerland
 from app.modules.payroll.engine.countries import saudi_arabia as _saudi_arabia
 from app.modules.payroll.engine.countries import netherlands as _netherlands
+from app.modules.payroll.engine.countries import mexico as _mexico
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -151,6 +152,7 @@ _calc_italy = _italy.calculate
 _calc_switzerland = _switzerland.calculate
 _calc_saudi_arabia = _saudi_arabia.calculate
 _calc_netherlands = _netherlands.calculate
+_calc_mexico = _mexico.calculate
 
 
 _COUNTRY_CALC = {
@@ -210,6 +212,11 @@ _COUNTRY_CALC = {
     # insurance (AWf/Aof/Wko), employer premiums (Whk), Zvw (employer + employee),
     # WKR, car addition, labor pay. Fail-closed: countries/netherlands.py.
     "NL": _calc_netherlands,
+    # Mexico (ZP-MX-ENG-001) — federal core (ISR, subsidy, SBC, IMSS branches,
+    # CEAV, INFONAVIT) + state ISN overlay. Fail-closed: countries/mexico.py
+    # BLOCKS every calculation until the Phase 5 engine exists, so Mexico can
+    # never fall through to _calc_generic.
+    "MX": _calc_mexico,
 }
 
 
@@ -301,6 +308,10 @@ class StandardStrategy(PayrollStrategy):
             # recovery (wage tax arrives as tds, pension as employee_pension).
             # Employer premiums are never in here (NL-035). 0 elsewhere.
             + deductions.get("nl_employee_total", Decimal("0"))
+            # Mexico: employee-side statutory deductions other than ISR (which
+            # arrives as tds) — IMSS employee branches, INFONAVIT credit
+            # withholding (MX-032). 0 elsewhere.
+            + deductions.get("mx_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -570,6 +581,9 @@ class StandardStrategy(PayrollStrategy):
             # Absent from every non-NL calculator dict, so a .get with the
             # default keeps every other country's result unchanged.
             nl_result=deductions.get("nl_result"),
+            # Mexico (ZP-MX-ENG-001) — the whole MX dict. Absent from every
+            # non-MX calculator dict, so every other country is unchanged.
+            mx_result=deductions.get("mx_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

@@ -271,11 +271,24 @@ function Netherlands() {
   );
 }
 
+// Mexico — vertical tricolour, green / white / red, with a simplified emblem
+// (brown disc) in the centre band — recognizable, not vexillographic.
+function Mexico() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="8" height="16" fill="#006847" />
+      <rect x="8" width="8" height="16" fill="#fff" />
+      <rect x="16" width="8" height="16" fill="#CE1126" />
+      <circle cx="12" cy="8" r="2" fill="#8C5A2B" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands,
+  NL: Netherlands, MX: Mexico,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

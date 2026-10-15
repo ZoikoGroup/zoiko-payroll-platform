@@ -595,6 +595,23 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{9}L\d{2}$", "example": "123456789L01", "primary": False},
         ],
     },
+    # Mexico (ZP-MX-ENG-001) — schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES (Phase 0 decision 1): live Mexican payroll stays
+    # disabled until release gates G1–G8 are evidenced and the registry row
+    # leaves PLANNED. RFC = SAT taxpayer registry (a legal entity's RFC is 12
+    # characters); Registro Patronal = the 11-character IMSS employer
+    # registration — one employer can hold several (MX-002). Formats only —
+    # never synthesised.
+    "MX": {
+        "label": "RFC / Registro Patronal IMSS",
+        "currency": "MXN",
+        "fields": [
+            {"key": "rfc", "label": "RFC (SAT taxpayer registry, legal entity)",
+             "pattern": r"^[A-ZÑ&]{3}[0-9]{6}[A-Z0-9]{3}$", "example": "ABC010101AB1", "primary": True},
+            {"key": "registro_patronal", "label": "Registro Patronal (IMSS employer registration)",
+             "pattern": r"^[A-Z0-9]{11}$", "example": "Y1234567101", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -636,6 +653,9 @@ COUNTRY_NAME_TO_CODE = {
     "netherlands": "NL",
     "the netherlands": "NL",
     "holland": "NL",
+    "mexico": "MX",
+    "méxico": "MX",
+    "estados unidos mexicanos": "MX",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -661,6 +681,7 @@ CODE_TO_COUNTRY_NAME = {
     "CH": "Switzerland",
     "SA": "Saudi Arabia",
     "NL": "Netherlands",
+    "MX": "Mexico",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this
