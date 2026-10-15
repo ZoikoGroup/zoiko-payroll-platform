@@ -4381,6 +4381,10 @@ class HKEntitlementRequest(_HKBody):
     availablePaidSicknessDays: Optional[Decimal] = None
     noticeGiven: bool = False
     documentProvided: bool = False
+    # Paternity (Concise Guide ch.7; gap audit D-M): the leave window and the document deadline.
+    expectedDeliveryDate: Optional[date] = None
+    actualDeliveryDate: Optional[date] = None
+    documentProvidedOn: Optional[date] = None
 
 
 class HKTerminationRequest(_HKBody):

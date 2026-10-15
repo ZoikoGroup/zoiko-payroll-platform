@@ -11,7 +11,7 @@ Statuses: ENTITLED / NOT_ENTITLED (with the failed condition), CALCULATED
 amounts — never a paid amount without its eligibility trace.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.modules.payroll.engine.jurisdictions.hong_kong.common import (
@@ -172,19 +172,52 @@ def maternity_leave_pay(rate_map: dict, cc: dict, average: dict, leave_start: da
 
 
 def paternity_leave_pay(rate_map: dict, cc: dict, average: dict, leave_date: date, days: int,
-                        document_provided: bool) -> dict:
+                        document_provided: bool, *, expected_delivery: date = None, actual_delivery: date = None,
+                        document_provided_on: date = None, cessation: date = None) -> dict:
+    """Concise Guide ch.7: leave between N weeks before the expected date of delivery and M weeks
+    beginning on the actual date of delivery; pay needs the continuous-contract weeks before the
+    leave day and the required document within the earlier of K months after the first leave day
+    or L months after cessation (gap audit D-M). The `days` are taken as one consecutive block."""
     max_days, r1 = _param(rate_map, "eo_paternity_leave_days")
     cc_weeks, r2 = _param(rate_map, "eo_paternity_pay_cc_weeks")
     factor, r3 = _param(rate_map, "eo_four_fifths_factor")
-    out = {"benefit": "PATERNITY_LEAVE_PAY", "refs": [r1, r2, r3]}
+    before, r4 = _param(rate_map, "eo_paternity_window_weeks_before_edd")
+    after, r5 = _param(rate_map, "eo_paternity_window_weeks_after_delivery")
+    doc_months, r6 = _param(rate_map, "eo_paternity_document_months_after_leave")
+    doc_cessation_months, r7 = _param(rate_map, "eo_paternity_document_months_after_cessation")
+    out = {"benefit": "PATERNITY_LEAVE_PAY", "refs": [r1, r2, r3, r4, r5, r6, r7]}
     if days > int(max_days):
         raise HongKongCalculationBlockedError(
             "paternity_leave_days", f"{days} days requested; the statutory entitlement is {int(max_days)} days")
+    if expected_delivery is None:
+        raise HongKongCalculationBlockedError(
+            "paternity_expected_delivery", "the expected date of delivery is required to place paternity leave in its "
+            "statutory window (Concise Guide ch.7)")
     failed = []
     if not continuous_for_at_least(cc, leave_date, weeks=int(cc_weeks)):
         failed.append(f"not under a continuous contract for {int(cc_weeks)} weeks immediately before the leave day")
-    if not document_provided:
-        failed.append("required document (statement / birth evidence) not yet provided")
+    last_day = leave_date + timedelta(days=max(days, 1) - 1)
+    window_from = expected_delivery - timedelta(weeks=int(before))
+    window_to = actual_delivery + timedelta(weeks=int(after)) - timedelta(days=1) if actual_delivery else None
+    out["window"] = {"from": window_from.isoformat(), "to": window_to.isoformat() if window_to else None}
+    if leave_date < window_from:
+        failed.append(f"leave starting {leave_date} is before the window opening {window_from} "
+                      f"({int(before)} weeks before the expected date of delivery)")
+    if window_to is not None and last_day > window_to:
+        failed.append(f"leave ending {last_day} is after the window closing {window_to} "
+                      f"({int(after)} weeks beginning on the actual date of delivery)")
+    if window_to is None and last_day >= expected_delivery:
+        failed.append("leave on or after the expected date of delivery: record the actual date of delivery to "
+                      "confirm it falls inside the window")
+    deadline = add_months(leave_date, int(doc_months))
+    if cessation is not None:
+        deadline = min(deadline, add_months(cessation, int(doc_cessation_months)))
+    out["documentDeadline"] = deadline.isoformat()
+    if document_provided_on is not None:
+        if document_provided_on > deadline:
+            failed.append(f"required document provided on {document_provided_on}, after the deadline {deadline}")
+    elif not document_provided:
+        failed.append(f"required document (statement / birth evidence) not yet provided — due by {deadline}")
     if failed:
         return {**out, "status": "NOT_ENTITLED", "failedConditions": failed, "amount": "0.00"}
     daily = dec(average["averageDailyWage"]) * factor

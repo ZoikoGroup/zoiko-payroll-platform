@@ -1331,8 +1331,15 @@ def calculate_entitlement(db: Session, organization_id: int, employee_id: int, b
         elif benefit == "MATERNITY_LEAVE_PAY":
             out = hk_entitlements.maternity_leave_pay(rate_map, cc, average, on, bool(data.get("noticeGiven")))
         elif benefit == "PATERNITY_LEAVE_PAY":
-            out = hk_entitlements.paternity_leave_pay(rate_map, cc, average, on, int(data["days"]),
-                                                      bool(data.get("documentProvided")))
+            def _d(key):
+                return date.fromisoformat(str(data[key])) if data.get(key) else None
+
+            facts = worker_facts(db, _employee(db, employee_id, organization_id), on) or {}
+            out = hk_entitlements.paternity_leave_pay(
+                rate_map, cc, average, on, int(data["days"]), bool(data.get("documentProvided")),
+                expected_delivery=_d("expectedDeliveryDate"), actual_delivery=_d("actualDeliveryDate"),
+                document_provided_on=_d("documentProvidedOn"),
+                cessation=date.fromisoformat(facts["terminationDate"]) if facts.get("terminationDate") else None)
         else:
             raise BadRequestException(f"unknown entitlement {benefit!r}")
     except HongKongCalculationBlockedError as exc:

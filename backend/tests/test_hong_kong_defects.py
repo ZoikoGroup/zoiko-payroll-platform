@@ -369,3 +369,60 @@ def test_d_l_an_open_ir56f_holds_the_ir56b_for_resolution_until_it_is_filed(db, 
     [row] = [r for r in out["employees"] if r["employeeId"] == hk.emp.id]
     assert any(f"IR56F case #{ir56f.id}" in e for e in row["validationErrors"])     # named, not silently prepared
     assert out["reconciliation"]["status"] == "Reconciled"
+
+
+# ── D-M: paternity leave pay only for leave inside the statutory window, document in time ──────
+# Labour Department Concise Guide ch.7 (archived ld_cg_07, sha256 bb4ada8c1ac3c472…): paternity
+# leave may be taken "from 4 weeks before the expected date of delivery of the child to 14 weeks
+# beginning on the actual date of delivery"; pay needs the required document within 12 months
+# after the first day of leave or, if employment ceases, within 6 months after cessation (whichever
+# expires first). Before: any leave date was paid and the document was a yes/no flag.
+
+from tests.test_hong_kong import packs  # noqa: E402,F401  (fixture)
+
+def _paternity(db, **kw):
+    from app.modules.payroll.engine.jurisdictions.hong_kong import entitlements
+    from tests.test_hong_kong import _cc_result, _inputs
+
+    rate_map, _s, _p = _inputs(db, date(2026, 6, 30))
+    args = dict(expected_delivery=date(2026, 5, 20), actual_delivery=date(2026, 5, 18),
+                document_provided_on=date(2026, 6, 10))
+    args.update(kw.pop("override", {}))
+    return entitlements.paternity_leave_pay(rate_map, _cc_result("2025-01-01"), {"averageDailyWage": "500"},
+                                            kw.pop("leave", date(2026, 6, 1)), kw.pop("days", 5), True, **args)
+
+
+def test_d_m_paternity_pay_inside_the_window_is_paid(db, packs):
+    out = _paternity(db)
+    assert out["status"] == "ENTITLED" and D(out["amount"]) == D("2000.00")
+    assert out["window"] == {"from": "2026-04-22", "to": "2026-08-23"}       # EDD − 4 weeks … actual + 14 weeks − 1 day
+
+
+def test_d_m_leave_after_the_14_week_window_is_not_paid(db, packs):
+    out = _paternity(db, leave=date(2026, 8, 21), days=5)                  # 21–25 Aug: runs past 23 Aug
+    assert out["status"] == "NOT_ENTITLED" and out["amount"] == "0.00"
+    assert any("2026-08-23" in f for f in out["failedConditions"])
+
+
+def test_d_m_leave_more_than_4_weeks_before_the_expected_date_is_not_paid(db, packs):
+    out = _paternity(db, leave=date(2026, 4, 1), days=2, override={"actual_delivery": None})
+    assert out["status"] == "NOT_ENTITLED" and any("2026-04-22" in f for f in out["failedConditions"])
+
+
+def test_d_m_leave_after_the_expected_date_needs_the_actual_delivery_date(db, packs):
+    out = _paternity(db, leave=date(2026, 5, 25), days=2, override={"actual_delivery": None})
+    assert out["status"] == "NOT_ENTITLED" and any("actual date of delivery" in f for f in out["failedConditions"])
+
+
+def test_d_m_document_after_the_deadline_is_not_paid(db, packs):
+    late = _paternity(db, override={"document_provided_on": date(2027, 6, 2)})      # > 12 months after 1 Jun 2026
+    assert late["status"] == "NOT_ENTITLED" and any("2027-06-01" in f for f in late["failedConditions"])
+    leaver = _paternity(db, override={"document_provided_on": date(2026, 12, 15), "cessation": date(2026, 6, 10)})
+    assert leaver["status"] == "NOT_ENTITLED" and any("2026-12-10" in f for f in leaver["failedConditions"])
+
+
+def test_d_m_expected_delivery_date_is_required(db, packs):
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
+
+    with pytest.raises(HongKongCalculationBlockedError, match="expected date of delivery"):
+        _paternity(db, override={"expected_delivery": None})

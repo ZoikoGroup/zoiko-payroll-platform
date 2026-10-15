@@ -328,7 +328,7 @@
        "componentKey": "smw_hours_record_cap_monthly",
        "effectiveFrom": "2026-05-01",
        "packId": 2,
-       "rowId": 145,
+       "rowId": 153,
        "sourceDocumentId": 9
       },
       "monthlyCap": "17600.00",
@@ -1170,7 +1170,7 @@
    "packs": [
     {
      "approvedById": null,
-     "contributionRates": 85,
+     "contributionRates": 89,
      "effectiveFrom": "2025-04-01",
      "effectiveTo": "2026-03-31",
      "g1CertificationRows": 77,
@@ -1184,7 +1184,7 @@
     },
     {
      "approvedById": null,
-     "contributionRates": 83,
+     "contributionRates": 87,
      "effectiveFrom": "2026-04-01",
      "effectiveTo": "2027-03-31",
      "g1CertificationRows": 77,
