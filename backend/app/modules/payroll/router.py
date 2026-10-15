@@ -4796,8 +4796,10 @@ def hk_ird_case_history(case_id: int, db: Session = Depends(get_db), current_use
 @payroll_router.post("/hong-kong/ird/employees/{employee_id}/event-cases", dependencies=_HK_WRITE,
                      summary="Create due IR56E / IR56F cases from the employee's effective statutory facts")
 def hk_ird_event_cases(employee_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    rows = hong_kong_service.create_event_cases(db, current_user.organization_id, employee_id, current_user.id)
-    return [hong_kong_service.serialize_ird_case(c) for c in rows]
+    controls: list = []
+    rows = hong_kong_service.create_event_cases(db, current_user.organization_id, employee_id, current_user.id,
+                                                controls=controls)
+    return {"cases": [hong_kong_service.serialize_ird_case(c) for c in rows], "controls": controls}
 
 
 @payroll_router.post("/hong-kong/ird/annual-return", dependencies=_HK_WRITE,

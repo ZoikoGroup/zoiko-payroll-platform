@@ -256,3 +256,39 @@ def test_d_g_ir56b_equals_payslip_paid_gross_and_engine_reportable_with_unpaid_d
     row = out["employees"][0]
     case = hong_kong_service._case(db, hk.org.id, row["caseId"])
     assert row["validationErrors"] == [] and D(case.payload["total"]) == paid == engine
+
+
+# ── D-H: IR56F is not used where an IR56G departure applies, and vice versa ─────────────────────
+# Wireframe §7 "IR56F — cessation ... do not use if departure IR56G applies"; IRD PAM 46(e): leaving
+# Hong Kong -> IR56G; "Not leaving Hong Kong - File Form IR56F not later than one month before
+# termination" (archived sources/ird_pam46e, sha256 fee4eaa115d6f4b0…). Before the fix the IR56F
+# check read only a profile fact, so an IR56F could sit next to an IR56G departure case.
+
+def test_d_h_no_ir56f_when_an_ir56g_departure_case_exists_and_the_control_explains_why(db, hk):
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase
+
+    hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 8, 31), actor_id=MAKER.id)
+    _profile(db, hk.emp, hk.org.id, "2026-07-01", hkgTerminationDate="2026-08-31")   # cessation recorded too
+    controls = []
+    created = hong_kong_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id, controls=controls)
+    assert [c.form_type for c in created if c.form_type == "IR56F"] == []
+    assert db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.employee_id == hk.emp.id,
+                                                     HongKongIrdReportingCase.form_type == "IR56F").count() == 0
+    assert controls and controls[0]["form"] == "IR56F" and "IR56G" in controls[0]["message"]
+
+
+def test_d_h_an_open_ir56f_blocks_identifying_an_ir56g_departure_until_it_is_cancelled(db, hk):
+    import pytest
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase
+
+    _profile(db, hk.emp, hk.org.id, "2026-07-01", hkgTerminationDate="2026-08-31")
+    [ir56f] = [c for c in hong_kong_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id) if c.form_type == "IR56F"]
+    with pytest.raises(BadRequestException, match=f"IR56F case #{ir56f.id}"):
+        hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 8, 31), actor_id=MAKER.id)
+    hong_kong_service.transition_ird_case(db, hk.org.id, ir56f.id, "CANCELLED", MAKER.id)
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 8, 31), actor_id=MAKER.id)
+    assert db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.id == hold.ird_case_id).one().form_type == "IR56G"

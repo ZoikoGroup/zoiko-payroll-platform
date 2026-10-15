@@ -400,6 +400,15 @@ def identify_departure(db: Session, organization_id: int, employee_id: int, expe
                          HongKongTaxClearanceHold.state != "CASE_CLOSED").first())
     if open_case is not None:
         raise BadRequestException(f"an open IR56G case (#{open_case.id}, {open_case.state}) already exists — change it instead")
+    cessation = _live_cases(db, organization_id, employee_id, "IR56F")
+    if cessation:
+        # Gap audit D-H: an employee leaving Hong Kong is notified on IR56G, not IR56F.
+        c = cessation[0]
+        raise BadRequestException(
+            f"IR56F case #{c.id} ({c.status}) already covers this employee's cessation. An employee leaving Hong Kong "
+            f"is notified on IR56G instead (IRD PAM 46(e)). Cancel the IR56F case with a reason"
+            + (" — or, if it was already filed, contact the IRD and record the outcome —" if c.status in hk_ird.FILED_STATES
+               else "") + " before identifying the departure.")
     hold = HongKongTaxClearanceHold(organization_id=organization_id, employee_id=employee_id,
                                expected_departure_date=expected_departure, identified_on=identified_on,
                                filing_deadline=hk_tc.filing_deadline(expected_departure, timing),
@@ -643,19 +652,34 @@ def _committed_hk_payslips(db, organization_id, start: date, end: date, employee
     return q.all()
 
 
-def create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int]) -> list:
+IR56F_IR56G_SOURCE = ("IRD PAM 46(e): leaving Hong Kong -> IR56G; not leaving Hong Kong -> IR56F not later than one "
+                      "month before termination; wireframe §7 'do not use [IR56F] if departure IR56G applies'")
+
+
+def _live_cases(db: Session, organization_id: int, employee_id: int, form: str) -> list:
+    return (db.query(HongKongIrdReportingCase)
+            .filter(HongKongIrdReportingCase.organization_id == organization_id,
+                    HongKongIrdReportingCase.employee_id == employee_id, HongKongIrdReportingCase.form_type == form,
+                    HongKongIrdReportingCase.status.notin_(("CANCELLED", "SUPPRESSED", "AMENDED")))
+            .order_by(HongKongIrdReportingCase.id).all())
+
+
+def create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int],
+                       controls: Optional[list] = None) -> list:
     """IR56E / IR56F from the effective profile facts (IR56G is created by
     identify_departure). Idempotent per (form, event date) — also under
     concurrency: uq_payroll_hk_ird_event_case refuses the second insert, and the run is
-    repeated once, finding the concurrent request's rows."""
+    repeated once, finding the concurrent request's rows. A case NOT created
+    because a control applies is reported in `controls` (gap audit D-H)."""
     try:
-        return _create_event_cases(db, organization_id, employee_id, actor_id)
+        return _create_event_cases(db, organization_id, employee_id, actor_id, controls)
     except IntegrityError:
         db.rollback()
-        return _create_event_cases(db, organization_id, employee_id, actor_id)
+        return _create_event_cases(db, organization_id, employee_id, actor_id, controls)
 
 
-def _create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int]) -> list:
+def _create_event_cases(db: Session, organization_id: int, employee_id: int, actor_id: Optional[int],
+                        controls: Optional[list] = None) -> list:
     employee = _employee(db, employee_id, organization_id)
     facts = worker_facts(db, employee, date.today()) or {}
     created = []
@@ -680,8 +704,20 @@ year_of_assessment=year_of_assessment(event), event_date=event,
     if employee.date_of_joining and facts.get("likelyChargeable"):
         ensure("IR56E", employee.date_of_joining)
     termination = facts.get("terminationDate")
-    if termination and not facts.get("expectedDepartureDate"):
-        ensure("IR56F", date.fromisoformat(termination))
+    if termination:
+        departure = _live_cases(db, organization_id, employee_id, "IR56G")
+        if departure or facts.get("expectedDepartureDate"):
+            # Gap audit D-H: the employee is leaving Hong Kong — the cessation is
+            # notified on the IR56G, never on an IR56F as well.
+            if controls is not None:
+                controls.append({"form": "IR56F", "control": "IR56G_DEPARTURE_APPLIES",
+                                 "message": ("no IR56F: an IR56G departure " +
+                                             (f"case #{departure[0].id} ({departure[0].status})" if departure
+                                              else "is recorded on the statutory profile (expected departure)") +
+                                             " covers this cessation — the IR56G is filed instead"),
+                                 "source": IR56F_IR56G_SOURCE})
+        else:
+            ensure("IR56F", date.fromisoformat(termination))
     db.commit()
     return created
 
