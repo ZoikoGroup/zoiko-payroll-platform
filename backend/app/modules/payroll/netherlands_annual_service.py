@@ -164,8 +164,9 @@ def generate_annual_statement(
     Returns existing DRAFT if idempotency key matches.
     """
     if idempotency_key is None:
-        idempotency_key = f"jaaropgaaf-{organization_id}-{employee_id}-{tax_year}-{actor_id}-{datetime.utcnow().isoformat()}"
-        idempotency_key = hashlib.sha256(idempotency_key.encode()).hexdigest()[:100]
+        # One original statement per employee and year: a repeated "generate"
+        # returns it instead of creating a second jaaropgaaf.
+        idempotency_key = hashlib.sha256(f"jaaropgaaf-{organization_id}-{employee_id}-{tax_year}".encode()).hexdigest()[:100]
 
     existing = db.query(PayrollNlAnnualStatement).filter(
         PayrollNlAnnualStatement.idempotency_key == idempotency_key
