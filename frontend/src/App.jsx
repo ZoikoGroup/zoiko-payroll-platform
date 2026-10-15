@@ -35,7 +35,7 @@ import {
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
   BBStatutoryPage, KYStatutoryPage, DOStatutoryPage,
   GYStatutoryPage, JMStatutoryPage, BSStatutoryPage, TTStatutoryPage, SGStatutoryPage,
-  PRStatutoryPage, IEStatutoryPage, SEStatutoryPage, HKStatutoryPage,
+  PRStatutoryPage, IEStatutoryPage, SEStatutoryPage, HKStatutoryPage, NLStatutoryPage,
 } from "./pages/JurisdictionStatutory";
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";

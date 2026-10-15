@@ -14,6 +14,7 @@ import { SAGosiBranchesTab } from "../../components/jurisdiction/saudi_arabia/SA
 import { SAEarningClassesTab } from "../../components/jurisdiction/saudi_arabia/SAEarningClassesTab";
 import { SAParametersTab } from "../../components/jurisdiction/saudi_arabia/SAParametersTab";
 import { SAReadinessPreviewTab } from "../../components/jurisdiction/saudi_arabia/SAReadinessPreviewTab";
+import { SAPackGoldenCheckTab } from "../../components/jurisdiction/saudi_arabia/SAPackGoldenCheckTab";
 import { getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations } from "../../service/superAdminService";
 import { useToast } from "../../context/ToastContext";
 
