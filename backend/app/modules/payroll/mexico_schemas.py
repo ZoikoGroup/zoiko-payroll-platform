@@ -191,3 +191,14 @@ class MXCredentialCreate(_MXIn):
     kind: str
     secretRef: str
     imssRegistrationId: Optional[int] = None
+
+
+class MXInfonavitNoticeCreate(_MXIn):
+    """Copied from the INFONAVIT notice itself (MX-031) — with its evidence."""
+    creditNumber: str
+    noticeType: str
+    discountMethod: Optional[str] = None
+    discountValue: Optional[str] = None
+    effectiveFrom: date
+    authorityReference: str
+    evidenceDocumentId: Optional[int] = None

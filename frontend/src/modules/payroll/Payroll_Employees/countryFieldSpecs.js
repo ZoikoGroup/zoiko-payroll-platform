@@ -321,6 +321,16 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "iban", label: "IBAN", type: "text", placeholder: "NL + 16 characters", upper: true, strip: " ", pattern: /^NL\d{2}[A-Z]{4}\d{10}$/, error: "Dutch IBAN must be NL, 2 check digits, a 4-letter bank code and 10 digits." },
     { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
   ],
+  // Mexico — mirrors backend MXEmployeeValidation (ZP-MX-ENG-001 §12). Format only:
+  // the CURP / NSS / CLABE check digits await their saved sources (S31–S33),
+  // so nothing beyond length / character class is checked here either.
+  MX: [
+    { key: "rfc", label: "RFC (persona física)", type: "text", placeholder: "13 characters", upper: true, strip: " -", pattern: /^[A-ZÑ&]{4}[0-9]{6}[A-Z0-9]{3}$/, required: true, error: "RFC must be 13 characters: 4 letters, YYMMDD and a 3-character homoclave." },
+    { key: "curp", label: "CURP", type: "text", placeholder: "18 characters", upper: true, strip: " -", pattern: /^[A-Z0-9]{18}$/, required: true, error: "CURP must be 18 letters or digits." },
+    { key: "nss", label: "NSS (IMSS)", type: "text", placeholder: "11 digits", strip: " -", pattern: /^\d{11}$/, required: true, error: "NSS must be 11 digits." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.MX): CLABE on SPEI.
+    { key: "clabe", label: "CLABE", type: "text", placeholder: "18 digits", strip: " -", pattern: /^\d{18}$/, error: "CLABE must be 18 digits." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [

@@ -174,3 +174,40 @@ def self_signed_cert(*, days=365, not_before=None, pem=False):
             .sign(key, hashes.SHA256()))
     enc = serialization.Encoding.PEM if pem else serialization.Encoding.DER
     return cert.public_bytes(enc), cert, key
+
+
+# ── Phase 4b — Mexican employees (SYNTHETIC identifiers) ──────────────────
+MX_IDS = {"rfc": "ABCD010101AB1", "curp": "ABCD010101HDFXYZ01", "nss": "12345678901"}
+
+
+def new_mx_employee(db, org_id, code="MX-001", email="emp1@example.com", **ids):
+    """Create a Mexican employee through the real create path (needs the flag on)."""
+    from app.modules.payroll import service
+    from app.modules.payroll.schemas import EmployeeCreate
+
+    fields = set(EmployeeCreate.model_fields)
+    data = {"name": "Persona Sintética", "employee_code": code, "country_code": "MX", "ctc": Decimal("120000"),
+            "basic": Decimal("120000"), "hra": Decimal("0"), "date_of_joining": date(2026, 1, 1),
+            "date_of_birth": date(1990, 1, 1), "pay_frequency": "Monthly", "email": email,
+            "compliance_fields": {**MX_IDS, **ids}}
+    return service.create_employee(db, EmployeeCreate(**{k: v for k, v in data.items() if k in fields}), org_id)
+
+
+def save_mx_profile(db, employee, org_id, actor=701, effective_from=date(2026, 3, 1), **fields):
+    from app.modules.payroll import service
+    from app.modules.payroll.schemas import EmployeeStatutoryProfileCreate
+
+    data = EmployeeStatutoryProfileCreate(country_code="MX", effective_from=effective_from, **fields)
+    return service.create_employee_statutory_profile_version(db, employee.id, org_id, data, actor)
+
+
+def mx_workplace(db, org_id, state="CDMX", municipality="Cuauhtémoc"):
+    """Legal employer + IMSS registration + establishment (Phase 3 objects)."""
+    from app.modules.payroll import mexico_employer_service as svc
+
+    emp = new_employer(db, org_id)
+    reg = new_registration(db, org_id, emp["id"])
+    est = svc.create_establishment(db, org_id, emp["id"], {"name": "Planta", "state_code": state,
+                                                           "municipality": municipality, "postal_code": "06600",
+                                                           "imss_registration_id": reg["id"]}, 701)
+    return SimpleNamespace(employer=emp, registration=reg, establishment=est)

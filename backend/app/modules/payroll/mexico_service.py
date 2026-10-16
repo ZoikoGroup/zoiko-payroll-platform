@@ -58,7 +58,7 @@ def gate_states(db: Session) -> list:
 
 def statutory_summary(db: Session) -> dict:
     return {"jurisdiction": MX, "spec": SPEC, "available": False, "engineVersion": ENGINE_VERSION,
-            "phase": 2, "gates": gate_states(db),
+            "phase": 4, "gates": gate_states(db),
             "note": "Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22); "
                     "the Mexico engine is not built yet, so every Mexican calculation is BLOCKED."}
 
@@ -156,11 +156,18 @@ def _mx_pack_holidays(db: Session, year: int) -> list:
 
 
 def _mx_statutory_profile_errors(data) -> list:
-    return [f"Mexico statutory profiles are {_NOT_BUILT} (Phase 4); no Mexican profile can be saved yet."]
+    """Phase 4b — shape checks (mexico_employee_service). Reachable only for a
+    Mexican employee, which cannot exist while MX_TENANT_ONBOARDING_ENABLED is off."""
+    from app.modules.payroll import mexico_employee_service
+
+    return mexico_employee_service.statutory_profile_errors(data)
 
 
 def _mx_profile_values(db: Session, employee, data, previous) -> dict:
-    return {}
+    """Phase 4b — full validation, carry-forward and identity tokens (Q7 strict)."""
+    from app.modules.payroll import mexico_employee_service
+
+    return mexico_employee_service.profile_values(db, employee, data, previous)
 
 
 def _mx_payslip_hold_view(item: PayslipItem) -> Optional[dict]:

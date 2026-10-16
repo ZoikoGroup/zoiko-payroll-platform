@@ -2571,6 +2571,10 @@ export const listMxCollectiveAgreements = () => mxList(api.get(`${MX}/collective
 export const createMxCredential = (employerId, payload) => api.post(`${MX}/employers/${employerId}/credentials`, payload);
 export const revokeMxCredential = (credentialId) => api.put(`${MX}/credentials/${credentialId}/revoke`, {});
 export const getMxReadinessOn = (on) => api.get(`${MX}/readiness`, { params: { on } });
+// Phase 4b — employees. The profile itself is saved through createEmployeeStatutoryProfile (shared route).
+export const getMxEmployeeRecord = (employeeId) => api.get(`${MX}/employees/${employeeId}`);
+export const getMxEmployeeReadiness = (employeeId, on) => api.get(`${MX}/employees/${employeeId}/readiness`, { params: { on } });
+export const recordMxInfonavitNotice = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/infonavit-notices`, payload);
 
 // The PUBLIC .cer is sent as the raw request body (the server reads it in
 // memory with a 16 KB cap; multipart would spool to a temp file there).

@@ -98,6 +98,9 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S29", "Reglamento de la LSS en materia de Afiliación, Clasificación de Empresas, Recaudación y "
             "Fiscalización (RACERF)"),
     ("S30", "SAT — CFDI 4.0 catalog workbook (catCFDI: c_RegimenFiscal, c_CodigoPostal) — Anexo 20"),
+    ("S31", "RENAPO — CURP structure and check-digit rules (instructivo normativo)"),
+    ("S32", "IMSS — NSS (Número de Seguridad Social) structure and check digit"),
+    ("S33", "Banco de México / ABM — CLABE 18-digit structure and check digit"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 

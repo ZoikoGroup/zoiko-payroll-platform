@@ -27,6 +27,9 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/labor-policies/1/floor-check?on=2026-03-01"), ("GET", "/collective-agreements"),
     ("POST", "/employers/1/credentials"), ("PUT", "/credentials/1/revoke"), ("POST", "/credentials/1/certificate"),
     ("GET", "/readiness?on=2026-03-01"),
+    # Phase 4b employee routes — dormant the same way
+    ("GET", "/employees/1"), ("GET", "/employees/1/readiness?on=2026-03-01"),
+    ("POST", "/employees/1/infonavit-notices"),
 ]
 
 
@@ -217,15 +220,16 @@ def test_signup_paths_refuse_mexico(db):
     assert get_jurisdiction_onboarding_block_reason(db, "Mexico") is not None
 
 
-@pytest.mark.parametrize("flag", [False, True])
-def test_mx_employee_creation_still_refused_with_the_unchanged_message(db, monkeypatch, flag):
+def test_mx_employee_creation_refused_with_the_unchanged_message_while_the_flag_is_off(db):
+    """Phase 4b registers the Mexico strategy in a DORMANT map: with the flag
+    off (production) creation is refused exactly as before 4b, and the
+    "Supported: …" list every other country sees never names MX. (With the
+    flag on, creation works — tests/test_mexico_employee_validation.py.)"""
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
     from app.modules.payroll.employee_validation import _STRATEGIES
     from app.modules.payroll.schemas import EmployeeCreate
 
-    if flag:
-        enable_mx_onboarding(monkeypatch)
     t = make_org(db)
     fields = set(EmployeeCreate.model_fields)
     data = {k: v for k, v in {"name": "Probe", "employee_code": "MX-1", "country_code": "MX", "ctc": Decimal("1"),
@@ -244,3 +248,39 @@ def test_dormancy_helper_never_treats_blank_as_mexico():
     assert not d.is_mexico(None) and not d.is_mexico("") and not d.is_mexico("India")
     assert d.is_mexico("MX") and d.is_mexico("Mexico") and d.is_mexico("méxico")
     assert d.entering_mexico_refusal("", "India") is None
+
+
+# ── pin: the 4a branch in tax_resolver cannot change any other country ────
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_jurisdiction_change_gate_is_identical_for_every_non_mexican_pair(db, monkeypatch, flag):
+    """get_jurisdiction_change_block_reason with the Mexico branch removed
+    must answer exactly as it does with it, for every pair of non-Mexican
+    registration countries (names and codes) and blank — so Phase 4a can only
+    ever change an answer whose new country is Mexico."""
+    from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
+    from app.modules.payroll import mexico_dormancy
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
+
+    if flag:
+        enable_mx_onboarding(monkeypatch)
+    countries = [c for c in REGISTRATION_COUNTRIES if get_jurisdiction_code(c) != "MX"]
+    values = [None, ""] + countries + [get_jurisdiction_code(c) for c in countries if get_jurisdiction_code(c)]
+    with_branch = {(o, n): get_jurisdiction_change_block_reason(db, o, n) for o in values for n in values}
+    monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal", lambda old, new: None)
+    without_branch = {(o, n): get_jurisdiction_change_block_reason(db, o, n) for o in values for n in values}
+    assert with_branch == without_branch
+    assert len(with_branch) > 100
+
+
+def test_the_mexico_branch_only_fires_for_a_change_into_mexico(db, monkeypatch):
+    from app.modules.payroll import mexico_dormancy
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
+
+    calls = []
+    real = mexico_dormancy.entering_mexico_refusal
+    monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal",
+                        lambda old, new: calls.append((old, new)) or real(old, new))
+    assert get_jurisdiction_change_block_reason(db, "India", "Germany") is None
+    assert get_jurisdiction_change_block_reason(db, "India", "Mexico") == mexico_dormancy.DORMANT_MESSAGE
+    assert calls == [("India", "Germany"), ("India", "Mexico")]

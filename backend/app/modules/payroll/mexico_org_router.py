@@ -34,7 +34,8 @@ from app.core.dependencies import _role_value, get_current_org_admin, get_curren
 from app.core.exceptions import BadRequestException, ForbiddenException
 from app.database import get_db
 from app.modules.payroll.mexico_schemas import (
-    MXClose, MXCredentialCreate, MXEmployerCreate, MXEstablishmentCreate, MXInfonavitModel, MXIsnRegistrationCreate,
+    MXClose, MXCredentialCreate, MXEmployerCreate, MXEstablishmentCreate, MXInfonavitModel, MXInfonavitNoticeCreate,
+    MXIsnRegistrationCreate,
     MXLaborPolicyCreate, MXRegistrationCreate, MXRiskPremiumCreate,
 )
 
@@ -246,3 +247,32 @@ async def attach_certificate(credential_id: int, request: Request, current_user=
 def readiness(on: date = Query(..., description="The date to assess — required, never the server date"),
               current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     return _svc().organisation_readiness(db, _org_id(current_user), on)
+
+
+# ── employees (Phase 4b, spec §12) ───────────────────────────────────────────
+# The statutory profile itself is saved through the shared
+# /api/payroll/employees/{id}/statutory-profile route (Mexico hooks).
+
+@router.get("/employees/{employee_id}", summary="Everything Mexico payroll holds for one employee (identifiers masked)")
+def employee_record(employee_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_employee_service
+
+    return mexico_employee_service.employee_record(db, _org_id(current_user), employee_id)
+
+
+@router.get("/employees/{employee_id}/readiness", summary="One employee's Mexico readiness on an explicit date")
+def employee_readiness(employee_id: int, on: date = Query(..., description="Required — never the server date"),
+                       current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_employee_service
+
+    return mexico_employee_service.employee_readiness(db, _org_id(current_user), employee_id, on)
+
+
+@router.post("/employees/{employee_id}/infonavit-notices",
+             summary="Record an INFONAVIT credit notice (RETENCION / MODIFICACION / SUSPENSION) with its evidence")
+def record_infonavit_notice(employee_id: int, body: MXInfonavitNoticeCreate, current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_employee_service
+
+    return mexico_employee_service.record_infonavit_notice(db, _org_id(current_user), employee_id, body.to_service(),
+                                                           _actor(current_user))

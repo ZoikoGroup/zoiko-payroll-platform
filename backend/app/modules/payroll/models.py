@@ -1146,6 +1146,37 @@ class EmployeeStatutoryProfile(Base):
     nl_contract_hours_per_week    = Column(Numeric(5, 2), nullable=True)
     nl_personnel_number           = Column(String(50), nullable=True)
 
+    # ── Mexico (ZP-MX-ENG-001 §12, Phase 4b, migration mx_employee_m3) ────
+    # All nullable, no default. Raw RFC/CURP/NSS live in the employee's
+    # compliance_fields (masked in every response); this table holds only
+    # keyed tokens + last-4. Minimum-wage zone and subsidy / annual-adjustment
+    # eligibility are DERIVED (never stored). Validated by
+    # mexico_employee_service through the statutory_profile_* hooks.
+    mx_rfc_token                  = Column(String(80), nullable=True)
+    mx_rfc_last4                  = Column(String(4), nullable=True)
+    mx_curp_token                 = Column(String(80), nullable=True)
+    mx_nss_token                  = Column(String(80), nullable=True)
+    mx_identifier_validation_status = Column(String(16), nullable=True)   # FORMAT_ONLY / VALID / MISMATCH
+    mx_identifier_findings        = Column(JSON, nullable=True)
+    mx_fiscal_postal_code         = Column(String(5), nullable=True)
+    mx_receiver_fiscal_regime     = Column(String(10), nullable=True)
+    mx_establishment_id           = Column(Integer, ForeignKey("payroll_mx_establishments.id", ondelete="SET NULL"), nullable=True)
+    mx_imss_registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="SET NULL"), nullable=True)
+    mx_work_state                 = Column(String(5), nullable=True)      # MX-038: the employee's own statutory attribute
+    mx_work_municipality          = Column(String(200), nullable=True)
+    mx_remote_state_exception_ref = Column(String(200), nullable=True)
+    mx_seniority_date             = Column(Date, nullable=True)
+    mx_contract_type_code         = Column(String(10), nullable=True)
+    mx_regime_type_code           = Column(String(10), nullable=True)
+    mx_workday_type_code          = Column(String(10), nullable=True)
+    mx_job_risk_code              = Column(String(10), nullable=True)
+    mx_professional_min_code      = Column(String(20), nullable=True)
+    mx_pay_frequency_code         = Column(String(10), nullable=True)
+    mx_daily_salary               = Column(Numeric(14, 2), nullable=True)
+    mx_salary_type                = Column(String(10), nullable=True)      # FIXED / VARIABLE / MIXED
+    mx_annual_adjustment_exclusion = Column(String(40), nullable=True)     # the employee's DECLARED exclusion code
+    mx_annual_adjustment_exclusion_evidence_ref = Column(String(200), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -9744,4 +9775,42 @@ class PayrollMxCredentialRef(Base):
         Index("uq_mx_cred_registration_kind_active", "imss_registration_id", "kind", unique=True,
               postgresql_where=text("status = 'ACTIVE' AND imss_registration_id IS NOT NULL"),
               sqlite_where=text("status = 'ACTIVE' AND imss_registration_id IS NOT NULL")),
+    )
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 4b employee records (migration mx_employee_m3) ──
+
+class PayrollMxInfonavitNotice(Base):
+    """An INFONAVIT credit notice for one employee (spec §10, MX-031/MX-032):
+    the ONLY way a housing-credit deduction can exist. The method and value
+    are copied from the authority's notice, with its evidence document —
+    payroll never invents a rate. Nothing deducts it before Phase 5. One
+    open notice per credit; a modification supersedes, a suspension or end
+    closes."""
+    __tablename__ = "payroll_mx_infonavit_notices"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    credit_number         = Column(String(30), nullable=False)
+    notice_type           = Column(String(12), nullable=False)       # RETENCION / SUSPENSION / MODIFICACION
+    discount_method       = Column(String(12), nullable=True)        # FIXED_AMOUNT / PERCENTAGE / VSM / UMA_FACTOR
+    discount_value        = Column(Numeric(14, 4), nullable=True)
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    authority_reference   = Column(String(100), nullable=False)
+    evidence_document_id  = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status                = Column(String(12), nullable=False, default="RECORDED")   # RECORDED / SUPERSEDED / CLOSED
+    recorded_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("notice_type IN ('RETENCION', 'SUSPENSION', 'MODIFICACION')", name="ck_mx_infonavit_type"),
+        sa.CheckConstraint("discount_method IS NULL OR discount_method IN ('FIXED_AMOUNT', 'PERCENTAGE', 'VSM', 'UMA_FACTOR')",
+                           name="ck_mx_infonavit_method"),
+        sa.CheckConstraint("status IN ('RECORDED', 'SUPERSEDED', 'CLOSED')", name="ck_mx_infonavit_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_infonavit_window"),
+        Index("uq_mx_infonavit_employee_credit_open", "employee_id", "credit_number", unique=True,
+              postgresql_where=text("effective_to IS NULL AND status = 'RECORDED'"),
+              sqlite_where=text("effective_to IS NULL AND status = 'RECORDED'")),
     )

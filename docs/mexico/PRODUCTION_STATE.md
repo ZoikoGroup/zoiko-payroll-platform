@@ -11,8 +11,9 @@ Prepared 2026-10-16 from repository state and the public GitHub Actions API (rea
 | #100 (2026-10-16 04:09Z) | 9e5c840 | 38849128315 — success | + Phase 2, migration **`5d2c8f1a7b3e`** (mx_foundation_m1) |
 | #101 (2026-10-16 06:17Z) | 22e86d3 | **38860348647** — test ✅ (22 min) · deploy ✅ · every step ✅ incl. "Verify single Alembic head", "SSH and deploy backend", "Check for model/schema drift" | + Phase 3, migration **`6e4a1d9c3f27`** (mx_employer_m2) |
 | #102 (2026-10-16 07:06Z) | 3851b69 | **38865098800** — test ✅ · deploy ✅ (SSH, drift) | Phase 3 follow-up `878dc00`: streaming-cap tests, S30 in the content source list, readiness message, docs. **No migration** — production stays at `6e4a1d9c3f27`. |
+| #103 (2026-10-16 07:56Z) | 7c0fd3e | **38870346791** — test ✅ · deploy ✅ (SSH, drift) — completed | **Phase 4a** `c5b058a`: dormancy gates (`MX_TENANT_ONBOARDING_ENABLED` = False, org-router guard, organisation-country / company-jurisdiction / back-fill gates). **No migration** — production stays at `6e4a1d9c3f27`. Effect: tightening only (§2e). |
 
-Everything committed on `nikhil` up to `878dc00` is on `main` and deployed. Not yet on `main`: Phase 4a (dormancy gates) and these docs.
+Everything committed on `nikhil` up to `c5b058a` (Phase 4a) is on `main` and deployed (run 38870346791). Not yet on `main`: Phase 4b.
 
 **Migration result (inferred, see §6 to confirm).** The SSH step runs `alembic current --check-heads` and a script that exits non-zero unless the database heads equal the repository head; that step succeeded for run 38860348647, so production should be at **`6e4a1d9c3f27`**. The job logs themselves need repository admin rights (`403 Must have admin rights`), so the exact migration lines were not read.
 
@@ -56,6 +57,27 @@ Once a real jurisdiction is chosen, `update_company_details` refuses every chang
 
 So, until a governed "controlled jurisdiction migration" exists (platform item, not built), a mistaken MX organisation is corrected by a Super Admin–approved operator change: record the organisation, old and new value, reason and ticket; check (queries in §6) that it has no MX employees (none can exist) and review/remove its `payroll_mx_*` rows first; then update `payroll_company_compliance.jurisdiction_country` (and `organizations.country` if it was set) in one transaction, and record it in the audit trail. Phase 4a stops new cases (gates on all three paths); it does not alter existing rows.
 
+### 2e. Phase 4a — what changed, and the `tax_resolver.py` change
+
+With `MX_TENANT_ONBOARDING_ENABLED` unset (False) in production, Phase 4a makes the §2b organisation routes refuse (403 *"Mexico is not open for onboarding on this platform yet…"*) and closes the three ways an organisation could become Mexican (§2c), without touching existing rows.
+
+**`engine/tax_resolver.py` — what.** `get_jurisdiction_change_block_reason(db, old_country, new_country)` is the gate that `PUT /organizations/me` and the Super Admin organization update already call before changing `Organization.country` (Singapore Phase 6.10). Phase 4a adds, before its existing logic, one Mexico-only branch:
+
+```python
+mx_refusal = entering_mexico_refusal(old_country, new_country)   # mexico_dormancy.py
+if mx_refusal:
+    return mx_refusal
+```
+
+`entering_mexico_refusal` returns a message only when **all three** hold: the new country normalises to `MX` (`app.core.jurisdiction.get_jurisdiction_code`, which never defaults a blank to a country), the old country does not, and the flag is off. Otherwise it returns `None` and the function continues exactly as before.
+
+**Why.** `Organization.country = "Mexico"` was accepted (MX is not in `_REGISTRY_ROW_REQUIRED_COUNTRIES`), and `get_company_details` back-fills the payroll jurisdiction from it — so this was one of the three paths into Mexico (with the company-jurisdiction update and the back-fill, gated in `service.py`).
+
+**It cannot change any other country's resolution.**
+- The function is not part of tax resolution at all: it is not called by `resolve_tax_configuration`, rate/slab resolution, calculations or payroll runs — only by the two organization-update endpoints, to decide whether a *country change* is allowed.
+- For any change whose new country is not Mexico, the branch returns `None` and the original code runs unchanged; for a change from Mexico to Mexico it also returns `None`.
+- Pinned by `tests/test_mexico_dormancy.py::test_jurisdiction_change_gate_is_identical_for_every_non_mexican_pair` (every pair of non-Mexican registration countries — names and codes — plus blank, with the flag off and on: the answer with the branch removed equals the answer with it) and `::test_the_mexico_branch_only_fires_for_a_change_into_mexico`.
+
 ## 3. Recommended ops action — nginx limit for the certificate upload
 
 `deploy/nginx/zoiko-payroll.conf` (`location /api/`) sets `client_max_body_size 20m` with request buffering on (default). nginx therefore accepts up to 20 MB on the certificate route and writes any body larger than `client_body_buffer_size` to a temporary file before proxying — the application never writes the `.cer` to disk, but nginx can. Add (not applied — production config):
@@ -87,7 +109,7 @@ Merging to `main` deploys to production and runs Alembic migrations. Every phase
 
 1. **Actions → "Deploy Zoiko Payroll Backend" → run for "Merge pull request #101"** (run 38860348647): jobs `test` and `deploy` are green; in `deploy`, open **"SSH and deploy backend"** and read the blocks *"--- Migration diagnostics ---"* (database `alembic_version` before), *"--- Applying migrations ---"* (`deploy_migrate.sh` output — expect `Running upgrade 5d2c8f1a7b3e -> 6e4a1d9c3f27`), and *"--- Post-migration verification ---"* (expect `database heads: ['6e4a1d9c3f27']` and `Database is at the Alembic head.`). Then **"Check for model/schema drift"** (`scripts.check_schema_drift` output). Viewing logs needs to be signed in with access to the repository.
 2. Same for run **38849128315** (PR #100), the first deploy carrying `5d2c8f1a7b3e` (expect `Running upgrade f4b8d2a6c9e1 -> 5d2c8f1a7b3e`).
-3. On the VM (read-only): `GET /api/health/version` returns the running commit (expect `3851b69…`); `alembic current` → `6e4a1d9c3f27`. Exposure counts (read-only SQL):
+3. On the VM (read-only): `GET /api/health/version` returns the running commit (expect `7c0fd3e…`); `alembic current` → `6e4a1d9c3f27`. Exposure counts (read-only SQL):
    ```sql
    -- Mexico packs seeded by hand?
    SELECT count(*) FROM payroll_jurisdiction_packs WHERE jurisdiction_country = 'MX';
