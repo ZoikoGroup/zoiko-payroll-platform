@@ -46,7 +46,7 @@ from typing import List, Optional
 # read from compliance_fields, exactly like every non-India country.
 # Netherlands (ZP-NL-ENG-001) also rides SEPA with IBAN + BIC, following the
 # DE pattern (combined "{iban} {bic}" BTF routing value).
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL")
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "BR")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -91,6 +91,11 @@ ROUTING_FIELDS = {
         {"key": "iban", "label": "IBAN"},
         {"key": "bic", "label": "BIC"},
     ],
+    "BR": [
+        {"key": "pix_key", "label": "PIX Key"},
+        {"key": "bank_compe", "label": "Bank COMPE"},
+        {"key": "bank_agency", "label": "Agency"},
+    ],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -115,6 +120,7 @@ BTF_ROUTING_LABEL = {
     "TT": "Bank/Branch Code",
     "BS": "ACH Routing #",
     "PR": "ACH Routing #",
+    "BR": "PIX Key / COMPE",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -136,6 +142,7 @@ PAYMENT_MODE_LABEL = {
     "TT": "EFT",
     "BS": "ACH",
     "PR": "ACH",
+    "BR": "PIX / TED",
 }
 
 

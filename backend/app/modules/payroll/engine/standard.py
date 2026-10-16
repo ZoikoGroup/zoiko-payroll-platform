@@ -76,6 +76,7 @@ from app.modules.payroll.engine.countries import italy as _italy
 from app.modules.payroll.engine.countries import switzerland as _switzerland
 from app.modules.payroll.engine.countries import saudi_arabia as _saudi_arabia
 from app.modules.payroll.engine.countries import netherlands as _netherlands
+from app.modules.payroll.engine.countries import brazil as _brazil
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -151,6 +152,7 @@ _calc_italy = _italy.calculate
 _calc_switzerland = _switzerland.calculate
 _calc_saudi_arabia = _saudi_arabia.calculate
 _calc_netherlands = _netherlands.calculate
+_calc_brazil = _brazil.calculate
 
 
 _COUNTRY_CALC = {
@@ -210,6 +212,13 @@ _COUNTRY_CALC = {
     # insurance (AWf/Aof/Wko), employer premiums (Whk), Zvw (employer + employee),
     # WKR, car addition, labor pay. Fail-closed: countries/netherlands.py.
     "NL": _calc_netherlands,
+    # Brazil CLT (ZP-BR-ENG-001, Priority Market #12) — progressive INSS
+    # (7.5/9/12/14%), IRRF with 2026 Law 15.270/2025 reduction, employer
+    # CPP/RAT/FAP/FPAS/CPRB-transition, FGTS (8%/2% apprentice), Salário-Família.
+    # Fail-closed (BR-001): countries/brazil.py BLOCKS every calculation until
+    # the Phase 5 engine is certified, so Brazil can never fall through to
+    # _calc_generic; simple mode is blocked in resolver.py.
+    "BR": _calc_brazil,
 }
 
 
@@ -301,6 +310,11 @@ class StandardStrategy(PayrollStrategy):
             # recovery (wage tax arrives as tds, pension as employee_pension).
             # Employer premiums are never in here (NL-035). 0 elsewhere.
             + deductions.get("nl_employee_total", Decimal("0"))
+            # Brazil CLT: Vale-Transporte employee deduction (max 6% of base
+            # salary — BR-029). INSS employee arrives via employee_pf above;
+            # IRRF arrives via tds above. VT is its own statutory deduction line.
+            # 0 for every non-BR calculation (key absent from all other calculators).
+            + deductions.get("br_vale_transporte_deduction", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -311,6 +325,13 @@ class StandardStrategy(PayrollStrategy):
         it_wedge_tax_free_sum = deductions.get("it_wedge_tax_free_sum", Decimal("0"))
         if it_wedge_tax_free_sum:
             net_pay = max(_round2(net_pay + it_wedge_tax_free_sum), Decimal("0"))
+        # Brazil CLT: Salário-Família is a BENEFIT added to net pay — it is not
+        # a deduction. R$67.54/eligible dependent when gross ≤ R$1,980.38.
+        # Follows the same pattern as Italy's it_wedge_tax_free_sum above: 0 for
+        # every non-BR country or BR employee not eligible.
+        br_salario_familia_net = deductions.get("br_salario_familia_net_addition", Decimal("0"))
+        if br_salario_familia_net:
+            net_pay = max(_round2(net_pay + br_salario_familia_net), Decimal("0"))
         # Switzerland: family allowances (per APPROVED entitlement) and the
         # absence-benefit allowances / top-ups are paid to the employee on
         # top of salary — never negative deductions. 0 for every other country.
@@ -618,6 +639,22 @@ class StandardStrategy(PayrollStrategy):
             germany_calculation_snapshot=deductions.get("_germany_calculation_snapshot"),
             germany_unavailable_components=germany_unavailable_components,
             state_program_deductions=deductions.get("state_program_deductions", Decimal("0")),
+            # Brazil CLT (ZP-BR-ENG-001) — the whole BR trace dict and flat
+            # snapshot fields. Absent from every non-BR calculator dict, so a
+            # .get with the default keeps every other country's result unchanged.
+            br_result=deductions.get("br_result"),
+            br_base_inss=deductions.get("br_base_inss", Decimal("0")),
+            br_inss_employee=deductions.get("br_inss_employee", Decimal("0")),
+            br_base_irrf=deductions.get("br_base_irrf", Decimal("0")),
+            br_irrf=deductions.get("br_irrf", Decimal("0")),
+            br_irrf_reduction=deductions.get("br_irrf_reduction", Decimal("0")),
+            br_salario_familia=deductions.get("br_salario_familia", Decimal("0")),
+            br_vale_transporte_deduction=deductions.get("br_vale_transporte_deduction", Decimal("0")),
+            br_base_fgts=deductions.get("br_base_fgts", Decimal("0")),
+            br_fgts_deposit=deductions.get("br_fgts_deposit", Decimal("0")),
+            br_cpp_employer=deductions.get("br_cpp_employer", Decimal("0")),
+            br_rat_adjusted=deductions.get("br_rat_adjusted", Decimal("0")),
+            br_third_parties=deductions.get("br_third_parties", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
             wage_deduction_cap_exceeded=wage_deduction_cap_exceeded,

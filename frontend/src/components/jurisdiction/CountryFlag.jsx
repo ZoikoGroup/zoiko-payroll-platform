@@ -271,11 +271,23 @@ function Netherlands() {
   );
 }
 
+// Brazil — green field, yellow rhombus, blue disc — recognizable, not
+// vexillographic (no stars or motto band).
+function Brazil() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#009C3B" />
+      <polygon points="12,2 22,8 12,14 2,8" fill="#FFDF00" />
+      <circle cx="12" cy="8" r="3.4" fill="#002776" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands,
+  NL: Netherlands, BR: Brazil,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

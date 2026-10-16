@@ -595,6 +595,25 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{9}L\d{2}$", "example": "123456789L01", "primary": False},
         ],
     },
+    # Brazil (ZP-BR-ENG-001) — schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES (same rule as NL / SA / HK / MX): live Brazilian
+    # payroll stays disabled until release gates G1–G8 are evidenced and the
+    # registry row leaves PLANNED. CNPJ = the 14-character legal-entity
+    # registry number (12 alphanumeric characters from July 2026 + 2 numeric
+    # check digits — the check digits are verified server-side by
+    # employee_validation.cnpj_is_valid, not by this pattern); CNAE = the
+    # 7-digit principal economic-activity code. Formats only — never
+    # synthesised.
+    "BR": {
+        "label": "CNPJ / CNAE",
+        "currency": "BRL",
+        "fields": [
+            {"key": "cnpj", "label": "CNPJ (legal-entity registry number)",
+             "pattern": r"^[0-9A-Z]{12}[0-9]{2}$", "example": "11222333000181", "primary": True},
+            {"key": "cnae", "label": "CNAE (principal economic activity)",
+             "pattern": r"^\d{7}$", "example": "6201501", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -636,6 +655,10 @@ COUNTRY_NAME_TO_CODE = {
     "netherlands": "NL",
     "the netherlands": "NL",
     "holland": "NL",
+    "brazil": "BR",
+    "brasil": "BR",
+    "república federativa do brasil": "BR",
+    "republica federativa do brasil": "BR",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -661,6 +684,7 @@ CODE_TO_COUNTRY_NAME = {
     "CH": "Switzerland",
     "SA": "Saudi Arabia",
     "NL": "Netherlands",
+    "BR": "Brazil",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

@@ -37,6 +37,10 @@ const INCOME_TAX_LABELS = {
   // Netherlands — loonheffing: wage tax and national insurance withheld
   // together, from the Belastingdienst tables (ZP-NL-ENG-001).
   NL: "Loonheffing (wage tax)",
+  // Brazil — IRRF (Imposto de Renda Retido na Fonte): the monthly withholding
+  // on labour income, from the Receita Federal's progressive table (and its
+  // reduction), ZP-BR-ENG-001.
+  BR: "IRRF (Imposto de Renda)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -55,8 +59,10 @@ const SOCIAL_SECURITY_LABELS = {
   CA: "Canada Pension Plan (CPP)",
   BB: "NIS", DO: "SFS (Seguro Familiar de Salud)", GY: "NIS", JM: "NIS", TT: "NIS",
   BS: "NIB", KY: "NIB Pension",
+  // Brazil — the employee's INSS (Instituto Nacional do Seguro Social) share.
+  BR: "INSS",
 };
-const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution" };
+const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution", BR: "CPP (Employer INSS)" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
 const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)" };
 const CHURCH_TAX_LABELS = { DE: "Kirchensteuer" };
@@ -74,6 +80,9 @@ const EMPLOYEE_PENSION_LABELS = {
   DO: "Pension (SVDS)",
   JM: "National Housing Trust (NHT)",
   HK: "MPF Mandatory Contribution (Employee)",
+  // Brazil — FGTS (Fundo de Garantia do Tempo de Serviço), the employer's 8%
+  // length-of-service deposit, shown on the payslip's savings line.
+  BR: "FGTS",
 };
 const NI_EMPLOYEE_LABELS = { JM: "Education Tax" };
 
@@ -138,6 +147,7 @@ const TAX_ID_LABELS = {
   NL: "KVK / RSIN / Loonheffingennummer",
   HK: "Business Registration No. / IRD Employer's File No.",
   CH: "UID (Business Identification No.)",
+  BR: "CNPJ / CPF",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only
@@ -152,6 +162,7 @@ const STATE_RULE_NOTES = {
   UK: "Statutory rates are generally uniform nationwide, but some allowances vary by region.",
   NL: "One national regime: loonheffing, employee insurance and Zvw do not vary by province.",
   HK: "One territory-wide regime: MPF is deducted through payroll; Salaries Tax is assessed by the IRD on the employee and is never withheld from pay.",
+  BR: "Core CLT payroll contributions (INSS, FGTS, IRRF) are federal; state rules mainly affect indirect taxes and regional benefits.",
 };
 
 // The one statutory ID that best identifies an employee to their tax
@@ -189,6 +200,8 @@ const IDENTITY_FIELD = {
   CH: { label: "AHV No.", get: (p) => p.complianceFields?.ahv_number },
   // Masked server-side (SENSITIVE_FIELDS), same as HKID above.
   NL: { label: "BSN", get: (p) => p.complianceFields?.bsn },
+  // Masked server-side (SENSITIVE_FIELDS) where applicable, like BSN/HKID.
+  BR: { label: "CPF", get: (p) => p.complianceFields?.cpf },
 };
 
 export function getIdentityField(payslip) {

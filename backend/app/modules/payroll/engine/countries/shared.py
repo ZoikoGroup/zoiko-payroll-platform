@@ -90,7 +90,7 @@ class MissingComplianceConfigurationError(Exception):
 # Saudi Arabia (ZP-SA-ENG-001) is the same case again: no Saudi packs, GOSI
 # rates, registry row or payroll runs exist, so flipping SA on at landing makes
 # readiness — not a default — the thing that keeps payroll honest.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK", "CH", "SA", "NL"}
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK", "CH", "SA", "NL", "BR"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
