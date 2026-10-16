@@ -23,3 +23,7 @@ Jur_doc/
 
 # Scratch/diagnostic scripts (read-only analysis, not application code)
 backend/scripts/_audit_*.py
+
+# Mexico Phase 1: stale CDMX Fiscal Code (2022 text, ISN 3%) served by the spec S22 URL.
+# Kept locally as evidence (SOURCES_MANIFEST.csv row WRONG_VERSION); never committed (49 MB).
+docs/mexico/sources/S22_CDMX_Codigo_Fiscal_2026.pdf

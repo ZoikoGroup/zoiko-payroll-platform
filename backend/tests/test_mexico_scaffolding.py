@@ -105,7 +105,10 @@ def test_content_skeleton_declares_no_statutory_values():
     assert c.MX_2026 == ("MX-PAYROLL-2026", date(2026, 1, 1), date(2026, 12, 31))
     assert c.MX_ISN_STATES_IN_SCOPE == ("CDMX",)
     assert [g for g, _ in c.GATES] == [f"G{i}" for i in range(1, 9)]
-    assert c.MX_PARAMETER_KEYS == {}                 # Phase 1 adds values from saved official sources
+    # Phase 1 tooling names the parameter keys; every content table stays empty
+    # until transcription from the saved official sources.
+    assert all(k.startswith("mx_") for k in c.MX_PARAMETER_KEYS)
+    assert c.MX_SCALAR_CONTENT == () and c.MX_ISR_TARIFFS == ()
     assert all(rt.startswith("MX_") for rt in (c.MX_ISR_TARIFF_RULE, c.MX_CEAV_BAND_RULE, c.MX_MIN_WAGE_RULE,
                                                c.MX_VACATION_DAYS_RULE, c.MX_WORKWEEK_RULE))
 
