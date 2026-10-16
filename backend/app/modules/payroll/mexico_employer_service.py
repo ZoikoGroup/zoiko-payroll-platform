@@ -1207,7 +1207,7 @@ def employer_readiness(db: Session, org_id: int, root_id: int, on: date) -> dict
                                        "Fiscal postal code in the SAT catalog")):
         found = _catalog_has(db, catalog, code)
         status = BLOCKED if found is None or found is False else PASS
-        detail = ("no Active CFDI catalog release — Phase 7 (SAT CFDI catalogs)" if found is None
+        detail = ("no Active CFDI catalog release — needs S30 (SAT CFDI 4.0 catalogs, catCFDI) loaded in Phase 7" if found is None
                   else ("not in the Active catalog" if not found else "found in the Active catalog"))
         items.append(_item(key, "A", label, status, detail, ["G1"]))
     # Panel B

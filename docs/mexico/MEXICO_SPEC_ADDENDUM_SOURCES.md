@@ -1,6 +1,6 @@
-# ZP-MX-ENG-001 — Addendum to the §22 Evidence Register (S24–S29)
+# ZP-MX-ENG-001 — Addendum to the §22 Evidence Register (S24–S30)
 
-**Status: PENDING SPEC-OWNER APPROVAL.** These sources extend the "Official evidence register — reviewed for 2026 design" in spec §22. They were added at the user's direction on 2026-10-15 (Phase 1, answers to Q1–Q3), because the primary legal text for these rules is not among S1–S23. Until the spec owner approves them, every value transcribed from S24–S29 stays `[PENDING G1]`, like every other Phase 1 value.
+**Status: PENDING SPEC-OWNER APPROVAL.** These sources extend the "Official evidence register — reviewed for 2026 design" in spec §22. They were added at the user's direction on 2026-10-15 (Phase 1, answers to Q1–Q3), because the primary legal text for these rules is not among S1–S23. Until the spec owner approves them, every value transcribed from S24–S30 stays `[PENDING G1]`, like every other Phase 1 value.
 
 | Code | Authority | Document | Official URL | Rules it evidences | Why it is needed |
 |---|---|---|---|---|---|
@@ -10,6 +10,7 @@
 | S27 | Cámara de Diputados (consolidated text) | Ley del INFONAVIT (LIFNVT), Art. 29 | https://www.diputados.gob.mx/LeyesBiblio/pdf/LIFNVT.pdf | MX-031, MX-032 | The primary law for the 5% employer housing contribution. S15 (INFONAVIT portal) is kept as a **cross-check** only. |
 | S28 | SAT | Complemento de Nómina 1.2 — catalog workbook (c_TipoPercepcion, c_TipoDeduccion, c_TipoOtroPago, …) **and** `nomina12.xsd` | XSD: http://www.sat.gob.mx/sitio_internet/cfd/nomina/nomina12.xsd · catalog workbook: SAT "Complemento de nómina" page (the catalog spreadsheet linked there — confirm the current revision on the SAT site before saving) | MX-005, MX-014, MX-015 | Added in Phase 2 (Q3). The SAT payroll concept codes for the earning-classification catalogue and the CFDI schema release come from these two files; none of S1–S27 contains them. Until S28 is saved and VERIFIED, **no canonical classification can go live** (a canonical row needs its SAT code in an approved catalog release). |
 | S29 | Cámara de Diputados (consolidated text) | Reglamento de la Ley del Seguro Social en materia de Afiliación, Clasificación de Empresas, Recaudación y Fiscalización (RACERF) | Index: https://www.diputados.gob.mx/LeyesBiblio/regla.htm (open the RACERF entry and save the PDF it links; confirm the current consolidated version there before saving) | MX-024, MX-026 | Added in Phase 3 (Q3). The validity window of an employer's work-risk premium (expected 1 March to the end of February of the following year, spec MX-026) and the annual determination rules are expected here if they are not in S10 (LSS) or S14. Until the window is transcribed from a saved source, **no risk premium can be approved**. |
+| S30 | SAT | CFDI 4.0 catalog workbook (catCFDI: c_RegimenFiscal, c_CodigoPostal, …) — Anexo 20 | SAT "Anexo 20" page (Comprobante Fiscal Digital por Internet, versión 4.0) — save the catalog spreadsheet linked there; confirm the current revision on the SAT site before saving | MX-015, spec §6 "Employer issuer" | Added in Phase 3 follow-up. The employer's fiscal regime (`c_RegimenFiscal`) and postal codes (`c_CodigoPostal`) are checked against these CFDI 4.0 catalogs, which are **not** in the Nómina 1.2 workbook (S28). Until S30 is saved, VERIFIED and loaded into an Active CFDI release (Phase 7), both employer readiness items stay BLOCKED. |
 
 **S29 fetch checklist (Phase 3):**
 1. Open https://www.diputados.gob.mx/LeyesBiblio/regla.htm and find the RACERF entry under "Ley del Seguro Social".
@@ -18,7 +19,14 @@
 4. Check S10 (LSS) at the same time for Art. 74 (premium range and annual revision) — the range belongs to S10; the validity window to whichever source states it.
 5. Stop and ask if S10, S14 and S29 disagree, or if none states the window.
 
-**Rules for S24–S29 (same as S1–S23):**
+**S30 fetch checklist (Phase 3 follow-up):**
+1. Open SAT's Anexo 20 page for CFDI 4.0 and find the catalog workbook (catCFDI) link; confirm it is the current revision.
+2. Save the workbook byte-for-byte as `docs/mexico/sources/S30_SAT_catCFDI.xls` (or `.xlsx` as published); record URL, SHA-256, size and retrieval time in `SOURCES_MANIFEST.csv`, plus the revision/version stated in the workbook.
+3. Record which sheets hold `c_RegimenFiscal` and `c_CodigoPostal` and their validity columns in the transcription log.
+4. `c_CodigoPostal` is large; it is loaded as catalog entries of a CFDI schema release (Phase 2 table), never transcribed by hand.
+5. Stop and ask if the workbook's catalog names or columns differ from the CFDI 4.0 schema the PAC validates against (Phase 7).
+
+**Rules for S24–S30 (same as S1–S23):**
 - Each file is saved byte-for-byte to `docs/mexico/sources/`, and its SHA-256 is recorded in `SOURCES_MANIFEST.csv`.
 - Each file becomes a `SourceArtifact` holding the URL, the SHA-256 and the `file_path`.
 - Where a primary source (S24–S27) and its cross-check (S15, S19, S20) disagree, the primary source wins. The disagreement is recorded in the transcription log, and work stops for a decision.

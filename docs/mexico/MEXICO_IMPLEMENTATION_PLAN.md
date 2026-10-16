@@ -25,7 +25,7 @@ Line numbers below are from commit 6a8f989; current ones are in `docs/mexico/MEX
 | Pack lifecycle / activation | Draft → In Review → QA → Approved → Active → Deprecated → Retired; `PackHotfixActivation`; `TaxConfigurationAudit`; four-eyes opt-in lists in `service.py` (~L8511–8530); golden PASS required (~L8674/8718) | Add MX to all opt-in lists (same as NL/SA) |
 | Report templates | `ReportTemplate` (+Component, +ComponentField), lifecycle Draft → Review → Approved → Published → Active → Superseded; `scripts/seed_statutory_report_templates.py` | MX templates seeded Draft |
 | Filing calendar | `StatutoryFilingCalendar`, seeded via `service.upsert_filing_calendar_entry` in `scripts/seed_statutory_report_templates.py` *[v1.1 carry-over from Phase 0]* (`seed_statutory_filings.py` seeds per-organisation filing instances, not the calendar) | ISR 17th, IMSS/INFONAVIT, ISN, aguinaldo, PTU, risk premium |
-| Evidence | `SourceArtifact` | S1–S27 (S24–S27 pending spec-owner approval) |
+| Evidence | `SourceArtifact` | S1–S30 (S24–S30 pending spec-owner approval) |
 | Golden tests | `TestCertificationRun`, `tests/fixtures/<cc>_golden`, `_GOLDEN_FIXTURES_DIR_BY_COUNTRY` (service.py ~L19268) | `mx_golden` |
 | Jurisdiction hooks | `jurisdiction_hooks.py` `_MODULES` (HK, SA, NL) | `"MX": "app.modules.payroll.mexico_service"` |
 | Employee statutory data | `EmployeeStatutoryProfile` with prefixed columns (`hk_*`, `sa_*`, `nl_*`), identity tokens not raw IDs | `mx_*` columns |
@@ -199,6 +199,15 @@ Frontend: `MXEmployerProfileTab` gains panels A–H; new `MXRegistrationsTab` (I
 
 ---
 
+
+**[As built — Phase 3, commit 45d822a, merged to main by PR #101; plan `MEXICO_PHASE_3_PLAN.md` §19, report `MEXICO_PHASE_3_IMPLEMENTATION_REPORT.md`]**
+- Backend: **`mexico_employer_service.py`** (all employer logic — kept out of `mexico_service.py`, the jurisdiction-hook module) and **`mexico_org_router.py`** (`/api/payroll/mexico`, mounted in `router.py` with one `include_router`, NL pattern — not the France-style readiness endpoint in `router.py`). Super Admin employer routes in `mexico_router.py` are read-only and masked.
+- Migration **`6e4a1d9c3f27_mx_employer_m2`** (as planned name `mx_employer_m2`): the six planned tables plus **`payroll_mx_credential_refs`**; partial unique indexes on every open/ACTIVE row.
+- Secrets: `gcp-sm://` references + public certificate metadata only (`MX_SECRET_REF_SCHEMES`), expiry warning `MX_CREDENTIAL_EXPIRY_WARNING_DAYS = 30`; `.cer` ≤16 KB, DER/PEM, in memory.
+- Frontend: Payroll → Compliances → **Mexico Compliance Centre** (the repo's equivalent of the spec's Settings → Countries → Mexico); Super Admin **Employer** tab (read-only). `MXPolicyPage.jsx` not built (Phase 6).
+- Column changes against the table above: profiles are versioned (`version`, `previous_version_id`, `effective_from/to`, `taxpayer_type`); `csd_*` / `pac_credential_secret_ref` moved to `payroll_mx_credential_refs`; `infonavit_operating_model` moved to the IMSS registration; `readiness_status` / `readiness_evidence` dropped (computed on read); establishments derive `min_wage_zone` (not stored); risk premiums use `evidence_document_id` → `payroll_compliance_documents`; labour policies gain `employer_profile_id`, `version`, `sunday_premium_pct`, `time_record_dependency`, `status`.
+- **Seven deviations** (report §10): (1) service in `mexico_employer_service.py`; (2) ISN registration stores OPEN/CLOSED, PENDING_PACK/ACTIVE computed from the pack on read; (3) IMSS registration status ACTIVE/CLOSED, no DRAFT; (4) credential uniqueness via two partial indexes instead of one expression index; (5) floor check reports dates past the Active content horizon as `notYetCheckable`; (6) Super Admin org picker also lists orgs with an MX employer or MX company jurisdiction; (7) `MXPolicyPage.jsx` deferred to Phase 6 (OOS-6 logged: the shared Policy dispatcher falls back to India's page).
+
 ## 7. Phase 4 — Employee statutory profile (§12)
 
 Backend (modify): `models.py` `EmployeeStatutoryProfile` + `employee_validation.py` (RFC persona física 13 chars, CURP 18, NSS 11 with check digit, CLABE 18 with check digit, cross-consistency RFC↔CURP; mismatch = exception, never auto-fix), `bank_routing.py` (`ROUTING_COUNTRIES` + MX, field CLABE, scheme SPEI), `schemas.py`.
@@ -320,6 +329,9 @@ Tests: T2, T5, T7, T8; F6.
 | CEAV other years | Content only; 2026 seeded (decided) |
 | CEAV lowest band for ZLFN | Content parameter [PENDING G2], resolved by SUA reconciliation |
 | Sources S24–S27 | Added, pending spec-owner approval |
+| Source S29 — RACERF (work-risk premium validity window / determination) | Added in Phase 3 (Q3), pending spec-owner approval; not yet saved. Premium approval refused until the window (S10/S14/S29) and the LSS Art. 74 range (S10) are transcribed |
+| Source S30 — SAT CFDI 4.0 catalog workbook (catCFDI: `c_RegimenFiscal`, `c_CodigoPostal`) | Added in the Phase 3 follow-up, pending spec-owner approval; not yet saved. Employer catalog checks BLOCKED until loaded into an Active CFDI release (Phase 7) |
+| Secret store for MX credentials | GCP Secret Manager (`gcp-sm://` only, Phase 3 Q9); must be live in production before Phase 7 (infrastructure lead time) |
 | Git workflow | Claude Code stages, you commit; work on `nikhil` |
 | Large source PDFs in git vs evidence storage | **Open** (follow the `docs/hk-evidence/` precedent) |
 | First ISN states beyond CDMX | **Open**, needed by Phase 2 |
