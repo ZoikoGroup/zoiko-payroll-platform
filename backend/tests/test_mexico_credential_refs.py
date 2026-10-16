@@ -201,6 +201,93 @@ def test_upload_over_http_is_in_memory_and_bytes_are_not_stored(db, monkeypatch)
     assert der.hex()[:40] not in stored and base64.b64encode(der).decode()[:40] not in stored
 
 
+def _raw_asgi_upload(db, org_id, credential_id, *, total, chunk=64 * 1024, declare_length):
+    """Drive the REAL app (all middleware) at the ASGI level with a streamed
+    body of `total` bytes, counting how many chunks the app actually pulls —
+    TestClient would buffer the whole body before calling the app, so it
+    cannot prove early refusal."""
+    import asyncio
+
+    from app.main import app
+    from tests.test_hong_kong_governance import _http as _hk_http
+
+    pulled = {"chunks": 0, "bytes": 0, "before_response": None}
+    remaining = {"n": total}
+    responded = {"yes": False}
+    finished = asyncio.Event()
+
+    async def receive():
+        # Like a real server: once the app has started its response (or the
+        # body is exhausted) the next receive is a disconnect — so `pulled`
+        # counts only what the app read BEFORE answering.
+        if responded["yes"] or remaining["n"] <= 0:
+            await finished.wait()                          # the client hangs up only after the full response
+            return {"type": "http.disconnect"}
+        await asyncio.sleep(0.002)                         # chunks arrive at network pace, not instantly
+        part = min(chunk, remaining["n"])
+        remaining["n"] -= part
+        pulled["chunks"] += 1
+        pulled["bytes"] += part
+        return {"type": "http.request", "body": b"\x30" * part, "more_body": remaining["n"] > 0}
+
+    sent = []
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            responded["yes"] = True
+            pulled["before_response"] = pulled["chunks"]
+        if message["type"] == "http.response.body" and not message.get("more_body"):
+            finished.set()
+        sent.append(message)
+
+    headers = [(b"content-type", b"application/octet-stream"), (b"host", b"testserver")]
+    if declare_length:
+        headers.append((b"content-length", str(total).encode()))
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+             "scheme": "http", "path": f"{ORG_BASE}/credentials/{credential_id}/certificate",
+             "raw_path": f"{ORG_BASE}/credentials/{credential_id}/certificate".encode(), "query_string": b"",
+             "headers": headers, "client": ("127.0.0.1", 1), "server": ("testserver", 80)}
+    async def run():
+        await asyncio.wait_for(app(scope, receive, send), timeout=30)
+
+    with _hk_http(db, principal(org_id)):                 # same dependency overrides (auth, DB)
+        asyncio.run(run())
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    return status, pulled, b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+
+
+@pytest.mark.parametrize("declare_length", [True, False])
+def test_a_10_mb_body_is_refused_without_reading_it_all(db, declare_length):
+    """Correction 2 follow-up: the 16 KB cap stops reading at 16 KB + 1 byte.
+    With a Content-Length header the request is refused before ANY body
+    chunk is read; with a streamed (chunked) body it is refused after the
+    first chunk that crosses 16 KB — never after reading all 10 MB."""
+    t = make_org(db)
+    emp = new_employer(db, t.org.id)
+    cred = _cred(db, t.org.id, emp["id"])
+    total = 10 * 1024 * 1024
+    status, pulled, body = _raw_asgi_upload(db, t.org.id, cred["id"], total=total, declare_length=declare_length)
+    assert status == 400 and b"larger than 16 KB" in body
+    # What the route read before answering: nothing with a declared length,
+    # one 64 KB chunk (of 160) when streamed.
+    assert pulled["before_response"] == (0 if declare_length else 1)
+    # Starlette's BaseHTTPMiddleware (the app's audit middleware) listens for
+    # a disconnect while the 400 is written and discards any chunk that
+    # arrives meanwhile — it never accumulates them, and it stops with the
+    # response. The 10 MB body is never read in full.
+    assert pulled["chunks"] < 160 and pulled["bytes"] < total
+
+
+def test_a_body_of_exactly_16_kb_plus_one_byte_is_refused_while_streaming(db):
+    t = make_org(db)
+    emp = new_employer(db, t.org.id)
+    cred = _cred(db, t.org.id, emp["id"])
+    status, pulled, body = _raw_asgi_upload(db, t.org.id, cred["id"], total=16 * 1024 + 1, chunk=1024,
+                                            declare_length=False)
+    assert status == 400 and b"larger than 16 KB" in body
+    assert pulled["bytes"] == 16 * 1024 + 1                   # stopped at the first byte over the cap
+
+
 def test_upload_rejections_over_http(db):
     t = make_org(db)
     emp = new_employer(db, t.org.id)

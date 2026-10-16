@@ -97,6 +97,7 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S28", "SAT — Complemento de Nómina 1.2 catalog workbook + nomina12.xsd"),
     ("S29", "Reglamento de la LSS en materia de Afiliación, Clasificación de Empresas, Recaudación y "
             "Fiscalización (RACERF)"),
+    ("S30", "SAT — CFDI 4.0 catalog workbook (catCFDI: c_RegimenFiscal, c_CodigoPostal) — Anexo 20"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 

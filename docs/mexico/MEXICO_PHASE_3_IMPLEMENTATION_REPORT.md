@@ -95,7 +95,7 @@ Employer readiness never signs a gate. `liveEligible` = every item PASS **and** 
 | Work-risk premium coverage (readiness) | BLOCKED | the two rows above + a second org admin's approval |
 | Premium for a brand-new registration (before its first determination) | BLOCKED (not guessed) | the applicable statutory rule transcribed (S10/S29) |
 | Risk class / fraction validity | format only | IMSS classification catalogue (RACERF, S29) if wanted |
-| Fiscal regime / postal code catalog checks | BLOCKED | an **Active** CFDI catalog release — Phase 7. Note: `c_RegimenFiscal` / `c_CodigoPostal` are in SAT's **CFDI 4.0** catalog (catCFDI), **not** the Nómina 1.2 workbook (S28); a source for catCFDI is not in the register yet |
+| Fiscal regime / postal code catalog checks | BLOCKED | **S30** (SAT CFDI 4.0 catalog workbook, catCFDI — `c_RegimenFiscal`, `c_CodigoPostal`; added to the addendum in the follow-up) saved and VERIFIED, then loaded into an **Active** CFDI catalog release — Phase 7. These catalogs are not in the Nómina 1.2 workbook (S28) |
 | CSD subject ↔ RFC match | "not checked" | the SAT certificate attribute confirmed from a saved source (S4) |
 | SAT stamp test | BLOCKED | Phase 7 (+ Secret Manager live, §4) |
 | State ISN (CDMX) | PENDING_PACK | S22 CDMX content transcribed + `MX-ISN-CDMX-2026` Activated |
@@ -141,3 +141,36 @@ Highlights: per-org RFC uniqueness and several RFCs per tenant; one open row per
 ## 11. Staged files / suggested commit
 
 See the staging summary given with this report.
+
+## 12. Follow-up (after the Phase 3 commit)
+
+**Sensitive-file check.** `git show --name-only HEAD` and the Phase 3 commit `45d822a` contain no `.cer/.der/.pem/.p12/.pfx/.key/.db/.sqlite` file, and neither does the tracked tree. (Phase 3 was already pushed and merged to `main` by PR #101.)
+
+**`.cer` upload cap — streams and refuses early (confirmed, no code change needed).** The route refuses on a declared `Content-Length` above 16 KB before reading any body, and otherwise reads the request stream chunk by chunk with a running byte count, refusing at the first chunk that crosses 16 KB. Measured by driving the full ASGI app (all middleware) with a paced 10 MB body (160 × 64 KB chunks) — `TestClient` cannot show this because it buffers the body before calling the app:
+
+| Body | Chunks read by the route before refusing | Chunks pulled in total |
+|---|---|---|
+| 10 MB with `Content-Length` | 0 | 1 |
+| 10 MB streamed, no length | 1 | 2 |
+| exactly 16 KB + 1 byte, 1 KB chunks | stops at byte 16 385 | — |
+
+The one extra chunk is Starlette's `BaseHTTPMiddleware` (the app's existing `assisted_access_audit_middleware`) listening for a client disconnect while the 400 is written: it reads and **discards** whatever arrives in that moment and stops with the response — nothing is accumulated. Tests: `test_a_10_mb_body_is_refused_without_reading_it_all[True/False]`, `test_a_body_of_exactly_16_kb_plus_one_byte_is_refused_while_streaming`.
+
+**nginx (`deploy/nginx/zoiko-payroll.conf`, `location /api/`)** — `client_max_body_size 20m`, request buffering on (nginx default). Two consequences for the certificate route, outside the app:
+1. nginx accepts up to 20 MB before the app's 16 KB cap applies (the app still refuses; nginx just carries more than needed).
+2. nginx buffers request bodies and writes any body larger than `client_body_buffer_size` (default 8 KB/16 KB by platform) to a **temporary file on disk** before proxying — so in production a `.cer` can touch disk at the nginx layer, which correction 2 rules out.
+
+Recommended (infrastructure change, **not made** — production config is yours to change):
+```nginx
+# A regex location wins over the `location /api/` prefix block (nginx matching order); it cannot carry a URI in proxy_pass.
+location ~ ^/api/payroll/mexico/credentials/[0-9]+/certificate$ {
+    proxy_pass              http://127.0.0.1:8000;
+    proxy_set_header        Host              $host;
+    proxy_set_header        X-Real-IP         $remote_addr;
+    proxy_set_header        X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header        X-Forwarded-Proto $scheme;
+    client_max_body_size    16k;     # refuse at the edge (413), matching the app cap
+    client_body_buffer_size 16k;     # a body that fits stays in memory, never in a temp file
+}
+```
+(`client_body_buffer_size ≥ client_max_body_size` means an accepted body always fits the in-memory buffer; an oversized one is refused with 413 before it is buffered.) Until this is in place, the "never written to disk" guarantee holds for the application, not for nginx.
