@@ -22,6 +22,7 @@ export { default as ITCompliancePage } from "./ITCompliancePage";
 export { default as CHCompliancePage } from "./CHCompliancePage";
 export { default as SACompliancePage } from "./SACompliancePage";
 export { default as NLCompliancePage } from "./NLCompliancePage";
+export { default as MXCompliancePage } from "./MXCompliancePage";
 export { default as BRCompliancePage } from "./BRCompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
@@ -51,5 +52,6 @@ export const COUNTRY_CODE_TO_ROUTE = {
   CH: "switzerland",
   SA: "saudi-arabia",
   NL: "netherlands",
+  MX: "mexico",
   BR: "brazil",
 };

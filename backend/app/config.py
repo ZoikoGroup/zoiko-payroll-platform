@@ -34,6 +34,21 @@ class Settings(BaseSettings):
     # passport token. Unset → derived from PAYROLL_SECRET_KEY under a fixed
     # domain label. Set a dedicated value in production.
     HK_IDENTITY_TOKEN_KEY: str = ""
+    # Mexico (ZP-MX-ENG-001 Phase 3, MX-035): CSD / PAC / IDSE / SUA / bank
+    # credentials are stored only as references into GCP Secret Manager
+    # (comma-separated allowed schemes — production is GCP), never the secret.
+    MX_SECRET_REF_SCHEMES: str = "gcp-sm://"
+    # Readiness WARNING window before a Mexican credential/certificate expires
+    # (a product setting, not statutory content).
+    MX_CREDENTIAL_EXPIRY_WARNING_DAYS: int = 30
+    # Mexico dormancy switch (Phase 4a). False = no organisation can become
+    # Mexican and the Mexico organisation API refuses. Leave UNSET in
+    # production until G1–G8 are signed; tests / local harnesses set it.
+    MX_TENANT_ONBOARDING_ENABLED: bool = False
+    # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
+    # profile (Phase 4b, Q7). Required outside development/test once Mexico is
+    # enabled — there is NO derived fallback in production. Secret Manager.
+    MX_IDENTITY_TOKEN_KEY: str = ""
     ALGORITHM: str = "HS256"
     # Distinct issuer/token-namespace so tokens from this platform can
     # never be confused with (or accepted by) the main platform.

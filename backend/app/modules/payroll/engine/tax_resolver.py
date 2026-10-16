@@ -326,6 +326,13 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     organization could move itself into a PLANNED Singapore. Changes that do
     not enter such a country are untouched (None)."""
     from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
+
+    # Mexico (ZP-MX-ENG-001 Phase 4a): entering Mexico is refused while
+    # onboarding is disabled. Only a change INTO Mexico reaches this branch.
+    mx_refusal = entering_mexico_refusal(old_country, new_country)
+    if mx_refusal:
+        return mx_refusal
 
     new_code = get_jurisdiction_code(new_country)
     if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):

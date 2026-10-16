@@ -1,7 +1,7 @@
 """brazil_statutory_foundation_phase1
 
 Revision ID: b7a1c9e3d5f2
-Revises: f4b8d2a6c9e1
+Revises: 8b2f6d4e1a93
 Create Date: 2026-10-15
 
 Foundation tables for Brazil (CLT) Payroll (ZP-BR-ENG-001), Phase 0:
@@ -24,7 +24,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "b7a1c9e3d5f2"
-down_revision: Union[str, Sequence[str], None] = "f4b8d2a6c9e1"
+down_revision: Union[str, Sequence[str], None] = "8b2f6d4e1a93"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

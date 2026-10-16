@@ -197,6 +197,50 @@ export const reconcileNlReturn = (orgId, id) =>
 export const correctNlReturn = (orgId, id) =>
   apiFetch(`${NL_SA}/loonaangifte/${id}/correction`, { method: "POST", params: { org_id: orgId } });
 
+// ————— Mexico (ZP-MX-ENG-001) ————
+// Super Admin API: backend/app/modules/payroll/mexico_router.py. Statutory
+// pack content is read-only here (governed pack lifecycle only) and is read
+// as in force on an explicit date — omitted, the pack's own effective-from
+// is used, never today. Employer-profile calls arrive in Phase 3.
+const MX_SA = "/api/super-admin/compliance/mexico";
+const mxOn = (on, packId) => ({ params: { ...(on ? { on } : {}), ...(packId ? { pack_id: packId } : {}) } });
+
+export const getMxReadiness = () => apiFetch(`${MX_SA}/readiness`);
+export const listMxOrganizations = () => apiFetch(`${MX_SA}/organizations`);
+export const listMxEmployees = (orgId) => apiFetch(`${MX_SA}/employees`, { params: { org_id: orgId } });
+export const listMxPacks = () => apiFetch(`${MX_SA}/packs`);
+export const getMxActivationReadiness = (packRowId) => apiFetch(`${MX_SA}/packs/${packRowId}/activation-readiness`);
+export const getMxIsrTariffs = (on, packId) => apiFetch(`${MX_SA}/isr-tariffs`, mxOn(on, packId));
+export const getMxUmaMinWage = (on, packId) => apiFetch(`${MX_SA}/uma-min-wage`, mxOn(on, packId));
+export const getMxImssBranches = (on, packId) => apiFetch(`${MX_SA}/imss-branches`, mxOn(on, packId));
+export const getMxCeavSchedule = (on, packId) => apiFetch(`${MX_SA}/ceav-schedule`, mxOn(on, packId));
+export const getMxInfonavit = (on, packId) => apiFetch(`${MX_SA}/infonavit`, mxOn(on, packId));
+export const getMxBenefitsWorkweek = (on, packId) => apiFetch(`${MX_SA}/benefits-workweek`, mxOn(on, packId));
+export const listMxIsnStates = () => apiFetch(`${MX_SA}/isn-states`);
+export const listMxEarningClassifications = (orgId, on) =>
+  apiFetch(`${MX_SA}/earning-classifications`, { params: { ...(orgId ? { org_id: orgId } : {}), ...(on ? { on } : {}) } });
+export const createMxEarningClassification = (payload) =>
+  apiFetch(`${MX_SA}/earning-classifications`, { method: "POST", body: payload });
+export const approveMxEarningClassification = (id) =>
+  apiFetch(`${MX_SA}/earning-classifications/${id}/approve`, { method: "POST" });
+export const archiveMxEarningClassification = (id, reason) =>
+  apiFetch(`${MX_SA}/earning-classifications/${id}/archive`, { method: "POST", body: { reason } });
+export const listMxCfdiReleases = () => apiFetch(`${MX_SA}/cfdi-catalogs`);
+export const createMxCfdiRelease = (payload) => apiFetch(`${MX_SA}/cfdi-catalogs`, { method: "POST", body: payload });
+export const listMxCfdiEntries = (releaseId) => apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`);
+export const addMxCfdiEntry = (releaseId, payload) =>
+  apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`, { method: "POST", body: payload });
+export const transitionMxCfdiRelease = (releaseId, action) =>
+  apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/${action}`, { method: "PUT" });
+// Phase 3 — employers, READ-ONLY for Super Admin (the tenant authors its own
+// employer facts). Identifiers come back masked; readiness needs an explicit date.
+export const listMxSaEmployers = (orgId) => apiFetch(`${MX_SA}/employers`, { params: { organization_id: orgId } });
+export const getMxSaEmployer = (orgId, employerId) =>
+  apiFetch(`${MX_SA}/employers/${employerId}`, { params: { organization_id: orgId } });
+export const getMxSaEmployerReadiness = (orgId, on) =>
+  apiFetch(`${MX_SA}/employer-readiness`, { params: { organization_id: orgId, on } });
+export const getMxSaEmployerReadinessSummary = (on) => apiFetch(`${MX_SA}/employer-readiness/summary`, { params: { on } });
+
 // ————— Brazil (ZP-BR-ENG-001) ————
 // Super Admin API: backend/app/modules/payroll/brazil_router.py (Phase 2).
 // Mirrors the Netherlands block above: every organisation-scoped call takes an

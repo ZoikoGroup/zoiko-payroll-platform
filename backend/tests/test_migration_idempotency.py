@@ -31,6 +31,9 @@ _GUARDED = [
     "9f8e7d6c5b4a",  # recreate Ireland Revenue tables
     "b3c4d5e6f7a8",  # attendance composite index
     "c4d5e6f7a8b9",  # drop Ireland Revenue tables
+    "5d2c8f1a7b3e",  # Mexico mx_foundation_m1 (guarded from day one)
+    "6e4a1d9c3f27",  # Mexico mx_employer_m2 (guarded from day one)
+    "8b2f6d4e1a93",  # Mexico mx_employee_m3 (guarded, lock_timeout)
 ]
 
 
@@ -90,7 +93,7 @@ def test_every_guarded_migration_keeps_its_literal_create_table_call():
     """test_model_tables_have_migrations and deploy_migrate.sh's stamp walk
     both find a table's migration by scanning for `op.create_table('name'`.
     Guarding must indent those calls, never rename or hide them."""
-    for revision in ("74aeb450aeee", "b1c2d3e4f5a6", "e5a1c7b9d204", "9f8e7d6c5b4a"):
+    for revision in ("74aeb450aeee", "b1c2d3e4f5a6", "e5a1c7b9d204", "9f8e7d6c5b4a", "5d2c8f1a7b3e", "6e4a1d9c3f27", "8b2f6d4e1a93"):
         text = next(_VERSIONS.glob(f"{revision}_*.py")).read_text(encoding="utf-8")
         assert "op.create_table(" in text, revision
         assert "if not _has_table(" in text, revision

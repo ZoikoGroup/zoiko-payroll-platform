@@ -982,6 +982,25 @@ class PayrollContext:
     nl_period_hours: Decimal = None            # paid hours; None = contract hours
     nl_vacation_balance_before: Decimal = None
 
+    # Mexico (ZP-MX-ENG-001) — every input countries/mexico.py will read,
+    # resolved by mexico_service (Phase 6 calc_inputs). The engine BLOCKS
+    # (MexicoCalculationBlockedError) rather than guess any that are missing;
+    # all default to None so every non-MX caller is unaffected.
+    mx_payroll_date: date = None               # pay date — selects law (MX-004), never the server date
+    mx_payment_period: str = None              # ISR tariff period code (MX-008)
+    mx_profile: object = None                  # EmployeeStatutoryProfile (mx_* facts)
+    mx_employer: dict = None                   # employer profile (RFC, CSD status, ...)
+    mx_registration: dict = None               # IMSS employer registration (MX-002/MX-024)
+    mx_risk_premium: dict = None               # work-risk premium for the registration/period
+    mx_sbc: dict = None                        # SBC in force + component trace (MX-019)
+    mx_infonavit_notices: list = None          # authority notices in force (MX-031)
+    mx_isn_state_pack: dict = None             # state ISN pack for the work state (MX-045)
+    mx_classifications: dict = None            # {earning_code: multi-axis classification} (MX-005)
+    mx_labor_policy: dict = None               # employer labor policy in force (MX-051)
+    mx_ytd: dict = None                        # committed year-to-date bases
+    mx_employee_id: int = None
+    mx_organization_id: int = None
+
     # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
     # Resolved by the service layer before dispatch; engine/countries/brazil.py
     # is a pure function of its context (no DB access from the engine layer,
@@ -1631,6 +1650,10 @@ class PayrollResult:
     # minimum_wage_hourly, period_maximum, status, errors, warnings).
     # None for every non-NL country.
     nl_result: dict = None
+
+    # Mexico (ZP-MX-ENG-001) — the whole dict countries/mexico.py returns
+    # under 'mx_result'. None for every non-MX country.
+    mx_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,
