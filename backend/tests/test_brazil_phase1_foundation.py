@@ -281,7 +281,7 @@ def test_brazil_bank_routing():
 def test_2026_statutory_baseline_constants():
     """2026 constants as drafted (Decree 12.797/2025 and the 2026 tables).
     Not yet signed: Phase 1 re-verifies each against its S-source."""
-    from app.modules.payroll import brazil_content as c
+    from app.modules.payroll.engine.countries import brazil_content as c
 
     assert c.MINIMUM_WAGE_MONTHLY == Decimal("1621.00")
     assert c.MINIMUM_WAGE_DAILY == Decimal("54.04")
@@ -305,7 +305,7 @@ def test_inss_maximum_agrees_with_the_brackets():
     summed to the ceiling, rounded once (D1): 988.0914 → 988.09."""
     from decimal import ROUND_HALF_UP
 
-    from app.modules.payroll import brazil_content as c
+    from app.modules.payroll.engine.countries import brazil_content as c
 
     full = sum((upper - lower) * rate for lower, upper, rate, _ in c.INSS_2026_BRACKETS)
     assert c.MAX_INSS_CONTRIBUTION == full.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) == Decimal("988.09")
@@ -314,7 +314,8 @@ def test_inss_maximum_agrees_with_the_brackets():
 def test_seed_brazil_statutory_content_idempotency(db):
     """seed_brazil_statutory_content seeds all 14 draft rubrics once. (The
     incidence codes themselves are unverified — known gap BR-K3, Phase 1.)"""
-    from app.modules.payroll.brazil_content import STANDARD_SYSTEM_RUBRICS, seed_brazil_statutory_content
+    from app.modules.payroll.brazil_service import seed_brazil_statutory_content
+    from app.modules.payroll.engine.countries.brazil_content import STANDARD_SYSTEM_RUBRICS
     from app.modules.payroll.models import PayrollBrRubric
 
     org_id = 42

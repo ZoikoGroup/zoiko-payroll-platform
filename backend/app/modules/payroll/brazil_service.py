@@ -26,10 +26,12 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import retention_service, service
-from app.modules.payroll.engine.countries.brazil_content import GATES, SPEC
+from app.modules.payroll.engine.countries.brazil_content import (
+    BRAZIL_EFFECTIVE_DATE, GATES, SPEC, STANDARD_SYSTEM_RUBRICS,
+)
 from app.modules.payroll.engine.countries.brazil import ENGINE_VERSION, BRBlock
 from app.modules.payroll.models import (
-    PayrollBrStatutoryProfile, PayrollEmployee, PayrollRun, PayrollStatus, PayslipItem,
+    PayrollBrRubric, PayrollBrStatutoryProfile, PayrollEmployee, PayrollRun, PayrollStatus, PayslipItem,
 )
 
 BR = "BR"
@@ -134,6 +136,44 @@ def _br_profile_values(db: Session, employee, data, previous) -> dict:
 
 def _br_payslip_hold_view(item: PayslipItem) -> Optional[dict]:
     return None
+
+
+# ---- Rubric catalogue ----
+# Moved here from the removed modules/payroll/brazil_content.py so the content
+# module stays pure data. Not called by any route yet: organisation rubric
+# adoption is Phase 3, and the codes themselves are unverified (BR-K3, D6).
+
+def seed_brazil_statutory_content(db: Session, organization_id: int) -> int:
+    """Idempotently seed the standard eSocial Table 03 rubrics for one
+    organisation (by rubric_code; an existing code is never changed).
+    Returns the number of rubrics created."""
+    existing = {
+        r.rubric_code
+        for r in db.query(PayrollBrRubric.rubric_code).filter(
+            PayrollBrRubric.organization_id == organization_id).all()
+    }
+    created = 0
+    for rubric_def in STANDARD_SYSTEM_RUBRICS:
+        if rubric_def["rubric_code"] in existing:
+            continue
+        db.add(PayrollBrRubric(
+            organization_id=organization_id,
+            rubric_code=rubric_def["rubric_code"],
+            rubric_name=rubric_def["rubric_name"],
+            nature_code=rubric_def["nature_code"],
+            rubric_type=rubric_def["rubric_type"],
+            cod_inc_cp=rubric_def["cod_inc_cp"],
+            cod_inc_irrf=rubric_def["cod_inc_irrf"],
+            cod_inc_fgts=rubric_def["cod_inc_fgts"],
+            is_system_standard=True,
+            version=1,
+            valid_from=BRAZIL_EFFECTIVE_DATE,
+            valid_to=None,
+        ))
+        created += 1
+    if created:
+        db.flush()
+    return created
 
 
 # ---- Records governance (retention_service) ----

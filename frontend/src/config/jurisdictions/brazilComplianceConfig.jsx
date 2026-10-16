@@ -16,13 +16,13 @@ export function brazilExtraTabs(orgId) {
   const tab = (key, label, icon, after, render) => ({ key, label, icon, after, isVisible: always, render });
   return [
     tab("br-inss", "INSS bands", FileSpreadsheet, "overview", () => (
-      <BRStatutorySectionTab ruleType="BR_INSS_BAND" title="INSS contribution bands (empregado / empregador / RAT)" />
+      <BRStatutorySectionTab ruleType="BR_INSS_BAND" title="INSS employee contribution bands (segurado empregado)" />
     )),
     tab("br-irrf", "IRRF table", Calculator, "br-inss", () => (
-      <BRStatutorySectionTab ruleType="BR_IRRF_TABLE" title="IRRF monthly table" />
+      <BRStatutorySectionTab ruleType="BR_IRRF_TABLE" title="IRRF monthly table (rates and parcela a deduzir)" />
     )),
     tab("br-irrf-reduction", "IRRF reduction", Calculator, "br-irrf", () => (
-      <BRStatutorySectionTab ruleType="BR_IRRF_REDUCTION" title="IRRF reduction (parcela a deduzir)" />
+      <BRStatutorySectionTab ruleType="BR_IRRF_REDUCTION" title="IRRF 2026 monthly reduction (Law 15.270/2025)" />
     )),
     tab("br-min-wage", "Minimum wage", Banknote, "br-irrf-reduction", () => (
       <BRStatutorySectionTab ruleType="BR_MIN_WAGE" title="Statutory minimum wage (salário mínimo)" />

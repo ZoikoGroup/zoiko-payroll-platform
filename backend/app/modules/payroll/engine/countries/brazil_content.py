@@ -1,8 +1,10 @@
 """
-modules/payroll/brazil_content.py
----------------------------------
-Signed, hash-verified statutory content and reference constants for Brazil (CLT)
-Payroll according to specification ZP-BR-ENG-001 (Priority Market #12).
+engine/countries/brazil_content.py
+----------------------------------
+Statutory content and reference constants for Brazil (CLT) Payroll according
+to specification ZP-BR-ENG-001 (Priority Market #12) — pure data, no ORM, no
+framework (rubric seeding lives in brazil_service). The single copy: the
+former modules/payroll/brazil_content.py was removed in Phase 2.
 
 Baseline: 2026 Statutory Year
   - Minimum Wage: Decree 12.797/2025 (R$ 1,621.00/mo, R$ 54.04/day, R$ 7.37/hr)
@@ -11,12 +13,11 @@ Baseline: 2026 Statutory Year
   - Salário-Família: Decree 12.797/2025 (R$ 67.54 quota, R$ 1,980.38 ceiling)
   - Rubric Catalog: eSocial S-1.3 Table 03 Naturezas & statutory incidences
 
-Phase 0 status: DRAFT, unsigned, not read by any payroll path (the engine
-blocks). Phase 1 moves this module to engine/countries/brazil_content.py,
-dates every value by tax year, derives the INSS maximum from the brackets,
-re-verifies the rubric incidence codes against the official eSocial tables,
-and seeds Draft canonical packs. Known issues: docs/brazil/
-BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7.
+Status: DRAFT, unsigned, not read by any payroll path (the engine blocks).
+Phase 1 dates every value by tax year, derives the INSS maximum from the
+brackets, re-verifies the rubric incidence codes against the official eSocial
+tables, cites a saved, VERIFIED source for every row and seeds Draft canonical
+packs. Known issues: docs/brazil/BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7.
 """
 
 from __future__ import annotations

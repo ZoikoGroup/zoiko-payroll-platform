@@ -36,7 +36,14 @@ export default function BRGoldenVectorsTab() {
               ? ` — ${result.passed_cases ?? 0} / ${result.total_cases} passed${result.failed_cases ? `, ${result.failed_cases} failed` : ""}`
               : ""}
           </h3>
-          <Table rows={failureRows} empty="No failing vectors — every vector passed." columns={[
+          {result.status === "NO_REAL_CASES" && (
+            <p className="mb-2 text-[12px] text-foreground-muted">
+              No golden vectors are committed yet (they arrive with the Phase 5 engine). This is not a pass — a
+              Brazilian pack cannot go Active until a run reports PASS.
+            </p>
+          )}
+          <Table rows={failureRows} empty={result.status === "NO_REAL_CASES"
+            ? "No vectors were run." : "No failing vectors — every vector passed."} columns={[
             { key: "case", label: "Vector" },
             { key: "field", label: "Field" },
             { key: "expected", label: "Expected" },

@@ -104,7 +104,7 @@ def test_currency_maps():
 # ── Evidence register / content identifiers ──────────────────────────────────
 
 def test_content_identifiers_and_evidence_register():
-    from app.modules.payroll import brazil_content as c
+    from app.modules.payroll.engine.countries import brazil_content as c
 
     assert c.SPEC == "ZP-BR-ENG-001 v1.0"
     assert c.SOURCE_CODES == tuple(f"S{i}" for i in range(1, 21))

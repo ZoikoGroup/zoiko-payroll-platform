@@ -14,6 +14,15 @@ Every phase ends with: import check, full pytest, `npm run check:undefined`, fro
 - **Content is governed.** Rates live in Draft canonical packs, dated by tax year, hashed and sourced (S1–S20). Activation needs four-eyes approval plus evidence.
 - **Government channels.** eSocial / DCTFWeb / FGTS Digital are prepared, validated and reconciled. No certified-transmitter claim is made, and DARF/GFD guides are imported, never issued.
 
+## Status (2026-10-16)
+
+| Phase | Status |
+|---|---|
+| 0 | Done (`4f7c145`), merged with `main`/Mexico (`2ded87b`) |
+| 1 | Partly done: gate lists in place and a single content module. Blocked: year-dated content, signed hash, seed script and rubric codes all need saved, VERIFIED official sources (D6) |
+| 2 | Done and browser-checked locally. Only the FPAS data (D6) is open — see `BRAZIL_PHASE_2_IMPLEMENTATION_REPORT.md` |
+| 3–11 | Not started |
+
 ## 2. Phase map
 
 | Phase | Scope | Gates |
