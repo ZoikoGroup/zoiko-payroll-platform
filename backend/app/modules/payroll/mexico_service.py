@@ -538,8 +538,16 @@ def isn_states(db: Session) -> list:
 def list_organizations(db: Session) -> list:
     from app.modules.organizations.models import Organization
 
+    from app.modules.payroll.models import CompanyComplianceDetails, PayrollMxEmployerProfile
+
+    # An organisation is "Mexican" here if it has a Mexico employee, a Mexico
+    # legal employer (Phase 3 onboarding comes before any employee), or Mexico
+    # as its company jurisdiction.
     org_ids = {row[0] for row in db.query(PayrollEmployee.organization_id)
                .filter(PayrollEmployee.country_code == MX).distinct().all()}
+    org_ids |= {row[0] for row in db.query(PayrollMxEmployerProfile.organization_id).distinct().all()}
+    org_ids |= {row[0] for row in db.query(CompanyComplianceDetails.organization_id)
+                .filter(CompanyComplianceDetails.jurisdiction_country.in_((MX, "Mexico"))).all()}
     orgs = db.query(Organization).filter(Organization.id.in_(org_ids or {-1})).order_by(Organization.id).all()
     return [{"id": o.id, "name": o.organization_name} for o in orgs]
 

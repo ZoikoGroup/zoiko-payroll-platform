@@ -1,6 +1,11 @@
+import { useState } from "react";
 import { CheckCircle2, CircleAlert, XCircle } from "lucide-react";
-import { getMxActivationReadiness, getMxReadiness, listMxPacks } from "../../../service/superAdminService";
+import {
+  getMxActivationReadiness, getMxReadiness, getMxSaEmployerReadinessSummary, listMxPacks,
+} from "../../../service/superAdminService";
 import { Messages, Table, card, useLoad } from "./mxShared";
+import { ReadinessDateBar } from "./employer/employerShared";
+import { localToday } from "./employer/employerUtils";
 
 // Go-live gates G1–G8 (spec §22) and, per pack, every activation condition
 // with its reason — the answer to "why can't I activate this pack?".
@@ -39,12 +44,41 @@ function PackReadiness({ pack }) {
   );
 }
 
+// Phase 3: per gate, how many employers have every item feeding it passing,
+// and each employer's first blocking item — on an explicit date.
+function EmployerSummary() {
+  const [on, setOn] = useState(localToday);
+  const [summary, error] = useLoad(() => getMxSaEmployerReadinessSummary(on), [on]);
+  return (
+    <div className={card} data-testid="mx-employer-summary">
+      <h3 className="mb-2 text-[14px] font-semibold text-foreground">Employer readiness</h3>
+      <ReadinessDateBar on={on} onChange={setOn} />
+      <Messages error={error} />
+      {summary && (
+        <>
+          <Table rows={Object.entries(summary.perGate).map(([gate, s]) => ({ gate, ...s }))} rowKey={(r) => r.gate} columns={[
+            { key: "gate", label: "Gate" }, { key: "employers", label: "Employers with items" },
+            { key: "allPassing", label: "All items passing" },
+            { key: "definition", label: "§22 definition", render: (r) => summary.definitions[r.gate] },
+          ]} />
+          <Table rows={summary.employers} rowKey={(r) => r.employerId} empty="No Mexico employer is recorded yet." columns={[
+            { key: "organizationId", label: "Org" }, { key: "employerId", label: "Employer" },
+            { key: "liveEligible", label: "LIVE", render: (r) => (r.liveEligible ? "eligible" : "blocked") },
+            { key: "first", label: "First blocking item", render: (r) => (r.firstBlockingItem ? `${r.firstBlockingItem.label} — ${r.firstBlockingItem.detail}` : "—") },
+          ]} />
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function MXReadinessGatesTab() {
   const [data, error] = useLoad(() => getMxReadiness(), []);
   const [packs, packsError] = useLoad(() => listMxPacks(), []);
   return (
     <div className="flex flex-col gap-4">
       <Messages error={error || packsError} />
+      <EmployerSummary />
       {data && (
         <>
           <div className={card}>

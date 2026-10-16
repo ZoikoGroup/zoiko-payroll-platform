@@ -232,6 +232,14 @@ export const addMxCfdiEntry = (releaseId, payload) =>
   apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`, { method: "POST", body: payload });
 export const transitionMxCfdiRelease = (releaseId, action) =>
   apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/${action}`, { method: "PUT" });
+// Phase 3 — employers, READ-ONLY for Super Admin (the tenant authors its own
+// employer facts). Identifiers come back masked; readiness needs an explicit date.
+export const listMxSaEmployers = (orgId) => apiFetch(`${MX_SA}/employers`, { params: { organization_id: orgId } });
+export const getMxSaEmployer = (orgId, employerId) =>
+  apiFetch(`${MX_SA}/employers/${employerId}`, { params: { organization_id: orgId } });
+export const getMxSaEmployerReadiness = (orgId, on) =>
+  apiFetch(`${MX_SA}/employer-readiness`, { params: { organization_id: orgId, on } });
+export const getMxSaEmployerReadinessSummary = (on) => apiFetch(`${MX_SA}/employer-readiness/summary`, { params: { on } });
 
 // Governed collective-agreement registry (spec §9) — no national default.
 export const listCollectiveAgreements = (params) =>

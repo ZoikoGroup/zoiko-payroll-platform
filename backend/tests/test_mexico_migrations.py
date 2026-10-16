@@ -10,8 +10,12 @@ import pytest
 import sqlalchemy as sa
 
 _VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
-MX_CHAIN = [("5d2c8f1a7b3e", "f4b8d2a6c9e1")]
+MX_CHAIN = [("5d2c8f1a7b3e", "f4b8d2a6c9e1"), ("6e4a1d9c3f27", "5d2c8f1a7b3e")]
 MX_TABLES = {"payroll_mx_earning_classifications", "payroll_mx_cfdi_schema_releases", "payroll_mx_cfdi_catalog_entries"}
+# Phase 3 (mx_employer_m2) — tested in detail by test_mexico_employer_migrations.py
+MX_M2_TABLES = {"payroll_mx_employer_profiles", "payroll_mx_imss_registrations", "payroll_mx_establishments",
+                "payroll_mx_risk_premiums", "payroll_mx_isn_registrations", "payroll_mx_labor_policies",
+                "payroll_mx_credential_refs"}
 
 
 def _path(rev):
@@ -31,16 +35,17 @@ def test_mx_chain_is_linear():
         assert (module.revision, module.down_revision) == (rev, down)
 
 
-def test_every_create_is_guarded_and_literal():
-    text = _path("5d2c8f1a7b3e").read_text(encoding="utf-8")
+@pytest.mark.parametrize("rev,tables", [("5d2c8f1a7b3e", MX_TABLES), ("6e4a1d9c3f27", MX_M2_TABLES)])
+def test_every_create_is_guarded_and_literal(rev, tables):
+    text = _path(rev).read_text(encoding="utf-8")
     tree = ast.parse(text)
     created = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "create_table"
                 and isinstance(node.args[0], ast.Constant)):
             created.add(node.args[0].value)
-    assert created == MX_TABLES
-    for table in MX_TABLES:
+    assert created == tables
+    for table in tables:
         assert f'if not _has_table("{table}"):' in text
 
 
@@ -49,7 +54,7 @@ def test_models_and_migration_define_the_same_mexico_tables():
     import app.modules.payroll.models  # noqa: F401
 
     model_tables = {t for t in Base.metadata.tables if t.startswith("payroll_mx_")}
-    assert model_tables == MX_TABLES
+    assert model_tables == MX_TABLES | MX_M2_TABLES
 
 
 @pytest.fixture()

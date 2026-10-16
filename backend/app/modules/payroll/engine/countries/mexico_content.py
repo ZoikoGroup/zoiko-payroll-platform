@@ -95,6 +95,8 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S26", "Ley Federal del Trabajo (LFT)"),
     ("S27", "Ley del INFONAVIT (LIFNVT), Art. 29"),
     ("S28", "SAT — Complemento de Nómina 1.2 catalog workbook + nomina12.xsd"),
+    ("S29", "Reglamento de la LSS en materia de Afiliación, Clasificación de Empresas, Recaudación y "
+            "Fiscalización (RACERF)"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -155,6 +157,12 @@ MX_PARAMETER_KEYS = {
     "mx_aguinaldo_min_days": ("amount", "Aguinaldo — statutory minimum days", "national"),
     "mx_vacation_premium_min_pct": ("employee_pct", "Vacation premium — statutory minimum %", "national"),
     "mx_sunday_premium_min_pct": ("employee_pct", "Sunday premium — statutory minimum %", "national"),
+    # Work-risk premium range (MX-024; Phase 3 Q3) — the legal minimum and
+    # maximum an employer's registration-scoped premium may take. Expected in
+    # LSS Art. 74 (S10); confirmed from the saved text at transcription. An
+    # employer premium is never approved while either is missing.
+    "mx_risk_premium_min_pct": ("employer_pct", "Work-risk premium — legal minimum %", "national"),
+    "mx_risk_premium_max_pct": ("employer_pct", "Work-risk premium — legal maximum %", "national"),
     # State ISN (spec §15; S22 for CDMX) — lives in MX-ISN-<STATE>-2026 only.
     "mx_isn_rate_pct": ("employer_pct", "State ISN — rate", "state"),
 }
@@ -276,6 +284,23 @@ class FilingRule(NamedTuple):
 
 
 MX_FILING_CALENDAR: tuple = ()        # EMPTY until each rule is confirmed in its saved source
+
+
+# Validity window of an employer's annual work-risk premium (Phase 3 Q3,
+# MX-024/MX-026). Spec MX-026 says the premium is determined in February and
+# applies to the following IMSS premium period; the exact start (expected 1
+# March, ending the day before the next start) is transcribed from whichever
+# saved source states it — S10 (LSS), S14 or S29 (RACERF) — never from the
+# spec text. None = not transcribed: no premium can be approved.
+class RiskPremiumPeriodRule(NamedTuple):
+    start_month: int                  # first month of the premium period
+    start_day: int                    # first day; the period ends the day before the next start
+    source: str
+    source_ref: str
+    needs_g1: bool = True
+
+
+MX_RISK_PREMIUM_PERIOD: Optional[RiskPremiumPeriodRule] = None
 
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
