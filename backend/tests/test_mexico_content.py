@@ -175,7 +175,7 @@ def test_identifiers_and_scope_constants():
     assert c.MX_CEAV_SEEDED_YEAR == 2026 and c.MX_CEAV_SCHEDULE_YEARS == tuple(range(2023, 2031))
     assert all(rule.startswith("MX_") for rule in c.MX_SLAB_RULES)
     assert set(c.MX_ISN_CONTENT) == set(c.MX_ISN_STATES_IN_SCOPE) == {"CDMX"}
-    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 28))
+    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 29))      # S24–S28: addendum, pending approval
 
 
 def test_every_content_row_has_its_declared_shape():

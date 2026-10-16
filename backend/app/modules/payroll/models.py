@@ -9396,3 +9396,111 @@ def _refuse_nl_ledger_mutation(mapper, connection, target):
 for _nl_ledger in (PayrollNlVcrSnapshot, PayrollNlWkrAccumulator, PayrollNlVacationAllowanceLedger):
     _sa_event.listen(_nl_ledger, "before_update", _refuse_nl_ledger_mutation)
     _sa_event.listen(_nl_ledger, "before_delete", _refuse_nl_ledger_mutation)
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 2 foundation (migration mx_foundation_m1) ──
+
+class PayrollMxEarningClassification(Base):
+    """Per-earning-code classification on independent statutory axes (MX-005):
+    ISR, SBC, INFONAVIT, state ISN, PTU and the CFDI node/concept — never one
+    universal 'taxable' flag. organization_id NULL = platform catalogue; an
+    org row overrides it. Versioned (MX-006): a change is a new row; nothing
+    is live until a second Super Admin approves it (DRAFT -> ACTIVE), and an
+    approved newer version SUPERSEDES the old row, whose window stays
+    queryable for historical results."""
+    __tablename__ = "payroll_mx_earning_classifications"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    earning_code             = Column(String(50), nullable=False, index=True)
+    label                    = Column(String(200), nullable=False)
+    version                  = Column(Integer, nullable=False, default=1)
+    effective_from           = Column(Date, nullable=False, index=True)
+    effective_to             = Column(Date, nullable=True, index=True)
+    isr_treatment            = Column(String(10), nullable=False)        # TAXABLE / EXEMPT / PARTIAL
+    isr_exempt_rule_key      = Column(String(80), nullable=True)         # names the exemption rule; no value here
+    sbc_treatment            = Column(String(10), nullable=False)        # FIXED / VARIABLE / EXCLUDED
+    sbc_exclusion_condition  = Column(String(300), nullable=True)        # MX-022: documentary condition for EXCLUDED
+    infonavit_included       = Column(Boolean, nullable=False)
+    isn_default_included     = Column(Boolean, nullable=False)
+    isn_state_overrides      = Column(JSON, nullable=True)               # {state: bool}
+    ptu_wage_base_included   = Column(Boolean, nullable=False)
+    cfdi_node_type           = Column(String(12), nullable=False)        # PERCEPCION / DEDUCCION / OTRO_PAGO / SEPARACION
+    cfdi_concept_code        = Column(String(10), nullable=True)         # SAT catalog code (S28) — none seeded until VERIFIED
+    status                   = Column(String(12), nullable=False, default="DRAFT")
+    source_document_id       = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    approved_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at              = Column(DateTime(timezone=True), nullable=True)
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sha256                   = Column(String(64), nullable=False)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("isr_treatment IN ('TAXABLE', 'EXEMPT', 'PARTIAL')", name="ck_mx_earn_isr"),
+        sa.CheckConstraint("sbc_treatment IN ('FIXED', 'VARIABLE', 'EXCLUDED')", name="ck_mx_earn_sbc"),
+        sa.CheckConstraint("cfdi_node_type IN ('PERCEPCION', 'DEDUCCION', 'OTRO_PAGO', 'SEPARACION')",
+                           name="ck_mx_earn_cfdi_node"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED', 'ARCHIVED')", name="ck_mx_earn_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_earn_window"),
+        Index("ix_mx_earn_org_code_eff", "organization_id", "earning_code", "effective_from"),
+        # One row per (code, effective_from) in each scope. A plain UNIQUE over a
+        # nullable organization_id would let duplicate canonical rows through
+        # (NULL != NULL), so — as ContributionRate does — two partial indexes,
+        # sqlite_where mirroring postgresql_where.
+        Index("uq_mx_earn_canonical_code_eff", "earning_code", "effective_from", unique=True,
+              postgresql_where=text("organization_id IS NULL"), sqlite_where=text("organization_id IS NULL")),
+        Index("uq_mx_earn_org_code_eff", "organization_id", "earning_code", "effective_from", unique=True,
+              postgresql_where=text("organization_id IS NOT NULL"), sqlite_where=text("organization_id IS NOT NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollMxEarningClassification org={self.organization_id} {self.earning_code} v{self.version} {self.status}>"
+
+
+class PayrollMxCfdiSchemaRelease(Base):
+    """A pinned CFDI 4.0 + Complemento de Nómina 1.2 release (MX-015): XSD
+    checksum, catalog release and PAC validation version are release-
+    controlled. Only one release is ever Active; activation needs the Phase 7
+    PAC validation and is refused before then."""
+    __tablename__ = "payroll_mx_cfdi_schema_releases"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    cfdi_version            = Column(String(10), nullable=False)
+    complement_version      = Column(String(10), nullable=False)
+    revision                = Column(String(40), nullable=True)
+    xsd_checksum            = Column(String(64), nullable=True)
+    catalog_release         = Column(String(40), nullable=True)
+    pac_validation_version  = Column(String(40), nullable=True)
+    source_document_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    status                  = Column(String(12), nullable=False, default="Draft")
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('Draft', 'In Review', 'Approved', 'Active', 'Superseded')",
+                           name="ck_mx_cfdi_release_status"),
+    )
+
+
+class PayrollMxCfdiCatalogEntry(Base):
+    """One SAT catalog code inside a pinned schema release (c_TipoPercepcion,
+    c_TipoDeduccion, c_TipoOtroPago, …). Entries are added only to a Draft
+    release; an approved release's entries are frozen."""
+    __tablename__ = "payroll_mx_cfdi_catalog_entries"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    schema_release_id  = Column(Integer, ForeignKey("payroll_mx_cfdi_schema_releases.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    catalog_name       = Column(String(60), nullable=False)
+    code               = Column(String(20), nullable=False)
+    description        = Column(String(500), nullable=False)
+    valid_from         = Column(Date, nullable=True)
+    valid_to           = Column(Date, nullable=True)
+    attributes         = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("schema_release_id", "catalog_name", "code", "valid_from", name="uq_mx_cfdi_catalog_entry"),
+    )

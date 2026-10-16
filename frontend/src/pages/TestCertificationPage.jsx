@@ -29,6 +29,8 @@ const JURISDICTIONS = [
   // Netherlands (ZP-NL-ENG-001) — golden cases for loonheffing, premies,
   // vakantiegeld, WKR, minimumloon, ziektewet, transitievergoeding, pensioen.
   { value: "NL", label: "Netherlands (Belastingdienst / UWV)", fixturesPath: "backend/tests/fixtures/nl_golden/README.md" },
+  // Mexico (ZP-MX-ENG-001): no cases until the Phase 5 engine — NO_REAL_CASES is never a PASS.
+  { value: "MX", label: "Mexico (SAT / IMSS)", fixturesPath: "backend/tests/fixtures/mx_golden/README.md" },
 ];
 
 export default function TestCertificationPage() {

@@ -183,8 +183,9 @@ def test_mx_hook_module_registered_with_full_contract():
     from app.modules.payroll import jurisdiction_hooks, mexico_service
 
     assert jurisdiction_hooks._MODULES["MX"] == "app.modules.payroll.mexico_service"
-    assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS
-    for name in _HOOK_KEYS:
+    # The 13 shared hooks, plus Mexico's optional Phase 2 approval gate.
+    assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS | {"pack_approval_refusal"}
+    for name in _HOOK_KEYS | {"pack_approval_refusal"}:
         assert callable(jurisdiction_hooks.get("MX", name)), name
 
 
@@ -201,8 +202,9 @@ def test_other_hook_modules_unchanged():
 
 def test_activation_and_template_refusals(db):
     from app.modules.payroll import jurisdiction_hooks
+    from scripts.seed_mexico_canonical_packs import seed_mexico
 
-    pack = SimpleNamespace(jurisdiction_country="MX", pack_type="tax")
+    pack = seed_mexico(db, manifest={})["national"]                 # Draft, empty content
     assert "refused" in jurisdiction_hooks.call("MX", "pack_activation_refusal", db, pack)
     assert "refused" in jurisdiction_hooks.call("MX", "template_activation_refusal", db, pack, 1)
     assert jurisdiction_hooks.call("MX", "statutory_editors", db, pack) == set()
@@ -271,7 +273,7 @@ def test_readiness_route_reports_every_gate_open(db):
         r = c.get(f"{BASE}/readiness")
     assert r.status_code == 200
     body = r.json()
-    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 0
+    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 2
     assert [g["gate"] for g in body["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in body["gates"]} == {"OPEN"}
 

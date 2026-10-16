@@ -131,7 +131,8 @@ def _parse_ts(value):
 
 # ── packs and rows ──────────────────────────────────────────────────────────
 
-def _upsert_pack(db, *, pack_id, state, parent, compliance_category, change_summary) -> JurisdictionPack:
+def _upsert_pack(db, *, pack_id, state, parent, compliance_category, change_summary,
+                 source_document_id=None) -> JurisdictionPack:
     pack = (db.query(JurisdictionPack)
             .filter(JurisdictionPack.pack_id == pack_id, JurisdictionPack.version == "1.0").first())
     if pack is not None and pack.status != "Draft":
@@ -153,6 +154,9 @@ def _upsert_pack(db, *, pack_id, state, parent, compliance_category, change_summ
     pack.compliance_owner = "Super Admin — Mexico build"
     pack.change_summary = change_summary
     pack.source_references = _source_references()
+    # The pack's primary source (S2 national / S22 for a state) once it is
+    # VERIFIED and cited; the shared activation gate requires one.
+    pack.source_document_id = source_document_id
     db.flush()
     return pack
 
@@ -229,6 +233,7 @@ def _seed_national_pack(db, source_ids) -> JurisdictionPack:
         compliance_category="ISR / subsidio al empleo / IMSS / CEAV / INFONAVIT / labour floors",
         change_summary=f"v1.0 — {SPEC} federal core, transcribed only from docs/mexico/sources/ "
                        "(SOURCES_MANIFEST.csv). Every row needs_g1 — Draft pending the gate G1 statutory review.",
+        source_document_id=source_ids.get("S2"),
     )
     _rewrite_pack_rows(db, pack)
     scalars, isr, wages, ceav, week, vac = _national_rows(MAIN_FROM, MAIN_TO)
@@ -281,6 +286,7 @@ def _seed_isn_pack(db, state, national, source_ids) -> JurisdictionPack:
         compliance_category=f"Impuesto Sobre Nóminas — {state}",
         change_summary=f"v1.0 — {state} state payroll tax overlay ({SPEC} §15), separately versioned (MX-047). "
                        "Every row needs_g1 — Draft pending the gate G4 statutory review.",
+        source_document_id=source_ids.get("S22"),
     )
     _rewrite_pack_rows(db, pack)
     for order, row in enumerate(content.MX_ISN_CONTENT.get(state, ()), start=1):

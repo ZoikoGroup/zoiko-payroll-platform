@@ -94,6 +94,7 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S25", "Reglamento de la LISR (RLISR), Art. 174"),
     ("S26", "Ley Federal del Trabajo (LFT)"),
     ("S27", "Ley del INFONAVIT (LIFNVT), Art. 29"),
+    ("S28", "SAT — Complemento de Nómina 1.2 catalog workbook + nomina12.xsd"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -257,6 +258,39 @@ MX_WORKWEEK: tuple = ()
 MX_VACATION_DAYS: tuple = ()
 MX_ISN_CONTENT: dict = {state: () for state in MX_ISN_STATES_IN_SCOPE}   # state -> tuple[ScalarRow]
 
+# Filing-calendar due-date rules (Phase 2). Each is transcribed only from
+# the saved primary-law text (LISR Art. 96 / S24, LSS Arts. 39 and 74 / S10,
+# Ley del INFONAVIT Art. 35 / S27, LFT Arts. 87 and 122 / S26, current CDMX
+# Fiscal Code / S22) — a rule not confirmed in the saved text is not listed.
+class FilingRule(NamedTuple):
+    report_type: str                  # e.g. MX_ISR_WITHHOLDING
+    period_label_format: str          # e.g. "{year}-{month:02d}"
+    frequency: str                    # MONTHLY / BIMONTHLY / ANNUAL
+    due_rule: str                     # rule wording, as the law states it
+    due_day: Optional[int]            # day of the following month / of the due month
+    due_month: Optional[int]          # fixed month for ANNUAL rules
+    state: Optional[str]              # set only for a state ISN filing
+    source: str
+    source_ref: str
+    needs_g1: bool = True
+
+
+MX_FILING_CALENDAR: tuple = ()        # EMPTY until each rule is confirmed in its saved source
+
+
+# The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
+# "CDMX" code its ISN pack already uses). Geography, not statutory content.
+MX_FEDERAL_ENTITIES = (
+    ("AGU", "Aguascalientes"), ("BCN", "Baja California"), ("BCS", "Baja California Sur"),
+    ("CAM", "Campeche"), ("CHP", "Chiapas"), ("CHH", "Chihuahua"), ("CDMX", "Ciudad de México"),
+    ("COA", "Coahuila"), ("COL", "Colima"), ("DUR", "Durango"), ("GUA", "Guanajuato"), ("GRO", "Guerrero"),
+    ("HID", "Hidalgo"), ("JAL", "Jalisco"), ("MEX", "Estado de México"), ("MIC", "Michoacán"),
+    ("MOR", "Morelos"), ("NAY", "Nayarit"), ("NLE", "Nuevo León"), ("OAX", "Oaxaca"), ("PUE", "Puebla"),
+    ("QUE", "Querétaro"), ("ROO", "Quintana Roo"), ("SLP", "San Luis Potosí"), ("SIN", "Sinaloa"),
+    ("SON", "Sonora"), ("TAB", "Tabasco"), ("TAM", "Tamaulipas"), ("TLA", "Tlaxcala"), ("VER", "Veracruz"),
+    ("YUC", "Yucatán"), ("ZAC", "Zacatecas"),
+)
+
 # Documented source-wins exceptions (Phase 1 plan §6 change 1): an ISR row
 # that fails the quota-arithmetic check but matches S2 exactly.
 # (period, bracket index starting at 1) -> transcription-log reference.
@@ -380,3 +414,63 @@ IN_FORCE_HELPERS = (
     scalar_rows_in_force, uma_in_force, subsidy_in_force, min_wages_in_force, ceav_bands_in_force,
     workweek_in_force, vacation_days_in_force,
 )
+
+
+# ── Expected pack content (activation gate 1b-1) ──────────────────────────
+# The exact rows a pack must carry, derived from this module the same way the
+# seed writes them. Signatures are value tuples, compared as multisets: every
+# expected row present, nothing extra.
+
+def _d(value):
+    return None if value is None else Decimal(str(value)).normalize()
+
+
+def _overlaps(eff_from, eff_to, start, end) -> bool:
+    return (eff_from is None or eff_from <= end) and (eff_to is None or eff_to >= start)
+
+
+def rate_signature(key, employee_pct, employer_pct, flat_amount, text_value, effective_from, effective_to) -> tuple:
+    return ("RATE", key, _d(employee_pct), _d(employer_pct), _d(flat_amount), text_value or None,
+            effective_from, effective_to)
+
+
+def slab_signature(rule_type, filing_status, min_amount, max_amount, flat_amount, rate_pct, effective_from,
+                   effective_to, tax_table_number=None) -> tuple:
+    return ("SLAB", rule_type, filing_status, _d(min_amount), _d(max_amount), _d(flat_amount), _d(rate_pct),
+            effective_from, effective_to, tax_table_number or None)
+
+
+def expected_national_signatures(start: date, end: date) -> list:
+    _check_date(start)
+    _check_date(end)
+    out = [rate_signature(r.key, r.employee_pct, r.employer_pct, r.flat_amount, r.text_value, r.effective_from,
+                          r.effective_to)
+           for r in MX_SCALAR_CONTENT if _overlaps(r.effective_from, r.effective_to, start, end)]
+    out += [slab_signature(MX_ISR_TARIFF_RULE, b.period, b.lower, b.upper, b.fixed_quota, b.rate_pct,
+                           b.effective_from, b.effective_to)
+            for b in MX_ISR_TARIFFS if _overlaps(b.effective_from, b.effective_to, start, end)]
+    out += [slab_signature(MX_MIN_WAGE_RULE, w.code, "0", None, w.daily_amount, "0", w.effective_from, w.effective_to)
+            for w in MX_MIN_WAGES if _overlaps(w.effective_from, w.effective_to, start, end)]
+    out += [slab_signature(MX_CEAV_BAND_RULE, f"{b.lower_multiple}{b.lower_unit}", b.lower_multiple, b.upper_multiple,
+                           None, b.employer_pct, b.effective_from, b.effective_to, str(b.year))
+            for b in MX_CEAV_SCHEDULE if b.year == MX_CEAV_SEEDED_YEAR]
+    out += [slab_signature(MX_WORKWEEK_RULE, "WEEKLY_MAX", "0", None, w.ordinary_weekly_max_hours, "0",
+                           w.effective_from, w.effective_to)
+            for w in MX_WORKWEEK if _overlaps(w.effective_from, w.effective_to, start, end)]
+    out += [slab_signature(MX_VACATION_DAYS_RULE, f"YEAR_{v.service_year_from}", str(v.service_year_from),
+                           str(v.service_year_to) if v.service_year_to is not None else None, v.days, "0",
+                           v.effective_from, v.effective_to)
+            for v in MX_VACATION_DAYS if _overlaps(v.effective_from, v.effective_to, start, end)]
+    return out
+
+
+def expected_state_signatures(state: str, start: date, end: date) -> list:
+    _check_date(start)
+    _check_date(end)
+    return [rate_signature(r.key, r.employee_pct, r.employer_pct, r.flat_amount, r.text_value, r.effective_from,
+                           r.effective_to)
+            for r in MX_ISN_CONTENT.get(state, ()) if _overlaps(r.effective_from, r.effective_to, start, end)]
+
+
+# Art. 96 tariffs have 11 brackets per payment period (spec §4 monthly table).
+MX_ISR_BRACKETS_PER_PERIOD = 11

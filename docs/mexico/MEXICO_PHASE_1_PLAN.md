@@ -17,6 +17,7 @@ The evidence register has 27 sources: S1–S23 from spec §22, whose URLs come f
 **Batches:**
 - **Batch A** (needed for transcription): S2, S3, S6, S7, S9, S10, S11, S18, the current S22, S24, S25, S26 and S27. Cross-checks: S8, S15, S17, S19 and S20.
 - **Batch B** (evidence only, needed before G1): S1, S4, S5, S12, S13, S14, S16, S21 and S23.
+- **S28** (Phase 2 dependency, added 2026-10-15): the SAT Complemento de Nómina 1.2 catalog workbook plus `nomina12.xsd`. Files: `S28_SAT_catNomina12.xlsx` (or `.xls` as published) and `S28_SAT_nomina12.xsd`. It gates canonical earning-classification codes only, never a Phase 1 value.
 
 **Download results** (2026-10-15) are in §7. Only S22 could be fetched from this machine, and it is the wrong version. The user supplies the rest.
 
