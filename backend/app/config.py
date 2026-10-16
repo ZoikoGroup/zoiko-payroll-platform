@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # Readiness WARNING window before a Mexican credential/certificate expires
     # (a product setting, not statutory content).
     MX_CREDENTIAL_EXPIRY_WARNING_DAYS: int = 30
+    # Mexico dormancy switch (Phase 4a). False = no organisation can become
+    # Mexican and the Mexico organisation API refuses. Leave UNSET in
+    # production until G1–G8 are signed; tests / local harnesses set it.
+    MX_TENANT_ONBOARDING_ENABLED: bool = False
     ALGORITHM: str = "HS256"
     # Distinct issuer/token-namespace so tokens from this platform can
     # never be confused with (or accepted by) the main platform.

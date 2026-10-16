@@ -35800,6 +35800,12 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
                 changed = True
         if org and needs_jurisdiction_backfill:
             code = _jurisdiction_code_for_org_country(org.country)
+            # Mexico (Phase 4a): never back-fill an org INTO Mexico while
+            # onboarding is disabled — Organization.country alone must not
+            # make an organisation Mexican.
+            from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
+            if code and entering_mexico_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -35883,6 +35889,13 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
             http_status.HTTP_423_LOCKED,
             detail="The payroll jurisdiction is locked after Compliance has been configured and cannot be changed here. Changing jurisdictions requires a controlled migration process.",
         )
+    # Mexico (ZP-MX-ENG-001 Phase 4a): choosing Mexico as the payroll
+    # jurisdiction is refused while Mexico onboarding is disabled. Only a
+    # change INTO Mexico reaches this; every other value is untouched.
+    from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
+    mx_refusal = entering_mexico_refusal(row.jurisdiction_country, incoming_country)
+    if mx_refusal:
+        raise BadRequestException(mx_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",

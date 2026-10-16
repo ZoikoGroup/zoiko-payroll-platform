@@ -4,6 +4,9 @@ Run with PAYROLL_DATABASE_URL pointing at a scratch sqlite file — anything
 else is refused. Every user is a throwaway @example.com address (RFC 2606
 reserved domain) with a throwaway password that exists only in this
 scratch file; nothing here touches a shared or production database.
+
+Since Phase 4a the Mexico organisation API is dormant by default: start the
+scratch backend with MX_TENANT_ONBOARDING_ENABLED=true to re-run acceptance.py.
 """
 import os
 import sys

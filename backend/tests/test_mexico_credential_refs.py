@@ -12,8 +12,14 @@ import logging
 import pytest
 
 from tests._mx_employer_helpers import (
-    GCP_REF, ORG_BASE, http, make_org, new_employer, new_registration, principal, self_signed_cert,
+    GCP_REF, ORG_BASE, enable_mx_onboarding, http, make_org, new_employer, new_registration, principal,
+    self_signed_cert,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mx_onboarding(monkeypatch):
+    enable_mx_onboarding(monkeypatch)
 
 
 def _svc():

@@ -6,6 +6,10 @@ spec §11 panels A–H), mounted inside payroll_router as /api/payroll/mexico
 (so the subscription gate applies). Same house rules as
 netherlands_org_router.py:
 
+  * Phase 4a dormancy: a router-level guard (require_mexico_tenant) refuses
+    every route unless MX_TENANT_ONBOARDING_ENABLED is on AND the caller's
+    organisation is Mexican (payroll jurisdiction MX) — off by default and
+    in production.
   * The organisation is ALWAYS the caller's own (current_user.organization_id);
     no route takes an organisation id. Super Admin (no organisation) uses the
     read-only Super Admin Employer tab instead.
@@ -34,7 +38,24 @@ from app.modules.payroll.mexico_schemas import (
     MXLaborPolicyCreate, MXRegistrationCreate, MXRiskPremiumCreate,
 )
 
-router = APIRouter(prefix="/mexico", tags=["Mexico (Organisation)"])
+def require_mexico_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    """Phase 4a dormancy guard on EVERY route here: refused unless Mexico
+    onboarding is enabled on this platform AND the caller's organisation is
+    Mexican (its payroll jurisdiction resolves to MX). Role checks stay on
+    each route (reads: payroll operator; writes: org admin)."""
+    from app.modules.payroll import mexico_dormancy, service
+
+    if not mexico_dormancy.onboarding_enabled():
+        raise ForbiddenException(mexico_dormancy.DORMANT_MESSAGE)
+    org_id = getattr(current_user, "organization_id", None)
+    if org_id is None:
+        return                                   # each route's _org_id answers Super Admin with its own 403
+    if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
+        raise ForbiddenException("The Mexico API is only available to organisations whose payroll jurisdiction "
+                                 "is Mexico.")
+
+
+router = APIRouter(prefix="/mexico", tags=["Mexico (Organisation)"], dependencies=[Depends(require_mexico_tenant)])
 
 _CERT_CONTENT_TYPES = ("application/octet-stream", "application/pkix-cert", "application/x-x509-ca-cert",
                        "application/x-pem-file")
