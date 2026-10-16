@@ -127,7 +127,7 @@ Data placement (no new tables)
 
 ## 5. Phase 2 — Super Admin: compliance configuration, version activation, report templates
 
-Version activation: reuse the existing pack lifecycle. *[v1.1] Replace the Phase 0 unconditional activation refusal with the gate-based check (four-eyes + golden PASS + evidence), same as NL.* Modify `service.py` opt-in lists (~L8511–8530) to add MX to `_APPROVER_NOT_ACTIVATOR_COUNTRIES`, `_SELF_APPROVAL_REFUSED_COUNTRIES`, `_REFUSAL_AUDIT_COUNTRIES`, `_PACK_TRANSITION_GRAPH_COUNTRIES`, the evidence/golden-PASS gates (~L8674, ~L8718), and `_GOLDEN_FIXTURES_DIR_BY_COUNTRY` (`"MX": "mx_golden"`). Hotfix activation and audit work unchanged.
+Version activation: reuse the existing pack lifecycle. *[v1.1] Replace the Phase 0 unconditional activation refusal with the gate-based check (four-eyes + golden PASS + evidence), same as NL.* *[v1.1 Phase 2 Q2]* The Mexico gates are: (1) content present and EXACT against mexico_content (every expected row, 11 ISR brackets per period, no extras); (2) every row linked to a hashed source; (3) G1 human review of every cited source by a Super Admin who is not the activator; (4) a pack-bound golden PASS. A [PENDING G2] parameter is a WARNING, never a block — G2 needs parallel-run output and go-live is already gated by the registry's G1–G8; the engine blocks only the affected ZLFN employees (decision 4). Modify `service.py` opt-in lists (~L8511–8530) to add MX to `_APPROVER_NOT_ACTIVATOR_COUNTRIES`, `_SELF_APPROVAL_REFUSED_COUNTRIES`, `_REFUSAL_AUDIT_COUNTRIES`, `_PACK_TRANSITION_GRAPH_COUNTRIES`, the evidence/golden-PASS gates (~L8674, ~L8718), and `_GOLDEN_FIXTURES_DIR_BY_COUNTRY` (`"MX": "mx_golden"`). Hotfix activation and audit work unchanged.
 
 Report templates: modify `scripts/seed_statutory_report_templates.py` with MX templates (all Draft):
 
@@ -153,13 +153,14 @@ Report templates: modify `scripts/seed_statutory_report_templates.py` with MX te
 | MX-JOURNAL | JOURNAL | AGGREGATE |
 
 Backend (create/modify)
-- `mexico_router.py` endpoints: `GET /organizations`, `GET /employees`, `GET/POST /employer-profile`, `GET /employer-profile/readiness`, `GET /isr-tariffs`, `GET /uma-min-wage`, `GET /imss-branches`, `GET /ceav-schedule`, `GET/POST /earning-classifications`, `GET/POST /cfdi-catalogs`, `PUT /cfdi-catalogs/{id}/{action}`, `GET /isn-states`, `GET /readiness`.
+- `mexico_router.py` endpoints: `GET /organizations`, `GET /employees`, `GET /packs`, `GET /packs/{id}/activation-readiness`, `GET /isr-tariffs`, `GET /uma-min-wage`, `GET /imss-branches`, `GET /ceav-schedule`, `GET /infonavit`, `GET /benefits-workweek`, `GET/POST /earning-classifications`, `POST /earning-classifications/{id}/approve`, `POST /earning-classifications/{id}/archive`, `GET/POST /cfdi-catalogs`, `GET/POST /cfdi-catalogs/{id}/entries`, `PUT /cfdi-catalogs/{id}/{action}`, `GET /isn-states`, `GET /readiness`. Content reads take an explicit `on` date; omitted, the pack's effective_from is used — never today. *[v1.1 Phase 2 Q5]*
+- *[v1.1 Phase 2 Q1]* `GET/POST /employer-profile`, `GET /employer-profile/readiness` and the Employer tab move to **Phase 3**, with their table (`payroll_mx_employer_profiles`, `mx_employer_m2`).
 - `mexico_service.py` — Super Admin reads/writes delegating to the shared pack/rate CRUD (no parallel editor).
 
 Frontend (create)
 - `pages/JurisdictionCompliance/MXCompliancePage.jsx`, `pages/JurisdictionStatutory/MXStatutoryPage.jsx`, `pages/ReportTemplates/MXReportTemplatesPage.jsx`
-- `config/jurisdictions/mexicoComplianceConfig.jsx` — extra tabs: Employer, ISR tariffs, Subsidy & UMA, Minimum wages, IMSS & CEAV, INFONAVIT, CFDI catalogs, Benefits & workweek, Earning classification, State ISN, Sources (SourceEvidencePanel), Tests (TestCertificationPanel), Readiness G1–G8
-- `components/jurisdiction/mexico/`: `MXEmployerProfileTab`, `MXIsrTariffsTab`, `MXSubsidyUmaTab`, `MXMinimumWageTab`, `MXImssCeavTab`, `MXInfonavitTab`, `MXCfdiCatalogTab`, `MXBenefitsWorkweekTab`, `MXEarningClassificationTab`, `MXReadinessGatesTab`, `mxShared.jsx`
+- `config/jurisdictions/mexicoComplianceConfig.jsx` — extra tabs (*Employer moved to Phase 3*): ISR tariffs, Subsidy & UMA, Minimum wages, IMSS & CEAV, INFONAVIT, CFDI catalogs, Benefits & workweek, Earning classification, State ISN, Sources (SourceEvidencePanel), Tests (TestCertificationPanel), Readiness G1–G8
+- `components/jurisdiction/mexico/` (*`MXEmployerProfileTab` moved to Phase 3*): `MXIsrTariffsTab`, `MXSubsidyUmaTab`, `MXMinimumWageTab`, `MXImssCeavTab`, `MXInfonavitTab`, `MXCfdiCatalogTab`, `MXBenefitsWorkweekTab`, `MXEarningClassificationTab`, `MXReadinessGatesTab`, `mxShared.jsx`
 - `components/jurisdiction/mexico/state/` (clone of AU state accordion): `MXStateAccordionWorkspace`, `MXStateAccordionRow`, `MXStateIsnTab`, `mxStateCodes.js`
 
 Frontend (modify)
@@ -173,7 +174,7 @@ DB (new, migration `mx_foundation_m1`)
 
 | Table | Columns |
 |---|---|
-| `payroll_mx_earning_classifications` | id, organization_id (null=canonical), earning_code, label, version, effective_from, effective_to, isr_treatment (TAXABLE/EXEMPT/PARTIAL), isr_exempt_rule_key, sbc_treatment (FIXED/VARIABLE/EXCLUDED), sbc_exclusion_condition, infonavit_included, isn_default_included, isn_state_overrides (JSON), ptu_wage_base_included, cfdi_node_type (PERCEPCION/DEDUCCION/OTRO_PAGO/SEPARACION), cfdi_concept_code, status, source_document_id, approved_by_id, created_by_id, created_at, updated_at |
+| `payroll_mx_earning_classifications` *(as built: + approved_at, sha256; status DRAFT → ACTIVE → SUPERSEDED/ARCHIVED; two partial unique indexes on (code, effective_from) for canonical rows and (org, code, effective_from) for org rows)* | id, organization_id (null=canonical), earning_code, label, version, effective_from, effective_to, isr_treatment (TAXABLE/EXEMPT/PARTIAL), isr_exempt_rule_key, sbc_treatment (FIXED/VARIABLE/EXCLUDED), sbc_exclusion_condition, infonavit_included, isn_default_included, isn_state_overrides (JSON), ptu_wage_base_included, cfdi_node_type (PERCEPCION/DEDUCCION/OTRO_PAGO/SEPARACION), cfdi_concept_code, status, source_document_id, approved_by_id, created_by_id, created_at, updated_at |
 | `payroll_mx_cfdi_schema_releases` | id, cfdi_version, complement_version, revision, xsd_checksum, catalog_release, pac_validation_version, source_document_id, status, approved_by_id, created_by_id, created_at, updated_at |
 | `payroll_mx_cfdi_catalog_entries` | id, schema_release_id, catalog_name, code, description, valid_from, valid_to, attributes (JSON) |
 

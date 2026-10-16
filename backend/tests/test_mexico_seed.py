@@ -230,7 +230,10 @@ def test_governed_activation_of_a_seeded_pack_is_refused(db):
     out = seed.seed_mexico(db, manifest={})
     db.commit()
     for pack in (out["national"], out["isn"]["CDMX"]):
-        with pytest.raises(BadRequestException, match="Mexico pack activation is refused"):
+        # Phase 2: MX is on the transition graph, so Draft -> Active is refused
+        # before any Mexico gate runs (tests/test_mexico_activation_gates.py
+        # covers each Mexico gate on an Approved pack).
+        with pytest.raises(BadRequestException):
             service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
         assert db.get(m.JurisdictionPack, pack.id).status == "Draft"
 
@@ -243,17 +246,27 @@ _PRODUCTION_FILES = (
 )
 
 
+def _is_active(node):
+    return isinstance(node, ast.Constant) and node.value == "Active"
+
+
 def test_no_production_mexico_code_sets_a_status_to_active():
-    """Every "Active" string literal in Mexico production code, outside
-    docstrings, is a refusal — never an assignment or a status argument."""
+    """No Mexico production code ever WRITES "Active": no `….status = "Active"`
+    assignment, no `status="Active"` keyword, and no status-setting call given
+    "Active". (Reading a status — `== "Active"` — is fine; so is the CFDI
+    release state map, whose activate step is refused in Phase 2.)"""
     for rel in _PRODUCTION_FILES:
         tree = ast.parse((BACKEND / rel).read_text(encoding="utf-8"))
-        docstrings = {id(n.body[0].value) for n in ast.walk(tree)
-                      if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef))
-                      and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and node.value == "Active" and id(node) not in docstrings:
-                pytest.fail(f"{rel}:{node.lineno} uses the literal 'Active'")
+            if isinstance(node, ast.Assign) and _is_active(node.value) and any(
+                    isinstance(t, ast.Attribute) and t.attr == "status" for t in node.targets):
+                pytest.fail(f"{rel}:{node.lineno} assigns status = 'Active'")
+            if isinstance(node, ast.keyword) and node.arg == "status" and _is_active(node.value):
+                pytest.fail(f"{rel}:{node.value.lineno} passes status='Active'")
+            if isinstance(node, ast.Call) and any(_is_active(a) for a in node.args):
+                name = getattr(node.func, "attr", getattr(node.func, "id", ""))
+                if "status" in name.lower():
+                    pytest.fail(f"{rel}:{node.lineno} calls {name}(…, 'Active')")
 
 
 # ── test-only Active pack (fixture-inserted, never via a service function) ──

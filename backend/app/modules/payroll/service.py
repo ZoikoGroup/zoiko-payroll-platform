@@ -8511,23 +8511,23 @@ def se_activation_blockers(db: Session, pack) -> list:
 
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
-                             "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands"}
+                             "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -8674,7 +8674,7 @@ def _set_jurisdiction_pack_status(
         # SG gate verbatim — evidenced, effective-dated, golden-passing content.
         # NL opted in alongside ZP-NL-ENG-001 (fail-closed from day one): the
         # SG gate verbatim — evidenced, effective-dated, golden-passing content.
-        if row.jurisdiction_country in ("US", "SG", "SE", "HK", "SA", "NL"):
+        if row.jurisdiction_country in ("US", "SG", "SE", "HK", "SA", "NL", "MX"):
             if not row.source_document_id:
                 raise BadRequestException(
                     "This pack needs a linked Source Evidence artifact before it can go Active — "
@@ -8717,8 +8717,8 @@ def _set_jurisdiction_pack_status(
             # pass — the spec requires golden vectors passing before
             # activation (SG-003/SG-049). US keeps its existing, more
             # lenient behavior above unchanged.
-            # SE, HK, SA, NL: same strict gate — PASS required.
-            if row.jurisdiction_country in ("SG", "SE", "HK", "SA", "NL") and (latest_run is None or latest_run.status != "PASS"):
+            # SE, HK, SA, NL, MX: same strict gate — PASS required.
+            if row.jurisdiction_country in ("SG", "SE", "HK", "SA", "NL", "MX") and (latest_run is None or latest_run.status != "PASS"):
                 name = _GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]
                 raise BadRequestException(
                     f"{name} packs need a passing golden-vector certification run before they can go Active — "
@@ -8795,7 +8795,18 @@ def _set_jurisdiction_pack_status(
         # accepted by a second Super Admin, and the golden vectors re-run
         # against THIS pack's own rows — on the hotfix path too.
         if jurisdiction_hooks.has_module(row.jurisdiction_country):
-            refusal = jurisdiction_hooks.call(row.jurisdiction_country, "pack_activation_refusal", db, row)
+            # Signature-gated dispatch: a hook that declares an explicit
+            # `actor_id` parameter (Mexico: the G1 reviewer may not be the
+            # activator) receives the activating Super Admin; every other
+            # jurisdiction's hook is called exactly as before, (db, row). The
+            # gate inspects named parameters only, so a hook must declare
+            # `actor_id` by name and must NOT rely on **kwargs — a **kwargs-
+            # only hook would silently never receive the actor.
+            import inspect as _inspect
+
+            _activation_hook = jurisdiction_hooks.get(row.jurisdiction_country, "pack_activation_refusal")
+            refusal = (_activation_hook(db, row, actor_id=actor_id)
+                       if "actor_id" in _inspect.signature(_activation_hook).parameters else _activation_hook(db, row))
             if refusal:
                 raise BadRequestException(refusal)
         # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
@@ -8938,6 +8949,21 @@ def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Opti
                    "cannot be replaced; create a new pack version to approve changed content.")
         _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
         raise BadRequestException(message)
+    # Optional per-jurisdiction approval gate (Mexico only today): called only
+    # when the country module registers `pack_approval_refusal`, so every
+    # other country's approver path is unchanged — including the Draft ->
+    # Approved auto-advance below (OUT_OF_SCOPE_DEFECTS.md OOS-5). Same
+    # signature-gated `actor_id` dispatch as pack_activation_refusal: declare
+    # `actor_id` by name, never via **kwargs.
+    if row.pack_type == "tax" and jurisdiction_hooks.declares(row.jurisdiction_country, "pack_approval_refusal"):
+        import inspect as _inspect
+
+        _approval_hook = jurisdiction_hooks.get(row.jurisdiction_country, "pack_approval_refusal")
+        refusal = (_approval_hook(db, row, actor_id=actor_id)
+                   if "actor_id" in _inspect.signature(_approval_hook).parameters else _approval_hook(db, row))
+        if refusal:
+            _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, refusal)
+            raise BadRequestException(refusal)
     old_approver = row.approved_by_id
     old_status = row.status
     row.approved_by_id = actor_id
@@ -10492,6 +10518,14 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("lpt", "Local Property Tax (deducted only where instructed on the RPN)"),
         ("totals", "LPT Totals"),
     ],
+    # Mexico (ZP-MX-ENG-001 Phase 2) — the three templates with data today;
+    # every other MX template is a component-less Draft shell (default list).
+    "MX_REGISTER": [
+        ("employer_info", "Employer"), ("employee_info", "Employee"),
+        ("earnings", "Perceptions"), ("deductions", "Deductions and Net Pay"),
+    ],
+    "MX_EMPLOYER_COST": [("employer_info", "Employer"), ("employer_contributions", "Employer Cost")],
+    "MX_JOURNAL": [("employer_info", "Employer"), ("totals", "Run Totals")],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -19274,7 +19308,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden", "NL": "nl_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden", "NL": "nl_golden", "MX": "mx_golden"}
 
 
 def run_golden_test_certification(

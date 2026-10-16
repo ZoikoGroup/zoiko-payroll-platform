@@ -53,6 +53,18 @@ def get(country: str, name: str) -> Callable:
     return fn
 
 
+def declares(country: str, name: str) -> bool:
+    """True when the country's module registers hook `name` — for OPTIONAL
+    hooks that only some jurisdictions implement (e.g. Mexico's
+    pack_approval_refusal). A declared hook is then resolved through get(),
+    which still fails closed if the name points at nothing callable."""
+    country = (country or "").upper()
+    module_name = _MODULES.get(country)
+    if module_name is None:
+        return False
+    return name in getattr(importlib.import_module(module_name), "JURISDICTION_HOOKS", {})
+
+
 def call(country: str, name: str, *args, **kwargs):
     return get(country, name)(*args, **kwargs)
 
