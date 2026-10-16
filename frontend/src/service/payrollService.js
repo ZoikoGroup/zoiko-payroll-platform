@@ -2537,3 +2537,50 @@ export const listNlPaymentBatches = () => nlList(api.get(`${NL}/payment-batches`
 export const getNlPaymentBatch = (batchId) => api.get(`${NL}/payment-batches/${batchId}`);
 export const createNlSalaryBatch = (runId, payload = {}) => api.post(`${NL}/runs/${runId}/salary-batch`, payload);
 export const getNlWkr = (taxYear) => api.get(`${NL}/wkr`, { params: { tax_year: taxYear } });
+
+// ── Mexico (ZP-MX-ENG-001) — organisation API (/api/payroll/mexico), Phase 3 ──
+// Employer onboarding (spec §11, panels A–H) for YOUR organisation only.
+// No statutory value is ever sent (floors, premium range and period come
+// from governed content). Credentials are gcp-sm:// references only — never
+// a key, password or certificate private part. Readiness always takes an
+// explicit date (`on`); the server date is never used.
+const MX = "/api/payroll/mexico";
+const mxList = async (promise) => {
+  const res = await promise;
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listMxEmployers = () => mxList(api.get(`${MX}/employers`));
+export const getMxEmployer = (employerId) => api.get(`${MX}/employers/${employerId}`);
+export const createMxEmployer = (payload) => api.post(`${MX}/employers`, payload);
+export const createMxEmployerVersion = (employerId, payload) => api.post(`${MX}/employers/${employerId}/versions`, payload);
+export const createMxEstablishment = (employerId, payload) => api.post(`${MX}/employers/${employerId}/establishments`, payload);
+export const deactivateMxEstablishment = (id) => api.put(`${MX}/establishments/${id}/deactivate`, {});
+export const createMxImssRegistration = (employerId, payload) => api.post(`${MX}/employers/${employerId}/imss-registrations`, payload);
+export const setMxInfonavitModel = (registrationId, model) =>
+  api.put(`${MX}/imss-registrations/${registrationId}/infonavit`, { infonavitOperatingModel: model });
+export const closeMxImssRegistration = (id, effectiveTo) => api.put(`${MX}/imss-registrations/${id}/close`, { effectiveTo });
+export const createMxRiskPremium = (registrationId, payload) =>
+  api.post(`${MX}/imss-registrations/${registrationId}/risk-premiums`, payload);
+export const approveMxRiskPremium = (premiumId) => api.put(`${MX}/risk-premiums/${premiumId}/approve`, {});
+export const createMxIsnRegistration = (employerId, payload) => api.post(`${MX}/employers/${employerId}/isn-registrations`, payload);
+export const closeMxIsnRegistration = (id, effectiveTo) => api.put(`${MX}/isn-registrations/${id}/close`, { effectiveTo });
+export const createMxLaborPolicy = (employerId, payload) => api.post(`${MX}/employers/${employerId}/labor-policies`, payload);
+export const activateMxLaborPolicy = (policyId) => api.put(`${MX}/labor-policies/${policyId}/activate`, {});
+export const getMxFloorCheck = (policyId, on) => api.get(`${MX}/labor-policies/${policyId}/floor-check`, { params: { on } });
+export const listMxCollectiveAgreements = () => mxList(api.get(`${MX}/collective-agreements`));
+export const createMxCredential = (employerId, payload) => api.post(`${MX}/employers/${employerId}/credentials`, payload);
+export const revokeMxCredential = (credentialId) => api.put(`${MX}/credentials/${credentialId}/revoke`, {});
+export const getMxReadinessOn = (on) => api.get(`${MX}/readiness`, { params: { on } });
+
+// The PUBLIC .cer is sent as the raw request body (the server reads it in
+// memory with a 16 KB cap; multipart would spool to a temp file there).
+export async function uploadMxCertificate(credentialId, file) {
+  const res = await fetch(`${API_BASE_URL}${MX}/credentials/${credentialId}/certificate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${getAccessToken()}` },
+    body: await file.arrayBuffer(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || data?.detail || "The certificate was refused.");
+  return data;
+}

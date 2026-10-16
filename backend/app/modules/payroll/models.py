@@ -9504,3 +9504,244 @@ class PayrollMxCfdiCatalogEntry(Base):
     __table_args__ = (
         UniqueConstraint("schema_release_id", "catalog_name", "code", "valid_from", name="uq_mx_cfdi_catalog_entry"),
     )
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 3 employer onboarding (migration mx_employer_m2) ──
+# Spec §11 panels A–H. An organisation (tenant) may hold several legal
+# employers (RFCs), each with establishments, several IMSS registrations and
+# state ISN registrations (MX-002). Secrets are NEVER stored: credential rows
+# hold a gcp-sm:// reference plus public certificate metadata only (MX-035).
+# Partial unique indexes guard open rows where effective_to / status allow
+# NULLs or history, sqlite_where mirroring postgresql_where (ContributionRate).
+
+class PayrollMxEmployerProfile(Base):
+    """One version of a legal employer (panels A and B). A change is a new
+    version from its effective_from; the RFC never changes inside a chain."""
+    __tablename__ = "payroll_mx_employer_profiles"
+
+    id                          = Column(Integer, primary_key=True, index=True)
+    organization_id             = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    version                     = Column(Integer, nullable=False, default=1)
+    previous_version_id         = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="SET NULL"), nullable=True)
+    effective_from              = Column(Date, nullable=False)
+    effective_to                = Column(Date, nullable=True)
+    taxpayer_type               = Column(String(10), nullable=False)          # MORAL / FISICA
+    rfc                         = Column(String(13), nullable=False)
+    legal_name                  = Column(String(300), nullable=False)
+    fiscal_regime_code          = Column(String(10), nullable=False)          # c_RegimenFiscal, checked against an Active catalog
+    fiscal_postal_code          = Column(String(5), nullable=False)
+    fiscal_address              = Column(JSON, nullable=True)
+    place_of_issue_postal_code  = Column(String(5), nullable=False)
+    withholding_obligation_active = Column(Boolean, nullable=False)
+    tax_contact                 = Column(JSON, nullable=True)
+    bank_contact                = Column(JSON, nullable=True)
+    pac_provider                = Column(String(100), nullable=True)
+    pac_environment             = Column(String(12), nullable=True)           # SANDBOX / PRODUCTION
+    stamp_test_status           = Column(String(12), nullable=False, default="NOT_TESTED")   # set only by Phase 7
+    stamp_test_uuid             = Column(String(40), nullable=True)
+    stamp_tested_at             = Column(DateTime(timezone=True), nullable=True)
+    created_by_id               = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                  = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("taxpayer_type IN ('MORAL', 'FISICA')", name="ck_mx_employer_taxpayer"),
+        sa.CheckConstraint("pac_environment IS NULL OR pac_environment IN ('SANDBOX', 'PRODUCTION')",
+                           name="ck_mx_employer_pac_env"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_employer_window"),
+        Index("uq_mx_employer_org_rfc_open", "organization_id", "rfc", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        UniqueConstraint("organization_id", "rfc", "effective_from", name="uq_mx_employer_org_rfc_from"),
+    )
+
+
+class PayrollMxImssRegistration(Base):
+    """One IMSS employer registration (Registro Patronal) — panel C, plus the
+    INFONAVIT operating model of panel D. Contribution parameters such as the
+    work-risk premium are registration-scoped (MX-024)."""
+    __tablename__ = "payroll_mx_imss_registrations"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id      = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    registro_patronal        = Column(String(11), nullable=False)
+    risk_class               = Column(String(10), nullable=False)
+    fraction                 = Column(String(10), nullable=False)
+    subdelegation_code       = Column(String(20), nullable=True)
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)
+    status                   = Column(String(10), nullable=False, default="ACTIVE")    # ACTIVE / CLOSED
+    infonavit_operating_model = Column(String(10), nullable=True)                     # SUA / SIPARE
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('ACTIVE', 'CLOSED')", name="ck_mx_imss_status"),
+        sa.CheckConstraint("infonavit_operating_model IS NULL OR infonavit_operating_model IN ('SUA', 'SIPARE')",
+                           name="ck_mx_imss_infonavit_model"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_imss_window"),
+        Index("uq_mx_imss_org_rp_open", "organization_id", "registro_patronal", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        UniqueConstraint("organization_id", "registro_patronal", "effective_from", name="uq_mx_imss_org_rp_from"),
+    )
+
+
+class PayrollMxEstablishment(Base):
+    """A workplace of a legal employer. The minimum-wage zone is DERIVED from
+    content (MX_ZLFN_MUNICIPALITIES), never typed."""
+    __tablename__ = "payroll_mx_establishments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    name                  = Column(String(200), nullable=False)
+    state_code            = Column(String(5), nullable=False)
+    municipality          = Column(String(200), nullable=False)
+    municipality_code     = Column(String(10), nullable=True)
+    postal_code           = Column(String(5), nullable=False)
+    imss_registration_id  = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_active             = Column(Boolean, nullable=False, default=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_mx_estab_profile_name_active", "employer_profile_id", "name", unique=True,
+              postgresql_where=text("is_active"), sqlite_where=text("is_active = 1")),
+    )
+
+
+class PayrollMxRiskPremium(Base):
+    """An employer's work-risk premium for one premium period of one IMSS
+    registration (MX-024/MX-026). The rate is tenant evidence (the annual
+    determination), approved four-eyes by a second org admin; the period
+    shape and the legal range come from content and block approval while
+    missing."""
+    __tablename__ = "payroll_mx_risk_premiums"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    determination_year    = Column(Integer, nullable=False)
+    premium_rate_pct      = Column(Numeric(9, 5), nullable=False)
+    period_from           = Column(Date, nullable=False)
+    period_to             = Column(Date, nullable=False)
+    evidence_document_id  = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status                = Column(String(12), nullable=False, default="DRAFT")     # DRAFT / ACTIVE / SUPERSEDED
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    approved_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_mx_riskprem_status"),
+        sa.CheckConstraint("period_to >= period_from", name="ck_mx_riskprem_window"),
+        Index("uq_mx_riskprem_reg_period_active", "registration_id", "period_from", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+
+class PayrollMxIsnRegistration(Base):
+    """A state payroll-tax (ISN) registration — panel E. Only states in
+    scope may register; it is effective only while the state's ISN pack is
+    Active, which is computed on read and never stored (MX-045)."""
+    __tablename__ = "payroll_mx_isn_registrations"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    state_code            = Column(String(5), nullable=False)
+    local_account_number  = Column(String(40), nullable=False)
+    jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=False)
+    return_frequency      = Column(String(12), nullable=True)          # from state content only; none transcribed yet
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    status                = Column(String(8), nullable=False, default="OPEN")    # OPEN / CLOSED
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'CLOSED')", name="ck_mx_isn_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_isn_window"),
+        Index("uq_mx_isn_profile_state_open", "employer_profile_id", "state_code", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        UniqueConstraint("employer_profile_id", "state_code", "effective_from", name="uq_mx_isn_profile_state_from"),
+    )
+
+
+class PayrollMxLaborPolicy(Base):
+    """An employer's workweek and benefit policy — panels F and G. Checked
+    against the statutory floors of the Active national pack (MX-051): it
+    may improve on a floor, never go below it; activation needs PASS."""
+    __tablename__ = "payroll_mx_labor_policies"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id     = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    collective_agreement_id = Column(Integer, ForeignKey("payroll_collective_agreements.id", ondelete="SET NULL"), nullable=True)
+    version                 = Column(Integer, nullable=False, default=1)
+    effective_from          = Column(Date, nullable=False)
+    effective_to            = Column(Date, nullable=True)
+    ordinary_weekly_hours   = Column(Numeric(5, 2), nullable=False)
+    weekly_schedule         = Column(JSON, nullable=True)
+    aguinaldo_days          = Column(Numeric(6, 2), nullable=False)
+    vacation_policy         = Column(JSON, nullable=False)          # [{serviceYearFrom, serviceYearTo, days}]
+    vacation_premium_pct    = Column(Numeric(7, 3), nullable=False)
+    sunday_premium_pct      = Column(Numeric(7, 3), nullable=False)
+    savings_fund            = Column(JSON, nullable=True)
+    food_vouchers           = Column(JSON, nullable=True)
+    other_benefits          = Column(JSON, nullable=True)
+    time_record_dependency  = Column(JSON, nullable=True)           # {required: bool, interfaceVersion: str}
+    floor_check_status      = Column(String(16), nullable=False, default="BLOCKED_CONTENT")
+    floor_check_detail      = Column(JSON, nullable=True)
+    status                  = Column(String(12), nullable=False, default="DRAFT")    # DRAFT / ACTIVE / SUPERSEDED
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_mx_laborpol_status"),
+        sa.CheckConstraint("floor_check_status IN ('PASS', 'FAIL', 'BLOCKED_CONTENT')", name="ck_mx_laborpol_floor"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_laborpol_window"),
+        Index("uq_mx_laborpol_profile_open", "employer_profile_id", unique=True,
+              postgresql_where=text("effective_to IS NULL AND status = 'ACTIVE'"),
+              sqlite_where=text("effective_to IS NULL AND status = 'ACTIVE'")),
+        UniqueConstraint("employer_profile_id", "effective_from", "version", name="uq_mx_laborpol_profile_from"),
+    )
+
+
+class PayrollMxCredentialRef(Base):
+    """A reference to a secret held in GCP Secret Manager (gcp-sm://) plus
+    public certificate metadata — never the secret itself (MX-035). CSD/PAC
+    belong to the legal employer; IDSE/SUA to an IMSS registration; BANK to
+    either. Rotation keeps history (ACTIVE -> ROTATED)."""
+    __tablename__ = "payroll_mx_credential_refs"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    imss_registration_id  = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="CASCADE"), nullable=True, index=True)
+    kind                  = Column(String(8), nullable=False)          # CSD / PAC / IDSE / SUA / BANK
+    secret_ref            = Column(String(300), nullable=False)
+    certificate_serial    = Column(String(80), nullable=True)
+    fingerprint_sha256    = Column(String(64), nullable=True)
+    subject_summary       = Column(String(500), nullable=True)
+    valid_from            = Column(DateTime(timezone=True), nullable=True)
+    valid_to              = Column(DateTime(timezone=True), nullable=True)
+    status                = Column(String(8), nullable=False, default="ACTIVE")  # ACTIVE / ROTATED / REVOKED
+    rotated_from_id       = Column(Integer, ForeignKey("payroll_mx_credential_refs.id", ondelete="SET NULL"), nullable=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("kind IN ('CSD', 'PAC', 'IDSE', 'SUA', 'BANK')", name="ck_mx_cred_kind"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'ROTATED', 'REVOKED')", name="ck_mx_cred_status"),
+        Index("uq_mx_cred_profile_kind_active", "employer_profile_id", "kind", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND imss_registration_id IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND imss_registration_id IS NULL")),
+        Index("uq_mx_cred_registration_kind_active", "imss_registration_id", "kind", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND imss_registration_id IS NOT NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND imss_registration_id IS NOT NULL")),
+    )

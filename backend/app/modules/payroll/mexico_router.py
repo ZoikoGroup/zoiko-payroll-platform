@@ -179,3 +179,38 @@ def add_entry(release_id: int, body: MXCatalogEntryCreate, current_user=Depends(
 def transition_release(release_id: int, action: str, current_user=Depends(get_current_super_admin),
                        db: Session = Depends(get_db)):
     return _mx().transition_release(db, release_id, action, _actor(current_user))
+
+
+# ── Phase 3 — employers, read-only (tenant facts are authored by the org; Q5) ──
+
+def _emp():
+    from app.modules.payroll import mexico_employer_service
+
+    return mexico_employer_service
+
+
+@router.get("/employers", summary="One organisation's legal employers (read-only, RFC masked)")
+def sa_list_employers(organization_id: int = Query(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    _mx()._org(db, organization_id)
+    return _emp().list_employers(db, organization_id, masked=True)
+
+
+@router.get("/employers/{employer_id}", summary="One legal employer with panels A–G (read-only, identifiers masked)")
+def sa_employer_detail(employer_id: int, organization_id: int = Query(...),
+                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    _mx()._org(db, organization_id)
+    return _emp().employer_detail(db, organization_id, employer_id, masked=True)
+
+
+@router.get("/employer-readiness", summary="One organisation's employer readiness on an explicit date (read-only)")
+def sa_employer_readiness(organization_id: int = Query(...), on: date = Query(...),
+                          current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    _mx()._org(db, organization_id)
+    return _emp().organisation_readiness(db, organization_id, on, masked=True)
+
+
+@router.get("/employer-readiness/summary", summary="Per-gate employer readiness counts on an explicit date")
+def sa_employer_readiness_summary(on: date = Query(...), current_user=Depends(get_current_super_admin),
+                                  db: Session = Depends(get_db)):
+    return _emp().readiness_summary(db, on)
