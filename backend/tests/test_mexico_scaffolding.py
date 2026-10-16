@@ -197,6 +197,8 @@ def test_other_hook_modules_unchanged():
         "SA": "app.modules.payroll.saudi_arabia_service",
         "NL": "app.modules.payroll.netherlands_service",
         "MX": "app.modules.payroll.mexico_service",
+        # Brazil (ZP-BR-ENG-001) Phase 0, merged from venu — fail-closed module.
+        "BR": "app.modules.payroll.brazil_service",
     }
 
 

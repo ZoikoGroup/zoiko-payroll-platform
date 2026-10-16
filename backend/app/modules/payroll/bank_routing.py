@@ -49,7 +49,7 @@ from typing import List, Optional
 # Mexico (ZP-MX-ENG-001 Phase 4b): the 18-digit CLABE on the SPEI rail —
 # inert until a Mexican employee can exist (MX_TENANT_ONBOARDING_ENABLED);
 # no Mexican payment file exists before Phase 10.
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX")
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -95,6 +95,11 @@ ROUTING_FIELDS = {
         {"key": "bic", "label": "BIC"},
     ],
     "MX": [{"key": "clabe", "label": "CLABE"}],
+    "BR": [
+        {"key": "pix_key", "label": "PIX Key"},
+        {"key": "bank_compe", "label": "Bank COMPE"},
+        {"key": "bank_agency", "label": "Agency"},
+    ],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -120,6 +125,7 @@ BTF_ROUTING_LABEL = {
     "TT": "Bank/Branch Code",
     "BS": "ACH Routing #",
     "PR": "ACH Routing #",
+    "BR": "PIX Key / COMPE",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -142,6 +148,7 @@ PAYMENT_MODE_LABEL = {
     "TT": "EFT",
     "BS": "ACH",
     "PR": "ACH",
+    "BR": "PIX / TED",
 }
 
 

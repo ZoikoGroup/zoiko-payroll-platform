@@ -120,6 +120,18 @@ def calculate_payroll(
             "Mexico payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "BR" and key == "simple":
+        # Brazil CLT (ZP-BR-ENG-001): simple mode would silently skip
+        # progressive INSS, IRRF/reduction, FGTS, Salário-Família and all
+        # employer contributions — all mandatory, no fallback. BR-001 requires
+        # the engine to fail-closed rather than return a plausible but wrong net.
+        from app.modules.payroll.engine.countries.brazil import BrazilCalculationBlockedError
+
+        raise BrazilCalculationBlockedError(
+            "BR_SIMPLE_MODE_UNSUPPORTED",
+            "Brazil CLT payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -242,6 +254,7 @@ def build_context_from_employee(
     saudi_inputs: dict | None = None,
     netherlands_inputs: dict | None = None,
     mexico_inputs: dict | None = None,
+    brazil_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -435,4 +448,8 @@ def build_context_from_employee(
         # Mexico (ZP-MX-ENG-001): the mx_* context fields resolved by
         # mexico_service (Phase 6).
         **(mexico_inputs or {}),
+        # Brazil (ZP-BR-ENG-001): the brazil_* context fields (brazil_inputs,
+        # brazil_is_apprentice, ...) resolved by brazil_service (Phase 6
+        # calc_inputs). Keys are PayrollContext field names.
+        **(brazil_inputs or {}),
     )

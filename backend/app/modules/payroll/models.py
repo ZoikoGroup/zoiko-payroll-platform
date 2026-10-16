@@ -1930,6 +1930,10 @@ class PayslipItem(Base):
     # Netherlands (ZP-NL-ENG-001): frozen NL inputs + nl_result, replayed by
     # corrections exactly as computed (never reconstructed). NULL for non-NL.
     nl_calculation_snapshot = Column(JSON, nullable=True)
+    # Brazil (ZP-BR-ENG-001): frozen BR inputs + br_result (content hash,
+    # trace), replayed exactly as computed. Written from Phase 6; NULL for
+    # non-BR payslips.
+    br_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -1952,6 +1956,20 @@ class PayslipItem(Base):
     # Also excluded from taxable salary under the New Regime only — see
     # india.py's _calculate_annual_tax_in.
     employer_nps            = Column(Numeric(12, 2), default=0, server_default="0")
+
+    # Brazil (CLT - ZP-BR-ENG-001): statutory bases and deductions snapshot
+    br_base_inss                  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_inss_employee              = Column(Numeric(12, 2), default=0, server_default="0")
+    br_base_irrf                  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_irrf                       = Column(Numeric(12, 2), default=0, server_default="0")
+    br_irrf_reduction             = Column(Numeric(12, 2), default=0, server_default="0")
+    br_salario_familia            = Column(Numeric(12, 2), default=0, server_default="0")
+    br_vale_transporte_deduction  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_base_fgts                  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_fgts_deposit               = Column(Numeric(12, 2), default=0, server_default="0")
+    br_cpp_employer               = Column(Numeric(12, 2), default=0, server_default="0")
+    br_rat_adjusted               = Column(Numeric(12, 2), default=0, server_default="0")
+    br_third_parties              = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -9814,3 +9832,151 @@ class PayrollMxInfonavitNotice(Base):
               postgresql_where=text("effective_to IS NULL AND status = 'RECORDED'"),
               sqlite_where=text("effective_to IS NULL AND status = 'RECORDED'")),
     )
+
+
+# ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────
+
+class PayrollBrEmployerProfile(Base):
+    """Brazilian legal employer profile and eSocial master data (Event S-1000)."""
+    __tablename__ = "payroll_br_employer_profiles"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    cnpj_root             = Column(String(8), nullable=False)  # Alphanumeric-aware for post-2026 format (Rule BR-038)
+    legal_name            = Column(String(255), nullable=False)
+    trade_name            = Column(String(255), nullable=True)
+    tax_classification    = Column(String(2), nullable=False)  # eSocial Table 08 (e.g. '01', '99')
+    cnae_preponderant     = Column(String(7), nullable=False)
+    cprb_opted            = Column(Boolean, nullable=False, default=False)
+    cprb_rate_pct         = Column(Numeric(5, 2), nullable=True)
+    esocial_environment   = Column(String(25), nullable=False, default="RESTRICTED_PRODUCTION")
+    esocial_active_version= Column(String(10), nullable=False, default="S-1.3")
+    esocial_cert_alias    = Column(String(255), nullable=True)
+    contact_name          = Column(String(120), nullable=False)
+    contact_cpf           = Column(String(11), nullable=False)
+    contact_email         = Column(String(120), nullable=False)
+    contact_phone         = Column(String(20), nullable=True)
+    status                = Column(String(20), nullable=False, default="DRAFT")
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    establishments        = relationship("PayrollBrEstablishment", back_populates="employer_profile", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_br_employer_org"),  # one legal employer per organisation
+        sa.CheckConstraint("esocial_environment IN ('PRODUCTION', 'RESTRICTED_PRODUCTION')", name="ck_br_employer_env"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUSPENDED')", name="ck_br_employer_status"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrEmployerProfile org={self.organization_id} cnpj_root={self.cnpj_root} status={self.status}>"
+
+
+class PayrollBrEstablishment(Base):
+    """Brazilian establishment (filial/obra) and tax lotação (Events S-1005 / S-1020)."""
+    __tablename__ = "payroll_br_establishments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_br_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Unique per employer, not platform-wide: a global unique constraint would
+    # tell one tenant that another tenant already uses a CNPJ.
+    cnpj                  = Column(String(14), nullable=False, index=True)
+    establishment_name    = Column(String(255), nullable=False)
+    is_headquarters       = Column(Boolean, nullable=False, default=False)
+    cnae                  = Column(String(7), nullable=False)
+    rat_pct               = Column(Numeric(4, 2), nullable=False)  # 1.00, 2.00, 3.00
+    fap_factor            = Column(Numeric(5, 4), nullable=False, default=1.0000)  # 0.5000 to 2.0000
+    fpas_code             = Column(String(3), nullable=False)  # eSocial Table 04
+    third_party_code      = Column(String(4), nullable=False)  # Outras Entidades
+    third_party_pct       = Column(Numeric(5, 2), nullable=False)
+    lotacao_code          = Column(String(30), nullable=False)
+    postal_code           = Column(String(8), nullable=False)
+    street_address        = Column(String(255), nullable=False)
+    neighborhood          = Column(String(100), nullable=False)
+    city_ibge_code        = Column(String(7), nullable=False)
+    state_uf              = Column(String(2), nullable=False)
+    judicial_process_id   = Column(String(50), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    employer_profile      = relationship("PayrollBrEmployerProfile", back_populates="establishments")
+    statutory_profiles    = relationship("PayrollBrStatutoryProfile", back_populates="establishment")
+
+    __table_args__ = (
+        UniqueConstraint("employer_profile_id", "cnpj", name="uq_br_establishment_employer_cnpj"),
+        sa.CheckConstraint("rat_pct IN (1.00, 2.00, 3.00)", name="ck_br_establishment_rat"),
+        sa.CheckConstraint("fap_factor >= 0.5000 AND fap_factor <= 2.0000", name="ck_br_establishment_fap"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrEstablishment id={self.id} cnpj={self.cnpj} rat={self.rat_pct} fap={self.fap_factor}>"
+
+
+class PayrollBrRubric(Base):
+    """eSocial Table 03 rubrics and statutory multi-dimensional incidence matrix (Rule BR-005)."""
+    __tablename__ = "payroll_br_rubrics"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    rubric_code           = Column(String(30), nullable=False)
+    rubric_name           = Column(String(255), nullable=False)
+    nature_code           = Column(String(4), nullable=False)  # eSocial Table 03
+    rubric_type           = Column(String(15), nullable=False)  # EARNING / DEDUCTION / INFORMATIONAL
+    cod_inc_cp            = Column(String(2), nullable=False)  # Social Security incidence
+    cod_inc_irrf          = Column(String(2), nullable=False)  # IRRF incidence
+    cod_inc_fgts          = Column(String(2), nullable=False)  # FGTS incidence
+    is_system_standard    = Column(Boolean, nullable=False, default=False)
+    version               = Column(SmallInteger, nullable=False, default=1)
+    valid_from            = Column(Date, nullable=False)
+    valid_to              = Column(Date, nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "rubric_code", "version", name="uq_br_rubric_org_code_ver"),
+        sa.CheckConstraint("rubric_type IN ('EARNING', 'DEDUCTION', 'INFORMATIONAL')", name="ck_br_rubric_type"),
+        Index("ix_br_rubric_lookup", "organization_id", "rubric_code", "valid_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrRubric org={self.organization_id} code={self.rubric_code} nature={self.nature_code}>"
+
+
+class PayrollBrStatutoryProfile(Base):
+    """Effective-dated employee contract, eSocial category, and withholding configuration."""
+    __tablename__ = "payroll_br_statutory_profiles"
+
+    id                                = Column(Integer, primary_key=True, index=True)
+    employee_id                       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    establishment_id                  = Column(Integer, ForeignKey("payroll_br_establishments.id", ondelete="RESTRICT"), nullable=False, index=True)
+    effective_from                    = Column(Date, nullable=False)
+    effective_to                      = Column(Date, nullable=True)
+    esocial_category                  = Column(String(3), nullable=False, default="101")  # 101 CLT Ordinary, 103 Apprentice
+    cbo_code                          = Column(String(6), nullable=False)
+    contract_type                     = Column(String(20), nullable=False, default="INDEFINITE")  # INDEFINITE / DETERMINED / INTERMITTENT
+    weekly_hours                      = Column(Numeric(4, 2), nullable=False, default=44.00)
+    concurrent_inss_flag              = Column(Boolean, nullable=False, default=False)
+    concurrent_inss_base_external     = Column(Numeric(12, 2), nullable=False, default=0.00)
+    concurrent_inss_deducted_external = Column(Numeric(12, 2), nullable=False, default=0.00)
+    irrf_dependents_count             = Column(SmallInteger, nullable=False, default=0)
+    salario_familia_dependents_count  = Column(SmallInteger, nullable=False, default=0)
+    simplified_irrf_opt_out           = Column(Boolean, nullable=False, default=False)
+    alimony_deduction_fixed           = Column(Numeric(12, 2), nullable=False, default=0.00)
+    alimony_deduction_pct             = Column(Numeric(5, 2), nullable=False, default=0.00)
+    vale_transporte_elected           = Column(Boolean, nullable=False, default=False)
+    vale_transporte_daily_cost        = Column(Numeric(8, 2), nullable=False, default=0.00)
+    status                            = Column(String(20), nullable=False, default="ACTIVE")
+    created_at                        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    establishment                     = relationship("PayrollBrEstablishment", back_populates="statutory_profiles")
+
+    __table_args__ = (
+        sa.CheckConstraint("contract_type IN ('INDEFINITE', 'DETERMINED', 'INTERMITTENT')", name="ck_br_contract_type"),
+        # Launch wedge (spec §1): ordinary CLT employee (101) and apprentice (103) only.
+        sa.CheckConstraint("esocial_category IN ('101', '103')", name="ck_br_stat_profile_category"),
+        sa.CheckConstraint("weekly_hours > 0 AND weekly_hours <= 44", name="ck_br_stat_profile_weekly_hours"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'ON_LEAVE', 'TERMINATED')", name="ck_br_stat_profile_status"),
+        Index("ix_br_stat_profile_emp_dates", "employee_id", "effective_from", "effective_to"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrStatutoryProfile id={self.id} emp={self.employee_id} cat={self.esocial_category} status={self.status}>"
+

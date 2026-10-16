@@ -6,6 +6,7 @@ export { default as CAStatutoryPage } from "./CAStatutoryPage";
 export { default as DEStatutoryPage } from "./DEStatutoryPage";
 export { default as NLStatutoryPage } from "./NLStatutoryPage";
 export { default as MXStatutoryPage } from "./MXStatutoryPage";
+export { default as BRStatutoryPage } from "./BRStatutoryPage";
 export { default as BBStatutoryPage } from "./BBStatutoryPage";
 export { default as KYStatutoryPage } from "./KYStatutoryPage";
 export { default as DOStatutoryPage } from "./DOStatutoryPage";

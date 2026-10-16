@@ -5,6 +5,7 @@ export { default as CAReportTemplatesPage } from "./CAReportTemplatesPage";
 export { default as AUReportTemplatesPage } from "./AUReportTemplatesPage";
 export { default as NLReportTemplatesPage } from "./NLReportTemplatesPage";
 export { default as MXReportTemplatesPage } from "./MXReportTemplatesPage";
+export { default as BRReportTemplatesPage } from "./BRReportTemplatesPage";
 // Caribbean 7 (2026-09-22, Group D gap-closure) — one seeded PER_EMPLOYEE
 // statutory pay-component template each (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY + _REPORT_COMPONENTS_BY_TYPE), same pattern
@@ -63,4 +64,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   CH: "switzerland",
   NL: "netherlands",
   MX: "mexico",
+  BR: "brazil",
 };

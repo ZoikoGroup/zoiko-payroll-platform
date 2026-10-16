@@ -96,7 +96,8 @@ def test_strategy_map_and_message_unchanged():
     from app.modules.payroll.employee_validation import _DORMANT_STRATEGIES, _STRATEGIES
 
     assert list(_STRATEGIES) == ["IN", "US", "UK", "AU", "CA", "DE", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR",
-                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL"]
+                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL",
+                                 "BR"]  # Brazil (ZP-BR-ENG-001), merged from venu
     assert list(_DORMANT_STRATEGIES) == ["MX"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())
 
@@ -132,8 +133,9 @@ def test_sensitive_field_set_only_gains_mexican_keys():
 def test_bank_routing_other_countries_unchanged():
     from app.modules.payroll import bank_routing as br
 
-    assert br.ROUTING_COUNTRIES[:-1] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
-                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-1] == "MX"
+    # Brazil (ZP-BR-ENG-001) follows Mexico at the end, merged from venu.
+    assert br.ROUTING_COUNTRIES[:-2] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
+                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-2:] == ("MX", "BR")
     assert br.ROUTING_FIELDS["MX"] == [{"key": "clabe", "label": "CLABE"}]
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing

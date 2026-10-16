@@ -1507,6 +1507,154 @@ class MXEmployeeValidation(EmployeeValidationStrategy):
             raise BadRequestException("RFC: the six digits after the letters must be a real date (YYMMDD).")
 
 
+# ── Brazil (CLT - ZP-BR-ENG-001) ───────────────────────────────────────────
+
+def cpf_is_valid(value) -> bool:
+    """Validates Brazilian CPF (Cadastro de Pessoas Físicas) using Modulo 11 check digits.
+    Rejects values that are not 11 digits or where all digits are identical."""
+    raw = re.sub(r"[\s.-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{11}", raw):
+        return False
+    # Reject identical digits (e.g. 111.111.111-11)
+    if len(set(raw)) == 1:
+        return False
+
+    # First check digit
+    s1 = sum(int(d) * (10 - i) for i, d in enumerate(raw[:9]))
+    r1 = (s1 * 10) % 11
+    d1 = 0 if r1 == 10 else r1
+    if int(raw[9]) != d1:
+        return False
+
+    # Second check digit
+    s2 = sum(int(d) * (11 - i) for i, d in enumerate(raw[:10]))
+    r2 = (s2 * 10) % 11
+    d2 = 0 if r2 == 10 else r2
+    return int(raw[10]) == d2
+
+
+def pis_is_valid(value) -> bool:
+    """Validates Brazilian PIS/PASEP/NIS (11 digits) using Modulo 11 check digit."""
+    raw = re.sub(r"[\s.-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{11}", raw):
+        return False
+    weights = (3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    s = sum(int(d) * w for d, w in zip(raw[:10], weights))
+    rest = s % 11
+    dv = 0 if rest < 2 else 11 - rest
+    return int(raw[10]) == dv
+
+
+def cnpj_is_valid(value) -> bool:
+    """Validates Brazilian CNPJ (14 characters) with Modulo 11 check digits.
+    Supports standard numeric CNPJ and post-2026 alphanumeric CNPJ format (Rule BR-038)."""
+    raw = re.sub(r"[\s./-]", "", str(value or "")).upper()
+    if not re.fullmatch(r"[0-9A-Z]{14}", raw):
+        return False
+    # Character conversion: ASCII - 48 ('0'-'9' -> 0-9, 'A'-'Z' -> 17-42)
+    def char_val(c):
+        return ord(c) - 48
+
+    # First check digit
+    weights1 = (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    s1 = sum(char_val(c) * w for c, w in zip(raw[:12], weights1))
+    r1 = s1 % 11
+    d1 = 0 if r1 < 2 else 11 - r1
+    if char_val(raw[12]) != d1:
+        return False
+
+    # Second check digit
+    weights2 = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    s2 = sum(char_val(c) * w for c, w in zip(raw[:13], weights2))
+    r2 = s2 % 11
+    d2 = 0 if r2 < 2 else 11 - r2
+    return char_val(raw[13]) == d2
+
+
+class BREmployeeValidation(EmployeeValidationStrategy):
+    """Brazil (CLT - ZP-BR-ENG-001) — CPF, PIS/NIS and identity validation.
+    
+    CPF is validated mathematically via Modulo 11 check digits and is the
+    unique duplicate_field key. CPF and PIS/NIS are classified SENSITIVE and
+    masked in standard API outputs.
+    """
+    country_code = "BR"
+    duplicate_field = "cpf"
+    SENSITIVE_FIELDS = ("cpf", "pis_nis")
+    FIELD_SPECS = {
+        "cpf": {
+            "required": True,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^\d{11}$"),
+            "error": "CPF must be 11 digits and satisfy Modulo 11 check digits.",
+        },
+        "pis_nis": {
+            "required": True,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^\d{11}$"),
+            "error": "PIS/NIS must be 11 digits and satisfy Modulo 11 check digit.",
+        },
+        "rg_number": {
+            "required": False,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^[A-Za-z0-9]{4,20}$"),
+            "error": "RG must be 4 to 20 alphanumeric characters.",
+        },
+        "ctps_number": {
+            "required": False,
+            "strip_chars": " ",
+            "pattern": re.compile(r"^\d{1,15}$"),
+            "error": "CTPS number must be up to 15 digits.",
+        },
+        "ctps_series": {
+            "required": False,
+            "strip_chars": " ",
+            "pattern": re.compile(r"^\d{1,10}$"),
+            "error": "CTPS series must be up to 10 digits.",
+        },
+        "pix_key_type": {
+            "required": False,
+            "choices": ["CPF", "CNPJ", "EMAIL", "PHONE", "RANDOM"],
+            "upper": True,
+        },
+        "pix_key": {
+            "required": False,
+        },
+        "bank_compe": {
+            "required": False,
+            "strip_chars": " ",
+            "pattern": re.compile(r"^\d{3}$"),
+            "error": "COMPE bank code must be exactly 3 digits.",
+        },
+        "bank_agency": {
+            "required": False,
+            "strip_chars": " -",
+            "pattern": re.compile(r"^\d{1,5}$"),
+            "error": "Bank agency must be up to 5 digits.",
+        },
+        "bank_account": {
+            "required": False,
+            "strip_chars": " -",
+            "pattern": re.compile(r"^\d{1,12}$"),
+            "error": "Bank account must be up to 12 digits.",
+        },
+        "bank_account_type": {
+            "required": False,
+            "choices": ["CORRENTE", "POUPANCA"],
+            "upper": True,
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        cpf = cleaned.get("cpf")
+        if cpf and not cpf_is_valid(cpf):
+            raise BadRequestException("CPF fails the official Modulo 11 check digit algorithm.")
+        pis = cleaned.get("pis_nis")
+        if pis and not pis_is_valid(pis):
+            raise BadRequestException("PIS/NIS fails the official Modulo 11 check digit algorithm.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1531,6 +1679,7 @@ _STRATEGIES = {
     "CH": CHEmployeeValidation,
     "SA": SAEmployeeValidation,
     "NL": NLEmployeeValidation,
+    "BR": BREmployeeValidation,
 }
 
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while

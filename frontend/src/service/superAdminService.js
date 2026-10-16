@@ -241,6 +241,32 @@ export const getMxSaEmployerReadiness = (orgId, on) =>
   apiFetch(`${MX_SA}/employer-readiness`, { params: { organization_id: orgId, on } });
 export const getMxSaEmployerReadinessSummary = (on) => apiFetch(`${MX_SA}/employer-readiness/summary`, { params: { on } });
 
+// ————— Brazil (ZP-BR-ENG-001) ————
+// Super Admin API: backend/app/modules/payroll/brazil_router.py (Phase 2).
+// Mirrors the Netherlands block above: every organisation-scoped call takes an
+// explicit orgId (no default organisation). Statutory pack rows (INSS bands,
+// IRRF table + reduction, minimum wage, salário-família, FGTS, CPP) are
+// READ-ONLY here — they change only through the governed pack editor
+// (draft -> review -> approve -> activate), never by a direct edit.
+const BR_SA = "/api/super-admin/compliance/brazil";
+
+export const listBrOrganizations = () => apiFetch(`${BR_SA}/organizations`);
+export const listBrEmployees = (orgId) => apiFetch(`${BR_SA}/employees`, { params: { org_id: orgId } });
+
+export const getBrPackRows = (ruleType, on) =>
+  apiFetch(`${BR_SA}/pack-rows`, { params: { rule_type: ruleType, ...(on ? { on } : {}) } });
+
+export const listBrRubricCatalogue = (orgId) =>
+  apiFetch(`${BR_SA}/rubric-catalogue`, { params: orgId ? { org_id: orgId } : {} });
+
+export const getBrFpasTable = () => apiFetch(`${BR_SA}/fpas-table`);
+
+export const getBrReadiness = () => apiFetch(`${BR_SA}/readiness`);
+export const getBrGates = () => apiFetch(`${BR_SA}/gates`);
+
+export const runBrGoldenCheck = (payload) =>
+  apiFetch(`${BR_SA}/golden-check`, { method: "POST", body: payload });
+
 // Governed collective-agreement registry (spec §9) — no national default.
 export const listCollectiveAgreements = (params) =>
   apiFetch("/api/super-admin/compliance/collective-agreements", { params });

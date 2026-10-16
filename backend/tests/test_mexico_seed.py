@@ -388,7 +388,8 @@ _VALIDATION_SET_BEFORE_MX = {"IE", "SG", "SE", "IT", "HK", "CH", "SA", "NL"}
 def test_validation_switch_adds_only_mexico():
     from app.modules.payroll.engine.countries.shared import _VALIDATION_ENABLED_COUNTRIES
 
-    assert set(_VALIDATION_ENABLED_COUNTRIES) == _VALIDATION_SET_BEFORE_MX | {"MX"}
+    # + Brazil (ZP-BR-ENG-001), opted in alongside Mexico at the venu/main merge.
+    assert set(_VALIDATION_ENABLED_COUNTRIES) == _VALIDATION_SET_BEFORE_MX | {"MX", "BR"}
 
 
 def test_validation_behaviour_is_unchanged_for_every_other_country():

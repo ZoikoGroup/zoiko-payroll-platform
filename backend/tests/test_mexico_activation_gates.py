@@ -260,9 +260,10 @@ def test_governance_opt_in_tuples_gain_only_mexico():
 
     for name in ("_APPROVER_NOT_ACTIVATOR_COUNTRIES", "_SELF_APPROVAL_REFUSED_COUNTRIES",
                  "_REFUSAL_AUDIT_COUNTRIES", "_PACK_TRANSITION_GRAPH_COUNTRIES"):
-        assert getattr(service, name) == _BEFORE + ("MX",), name
+        # + Brazil (ZP-BR-ENG-001), opted in alongside Mexico at the venu/main merge.
+        assert getattr(service, name) == _BEFORE + ("MX", "BR"), name
     assert service._GATED_PACK_COUNTRY_NAMES["MX"] == "Mexico"
-    assert set(service._GATED_PACK_COUNTRY_NAMES) == {"US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX"}
+    assert set(service._GATED_PACK_COUNTRY_NAMES) == {"US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR"}
     assert service._GOLDEN_FIXTURES_DIR_BY_COUNTRY["MX"] == "mx_golden"
-    assert len(service._GOLDEN_FIXTURES_DIR_BY_COUNTRY) == 12
-    assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX")
+    assert len(service._GOLDEN_FIXTURES_DIR_BY_COUNTRY) == 13
+    assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX", "BR")

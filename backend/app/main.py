@@ -173,6 +173,7 @@ from app.modules.super_admin.command_center_router import router as super_admin_
 from app.modules.payroll.router import payroll_router
 from app.modules.payroll.netherlands_router import router as netherlands_router
 from app.modules.payroll.mexico_router import router as mexico_router
+from app.modules.payroll.brazil_router import router as brazil_router
 from app.modules.payroll.forms.router import public_forms_router
 from app.modules.assist.router import assist_router
 from app.modules.assist.public_router import assist_public_router
@@ -188,6 +189,7 @@ app.include_router(jurisdiction_router, prefix="/api")
 app.include_router(super_admin_router, prefix="/api")
 app.include_router(netherlands_router, prefix="/api")
 app.include_router(mexico_router, prefix="/api")
+app.include_router(brazil_router, prefix="/api")
 app.include_router(super_admin_command_center_router, prefix="/api")
 app.include_router(payroll_router, prefix="/api")
 app.include_router(public_forms_router, prefix="/api/payroll")
