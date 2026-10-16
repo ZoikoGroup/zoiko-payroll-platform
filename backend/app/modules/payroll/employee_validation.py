@@ -56,6 +56,10 @@ class EmployeeValidationStrategy:
     # Bank details (routing codes, IBAN, account numbers) are NOT in scope
     # here: they also feed the `routing` display and bank transfer files.
     SENSITIVE_FIELDS: tuple = ()
+    # True = the duplicate-identifier 409 shows the masked value instead of the
+    # raw one (Mexico, MX-061). False for every other strategy — their message
+    # is unchanged (the shared fix is OOS-7).
+    MASK_DUPLICATE_VALUE: bool = False
 
     # Maps a compliance_fields key to the PayrollEmployee dedicated column
     # it should ALSO populate, for strategies whose engine calculator
@@ -1442,6 +1446,67 @@ class NLEmployeeValidation(EmployeeValidationStrategy):
                                       "number against the employee's identity document.")
 
 
+def _mx_yymmdd_is_a_date(digits: str) -> bool:
+    import datetime as _dt
+
+    yy, mm, dd = int(digits[:2]), int(digits[2:4]), int(digits[4:6])
+    for century in (1900, 2000):
+        try:
+            _dt.date(century + yy, mm, dd)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+class MXEmployeeValidation(EmployeeValidationStrategy):
+    """Mexico (ZP-MX-ENG-001 §12 Identity, Phase 4b) — RFC (persona física),
+    CURP, NSS. DORMANT: registered in _DORMANT_STRATEGIES, consulted only
+    while MX_TENANT_ONBOARDING_ENABLED is on (mexico_dormancy), so production
+    keeps refusing MX employees with the unchanged message.
+
+    Format only: the CURP structure and check digit (S31, RENAPO), the NSS
+    check digit (S32, IMSS) and the RFC↔CURP agreement rule are not in any
+    saved source yet, so nothing beyond length / character class / the RFC
+    date part is checked, and the statutory profile records FORMAT_ONLY —
+    never VALID (MX-036: a mismatch is an exception, never auto-fixed).
+    The raw values are SENSITIVE (masked in every response) and, as for every
+    country, stored in clear in compliance_fields — plan Q9 / HK D-4.
+    The duplicate key is the CURP; its 409 message is masked (MX-061)."""
+    country_code = "MX"
+    duplicate_field = "curp"
+    SENSITIVE_FIELDS = ("rfc", "curp", "nss", "clabe")   # CLABE masked like SA's IBAN
+    MASK_DUPLICATE_VALUE = True
+    FIELD_SPECS = {
+        "rfc": {
+            "required": True, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-ZÑ&]{4}[0-9]{6}[A-Z0-9]{3}$"),
+            "error": "RFC must be the 13-character persona física RFC (4 letters, YYMMDD, 3-character homoclave).",
+        },
+        "curp": {
+            "required": True, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{18}$"),
+            "error": "CURP must be 18 letters or digits.",
+        },
+        "nss": {
+            "required": True, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{11}$"),
+            "error": "NSS (IMSS) must be 11 digits.",
+        },
+        "clabe": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{18}$"),
+            "error": "CLABE must be 18 digits (check digit not verified until S33 is saved).",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        rfc = cleaned.get("rfc")
+        if rfc and not _mx_yymmdd_is_a_date(rfc[4:10]):
+            raise BadRequestException("RFC: the six digits after the letters must be a real date (YYMMDD).")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1468,12 +1533,34 @@ _STRATEGIES = {
     "NL": NLEmployeeValidation,
 }
 
+# Strategies built but dormant (Mexico, Phase 4b): consulted only while
+# their country's onboarding flag is on, and never listed in _STRATEGIES —
+# so the "Supported: …" message every other country sees never changes.
+_DORMANT_STRATEGIES = {
+    "MX": MXEmployeeValidation,
+}
+
+
+def _dormant_strategy(code: str):
+    strategy = _DORMANT_STRATEGIES.get(code)
+    if strategy is None:
+        return None
+    from app.modules.payroll import mexico_dormancy
+
+    return strategy if mexico_dormancy.onboarding_enabled() else None
+
+
+def is_supported_employee_country(country_code: str) -> bool:
+    code = (country_code or "").upper()
+    return code in _STRATEGIES or _dormant_strategy(code) is not None
+
 
 def get_employee_validation_strategy(country_code: str) -> EmployeeValidationStrategy:
     """Factory/dispatcher — country_code must already be normalized to a
     2-letter code (callers use service._normalize_country() first, exactly
     like every other jurisdiction-aware lookup in service.py)."""
-    strategy = _STRATEGIES.get((country_code or "").upper())
+    code = (country_code or "").upper()
+    strategy = _STRATEGIES.get(code) or _dormant_strategy(code)
     if strategy is None:
         raise BadRequestException(
             f"Unsupported country code '{country_code}'. Supported: {', '.join(_STRATEGIES)}."
@@ -1523,7 +1610,10 @@ def _mask_field(key, value):
     return _FIELD_MASKERS.get(key, mask_identifier)(value)
 
 
-SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in _STRATEGIES.values() for f in cls.SENSITIVE_FIELDS)
+# Dormant strategies' fields are masked too (whether or not their flag is on),
+# so a Mexican identifier is never returned in clear by any shared path.
+SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in (*_STRATEGIES.values(), *_DORMANT_STRATEGIES.values())
+                                        for f in cls.SENSITIVE_FIELDS)
 
 
 def mask_compliance_fields(compliance_fields):
@@ -1581,5 +1671,5 @@ def mask_routing(routing):
     is itself an account identifier (IBAN) is masked."""
     if not isinstance(routing, list):
         return routing
-    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") == "iban" and r.get("value")
+    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") in ("iban", "clabe") and r.get("value")
              else r) for r in routing]

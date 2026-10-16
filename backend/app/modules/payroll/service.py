@@ -70,7 +70,8 @@ from app.modules.payroll.models import (
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
 from app.modules.payroll.employee_validation import (
-    get_employee_validation_strategy, _STRATEGIES, mask_identifier, mask_account_last4, restore_masked_compliance_fields,
+    get_employee_validation_strategy, _STRATEGIES, is_supported_employee_country, mask_identifier, mask_account_last4,
+    restore_masked_compliance_fields,
     restore_masked_employee_columns,
     mask_nric_fin,
 )
@@ -27440,7 +27441,9 @@ def create_employee_statutory_profile_version(
     effective_to; overlap is validated in both modes."""
     employee = get_employee_by_id(db, employee_id, organization_id)
     country_code = _normalize_country(data.country_code or employee.country_code)
-    if country_code not in _STRATEGIES:
+    # Same set as before plus a dormant strategy whose flag is on (Mexico,
+    # Phase 4b) — identical for every other country.
+    if not is_supported_employee_country(country_code):
         raise BadRequestException(f"Unsupported jurisdiction country_code: {country_code!r}.")
 
     _validate_statutory_profile_fields(country_code, data)
@@ -29953,7 +29956,9 @@ def check_duplicate_employee_identifiers(
             if (existing.compliance_fields or {}).get(field) == value:
                 raise HTTPException(
                     http_status.HTTP_409_CONFLICT,
-                    detail=f"An employee with {field.upper()} '{value}' already exists in this organization.",
+                    detail=(f"An employee with {field.upper()} "
+                            f"'{mask_identifier(value) if getattr(strategy, 'MASK_DUPLICATE_VALUE', False) else value}' "
+                            "already exists in this organization."),
                 )
 
 

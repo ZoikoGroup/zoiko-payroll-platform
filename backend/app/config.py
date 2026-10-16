@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Mexican and the Mexico organisation API refuses. Leave UNSET in
     # production until G1–G8 are signed; tests / local harnesses set it.
     MX_TENANT_ONBOARDING_ENABLED: bool = False
+    # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
+    # profile (Phase 4b, Q7). Required outside development/test once Mexico is
+    # enabled — there is NO derived fallback in production. Secret Manager.
+    MX_IDENTITY_TOKEN_KEY: str = ""
     ALGORITHM: str = "HS256"
     # Distinct issuer/token-namespace so tokens from this platform can
     # never be confused with (or accepted by) the main platform.

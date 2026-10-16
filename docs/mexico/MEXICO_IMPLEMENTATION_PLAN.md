@@ -11,6 +11,15 @@ Line numbers below are from commit 6a8f989; current ones are in `docs/mexico/MEX
 
 **Production rule (2026-10-16).** Merging to main deploys to production and runs Alembic migrations. Every phase PR must keep Mexico dormant and fail-closed, and every migration must be additive and guarded. Phases 0–3 are in production (PR #97–#101; migrations `5d2c8f1a7b3e` and `6e4a1d9c3f27`) — see `PRODUCTION_STATE.md`. Each phase plan must include a section on what its migration and routes do in production when merged.
 
+**Prerequisites for turning Mexico on (beside G1–G8).** `MX_TENANT_ONBOARDING_ENABLED` (Phase 4a, default False) must not be turned on in **any environment other than development/test** until **all** of these are met:
+
+| Prerequisite | Decided / evidenced by |
+|---|---|
+| G1–G8 (spec §22) signed | Phase 10 gate evidence |
+| **Q9 — MX identifiers (RFC, CURP, NSS, CLABE) are plaintext at rest in `compliance_fields`**, the same platform-wide gap as HK owner decision **D-4** (encryption at rest; HK G5 assessment, fact F2 unverified): Q9-a MX application-level encryption, or Q9-b accepted risk tied to D-4 | **Security lead** (with privacy counsel for the 2025 privacy law) — recorded decision |
+| `MX_IDENTITY_TOKEN_KEY` provisioned in GCP Secret Manager (Q7: never the derived fallback outside dev/test) | deploy owner |
+| GCP Secret Manager live for per-employer CSD/PAC credentials (before Phase 7) | infrastructure |
+
 ---
 
 ## 1. Architecture findings (what Mexico must plug into)

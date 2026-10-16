@@ -386,6 +386,27 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     nl_contract_hours_per_week:    Optional[Decimal] = Field(None, validation_alias="nlContractHoursPerWeek")
     nl_personnel_number:           Optional[str] = Field(None, validation_alias="nlPersonnelNumber")
 
+    # mx_* block (ZP-MX-ENG-001 §12, Phase 4b). Validated by mexico_employee_service;
+    # fields not sent carry forward. Identifier tokens / status are server-written only.
+    mx_fiscal_postal_code: Optional[str] = Field(None, validation_alias="mxFiscalPostalCode")
+    mx_receiver_fiscal_regime: Optional[str] = Field(None, validation_alias="mxReceiverFiscalRegime")
+    mx_establishment_id: Optional[int] = Field(None, validation_alias="mxEstablishmentId")
+    mx_imss_registration_id: Optional[int] = Field(None, validation_alias="mxImssRegistrationId")
+    mx_work_state: Optional[str] = Field(None, validation_alias="mxWorkState")
+    mx_work_municipality: Optional[str] = Field(None, validation_alias="mxWorkMunicipality")
+    mx_remote_state_exception_ref: Optional[str] = Field(None, validation_alias="mxRemoteStateExceptionRef")
+    mx_seniority_date: Optional[date] = Field(None, validation_alias="mxSeniorityDate")
+    mx_contract_type_code: Optional[str] = Field(None, validation_alias="mxContractTypeCode")
+    mx_regime_type_code: Optional[str] = Field(None, validation_alias="mxRegimeTypeCode")
+    mx_workday_type_code: Optional[str] = Field(None, validation_alias="mxWorkdayTypeCode")
+    mx_job_risk_code: Optional[str] = Field(None, validation_alias="mxJobRiskCode")
+    mx_professional_min_code: Optional[str] = Field(None, validation_alias="mxProfessionalMinCode")
+    mx_pay_frequency_code: Optional[str] = Field(None, validation_alias="mxPayFrequencyCode")
+    mx_daily_salary: Optional[Decimal] = Field(None, validation_alias="mxDailySalary")
+    mx_salary_type: Optional[str] = Field(None, validation_alias="mxSalaryType")
+    mx_annual_adjustment_exclusion: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusion")
+    mx_annual_adjustment_exclusion_evidence_ref: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusionEvidenceRef")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -555,6 +576,30 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     nlVacationAllowancePct:         Optional[Decimal] = Field(None, validation_alias="nl_vacation_allowance_pct", serialization_alias="nlVacationAllowancePct")
     nlContractHoursPerWeek:         Optional[Decimal] = Field(None, validation_alias="nl_contract_hours_per_week", serialization_alias="nlContractHoursPerWeek")
     nlPersonnelNumber:              Optional[str] = Field(None, validation_alias="nl_personnel_number", serialization_alias="nlPersonnelNumber")
+
+    # ── Mexico (ZP-MX-ENG-001 §12) — identifiers never returned: only last-4,
+    # the validation status and its findings; tokens stay server-side.
+    mxFiscalPostalCode: Optional[str] = Field(None, validation_alias="mx_fiscal_postal_code", serialization_alias="mxFiscalPostalCode")
+    mxReceiverFiscalRegime: Optional[str] = Field(None, validation_alias="mx_receiver_fiscal_regime", serialization_alias="mxReceiverFiscalRegime")
+    mxEstablishmentId: Optional[int] = Field(None, validation_alias="mx_establishment_id", serialization_alias="mxEstablishmentId")
+    mxImssRegistrationId: Optional[int] = Field(None, validation_alias="mx_imss_registration_id", serialization_alias="mxImssRegistrationId")
+    mxWorkState: Optional[str] = Field(None, validation_alias="mx_work_state", serialization_alias="mxWorkState")
+    mxWorkMunicipality: Optional[str] = Field(None, validation_alias="mx_work_municipality", serialization_alias="mxWorkMunicipality")
+    mxRemoteStateExceptionRef: Optional[str] = Field(None, validation_alias="mx_remote_state_exception_ref", serialization_alias="mxRemoteStateExceptionRef")
+    mxSeniorityDate: Optional[date] = Field(None, validation_alias="mx_seniority_date", serialization_alias="mxSeniorityDate")
+    mxContractTypeCode: Optional[str] = Field(None, validation_alias="mx_contract_type_code", serialization_alias="mxContractTypeCode")
+    mxRegimeTypeCode: Optional[str] = Field(None, validation_alias="mx_regime_type_code", serialization_alias="mxRegimeTypeCode")
+    mxWorkdayTypeCode: Optional[str] = Field(None, validation_alias="mx_workday_type_code", serialization_alias="mxWorkdayTypeCode")
+    mxJobRiskCode: Optional[str] = Field(None, validation_alias="mx_job_risk_code", serialization_alias="mxJobRiskCode")
+    mxProfessionalMinCode: Optional[str] = Field(None, validation_alias="mx_professional_min_code", serialization_alias="mxProfessionalMinCode")
+    mxPayFrequencyCode: Optional[str] = Field(None, validation_alias="mx_pay_frequency_code", serialization_alias="mxPayFrequencyCode")
+    mxDailySalary: Optional[Decimal] = Field(None, validation_alias="mx_daily_salary", serialization_alias="mxDailySalary")
+    mxSalaryType: Optional[str] = Field(None, validation_alias="mx_salary_type", serialization_alias="mxSalaryType")
+    mxAnnualAdjustmentExclusion: Optional[str] = Field(None, validation_alias="mx_annual_adjustment_exclusion", serialization_alias="mxAnnualAdjustmentExclusion")
+    mxAnnualAdjustmentExclusionEvidenceRef: Optional[str] = Field(None, validation_alias="mx_annual_adjustment_exclusion_evidence_ref", serialization_alias="mxAnnualAdjustmentExclusionEvidenceRef")
+    mxRfcLast4: Optional[str] = Field(None, validation_alias="mx_rfc_last4", serialization_alias="mxRfcLast4")
+    mxIdentifierValidationStatus: Optional[str] = Field(None, validation_alias="mx_identifier_validation_status", serialization_alias="mxIdentifierValidationStatus")
+    mxIdentifierFindings: Optional[list] = Field(None, validation_alias="mx_identifier_findings", serialization_alias="mxIdentifierFindings")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses

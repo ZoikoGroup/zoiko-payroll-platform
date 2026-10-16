@@ -46,7 +46,10 @@ from typing import List, Optional
 # read from compliance_fields, exactly like every non-India country.
 # Netherlands (ZP-NL-ENG-001) also rides SEPA with IBAN + BIC, following the
 # DE pattern (combined "{iban} {bic}" BTF routing value).
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL")
+# Mexico (ZP-MX-ENG-001 Phase 4b): the 18-digit CLABE on the SPEI rail —
+# inert until a Mexican employee can exist (MX_TENANT_ONBOARDING_ENABLED);
+# no Mexican payment file exists before Phase 10.
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -91,6 +94,7 @@ ROUTING_FIELDS = {
         {"key": "iban", "label": "IBAN"},
         {"key": "bic", "label": "BIC"},
     ],
+    "MX": [{"key": "clabe", "label": "CLABE"}],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -107,6 +111,7 @@ BTF_ROUTING_LABEL = {
     "FR": "IBAN",
     "IE": "IBAN",
     "NL": "IBAN",
+    "MX": "CLABE",
     "BB": "Bank/Branch Code",
     "KY": "Bank/Branch Code",
     "DO": "Bank/Branch Code",
@@ -128,6 +133,7 @@ PAYMENT_MODE_LABEL = {
     "FR": "SEPA",
     "IE": "SEPA",
     "NL": "SEPA",
+    "MX": "SPEI",
     "BB": "EFT",
     "KY": "EFT",
     "DO": "EFT",

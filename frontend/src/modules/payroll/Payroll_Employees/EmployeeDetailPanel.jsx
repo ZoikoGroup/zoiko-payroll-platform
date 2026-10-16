@@ -13,6 +13,7 @@ import ItalyStatutoryProfilePanel from "./ItalyStatutoryProfilePanel";
 import HKStatutoryProfilePanel from "./HKStatutoryProfilePanel";
 import SwitzerlandStatutoryProfilePanel from "./SwitzerlandStatutoryProfilePanel";
 import NetherlandsStatutoryProfilePanel from "./NetherlandsStatutoryProfilePanel";
+import MexicoStatutoryProfilePanel from "./MexicoStatutoryProfilePanel";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
 import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
@@ -102,6 +103,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showHkStatutory, setShowHkStatutory] = useState(false);
   const [showSwissStatutory, setShowSwissStatutory] = useState(false);
   const [showNlStatutory, setShowNlStatutory] = useState(false);
+  const [showMxStatutory, setShowMxStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
@@ -285,6 +287,19 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "MX" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="mx-identity-block">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">Mexico identity &amp; bank (CLABE)</h4>
+                  {/* RFC / CURP / NSS / CLABE arrive masked from the API (MXEmployeeValidation SENSITIVE_FIELDS). */}
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.MX.map((spec) => (
+                      <DetailRow key={spec.key} label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])} />
+                    ))}
+                  </dl>
+                </div>
+              )}
+
               {employee.countryCode === "US" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">US Tax Details</h4>
@@ -320,6 +335,27 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                     Income relationship, signed loonheffingskorting instruction, contract (AWf), insurance and Zvw,
                     pension, company car, sickness and termination — required before Netherlands payroll can be
                     calculated for this employee.
+                  </p>
+                </div>
+              )}
+
+{employee.countryCode === "MX" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Mexico statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowMxStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Establishment, IMSS registration, work state, contract and pay facts, INFONAVIT notices and
+                    readiness — Mexican payroll stays blocked until its release gates are signed.
                   </p>
                 </div>
               )}
@@ -510,6 +546,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showNlStatutory && (
         <NetherlandsStatutoryProfilePanel employee={employee} onClose={() => setShowNlStatutory(false)} />
+      )}
+      {showMxStatutory && (
+        <MexicoStatutoryProfilePanel employee={employee} onClose={() => setShowMxStatutory(false)} />
       )}
       {showSwissStatutory && (
         <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />

@@ -214,3 +214,14 @@ def sa_employer_readiness(organization_id: int = Query(...), on: date = Query(..
 def sa_employer_readiness_summary(on: date = Query(...), current_user=Depends(get_current_super_admin),
                                   db: Session = Depends(get_db)):
     return _emp().readiness_summary(db, on)
+
+
+@router.get("/employees/{employee_id}", summary="One Mexican employee's record and readiness (read-only, masked)")
+def sa_employee_record(employee_id: int, organization_id: int = Query(...), on: date = Query(...),
+                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_employee_service
+
+    _mx()._org(db, organization_id)
+    record = mexico_employee_service.employee_record(db, organization_id, employee_id)
+    record["readiness"] = mexico_employee_service.employee_readiness(db, organization_id, employee_id, on)
+    return record

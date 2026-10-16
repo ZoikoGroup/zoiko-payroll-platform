@@ -226,11 +226,12 @@ def test_calc_inputs_and_run_approval_block(db):
         assert jurisdiction_hooks.call("MX", "before_run_transition", db, run, status, 1) is None
 
 
-def test_profile_hooks_refuse_mexican_profiles(db):
+def test_profile_hooks_are_phase_4b_and_other_hooks_stay_inert(db):
+    """Phase 4b replaced the Phase 0 profile refusal with real validation
+    (tests/test_mexico_statutory_profile.py); an empty profile has no errors."""
     from app.modules.payroll import jurisdiction_hooks
 
-    assert jurisdiction_hooks.call("MX", "statutory_profile_errors", SimpleNamespace())
-    assert jurisdiction_hooks.call("MX", "statutory_profile_values", db, None, None, None) == {}
+    assert jurisdiction_hooks.call("MX", "statutory_profile_errors", SimpleNamespace()) == []
     assert jurisdiction_hooks.call("MX", "payslip_hold_view", SimpleNamespace()) is None
     assert jurisdiction_hooks.call("MX", "pack_holidays", db, 2026) == []
     assert jurisdiction_hooks.call("MX", "payment_treatment", db, 1, None, []) == {}
@@ -273,7 +274,7 @@ def test_readiness_route_reports_every_gate_open(db):
         r = c.get(f"{BASE}/readiness")
     assert r.status_code == 200
     body = r.json()
-    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 2
+    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 4
     assert [g["gate"] for g in body["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in body["gates"]} == {"OPEN"}
 

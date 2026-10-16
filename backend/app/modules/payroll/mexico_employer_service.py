@@ -1317,6 +1317,19 @@ def employer_readiness(db: Session, org_id: int, root_id: int, on: date) -> dict
                            f"version {policy.version} ACTIVE; floor check {check['status']}", ["G5"]))
     items.append(_item("time_record", "F", "Electronic time-record dependency",
                        NOT_STARTED, "interface versioning only; not in any §22 gate definition", []))
+    # Phase 4b: employees of this employer with a Mexico profile in force and
+    # an unresolved identifier exception (a summary line — each employee's own
+    # readiness carries the gate mapping).
+    from app.modules.payroll.models import EmployeeStatutoryProfile as SP
+
+    profiles = [p for p in db.query(SP).filter(SP.organization_id == org_id, SP.country_code == MX).all()
+                if p.effective_from <= on and (p.effective_to is None or p.effective_to >= on)
+                and (p.mx_establishment_id in {e.id for e in estabs} or p.mx_imss_registration_id in {r.id for r in regs})]
+    exceptions = [p for p in profiles if p.mx_identifier_validation_status != "VALID"]
+    items.append(_item("employee_exceptions", "H", "Employees with blocking exceptions",
+                       NOT_STARTED if not profiles else (BLOCKED if exceptions else PASS),
+                       "no Mexican employee assigned to this employer" if not profiles
+                       else f"{len(exceptions)} of {len(profiles)} employee(s) with identifier exceptions", []))
     # Bank + parallel payroll
     items.append(_credential_item(active_cred("BANK"), "bank_credential", "H", "Payroll bank credential reference",
                                   ["G6", "G7"], on))
