@@ -36,6 +36,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      # vite build does not catch an undefined JSX component (it only throws
+      # when the page renders) — that is how 9fc1a36 blanked production.
+      - name: Refuse undefined names (no-undef / jsx-no-undef)
+        working-directory: frontend
+        run: npm run check:undefined
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -82,6 +87,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          npm run check:undefined
           npm run build
 
       - name: Verify the bundle

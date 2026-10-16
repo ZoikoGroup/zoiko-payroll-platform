@@ -33,6 +33,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/backend"
 
+# alembic/env.py refuses schema writes against a non-local database unless
+# this is set. Only the deploy pipeline sets it — never a developer laptop
+# (see backend/scripts/_local_db_guard.py, 2026-10-14 incident).
+export ZOIKO_ALLOW_REMOTE_MIGRATIONS=I_UNDERSTAND
+
 # --- Convenience -----------------------------------------------------------
 
 print_diagnostics() {

@@ -371,10 +371,13 @@ class TestTransportIntegration:
             success=True, transport_status=digi.TransportStatus.SENT,
             digipoort_reference="RETRY-NEW-123"
         )
-        mock_transport.poll_acknowledgement.return_value = digi.TransportResult(
-            success=True, transport_status=digi.TransportStatus.ACK,
-            digipoort_reference="RETRY-NEW-123", ack_payload="<Ack/>"
-        )
+        # Reconciliation proves the first attempt was REJECTED; only then is it resent.
+        mock_transport.poll_acknowledgement.side_effect = [
+            digi.TransportResult(success=False, transport_status=digi.TransportStatus.REJECTED,
+                                 digipoort_reference="RETRY-123", error_codes=[{"code": "REJ"}]),
+            digi.TransportResult(success=True, transport_status=digi.TransportStatus.ACK,
+                                 digipoort_reference="RETRY-NEW-123", ack_payload="<Ack/>"),
+        ]
 
         with patch.object(digi, "get_transport", return_value=mock_transport):
             new_sub = digi.retry_submission(db, sub.id)

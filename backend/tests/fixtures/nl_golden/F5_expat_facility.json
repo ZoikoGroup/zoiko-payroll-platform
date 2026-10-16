@@ -1,0 +1,40 @@
+{
+  "id": "F5",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-NL-ENG-001 v1.0 \u00a718. NOT an official golden vector: the wage-tax row is SYNTHETIC (the spec's own published F1 result), not the official 2026 Belastingdienst table. Replace with an OFFICIAL vector generated from the official tables and independently reviewed once gate G1 is signed (NL-054).",
+  "source": {
+    "spec": "ZP-NL-ENG-001 v1.0 \u00a718 F5 / NL-026",
+    "formulas": {
+      "threshold": "48013.00 / 12 = 4001.08 per month",
+      "headroom": "5000.00 - 4001.08 = 998.92",
+      "allowance": "min(30% x 5000.00 = 1500.00, 998.92) = 998.92"
+    }
+  },
+  "periods": [
+    {
+      "inputs": {
+        "gross": "5000",
+        "payDate": "2026-01-31",
+        "contract": "LOW",
+        "withTaxCredit": true,
+        "expatDecision": {
+          "status": "VERIFIED",
+          "granted_from": "2025-01-01",
+          "granted_to": null,
+          "method": "FACILITY_30PCT",
+          "threshold_category": "STANDARD",
+          "allowance_pct": "30",
+          "decision_reference": "BD-GOLDEN-F5"
+        }
+      },
+      "expected": {
+        "nl.expat.applied": true,
+        "nl.expat.allowance": "998.92",
+        "nl.expat.taxableWage": "4001.08"
+      },
+      "exceptionCodes": [
+        "EXPAT_THRESHOLD_RISK"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "id": "F3",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-NL-ENG-001 v1.0 \u00a718. NOT an official golden vector: the wage-tax row is SYNTHETIC (the spec's own published F1 result), not the official 2026 Belastingdienst table. Replace with an OFFICIAL vector generated from the official tables and independently reviewed once gate G1 is signed (NL-054).",
+  "source": {
+    "spec": "ZP-NL-ENG-001 v1.0 \u00a718 F3 / NL-011..NL-014",
+    "formulas": {
+      "month1": "min(8000.00, 6617.41) = 6617.41",
+      "month2": "cumulative wage 13000.00 vs cumulative max 2 x 6617.41 = 13234.82 -> base 13000.00; increment 13000.00 - 6617.41 = 6382.59"
+    }
+  },
+  "periods": [
+    {
+      "inputs": {
+        "gross": "8000",
+        "payDate": "2026-01-31",
+        "contract": "LOW",
+        "withTaxCredit": true
+      },
+      "expected": {
+        "nl.vcr.increments.EI": "6617.41"
+      },
+      "intermediates": {
+        "nl.vcr.after.EI.cumulative_wage": "8000.00",
+        "nl.vcr.after.EI.cumulative_max": "6617.41",
+        "nl.vcr.after.EI.cumulative_base": "6617.41",
+        "nl.vcr.after.EI.revision": 1
+      }
+    },
+    {
+      "inputs": {
+        "gross": "5000",
+        "payDate": "2026-02-28",
+        "contract": "LOW",
+        "withTaxCredit": true,
+        "chainVcr": true
+      },
+      "expected": {
+        "nl.vcr.increments.EI": "6382.59"
+      },
+      "intermediates": {
+        "nl.vcr.after.EI.cumulative_wage": "13000.00",
+        "nl.vcr.after.EI.cumulative_max": "13234.82",
+        "nl.vcr.after.EI.cumulative_base": "13000.00",
+        "nl.vcr.after.EI.revision": 2
+      }
+    }
+  ]
+}

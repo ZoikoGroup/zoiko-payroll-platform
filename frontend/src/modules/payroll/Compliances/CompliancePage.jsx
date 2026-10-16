@@ -14,6 +14,7 @@ import ITEmployerProfileTab from "./ITEmployerProfileTab";
 import HKComplianceCentreTab from "./HKComplianceCentreTab";
 import CHEmployerProfileTab from "./CHEmployerProfileTab";
 import SAComplianceCentreTab from "./SAComplianceCentreTab";
+import NLComplianceCentreTab from "./NLComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -116,9 +117,18 @@ export default function CompliancePage() {
   const SA_TAB = "Saudi Arabia Compliance Centre";
   // stored as a code or a name ("CH" / "Switzerland") — normalized either way
   const isSwitzerland = normalizeCountryCode(companyDetails.jurisdictionCountry) === "CH";
+  // Netherlands (ZP-NL-ENG-001): wage-tax tables, premium rates and Whk/Aof
+  // decisions are platform data, so the generic Tax Configuration tab (US
+  // fallback) is omitted; the org's own set-up lives in the NL Compliance
+  // Centre. Checked by COUNTRY code — "NL" as a Canadian province never
+  // reaches jurisdictionCountry.
+  const NL_TAB = "Netherlands Compliance Centre";
+  const isNetherlands = normalizeCountryCode(companyDetails.jurisdictionCountry) === "NL";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : BASE_TABS;
+    : isNetherlands
+      ? BASE_TABS.filter((t) => t !== "Tax Configuration")
+      : BASE_TABS;
   const tabs = [
     ...(showEnterpriseTab ? [...baseTabs, "Enterprise Jurisdictions"] : baseTabs),
     ...(companyDetails.jurisdictionCountry === "SG" ? [IR21_TAB] : []),
@@ -126,6 +136,7 @@ export default function CompliancePage() {
     ...(companyDetails.jurisdictionCountry === "HK" ? [HK_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "SA" ? [SA_TAB] : []),
     ...(isSwitzerland ? [CH_EMPLOYER_TAB] : []),
+    ...(isNetherlands ? [NL_TAB] : []),
   ];
   const currentTab = tabs[activeTab];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
@@ -334,6 +345,7 @@ export default function CompliancePage() {
       {currentTab === HK_TAB && <HKComplianceCentreTab />}
       {currentTab === SA_TAB && <SAComplianceCentreTab />}
       {currentTab === CH_EMPLOYER_TAB && <CHEmployerProfileTab />}
+      {currentTab === NL_TAB && <NLComplianceCentreTab />}
 
       {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab

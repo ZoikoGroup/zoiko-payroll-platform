@@ -72,6 +72,7 @@ from app.modules.payroll.policy.router import policy_router
 from app.modules.payroll.enterprise.router import enterprise_router
 from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
+from app.modules.payroll.netherlands_org_router import router as netherlands_org_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
     IrelandRpnSnapshotUpsert, IrelandRpnSnapshotResponse,
@@ -182,6 +183,8 @@ payroll_router.include_router(policy_router)
 payroll_router.include_router(enterprise_router)
 payroll_router.include_router(mail_router)
 payroll_router.include_router(forms_router)
+# Netherlands organisation API (/payroll/netherlands/...) — own module, not this file.
+payroll_router.include_router(netherlands_org_router)
 
 
 # ── Employees ────────────────────────────────────────────────────────

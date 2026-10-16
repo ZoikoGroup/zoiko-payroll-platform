@@ -2496,3 +2496,44 @@ export const listHkAccessEvents = async (employeeId) => {
   const res = await api.get(`${HK}/access-events`, { params: employeeId ? { employee_id: employeeId } : {} });
   return Array.isArray(res) ? res : res?.data || [];
 };
+
+// ── Netherlands (ZP-NL-ENG-001) — organisation API (/api/payroll/netherlands) ──
+// Always the caller's own organisation (the server never takes an org id
+// here). No tax-credit amount, AWf class or premium rate is ever sent: the
+// server derives every statutory figure. Filing / Digipoort / authority
+// payments stay locked server-side until gate G3.
+const NL = "/api/payroll/netherlands";
+const nlList = async (promise) => {
+  const res = await promise;
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const getNlEmployerProfile = () => api.get(`${NL}/employer-profile`);
+export const createNlEmployerProfile = (payload) => api.post(`${NL}/employer-profile`, payload);
+export const getNlReadiness = () => api.get(`${NL}/readiness`);
+export const listNlCaos = () => nlList(api.get(`${NL}/caos`));
+export const listNlPensionSchemes = () => nlList(api.get(`${NL}/pension-schemes`));
+export const listNlAbsencePayPolicies = () => nlList(api.get(`${NL}/absence-pay-policies`));
+export const createNlAbsencePayPolicy = (payload) => api.post(`${NL}/absence-pay-policies`, payload);
+export const getNlEmployeeRecord = (employeeId) => api.get(`${NL}/employees/${employeeId}`);
+export const createNlIncomeRelationship = (employeeId, payload) => api.post(`${NL}/employees/${employeeId}/income-relationships`, payload);
+export const closeNlIncomeRelationship = (ikvId, payload) => api.put(`${NL}/income-relationships/${ikvId}/close`, payload);
+export const createNlTaxCreditInstruction = (employeeId, payload) => api.post(`${NL}/employees/${employeeId}/tax-credit-instructions`, payload);
+export const createNlContractVersion = (employeeId, payload) => api.post(`${NL}/employees/${employeeId}/contracts`, payload);
+export const addNlCompanyCar = (employeeId, payload) => api.post(`${NL}/employees/${employeeId}/company-cars`, payload);
+export const recordNlSicknessEvent = (employeeId, payload) => api.post(`${NL}/employees/${employeeId}/sickness-events`, payload);
+export const closeNlSicknessEvent = (eventId, payload) => api.put(`${NL}/sickness-events/${eventId}/close`, payload);
+export const prepareNlTerminationSettlement = (employeeId, payload) => api.post(`${NL}/employees/${employeeId}/termination-settlements`, payload);
+export const approveNlTerminationSettlement = (settlementId) => api.put(`${NL}/termination-settlements/${settlementId}/approve`, {});
+export const getNlRunPreflight = (runId) => api.get(`${NL}/runs/${runId}/preflight`);
+export const getNlRunFingerprint = (runId) => api.get(`${NL}/runs/${runId}/fingerprint`);
+export const listNlReturns = (taxYear) => nlList(api.get(`${NL}/loonaangifte`, { params: taxYear ? { tax_year: taxYear } : {} }));
+export const getNlReturn = (returnId) => api.get(`${NL}/loonaangifte/${returnId}`);
+export const buildNlReturn = (payload) => api.post(`${NL}/loonaangifte/build`, payload);
+export const reconcileNlReturn = (returnId) => api.put(`${NL}/loonaangifte/${returnId}/reconcile`, {});
+export const listNlAnnualStatements = (params = {}) => nlList(api.get(`${NL}/annual-statements`, { params }));
+export const generateNlAnnualStatement = (payload) => api.post(`${NL}/annual-statements/generate`, payload);
+export const issueNlAnnualStatement = (statementId) => api.put(`${NL}/annual-statements/${statementId}/issue`, {});
+export const listNlPaymentBatches = () => nlList(api.get(`${NL}/payment-batches`));
+export const getNlPaymentBatch = (batchId) => api.get(`${NL}/payment-batches/${batchId}`);
+export const createNlSalaryBatch = (runId, payload = {}) => api.post(`${NL}/runs/${runId}/salary-batch`, payload);
+export const getNlWkr = (taxYear) => api.get(`${NL}/wkr`, { params: { tax_year: taxYear } });

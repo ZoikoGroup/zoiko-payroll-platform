@@ -5,6 +5,7 @@ import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDraw
 import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
+import { nlEmployeeLines, nlEmployerLines } from "../PayRollRuns/nlPayslipLines";
 
 const printStyles = `
 @media print {
@@ -101,9 +102,15 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     ...chPaidOnTop,
   ].filter((r) => Number(r.amount) > 0);
 
+  // Netherlands: employee-side lines straight from the frozen snapshot; the
+  // employer's premiums are shown in their own section below (NL-048).
+  const nlSnapshot = (payslip.country || payslip.countryCode) === "NL" ? payslip.nlCalculationSnapshot : null;
+  const nlEmployerRows = nlSnapshot ? nlEmployerLines(nlSnapshot).map(([label, amount]) => ({ label, amount })) : [];
+
   const deductionRows = chSnapshot ? CH_EMPLOYEE_LINES
     .map(([key, label]) => ({ label, amount: chTotals[key] || 0 }))
-    .filter((r) => Number(r.amount) > 0) : [
+    .filter((r) => Number(r.amount) > 0) : nlSnapshot ? nlEmployeeLines(nlSnapshot)
+    .map(([label, amount]) => ({ label, amount })) : [
     ...getIncomeTaxLines(payslip).map(([label, amount]) => ({ label, amount })),
     ...(labels.churchTax ? [{ label: labels.churchTax, amount: payslip.churchTax || 0 }] : []),
     // Solidaritätszuschlag (Soli) — real, persisted (PayslipItem.soli),
@@ -376,6 +383,26 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                   this net pay is held pending the IRD letter of release. It is not a deduction and remains owed to you.
                 </p>
               )}
+            </div>
+            )}
+
+            {/* NETHERLANDS EMPLOYER COST (NL-048) — paid by the employer, never deducted */}
+            {!isBlocked && nlEmployerRows.length > 0 && (
+            <div className="mb-5 rounded-[8px] border border-border p-4">
+              <p className="mb-2 text-[12px] font-bold uppercase tracking-wider text-foreground-muted">
+                Employer cost — paid by your employer on top of your salary, not deducted from your pay
+              </p>
+              <dl className="space-y-1 text-[13px]">
+                {nlEmployerRows.map((r) => (
+                  <div key={r.label} className="flex justify-between gap-3">
+                    <dt className="text-foreground-muted">{r.label}</dt><dd className="text-foreground">{fmt(r.amount)}</dd>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
+                  <dt className="text-foreground">Total employer cost</dt>
+                  <dd className="text-foreground">{fmt(nlSnapshot.totals?.employerCost)}</dd>
+                </div>
+              </dl>
             </div>
             )}
 
