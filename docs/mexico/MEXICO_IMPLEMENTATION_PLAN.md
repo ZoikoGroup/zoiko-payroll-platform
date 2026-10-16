@@ -7,7 +7,7 @@ State-overlay template: **Australia state payroll tax accordion** (each state = 
 
 Line numbers below are from commit 6a8f989; current ones are in `docs/mexico/MEXICO_PHASE_0_GAP_ASSESSMENT.md`, which wins on any conflict.
 
-**Revision v1.1 (after Phase 0 and the Phase 1 review).** Changes are marked *[v1.1]*. Five points that the Phase 0 gap assessment had already established are restored and marked *[v1.1 carry-over from Phase 0]*. Status: Phase 0 complete and staged; Phase 1 approved, blocked on source downloads.
+**Revision v1.1 (after Phase 0 and the Phase 1 review).** Changes are marked *[v1.1]*. Five points that the Phase 0 gap assessment had already established are restored and marked *[v1.1 carry-over from Phase 0]*. Status: Phase 0 committed (c09f7e8); Phase 1 approved, value-free tooling built, transcription blocked on source downloads.
 
 ---
 

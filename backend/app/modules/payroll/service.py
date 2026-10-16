@@ -1505,7 +1505,10 @@ def check_jurisdiction_readiness(
 
 # Countries whose statutory rows come ONLY from the Active canonical pack
 # (never an org's cached copy) — see _resolve_effective_rate_inputs.
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL")
+# Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
+# pack; an org-synced copy would drop the row-level dates that separate the
+# January and February UMA rows (MX-004).
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
