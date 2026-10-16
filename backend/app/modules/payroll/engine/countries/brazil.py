@@ -31,17 +31,18 @@ Phase 0 (scaffolding): Brazil is dispatched here by engine/standard.py so it can
 never fall through to the generic progressive-tax calculator, and calculate()
 BLOCKS every Brazilian calculation (BR_ENGINE_NOT_CERTIFIED). The draft Phase 2
 calculation is kept as _calculate_draft() — it is NOT reachable from any payroll
-path — and is corrected in Phase 1 (content: INSS maximum, IRRF reduction basis)
-and Phase 5 (no silent employer-charge defaults, rubric incidence bases). The
-known defects are listed in docs/brazil/BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7.
+path. Phase 1 fixed the INSS maximum (BR-K1, derived 988.09), per-band rounding
+(BR-K10, now rounded once) and the IRRF reduction basis (BR-K2, gross). Phase 5
+removes the silent employer-charge defaults and derives the bases from rubric
+incidence. Open defects: docs/brazil/BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7.
 
 The result is a plain dict consumed by engine/standard.py's StandardStrategy
 through the `br_result` key plus flat `br_*` fields.
 
 Golden-fixture targets (§22 of spec):
-  F1  — R$5,000 salary → INSS ≈ R$501.52
-  F2  — Salary > R$8,475.55 → INSS capped at R$951.62
-  F3  — Taxable base R$5,000 → IRRF = R$0.00 (reduction zeroes it)
+  F1  — R$5,000 salary → INSS R$501.51 (exact total rounded once, D1)
+  F2  — Salary > R$8,475.55 → INSS stops at R$988.09 (every band to the ceiling)
+  F3  — Gross R$5,000 → IRRF = R$0.00 (the reduction, on gross, zeroes it)
   F4  — Salary R$6,000 → IRRF reduced via phase-out formula, trace retained
   F5  — Salary within R$1,980.38, 1 dependent → Salário-Família R$67.54
   F6  — Apprentice R$1,621 → FGTS 2%, not 8%; net pay unaffected
@@ -148,54 +149,41 @@ def _calculate_inss_employee(
     responsible for BLOCKING the calculation when concurrent data is known to
     exist but unavailable (unknown external data must never be assumed zero).
     """
+    # Concurrent jobs are SUMMED before the bands apply, within the maximum
+    # (S1, BR-009): own = table(combined) − table(already covered elsewhere),
+    # both capped at the ceiling. The exact progressive total is rounded ONCE
+    # (decision D1 — the draft rounded each band, BR-K10).
     combined_base = gross_inss + concurrent_base
 
+    def table(base: Decimal) -> Decimal:
+        capped = min(max(base, ZERO), INSS_CEILING)
+        return sum(((min(capped, upper) - lower) * rate
+                    for lower, upper, rate, _full in INSS_2026_BRACKETS if capped > lower), ZERO)
+
     brackets_detail = []
-    total_contribution = ZERO
-
-    for lower, upper, rate, _max_bracket in INSS_2026_BRACKETS:
-        # How much of combined salary falls inside this bracket?
-        bracket_top = min(combined_base, upper)
-        bracket_bottom = max(lower, concurrent_base)
-
-        if bracket_top <= bracket_bottom:
-            # Concurrent employment already consumed this entire bracket
-            brackets_detail.append({
-                "lower": str(lower),
-                "upper": str(upper),
-                "rate_pct": str(rate * 100),
-                "own_portion": "0.00",
-                "own_contribution": "0.00",
-                "consumed_by_concurrent": True,
-            })
-            continue
-
-        own_portion = bracket_top - bracket_bottom
-        bracket_contribution = _r2(own_portion * rate)
-        total_contribution += bracket_contribution
+    for lower, upper, rate, _full in INSS_2026_BRACKETS:
+        top = min(combined_base, upper)
+        bottom = max(lower, min(concurrent_base, upper))
+        own_portion = max(ZERO, top - bottom)
         brackets_detail.append({
             "lower": str(lower),
             "upper": str(upper),
             "rate_pct": str(rate * 100),
             "own_portion": str(_r2(own_portion)),
-            "own_contribution": str(bracket_contribution),
-            "consumed_by_concurrent": False,
+            "own_contribution_exact": str(own_portion * rate),
+            "consumed_by_concurrent": own_portion == ZERO and concurrent_base > lower,
         })
 
-        if combined_base <= upper:
-            break  # No higher brackets apply
+    exact_own = table(combined_base) - table(concurrent_base)
+    total_contribution = _r2(exact_own)
 
-    # Apply overall ceiling check
     ceiling_reached = combined_base >= INSS_CEILING
     cap_applied = False
-    combined_contribution = total_contribution + concurrent_deducted
-
-    if combined_contribution > MAX_INSS_CONTRIBUTION:
-        # Reduce own contribution so combined ≤ MAX
+    # Contributions already withheld elsewhere are authoritative; the total
+    # across every employer never exceeds the maximum.
+    if total_contribution + concurrent_deducted > MAX_INSS_CONTRIBUTION:
         total_contribution = max(ZERO, MAX_INSS_CONTRIBUTION - concurrent_deducted)
         cap_applied = True
-
-    total_contribution = _r2(total_contribution)
 
     return {
         "inss_employee": total_contribution,
@@ -295,8 +283,11 @@ def _calculate_irrf(
 
     raw_tax = max(ZERO, raw_tax)
 
-    # Step 4: 2026 reduction
-    reduction_result = _apply_2026_irrf_reduction(taxable_base, raw_tax)
+    # Step 4: 2026 reduction — on the gross taxable INCOME, "e não o da base de
+    # cálculo" (Receita Federal example 5, source S3; decision D2). The draft
+    # fed the post-deduction base here (BR-K2), under-withholding ~R$5k–8.5k.
+    reduction_basis = _r2(gross_irrf)
+    reduction_result = _apply_2026_irrf_reduction(reduction_basis, raw_tax)
     irrf_net = reduction_result["irrf_after_reduction"]
     irrf_reduction = reduction_result["reduction"]
 
@@ -308,6 +299,7 @@ def _calculate_irrf(
         "deduction_method": deduction_method,
         "chosen_deduction": _r2(chosen_deduction),
         "taxable_base": taxable_base,
+        "reduction_basis": reduction_basis,
         "raw_tax": raw_tax,
         "irrf_reduction": irrf_reduction,
         "dependents": dependents,
@@ -483,9 +475,9 @@ def _calculate_draft(ctx: PayrollContext) -> Dict[str, Any]:
     """
     DRAFT Brazil CLT calculation (ZP-BR-ENG-001 Phase 2 draft) — not reachable
     from any payroll path; calculate() above blocks. Kept for Phase 5 and
-    exercised directly by tests/test_brazil_phase2_engine.py. Known defects
-    (fixed in Phases 1 and 5): INSS maximum, IRRF reduction basis, silent
-    employer-charge defaults, single dependants count, gross used as every base.
+    exercised directly by tests/test_brazil_phase2_engine.py. Still open
+    (Phase 5): silent employer-charge defaults, single dependants count, gross
+    used as every base, no tax-year guard on the context dates.
 
     Reads from ctx:
       brazil_inputs              — dict: {dependents, alimony, vt_benefit,

@@ -1,0 +1,5 @@
+# Saved official source documents are evidence: each file's SHA-256 is pinned
+# in SOURCES_MANIFEST.csv, so git must store them byte-for-byte (no CRLF/LF
+# normalisation under core.autocrlf).
+* -text
+.gitattributes text

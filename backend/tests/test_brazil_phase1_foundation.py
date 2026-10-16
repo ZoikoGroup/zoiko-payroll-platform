@@ -297,9 +297,6 @@ def test_2026_statutory_baseline_constants():
     assert c.STANDARD_CPP_RATE == Decimal("0.20")
     assert c.FGTS_ORDINARY_RATE == Decimal("0.08")
     assert c.FGTS_APPRENTICE_RATE == Decimal("0.02")
-
-
-@pytest.mark.xfail(strict=True, reason="Known defect BR-K1 (INSS maximum 951.62) — fixed in Phase 1")
 def test_inss_maximum_agrees_with_the_brackets():
     """The maximum employee contribution must equal the four 2026 brackets
     summed to the ceiling, rounded once (D1): 988.0914 → 988.09."""

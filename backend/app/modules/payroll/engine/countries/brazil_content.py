@@ -13,19 +13,22 @@ Baseline: 2026 Statutory Year
   - Salário-Família: Decree 12.797/2025 (R$ 67.54 quota, R$ 1,980.38 ceiling)
   - Rubric Catalog: eSocial S-1.3 Table 03 Naturezas & statutory incidences
 
-Status: DRAFT, unsigned, not read by any payroll path (the engine blocks).
-Phase 1 dates every value by tax year, derives the INSS maximum from the
-brackets, re-verifies the rubric incidence codes against the official eSocial
-tables, cites a saved, VERIFIED source for every row and seeds Draft canonical
-packs. Known issues: docs/brazil/BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7.
+Status: DRAFT, transcribed from saved official sources (docs/brazil/sources/,
+SOURCES_MANIFEST.csv); every row cites its source code and stays [PENDING G1]
+until the human gate-G1 review. Values are dated (2026 only); a date outside
+the content raises BrazilContentMissing (BR_CONTENT_YEAR_UNAVAILABLE). The
+engine still BLOCKS every calculation. The eSocial rubric incidence codes are
+NOT yet verified (Tabela 03 not saved — BR-K3) and are never seeded into a
+pack. Known issues: docs/brazil/BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date
-from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 # Content identification & versioning (Rule BR-003, BR-004)
 BRAZIL_SPEC_VERSION = "ZP-BR-ENG-001 v1.0"
@@ -76,63 +79,201 @@ GATES = (
     ("G8", "Parallel payroll"),
 )
 
-# ── 1. 2026 National Minimum Wage (Decree 12.797/2025) ────────────────────────
-MINIMUM_WAGE_MONTHLY = Decimal("1621.00")
-MINIMUM_WAGE_DAILY = Decimal("54.04")
-MINIMUM_WAGE_HOURLY = Decimal("7.37")
+# Additional saved official sources the spec register does not list by name
+# (docs/brazil/sources/SOURCES_MANIFEST.csv). A4 is the primary legal act
+# behind S1/S5; it is a scanned PDF without a text layer, so S1/S5 (the INSS
+# pages reproducing it) are what each row cites.
+ADDENDUM_SOURCE_REFERENCES = (
+    ("A1", "Presidency — Law 15.270/2025 (monthly IR reduction, art. 3-A of Lei 9.250)"),
+    ("A2", "Presidency — Law 8.212/1991, art. 22 (employer contribution, financial add-on)"),
+    ("A3", "Presidency — Law 8.036/1990, art. 15 (FGTS 8%, apprentice 2%)"),
+    ("A4", "MPS/MF — Portaria Interministerial nº 13, de 9 de janeiro de 2026"),
+)
+ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
-# ── 2. 2026 Employee INSS Progressive Table ──────────────────────────────────
-# Progressive brackets: (lower_bound, upper_bound, marginal_rate, max_bracket_contribution)
-INSS_CEILING = Decimal("8475.55")
-MAX_INSS_CONTRIBUTION = Decimal("951.62")
+# Every row is transcribed from a saved, VERIFIED source and stays marked
+# pending until the human gate-G1 statutory review signs it.
+PENDING_G1 = "[PENDING G1]"
 
-INSS_2026_BRACKETS: Tuple[Tuple[Decimal, Decimal, Decimal, Decimal], ...] = (
-    (Decimal("0.00"), Decimal("1621.00"), Decimal("0.075"), Decimal("121.58")),
-    (Decimal("1621.00"), Decimal("2902.84"), Decimal("0.090"), Decimal("115.37")),
-    (Decimal("2902.84"), Decimal("4354.27"), Decimal("0.120"), Decimal("174.17")),
-    (Decimal("4354.27"), Decimal("8475.55"), Decimal("0.140"), Decimal("577.02")),
+# TaxSlab discriminators (rule_type). countries/brazil.py and the Super Admin
+# pack-rows view read only rows whose rule_type starts with "BR_"; Brazil is NOT
+# a _NO_TAX_SLAB_COUNTRIES country (INSS and IRRF are bracket tables).
+BR_INSS_BAND_RULE = "BR_INSS_BAND"
+BR_IRRF_TABLE_RULE = "BR_IRRF_TABLE"
+BR_IRRF_REDUCTION_RULE = "BR_IRRF_REDUCTION"
+BR_MIN_WAGE_RULE = "BR_MIN_WAGE"
+BR_SAL_FAMILIA_RULE = "BR_SAL_FAMILIA"
+BR_FGTS_RATE_RULE = "BR_FGTS_RATE"
+BR_CPP_RATE_RULE = "BR_CPP_RATE"
+BR_SLAB_RULES = (BR_INSS_BAND_RULE, BR_IRRF_TABLE_RULE, BR_IRRF_REDUCTION_RULE, BR_MIN_WAGE_RULE,
+                 BR_SAL_FAMILIA_RULE, BR_FGTS_RATE_RULE, BR_CPP_RATE_RULE)
+
+
+class ContentRow(NamedTuple):
+    """One statutory row. Amounts in R$; rate_pct is a PERCENT (7.5 = 7.5%),
+    never a fraction. min/max bound the band the row applies to (None = open)."""
+    rule_type: str
+    key: str
+    label: str
+    min_amount: Optional[Decimal]
+    max_amount: Optional[Decimal]
+    rate_pct: Optional[Decimal]
+    flat_amount: Optional[Decimal]
+    effective_from: date
+    effective_to: Optional[date]
+    source: str
+
+
+_Y26 = (date(2026, 1, 1), date(2026, 12, 31))
+D = Decimal
+
+
+def _row(rule, key, label, source, *, lo=None, hi=None, rate=None, flat=None, window=_Y26):
+    return ContentRow(rule, key, label, D(lo) if lo is not None else None, D(hi) if hi is not None else None,
+                      D(rate) if rate is not None else None, D(flat) if flat is not None else None,
+                      window[0], window[1], source)
+
+
+BR_CONTENT_ROWS: Tuple[ContentRow, ...] = (
+    # ── 1. Employee INSS — progressive bands, by competence month (S1) ────────
+    _row(BR_INSS_BAND_RULE, "B1", "Até R$ 1.621,00 — 7,5%", "S1", lo="0.00", hi="1621.00", rate="7.5"),
+    _row(BR_INSS_BAND_RULE, "B2", "De R$ 1.621,01 a R$ 2.902,84 — 9%", "S1", lo="1621.00", hi="2902.84", rate="9"),
+    _row(BR_INSS_BAND_RULE, "B3", "De R$ 2.902,85 até R$ 4.354,27 — 12%", "S1", lo="2902.84", hi="4354.27", rate="12"),
+    _row(BR_INSS_BAND_RULE, "B4", "De R$ 4.354,28 até R$ 8.475,55 — 14%", "S1", lo="4354.27", hi="8475.55", rate="14"),
+    # ── 2. IRRF monthly table on the base de cálculo + deductions (S2) ────────
+    _row(BR_IRRF_TABLE_RULE, "T1", "Até R$ 2.428,80 — isento", "S2", lo="0.00", hi="2428.80", rate="0", flat="0.00"),
+    _row(BR_IRRF_TABLE_RULE, "T2", "De R$ 2.428,81 até R$ 2.826,65 — 7,5%", "S2", lo="2428.80", hi="2826.65",
+         rate="7.5", flat="182.16"),
+    _row(BR_IRRF_TABLE_RULE, "T3", "De R$ 2.826,66 até R$ 3.751,05 — 15%", "S2", lo="2826.65", hi="3751.05",
+         rate="15", flat="394.16"),
+    _row(BR_IRRF_TABLE_RULE, "T4", "De R$ 3.751,06 até R$ 4.664,68 — 22,5%", "S2", lo="3751.05", hi="4664.68",
+         rate="22.5", flat="675.49"),
+    _row(BR_IRRF_TABLE_RULE, "T5", "Acima de R$ 4.664,68 — 27,5%", "S2", lo="4664.68", rate="27.5", flat="908.73"),
+    _row(BR_IRRF_TABLE_RULE, "DEDUCTION_DEPENDENT", "Dedução mensal por dependente", "S2", flat="189.59"),
+    _row(BR_IRRF_TABLE_RULE, "DEDUCTION_SIMPLIFIED", "Limite mensal de desconto simplificado", "S2", flat="607.20"),
+    # ── 3. IRRF 2026 monthly reduction on GROSS taxable income (A1, S2, S3) ───
+    # Applied after the table (BR-013). The basis is the taxable INCOME, "e não o
+    # da base de cálculo" (Receita example 5, S3) — decision D2.
+    _row(BR_IRRF_REDUCTION_RULE, "ZERO_BAND", "Rendimentos até R$ 5.000,00 — redução até R$ 312,89",
+         "A1", lo="0.00", hi="5000.00", flat="312.89"),
+    _row(BR_IRRF_REDUCTION_RULE, "PHASE_OUT", "R$ 5.000,01 a R$ 7.350,00 — 978,62 − 0,133145 × rendimentos",
+         "A1", lo="5000.00", hi="7350.00", rate="13.3145", flat="978.62"),
+    # ── 4. Minimum wage (S4) ──────────────────────────────────────────────────
+    _row(BR_MIN_WAGE_RULE, "MONTHLY", "Salário mínimo mensal", "S4", flat="1621.00"),
+    _row(BR_MIN_WAGE_RULE, "DAILY", "Salário mínimo diário", "S4", flat="54.04"),
+    _row(BR_MIN_WAGE_RULE, "HOURLY", "Salário mínimo horário", "S4", flat="7.37"),
+    # ── 5. Salário-família (S5) — total salário de contribuição, all jobs ─────
+    _row(BR_SAL_FAMILIA_RULE, "QUOTA", "Cota por filho ou equiparado — remuneração até R$ 1.980,38", "S5",
+         lo="0.00", hi="1980.38", flat="67.54"),
+    # ── 6. FGTS (A3) — employer deposit, never deducted from net ──────────────
+    _row(BR_FGTS_RATE_RULE, "ORDINARY", "FGTS — 8% da remuneração", "A3", rate="8"),
+    _row(BR_FGTS_RATE_RULE, "APPRENTICE", "FGTS — contrato de aprendizagem 2%", "A3", rate="2"),
+    # ── 7. Employer CPP (A2) and the 2026 CPRB transition (S8) ────────────────
+    _row(BR_CPP_RATE_RULE, "STANDARD", "CPP — 20% (Lei 8.212 art. 22 I)", "A2", rate="20"),
+    _row(BR_CPP_RATE_RULE, "FINANCIAL_ADDON", "CPP adicional instituições financeiras — 2,5% (art. 22 §1)", "A2",
+         rate="2.5"),
+    _row(BR_CPP_RATE_RULE, "CPRB_2026", "CPRB 2026 — 50% das alíquotas do art. 22 I (Lei 14.973 art. 9-A II)", "S8",
+         rate="10"),
+    _row(BR_CPP_RATE_RULE, "CPRB_2026_REVENUE_FACTOR", "CPRB 2026 — 60% das alíquotas dos arts. 7-A/8-A", "S8",
+         rate="60"),
 )
 
-# ── 3. 2026 IRRF Monthly Progressive Table & Deductions ──────────────────────
-# Deductions
-IRRF_DEPENDENT_DEDUCTION = Decimal("189.59")
-IRRF_SIMPLIFIED_MONTHLY_DEDUCTION = Decimal("607.20")
 
-# Progressive brackets: (lower_bound, upper_bound, rate, parcel_to_deduct)
-IRRF_2026_TABLE: Tuple[Tuple[Decimal, Optional[Decimal], Decimal, Decimal], ...] = (
-    (Decimal("0.00"), Decimal("2428.80"), Decimal("0.000"), Decimal("0.00")),
-    (Decimal("2428.80"), Decimal("2826.65"), Decimal("0.075"), Decimal("182.16")),
-    (Decimal("2826.65"), Decimal("3751.05"), Decimal("0.150"), Decimal("394.16")),
-    (Decimal("3751.05"), Decimal("4664.68"), Decimal("0.225"), Decimal("675.49")),
-    (Decimal("4664.68"), None, Decimal("0.275"), Decimal("908.73")),
+class BrazilContentMissing(LookupError):
+    """No Brazil statutory content covers the requested date — the caller must
+    BLOCK (BR_CONTENT_YEAR_UNAVAILABLE), never fall back to another year."""
+
+
+def rows_in_force(rule_type: str, as_of: date) -> Tuple[ContentRow, ...]:
+    """The rows of one rule in force on `as_of` (IRRF: the PAYMENT date, BR-014;
+    INSS/FGTS: the competence month's first day). Raises when none exist."""
+    if not isinstance(as_of, date):
+        raise TypeError("as_of must be a date")
+    rows = tuple(r for r in BR_CONTENT_ROWS if r.rule_type == rule_type and r.effective_from <= as_of
+                 and (r.effective_to is None or as_of <= r.effective_to))
+    if not rows:
+        raise BrazilContentMissing(f"BR_CONTENT_YEAR_UNAVAILABLE: no {rule_type} content in force on {as_of.isoformat()}")
+    return rows
+
+
+def row_in_force(rule_type: str, key: str, as_of: date) -> ContentRow:
+    for row in rows_in_force(rule_type, as_of):
+        if row.key == key:
+            return row
+    raise BrazilContentMissing(f"BR_CONTENT_YEAR_UNAVAILABLE: no {rule_type}/{key} in force on {as_of.isoformat()}")
+
+
+def _pct(row: ContentRow) -> Decimal:
+    return row.rate_pct / D("100")
+
+
+# ── Derived constants (2026) — kept for the draft engine and existing callers ─
+_AS_OF_2026 = date(2026, 1, 1)
+
+# 1. Minimum wage
+MINIMUM_WAGE_MONTHLY = row_in_force(BR_MIN_WAGE_RULE, "MONTHLY", _AS_OF_2026).flat_amount
+MINIMUM_WAGE_DAILY = row_in_force(BR_MIN_WAGE_RULE, "DAILY", _AS_OF_2026).flat_amount
+MINIMUM_WAGE_HOURLY = row_in_force(BR_MIN_WAGE_RULE, "HOURLY", _AS_OF_2026).flat_amount
+
+# 2. Employee INSS: (lower, upper, marginal rate as a fraction, full-band contribution).
+INSS_2026_BRACKETS: Tuple[Tuple[Decimal, Decimal, Decimal, Decimal], ...] = tuple(
+    (r.min_amount, r.max_amount, _pct(r), (r.max_amount - r.min_amount) * _pct(r))
+    for r in rows_in_force(BR_INSS_BAND_RULE, _AS_OF_2026)
 )
+INSS_CEILING = INSS_2026_BRACKETS[-1][1]
 
-# 2026 Monthly IRRF Reduction (Law 15.270/2025 - Rule BR-013)
-# Up to R$ 5,000.00: max reduction R$ 312.89 -> net tax = R$ 0.00
-# R$ 5,000.01 to R$ 7,350.00: 978.62 - (0.133145 * taxable_earnings)
-# Above R$ 7,350.00: R$ 0.00
-IRRF_2026_REDUCTION_ZERO_CEILING = Decimal("5000.00")
-IRRF_2026_REDUCTION_MAX_ZERO = Decimal("312.89")
-IRRF_2026_REDUCTION_PHASE_CEILING = Decimal("7350.00")
-IRRF_2026_REDUCTION_A = Decimal("978.62")
-IRRF_2026_REDUCTION_B = Decimal("0.133145")
 
-# ── 4. 2026 Salário-Família (Decree 12.797/2025) ──────────────────────────────
-SALARIO_FAMILIA_CEILING = Decimal("1980.38")
-SALARIO_FAMILIA_QUOTA = Decimal("67.54")
+def inss_maximum(brackets=INSS_2026_BRACKETS) -> Decimal:
+    """Maximum employee contribution = every band filled to the ceiling, the
+    exact total rounded ONCE (decision D1). Never stored separately (BR-K1)."""
+    return sum((b[3] for b in brackets), D("0")).quantize(D("0.01"), rounding=ROUND_HALF_UP)
 
-# ── 5. Standard Employer Social Security, FGTS & Risk Rates ──────────────────
-STANDARD_CPP_RATE = Decimal("0.20")              # 20% ordinary private-sector CPP
-FINANCIAL_SECTOR_CPP_ADDON = Decimal("0.025")    # +2.5% for financial institutions
-CPRB_2026_CPP_RATE = Decimal("0.10")             # 50% transition relief on covered payroll (10%)
-CPRB_2026_SERVICE_RETENTION = Decimal("0.035")   # 3.5% retention on covered services
 
-FGTS_ORDINARY_RATE = Decimal("0.08")             # 8% standard CLT
-FGTS_APPRENTICE_RATE = Decimal("0.02")           # 2% apprentice
-FGTS_TERMINATION_FINE_RATE = Decimal("0.40")     # 40% dismissal without cause
-FGTS_MUTUAL_TERMINATION_FINE_RATE = Decimal("0.20") # 20% mutual agreement (Art. 484-A)
+MAX_INSS_CONTRIBUTION = inss_maximum()
+# Published 2026 maximum (INSS / secondary press, reconciled against S1's bands).
+# A content edit that changes the bands without this figure fails at import.
+PUBLISHED_INSS_MAXIMUM_2026 = D("988.09")
+if MAX_INSS_CONTRIBUTION != PUBLISHED_INSS_MAXIMUM_2026:  # pragma: no cover - content guard
+    raise RuntimeError(f"Brazil INSS maximum {MAX_INSS_CONTRIBUTION} disagrees with the published "
+                       f"{PUBLISHED_INSS_MAXIMUM_2026} — the S1 bands were edited inconsistently")
 
-VALE_TRANSPORTE_MAX_DEDUCTION_PCT = Decimal("0.06") # 6% of base salary
+# 3. IRRF: (lower, upper|None, rate fraction, parcela a deduzir)
+IRRF_2026_TABLE: Tuple[Tuple[Decimal, Optional[Decimal], Decimal, Decimal], ...] = tuple(
+    (r.min_amount, r.max_amount, _pct(r), r.flat_amount)
+    for r in rows_in_force(BR_IRRF_TABLE_RULE, _AS_OF_2026) if r.key.startswith("T")
+)
+IRRF_DEPENDENT_DEDUCTION = row_in_force(BR_IRRF_TABLE_RULE, "DEDUCTION_DEPENDENT", _AS_OF_2026).flat_amount
+IRRF_SIMPLIFIED_MONTHLY_DEDUCTION = row_in_force(BR_IRRF_TABLE_RULE, "DEDUCTION_SIMPLIFIED", _AS_OF_2026).flat_amount
+
+_zero_band = row_in_force(BR_IRRF_REDUCTION_RULE, "ZERO_BAND", _AS_OF_2026)
+_phase_out = row_in_force(BR_IRRF_REDUCTION_RULE, "PHASE_OUT", _AS_OF_2026)
+IRRF_2026_REDUCTION_ZERO_CEILING = _zero_band.max_amount
+IRRF_2026_REDUCTION_MAX_ZERO = _zero_band.flat_amount
+IRRF_2026_REDUCTION_PHASE_CEILING = _phase_out.max_amount
+IRRF_2026_REDUCTION_A = _phase_out.flat_amount
+IRRF_2026_REDUCTION_B = _pct(_phase_out)
+
+# 4. Salário-família
+_sf = row_in_force(BR_SAL_FAMILIA_RULE, "QUOTA", _AS_OF_2026)
+SALARIO_FAMILIA_CEILING = _sf.max_amount
+SALARIO_FAMILIA_QUOTA = _sf.flat_amount
+
+# 5. Employer CPP, CPRB transition, FGTS
+STANDARD_CPP_RATE = _pct(row_in_force(BR_CPP_RATE_RULE, "STANDARD", _AS_OF_2026))
+FINANCIAL_SECTOR_CPP_ADDON = _pct(row_in_force(BR_CPP_RATE_RULE, "FINANCIAL_ADDON", _AS_OF_2026))
+CPRB_2026_CPP_RATE = _pct(row_in_force(BR_CPP_RATE_RULE, "CPRB_2026", _AS_OF_2026))
+CPRB_2026_REVENUE_FACTOR = _pct(row_in_force(BR_CPP_RATE_RULE, "CPRB_2026_REVENUE_FACTOR", _AS_OF_2026))
+if CPRB_2026_CPP_RATE != STANDARD_CPP_RATE * D("0.5"):  # pragma: no cover - content guard
+    raise RuntimeError("CPRB 2026 CPP rate must be 50% of the standard CPP rate (Lei 14.973, S8)")
+FGTS_ORDINARY_RATE = _pct(row_in_force(BR_FGTS_RATE_RULE, "ORDINARY", _AS_OF_2026))
+FGTS_APPRENTICE_RATE = _pct(row_in_force(BR_FGTS_RATE_RULE, "APPRENTICE", _AS_OF_2026))
+
+# Not yet sourced from a saved, VERIFIED document — kept for the draft engine
+# only and NEVER seeded into a pack (Phase 7 / Phase 10 will source them).
+CPRB_2026_SERVICE_RETENTION = D("0.035")         # UNSOURCED
+FGTS_TERMINATION_FINE_RATE = D("0.40")           # UNSOURCED (Phase 7)
+FGTS_MUTUAL_TERMINATION_FINE_RATE = D("0.20")    # UNSOURCED (Phase 7)
+VALE_TRANSPORTE_MAX_DEDUCTION_PCT = D("0.06")    # UNSOURCED (Phase 5, Lei 7.418)
 
 # ── 6. Mandatory System Rubric Matrix (eSocial Table 03 - Rule BR-005) ────────
 STANDARD_SYSTEM_RUBRICS: List[Dict[str, Any]] = [
@@ -265,15 +406,40 @@ STANDARD_SYSTEM_RUBRICS: List[Dict[str, Any]] = [
 ]
 
 
-def calculate_content_hash() -> str:
-    """Computes a deterministic SHA256 signature for 2026 Brazil content (Rule BR-003)."""
-    raw = (
-        f"{BRAZIL_SPEC_VERSION}|{BRAZIL_TAX_YEAR}|{MINIMUM_WAGE_MONTHLY}|"
-        f"{INSS_CEILING}|{MAX_INSS_CONTRIBUTION}|{IRRF_DEPENDENT_DEDUCTION}|"
-        f"{IRRF_SIMPLIFIED_MONTHLY_DEDUCTION}|{SALARIO_FAMILIA_CEILING}|"
-        f"{SALARIO_FAMILIA_QUOTA}|{STANDARD_CPP_RATE}|{FGTS_ORDINARY_RATE}"
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+# ── Content signature (BR-003, BR-K7) ─────────────────────────────────────────
+# One SHA-256 over EVERY statutory row and every rubric, serialised canonically
+# (sorted keys, decimal strings). Stamped on the seeded pack's change summary
+# and, from Phase 6, on every payslip snapshot; any change to any value changes
+# the hash.
+
+def _canonical(value):
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def content_payload() -> dict:
+    return {
+        "spec": BRAZIL_SPEC_VERSION,
+        "rows": [{k: _canonical(v) for k, v in row._asdict().items()} for row in BR_CONTENT_ROWS],
+        "rubrics": [dict(sorted(r.items())) for r in STANDARD_SYSTEM_RUBRICS],
+    }
+
+
+def calculate_content_hash(payload: Optional[dict] = None) -> str:
+    """Deterministic SHA-256 over the whole Brazil content (BR-003)."""
+    text = json.dumps(payload if payload is not None else content_payload(), sort_keys=True,
+                      ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 CONTENT_HASH = calculate_content_hash()
+
+
+def cited_sources() -> set:
+    """Every source code a statutory row cites — each must be VERIFIED in
+    docs/brazil/sources/SOURCES_MANIFEST.csv before a pack can be seeded."""
+    return {row.source for row in BR_CONTENT_ROWS}

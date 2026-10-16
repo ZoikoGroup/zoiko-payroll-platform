@@ -19,7 +19,7 @@ Every phase ends with: import check, full pytest, `npm run check:undefined`, fro
 | Phase | Status |
 |---|---|
 | 0 | Done (`4f7c145`), merged with `main`/Mexico (`2ded87b`) |
-| 1 | Partly done: gate lists in place and a single content module. Blocked: year-dated content, signed hash, seed script and rubric codes all need saved, VERIFIED official sources (D6) |
+| 1 | Done (2026-10-16): official sources saved and verified, year-dated sourced content, defects BR-K1/K2/K7/K10 fixed, Draft seeder — see `BRAZIL_PHASE_1_IMPLEMENTATION_REPORT.md`. Open: rubric codes (BR-K3), sources S6/S7/S9–S20, G1 sign-off |
 | 2 | Done and browser-checked locally. Only the FPAS data (D6) is open — see `BRAZIL_PHASE_2_IMPLEMENTATION_REPORT.md` |
 | 3–11 | Not started |
 

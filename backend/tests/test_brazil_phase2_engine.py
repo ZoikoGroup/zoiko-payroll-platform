@@ -27,11 +27,10 @@ Additional boundary tests:
 Phase 0 status: the production dispatch (_COUNTRY_CALC["BR"] -> brazil.calculate)
 BLOCKS every Brazilian calculation — see tests/test_brazil_scaffolding.py. This
 file exercises the DRAFT calculation (_calculate_draft) and its helpers, which
-no payroll path can reach. Tests marked xfail(strict=True) assert the CORRECT
-statutory result for a known draft defect (docs/brazil/
-BRAZIL_PHASE_0_GAP_ASSESSMENT.md §7): they fail today by design, and the fix
-turns them into XPASS, which strict mode reports as a failure — forcing the
-marker to be removed in the same change that fixes the defect.
+no payroll path can reach. Phase 1 fixed BR-K1 (INSS maximum), BR-K10 (rounding
+once) and BR-K2 (IRRF reduction on gross) — their former strict-xfail tests now
+pass as ordinary tests. The IRRF reduction-basis tests reproduce the official
+Receita Federal worked examples (docs/brazil/sources/S3).
 """
 
 import sys
@@ -84,8 +83,6 @@ class TestINSS:
     """Decision D1 (2026-10-16): INSS is rounded ONCE, on the exact progressive
     total — not per bracket. The draft rounds each bracket (known defect
     BR-K10, fixed in Phase 1), which is off by one cent on some salaries."""
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K10 (per-bracket rounding, D1) — fixed in Phase 1")
     def test_F1_salary_5000(self):
         """F1: R$5,000 salary → INSS = R$501.51 (exact total rounded once)."""
         result = _calculate_inss_employee(D("5000.00"))
@@ -101,8 +98,6 @@ class TestINSS:
     # brackets, which sum to 988.0914 → 988.09 (D1: rounded once) at the
     # R$8,475.55 ceiling. Phase 1 fixes.
     _CORRECT_INSS_MAX = (D("988.09"),)
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K1 (INSS maximum) — fixed in Phase 1")
     def test_F2_above_ceiling(self):
         """F2: Salary > R$8,475.55 → INSS stops at the 2026 ceiling contribution."""
         result = _calculate_inss_employee(D("15000.00"))
@@ -110,27 +105,25 @@ class TestINSS:
             f"F2 failed: expected the 2026 ceiling contribution, got {result['inss_employee']}"
         )
         assert result["ceiling_reached"] is True
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K1 (INSS maximum) — fixed in Phase 1")
     def test_exactly_at_ceiling(self):
         """INSS at exactly the ceiling salary R$8,475.55 → the full four-bracket sum."""
         result = _calculate_inss_employee(D("8475.55"))
         assert result["inss_employee"] in self._CORRECT_INSS_MAX
         assert result["ceiling_reached"] is True
 
-    def test_draft_cap_starts_below_the_ceiling(self):
-        """Pins the BR-K1 symptom so it is visible in every run: the draft stops
-        INSS growing at about R$8,215, well below the R$8,475.55 ceiling."""
-        below = _calculate_inss_employee(D("8200.00"))["inss_employee"]
-        above = _calculate_inss_employee(D("8400.00"))["inss_employee"]
-        assert below < D("951.62") and above == D("951.62")
+    def test_inss_keeps_growing_up_to_the_ceiling(self):
+        """BR-K1 fixed: INSS grows through band 4 all the way to R$8,475.55
+        (the old 951.62 cap stopped it at about R$8,215), then stops."""
+        at_8200 = _calculate_inss_employee(D("8200.00"))["inss_employee"]
+        at_8400 = _calculate_inss_employee(D("8400.00"))["inss_employee"]
+        at_ceiling = _calculate_inss_employee(D("8475.55"))["inss_employee"]
+        above = _calculate_inss_employee(D("8475.56"))["inss_employee"]
+        assert at_8200 < at_8400 < at_ceiling == above == D("988.09")
 
     def test_bracket_boundary_1621(self):
         """Exactly R$1,621.00 → only first bracket applies: 1621 × 7.5% = 121.58."""
         result = _calculate_inss_employee(D("1621.00"))
         assert result["inss_employee"] == D("121.58")
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K10 (per-bracket rounding, D1) — fixed in Phase 1")
     def test_bracket_boundary_2902_84(self):
         """Exactly R$2,902.84 → first + second bracket."""
         result = _calculate_inss_employee(D("2902.84"))
@@ -144,8 +137,6 @@ class TestINSS:
         """Minimum wage R$1,621.00 is exactly the top of bracket 1."""
         result = _calculate_inss_employee(D("1621.00"))
         assert result["inss_employee"] == D("121.58")
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K10 (per-bracket rounding, D1) — fixed in Phase 1")
     def test_concurrent_employment_offset(self):
         """T9: Concurrent employment that consumed bracket 1 means bracket 2 starts at 0."""
         # Worker earned R$1,621 elsewhere; own salary R$2,000
@@ -270,20 +261,39 @@ class TestIRRFReductionBasis:
     cap is exactly the table tax on R$5,000 − R$607.20, which only holds on the
     gross reading. The draft feeds the post-deduction base, so it under-withholds
     for gross between about R$5,000 and R$8,500. Pending tax-team sign-off (D2)."""
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K2 (IRRF reduction basis) — fixed in Phase 1")
     def test_gross_5500(self):
         # Simplified (607.20) beats INSS 571.52 → base 4,892.80 → table tax 436.79;
         # reduction = 978.62 − 0.133145 × 5,500 = 246.32 → IRRF 190.47 (draft: 123.90).
         result = _calculate_irrf(gross_irrf=D("5500.00"), inss_deducted=D("571.52"))
         assert result["irrf"] == D("190.47")
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K2 (IRRF reduction basis) — fixed in Phase 1")
     def test_gross_7350_gets_no_reduction(self):
         # Legal (INSS 830.52) → base 6,519.48 → table tax 884.13; reduction on
         # gross 7,350 = 978.62 − 978.62 = 0.00 → IRRF 884.13 (draft: 773.54).
         result = _calculate_irrf(gross_irrf=D("7350.00"), inss_deducted=D("830.52"))
         assert result["irrf"] == D("884.13")
+
+
+class TestReceitaOfficialExamples:
+    """The five monthly worked examples published by Receita Federal for Lei
+    15.270/2025 (saved: docs/brazil/sources/S3_Receita_Exemplos_Lei_15270_2025.html).
+    The examples take their INSS amount as an input (Receita used the 2025 INSS
+    figures), so INSS is passed in exactly as published."""
+
+    @pytest.mark.parametrize("gross,inss,method,base,raw_tax,reduction,irrf", [
+        ("3036.00", "257.73", "SIMPLIFIED", "2428.80", "0.00", "0.00", "0.00"),       # Ex. 1
+        ("4000.00", "373.41", "SIMPLIFIED", "3392.80", "114.76", "114.76", "0.00"),   # Ex. 2
+        ("5000.00", "509.60", "SIMPLIFIED", "4392.80", "312.89", "312.89", "0.00"),   # Ex. 3
+        ("6000.00", "649.60", "LEGAL", "5350.40", "562.63", "179.75", "382.88"),      # Ex. 4
+        ("7607.20", "0.00", "SIMPLIFIED", "7000.00", "1016.27", "0.00", "1016.27"),   # Ex. 5
+    ])
+    def test_receita_example(self, gross, inss, method, base, raw_tax, reduction, irrf):
+        result = _calculate_irrf(gross_irrf=D(gross), inss_deducted=D(inss))
+        assert result["deduction_method"] == method
+        assert result["taxable_base"] == D(base)
+        assert result["raw_tax"] == D(raw_tax)
+        assert result["irrf_reduction"] == D(reduction)
+        assert result["irrf"] == D(irrf)
+        assert result["reduction_basis"] == D(gross)    # gross, "e não o da base de cálculo"
 
 
 class TestIRRFReduction:
@@ -557,8 +567,6 @@ class TestBrazilEngineIntegration:
         assert result.net_pay == net_without_sf + D("67.54"), (
             f"F5 net pay with SF: expected {net_without_sf + D('67.54')}, got {result.net_pay}"
         )
-
-    @pytest.mark.xfail(strict=True, reason="Known defect BR-K1 (INSS maximum) — fixed in Phase 1")
     def test_F2_ceiling_integration(self):
         """F2: High salary → INSS stops at the 2026 ceiling contribution via integration."""
         ctx = make_ctx("20000.00", basic="20000.00")

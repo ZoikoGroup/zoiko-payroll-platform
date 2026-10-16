@@ -80,15 +80,15 @@ The touchpoint list follows `docs/mexico/MEXICO_PHASE_0_GAP_ASSESSMENT.md` (on `
 
 | Key | Defect | Effect if it were live | Fixed in | Test |
 |---|---|---|---|---|
-| BR-K1 | `MAX_INSS_CONTRIBUTION = 951.62` contradicts the 2026 brackets (sum at the ceiling = 988.09, D1) | INSS stops growing at ≈ R$8,215; under-deducts up to ≈ R$36/month | 1 | strict xfail (×4) + symptom pin |
-| BR-K10 | INSS rounded per bracket; D1 (2026-10-16) requires the exact progressive total rounded once | Off by R$0.01 on some salaries (F1: 501.52 vs 501.51; 2,902.84: 236.95 vs 236.94) | 1 | strict xfail (×3) |
-| BR-K2 | IRRF 2026 reduction computed from the base after deductions instead of gross taxable income | Under-withholds for gross ≈ R$5,000–8,500 (R$66.57 at 5,500; R$110.59 at 7,350) | 1 | strict xfail (×2) |
+| BR-K1 | **FIXED in Phase 1** — `MAX_INSS_CONTRIBUTION = 951.62` contradicts the 2026 brackets (sum at the ceiling = 988.09, D1) | INSS stops growing at ≈ R$8,215; under-deducts up to ≈ R$36/month | 1 | strict xfail (×4) + symptom pin |
+| BR-K10 | **FIXED in Phase 1** — INSS rounded per bracket; D1 (2026-10-16) requires the exact progressive total rounded once | Off by R$0.01 on some salaries (F1: 501.52 vs 501.51; 2,902.84: 236.95 vs 236.94) | 1 | strict xfail (×3) |
+| BR-K2 | **FIXED in Phase 1** (S3 decides D2) — IRRF 2026 reduction computed from the base after deductions instead of gross taxable income | Under-withholds for gross ≈ R$5,000–8,500 (R$66.57 at 5,500; R$110.59 at 7,350) | 1 | strict xfail (×2) |
 | BR-K3 | Seeded rubric incidence codes unverified; likely wrong: INSS `codIncIRRF` 31 (→ 41), INSS `codIncCP` 00 (→ 31), IRRF `codIncIRRF` 00 (→ 31), alimony `codIncIRRF` 33 (→ 51); several nature codes to re-check | Wrong eSocial S-1010 declarations | 1 (needs D6) | — |
 | BR-K4 | Missing RAT / FAP / third-party rate silently defaults to 2% / 1.0 / 0% | Wrong employer charges with no warning | 5 | — |
 | BR-K5 | One dependants count for IRRF and salário-família; `concurrent_inss_flag` never enforced; alimony lowers the IRRF base but is not deducted from net; gross used as every base; no tax-year guard | Wrong IRRF/SF, missed BR-009 block, overpaid net | 1 / 4 / 5 | — |
 | BR-K6 | PIX key not masked (often the CPF); `bank_account` missing from routing; CNPJ check digits not used by the schemas; contact CPF unchecked | LGPD exposure (G7) | 3 / 4 | noted in tests |
-| BR-K7 | Content hash covers 11 scalars, not the tables or rubrics | Hash proves nothing about the brackets | 1 | — |
-| BR-K8 | Rubrics seeded per organisation, no canonical catalogue; content module outside `engine/countries/` | Inconsistent with NL/MX governance | 1 | — |
+| BR-K7 | **FIXED in Phase 1** — Content hash covers 11 scalars, not the tables or rubrics | Hash proves nothing about the brackets | 1 | — |
+| BR-K8 | **FIXED (Phases 1–2)** — Rubrics seeded per organisation, no canonical catalogue; content module outside `engine/countries/` | Inconsistent with NL/MX governance | 1 | — |
 | BR-K9 | `delete_organization` does not know the BR tables (`RESTRICT` from profiles to establishments) | Org delete can fail once BR rows exist | 3 | — |
 
 Spec errata (to confirm with the tax content team):
