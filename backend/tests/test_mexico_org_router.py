@@ -5,8 +5,15 @@ read-only Super Admin employer routes. In-memory SQLite; SYNTHETIC data."""
 import pytest
 
 from tests._mx_employer_helpers import (
-    GCP_REF, ORG_BASE, SA_BASE, SUPER_ADMIN, employer_payload, http, make_org, principal,
+    GCP_REF, ORG_BASE, SA_BASE, SUPER_ADMIN, employer_payload, enable_mx_onboarding, http, make_org, new_employer,
+    principal,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mx_onboarding(monkeypatch):
+    """These tests exercise the Phase 3 API itself; dormancy is test_mexico_dormancy.py's job."""
+    enable_mx_onboarding(monkeypatch)
 
 
 def _create(c, **over):
@@ -107,15 +114,10 @@ def test_super_admin_employer_routes_are_read_only_and_masked(db):
 
 
 def test_super_admin_org_picker_lists_orgs_with_a_mexico_employer_or_jurisdiction(db):
-    from app.modules.payroll.models import CompanyComplianceDetails
-
-    with_employer, by_jurisdiction = make_org(db), make_org(db, name="Jur", code="JUR")
-    unrelated = make_org(db, name="NL org", code="NLORG")
-    db.add_all([CompanyComplianceDetails(organization_id=by_jurisdiction.org.id, jurisdiction_country="MX"),
-                CompanyComplianceDetails(organization_id=unrelated.org.id, jurisdiction_country="NL")])
-    db.commit()
-    with http(db, principal(with_employer.org.id)) as c:
-        _create(c)
+    with_employer = make_org(db, country=None)                       # employer row, no MX jurisdiction
+    by_jurisdiction = make_org(db, name="Jur", code="JUR")             # MX jurisdiction, no employer
+    make_org(db, name="NL org", code="NLORG", country="NL")            # unrelated
+    new_employer(db, with_employer.org.id)
     with http(db, SUPER_ADMIN) as c:
         ids = {o["id"] for o in c.get(f"{SA_BASE}/organizations").json()}
     assert ids == {with_employer.org.id, by_jurisdiction.org.id}

@@ -9,6 +9,8 @@ Line numbers below are from commit 6a8f989; current ones are in `docs/mexico/MEX
 
 **Revision v1.1 (after Phase 0 and the Phase 1 review).** Changes are marked *[v1.1]*. Five points that the Phase 0 gap assessment had already established are restored and marked *[v1.1 carry-over from Phase 0]*. Status: Phase 0 committed (c09f7e8); Phase 1 approved, value-free tooling built, transcription blocked on source downloads.
 
+**Production rule (2026-10-16).** Merging to main deploys to production and runs Alembic migrations. Every phase PR must keep Mexico dormant and fail-closed, and every migration must be additive and guarded. Phases 0–3 are in production (PR #97–#101; migrations `5d2c8f1a7b3e` and `6e4a1d9c3f27`) — see `PRODUCTION_STATE.md`. Each phase plan must include a section on what its migration and routes do in production when merged.
+
 ---
 
 ## 1. Architecture findings (what Mexico must plug into)

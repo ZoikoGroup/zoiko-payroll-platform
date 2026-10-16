@@ -22,6 +22,13 @@ def principal(org_id, user_id=701, role="org_admin"):
 SUPER_ADMIN = SimpleNamespace(id=990, organization_id=None, role="super_admin", is_active=True)
 
 
+def enable_mx_onboarding(monkeypatch):
+    """Phase 4a: the Mexico organisation API is dormant unless the flag is on."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MX_TENANT_ONBOARDING_ENABLED", True)
+
+
 @contextmanager
 def http(db, who):
     from tests.test_hong_kong_governance import _http as hk_http
@@ -30,15 +37,20 @@ def http(db, who):
         yield client
 
 
-def make_org(db, name="MX Test Org", code="MXTEST", admins=1):
+def make_org(db, name="MX Test Org", code="MXTEST", admins=1, country="MX"):
     """An organisation plus `admins` real active org-admin users (the
-    four-eyes readiness check counts real users)."""
+    four-eyes readiness check counts real users). `country` sets its payroll
+    jurisdiction (CompanyComplianceDetails) — MX by default, None for none —
+    because the Phase 4a guard only admits Mexican organisations."""
     from app.modules.auth.models import User, UserRole
     from app.modules.organizations.models import Organization
+    from app.modules.payroll.models import CompanyComplianceDetails
 
     org = Organization(organization_name=name, organization_code=code)
     db.add(org)
     db.flush()
+    if country:
+        db.add(CompanyComplianceDetails(organization_id=org.id, name=name, jurisdiction_country=country))
     users = []
     for i in range(admins):
         u = User(email=f"admin{i}.{code.lower()}@example.com", hashed_password="x", role=UserRole.ORG_ADMIN,
