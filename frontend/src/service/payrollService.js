@@ -705,7 +705,7 @@ export const deletePayRun = async (id) => {
   return await api.delete(`/api/payroll/runs/${id}`);
 };
 
-export const previewPayrollRun = async (employeeIds, country = "IN", periodStart = undefined, periodEnd = undefined, calculationMode = undefined) => {
+export const previewPayrollRun = async (employeeIds, country = "IN", periodStart = undefined, periodEnd = undefined, calculationMode = undefined, payDate = undefined) => {
   return await api.post("/api/payroll/runs/preview", {
     employeeIds,
     country,
@@ -717,6 +717,9 @@ export const previewPayrollRun = async (employeeIds, country = "IN", periodStart
     ...(periodStart ? { periodStart } : {}),
     ...(periodEnd ? { periodEnd } : {}),
     ...(calculationMode ? { calculationMode } : {}),
+    // The run's pay date — Mexico selects the law by it (MX-004) and refuses
+    // a preview without it; other countries ignore it.
+    ...(payDate ? { payDate } : {}),
   });
 };
 

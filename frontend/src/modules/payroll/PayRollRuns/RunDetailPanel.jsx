@@ -157,6 +157,9 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
   ].filter(([, v]) => Number(v) > 0);
   const employerContributionsTotal = employerContributions.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
   const employerTotalCost = (Number(item.salary) || 0) + employerContributionsTotal;
+  // Mexico: the employer cost lives in the frozen Mexican result (IMSS,
+  // INFONAVIT, state ISN) — never shown as an understated shared total.
+  const isMx = (item.country || item.countryCode) === "MX";
   // Phase 8BV: previously only discoverable via a truncated free-text
   // Remarks cell (item.notes) — the structured list the backend already
   // serializes (germanyUnavailableComponents) is now shown as its own
@@ -204,7 +207,11 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
       </div>
       <div>
         <p className="text-[11px] font-bold uppercase tracking-widest text-category-teal mb-2">Employer Contributions</p>
-        {employerContributions.length === 0 ? (
+        {isMx ? (
+          <p className="text-[12px] text-foreground-muted" data-testid="mx-employer-dash">
+            — <span className="text-[11px]">(Mexican employer cost: see the Mexico trace below)</span>
+          </p>
+        ) : employerContributions.length === 0 ? (
           <p className="text-[12px] text-foreground-muted">No employer contributions.</p>
         ) : (
           <dl className="space-y-1.5">
@@ -222,7 +229,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
             above. */}
         <div className="mt-2 flex items-center justify-between border-t border-border pt-1.5 text-[12px]">
           <dt className="font-bold text-foreground-muted">Employer Total Cost</dt>
-          <dd className="font-bold text-category-teal">{fmtCurrencyLocal(employerTotalCost, fmtCurrency)}</dd>
+          <dd className="font-bold text-category-teal">{isMx ? "—" : fmtCurrencyLocal(employerTotalCost, fmtCurrency)}</dd>
         </div>
       </div>
       </div>

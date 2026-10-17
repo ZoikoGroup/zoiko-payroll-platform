@@ -1112,7 +1112,7 @@ def preview_run(
 ):
     return service.preview_payroll_run(
         db, current_user.organization_id, data.employee_ids, data.country,
-        data.period_start, data.period_end, data.calculation_mode,
+        data.period_start, data.period_end, data.calculation_mode, pay_date=data.pay_date,
     )
 
 
