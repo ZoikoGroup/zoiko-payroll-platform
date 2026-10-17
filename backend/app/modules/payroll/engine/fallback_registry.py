@@ -430,12 +430,15 @@ _ENGINE_CONSTANT_REGISTRY = [
 # national pack. Text parameters are not readiness requirements either: the
 # shared readiness predicate (service._check_missing_required_keys) counts a
 # side-less key as configured only via flat_amount, so the MX engine checks
-# its text parameters itself (same as NL's text keys). Notes carry no values:
+# its text parameters itself (same as NL's text keys). Per-case keys
+# (MX_PER_CASE_KEYS, e.g. overtime tiers) BLOCK only the case that needs
+# them, so they are not readiness requirements either. Notes carry no values:
 # those exist only in the transcribed, source-cited content.
 _ENGINE_CONSTANT_REGISTRY += [
     {"country": "MX", "module": "mexico", "attr": "MX_NO_FALLBACK", "label": label, "resolverKey": key,
      "side": {"employee_pct": "employee", "employer_pct": "employer"}.get(kind),
-     **({"required": False} if scope != "national" or kind == "text" else {}),
+     **({"required": False}
+        if scope != "national" or kind == "text" or key in mexico_content.MX_PER_CASE_KEYS else {}),
      "note": "NO FALLBACK — a missing row BLOCKS"
              + (" (state ISN pack only)" if scope != "national" else "")
              + (" [PENDING G2]" if key in mexico_content.MX_PENDING_G2_KEYS else "") + "."}

@@ -12,8 +12,9 @@ Prepared 2026-10-16 from repository state and the public GitHub Actions API (rea
 | #101 (2026-10-16 06:17Z) | 22e86d3 | **38860348647** — test ✅ (22 min) · deploy ✅ · every step ✅ incl. "Verify single Alembic head", "SSH and deploy backend", "Check for model/schema drift" | + Phase 3, migration **`6e4a1d9c3f27`** (mx_employer_m2) |
 | #102 (2026-10-16 07:06Z) | 3851b69 | **38865098800** — test ✅ · deploy ✅ (SSH, drift) | Phase 3 follow-up `878dc00`: streaming-cap tests, S30 in the content source list, readiness message, docs. **No migration** — production stays at `6e4a1d9c3f27`. |
 | #103 (2026-10-16 07:56Z) | 7c0fd3e | **38870346791** — test ✅ · deploy ✅ (SSH, drift) — completed | **Phase 4a** `c5b058a`: dormancy gates (`MX_TENANT_ONBOARDING_ENABLED` = False, org-router guard, organisation-country / company-jurisdiction / back-fill gates). **No migration** — production stays at `6e4a1d9c3f27`. Effect: tightening only (§2e). |
+| #104 (2026-10-16 09:22Z) | 8b902df | **38879994972** — test ✅ · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅ | **Phase 4b** `dc4de74`: employee statutory profile, migration **`8b2f6d4e1a93`** (mx_employee_m3: 24 nullable columns + 2 FKs on the shared profile table, INFONAVIT notices table). Dormant: MX employees still refused while the flag is off. Production should be at `8b2f6d4e1a93` (the SSH step's head check would have failed otherwise). |
 
-Everything committed on `nikhil` up to `c5b058a` (Phase 4a) is on `main` and deployed (run 38870346791). Not yet on `main`: Phase 4b.
+Everything committed on `nikhil` up to `dc4de74` (Phase 4b) is on `main` and deployed (run 38879994972); production database head `8b2f6d4e1a93`.
 
 **Migration result (inferred, see §6 to confirm).** The SSH step runs `alembic current --check-heads` and a script that exits non-zero unless the database heads equal the repository head; that step succeeded for run 38860348647, so production should be at **`6e4a1d9c3f27`**. The job logs themselves need repository admin rights (`403 Must have admin rights`), so the exact migration lines were not read.
 
@@ -109,7 +110,7 @@ Merging to `main` deploys to production and runs Alembic migrations. Every phase
 
 1. **Actions → "Deploy Zoiko Payroll Backend" → run for "Merge pull request #101"** (run 38860348647): jobs `test` and `deploy` are green; in `deploy`, open **"SSH and deploy backend"** and read the blocks *"--- Migration diagnostics ---"* (database `alembic_version` before), *"--- Applying migrations ---"* (`deploy_migrate.sh` output — expect `Running upgrade 5d2c8f1a7b3e -> 6e4a1d9c3f27`), and *"--- Post-migration verification ---"* (expect `database heads: ['6e4a1d9c3f27']` and `Database is at the Alembic head.`). Then **"Check for model/schema drift"** (`scripts.check_schema_drift` output). Viewing logs needs to be signed in with access to the repository.
 2. Same for run **38849128315** (PR #100), the first deploy carrying `5d2c8f1a7b3e` (expect `Running upgrade f4b8d2a6c9e1 -> 5d2c8f1a7b3e`).
-3. On the VM (read-only): `GET /api/health/version` returns the running commit (expect `7c0fd3e…`); `alembic current` → `6e4a1d9c3f27`. Exposure counts (read-only SQL):
+3. On the VM (read-only): `GET /api/health/version` returns the running commit (expect `8b902df…`); `alembic current` → `8b2f6d4e1a93`. Exposure counts (read-only SQL):
    ```sql
    -- Mexico packs seeded by hand?
    SELECT count(*) FROM payroll_jurisdiction_packs WHERE jurisdiction_country = 'MX';
