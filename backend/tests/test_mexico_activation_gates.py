@@ -27,7 +27,7 @@ def _synthetic_national_content(monkeypatch, *, with_g2=False):
     c = _c()
     rows = []
     for key, (kind, _label, scope) in c.MX_PARAMETER_KEYS.items():
-        if scope != "national" or (kind == "text" and not with_g2):
+        if scope != "national" or (kind == "text" and not with_g2 and key not in c.MX_REQUIRED_TEXT_KEYS):
             continue
         rows.append(c.ScalarRow(
             key, "1" if kind == "employee_pct" else None, "1" if kind == "employer_pct" else None,

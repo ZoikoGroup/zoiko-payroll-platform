@@ -1000,6 +1000,14 @@ class PayrollContext:
     mx_ytd: dict = None                        # committed year-to-date bases
     mx_employee_id: int = None
     mx_organization_id: int = None
+    # Phase 5 engine inputs (filled by Phase 6 calc_inputs; tests build them).
+    mx_earnings: list = None                   # [{code, amount, kind}] earning lines of the period
+    mx_period: dict = None                     # {start, end, days_paid, absence_days, incapacity_days, segments}
+    mx_hours: dict = None                      # approved hours: {weeks:[{overtime_hours}], hourly_rate, sundays_worked, holiday_days}
+    mx_variable_accumulator: dict = None       # prior-bimester variable pay {total, days} (MX-020)
+    mx_min_wage_zone: str = None               # GENERAL / ZLFN / UNRESOLVED — derived by the service, never typed
+    mx_month_to_date: dict = None              # {taxable, subsidy_applied} already committed in the month
+    mx_pack: dict = None                       # {pack_id, version, source_codes} of the national rows (MX-063 trace)
 
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never

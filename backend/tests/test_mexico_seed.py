@@ -420,6 +420,6 @@ def test_mexico_registry_rows_are_value_free_and_complete():
     assert hasattr(mexico, "MX_NO_FALLBACK") and mexico.MX_NO_FALLBACK is None
     required = {r["key"] for r in fr.get_required_parameter_keys("MX")}
     assert required == {k for k, (kind, _l, scope) in c.MX_PARAMETER_KEYS.items()
-                        if scope == "national" and kind != "text"}
+                        if scope == "national" and kind != "text" and k not in c.MX_PER_CASE_KEYS}
     inventory = [e for e in fr.get_engine_fallback_inventory()["engineConstants"] if e["country"] == "MX"]
     assert inventory and all(e["value"] is None for e in inventory)

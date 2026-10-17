@@ -58,9 +58,10 @@ def gate_states(db: Session) -> list:
 
 def statutory_summary(db: Session) -> dict:
     return {"jurisdiction": MX, "spec": SPEC, "available": False, "engineVersion": ENGINE_VERSION,
-            "phase": 4, "gates": gate_states(db),
+            "phase": 5, "gates": gate_states(db),
             "note": "Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22); "
-                    "the Mexico engine is not built yet, so every Mexican calculation is BLOCKED."}
+                    "the Mexico engine is built but not wired to payroll runs (Phase 6) and its content is not "
+                    "transcribed, so every Mexican calculation is BLOCKED."}
 
 
 # ---- Governance hooks ----
@@ -290,7 +291,8 @@ def _content_check(pack, rates, slabs) -> tuple:
             return False, "no transcribed national content exists (mexico_content is empty — awaiting transcription)"
         keys = {sig[1] for sig in expected if sig[0] == "RATE"}
         required = {k for k, (kind, _label, scope) in _content.MX_PARAMETER_KEYS.items()
-                    if scope == "national" and kind != "text"}
+                    if scope == "national" and kind != "text" and k not in _content.MX_PER_CASE_KEYS}
+        required |= set(_content.MX_REQUIRED_TEXT_KEYS)
         if required - keys:
             return False, f"the content lacks required parameters: {', '.join(sorted(required - keys)[:6])}"
         per_period = _Counter(sig[2] for sig in expected if sig[0] == "SLAB" and sig[1] == _content.MX_ISR_TARIFF_RULE)

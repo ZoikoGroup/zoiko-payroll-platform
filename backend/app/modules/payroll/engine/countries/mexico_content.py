@@ -167,11 +167,31 @@ MX_PARAMETER_KEYS = {
     # employer premium is never approved while either is missing.
     "mx_risk_premium_min_pct": ("employer_pct", "Work-risk premium — legal minimum %", "national"),
     "mx_risk_premium_max_pct": ("employer_pct", "Work-risk premium — legal maximum %", "national"),
+    # Phase 5 engine rules (names only; each value is transcribed from its
+    # source — the vocabularies are listed in engine/jurisdictions/mexico).
+    # Text rules: rounding (Q2) and the SBC floor (Q5) are REQUIRED for
+    # activation (MX_REQUIRED_TEXT_KEYS); the others BLOCK only the case that needs them.
+    "mx_rounding_rule": ("text", "Monetary rounding — mode and quantum (e.g. MODE:QUANTUM)", "national"),
+    "mx_sbc_min_rule": ("text", "SBC floor rule (S10)", "national"),
+    "mx_subsidy_remainder_rule": ("text", "Employment subsidy above ISR — remainder handling (S3)", "national"),
+    "mx_infonavit_percentage_basis": ("text", "INFONAVIT credit, PERCENTAGE method — basis (S27/S15)", "national"),
+    "mx_infonavit_fixed_amount_basis": ("text", "INFONAVIT credit, FIXED_AMOUNT method — basis (S27/S15)", "national"),
+    # Overtime tiers (spec §16; S26 / S18) — dated rows, the reform phases them.
+    "mx_overtime_double_weekly_max_hours": ("amount", "Overtime — hours per week paid at the first tier", "national"),
+    "mx_overtime_double_multiplier": ("amount", "Overtime — first-tier pay multiplier", "national"),
+    "mx_overtime_triple_multiplier": ("amount", "Overtime — second-tier pay multiplier", "national"),
     # State ISN (spec §15; S22 for CDMX) — lives in MX-ISN-<STATE>-2026 only.
     "mx_isn_rate_pct": ("employer_pct", "State ISN — rate", "state"),
 }
 MX_PARAMETER_KINDS = ("amount", "employee_pct", "employer_pct", "text")
 MX_PENDING_G2_KEYS = ("mx_ceav_lowest_band_min_wage_ref",)
+# Text rules the national pack must carry before it can be activated
+# (Phase 5 Q11); every other text key blocks only the case that needs it.
+MX_REQUIRED_TEXT_KEYS = ("mx_rounding_rule", "mx_sbc_min_rule")
+# Non-text keys the engine BLOCKS on per case (overtime is paid only from
+# approved hours) — not required for activation.
+MX_PER_CASE_KEYS = ("mx_overtime_double_weekly_max_hours", "mx_overtime_double_multiplier",
+                    "mx_overtime_triple_multiplier")
 
 
 # ── Content row shapes ────────────────────────────────────────────────────
