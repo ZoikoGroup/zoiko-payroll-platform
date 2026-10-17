@@ -41,7 +41,8 @@ def _paths(db, w):
     data = {"employee_id": w.employee.id, "basic_salary": 9000, "employeeId": w.employee.id, "basicSalary": 9000}
     item = PayslipItemCreate(**{k: v for k, v in data.items() if k in fields})
     return {
-        "preview": lambda: service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD),
+        "preview": lambda: service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD,
+                                                       pay_date=rh.PAY_DATE),
         "generate": lambda: service.generate_payslips_for_run(db, w.run, w.org.id, [w.employee.id]),
         "add_item": lambda: service.add_payslip_item(db, w.run.id, item, w.org.id),
     }

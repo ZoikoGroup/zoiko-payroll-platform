@@ -19775,7 +19775,8 @@ def _resolve_calculation_mode(db: Session, organization_id: int, calculation_mod
 
 
 def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[int], country: str,
-                         period_start=None, period_end=None, calculation_mode: str = None) -> dict:
+                         period_start=None, period_end=None, calculation_mode: str = None,
+                         pay_date=None) -> dict:
     """Dry-run payroll calculation: returns per-employee breakdowns without
     writing anything to the database. Uses the strategy-based payroll engine,
     so preview == persisted by construction.
@@ -19796,7 +19797,17 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
 
     country = _normalize_country(country)
-    calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
+    if country == "MX":
+        # Mexico (MX-039): a preview never writes. The shared resolvers below
+        # get-or-create the org's default policy (OOS-8); Mexico reads it
+        # read-only instead — no policy yet means the defaults that policy
+        # would seed (standard mode, no named allowances).
+        from app.modules.payroll import mexico_run_service as _mx_run
+
+        _mx_policy = _mx_run.read_only_policy(db, organization_id)
+        calculation_mode = calculation_mode or (getattr(_mx_policy, "calculation_mode", None) or "standard")
+    else:
+        calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
     # Same canonical-pack substitution generate_payslips_for_run uses (see
     # _resolve_effective_rate_inputs) — a preview should show the same
     # numbers a real run for this same period would produce. No run row
@@ -19806,7 +19817,8 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     rate_map, slabs, _canonical_rates, _pack = _resolve_effective_rate_inputs(
         db, organization_id, country, period_end or date.today(), org_opted_in,
     )
-    allowance_components = _resolve_allowance_components(db, organization_id)
+    allowance_components = (_mx_run.read_only_allowance_components(_mx_policy) if country == "MX"
+                            else _resolve_allowance_components(db, organization_id))
 
     employees = db.query(PayrollEmployee).filter(
         PayrollEmployee.id.in_(employee_ids),
@@ -20000,7 +20012,8 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             if emp_country == "NL" else None
         )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
-        # date is the preview's period end — never today's date (MX-004). A
+        # date is the run's own pay date, passed explicitly — never the period
+        # end or today's date (MX-004); without it the preview refuses. A
         # dormancy / scope refusal aborts the preview; a statutory block is
         # shown for this employee only.
         mexico_inputs = None
@@ -20010,24 +20023,17 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
 
             try:
                 mexico_inputs = jurisdiction_hooks.call(
-                    "MX", "calc_inputs", db, None, emp, None, as_of=period_end,
+                    "MX", "calc_inputs", db, None, emp, None, as_of=pay_date,
                     period=(period_start, period_end), allowance_items=allowance_items)
                 _mx_split = _mx_run.payslip_split(mexico_inputs)
             except _MXBlocked as exc:
+                # A blocked Mexican employee refuses the preview with a coded 4xx
+                # naming the employee and every reason. The shared preview
+                # response model has no blocked-row shape (its money fields are
+                # required — OOS-9), and a row of zeros would fabricate figures.
                 if exc.key in _mx_run.GUARD_CODES:
                     raise
-                results.append({
-                    "employeeId": emp.id,
-                    "employeeName": getattr(emp, "name", None) or f"Employee #{emp.id}",
-                    "department": getattr(emp, "department", None),
-                    "attendanceStatus": "active" if is_active else "inactive",
-                    "blocked": True,
-                    "blockedReasonCode": exc.key,
-                    "blockedReasonMessage": exc.reason,
-                    "blockedReasons": [{"code": k, "message": m} for k, m in exc.reasons],
-                    "calculationTrace": None,
-                })
-                continue
+                raise _mx_run.preview_block(exc, emp)
             basic, hra, special = _mx_split["basic"], Decimal("0"), Decimal("0")
             overtime = _mx_split["overtime"]
             additional_compensation = _mx_split["extras"]
@@ -20195,22 +20201,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         try:
             calc = calculate_payroll(ctx, calculation_mode)
         except MissingComplianceConfigurationError as exc:
-            # Mexico (Phase 6): one blocked Mexican employee never aborts the
-            # preview; every reason is shown. Other countries re-raise as before.
+            # Mexico: a statutory block refuses the preview with the employee and
+            # every reason named (see the calc_inputs refusal above). Other
+            # countries re-raise as before.
             if emp_country != "MX" or not hasattr(exc, "reasons"):
                 raise
-            results.append({
-                "employeeId": emp.id,
-                "employeeName": employee_name,
-                "department": getattr(emp, "department", None),
-                "attendanceStatus": "active" if is_active else "inactive",
-                "blocked": True,
-                "blockedReasonCode": exc.key,
-                "blockedReasonMessage": exc.reason,
-                "blockedReasons": [{"code": k, "message": m} for k, m in exc.reasons],
-                "calculationTrace": None,
-            })
-            continue
+            from app.modules.payroll import mexico_run_service as _mx_run
+
+            raise _mx_run.preview_block(exc, emp)
         except FranceCalculationBlockedError as exc:
             # Same diagnostic contract as Germany below: one blocked France
             # employee never aborts the whole preview (FR-027 reason shown).

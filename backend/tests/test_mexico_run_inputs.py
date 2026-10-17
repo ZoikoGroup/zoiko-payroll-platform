@@ -185,3 +185,47 @@ def test_run_items_api_carries_the_mexican_snapshot(db, monkeypatch):
         items = client.get(f"/api/payroll/runs/{w.run.id}/items").json()
     snap = items[0].get("mxCalculationSnapshot")
     assert snap and snap["inputHash"] and snap["result"]["pay_date"] == "2026-06-15"
+
+
+def test_preview_api_takes_the_runs_pay_date(db, monkeypatch):
+    from tests._mx_employer_helpers import http, principal
+
+    w = rh.world(db, monkeypatch)
+    w.org.workspace_type = "EVALUATION"
+    db.commit()
+    body = {"employeeIds": [w.employee.id], "country": "MX", "periodStart": "2026-06-01", "periodEnd": "2026-06-15"}
+    with http(db, principal(w.org.id, w.users[0].id)) as client:
+        refused = client.post("/api/payroll/runs/preview", json=body)
+        ok = client.post("/api/payroll/runs/preview", json={**body, "payDate": "2026-06-15"})
+    assert refused.status_code >= 400 and "MX_PAY_DATE_MISSING" in refused.text
+    assert ok.status_code == 200, ok.text[:300]
+
+
+def test_blocked_preview_is_a_coded_refusal_naming_the_employee(db, monkeypatch):
+    """The shared preview response has no blocked-row shape (OOS-9): a blocked
+    Mexican employee refuses the preview with a 4xx listing every reason,
+    never a 500 and never a row of zeros."""
+    from tests._mx_employer_helpers import http, principal
+
+    w = rh.world(db, monkeypatch, convention=None)
+    w.org.workspace_type = "EVALUATION"
+    db.commit()
+    body = {"employeeIds": [w.employee.id], "country": "MX", "periodStart": "2026-06-01", "periodEnd": "2026-06-15",
+            "payDate": "2026-06-15"}
+    with http(db, principal(w.org.id, w.users[0].id)) as client:
+        r = client.post("/api/payroll/runs/preview", json=body)
+    assert 400 <= r.status_code < 500, r.status_code
+    assert "MX_SALARY_DAYS_CONVENTION_UNSET" in r.text and "Persona" in r.text
+
+
+def test_preview_api_returns_the_mexican_trace(db, monkeypatch):
+    from tests._mx_employer_helpers import http, principal
+
+    w = rh.world(db, monkeypatch)
+    w.org.workspace_type = "EVALUATION"
+    db.commit()
+    body = {"employeeIds": [w.employee.id], "country": "MX", "periodStart": "2026-06-01", "periodEnd": "2026-06-15",
+            "payDate": "2026-06-15"}
+    with http(db, principal(w.org.id, w.users[0].id)) as client:
+        out = client.post("/api/payroll/runs/preview", json=body).json()
+    assert out["employees"][0]["mxPreview"]["isr_withheld"] == "450.00"

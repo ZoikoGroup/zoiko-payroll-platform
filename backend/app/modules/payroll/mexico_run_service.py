@@ -107,6 +107,26 @@ def guard(db: Session, employee, run=None) -> None:
         raise MXBlock("MX_RUN_TYPE_PHASE9", f"{run.mx_run_type} runs are built in Phase 9", org_id)
 
 
+# ── 1b. Read-only policy for previews (MX-039, OOS-8) ───────────────────────
+
+def read_only_policy(db: Session, organization_id: int):
+    """The org's default payroll policy if it exists — never created here
+    (the shared get_active_policy get-or-creates; a Mexican preview must not
+    write). None means the defaults that policy would be seeded with."""
+    from app.modules.payroll.policy.models import PayrollPolicy
+
+    if not organization_id:
+        return None
+    return (db.query(PayrollPolicy)
+            .filter(PayrollPolicy.organization_id == organization_id, PayrollPolicy.is_default == True)  # noqa: E712
+            .first())
+
+
+def read_only_allowance_components(policy) -> list:
+    return [{"key": c.key, "label": c.label, "pct": c.pct, "flat_amount": c.flat_amount}
+            for c in (getattr(policy, "allowance_components", None) or [])]
+
+
 # ── 2. Period (plan §3, D3, D13) ─────────────────────────────────────────────
 
 def run_period_kind(start: date, end: date) -> Optional[str]:
@@ -505,6 +525,17 @@ def payslip_snapshot(mx_result: dict, inputs: dict) -> dict:
     comps = inputs.get("mx_input_components") or {}
     return {"result": mx_result, "inputHash": input_hash(comps), "components": comps,
             "pack": _plain(inputs.get("mx_pack")), "engineVersion": (mx_result or {}).get("engine_version")}
+
+
+def preview_block(exc, employee) -> MXBlock:
+    """A preview refusal naming the employee and every reason (coded 4xx via
+    the shared MissingComplianceConfigurationError handler). Generation, by
+    contrast, records a FAILED sentinel plus exception rows."""
+    name = getattr(employee, "name", None) or f"Employee #{employee.id}"
+    reasons = list(getattr(exc, "reasons", None) or [(exc.key, exc.reason)])
+    return MXBlock(exc.key, f"preview refused for {name} (#{employee.id}): "
+                   + "; ".join(f"{k}: {m}" for k, m in reasons),
+                   getattr(employee, "organization_id", None), reasons=reasons)
 
 
 def blocked_snapshot(exc) -> dict:

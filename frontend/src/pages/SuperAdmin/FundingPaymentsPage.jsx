@@ -21,6 +21,15 @@ function resolveCurrencyCode(explicitCurrency, countryCode) {
   return getCurrencyForCountry(countryCode)?.code || null;
 }
 
+// Mexico: the shared employer total excludes Mexico's employer cost (it is
+// in each Mexican payslip's frozen result) — show "—", never an understated figure.
+function employerCost(amount, countryCode, explicitCurrency) {
+  if ((countryCode || "").toUpperCase() === "MX") {
+    return <span title="Mexican employer cost (IMSS, INFONAVIT, state ISN) is not part of this shared total — see the run's Mexico trace and payslip section">—</span>;
+  }
+  return money(amount, countryCode, explicitCurrency);
+}
+
 function money(amount, countryCode, explicitCurrency) {
   const currency = resolveCurrencyCode(explicitCurrency, countryCode);
   if (!currency) return `${Number(amount || 0).toLocaleString()} (currency unknown)`;
@@ -252,7 +261,7 @@ export default function FundingPaymentsPage() {
                 </div>
                 <dl className="space-y-1.5 border-t border-border-light pt-2.5 text-sm">
                   <div className="flex justify-between"><dt className="text-foreground-muted">Deductions</dt><dd className="text-foreground-secondary">{money(row.totalDeductions, row.country)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{money(row.employerCost, row.country)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{employerCost(row.employerCost, row.country)}</dd></div>
                 </dl>
               </div>
               );
@@ -295,7 +304,7 @@ export default function FundingPaymentsPage() {
                       {hasRuns ? money(org.netPay, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right text-foreground-muted">
-                      {hasRuns ? money(org.employerCost, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
+                      {hasRuns ? employerCost(org.employerCost, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
                     </td>
                     <td className="px-4 py-3 text-foreground-muted">{org.lastPayDate || "—"}</td>
                   </tr>
@@ -364,7 +373,7 @@ export default function FundingPaymentsPage() {
                 <td className="px-4 py-3"><StatusPill status={STATUS_PILL_MAP[row.status] || "pending"} label={row.status} /></td>
                 <td className="px-4 py-3 text-right font-medium text-foreground">{money(row.grossPay, row.jurisdictionCountry, row.currency)}</td>
                 <td className="px-4 py-3 text-right font-medium text-foreground">{money(row.netPay, row.jurisdictionCountry, row.currency)}</td>
-                <td className="px-4 py-3 text-right text-foreground-muted">{money(row.employerCost, row.jurisdictionCountry, row.currency)}</td>
+                <td className="px-4 py-3 text-right text-foreground-muted">{employerCost(row.employerCost, row.jurisdictionCountry, row.currency)}</td>
               </tr>
               );
             })}

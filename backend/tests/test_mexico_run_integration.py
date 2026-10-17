@@ -314,14 +314,12 @@ def test_preview_writes_nothing_and_is_deterministic(db, monkeypatch):
 
     from app.modules.payroll import service
 
-    from app.modules.payroll.policy.service import get_active_policy
+    from app.modules.payroll.policy.models import PayrollPolicy
 
     w = rh.world(db, monkeypatch)
-    # OOS-8: the SHARED preview path get-or-creates the org's default payroll
-    # policy (every country, pre-existing). Seeded first so this test isolates
-    # what Mexico adds: nothing.
-    get_active_policy(db, w.org.id)
-    db.commit()
+    # OOS-8, Mexico side: a brand-new organisation has no payroll policy yet;
+    # a Mexican preview reads it read-only and must NOT create one.
+    assert db.query(PayrollPolicy).filter(PayrollPolicy.organization_id == w.org.id).count() == 0
     writes = []
 
     def _listen(conn, cursor, statement, *a):
@@ -331,19 +329,48 @@ def test_preview_writes_nothing_and_is_deterministic(db, monkeypatch):
     engine = db.get_bind()
     event.listen(engine, "before_cursor_execute", _listen)
     try:
-        first = service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD)
-        second = service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD)
+        first = service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD, pay_date=rh.PAY_DATE)
+        second = service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD, pay_date=rh.PAY_DATE)
     finally:
         event.remove(engine, "before_cursor_execute", _listen)
     assert writes == [] and not db.new and not db.dirty and not db.deleted
+    assert db.query(PayrollPolicy).filter(PayrollPolicy.organization_id == w.org.id).count() == 0
     row = first["employees"][0] if "employees" in first else first["results"][0]
     assert row.get("mxPreview") and first == second
 
 
-def test_preview_without_a_period_end_is_refused(db, monkeypatch):
+def test_preview_without_the_runs_pay_date_is_refused(db, monkeypatch):
+    """MX-004: the pay date selects the law; a preview never assumes the
+    period end (or today) stands for it."""
     from app.modules.payroll import service
 
     w = rh.world(db, monkeypatch)
-    with pytest.raises(Exception) as exc:
-        service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX")
-    assert getattr(exc.value, "key", "") == "MX_PAY_DATE_MISSING"
+    for kwargs in ({}, {"pay_date": None}):
+        with pytest.raises(Exception) as exc:
+            service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD, **kwargs)
+        assert getattr(exc.value, "key", "") == "MX_PAY_DATE_MISSING"
+
+
+def test_preview_uses_the_runs_pay_date_not_the_period_end(db, monkeypatch):
+    """A June 1–15 period paid on 1 July takes its pay-date law from the July
+    rows: a rounding rule that changes on 1 July must reach the preview
+    (contribution segments still use the period's own dates, MX-021)."""
+    from datetime import date
+
+    from app.modules.payroll import service
+    from app.modules.payroll.models import ContributionRate
+
+    w = rh.world(db, monkeypatch)
+    old = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == w.pack.id,
+                                            ContributionRate.component_key == "mx_rounding_rule").one()
+    old.effective_to = date(2026, 6, 30)
+    db.add(ContributionRate(jurisdiction_pack_id=w.pack.id, jurisdiction_country="MX", component_key="mx_rounding_rule",
+                            label="rounding", employee_share="—", employer_share="—", total="—", text_value="HALF_UP:1",
+                            effective_from=date(2026, 7, 1)))
+    db.commit()
+    june = service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD, pay_date=rh.PAY_DATE)
+    july = service.preview_payroll_run(db, w.org.id, [w.employee.id], "MX", *rh.PERIOD, pay_date=date(2026, 7, 1))
+    rj, rl = ((x.get("employees") or x.get("results"))[0]["mxPreview"] for x in (june, july))
+    assert (rj["pay_date"], rj["rounding_rule"]) == ("2026-06-15", "HALF_UP:0.01")
+    assert (rl["pay_date"], rl["rounding_rule"]) == ("2026-07-01", "HALF_UP:1")
+    assert rl["sbc"]["segments"][0]["start"] == "2026-06-01"          # contributions keep the period's dates

@@ -1055,6 +1055,8 @@ class PayrollRunPreviewRequest(BaseModel):
     period_end: Optional[date] = Field(None, alias="periodEnd")
     calculation_mode: Optional[str] = Field(None, alias="calculationMode",
         description="simple|standard|enterprise — if omitted, resolved from the org's active policy.")
+    pay_date: Optional[date] = Field(None, alias="payDate",
+        description="The run's pay date. Required for Mexico (it selects the law, MX-004); ignored elsewhere.")
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -1106,6 +1108,9 @@ class PayrollRunPreviewEmployee(BaseModel):
     payableDays: Optional[float] = None
     totalWorkingDays: Optional[float] = None
     prorated: bool = False
+    # Mexico (Phase 6): the preview trace (MX-063) of a Mexican employee -
+    # declared so the response model does not strip it; absent elsewhere.
+    mxPreview: Optional[dict] = None
     model_config = ConfigDict(populate_by_name=True)
 
 
