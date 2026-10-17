@@ -345,6 +345,12 @@ MX_FEDERAL_ENTITIES = (
 # (period, bracket index starting at 1) -> transcription-log reference.
 MX_ISR_ARITHMETIC_EXCEPTIONS: dict = {}
 
+# Phase 6 (D3): SAT c_PeriodicidadPago code (S28 catalog) -> Art. 96 payment
+# period (MX_ISR_PERIODS). EMPTY until transcribed from the saved S28 catalog
+# workbook; while empty every Mexican calculation BLOCKS
+# (MX_PAY_FREQUENCY_MAPPING_MISSING) — a code is never read as a period by guess.
+MX_PAY_FREQUENCY_ISR_PERIOD: dict = {}
+
 
 # ── Date-selected readers (MX-004) ────────────────────────────────────────
 

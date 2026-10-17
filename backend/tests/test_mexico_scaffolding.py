@@ -218,10 +218,11 @@ def test_calc_inputs_and_run_approval_block(db):
     from app.modules.payroll.models import PayrollStatus
 
     employee = SimpleNamespace(organization_id=5, country_code="MX")
-    with pytest.raises(MexicoCalculationBlockedError):
+    with pytest.raises(MexicoCalculationBlockedError) as exc:     # Phase 6: dormant while the flag is off
         jurisdiction_hooks.call("MX", "calc_inputs", db, None, employee, None, as_of=date(2026, 2, 1))
+    assert exc.value.key == "MX_DORMANT"
     run = SimpleNamespace(organization_id=5)
-    for status in (PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
+    for status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):  # APPROVED: tests/test_mexico_run_integration.py
         with pytest.raises(MexicoCalculationBlockedError):
             jurisdiction_hooks.call("MX", "before_run_transition", db, run, status, 1)
     for status in (PayrollStatus.DRAFT, PayrollStatus.REVIEW):    # moving back is never blocked
@@ -276,7 +277,7 @@ def test_readiness_route_reports_every_gate_open(db):
         r = c.get(f"{BASE}/readiness")
     assert r.status_code == 200
     body = r.json()
-    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 5
+    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 6
     assert [g["gate"] for g in body["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in body["gates"]} == {"OPEN"}
 

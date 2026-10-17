@@ -1496,6 +1496,14 @@ class PayrollRun(Base):
     # Netherlands (ZP-NL-ENG-001 NL-034): {fingerprint, approvedBy, approvedAt} —
     # binds approval to inputs + rule pack + premium decisions + VCR snapshot.
     nl_approval_fingerprint = Column(JSON, nullable=True)
+    # Mexico (ZP-MX-ENG-001 MX-040): {fingerprint, approvedBy, approvedAt,
+    # committedAt, items:[...]} — binds approval to every content row, input
+    # and classification; NULL for non-MX runs.
+    mx_approval_fingerprint = Column(JSON, nullable=True)
+    # Mexico run type: ORDINARY / AGUINALDO / PTU / FINIQUITO / CORRECTION
+    # (only ORDINARY in Phase 6). NULL = ORDINARY; no default, no CHECK
+    # (metadata-only ALTER on a live table) — values enforced in code.
+    mx_run_type = Column(String(16), nullable=True)
 
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -1934,6 +1942,9 @@ class PayslipItem(Base):
     # trace), replayed exactly as computed. Written from Phase 6; NULL for
     # non-BR payslips.
     br_calculation_snapshot = Column(JSON, nullable=True)
+    # Mexico (ZP-MX-ENG-001): mx_result + input / content hashes, frozen at
+    # generation (MX-063 trace). NULL for non-MX payslips.
+    mx_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -9742,6 +9753,11 @@ class PayrollMxLaborPolicy(Base):
     food_vouchers           = Column(JSON, nullable=True)
     other_benefits          = Column(JSON, nullable=True)
     time_record_dependency  = Column(JSON, nullable=True)           # {required: bool, interfaceVersion: str}
+    # Phase 6 D13: salary days for QUINCENAL_15 / MONTHLY periods — CALENDAR
+    # (actual days) or FIXED (15 / 30). An employer / contract convention,
+    # never inferred: NULL BLOCKS a Mexican calculation. IMSS contribution
+    # days are always calendar days, independent of this.
+    salary_days_convention  = Column(String(10), nullable=True)
     floor_check_status      = Column(String(16), nullable=False, default="BLOCKED_CONTENT")
     floor_check_detail      = Column(JSON, nullable=True)
     status                  = Column(String(12), nullable=False, default="DRAFT")    # DRAFT / ACTIVE / SUPERSEDED
@@ -9832,6 +9848,177 @@ class PayrollMxInfonavitNotice(Base):
               postgresql_where=text("effective_to IS NULL AND status = 'RECORDED'"),
               sqlite_where=text("effective_to IS NULL AND status = 'RECORDED'")),
     )
+
+# ── Mexico (ZP-MX-ENG-001) Phase 6 — payroll run integration ────────────────
+# Written by mexico_run_service: preflight exceptions at generate time; every
+# ledger table ONLY at commit (the APPROVED transition, MX-039), idempotent by
+# its unique key, removed only by a Mexico run reset that no downstream
+# lifecycle has acted on. Ledger FKs are RESTRICT: a committed statutory
+# row is never removed by a cascade.
+
+class PayrollMxPreflightException(Base):
+    """A Mexico run preflight finding (MX-001/MX-036) — BLOCK cannot be
+    acknowledged; WARN can, with a note. Replaced on every regenerate."""
+    __tablename__ = "payroll_mx_preflight_exceptions"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    payroll_run_id       = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id      = Column(Integer, ForeignKey("payslip_items.id", ondelete="CASCADE"), nullable=True, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    code                 = Column(String(60), nullable=False)
+    severity             = Column(String(8), nullable=False)          # BLOCK / WARN
+    message              = Column(Text, nullable=False)
+    acknowledged_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledgement_note = Column(String(500), nullable=True)
+    acknowledged_at      = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("severity IN ('BLOCK', 'WARN')", name="ck_mx_preflight_severity"),
+    )
+
+
+class PayrollMxImssBranchLine(Base):
+    """One IMSS branch / side / contribution segment of a committed Mexican
+    payslip (MX-023): base × days × rate."""
+    __tablename__ = "payroll_mx_imss_branch_lines"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_code       = Column(String(30), nullable=False)
+    side              = Column(String(10), nullable=False)             # employer / employee
+    segment_start     = Column(Date, nullable=False)
+    base_amount       = Column(Numeric(14, 4), nullable=False)
+    contribution_days = Column(Numeric(6, 2), nullable=False)
+    rate_pct          = Column(Numeric(9, 5), nullable=False)
+    amount            = Column(Numeric(14, 4), nullable=False)
+    band              = Column(String(20), nullable=True)               # CEAV employer band label
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("payslip_item_id", "branch_code", "side", "segment_start", name="uq_mx_imss_line"),
+    )
+
+
+class PayrollMxIsnLiability(Base):
+    """State payroll-tax liability of a committed Mexican payslip — a ledger
+    line, not a filing (MX-046; returns are Phase 8)."""
+    __tablename__ = "payroll_mx_isn_liabilities"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    payslip_item_id      = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    state_code           = Column(String(5), nullable=False)
+    base_amount          = Column(Numeric(14, 4), nullable=False)
+    rate_pct             = Column(Numeric(9, 5), nullable=False)
+    amount               = Column(Numeric(14, 4), nullable=False)
+    jurisdiction_pack_id = Column(String(60), nullable=True)
+    period_key           = Column(String(10), nullable=False)          # YYYY-MM of the pay date
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("payslip_item_id", "state_code", name="uq_mx_isn_liability"),
+    )
+
+
+class PayrollMxSbcHistory(Base):
+    """The SBC an employee was contributed on, per committed run (MX-019/037)."""
+    __tablename__ = "payroll_mx_sbc_history"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    effective_from   = Column(Date, nullable=False)
+    sbc_fixed        = Column(Numeric(14, 4), nullable=False)
+    sbc_variable     = Column(Numeric(14, 4), nullable=False)
+    sbc_total        = Column(Numeric(14, 4), nullable=False)
+    factor           = Column(Numeric(14, 10), nullable=False)
+    components       = Column(JSON, nullable=False)
+    source           = Column(String(10), nullable=False, default="RUN")   # RUN / MOVEMENT
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "effective_from", "payroll_run_id", name="uq_mx_sbc_history"),
+    )
+
+
+class PayrollMxVariableAccumulator(Base):
+    """Variable pay committed per employee and IMSS bimester (MX-020). The
+    value a later bimester reads is the sum over committed rows; an OPENING
+    row (payroll_run_id NULL) is the evidenced, four-eyes opening balance for
+    a tenant's first bimester (Phase 6 D4)."""
+    __tablename__ = "payroll_mx_variable_accumulators"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id       = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
+    bimester_key         = Column(String(8), nullable=False)          # YYYY-Bn
+    variable_total       = Column(Numeric(14, 4), nullable=False)
+    days                 = Column(Numeric(6, 2), nullable=False)
+    kind                 = Column(String(8), nullable=False, default="RUN")    # RUN / OPENING
+    evidence_document_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    recorded_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("kind IN ('RUN', 'OPENING')", name="ck_mx_varacc_kind"),
+        UniqueConstraint("employee_id", "bimester_key", "payroll_run_id", name="uq_mx_varacc"),
+    )
+
+
+class PayrollMxBenefitAccrual(Base):
+    """Statutory vs employer benefit entitlement per committed run (MX-051),
+    for Phase 9 (aguinaldo, vacation, vacation premium)."""
+    __tablename__ = "payroll_mx_benefit_accruals"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    concept          = Column(String(20), nullable=False)              # AGUINALDO / VACATION / VACATION_PREMIUM
+    period_key       = Column(String(10), nullable=False)
+    statutory_amount = Column(Numeric(14, 4), nullable=False)
+    employer_amount  = Column(Numeric(14, 4), nullable=False)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "concept", "period_key", "payroll_run_id", name="uq_mx_benefit_accrual"),
+    )
+
+
+class PayrollMxApprovedHours(Base):
+    """Approved weekly hours of one employee (MX-049, Phase 6 D1) — the only
+    source of overtime / Sunday premium / rest-day work. Four-eyes: the
+    approver is never the recorder; evidence is required."""
+    __tablename__ = "payroll_mx_approved_hours"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    week_start           = Column(Date, nullable=False)
+    ordinary_hours       = Column(Numeric(6, 2), nullable=False)
+    overtime_hours       = Column(Numeric(6, 2), nullable=False, default=0)
+    sundays_worked       = Column(Integer, nullable=False, default=0)
+    rest_days_worked     = Column(Integer, nullable=False, default=0)
+    evidence_document_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT")   # DRAFT / APPROVED / SUPERSEDED
+    recorded_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_mx_hours_status"),
+        sa.CheckConstraint("ordinary_hours >= 0 AND overtime_hours >= 0 AND sundays_worked >= 0 "
+                           "AND rest_days_worked >= 0", name="ck_mx_hours_nonneg"),
+        Index("uq_mx_hours_employee_week_approved", "employee_id", "week_start", unique=True,
+              postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
+    )
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

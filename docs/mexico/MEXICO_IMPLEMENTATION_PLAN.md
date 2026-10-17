@@ -283,6 +283,8 @@ Frontend: `MXCfdiLifecycleTab.jsx` (Super Admin), `MXCfdiStagePanel.jsx`, `MXCfd
 
 ---
 
+**Reset rule (Phase 6, approved 2026-10-17):** a Mexico run reset deletes its ledger rows only while no downstream lifecycle has acted. Phase 7 must register in `mexico_service.run_downstream_actions` that any STAMPED CFDI of the run refuses reset (`MX_RESET_DOWNSTREAM_ACTED`), with a test.
+
 ## 11. Phase 8 — Authorities: IMSS / SUA / SIPARE / IDSE, INFONAVIT, ISR remittance, state ISN
 
 Backend (create): `mexico_imss_service.py` (movements alta/baja/modificación from committed events, 5-business-day due dates, IDSE export, SUA export + reconciliation, SIPARE, annual risk premium), `mexico_filing_service.py` (ISR monthly remittance by the 17th, ISN returns per state, INFONAVIT reconciliation), `mexico_payment_service.py` (authority liabilities). Reuse `StatutoryFiling` for generic filing status where it fits.
@@ -302,6 +304,8 @@ DB (migration `mx_authorities_m6`)
 Frontend: `MXSocialSecurityCenterTab.jsx` (cards: registration, movements, SUA, SIPARE, work-risk, differences), `MXIsrRemittanceTab.jsx`, `MXIsnReturnsTab.jsx`, `MXInfonavitReconTab.jsx`.
 
 ---
+
+**Reset rule (Phase 6, approved 2026-10-17):** Phase 8 must register in `mexico_service.run_downstream_actions` that any authority filing / liability (IMSS, SUA, SIPARE, INFONAVIT, ISR remittance, state ISN) including the run that is submitted or paid refuses reset, with a test.
 
 ## 12. Phase 9 — Annual and event modules
 
@@ -328,6 +332,8 @@ Docs: `docs/mx-evidence/G1`…`G8`, `MEXICO_PRODUCTION_ACTIVATION_RUNBOOK.md`, `
 Tests: T2, T5, T7, T8; F6.
 
 ---
+
+**Reset rule (Phase 6, approved 2026-10-17):** Phase 10 must register in `mexico_service.run_downstream_actions` that any RELEASED bank instruction for the run refuses reset, with a test.
 
 ## 14. Decisions log
 

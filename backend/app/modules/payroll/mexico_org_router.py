@@ -276,3 +276,99 @@ def record_infonavit_notice(employee_id: int, body: MXInfonavitNoticeCreate, cur
 
     return mexico_employee_service.record_infonavit_notice(db, _org_id(current_user), employee_id, body.to_service(),
                                                            _actor(current_user))
+
+
+# ── payroll runs (Phase 6, spec §13) ─────────────────────────────────────────
+# Run generation / preview / approval stay on the shared run routes (Mexico
+# hooks); these are the Mexico-only stages: preflight, status (four separate
+# lifecycles, MX-041), reset, approved hours and opening balances.
+
+def _run(db: Session, user, run_id: int):
+    from app.modules.payroll import service
+
+    return service.get_payroll_run_by_id(db, run_id, _org_id(user))
+
+
+@router.get("/runs/{run_id}/preflight", summary="Mexico run preflight exceptions (BLOCK / WARN) from generation")
+def run_preflight(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.run_preflight(db, _run(db, current_user, run_id))
+
+
+@router.post("/runs/{run_id}/preflight/{exception_id}/acknowledge",
+             summary="Acknowledge a WARN exception with a note (BLOCK can never be acknowledged)")
+def acknowledge_exception(run_id: int, exception_id: int, body: Dict[str, Any] = Body(...),
+                          current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.acknowledge_exception(db, _run(db, current_user, run_id), exception_id,
+                                                    str(body.get("note") or ""), _actor(current_user))
+
+
+@router.get("/runs/{run_id}/status",
+            summary="Payroll / CFDI / authority / bank lifecycles kept separate (MX-041) + approval drift (MX-040)")
+def run_status(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.run_status(db, _run(db, current_user, run_id))
+
+
+@router.post("/runs/{run_id}/reset",
+             summary="Reset an Approved (committed) run to Review — refused once any downstream lifecycle acted")
+def reset_run(run_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+              db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.reset_run(db, _run(db, current_user, run_id), _actor(current_user),
+                                        str(body.get("reason") or ""))
+
+
+@router.get("/employees/{employee_id}/hours", summary="Approved-hours records of one employee (D1)")
+def list_hours(employee_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.list_hours(db, _org_id(current_user), employee_id)
+
+
+@router.post("/employees/{employee_id}/hours", summary="Record a week of hours with its time-record evidence (DRAFT)")
+def record_hours(employee_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                 db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    def _date(v):
+        try:
+            return date.fromisoformat(str(v))
+        except ValueError:
+            raise BadRequestException("weekStart must be an ISO date")
+
+    data = {"week_start": _date(body.get("weekStart")) if body.get("weekStart") else None,
+            "ordinary_hours": body.get("ordinaryHours"), "overtime_hours": body.get("overtimeHours"),
+            "sundays_worked": body.get("sundaysWorked"), "rest_days_worked": body.get("restDaysWorked"),
+            "evidence_document_id": body.get("evidenceDocumentId")}
+    return mexico_run_service.record_hours(db, _org_id(current_user), employee_id, data, _actor(current_user))
+
+
+@router.post("/hours/{hours_id}/approve", summary="Approve recorded hours (a second person — four-eyes)")
+def approve_hours(hours_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.approve_hours(db, _org_id(current_user), hours_id, _actor(current_user))
+
+
+@router.post("/employees/{employee_id}/opening-balances",
+             summary="Record an evidenced opening variable-pay balance for a first bimester (D4)")
+def record_opening_balance(employee_id: int, body: Dict[str, Any] = Body(...),
+                           current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    data = {"bimester": body.get("bimester"), "variable_total": body.get("variableTotal"), "days": body.get("days"),
+            "evidence_document_id": body.get("evidenceDocumentId")}
+    return mexico_run_service.record_opening_balance(db, _org_id(current_user), employee_id, data, _actor(current_user))
+
+
+@router.post("/opening-balances/{row_id}/approve", summary="Approve an opening balance (a second person — four-eyes)")
+def approve_opening_balance(row_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.approve_opening_balance(db, _org_id(current_user), row_id, _actor(current_user))

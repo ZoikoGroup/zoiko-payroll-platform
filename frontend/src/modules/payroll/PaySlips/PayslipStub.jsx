@@ -106,8 +106,22 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   // employer's premiums are shown in their own section below (NL-048).
   const nlSnapshot = (payslip.country || payslip.countryCode) === "NL" ? payslip.nlCalculationSnapshot : null;
   const nlEmployerRows = nlSnapshot ? nlEmployerLines(nlSnapshot).map(([label, amount]) => ({ label, amount })) : [];
+  // Mexico (ZP-MX-ENG-001): every line from the frozen engine result; the SBC
+  // (IMSS contribution base) is shown apart from pay (MX-037); employer cost
+  // in its own section. A blocked payslip has no result.
+  const mxResult = (payslip.country || payslip.countryCode) === "MX" ? payslip.mxCalculationSnapshot?.result : null;
+  const mxEmployeeRows = mxResult ? [
+    { label: "ISR withheld (after employment subsidy)", amount: mxResult.isr_withheld },
+    { label: "IMSS — employee contributions", amount: mxResult.imss_employee },
+    { label: "INFONAVIT credit", amount: mxResult.infonavit_credit },
+  ].filter((r) => Number(r.amount) > 0) : [];
+  const mxEmployerRows = mxResult ? [
+    { label: "IMSS — employer contributions (incl. RCV)", amount: mxResult.imss_employer },
+    { label: "INFONAVIT — employer housing", amount: mxResult.infonavit_employer },
+    { label: `State payroll tax (ISN ${mxResult.isn?.state || ""})`, amount: mxResult.isn?.amount },
+  ].filter((r) => Number(r.amount) > 0) : [];
 
-  const deductionRows = chSnapshot ? CH_EMPLOYEE_LINES
+  const deductionRows = mxResult ? mxEmployeeRows : chSnapshot ? CH_EMPLOYEE_LINES
     .map(([key, label]) => ({ label, amount: chTotals[key] || 0 }))
     .filter((r) => Number(r.amount) > 0) : nlSnapshot ? nlEmployeeLines(nlSnapshot)
     .map(([label, amount]) => ({ label, amount })) : [
@@ -402,6 +416,31 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                   <dt className="text-foreground">Total employer cost</dt>
                   <dd className="text-foreground">{fmt(nlSnapshot.totals?.employerCost)}</dd>
                 </div>
+              </dl>
+            </div>
+            )}
+
+            {!isBlocked && mxResult && (
+            <div className="mb-5 rounded-[8px] border border-border p-4" data-testid="mx-payslip-section">
+              <p className="mb-2 text-[12px] font-bold uppercase tracking-wider text-foreground-muted">
+                Mexico — employer cost and contribution base (not deducted from your pay)
+              </p>
+              <dl className="space-y-1 text-[13px]">
+                {mxEmployerRows.map((r) => (
+                  <div key={r.label} className="flex justify-between gap-3">
+                    <dt className="text-foreground-muted">{r.label}</dt><dd className="text-foreground">{fmt(r.amount)}</dd>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
+                  <dt className="text-foreground">Total employer cost</dt>
+                  <dd className="text-foreground">{fmt(mxResult.employer_total)}</dd>
+                </div>
+                {(mxResult.sbc?.segments || []).map((seg) => (
+                  <div key={seg.start} className="flex justify-between gap-3 text-[12px]">
+                    <dt className="text-foreground-muted">SBC (IMSS daily contribution base) from {seg.start}</dt>
+                    <dd className="text-foreground">{fmt(seg.sbc)}</dd>
+                  </div>
+                ))}
               </dl>
             </div>
             )}

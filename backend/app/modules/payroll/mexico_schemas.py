@@ -185,6 +185,8 @@ class MXLaborPolicyCreate(_MXIn):
     foodVouchers: Optional[Dict[str, Any]] = None
     otherBenefits: Optional[Dict[str, Any]] = None
     timeRecordDependency: Optional[Dict[str, Any]] = None
+    # Phase 6 D13: CALENDAR / FIXED salary days for quincenal / monthly periods.
+    salaryDaysConvention: Optional[str] = None
 
 
 class MXCredentialCreate(_MXIn):

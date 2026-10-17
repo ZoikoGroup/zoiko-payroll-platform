@@ -30,6 +30,10 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     # Phase 4b employee routes — dormant the same way
     ("GET", "/employees/1"), ("GET", "/employees/1/readiness?on=2026-03-01"),
     ("POST", "/employees/1/infonavit-notices"),
+    # Phase 6 run routes — dormant the same way
+    ("GET", "/runs/1/preflight"), ("POST", "/runs/1/preflight/1/acknowledge"), ("GET", "/runs/1/status"),
+    ("POST", "/runs/1/reset"), ("GET", "/employees/1/hours"), ("POST", "/employees/1/hours"),
+    ("POST", "/hours/1/approve"), ("POST", "/employees/1/opening-balances"), ("POST", "/opening-balances/1/approve"),
 ]
 
 

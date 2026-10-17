@@ -216,6 +216,7 @@ export function MXLaborPolicyPanel({ detail, readOnly, reload, agreements = [] }
         { key: "effectiveTo", label: "To", render: (r) => r.effectiveTo || "open" },
         { key: "ordinaryWeeklyHours", label: "Weekly h" }, { key: "aguinaldoDays", label: "Aguinaldo days" },
         { key: "vacationPremiumPct", label: "Vac. premium %" }, { key: "sundayPremiumPct", label: "Sunday %" },
+        { key: "salaryDaysConvention", label: "Salary days", render: (r) => r.salaryDaysConvention || "not set — blocks payroll" },
         { key: "floor", label: "Floor check", render: (r) => <div><Badge value={r.floorCheckStatus} /><FloorDetail detail={r.floorCheckDetail} /></div> },
         { key: "status", label: "Status", render: (r) => <Badge value={r.status} /> },
         ...(readOnly ? [] : [{
@@ -237,6 +238,9 @@ export function MXLaborPolicyPanel({ detail, readOnly, reload, agreements = [] }
               { key: "vacationDaysLater", label: "Vacation days, year 2+", required: true },
               { key: "vacationPremiumPct", label: "Vacation premium %", required: true },
               { key: "sundayPremiumPct", label: "Sunday premium %", required: true },
+              { key: "salaryDaysConvention", label: "Salary days for quincenal / monthly pay (contract)", type: "select",
+                options: [{ value: "CALENDAR", label: "Calendar days of the period" },
+                  { value: "FIXED", label: "Fixed 15 / 30 days" }] },
               { key: "collectiveAgreementId", label: "Collective agreement (optional)", type: "select",
                 options: agreements.map((a) => ({ value: a.id, label: `${a.code} v${a.version}` })) },
             ]}
@@ -245,6 +249,7 @@ export function MXLaborPolicyPanel({ detail, readOnly, reload, agreements = [] }
               vacationPolicy: [{ serviceYearFrom: 1, serviceYearTo: 1, days: s.vacationDaysYear1 },
                 { serviceYearFrom: 2, serviceYearTo: null, days: s.vacationDaysLater }],
               vacationPremiumPct: s.vacationPremiumPct, sundayPremiumPct: s.sundayPremiumPct,
+              salaryDaysConvention: s.salaryDaysConvention || null,
               collectiveAgreementId: s.collectiveAgreementId ? Number(s.collectiveAgreementId) : null,
             }), "Policy recorded as DRAFT with its floor check.")}
           />

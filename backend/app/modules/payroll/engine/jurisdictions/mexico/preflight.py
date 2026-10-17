@@ -37,7 +37,9 @@ def run(ctx) -> dict:
             reasons.extend(exc.reasons)
 
     attempt("on", lambda: period.pay_date(ctx))
-    content = Content(getattr(ctx, "rate_map", None), getattr(ctx, "slabs", None))
+    rows = getattr(ctx, "mx_pack_rows", None)
+    content = (Content(rows.get("rate_map"), rows.get("slabs")) if rows
+               else Content(getattr(ctx, "rate_map", None), getattr(ctx, "slabs", None)))
     resolved["content"] = content
     attempt("period", lambda: period.resolve(ctx, content))
     attempt("round", lambda: rounding.rounder(content))
