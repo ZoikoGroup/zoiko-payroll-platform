@@ -12,6 +12,9 @@ import NLRunPreflightPanel from "./NLRunPreflightPanel";
 import NLPayslipBreakdown from "./NLPayslipBreakdown";
 import HKCorrectionRequestPanel from "./HKCorrectionRequestPanel";
 import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDrawer";
+import MXRunPreflightPanel from "../../../components/jurisdiction/mexico/run/MXRunPreflightPanel";
+import MXRunStatusBadges from "../../../components/jurisdiction/mexico/run/MXRunStatusBadges";
+import MXRunCalculationTrace from "../../../components/jurisdiction/mexico/run/MXRunCalculationTrace";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -284,6 +287,8 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
   const chSnapshot = (item.country || item.countryCode) === "CH" ? item.chCalculationSnapshot : null;
   // Netherlands: employee pay and employer cost from the frozen snapshot (NL-048)
   const nlSnapshot = (item.country || item.countryCode) === "NL" ? item.nlCalculationSnapshot : null;
+  // Mexico: the frozen engine result + input hashes (MX-063 trace)
+  const mxSnapshot = (item.country || item.countryCode) === "MX" ? item.mxCalculationSnapshot : null;
 
   async function handleRecalculate(e) {
     e.stopPropagation();
@@ -359,6 +364,7 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
               </button>
             </div>
             {nlSnapshot && <NLPayslipBreakdown snapshot={nlSnapshot} employeeName={item.employee} />}
+            {mxSnapshot && <MXRunCalculationTrace snapshot={mxSnapshot} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -469,6 +475,12 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               {items.some((i) => (i.country || i.countryCode) === "SG") && <SGRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "HK") && <HKRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "NL") && <NLRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "MX") && (
+                <>
+                  <MXRunStatusBadges runId={run.id} refreshKey={(detail || run).status} />
+                  <MXRunPreflightPanel runId={run.id} runStatus={(detail || run).status} onChanged={load} />
+                </>
+              )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

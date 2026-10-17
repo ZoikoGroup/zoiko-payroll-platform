@@ -31,14 +31,13 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import retention_service, service
-from app.modules.payroll.engine.countries.mexico import ENGINE_VERSION, MXBlock
+from app.modules.payroll.engine.countries.mexico import ENGINE_VERSION
 from app.modules.payroll.engine.countries.mexico_content import GATES, SPEC
 from app.modules.payroll.models import (
-    EmployeeStatutoryProfile, PayrollEmployee, PayrollRun, PayrollStatus, PayslipItem,
+    EmployeeStatutoryProfile, PayrollEmployee, PayrollRun, PayslipItem,
 )
 
 MX = "MX"
-_NOT_BUILT = "not built yet (ZP-MX-ENG-001 Phase 0 scaffolding)"
 
 
 def _employee(db: Session, employee_id: int, organization_id: int) -> PayrollEmployee:
@@ -58,10 +57,10 @@ def gate_states(db: Session) -> list:
 
 def statutory_summary(db: Session) -> dict:
     return {"jurisdiction": MX, "spec": SPEC, "available": False, "engineVersion": ENGINE_VERSION,
-            "phase": 5, "gates": gate_states(db),
+            "phase": 6, "gates": gate_states(db),
             "note": "Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22); "
-                    "the Mexico engine is built but not wired to payroll runs (Phase 6) and its content is not "
-                    "transcribed, so every Mexican calculation is BLOCKED."}
+                    "Mexican payroll runs are wired (Phase 6) but refused while Mexico onboarding is disabled, and "
+                    "the content is not transcribed, so every Mexican calculation is BLOCKED."}
 
 
 # ---- Governance hooks ----
@@ -128,26 +127,29 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
 # ---- Calculation and run hooks ----
 
 def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmployee,
-                resolved_pack=None, as_of: Optional[date] = None) -> dict:
-    raise MXBlock("MX_ENGINE_NOT_IMPLEMENTED",
-                  f"Mexico calculation inputs are {_NOT_BUILT}; no Mexican payroll is calculated until then",
-                  getattr(employee, "organization_id", None))
+                resolved_pack=None, as_of: Optional[date] = None, **kwargs) -> dict:
+    """Phase 6: the guarded, read-only input builder (mexico_run_service) —
+    refused unless Mexico onboarding is enabled AND the organisation is
+    Mexican; every engine input as of the run's pay date."""
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.calc_inputs(db, run, employee, resolved_pack, as_of, **kwargs)
 
 
 def _mx_before_run_transition(db: Session, run: PayrollRun, next_status, actor_id) -> None:
     """Reached only for a run with Mexican payslips (service.advance_payroll_run_
-    status). None can be approved, authorized or paid before Phase 6 (approval
-    fingerprint, MX-040); moving back (Draft / Review) is not blocked."""
-    if next_status in (PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
-        raise MXBlock("MX_RUN_NOT_SUPPORTED",
-                      f"Mexico payroll-run approval is {_NOT_BUILT}; a run with Mexican payslips cannot be "
-                      f"{getattr(next_status, 'value', next_status)}",
-                      getattr(run, "organization_id", None))
+    status). APPROVED: preflight clear + fingerprint + ledger commit (MX-039/040);
+    AUTHORIZED / PAID refused until CFDI (Phase 7) and bank settlement (Phase 10)."""
+    from app.modules.payroll import mexico_run_service
+
+    mexico_run_service.before_run_transition(db, run, next_status, actor_id)
 
 
 def payment_treatment(db: Session, organization_id: int, run: PayrollRun, items: list) -> dict:
-    """No MX payment hold at this phase (bank settlement lifecycle is Phase 10)."""
-    return {}
+    """Every Mexican payment item is held until bank settlement (Phase 10, D11)."""
+    from app.modules.payroll import mexico_run_service
+
+    return mexico_run_service.payment_treatment(db, organization_id, run, items)
 
 
 def _mx_pack_holidays(db: Session, year: int) -> list:

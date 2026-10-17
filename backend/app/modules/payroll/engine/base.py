@@ -1008,6 +1008,14 @@ class PayrollContext:
     mx_min_wage_zone: str = None               # GENERAL / ZLFN / UNRESOLVED — derived by the service, never typed
     mx_month_to_date: dict = None              # {taxable, subsidy_applied} already committed in the month
     mx_pack: dict = None                       # {pack_id, version, source_codes} of the national rows (MX-063 trace)
+    # Phase 6: the national pack rows in force on the pay date as plain dicts
+    # {rate_map, slabs} (service.pack_rows_for_golden — row-level dates
+    # applied). When set, the Mexico engine reads these instead of rate_map /
+    # slabs (which the shared resolver fills with ORM rows keyed per key).
+    mx_pack_rows: dict = None
+    # Phase 6: per-input hashes bound by the approval fingerprint (MX-040);
+    # the engine never reads them — the payslip snapshot carries them.
+    mx_input_components: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
     # Resolved by the service layer before dispatch; engine/countries/brazil.py

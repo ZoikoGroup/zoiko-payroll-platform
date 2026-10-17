@@ -1345,6 +1345,10 @@ class PayslipItemResponse(BaseModel):
     # totals with net pay vs employer cost, exceptions, trace). Emitted for NL
     # only; declared here so response_model does not strip it.
     nlCalculationSnapshot: Optional[dict] = None
+    # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
+    # input / content hashes, or the blocked reasons). Emitted for MX only;
+    # declared here so response_model does not strip it.
+    mxCalculationSnapshot: Optional[dict] = None
     # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
     # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
     # amount; informational only, never affects employeePension/

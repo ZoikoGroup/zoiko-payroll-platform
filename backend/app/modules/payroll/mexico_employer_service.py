@@ -854,7 +854,22 @@ def _policy_values(data: dict) -> dict:
             "aguinaldo_days": _dec(data.get("aguinaldo_days"), "aguinaldoDays"),
             "vacation_premium_pct": _dec(data.get("vacation_premium_pct"), "vacationPremiumPct"),
             "sunday_premium_pct": _dec(data.get("sunday_premium_pct"), "sundayPremiumPct"),
-            "vacation_bands": _vacation_bands(data.get("vacation_policy"))}
+            "vacation_bands": _vacation_bands(data.get("vacation_policy")),
+            "salary_days_convention": _salary_days_convention(data.get("salary_days_convention"))}
+
+
+# Phase 6 D13: salary days of a QUINCENAL_15 / MONTHLY period — an employer /
+# contract convention, never inferred (NULL blocks a Mexican calculation).
+SALARY_DAYS_CONVENTIONS = ("CALENDAR", "FIXED")
+
+
+def _salary_days_convention(value):
+    if value in (None, ""):
+        return None
+    value = str(value).strip().upper()
+    if value not in SALARY_DAYS_CONVENTIONS:
+        raise BadRequestException(f"salaryDaysConvention must be one of {', '.join(SALARY_DAYS_CONVENTIONS)}")
+    return value
 
 
 def policy_view(row) -> dict:
@@ -865,7 +880,8 @@ def policy_view(row) -> dict:
             "vacationPremiumPct": _s(row.vacation_premium_pct), "sundayPremiumPct": _s(row.sunday_premium_pct),
             "savingsFund": row.savings_fund, "foodVouchers": row.food_vouchers, "otherBenefits": row.other_benefits,
             "timeRecordDependency": row.time_record_dependency, "floorCheckStatus": row.floor_check_status,
-            "floorCheckDetail": row.floor_check_detail, "status": row.status}
+            "floorCheckDetail": row.floor_check_detail, "status": row.status,
+            "salaryDaysConvention": row.salary_days_convention}
 
 
 def _row_policy(row) -> dict:
@@ -895,7 +911,8 @@ def create_labor_policy(db: Session, org_id: int, employer_id: int, data: dict, 
             vacation_premium_pct=values["vacation_premium_pct"], sunday_premium_pct=values["sunday_premium_pct"],
             savings_fund=data.get("savings_fund"), food_vouchers=data.get("food_vouchers"),
             other_benefits=data.get("other_benefits"), time_record_dependency=data.get("time_record_dependency"),
-            floor_check_status=check["status"], floor_check_detail=check, status="DRAFT", created_by_id=actor_id)
+            floor_check_status=check["status"], floor_check_detail=check, status="DRAFT", created_by_id=actor_id,
+            salary_days_convention=values["salary_days_convention"])
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="create", entity_type="mx_labor_policy", entity_id=row.id,

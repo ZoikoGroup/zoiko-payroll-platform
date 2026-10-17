@@ -2575,6 +2575,17 @@ export const getMxReadinessOn = (on) => api.get(`${MX}/readiness`, { params: { o
 export const getMxEmployeeRecord = (employeeId) => api.get(`${MX}/employees/${employeeId}`);
 export const getMxEmployeeReadiness = (employeeId, on) => api.get(`${MX}/employees/${employeeId}/readiness`, { params: { on } });
 export const recordMxInfonavitNotice = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/infonavit-notices`, payload);
+// Phase 6 — payroll runs (generation / approval stay on the shared run routes).
+export const getMxRunPreflight = (runId) => api.get(`${MX}/runs/${runId}/preflight`);
+export const acknowledgeMxPreflight = (runId, exceptionId, note) =>
+  api.post(`${MX}/runs/${runId}/preflight/${exceptionId}/acknowledge`, { note });
+export const getMxRunStatus = (runId) => api.get(`${MX}/runs/${runId}/status`);
+export const resetMxRun = (runId, reason) => api.post(`${MX}/runs/${runId}/reset`, { reason });
+export const listMxHours = (employeeId) => api.get(`${MX}/employees/${employeeId}/hours`);
+export const recordMxHours = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/hours`, payload);
+export const approveMxHours = (hoursId) => api.post(`${MX}/hours/${hoursId}/approve`, {});
+export const recordMxOpeningBalance = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/opening-balances`, payload);
+export const approveMxOpeningBalance = (rowId) => api.post(`${MX}/opening-balances/${rowId}/approve`, {});
 
 // The PUBLIC .cer is sent as the raw request body (the server reads it in
 // memory with a 16 KB cap; multipart would spool to a temp file there).

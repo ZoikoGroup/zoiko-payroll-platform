@@ -114,6 +114,7 @@ from app.modules.payroll.engine.countries.shared import (
     _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES, _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES,
     _UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES, _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
     _IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
+    MissingComplianceConfigurationError,
 )
 
 
@@ -19998,6 +19999,39 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     as_of=period_end or date.today())
             if emp_country == "NL" else None
         )
+        # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
+        # date is the preview's period end — never today's date (MX-004). A
+        # dormancy / scope refusal aborts the preview; a statutory block is
+        # shown for this employee only.
+        mexico_inputs = None
+        if emp_country == "MX":
+            from app.modules.payroll import mexico_run_service as _mx_run
+            from app.modules.payroll.engine.countries.mexico import MexicoCalculationBlockedError as _MXBlocked
+
+            try:
+                mexico_inputs = jurisdiction_hooks.call(
+                    "MX", "calc_inputs", db, None, emp, None, as_of=period_end,
+                    period=(period_start, period_end), allowance_items=allowance_items)
+                _mx_split = _mx_run.payslip_split(mexico_inputs)
+            except _MXBlocked as exc:
+                if exc.key in _mx_run.GUARD_CODES:
+                    raise
+                results.append({
+                    "employeeId": emp.id,
+                    "employeeName": getattr(emp, "name", None) or f"Employee #{emp.id}",
+                    "department": getattr(emp, "department", None),
+                    "attendanceStatus": "active" if is_active else "inactive",
+                    "blocked": True,
+                    "blockedReasonCode": exc.key,
+                    "blockedReasonMessage": exc.reason,
+                    "blockedReasons": [{"code": k, "message": m} for k, m in exc.reasons],
+                    "calculationTrace": None,
+                })
+                continue
+            basic, hra, special = _mx_split["basic"], Decimal("0"), Decimal("0")
+            overtime = _mx_split["overtime"]
+            additional_compensation = _mx_split["extras"]
+            gross = _mx_split["gross"]
         # Switzerland (CH spec): every resolver check, read-only; a blocked
         # worker raises SwitzerlandCalculationBlockedError (same surfacing as
         # Italy's blocks). Applied to ctx after it is built.
@@ -20144,6 +20178,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             italy_inputs=italy_inputs,
             saudi_inputs=saudi_inputs,
             netherlands_inputs=netherlands_inputs,
+            mexico_inputs=mexico_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -20159,6 +20194,23 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
         try:
             calc = calculate_payroll(ctx, calculation_mode)
+        except MissingComplianceConfigurationError as exc:
+            # Mexico (Phase 6): one blocked Mexican employee never aborts the
+            # preview; every reason is shown. Other countries re-raise as before.
+            if emp_country != "MX" or not hasattr(exc, "reasons"):
+                raise
+            results.append({
+                "employeeId": emp.id,
+                "employeeName": employee_name,
+                "department": getattr(emp, "department", None),
+                "attendanceStatus": "active" if is_active else "inactive",
+                "blocked": True,
+                "blockedReasonCode": exc.key,
+                "blockedReasonMessage": exc.reason,
+                "blockedReasons": [{"code": k, "message": m} for k, m in exc.reasons],
+                "calculationTrace": None,
+            })
+            continue
         except FranceCalculationBlockedError as exc:
             # Same diagnostic contract as Germany below: one blocked France
             # employee never aborts the whole preview (FR-027 reason shown).
@@ -20261,6 +20313,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         if emp_country == "CH":
             # Swiss lines/totals/trace (only CH rows carry the key)
             results[-1]["switzerland"] = _switzerland_service.ch_payslip_snapshot(calc)
+        if emp_country == "MX":
+            # Mexico trace (MX-063) — preview only, nothing persisted (MX-039).
+            results[-1]["mxPreview"] = calc.mx_result
 
         totals["count"] += 1
         totals["totalGross"] += calc.gross
@@ -25116,6 +25171,21 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "NL" else None
     )
+    # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
+    # pay date; the payslip's money columns come from the Mexican earning lines
+    # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
+    mexico_inputs = None
+    if country == "MX":
+        from app.modules.payroll import mexico_run_service as _mx_run
+
+        mexico_inputs = jurisdiction_hooks.call(
+            "MX", "calc_inputs", db, run, employee, resolved_pack,
+            allowance_items=allowance_items, attendance_records=attendance_records)
+        _mx_split = _mx_run.payslip_split(mexico_inputs)
+        basic, hra, special = _mx_split["basic"], Decimal("0"), Decimal("0")
+        overtime = _mx_split["overtime"]
+        additional_compensation = _mx_split["extras"]
+        gross = _mx_split["gross"]
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
     # raises SwitzerlandCalculationBlockedError, same surfacing as Italy.
     switzerland_attrs = (
@@ -25215,6 +25285,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         italy_inputs=italy_inputs,
         saudi_inputs=saudi_inputs,
         netherlands_inputs=netherlands_inputs,
+        mexico_inputs=mexico_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -25394,6 +25465,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
         # status, errors, warnings). Read by netherlands_service.nl_payslip_snapshot.
         "nl_calculation_snapshot": result.nl_result,
+        "mx_calculation_snapshot": (_mx_run.payslip_snapshot(result.mx_result, mexico_inputs)
+                                    if mexico_inputs is not None else None),
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -26647,6 +26720,10 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
             generated_item = _generate_single_payslip(
                 db, run, emp, **resolved_inputs,
             )
+            if country == "MX":
+                from app.modules.payroll import mexico_run_service as _mx_run
+
+                _mx_run.clear_exceptions(db, run.id, emp.id)
             # Phase 8BV: a PARTIAL payslip (Phase 8BU) is a real, persisted
             # outcome an operator needs to know about — the FAILED sentinel
             # below already gets a log_activity entry; PARTIAL previously
@@ -26660,6 +26737,30 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
                     f"Payroll for {employee_name} in run '{run.period_label}' is PARTIAL: {generated_item.notes or 'one or more components unavailable'}",
                     ActivityStatus.INFO, actor_id=run.created_by,
                 )
+        except MissingComplianceConfigurationError as exc:
+            # Mexico (Phase 6): a statutorily blocked Mexican employee becomes a
+            # FAILED sentinel (zero fabricated figures) plus one preflight
+            # exception per reason, like Germany below. Dormancy / scope
+            # refusals (and every other country) still abort the whole call.
+            from app.modules.payroll import mexico_run_service as _mx_run
+
+            if country != "MX" or not hasattr(exc, "reasons") or exc.key in _mx_run.GUARD_CODES:
+                raise
+            employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
+            blocked_item = PayslipItem(
+                payroll_run_id=run.id, employee_id=emp.id, organization_id=run.organization_id,
+                employee_name=employee_name, country_code=country, status=PayslipStatus.FAILED,
+                mx_calculation_snapshot=_mx_run.blocked_snapshot(exc), notes=f"[{exc.key}] {exc.reason}"[:2000],
+            )
+            db.add(blocked_item)
+            db.flush()
+            _mx_run.record_block(db, run, emp, blocked_item, exc)
+            log_activity(
+                db, organization_id,
+                f"Payroll for {employee_name} in run '{run.period_label}' is blocked: {exc.reason}",
+                ActivityStatus.INFO, actor_id=run.created_by,
+            )
+            continue
         except GermanyCalculationBlockedException as exc:
             employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
             db.add(PayslipItem(
@@ -26933,6 +27034,10 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # former never-write contract, which left YTD stale after a
     # value-changing correction. Payslips without posting records keep the
     # former behaviour.
+    if country == "MX":
+        from app.modules.payroll import mexico_run_service as _mx_run
+
+        _mx_run.clear_exceptions(db, run.id, employee.id)
     ytd_result = values.pop("_ytd_result", None)
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
     us_ytd_result = values.pop("_us_ytd_result", None)
@@ -31568,6 +31673,10 @@ def _reverse_run_ytd_postings(db: Session, run: PayrollRun) -> None:
 
 def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
+    if getattr(run, "mx_approval_fingerprint", None):
+        from app.modules.payroll import mexico_run_service as _mx_run
+
+        _mx_run.refuse_if_committed(run)
     if run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft runs can be deleted.")
     if (run.notes or "").startswith("[HK-CORRECTION]"):
@@ -31598,6 +31707,10 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
     if not item:
         raise NotFoundException(f"Payslip {payslip_id} not found.")
     run = db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).first()
+    if run is not None and getattr(run, "mx_approval_fingerprint", None):
+        from app.modules.payroll import mexico_run_service as _mx_run
+
+        _mx_run.refuse_if_committed(run)
     if run and run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only payslips in Draft runs can be deleted.")
     if run and (run.notes or "").startswith("[HK-CORRECTION]"):
@@ -31764,6 +31877,17 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, None)
         if country == "NL" else None
     )
+    # Mexico (Phase 6): the payslip is computed from the profile, labour policy
+    # and approved hours; manual amounts that disagree are refused, never
+    # silently replaced.
+    mexico_inputs = None
+    if country == "MX":
+        from app.modules.payroll import mexico_run_service as _mx_run
+
+        mexico_inputs = jurisdiction_hooks.call("MX", "calc_inputs", db, run, employee, None)
+        _mx_split = _mx_run.payslip_split(mexico_inputs)
+        _mx_run.check_manual_amounts(data, _mx_split)
+        gross = _mx_split["gross"]
     switzerland_attrs = (
         _switzerland_service.ch_calc_context(
             db, organization_id, employee, run.pay_date, run.period_start, run.period_end,
@@ -31896,6 +32020,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         italy_inputs=italy_inputs,
         saudi_inputs=saudi_inputs,
         netherlands_inputs=netherlands_inputs,
+        mexico_inputs=mexico_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -31945,6 +32070,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         compliance_fields=dict(getattr(employee, "compliance_fields", None) or {}),
         ch_calculation_snapshot=_switzerland_service.ch_payslip_snapshot(calc, frozen=switzerland_frozen),
         nl_calculation_snapshot=calc.nl_result if country == "NL" else None,
+        mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
+                                 if mexico_inputs is not None else None),
         **tax_snapshot,
         basic_salary=calc.basic,
         hra=calc.hra,
@@ -32590,6 +32717,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # Netherlands (ZP-NL-ENG-001): frozen inputs + nl_result (net vs employer
         # cost kept apart, NL-035). Gated to NL — never Canada's NL province.
         "nlCalculationSnapshot": item.nl_calculation_snapshot if (item.country_code or country) == "NL" else None,
+        "mxCalculationSnapshot": item.mx_calculation_snapshot if (item.country_code or country) == "MX" else None,
     }
 
 
