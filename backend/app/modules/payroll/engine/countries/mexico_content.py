@@ -355,6 +355,16 @@ MX_LIABILITY_REPORT_TYPES = {"SAT_ISR": "MX_ISR_WITHHOLDING", "IMSS": "MX_IMSS",
 # definitive, so every retry after UNKNOWN needs an operator's confirmation.
 MX_AUTHORITY_RETRY_CONFIG: dict = {}  # channel -> {"min_wait_seconds": int, "min_not_found_checks": int}
 
+# Phase 9b (D2 / D3): special payments. Each entry is a small RULE OBJECT
+# written at transcription from the saved text — never anticipated here — and
+# carrying its own `source` / `source_ref` (engine/jurisdictions/mexico/
+# special_pay.py defines the interfaces). EMPTY: every special payment BLOCKS
+# (MX_SPECIAL_PAY_RULE_MISSING / MX_AGUINALDO_RULE_MISSING /
+# MX_ISN_SPECIAL_PAY_RULE_MISSING); none falls back to the ordinary tariff (MX-009).
+MX_SPECIAL_PAY_RULES: dict = {}       # concept (AGUINALDO / VACATION_PREMIUM / PTU / SEPARATION) -> SpecialPayRule (S24 / S25)
+MX_AGUINALDO_RULE = None              # AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
+MX_SPECIAL_PAY_ISN_INCLUSION: dict = {}   # (state, concept) -> (included: bool, source, source_ref) — state ISN content
+
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
 # "CDMX" code its ISN pack already uses). Geography, not statutory content.

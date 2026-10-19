@@ -44,7 +44,7 @@ SPEC = _content.SPEC
 GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
-BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION")          # Phase 9a; the rest arrive with 9b–9d
+BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO")   # 9a corrections, 9b aguinaldo; PTU / FINIQUITO: 9c–9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
@@ -438,6 +438,9 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     if pack is None:
         raise MXBlock("MX_NO_ACTIVE_PACK", f"no Active Mexico national pack covers {on.isoformat()}")
     pay_rates, pay_slabs = service.pack_rows_for_golden(db, pack, on)
+    run_type = (run.mx_run_type or "ORDINARY") if run is not None else "ORDINARY"
+    if run_type == "AGUINALDO":
+        return _aguinaldo_inputs(db, run, employee, pack, pay_rates, pay_slabs)
 
     prof = _profile(db, employee, on)
     reg = _registration(db, prof, on)
@@ -467,6 +470,10 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         "aguinaldo_days": policy_row.aguinaldo_days, "vacation_policy": policy_row.vacation_policy,
         "vacation_premium_pct": policy_row.vacation_premium_pct, "sunday_premium_pct": policy_row.sunday_premium_pct,
         "salary_days_convention": policy_row.salary_days_convention}
+    # Phase 9b: the vacation premium of approved vacation records (special pay, engine special_pay).
+    from app.modules.payroll import mexico_benefits_service as benefits
+
+    earnings += benefits.premium_lines(db, run, employee.id, end, daily, policy)
     registration = None if reg is None else {"id": reg.id, "status": reg.status,
                                              "employer_profile_id": reg.employer_profile_id}
     risk = None if premium is None else {"id": premium.id, "registration_id": premium.registration_id,
@@ -504,7 +511,67 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
         "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
         "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
-        "mx_input_components": components,
+        "mx_input_components": components, "mx_run_type": run_type,
+    }
+
+
+def _aguinaldo_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
+    """Phase 9b: the inputs of one AGUINALDO payslip — days from the labour
+    policy (never below the statutory floor), × daily salary × the transcribed
+    proportion for the part of the year employed (S26). No ordinary period,
+    hours, accumulator or month-to-date: the engine's special-run path."""
+    from app.modules.payroll import mexico_employer_service
+    from app.modules.payroll.engine.jurisdictions.mexico import rounding, special_pay
+    from app.modules.payroll.engine.jurisdictions.mexico.content import Content
+
+    on = run.pay_date
+    prof = _profile(db, employee, on)
+    reg = _registration(db, prof, on)
+    policy_row = _labor_policy(db, reg, on)
+    if policy_row is None:
+        raise MXBlock("MX_LABOR_POLICY_MISSING", "no employer labour policy is in force on the pay date",
+                      employee.organization_id)
+    if policy_row.floor_check_status != "PASS":
+        raise MXBlock("MX_LABOR_POLICY_FLOOR_NOT_PASS", "the employer labour policy has not passed its floor check")
+    content = Content(pay_rates, pay_slabs)
+    statutory_days = content.amount("mx_aguinaldo_min_days")
+    days = _dec(policy_row.aguinaldo_days)
+    if days < statutory_days:
+        raise MXBlock("MX_LABOR_POLICY_BELOW_FLOOR", "the labour policy's aguinaldo days are below the statutory minimum")
+    daily = _dec(prof.mx_daily_salary)
+    year = run.period_start.year
+    detail = special_pay.aguinaldo_amount(days, daily, year, employee.date_of_joining, employee.date_of_leaving)
+    amount = rounding.rounder(content)(detail["amount"])
+    earnings = [{"code": "MX_AGUINALDO", "kind": "AGUINALDO", "amount": amount}]
+    zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
+    isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
+    policy = {"id": policy_row.id, "version": policy_row.version, "aguinaldo_days": policy_row.aguinaldo_days,
+              "vacation_policy": policy_row.vacation_policy, "vacation_premium_pct": policy_row.vacation_premium_pct}
+    registration = None if reg is None else {"id": reg.id, "status": reg.status,
+                                             "employer_profile_id": reg.employer_profile_id}
+    employment = {"from": employee.date_of_joining, "to": employee.date_of_leaving, "year": year}
+    profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
+                                                    "mx_seniority_date", "mx_imss_registration_id")}
+    components = {
+        "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs]}),
+        "isnPack": _hash(isn_pack), "registration": _hash(registration), "laborPolicy": _hash(policy),
+        "profile": _hash(profile_facts), "employment": _hash(employment), "earnings": _hash(earnings),
+    }
+    special_detail = {"concept": "AGUINALDO", "year": year, "days": days, "statutoryMinDays": statutory_days,
+                      "dailySalary": daily, "fraction": detail["fraction"], "unrounded": detail["amount"],
+                      "payableBy": detail["payable_by"], "employedFrom": employee.date_of_joining,
+                      "employedTo": employee.date_of_leaving, "ruleSource": detail["rule_source"]}
+    return {
+        "mx_payroll_date": on, "mx_payment_period": None, "mx_profile": prof, "mx_registration": registration,
+        "mx_risk_premium": None, "mx_labor_policy": policy, "mx_classifications": {}, "mx_infonavit_notices": [],
+        "mx_isn_state_pack": isn_pack, "mx_earnings": earnings, "mx_hours": None, "mx_min_wage_zone": zone,
+        "mx_period": {"start": run.period_start, "end": run.period_end, "days_paid": _ZERO, "segments": []},
+        "mx_variable_accumulator": {"total": _ZERO, "days": _ZERO},
+        "mx_month_to_date": {"taxable": _ZERO, "subsidy_applied": _ZERO},
+        "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
+        "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
+        "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
+        "mx_input_components": components, "mx_run_type": "AGUINALDO", "mx_special_detail": _plain(special_detail),
     }
 
 
@@ -755,6 +822,9 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
                 counts["accruals"] += 1
     if is_correction:
         corrections.on_commit(db, run)
+    from app.modules.payroll import mexico_benefits_service
+
+    counts["vacationPremiumsPaid"] = mexico_benefits_service.on_commit(db, run)
     db.flush()
     return {"committed": True, **counts}
 
@@ -853,6 +923,9 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     from app.modules.payroll import mexico_correction_service
 
     removed["correctionsReopened"] = mexico_correction_service.on_reset(db, run)
+    from app.modules.payroll import mexico_benefits_service
+
+    removed["vacationPremiumsReopened"] = mexico_benefits_service.on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)

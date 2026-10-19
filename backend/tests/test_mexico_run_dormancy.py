@@ -80,7 +80,7 @@ def test_guard_codes_directly(db, monkeypatch):
     from app.modules.payroll.models import CompanyComplianceDetails
 
     w = rh.world(db, monkeypatch)
-    w.run.mx_run_type = "AGUINALDO"
+    w.run.mx_run_type = "PTU"                       # AGUINALDO / CORRECTION are built (9a / 9b)
     db.commit()
     _refused(lambda: mexico_run_service.guard(db, w.employee, w.run), "MX_RUN_TYPE_PHASE9")
     w.run.mx_run_type = None

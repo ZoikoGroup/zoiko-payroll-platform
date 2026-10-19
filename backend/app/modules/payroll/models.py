@@ -10388,6 +10388,43 @@ class PayrollMxRunCorrection(Base):
     )
 
 
+# ── Mexico (ZP-MX-ENG-001) Phase 9b — vacation records (migration mx_benefits_m8) ──
+
+class PayrollMxVacationRecord(Base):
+    """A vacation fact for one employee and service year (MX-051 / MX-053,
+    Phase 9 plan B5, D4): TAKEN days (dates), an OPENING balance, or days
+    PAID_OUT (written only by the termination workflow, 9c). Recorded by one
+    person, approved by another; an approved TAKEN record pays its premium in
+    the ordinary run whose period reaches its start date (PAID, linked)."""
+    __tablename__ = "payroll_mx_vacation_records"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    service_year     = Column(Integer, nullable=False)                 # 1 = the first year from the seniority date
+    kind             = Column(String(10), nullable=False)              # TAKEN / OPENING / PAID_OUT
+    days             = Column(Numeric(6, 2), nullable=False)
+    start_date       = Column(Date, nullable=True)
+    end_date         = Column(Date, nullable=True)
+    status           = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / APPROVED / PAID / WITHDRAWN
+    note             = Column(String(300), nullable=True)
+    recorded_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at      = Column(DateTime(timezone=True), nullable=True)
+    premium_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
+    premium_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=True, index=True)
+    withdrawn_reason = Column(String(300), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("kind IN ('TAKEN', 'OPENING', 'PAID_OUT')", name="ck_mx_vacation_record_kind"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'PAID', 'WITHDRAWN')", name="ck_mx_vacation_record_status"),
+        sa.CheckConstraint("days > 0", name="ck_mx_vacation_record_days"),
+    )
+
+
+
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────
 

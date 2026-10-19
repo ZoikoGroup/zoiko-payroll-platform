@@ -57,6 +57,9 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("POST", "/authorities/{kind}/1/confirm-retry"),
     # Phase 9a — corrections
     ("GET", "/runs/1/corrections"), ("POST", "/runs/1/corrections"), ("POST", "/corrections/1/void"),
+    # Phase 9b — vacation and aguinaldo
+    ("GET", "/employees/1/vacation"), ("POST", "/employees/1/vacation"), ("POST", "/vacation/1/approve"),
+    ("POST", "/vacation/1/withdraw"), ("POST", "/aguinaldo-runs"),
 ]
 
 

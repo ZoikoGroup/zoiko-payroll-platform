@@ -2629,6 +2629,12 @@ export const recordMxIsnOutcome = (id, outcome) => api.post(`${MX}/authorities/i
 export const getMxRunCorrections = (runId) => api.get(`${MX}/runs/${runId}/corrections`);
 export const openMxRunCorrection = (runId, itemIds, reason) => api.post(`${MX}/runs/${runId}/corrections`, { itemIds, reason });
 export const voidMxRunCorrection = (runId, reason) => api.post(`${MX}/corrections/${runId}/void`, { reason });
+// Phase 9b — vacation records / ledger and the aguinaldo run.
+export const getMxVacationLedger = (employeeId) => api.get(`${MX}/employees/${employeeId}/vacation`);
+export const recordMxVacation = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/vacation`, payload);
+export const approveMxVacation = (recordId) => api.post(`${MX}/vacation/${recordId}/approve`, {});
+export const withdrawMxVacation = (recordId, reason) => api.post(`${MX}/vacation/${recordId}/withdraw`, { reason });
+export const openMxAguinaldoRun = (year, payDate) => api.post(`${MX}/aguinaldo-runs`, { year, payDate });
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>

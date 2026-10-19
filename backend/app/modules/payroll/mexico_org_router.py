@@ -720,3 +720,59 @@ def open_run_correction(run_id: int, body: Dict[str, Any] = Body(...), current_u
 def void_run_correction(run_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
                         db: Session = Depends(get_db)):
     return _corrections().void(db, _org_id(current_user), run_id, str(body.get("reason") or ""), _actor(current_user))
+
+
+# ── Vacation and aguinaldo (Phase 9b) ────────────────────────────────────────
+
+def _benefits():
+    from app.modules.payroll import mexico_benefits_service
+
+    return mexico_benefits_service
+
+
+def _opt_date(value, name: str):
+    if value in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        raise BadRequestException(f"{name} must be a date (YYYY-MM-DD)")
+
+
+@router.get("/employees/{employee_id}/vacation", summary="Vacation ledger per service year, with every record")
+def employee_vacation(employee_id: int, on: Optional[str] = Query(None),
+                      current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _benefits().ledger(db, _org_id(current_user), employee_id, _opt_date(on, "on"))
+
+
+@router.post("/employees/{employee_id}/vacation", summary="Record vacation TAKEN or an OPENING balance (needs approval)")
+def record_employee_vacation(employee_id: int, body: Dict[str, Any] = Body(...),
+                             current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"kind": body.get("kind"), "days": body.get("days"), "service_year": body.get("serviceYear"),
+            "start_date": _opt_date(body.get("startDate"), "startDate"),
+            "end_date": _opt_date(body.get("endDate"), "endDate"), "note": body.get("note")}
+    return _benefits().record_vacation(db, _org_id(current_user), employee_id, data, _actor(current_user))
+
+
+@router.post("/vacation/{record_id}/approve", summary="Approve a vacation record (a different person)")
+def approve_employee_vacation(record_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    return _benefits().approve_vacation(db, _org_id(current_user), record_id, _actor(current_user))
+
+
+@router.post("/vacation/{record_id}/withdraw", summary="Withdraw a vacation record whose premium is not paid")
+def withdraw_employee_vacation(record_id: int, body: Dict[str, Any] = Body(...),
+                               current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _benefits().withdraw_vacation(db, _org_id(current_user), record_id, str(body.get("reason") or ""),
+                                         _actor(current_user))
+
+
+@router.post("/aguinaldo-runs", summary="Open the AGUINALDO run of a year (calculated; blocks until S24 / S26 rules)")
+def open_aguinaldo_run(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    try:
+        year = int(body.get("year"))
+    except (TypeError, ValueError):
+        raise BadRequestException("year is required")
+    return _benefits().create_aguinaldo_run(db, _org_id(current_user), year, _opt_date(body.get("payDate"), "payDate"),
+                                            body.get("employeeIds"), _actor(current_user))

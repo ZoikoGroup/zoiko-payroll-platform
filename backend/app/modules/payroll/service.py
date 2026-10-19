@@ -26610,6 +26610,12 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
     employees = [e for e in employees if not _hk_left_before_period(db, organization_id, e, run.period_start)]
     # Singapore joiners within the period (incomplete-month salary) — SG only.
     employees += _sg_mid_period_joiners(db, organization_id, run.period_start, run.period_end, employee_ids)
+    # Mexico (Phase 9b): an AGUINALDO run covers the calendar year — a joiner
+    # within it is owed the proportion for the part of the year. MX runs only.
+    if getattr(run, "mx_run_type", None) == "AGUINALDO":
+        from app.modules.payroll import mexico_benefits_service as _mx_benefits
+
+        employees += _mx_benefits.year_joiners(db, organization_id, run, employee_ids, {e.id for e in employees})
 
     # Phase 8BI: a FAILED item (a prior statutorily-blocked attempt —
     # e.g. Germany PAP unavailable) does NOT count as "already generated"
