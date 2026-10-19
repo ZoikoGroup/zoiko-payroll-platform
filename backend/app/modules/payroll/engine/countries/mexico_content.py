@@ -327,6 +327,35 @@ class RiskPremiumPeriodRule(NamedTuple):
 MX_RISK_PREMIUM_PERIOD: Optional[RiskPremiumPeriodRule] = None
 
 
+# Phase 8 (D3): the IMSS affiliation-movement deadline (MX-025: "ordinary
+# movements are generally due within five business days") is transcribed from
+# its saved source (S13, with S10) — never from the spec text. Business days
+# exclude the official holidays of MX_OFFICIAL_HOLIDAYS, which must list the
+# event's year (a year with no transcribed list = no due date). Both EMPTY
+# until transcribed: every movement is then DUE_DATE_UNSOURCED, and the shared
+# weekend-only business-day helper is never used instead.
+class MovementDeadlineRule(NamedTuple):
+    business_days: int                # counted from the day after the event date
+    source: str
+    source_ref: str
+    needs_g1: bool = True
+
+
+MX_IMSS_MOVEMENT_DEADLINE: Optional[MovementDeadlineRule] = None
+MX_OFFICIAL_HOLIDAYS: dict = {}       # year -> (tuple of dates, source, source_ref); EMPTY until transcribed
+
+# Phase 8: which filing-calendar report type (payroll_statutory_filing_calendar,
+# seeded only from verified MX_FILING_CALENDAR rules) dates each authority
+# liability. Names match the Mexico report templates — structural, not law.
+MX_LIABILITY_REPORT_TYPES = {"SAT_ISR": "MX_ISR_WITHHOLDING", "IMSS": "MX_IMSS", "INFONAVIT": "MX_INFONAVIT",
+                             "ISN": "MX_ISN_RETURN"}
+
+# Phase 8 B7 (as Phase 7 §4.2): when a channel may call an authority-status
+# NOT_FOUND "definitive" — provider/portal-specific, NO default. EMPTY: never
+# definitive, so every retry after UNKNOWN needs an operator's confirmation.
+MX_AUTHORITY_RETRY_CONFIG: dict = {}  # channel -> {"min_wait_seconds": int, "min_not_found_checks": int}
+
+
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
 # "CDMX" code its ISN pack already uses). Geography, not statutory content.
 MX_FEDERAL_ENTITIES = (

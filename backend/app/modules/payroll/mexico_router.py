@@ -235,3 +235,13 @@ def sa_cfdi_lifecycle(organization_id: Optional[int] = Query(None), current_user
     if organization_id is not None:
         _mx()._org(db, organization_id)
     return mexico_cfdi_service.lifecycle_overview(db, organization_id)
+
+
+@router.get("/authorities", summary="Authorities — read-only counts (movements, liabilities, SUA, ISN) and the blocks")
+def sa_authorities(organization_id: Optional[int] = Query(None), current_user=Depends(get_current_super_admin),
+                   db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_imss_service
+
+    if organization_id is not None:
+        _mx()._org(db, organization_id)
+    return mexico_imss_service.overview(db, organization_id)

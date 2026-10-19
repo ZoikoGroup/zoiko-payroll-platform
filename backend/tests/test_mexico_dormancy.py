@@ -39,6 +39,22 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/cfdi/documents/1"), ("POST", "/cfdi/documents/1/status-query"),
     ("POST", "/cfdi/documents/1/confirm-retry"), ("POST", "/cfdi/documents/1/cancel"), ("POST", "/cfdi/reconcile"),
     ("GET", "/cfdi/cancellation-reasons"),
+    # Phase 8 — authorities
+    ("GET", "/authorities/summary"), ("POST", "/authorities/accrue"), ("GET", "/authorities/liabilities"),
+    ("GET", "/authorities/liabilities/1"), ("POST", "/authorities/liabilities/1/file"),
+    ("POST", "/authorities/liabilities/1/pay"), ("POST", "/authorities/liabilities/1/reconcile"),
+    ("GET", "/authorities/movements"), ("POST", "/authorities/movements/generate"),
+    ("POST", "/authorities/movements/export"), ("GET", "/authorities/movements/1"),
+    ("POST", "/authorities/movements/1/outcome"), ("POST", "/authorities/movements/1/withdraw"),
+    ("POST", "/authorities/movements/1/regenerate"), ("GET", "/authorities/sua-periods"),
+    ("POST", "/authorities/sua-periods"), ("GET", "/authorities/sua-periods/1"),
+    ("POST", "/authorities/sua-periods/1/figures"), ("POST", "/authorities/sua-differences/1/explain"),
+    ("POST", "/authorities/sua-differences/1/approve"), ("POST", "/authorities/sua-periods/1/reconcile"),
+    ("POST", "/authorities/sua-periods/1/payment"), ("GET", "/authorities/isn-returns"),
+    ("POST", "/authorities/isn-returns"), ("GET", "/authorities/isn-returns/1"),
+    ("POST", "/authorities/isn-returns/1/file"), ("POST", "/authorities/isn-returns/1/outcome"),
+    ("POST", "/authorities/{kind}/1/unknown"), ("POST", "/authorities/{kind}/1/status-check"),
+    ("POST", "/authorities/{kind}/1/confirm-retry"),
 ]
 
 

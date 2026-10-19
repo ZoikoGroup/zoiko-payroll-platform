@@ -10114,6 +10114,244 @@ class PayrollMxCfdiEvent(Base):
     occurred_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+# ── Mexico (ZP-MX-ENG-001) Phase 8 — authorities (migration mx_authorities_m6) ──
+# IMSS movements, the authority liability ledger (+ its committed sources), SUA
+# reconciliation periods / differences, state ISN returns and one append-only
+# event timeline. Fed ONLY from committed runs; file-export mode (D1) — nothing
+# here transmits. Identifiers (NSS) never stored here; views mask them (MX-061).
+
+class PayrollMxImssMovement(Base):
+    """An IMSS affiliation movement (alta / baja / modificación, MX-025)
+    generated once from a committed event (`source_key`)."""
+    __tablename__ = "payroll_mx_imss_movements"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    registration_id        = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id         = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
+    source_kind            = Column(String(20), nullable=False)       # FIRST_RUN / SBC_CHANGE / END_OF_EMPLOYMENT
+    source_key             = Column(String(120), nullable=False)
+    movement_type          = Column(String(14), nullable=False)       # ALTA / BAJA / MODIFICACION
+    event_date             = Column(Date, nullable=False)
+    sbc                    = Column(Numeric(14, 4), nullable=True)
+    due_date               = Column(Date, nullable=True)
+    due_rule_ref           = Column(String(80), nullable=True)
+    status                 = Column(String(12), nullable=False, default="PENDING")
+    unknown_since          = Column(DateTime(timezone=True), nullable=True)
+    export_batch_ref       = Column(String(60), nullable=True)
+    exported_at            = Column(DateTime(timezone=True), nullable=True)
+    payload_hash           = Column(String(64), nullable=True)
+    idempotency_key        = Column(String(100), nullable=False, unique=True)
+    authority_reference    = Column(String(120), nullable=True)
+    evidence_ref           = Column(String(200), nullable=True)
+    outcome_recorded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    accepted_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    withdrawn_reason       = Column(String(300), nullable=True)
+    replaces_movement_id   = Column(Integer, ForeignKey("payroll_mx_imss_movements.id", ondelete="RESTRICT"), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'EXPORTED', 'FILED', 'ACCEPTED', 'REJECTED', 'UNKNOWN', "
+                           "'WITHDRAWN', 'VOIDED')", name="ck_mx_imss_movement_status"),
+        sa.CheckConstraint("movement_type IN ('ALTA', 'BAJA', 'MODIFICACION')", name="ck_mx_imss_movement_type"),
+        Index("uq_mx_imss_movement_live_source", "source_key", unique=True,
+              postgresql_where=text("status NOT IN ('VOIDED', 'REJECTED')"),
+              sqlite_where=text("status NOT IN ('VOIDED', 'REJECTED')")),
+    )
+
+
+class PayrollMxAuthorityLiability(Base):
+    """One authority amount owed for a period (B3): SAT_ISR per organisation,
+    IMSS / INFONAVIT per IMSS registration, ISN per state — accrued only from
+    committed rows (see PayrollMxAuthorityLiabilitySource). `sequence` > 0 is
+    a complementary liability for rows committed after the period was filed."""
+    __tablename__ = "payroll_mx_authority_liabilities"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    authority             = Column(String(10), nullable=False)        # SAT_ISR / IMSS / INFONAVIT / ISN
+    registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=True, index=True)
+    state_code            = Column(String(5), nullable=True)
+    scope_key             = Column(String(30), nullable=False)        # ORG / REG:<id> / ST:<state>
+    period_key            = Column(String(7), nullable=False)         # YYYY-MM of the pay date (D4)
+    sequence              = Column(Integer, nullable=False, default=0)
+    amount                = Column(Numeric(14, 4), nullable=False, default=0)
+    components            = Column(JSON, nullable=True)               # amount by branch / side
+    due_date              = Column(Date, nullable=True)
+    due_rule_ref          = Column(String(80), nullable=True)
+    status                = Column(String(12), nullable=False, default="ACCRUED")
+    unknown_since         = Column(DateTime(timezone=True), nullable=True)
+    payload_hash          = Column(String(64), nullable=True)
+    idempotency_key       = Column(String(100), nullable=False, unique=True)
+    declaration_reference = Column(String(120), nullable=True)
+    payment_reference     = Column(String(120), nullable=True)
+    evidence_ref          = Column(String(200), nullable=True)
+    filed_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    paid_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reconciled_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("authority IN ('SAT_ISR', 'IMSS', 'INFONAVIT', 'ISN')", name="ck_mx_liability_authority"),
+        sa.CheckConstraint("status IN ('ACCRUED', 'FILED', 'PAID', 'RECONCILED', 'UNKNOWN', 'WITHDRAWN')",
+                           name="ck_mx_liability_status"),
+        UniqueConstraint("organization_id", "authority", "scope_key", "period_key", "sequence",
+                         name="uq_mx_liability_scope_period"),
+    )
+
+
+class PayrollMxAuthorityLiabilitySource(Base):
+    """One committed row inside a liability — unique per source row, so
+    nothing is counted twice and every amount traces to a payslip."""
+    __tablename__ = "payroll_mx_authority_liability_sources"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    liability_id    = Column(Integer, ForeignKey("payroll_mx_authority_liabilities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payslip_item_id = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    source_table    = Column(String(40), nullable=False)    # payroll_mx_imss_branch_lines / ..._isn_liabilities / payslip_items.isr …
+    source_row_id   = Column(Integer, nullable=False)
+    branch_code     = Column(String(30), nullable=False)    # IMSS branch, INFONAVIT, INFONAVIT_CREDIT, ISR, ISN
+    side            = Column(String(10), nullable=True)     # employer / employee
+    base_amount     = Column(Numeric(14, 4), nullable=True)
+    amount          = Column(Numeric(14, 4), nullable=False)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("source_table", "source_row_id", name="uq_mx_liability_source_row"),
+    )
+
+
+class PayrollMxSuaPeriod(Base):
+    """SUA reconciliation of one IMSS registration × month (B4, MX-033 /
+    MX-042): Zoiko's per-worker × per-branch totals against the figures the
+    operator enters from SUA (D5). RECONCILED only with no open difference,
+    by someone other than the person who entered the SUA figures (D6)."""
+    __tablename__ = "payroll_mx_sua_periods"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    registration_id        = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    period_key             = Column(String(7), nullable=False)
+    sua_version            = Column(String(20), nullable=True)        # as recorded by the operator, never assumed
+    zoiko_totals           = Column(JSON, nullable=True)
+    sua_totals             = Column(JSON, nullable=True)
+    difference_total       = Column(Numeric(14, 4), nullable=True)
+    status                 = Column(String(12), nullable=False, default="DRAFT")
+    unknown_since          = Column(DateTime(timezone=True), nullable=True)
+    payload_hash           = Column(String(64), nullable=True)
+    idempotency_key        = Column(String(100), nullable=False, unique=True)
+    figures_entered_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    figures_entered_at     = Column(DateTime(timezone=True), nullable=True)
+    reconciled_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reconciled_at          = Column(DateTime(timezone=True), nullable=True)
+    capture_line           = Column(String(60), nullable=True)        # recorded only (SIPARE layout X1)
+    payment_reference      = Column(String(120), nullable=True)
+    evidence_ref           = Column(String(200), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'RECONCILED', 'PAID', 'UNKNOWN', 'WITHDRAWN')",
+                           name="ck_mx_sua_period_status"),
+        UniqueConstraint("organization_id", "registration_id", "period_key", name="uq_mx_sua_period"),
+    )
+
+
+class PayrollMxSuaDifference(Base):
+    """One worker × branch difference between Zoiko and SUA — BLOCKING until
+    explained and approved by a second person (MX-033, D5/D6)."""
+    __tablename__ = "payroll_mx_sua_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    sua_period_id    = Column(Integer, ForeignKey("payroll_mx_sua_periods.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    branch_code      = Column(String(30), nullable=False)
+    zoiko_amount     = Column(Numeric(14, 4), nullable=False)
+    sua_amount       = Column(Numeric(14, 4), nullable=False)
+    difference       = Column(Numeric(14, 4), nullable=False)
+    explanation_code = Column(String(20), nullable=True)
+    explanation      = Column(String(500), nullable=True)
+    explained_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status           = Column(String(10), nullable=False, default="OPEN")
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'EXPLAINED', 'APPROVED')", name="ck_mx_sua_difference_status"),
+        UniqueConstraint("sua_period_id", "employee_id", "branch_code", name="uq_mx_sua_difference"),
+    )
+
+
+class PayrollMxIsnReturn(Base):
+    """A state ISN return for one state × month (B5, MX-046), built from that
+    state's committed ISN liability. A filed return is never edited — an
+    amendment is a new row (`amendment_of_id`, `sequence` + 1)."""
+    __tablename__ = "payroll_mx_isn_returns"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    isn_registration_id = Column(Integer, ForeignKey("payroll_mx_isn_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    liability_id        = Column(Integer, ForeignKey("payroll_mx_authority_liabilities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    state_code          = Column(String(5), nullable=False)
+    period_key          = Column(String(7), nullable=False)
+    sequence            = Column(Integer, nullable=False, default=0)
+    base_total          = Column(Numeric(14, 4), nullable=False, default=0)
+    amount              = Column(Numeric(14, 4), nullable=False, default=0)
+    due_date            = Column(Date, nullable=True)
+    due_rule_ref        = Column(String(80), nullable=True)
+    status              = Column(String(12), nullable=False, default="DRAFT")
+    unknown_since       = Column(DateTime(timezone=True), nullable=True)
+    payload_hash        = Column(String(64), nullable=True)
+    idempotency_key     = Column(String(100), nullable=False, unique=True)
+    filing_reference    = Column(String(120), nullable=True)
+    payment_reference   = Column(String(120), nullable=True)
+    evidence_ref        = Column(String(200), nullable=True)
+    amendment_of_id     = Column(Integer, ForeignKey("payroll_mx_isn_returns.id", ondelete="RESTRICT"), nullable=True)
+    filed_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    outcome_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'FILED', 'ACCEPTED', 'REJECTED', 'UNKNOWN', 'WITHDRAWN')",
+                           name="ck_mx_isn_return_status"),
+        UniqueConstraint("organization_id", "state_code", "period_key", "sequence", name="uq_mx_isn_return_period"),
+    )
+
+
+class PayrollMxAuthorityEvent(Base):
+    """Append-only timeline for every Phase 8 object (movement / liability /
+    SUA period / SUA difference / ISN return). Nothing updates or deletes a
+    row; `detail` never carries an identifier in clear."""
+    __tablename__ = "payroll_mx_authority_events"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type     = Column(String(20), nullable=False)
+    entity_id       = Column(Integer, nullable=False)
+    event_type      = Column(String(40), nullable=False)
+    from_status     = Column(String(12), nullable=True)
+    to_status       = Column(String(12), nullable=True)
+    payload_hash    = Column(String(64), nullable=True)
+    detail          = Column(JSON, nullable=True)
+    actor_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    occurred_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_mx_authority_events_entity", "entity_type", "entity_id"),
+    )
+
+
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────
 

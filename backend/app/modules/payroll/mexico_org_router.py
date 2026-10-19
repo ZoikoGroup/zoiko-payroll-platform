@@ -444,3 +444,253 @@ def cfdi_cancel_reasons(current_user=Depends(get_current_payroll_operator), db: 
     from app.modules.payroll import mexico_cfdi_service
 
     return mexico_cfdi_service.cancellation_reasons(db)
+
+
+# ── Authorities (Phase 8): IMSS movements, liabilities, SUA, ISN returns ─────
+# File-export mode (D1): nothing here transmits. Reads need a payroll
+# operator; every write needs an org admin. Docs: MEXICO_PHASE_8_PLAN.md.
+
+_ENTITY_PATHS = {"movements": "MOVEMENT", "liabilities": "LIABILITY", "isn-returns": "ISN_RETURN",
+                 "sua-periods": "SUA_PERIOD"}
+
+
+def _imss():
+    from app.modules.payroll import mexico_imss_service
+
+    return mexico_imss_service
+
+
+def _filing():
+    from app.modules.payroll import mexico_filing_service
+
+    return mexico_filing_service
+
+
+def _entity(kind: str) -> str:
+    if kind not in _ENTITY_PATHS:
+        raise BadRequestException(f"Unknown authority object {kind!r}")
+    return _ENTITY_PATHS[kind]
+
+
+@router.get("/authorities/summary", summary="Social Security Center — registrations, counts and the blocks (§14)")
+def authorities_summary(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _imss().center_summary(db, _org_id(current_user))
+
+
+@router.post("/authorities/accrue", summary="Accrue authority liabilities from committed runs (idempotent)")
+def authorities_accrue(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().accrue(db, _org_id(current_user), _actor(current_user))
+
+
+@router.get("/authorities/liabilities", summary="Authority liability ledger (SAT ISR / IMSS / INFONAVIT / ISN)")
+def authorities_liabilities(period: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                            db: Session = Depends(get_db)):
+    return _filing().list_liabilities(db, _org_id(current_user), period)
+
+
+@router.get("/authorities/liabilities/{liability_id}", summary="One liability with its committed sources and events")
+def authorities_liability(liability_id: int, current_user=Depends(get_current_payroll_operator),
+                          db: Session = Depends(get_db)):
+    org_id = _org_id(current_user)
+    return _filing().liability_view(db, _filing()._liability(db, org_id, liability_id), with_sources=True)
+
+
+@router.post("/authorities/liabilities/{liability_id}/file", summary="Record the declaration as filed (reference)")
+def authorities_liability_file(liability_id: int, body: Dict[str, Any] = Body(...),
+                               current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().file_liability(db, _org_id(current_user), liability_id, str(body.get("reference") or ""),
+                                    _actor(current_user), body.get("evidenceRef"))
+
+
+@router.post("/authorities/liabilities/{liability_id}/pay", summary="Record a payment made outside Zoiko")
+def authorities_liability_pay(liability_id: int, body: Dict[str, Any] = Body(...),
+                              current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().pay_liability(db, _org_id(current_user), liability_id, str(body.get("reference") or ""),
+                                   _actor(current_user), body.get("evidenceRef"))
+
+
+@router.post("/authorities/liabilities/{liability_id}/reconcile", summary="Reconcile a paid liability (four-eyes)")
+def authorities_liability_reconcile(liability_id: int, current_user=Depends(get_current_org_admin),
+                                    db: Session = Depends(get_db)):
+    return _filing().reconcile_liability(db, _org_id(current_user), liability_id, _actor(current_user))
+
+
+@router.get("/authorities/movements", summary="IMSS affiliation movements (NSS masked)")
+def authorities_movements(status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                          db: Session = Depends(get_db)):
+    return _imss().list_movements(db, _org_id(current_user), status)
+
+
+@router.post("/authorities/movements/generate", summary="Generate movements from committed events (idempotent)")
+def authorities_movements_generate(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _imss().generate_movements(db, _org_id(current_user), _actor(current_user))
+
+
+@router.post("/authorities/movements/export", summary="Export PENDING movements as a Zoiko worklist (not an IDSE file)")
+def authorities_movements_export(body: Dict[str, Any] = Body(default={}), current_user=Depends(get_current_org_admin),
+                                 db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    out = _imss().export_worklist(db, _org_id(current_user), _actor(current_user), body.get("movementIds"))
+    disposition = "attachment; filename=" + '"' + out["filename"] + '"'
+    return Response(content=out["content"], media_type="text/csv",
+                    headers={"Content-Disposition": disposition, "X-Zoiko-Batch": out["batchRef"],
+                             "Cache-Control": "no-store"})
+
+
+@router.get("/authorities/movements/{movement_id}", summary="One movement with its event timeline")
+def authorities_movement(movement_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    org_id = _org_id(current_user)
+    return _imss().movement_view(db, _imss()._movement(db, org_id, movement_id), detail=True)
+
+
+@router.post("/authorities/movements/{movement_id}/outcome", summary="Record FILED / ACCEPTED / REJECTED")
+def authorities_movement_outcome(movement_id: int, body: Dict[str, Any] = Body(...),
+                                 current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _imss().record_outcome(db, _org_id(current_user), movement_id, str(body.get("outcome") or ""),
+                                  _actor(current_user), body.get("reference"), body.get("evidenceRef"),
+                                  body.get("reason"))
+
+
+@router.post("/authorities/movements/{movement_id}/withdraw", summary="Withdraw a never-exported movement (reason)")
+def authorities_movement_withdraw(movement_id: int, body: Dict[str, Any] = Body(...),
+                                  current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _imss().withdraw(db, _org_id(current_user), movement_id, str(body.get("reason") or ""),
+                            _actor(current_user))
+
+
+@router.post("/authorities/movements/{movement_id}/regenerate", summary="Re-issue a REJECTED movement")
+def authorities_movement_regenerate(movement_id: int, current_user=Depends(get_current_org_admin),
+                                    db: Session = Depends(get_db)):
+    return _imss().regenerate(db, _org_id(current_user), movement_id, _actor(current_user))
+
+
+@router.get("/authorities/sua-periods", summary="SUA reconciliation periods")
+def authorities_sua_periods(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _filing().list_sua_periods(db, _org_id(current_user))
+
+
+@router.post("/authorities/sua-periods", summary="Open a SUA period for a registration and month")
+def authorities_sua_open(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    try:
+        reg_id = int(body.get("registrationId"))
+    except (TypeError, ValueError):
+        raise BadRequestException("registrationId is required")
+    return _filing().open_sua_period(db, _org_id(current_user), reg_id, str(body.get("periodKey") or ""),
+                                     _actor(current_user))
+
+
+@router.get("/authorities/sua-periods/{period_id}", summary="One SUA period: totals, differences, events")
+def authorities_sua_period(period_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    org_id = _org_id(current_user)
+    return _filing().sua_view(db, _filing()._sua(db, org_id, period_id), detail=True)
+
+
+@router.post("/authorities/sua-periods/{period_id}/figures", summary="Enter SUA figures (Zoiko template, D5)")
+def authorities_sua_figures(period_id: int, body: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().enter_sua_figures(db, _org_id(current_user), period_id, body.get("rows"),
+                                       body.get("suaVersion"), _actor(current_user))
+
+
+@router.post("/authorities/sua-differences/{difference_id}/explain", summary="Explain a SUA difference")
+def authorities_sua_explain(difference_id: int, body: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().explain_difference(db, _org_id(current_user), difference_id, str(body.get("code") or ""),
+                                        str(body.get("explanation") or ""), _actor(current_user))
+
+
+@router.post("/authorities/sua-differences/{difference_id}/approve", summary="Approve an explanation (four-eyes)")
+def authorities_sua_approve(difference_id: int, current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    return _filing().approve_difference(db, _org_id(current_user), difference_id, _actor(current_user))
+
+
+@router.post("/authorities/sua-periods/{period_id}/reconcile", summary="Reconcile a SUA period (four-eyes)")
+def authorities_sua_reconcile(period_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    return _filing().reconcile_sua(db, _org_id(current_user), period_id, _actor(current_user))
+
+
+@router.post("/authorities/sua-periods/{period_id}/payment", summary="Record the SUA / SIPARE payment made outside Zoiko")
+def authorities_sua_payment(period_id: int, body: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().record_sua_payment(db, _org_id(current_user), period_id, str(body.get("reference") or ""),
+                                        body.get("captureLine"), _actor(current_user), body.get("evidenceRef"))
+
+
+@router.get("/authorities/isn-returns", summary="State ISN returns")
+def authorities_isn_returns(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _filing().list_isn_returns(db, _org_id(current_user))
+
+
+@router.post("/authorities/isn-returns", summary="Draft (or refresh / amend) a state ISN return for a month")
+def authorities_isn_draft(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                          db: Session = Depends(get_db)):
+    return _filing().draft_isn_return(db, _org_id(current_user), str(body.get("stateCode") or ""),
+                                      str(body.get("periodKey") or ""), _actor(current_user))
+
+
+@router.get("/authorities/isn-returns/{return_id}", summary="One ISN return with its MX-046 reconciliation")
+def authorities_isn_return(return_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    org_id = _org_id(current_user)
+    return _filing().isn_view(db, _filing()._return(db, org_id, return_id), detail=True)
+
+
+@router.post("/authorities/isn-returns/{return_id}/file", summary="Record the return as filed (reference)")
+def authorities_isn_file(return_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    return _filing().file_isn_return(db, _org_id(current_user), return_id, str(body.get("reference") or ""),
+                                     _actor(current_user), body.get("evidenceRef"))
+
+
+@router.post("/authorities/isn-returns/{return_id}/outcome", summary="Record ACCEPTED (four-eyes) / REJECTED")
+def authorities_isn_outcome(return_id: int, body: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _filing().record_isn_outcome(db, _org_id(current_user), return_id, str(body.get("outcome") or ""),
+                                        _actor(current_user))
+
+
+@router.post("/authorities/{kind}/{entity_id}/unknown", summary="Record that a transmission's outcome is not known")
+def authorities_mark_unknown(kind: str, entity_id: int, body: Dict[str, Any] = Body(default={}),
+                             current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _authority_unknown_action(db, current_user, kind, entity_id, "unknown", body)
+
+
+@router.post("/authorities/{kind}/{entity_id}/status-check", summary="Record an authority status check (FOUND / NOT_FOUND)")
+def authorities_status_check(kind: str, entity_id: int, body: Dict[str, Any] = Body(...),
+                             current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _authority_unknown_action(db, current_user, kind, entity_id, "status", body)
+
+
+@router.post("/authorities/{kind}/{entity_id}/confirm-retry",
+             summary="Confirm a retry after NOT_FOUND (same record, payload and key; recorded)")
+def authorities_confirm_retry(kind: str, entity_id: int, body: Dict[str, Any] = Body(...),
+                              current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _authority_unknown_action(db, current_user, kind, entity_id, "retry", body)
+
+
+def _authority_unknown_action(db, current_user, kind, entity_id, action, body):
+    from app.modules.payroll import mexico_authority_lifecycle as L
+
+    org_id, actor = _org_id(current_user), _actor(current_user)
+    entity_type = _entity(kind)
+    _filing().guard(db, org_id)
+    obj = L.load(db, entity_type, org_id, entity_id)
+    if action == "unknown":
+        L.mark_unknown(db, org_id, entity_type, obj, actor, body.get("note"))
+    elif action == "status":
+        L.record_status_check(db, org_id, entity_type, obj, bool(body.get("found")), body.get("reference"), actor,
+                              body.get("evidenceRef"))
+    else:
+        L.confirm_retry(db, org_id, entity_type, obj, actor, str(body.get("reason") or ""))
+    db.commit()
+    views = {"MOVEMENT": lambda: _imss().movement_view(db, obj, detail=True),
+             "LIABILITY": lambda: _filing().liability_view(db, obj, with_sources=True),
+             "ISN_RETURN": lambda: _filing().isn_view(db, obj, detail=True),
+             "SUA_PERIOD": lambda: _filing().sua_view(db, obj, detail=True)}
+    return views[entity_type]()
