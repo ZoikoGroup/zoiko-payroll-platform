@@ -23,3 +23,12 @@ Jur_doc/
 
 # Scratch/diagnostic scripts (read-only analysis, not application code)
 backend/scripts/_audit_*.py
+
+# Local run logs (ZP-PRIV D03: may contain secrets / personal data)
+*.log
+
+# Attestation records are kept as CI artifacts (privacy-evidence-<run>); local runs are not committed
+docs/privacy/evidence_pack/attestations/
+backend/.privacy_attestation_junit.xml
+# Per-run privacy test evidence (CI uploads it as the privacy-evidence artifact)
+backend/tests/privacy/evidence/
