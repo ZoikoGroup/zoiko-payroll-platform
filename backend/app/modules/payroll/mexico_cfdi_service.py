@@ -227,9 +227,18 @@ def generate(db: Session, run, actor_id: Optional[int]) -> dict:
                       run.organization_id, reasons=[(r["code"], r["message"]) for r in pre["reasons"]])
     release = _active_release(db)
     created = []
+    is_correction = (run.mx_run_type or "ORDINARY") == "CORRECTION"
     for item in mexico_run_service._mx_items(db, run):
         if _live_doc(db, item.id) is None:
-            created.append(_generate_one(db, run, item, release, actor_id))
+            replaces = None
+            if is_correction:                      # Phase 9a: substitution of the original's stamped CFDI
+                from app.modules.payroll import mexico_correction_service
+
+                replaces = mexico_correction_service.cfdi_original(db, item, actor_id)
+            doc = _generate_one(db, run, item, release, actor_id, replaces=replaces)
+            if replaces is not None:
+                _event(db, replaces, "REPLACEMENT_LINKED", actor_id, {"replacementDocumentId": doc.id})
+            created.append(doc)
     db.commit()
     return {"runId": run.id, "created": [document_view(d) for d in created]}
 

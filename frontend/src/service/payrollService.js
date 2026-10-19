@@ -2625,6 +2625,10 @@ export const draftMxIsnReturn = (stateCode, periodKey) => api.post(`${MX}/author
 export const getMxIsnReturn = (id) => api.get(`${MX}/authorities/isn-returns/${id}`);
 export const fileMxIsnReturn = (id, reference) => api.post(`${MX}/authorities/isn-returns/${id}/file`, { reference });
 export const recordMxIsnOutcome = (id, outcome) => api.post(`${MX}/authorities/isn-returns/${id}/outcome`, { outcome });
+// Phase 9a — correction runs of committed payslips.
+export const getMxRunCorrections = (runId) => api.get(`${MX}/runs/${runId}/corrections`);
+export const openMxRunCorrection = (runId, itemIds, reason) => api.post(`${MX}/runs/${runId}/corrections`, { itemIds, reason });
+export const voidMxRunCorrection = (runId, reason) => api.post(`${MX}/corrections/${runId}/void`, { reason });
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>

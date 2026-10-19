@@ -31677,6 +31677,10 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
         _mx_run.refuse_if_committed(run)
     if run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft runs can be deleted.")
+    if getattr(run, "mx_run_type", None) == "CORRECTION":
+        from app.modules.payroll import mexico_correction_service as _mx_corr
+
+        _mx_corr.refuse_delete_unless_voided(db, run)
     if (run.notes or "").startswith("[HK-CORRECTION]"):
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
             "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))

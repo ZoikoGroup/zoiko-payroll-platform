@@ -44,6 +44,7 @@ SPEC = _content.SPEC
 GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
+BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION")          # Phase 9a; the rest arrive with 9b–9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
@@ -103,8 +104,8 @@ def guard(db: Session, employee, run=None) -> None:
         raise MXBlock("MX_ORG_NOT_MEXICAN", "the employee's organisation payroll jurisdiction is not Mexico", org_id)
     if run is not None and run.organization_id != org_id:
         raise MXBlock("MX_RUN_ORG_MISMATCH", "the run belongs to another organisation", org_id)
-    if run is not None and (run.mx_run_type or "ORDINARY") != "ORDINARY":
-        raise MXBlock("MX_RUN_TYPE_PHASE9", f"{run.mx_run_type} runs are built in Phase 9", org_id)
+    if run is not None and (run.mx_run_type or "ORDINARY") not in BUILT_RUN_TYPES:
+        raise MXBlock("MX_RUN_TYPE_PHASE9", f"{run.mx_run_type} runs are built in a later Phase 9 sub-phase", org_id)
 
 
 # ── 1b. Read-only policy for previews (MX-039, OOS-8) ───────────────────────
@@ -375,10 +376,18 @@ def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
     same pay date committed earlier (run id breaks an exact tie). A payment
     ordered after this one never counts, so committing another run — a later
     pay date, or the same pay date afterwards, in either id order — cannot
-    change (and invalidate) an already committed run's inputs."""
+    change (and invalidate) an already committed run's inputs.
+
+    Phase 9a corrections: a committed CORRECTION payslip adds only its delta
+    (corrected − original), and only to runs committed after it (or not yet
+    committed); a correction run's own calculation leaves out the payslips it
+    replaces (and their earlier chain) — mexico_correction_service."""
+    from app.modules.payroll import mexico_correction_service as corrections
     from app.modules.payroll.models import PayrollRun, PayslipItem
 
     me = _payment_order(run, on)
+    replaced = corrections.replaced_chain(db, run)
+    my_committed_at = (getattr(run, "mx_approval_fingerprint", None) or {}).get("committedAt") if run is not None else None
     q = (db.query(PayslipItem, PayrollRun).join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
          .filter(PayslipItem.employee_id == employee_id, PayslipItem.mx_calculation_snapshot.isnot(None)))
     taxable = applied = _ZERO
@@ -389,11 +398,13 @@ def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
             continue
         if not (r.mx_approval_fingerprint or {}).get("committedAt"):
             continue
-        if _payment_order(r, r.pay_date) >= me:
+        if _payment_order(r, r.pay_date) >= me or item.id in replaced:
             continue
-        res = (item.mx_calculation_snapshot or {}).get("result") or {}
-        taxable += _dec(res.get("isr_taxable"))
-        applied += _dec((res.get("subsidy") or {}).get("applied"))
+        part = corrections.contribution(db, item, r, run, my_committed_at)
+        if part is None:
+            continue
+        taxable += part[0]
+        applied += part[1]
     return {"taxable": taxable, "subsidy_applied": applied}
 
 
@@ -682,8 +693,15 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
         return {"committed": False, "reason": "already committed"}
     counts = {"imss": 0, "isn": 0, "sbc": 0, "accumulators": 0, "accruals": 0}
     period_key = run.pay_date.strftime("%Y-%m")
+    # Phase 9a: a CORRECTION run posts DELTAS (corrected − original) to the
+    # aggregate ledgers (ISN, accumulators, accruals) and the full corrected
+    # rows to the per-payslip traces (IMSS lines, SBC history).
+    from app.modules.payroll import mexico_correction_service as corrections
+
+    is_correction = (run.mx_run_type or "ORDINARY") == "CORRECTION"
     for item in _mx_items(db, run):
         res = (item.mx_calculation_snapshot or {}).get("result") or {}
+        base = corrections.result_of(corrections.original_item_for(db, item)) if is_correction else {}
         for branch in res.get("imss") or []:
             for line in branch.get("lines") or []:
                 db.add(PayrollMxImssBranchLine(
@@ -692,12 +710,17 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
                     base_amount=_dec(line["base"]), contribution_days=_dec(line["days"]),
                     rate_pct=_dec(line["rate_pct"]), amount=_dec(line["amount"]), band=line.get("band")))
                 counts["imss"] += 1
-        isn = res.get("isn") or {}
-        if isn.get("state"):
+        isn_now = {(res.get("isn") or {}).get("state"): res.get("isn") or {}}
+        isn_was = {(base.get("isn") or {}).get("state"): base.get("isn") or {}}
+        for state in sorted(s for s in set(isn_now) | set(isn_was) if s):
+            now, was = isn_now.get(state, {}), isn_was.get(state, {})
+            d_base, d_amount = _dec(now.get("base")) - _dec(was.get("base")), _dec(now.get("amount")) - _dec(was.get("amount"))
+            if is_correction and d_base == 0 and d_amount == 0:
+                continue
             db.add(PayrollMxIsnLiability(
-                payslip_item_id=item.id, organization_id=run.organization_id, state_code=isn["state"],
-                base_amount=_dec(isn.get("base")), rate_pct=_dec(isn.get("rate_pct")), amount=_dec(isn.get("amount")),
-                jurisdiction_pack_id=isn.get("pack_id"), period_key=period_key))
+                payslip_item_id=item.id, organization_id=run.organization_id, state_code=state, base_amount=d_base,
+                rate_pct=_dec(now.get("rate_pct") or was.get("rate_pct")), amount=d_amount,
+                jurisdiction_pack_id=now.get("pack_id") or was.get("pack_id"), period_key=period_key))
             counts["isn"] += 1
         sbc = res.get("sbc") or {}
         comp = sbc.get("components") or {}
@@ -706,23 +729,32 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
                 organization_id=run.organization_id, employee_id=item.employee_id, payroll_run_id=run.id,
                 effective_from=date.fromisoformat(seg["start"]), sbc_fixed=_dec(comp.get("fixed")),
                 sbc_variable=_dec(comp.get("variable_daily")), sbc_total=_dec(seg.get("sbc")),
-                factor=_dec(comp.get("factor")), components=comp, source="RUN"))
+                factor=_dec(comp.get("factor")), components=comp, source="CORRECTION" if is_correction else "RUN"))
             counts["sbc"] += 1
-        variable = sum((_dec(c["gross"]) for c in res.get("concepts") or [] if c.get("sbc") == "VARIABLE"), _ZERO)
+
+        def _variable(r):
+            return sum((_dec(c["gross"]) for c in r.get("concepts") or [] if c.get("sbc") == "VARIABLE"), _ZERO)
+
         db.add(PayrollMxVariableAccumulator(
             organization_id=run.organization_id, employee_id=item.employee_id, payroll_run_id=run.id,
-            bimester_key=bimester_key(run.period_end), variable_total=variable,
-            days=_dec(res.get("contribution_days")), kind="RUN", recorded_by_id=actor_id))
+            bimester_key=bimester_key(run.period_end), variable_total=_variable(res) - _variable(base),
+            days=_dec(res.get("contribution_days")) - _dec(base.get("contribution_days")), kind="RUN",
+            recorded_by_id=actor_id))
         counts["accumulators"] += 1
+        concepts = {"aguinaldo days": "AGUINALDO", "vacation days": "VACATION", "vacation premium %": "VACATION_PREMIUM"}
+        was_ent = {concepts.get(e.get("concept")): e for e in base.get("entitlements") or []}
         for ent in res.get("entitlements") or []:
-            concept = {"aguinaldo days": "AGUINALDO", "vacation days": "VACATION",
-                       "vacation premium %": "VACATION_PREMIUM"}.get(ent.get("concept"))
+            concept = concepts.get(ent.get("concept"))
             if concept:
+                prev = was_ent.get(concept, {})
                 db.add(PayrollMxBenefitAccrual(
                     organization_id=run.organization_id, employee_id=item.employee_id, payroll_run_id=run.id,
-                    concept=concept, period_key=period_key, statutory_amount=_dec(ent.get("statutory_amount")),
-                    employer_amount=_dec(ent.get("employer_amount"))))
+                    concept=concept, period_key=period_key,
+                    statutory_amount=_dec(ent.get("statutory_amount")) - _dec(prev.get("statutory_amount")),
+                    employer_amount=_dec(ent.get("employer_amount")) - _dec(prev.get("employer_amount"))))
                 counts["accruals"] += 1
+    if is_correction:
+        corrections.on_commit(db, run)
     db.flush()
     return {"committed": True, **counts}
 
@@ -795,11 +827,12 @@ def run_downstream_actions(db: Session, run) -> list:
     (SUBMITTED onward, Phase 7 D2). Phase 8: any IMSS movement exported /
     filed / UNKNOWN, any liability past ACCRUED (or ever sent), any SUA
     period RECONCILED onward and any ISN return past DRAFT that includes it
-    (Phase 8 plan §6). Phase 10 MUST add: any RELEASED bank instruction for
-    it. Each with a test."""
-    from app.modules.payroll import mexico_cfdi_service, mexico_filing_service
+    (Phase 8 plan §6). Phase 9a: any live correction of one of its payslips.
+    Phase 10 MUST add: any RELEASED bank instruction for it. Each with a test."""
+    from app.modules.payroll import mexico_cfdi_service, mexico_correction_service, mexico_filing_service
 
-    return mexico_cfdi_service.downstream_reasons(db, run) + mexico_filing_service.downstream_reasons(db, run)
+    return (mexico_cfdi_service.downstream_reasons(db, run) + mexico_filing_service.downstream_reasons(db, run)
+            + mexico_correction_service.downstream_reasons(db, run))
 
 
 def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
@@ -817,6 +850,9 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
 
     voided = mexico_cfdi_service.void_untransmitted(db, run, actor_id)   # never transmitted → VOIDED (D3)
     removed = {"cfdiVoided": voided, **mexico_filing_service.withdraw_on_reset(db, run, actor_id)}
+    from app.modules.payroll import mexico_correction_service
+
+    removed["correctionsReopened"] = mexico_correction_service.on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)
