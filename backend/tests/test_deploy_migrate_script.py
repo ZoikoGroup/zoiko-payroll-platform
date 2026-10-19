@@ -43,3 +43,52 @@ def test_every_success_path_ends_with_the_read_only_drift_check_and_head_verific
     for tail in (code.split('if upgrade_output="$(alembic upgrade head 2>&1)"; then', 1)[1].split("fi", 1)[0],
                  code.rsplit("alembic upgrade head", 1)[1]):
         assert tail.index("check_model_drift") < tail.index("verify_at_head")
+
+
+# ── 2026-10-19 (PR #112): the orphan self-heal must survive a deploy that brings new objects ──
+
+def test_the_stamp_point_is_found_before_the_drift_check_and_the_refusal_uses_the_pending_filter():
+    code = "\n".join(_code_lines())
+    orphan = code.split("orphan version row confirmed", 1)[1]
+    head = code.split("orphan version row confirmed", 1)[0]
+    assert "STAMP_REV=" in head                                    # computed (read-only) before the check
+    refuse = orphan[orphan.index("schema_drift"):orphan.index("alembic stamp")]
+    assert "python -m scripts.drift_pending_filter \"$STAMP_REV\"" in refuse
+    assert "exit 1" in refuse and "Refusing to stamp" in refuse
+
+
+def test_the_filter_explains_only_what_the_pending_migrations_create():
+    from scripts.drift_pending_filter import unexplained
+
+    report = "\n".join([
+        "Schema drift detected:",
+        "  - Model table 'payroll_mx_vacation_records' has no matching DB table.",
+        "  - Model table 'payroll_other' has no matching DB table.",
+        "  - payroll_runs: model has columns not in the DB: ['mx_new']",
+        "  - payroll_runs: model has columns not in the DB: ['mx_new', 'mx_other']",
+        "  - payslip_items: DB has columns not on the model: ['mystery']",
+    ])
+    out = unexplained(report, {"payroll_mx_vacation_records"}, {"payroll_runs": {"mx_new"}})
+    assert out == ["Model table 'payroll_other' has no matching DB table.",
+                   "payroll_runs: model has columns not in the DB: ['mx_new', 'mx_other']",
+                   "payslip_items: DB has columns not on the model: ['mystery']"]
+    # A change made outside the repository is NEVER explained, whatever is pending.
+    assert unexplained("  - payslip_items: DB has columns not on the model: ['x']", {"payslip_items"},
+                       {"payslip_items": {"x"}}) == ["payslip_items: DB has columns not on the model: ['x']"]
+    assert unexplained("No schema drift detected.", set(), {}) == []
+
+
+def test_pending_objects_are_read_from_the_real_migration_chain():
+    import os
+
+    from scripts.drift_pending_filter import pending_objects
+
+    here = os.getcwd()
+    os.chdir(Path(__file__).resolve().parents[1])
+    try:
+        tables, _ = pending_objects("f5c1a8d3e9b2")
+        assert tables == {"payroll_mx_vacation_records"}
+        tables, _ = pending_objects("e3b9c2d7f4a1")
+        assert {"payroll_mx_run_corrections", "payroll_mx_vacation_records"} <= tables
+    finally:
+        os.chdir(here)
