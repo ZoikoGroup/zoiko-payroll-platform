@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert } from "lucide-react";
-import { getSwissReadiness, previewSwissCalculation } from "../../../service/superAdminService";
-import { inputClass, labelClass } from "../constants";
-import StatutoryTraceDrawer from "../../payroll/StatutoryTraceDrawer";
+import { getSwissReadiness } from "../../../service/superAdminService";
+import WorkerDataLocked from "../../WorkerDataLocked";
 
 // Switzerland release gates G1-G7 (re-derived server-side on every read —
-// never cached, never fabricated) plus the read-only calculation preview
-// against a real CH employee. Matches how SEReadinessTab/ITReadinessTab sit
+// never cached, never fabricated). The calculation preview against a real
+// CH employee is retired for Super Admin (ZP-PRIV, worker data). Matches how SEReadinessTab/ITReadinessTab sit
 // in their own workspaces: the same pack-management surface, Switzerland's
 // readiness is org-independent so it renders for any selected pack.
 function Readiness() {
@@ -54,92 +53,19 @@ function Readiness() {
   );
 }
 
-const PREVIEW_DEFAULTS = { organizationId: "", employeeId: "", payDate: "", monthlyBaseSalary: "" };
-
+// ZP-PRIV: the Swiss calculation preview loads a REAL PayrollEmployee
+// (organizationId + employeeId) and echoes worker data, so the Super Admin
+// route is retired (it needs a JIT Support Access grant). The preview is no
+// longer offered here.
 function Preview() {
-  const [form, setForm] = useState(PREVIEW_DEFAULTS);
-  const [running, setRunning] = useState(false);
-  const [out, setOut] = useState(null);
-  const [error, setError] = useState(null);
-  const [traceOpen, setTraceOpen] = useState(false);
-
-  async function run() {
-    if (!form.organizationId || !form.employeeId || !form.payDate) {
-      setError("Organization id, employee id and payment date are required."); return;
-    }
-    setRunning(true); setError(null);
-    try {
-      const payload = {
-        organizationId: Number(form.organizationId), employeeId: Number(form.employeeId), payDate: form.payDate,
-        ...(form.monthlyBaseSalary ? { earnings: { base_salary: form.monthlyBaseSalary } } : {}),
-      };
-      setOut(await previewSwissCalculation(payload));
-    } catch (e) {
-      setError(e?.message || "Preview failed.");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  const t = out && !out.blocked ? out.switzerland?.totals : null;
-  const money = (v) => `CHF ${v ?? "—"}`;
-
   return (
     <section aria-labelledby="ch-preview-heading" className="space-y-3">
-      <h3 id="ch-preview-heading" className="text-sm font-semibold text-foreground">Calculation preview (read-only)</h3>
-      <p className="text-xs text-foreground-muted">
-        Runs the production resolver and Swiss engine for one real CH employee on the payment date. Nothing is saved; a
-        missing fact or row returns the engine&apos;s own block, never a guessed figure.
-      </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-        <div><label className={labelClass} htmlFor="ch-pv-org">Organization id</label>
-          <input id="ch-pv-org" type="number" className={inputClass} value={form.organizationId} onChange={(e) => setForm({ ...form, organizationId: e.target.value })} /></div>
-        <div><label className={labelClass} htmlFor="ch-pv-emp">Employee id</label>
-          <input id="ch-pv-emp" type="number" className={inputClass} value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} /></div>
-        <div><label className={labelClass} htmlFor="ch-pv-date">Payment date</label>
-          <input id="ch-pv-date" type="date" className={inputClass} value={form.payDate} onChange={(e) => setForm({ ...form, payDate: e.target.value })} /></div>
-        <div><label className={labelClass} htmlFor="ch-pv-basic">Monthly base salary (optional; defaults to CTC/12)</label>
-          <input id="ch-pv-basic" className={inputClass} inputMode="decimal" value={form.monthlyBaseSalary} onChange={(e) => setForm({ ...form, monthlyBaseSalary: e.target.value })} /></div>
-      </div>
-      <button type="button" onClick={run} disabled={running}
-        className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60">
-        {running ? "Calculating…" : "Run preview"}
-      </button>
-      {error && <p role="alert" className="text-xs text-error">{error}</p>}
-      {out?.blocked && (
-        <p role="status" className="rounded-lg border border-warning/40 bg-warning-light px-3 py-2 text-xs text-foreground-secondary">
-          Blocked on <span className="font-mono">{out.blockedKey}</span>: {out.blockedReason}
+      <h3 id="ch-preview-heading" className="text-sm font-semibold text-foreground">Calculation preview</h3>
+      <WorkerDataLocked variant="support" title="The Swiss preview runs on a real employee">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Unlike the synthetic previews of other jurisdictions, this preview needs an actual employee record.
         </p>
-      )}
-      {t && (
-        <dl className="grid grid-cols-1 gap-x-6 gap-y-1 rounded-xl border border-border p-3 text-xs sm:grid-cols-2">
-          <dt className="text-foreground-muted">Gross</dt><dd className="font-medium text-foreground">{money(out.result?.gross)}</dd>
-          <dt className="text-foreground-muted">Total deductions</dt><dd className="font-medium text-foreground">{money(out.result?.totalDeductions)}</dd>
-          <dt className="text-foreground-muted">Net pay</dt><dd className="font-semibold text-foreground">{money(out.result?.netPay)}</dd>
-          {/* ch_employee_total / ch_employer_total are the engine's full statutory
-              totals (AHV/IV/EO/ALV, BVG, UVG, KTG, QST, FAK, admin cost) */}
-          <dt className="text-foreground-muted">Employee statutory deductions (incl. QST)</dt><dd className="font-medium text-foreground">{money(t.ch_employee_total)}</dd>
-          <dt className="text-foreground-muted">QST withheld (source tax)</dt><dd className="font-medium text-foreground">{money(t.ch_qst_total)}</dd>
-          <dt className="text-foreground-muted">BVG employee share</dt><dd className="font-medium text-foreground">{money(t.ch_bvg_employee)}</dd>
-          <dt className="text-foreground-muted">Employer statutory cost</dt><dd className="font-medium text-foreground">{money(t.ch_employer_total)}</dd>
-          {out.switzerland?.trace && (
-            <>
-              <dt className="text-foreground-muted">Input / rule hash</dt>
-              <dd className="font-mono text-[10px] text-foreground-disabled break-all">
-                {(out.switzerland.trace.input_hash || "").slice(0, 12)} / {(out.switzerland.trace.rule_hash || "").slice(0, 12)}
-              </dd>
-            </>
-          )}
-        </dl>
-      )}
-      {t && out.switzerland?.trace && (
-        <button type="button" onClick={() => setTraceOpen(true)}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-muted">
-          View statutory trace
-        </button>
-      )}
-      <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)}
-        snapshot={out?.switzerland} title="Swiss calculation preview" currency="CHF" />
+      </WorkerDataLocked>
     </section>
   );
 }

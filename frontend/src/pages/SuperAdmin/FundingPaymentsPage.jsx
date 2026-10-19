@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { Wallet, Building2, RefreshCcw, TrendingUp, Clock, CheckCircle2, Coins } from "lucide-react";
+import { Wallet, Building2, RefreshCcw, TrendingUp, Clock, CheckCircle2, Coins, Info } from "lucide-react";
 import Modal from "../../components/Modal";
 import DateRangeFilter from "../../components/DateRangeFilter";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
+import { Link } from "react-router-dom";
+import { LoadError, LoadingBlocks } from "../../components/LoadState";
 import { resolveDateRange } from "../../utils/dateRangePresets";
 import { formatCurrency, getCurrencyForCountry, getCurrencySelectOptions } from "../../utils/currency";
 import {
-  getFinanceOverview, getFinanceSummary, getFinanceByOrganization, listAllOrganizationsBrief, getComplianceJurisdictions,
+  getFinanceOverview, getFinanceSummary, getFinanceByOrganization, getComplianceJurisdictions,
   getOrganizationCurrencies, updateOrganizationCurrency,
+  isSuppressed, SUPPRESSED, SUPPRESSED_EXPLANATION, aggregateRefusalMessage,
 } from "../../service/superAdminService";
 
 const RUN_STATUSES = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
@@ -21,10 +24,31 @@ function resolveCurrencyCode(explicitCurrency, countryCode) {
   return getCurrencyForCountry(countryCode)?.code || null;
 }
 
-function money(amount, countryCode, explicitCurrency) {
+// Muted chip for a k-suppressed cell (ZP-PRIV B.2).
+function SuppressedChip() {
+  return (
+    <span
+      title={SUPPRESSED_EXPLANATION}
+      aria-label={SUPPRESSED_EXPLANATION}
+      className="inline-flex cursor-help items-center whitespace-nowrap rounded-full border border-border bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-foreground-muted dark:bg-white/5"
+    >
+      {SUPPRESSED}
+    </span>
+  );
+}
+
+// Money cell: the hidden token renders as the chip, never as a number.
+function Money({ amount, countryCode, explicitCurrency }) {
+  if (isSuppressed(amount)) return <SuppressedChip />;
+  if (amount === null || amount === undefined) return <span className="text-foreground-disabled">—</span>;
   const currency = resolveCurrencyCode(explicitCurrency, countryCode);
-  if (!currency) return `${Number(amount || 0).toLocaleString()} (currency unknown)`;
-  return formatCurrency(amount, currency);
+  if (!currency) return <>{`${Number(amount || 0).toLocaleString()} (currency unknown)`}</>;
+  return <>{formatCurrency(amount, currency)}</>;
+}
+
+function Count({ value }) {
+  if (isSuppressed(value)) return <SuppressedChip />;
+  return <>{value ?? "—"}</>;
 }
 
 function CurrencyManagerModal({ onClose }) {
@@ -42,7 +66,8 @@ function CurrencyManagerModal({ onClose }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []);
 
   async function handleChange(org, currency) {
     setSavingId(org.id);
@@ -123,12 +148,12 @@ export default function FundingPaymentsPage() {
   const [summary, setSummary] = useState(null);
   const [byOrganization, setByOrganization] = useState({ organizations: [], total: 0 });
   const [overview, setOverview] = useState({ items: [], total: 0 });
-  const [organizations, setOrganizations] = useState([]);
   const [jurisdictions, setJurisdictions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
-  const [organizationId, setOrganizationId] = useState("");
   const [country, setCountry] = useState("");
   const [status, setStatus] = useState("");
   const [dateRange, setDateRange] = useState({ preset: "thisMonth", ...resolveDateRange("thisMonth") });
@@ -137,42 +162,58 @@ export default function FundingPaymentsPage() {
   const pageSize = 20;
 
   useEffect(() => {
-    Promise.all([listAllOrganizationsBrief(), getComplianceJurisdictions()])
-      .then(([orgRes, jRes]) => {
-        setOrganizations(orgRes.organizations || []);
-        setJurisdictions(jRes);
-      })
-      .catch(() => {});
+    getComplianceJurisdictions().then(setJurisdictions).catch(() => {});
   }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
-    const params = {
-      organization_id: organizationId || undefined,
+    setNotice("");
+    // /finance/summary takes no status filter; the other two do.
+    const range = {
       country: country || undefined,
-      status: status || undefined,
       start_date: dateRange.startDate || undefined,
       end_date: dateRange.endDate || undefined,
     };
+    const withStatus = { ...range, status: status || undefined };
     try {
       const [summaryRes, byOrgRes, overviewRes] = await Promise.all([
-        getFinanceSummary(params),
-        getFinanceByOrganization(params),
-        getFinanceOverview({ ...params, skip: page * pageSize, limit: pageSize }),
+        getFinanceSummary(range),
+        getFinanceByOrganization(withStatus),
+        getFinanceOverview({ ...withStatus, skip: page * pageSize, limit: pageSize }),
       ]);
       setSummary(summaryRes);
       setByOrganization(byOrgRes);
       setOverview(overviewRes);
+      setLoaded(true);
     } catch (err) {
-      setError(err.message);
+      const friendly = aggregateRefusalMessage(err);
+      if (friendly) setNotice(friendly);
+      else setError(err?.message || "Funding totals could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [organizationId, country, status, dateRange, page]);
+  }, [country, status, dateRange, page]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(0); }, [organizationId, country, status, dateRange]);
+
+  // Any filter change goes back to the first page of cells.
+  const onFilter = (setter) => (value) => { setter(value); setPage(0); };
+  const changeCountry = onFilter(setCountry);
+  const changeStatus = onFilter(setStatus);
+  const changeDateRange = onFilter(setDateRange);
+
+  const byCountry = summary?.byCountry || [];
+  const filtered = Boolean(country || status || dateRange.preset !== "thisMonth");
+  const clearFilters = () => {
+    setCountry("");
+    setStatus("");
+    setPage(0);
+    setDateRange({ preset: "thisMonth", ...resolveDateRange("thisMonth") });
+  };
+  const hasUnassigned = byCountry.some((r) => !r.country || r.country === "Unassigned");
+  const activeOrgCount = byOrganization.organizations.filter((o) => o.payrollActive).length;
 
   return (
     <div>
@@ -182,7 +223,7 @@ export default function FundingPaymentsPage() {
             <Wallet size={22} className="text-primary" /> Funding &amp; Payments
           </h1>
           <p className="text-sm text-foreground-muted mt-0.5">
-            Customer payroll money movement across organizations — not Zoiko revenue
+            Customer payroll money movement as platform totals — not Zoiko revenue
             (that lives in Zoiko Commercial → Revenue &amp; Collections, and the two are never merged).
             Does not replace an org&apos;s own Payroll module.
           </p>
@@ -204,57 +245,106 @@ export default function FundingPaymentsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="mb-5 flex items-start gap-2 rounded-lg border border-info/30 bg-info-light px-4 py-3 text-sm text-info">
+        <Info size={16} className="mt-0.5 shrink-0" />
+        <span>
+          Totals always span several organizations — no single organization&apos;s payroll or person&apos;s pay is shown.
+          Money appears only for cells with at least 5 workers and 2 organizations; smaller cells show <SuppressedChip />.
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        <select value={country} onChange={(e) => changeCountry(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+          <option value="">All Jurisdictions</option>
+          {jurisdictions.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
+        </select>
+        <select
+          value={status}
+          onChange={(e) => changeStatus(e.target.value)}
+          title="Applies to the monthly totals and the organization activity column"
+          className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground"
+        >
+          <option value="">All Statuses</option>
+          {RUN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <DateRangeFilter value={dateRange} onChange={changeDateRange} />
+        {filtered && (
+          <button onClick={clearFilters} className="rounded-lg px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5">
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {notice && (
+        <p className="mb-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-light px-4 py-3 text-sm text-warning">
+          <Clock size={16} className="mt-0.5 shrink-0" /> {notice}
+        </p>
+      )}
+      <LoadError message={error} onRetry={load} />
+      {!loaded && !error && !notice && <LoadingBlocks count={4} cols="sm:grid-cols-4" />}
+
+      {loaded && <>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2">
         <SummaryCard icon={Building2} label="Organizations (with runs)" value={summary?.totalOrganizations ?? "—"} />
         <SummaryCard icon={TrendingUp} label="Payroll Runs" value={summary?.totalPayrollRuns ?? "—"} />
-        <SummaryCard icon={Clock} label="Pending" value={summary?.payrollsPending ?? "—"} accent="text-amber-500" />
-        <SummaryCard icon={CheckCircle2} label="Completed" value={summary?.payrollsCompleted ?? "—"} accent="text-green-500" />
+        <SummaryCard icon={Clock} label="Pending" value={summary?.payrollsPending ?? "—"} accent="text-warning" />
+        <SummaryCard icon={CheckCircle2} label="Completed" value={summary?.payrollsCompleted ?? "—"} accent="text-success" />
       </div>
+      <p className="mb-6 text-xs text-foreground-muted">
+        These four counts follow the jurisdiction and date range; the status filter applies to the tables below.
+      </p>
 
       <div className="mb-6">
         <h2 className={`${SECTION_LABEL_CLS} mb-3`}>Totals by Jurisdiction (currency-safe — never combined)</h2>
-        {!summary || summary.byCountry.length === 0 ? (
+        {hasUnassigned && (
+          <p className="mb-3 text-xs text-foreground-muted">
+            &quot;Unassigned&quot; totals come from organizations with no compliance jurisdiction, so no currency can be derived.
+            Set one in <Link to="/super-admin/organizations" className="text-primary underline">Organizations</Link> or
+            choose a currency with Manage Currencies.
+          </p>
+        )}
+        {byCountry.length === 0 ? (
           <p className="text-sm text-foreground-disabled">No payroll data for the selected filters.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {summary.byCountry.map((row) => {
-              const currencyInfo = getCurrencyForCountry(row.country);
+            {byCountry.map((row) => {
+              const code = resolveCurrencyCode(row.currency, row.country);
+              const countryCurrency = getCurrencyForCountry(row.country);
+              const symbol = countryCurrency && countryCurrency.code === code ? `${countryCurrency.symbol} ` : "";
+              const money = (key) => <Money amount={row[key]} countryCode={row.country} explicitCurrency={row.currency} />;
               return (
-              // A distinct, self-contained section per jurisdiction/currency
-              // — never a shared table with currency as just another column
-              // — with a left accent bar in that currency's own badge color,
-              // so the boundary between currencies reads structurally, not
-              // just via a label inside a uniform box.
-              <div key={row.country} className="bg-surface border border-border border-l-4 border-l-primary rounded-xl shadow-sm p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    {row.country}
-                    {currencyInfo && (
-                      <span className="rounded-full bg-primary-light dark:bg-primary-active/30 px-2 py-0.5 text-[11px] font-semibold text-primary-hover">
-                        {currencyInfo.symbol} {currencyInfo.code}
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-xs text-foreground-disabled">{row.organizations} org(s) · {row.payrollRuns} run(s)</span>
-                </div>
-                {/* The totals themselves are this card's hero content — larger
-                    and bolder than the secondary Deductions/Employer Cost
-                    figures below them, not four equally-weighted lines. */}
-                <div className="mb-3 grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-foreground-muted">Gross Pay</p>
-                    <p className="text-xl font-bold text-foreground">{money(row.grossPay, row.country)}</p>
+                // A distinct, self-contained section per jurisdiction/currency
+                // — never a shared table with currency as just another column.
+                <div key={`${row.country}-${row.currency || ""}`} className="bg-surface border border-border border-l-4 border-l-primary rounded-xl shadow-sm p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      {row.country}
+                      {code && (
+                        <span className="rounded-full bg-primary-light dark:bg-primary-active/30 px-2 py-0.5 text-[11px] font-semibold text-primary-hover">
+                          {symbol}{code}
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex flex-wrap items-center gap-1 text-xs text-foreground-disabled">
+                      {row.organizations} org(s) · {row.payrollRuns} run(s) · <Count value={row.employeeCount} /> worker(s)
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-xs text-foreground-muted">Net Pay</p>
-                    <p className="text-xl font-bold text-foreground">{money(row.netPay, row.country)}</p>
+                  <div className="mb-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs text-foreground-muted">Gross Pay</p>
+                      <p className="text-xl font-bold text-foreground">{money("grossPay")}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-foreground-muted">Net Pay</p>
+                      <p className="text-xl font-bold text-foreground">{money("netPay")}</p>
+                    </div>
                   </div>
+                  <dl className="space-y-1.5 border-t border-border-light pt-2.5 text-sm">
+                    <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Deductions</dt><dd className="text-foreground-secondary">{money("totalDeductions")}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Taxes</dt><dd className="text-foreground-secondary">{money("totalTaxes")}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{money("employerCost")}</dd></div>
+                  </dl>
                 </div>
-                <dl className="space-y-1.5 border-t border-border-light pt-2.5 text-sm">
-                  <div className="flex justify-between"><dt className="text-foreground-muted">Deductions</dt><dd className="text-foreground-secondary">{money(row.totalDeductions, row.country)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{money(row.employerCost, row.country)}</dd></div>
-                </dl>
-              </div>
               );
             })}
           </div>
@@ -262,42 +352,111 @@ export default function FundingPaymentsPage() {
       </div>
 
       <div className="mb-6">
-        <h2 className={`${SECTION_LABEL_CLS} mb-3`}>
-          Totals by Organization — every organization, including ones with no payroll runs yet
+        <h2 className={`${SECTION_LABEL_CLS} mb-1`}>
+          Payroll totals by month ({overview.total} cell{overview.total === 1 ? "" : "s"})
         </h2>
+        <p className="mb-3 text-xs text-foreground-muted">
+          One row per jurisdiction × currency × month × run status, summed across organizations.
+        </p>
         <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1000px]">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Jurisdiction</th>
+                <th className="px-4 py-3">Currency</th>
+                <th className="px-4 py-3">Period</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Runs</th>
+                <th className="px-4 py-3 text-right">Orgs</th>
+                <th className="px-4 py-3 text-right">Workers</th>
+                <th className="px-4 py-3 text-right">Gross Pay</th>
+                <th className="px-4 py-3 text-right">Net Pay</th>
+                <th className="px-4 py-3 text-right">Deductions</th>
+                <th className="px-4 py-3 text-right">Taxes</th>
+                <th className="px-4 py-3 text-right">Employer Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overview.items.map((row) => {
+                const resolvedCurrency = resolveCurrencyCode(row.currency, row.jurisdictionCountry);
+                const money = (key) => <Money amount={row[key]} countryCode={row.jurisdictionCountry} explicitCurrency={row.currency} />;
+                return (
+                  <tr key={`${row.jurisdictionCountry}-${row.currency || ""}-${row.period}-${row.status}`} className="border-t border-border-light">
+                    <td className="px-4 py-3 font-medium text-foreground">{row.jurisdictionCountry || "—"}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-slate-100 dark:bg-white/10 px-2 py-0.5 text-xs font-semibold text-foreground-secondary">
+                        {resolvedCurrency || "—"}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-foreground-secondary">{row.period}</td>
+                    <td className="px-4 py-3"><StatusPill status={STATUS_PILL_MAP[row.status] || "pending"} label={row.status} /></td>
+                    <td className="px-4 py-3 text-right text-foreground-secondary">{row.runCount}</td>
+                    <td className="px-4 py-3 text-right text-foreground-secondary">{row.organizationCount}</td>
+                    <td className="px-4 py-3 text-right text-foreground-secondary"><Count value={row.employeeCount} /></td>
+                    <td className="px-4 py-3 text-right font-medium text-foreground">{money("grossPay")}</td>
+                    <td className="px-4 py-3 text-right font-medium text-foreground">{money("netPay")}</td>
+                    <td className="px-4 py-3 text-right text-foreground-muted">{money("totalDeductions")}</td>
+                    <td className="px-4 py-3 text-right text-foreground-muted">{money("totalTaxes")}</td>
+                    <td className="px-4 py-3 text-right text-foreground-muted">{money("employerCost")}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!loading && overview.items.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+              <Wallet size={28} className="text-border-strong" />
+              <p className="text-sm text-foreground-disabled">No payroll activity matches these filters.</p>
+            </div>
+          )}
+        </div>
+
+        {overview.total > pageSize && (
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-sm text-foreground-muted">
+            <span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, overview.total)} of {overview.total}</span>
+            <div className="flex gap-2">
+              <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Previous</button>
+              <button disabled={(page + 1) * pageSize >= overview.total} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Next</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-6">
+        <h2 className={`${SECTION_LABEL_CLS} mb-1`}>
+          Organizations — {byOrganization.total} total, {activeOrgCount} with payroll in this window
+        </h2>
+        <p className="mb-3 text-xs text-foreground-muted">
+          Registry and payroll activity only. An organization&apos;s own payroll totals stay inside that organization.
+        </p>
+        <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[760px]">
             <thead className="bg-background text-left text-xs text-foreground-muted">
               <tr>
                 <th className="px-4 py-3">Organization</th>
+                <th className="px-4 py-3">Code</th>
                 <th className="px-4 py-3">Jurisdiction</th>
-                <th className="px-4 py-3 text-right">Runs</th>
-                <th className="px-4 py-3 text-right">Gross Pay</th>
-                <th className="px-4 py-3 text-right">Net Pay</th>
-                <th className="px-4 py-3 text-right">Employer Cost</th>
-                <th className="px-4 py-3">Last Pay Date</th>
+                <th className="px-4 py-3">Currency</th>
+                <th className="px-4 py-3 text-right">Headcount</th>
+                <th className="px-4 py-3">Payroll in window</th>
               </tr>
             </thead>
             <tbody>
               {byOrganization.organizations.map((org) => {
-                const hasRuns = org.runCount > 0;
+                const resolvedCurrency = resolveCurrencyCode(org.currency, org.jurisdictionCountry);
                 return (
                   <tr key={org.organizationId} className="border-t border-border-light">
                     <td className="px-4 py-3 font-medium text-foreground">{org.organizationName}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-foreground-muted">{org.organizationCode || "—"}</td>
                     <td className="px-4 py-3 text-foreground-muted">{org.jurisdictionCountry || "—"}</td>
-                    <td className="px-4 py-3 text-right text-foreground-secondary">{org.runCount}</td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground">
-                      {hasRuns ? money(org.grossPay, org.jurisdictionCountry, org.currency) : (
-                        <span className="text-foreground-disabled" title="No payroll runs yet — nothing to total.">—</span>
-                      )}
+                    <td className="px-4 py-3 text-foreground-secondary">
+                      {resolvedCurrency || "—"}
+                      {org.currency && <span className="ml-1 text-[10px] text-primary" title="Explicit override">override</span>}
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground">
-                      {hasRuns ? money(org.netPay, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
+                    <td className="px-4 py-3 text-right text-foreground-secondary"><Count value={org.headcount} /></td>
+                    <td className="px-4 py-3">
+                      <StatusPill status={org.payrollActive ? "active" : "inactive"} label={org.payrollActive ? "Active" : "None"} />
                     </td>
-                    <td className="px-4 py-3 text-right text-foreground-muted">
-                      {hasRuns ? money(org.employerCost, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-foreground-muted">{org.lastPayDate || "—"}</td>
                   </tr>
                 );
               })}
@@ -311,84 +470,11 @@ export default function FundingPaymentsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
-          <option value="">All Organizations</option>
-          {organizations.map((o) => <option key={o.id} value={o.id}>{o.organization_name}</option>)}
-        </select>
-        <select value={country} onChange={(e) => setCountry(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
-          <option value="">All Jurisdictions</option>
-          {jurisdictions.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
-          <option value="">All Statuses</option>
-          {RUN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <DateRangeFilter value={dateRange} onChange={setDateRange} />
-      </div>
+      </>}
 
-      {error && (
-        <p className="mb-4 rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">{error}</p>
+      {showCurrencyManager && (
+        <CurrencyManagerModal onClose={() => { setShowCurrencyManager(false); load(); }} />
       )}
-
-      <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
-        <table className="w-full text-sm min-w-[900px]">
-          <thead className="bg-background text-left text-xs text-foreground-muted">
-            <tr>
-              <th className="px-4 py-3">Organization</th>
-              <th className="px-4 py-3">Jurisdiction</th>
-              <th className="px-4 py-3">Currency</th>
-              <th className="px-4 py-3">Period</th>
-              <th className="px-4 py-3">Pay Date</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Gross Pay</th>
-              <th className="px-4 py-3 text-right">Net Pay</th>
-              <th className="px-4 py-3 text-right">Employer Cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            {overview.items.map((row) => {
-              const resolvedCurrency = resolveCurrencyCode(row.currency, row.jurisdictionCountry);
-              return (
-              <tr key={row.id} className="border-t border-border-light">
-                <td className="px-4 py-3 font-medium text-foreground">{row.organizationName}</td>
-                <td className="px-4 py-3 text-foreground-muted">{row.jurisdictionCountry || "—"}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 dark:bg-white/10 px-2 py-0.5 text-xs font-semibold text-foreground-secondary">
-                    {resolvedCurrency || "—"}
-                  </span>
-                  {row.currency && <span className="ml-1 text-[10px] text-primary" title="Explicit override">override</span>}
-                </td>
-                <td className="px-4 py-3 text-foreground-secondary">{row.periodLabel}</td>
-                <td className="px-4 py-3 text-foreground-muted">{row.payDate}</td>
-                <td className="px-4 py-3"><StatusPill status={STATUS_PILL_MAP[row.status] || "pending"} label={row.status} /></td>
-                <td className="px-4 py-3 text-right font-medium text-foreground">{money(row.grossPay, row.jurisdictionCountry, row.currency)}</td>
-                <td className="px-4 py-3 text-right font-medium text-foreground">{money(row.netPay, row.jurisdictionCountry, row.currency)}</td>
-                <td className="px-4 py-3 text-right text-foreground-muted">{money(row.employerCost, row.jurisdictionCountry, row.currency)}</td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!loading && overview.items.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <Wallet size={28} className="text-border-strong" />
-            <p className="text-sm text-foreground-disabled">No payroll runs match these filters.</p>
-          </div>
-        )}
-      </div>
-
-      {overview.total > pageSize && (
-        <div className="flex items-center justify-between mt-3 text-sm text-foreground-muted">
-          <span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, overview.total)} of {overview.total}</span>
-          <div className="flex gap-2">
-            <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Previous</button>
-            <button disabled={(page + 1) * pageSize >= overview.total} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Next</button>
-          </div>
-        </div>
-      )}
-
-      {showCurrencyManager && <CurrencyManagerModal onClose={() => setShowCurrencyManager(false)} />}
     </div>
   );
 }

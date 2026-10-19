@@ -18,6 +18,7 @@ import {
 } from "../utils/jurisdictionTax";
 import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
+import MfaLoginStep from "../components/MfaLoginStep";
 
 const fieldStyle = {
   width: "100%", padding: "11px 14px", borderRadius: "10px",
@@ -274,6 +275,8 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState(null);
+  // ZP-PRIV B08: a new organization admin sets up MFA before the first session.
+  const [mfaStep, setMfaStep] = useState(null);
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -347,6 +350,19 @@ export default function RegisterPage() {
       // Account exists from here on — log the browser in immediately so
       // PlanReviewPage's checkout call (which requires a real org-admin
       // JWT) works with no separate login step in between.
+      if (data.mfa_enrollment_required) {
+        setMfaStep({ mfaToken: data.mfa_token });
+        return;
+      }
+      await finishRegistration(data);
+    } catch (err) {
+      setLocalError(err.message || "Unable to create your account.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function finishRegistration(data) {
       setSession(data);
       await login(data.user);
 
@@ -356,11 +372,21 @@ export default function RegisterPage() {
       // Pass the already-fetched plan card along so that page doesn't need
       // a second GET /billing/plans round-trip.
       navigate("/register/plan-review", { state: { planCode: selectedPlanCode, plan: selectedPlan } });
-    } catch (err) {
-      setLocalError(err.message || "Unable to create your account.");
-    } finally {
-      setSubmitting(false);
-    }
+  }
+
+  if (mfaStep) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white p-6">
+        <div className="w-full max-w-md">
+          <MfaLoginStep
+            mode="enroll"
+            mfaToken={mfaStep.mfaToken}
+            onComplete={(session) => finishRegistration(session)}
+            onCancel={() => navigate("/login")}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (

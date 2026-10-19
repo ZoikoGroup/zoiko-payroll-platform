@@ -72,27 +72,20 @@ export const listAlerts = () => apiFetch("/api/super-admin/alerts");
 
 // ── Payroll Operations ──────────────────────────────────────────────────
 
+// Aggregates only (ZP-PRIV B.1): run counts by jurisdiction x status and
+// an at-risk count — individual runs are tenant data.
 export const listAllPayrollRuns = (params) =>
   apiFetch("/api/super-admin/payroll/runs", { params });
 
+// Filing coverage counts per jurisdiction. Recording/editing/deleting a
+// filing is tenant-run (ZP-PRIV decision 3) — the Super Admin PUT/DELETE
+// endpoints are retired.
 export const listFilingsRemittances = () =>
   apiFetch("/api/super-admin/compliance/filings-remittances");
 
-// Write path for the same dashboard: record/update a statutory filing
-// status for an org (upserts by natural key — jurisdiction + filing type +
-// period — so re-saving an existing period updates it in place), and delete
-// a recorded filing.
-export const upsertStatutoryFiling = (organizationId, payload) =>
-  apiFetch(`/api/super-admin/compliance/filings-remittances/${organizationId}`, {
-    method: "PUT",
-    body: payload,
-  });
-
-export const deleteStatutoryFiling = (organizationId, filingId) =>
-  apiFetch(`/api/super-admin/compliance/filings-remittances/${organizationId}/${filingId}`, {
-    method: "DELETE",
-  });
-
+// Stuck-in-review runs as counts only ({run_count, organization_count,
+// older_than_days}), plus platform billing reconciliation rows (BWM plan
+// overages and BWM/invoice mismatches).
 export const listExceptions = (params) =>
   apiFetch("/api/super-admin/compliance/exceptions", { params });
 

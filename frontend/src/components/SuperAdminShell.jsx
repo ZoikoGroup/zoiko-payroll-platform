@@ -14,13 +14,13 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
-import { apiFetch } from "../api/client";
+import { apiFetch, getStoredUser } from "../api/client";
 import { listAlerts } from "../service/commandCenterService";
 import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
 import CommandPalette from "./CommandPalette";
 import PageErrorBoundary from "./PageErrorBoundary";
-import { NAV_GROUPS, isItemActive, getPageLabel } from "./superAdminNav";
+import { navGroupsFor, isItemActive, getPageLabel } from "./superAdminNav";
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_super_admin_sidebar_collapsed";
 
@@ -130,7 +130,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
       </div>
 
       <nav aria-label="Super Admin navigation" className="scrollbar-hide flex-1 space-y-6 overflow-y-auto pb-6">
-        {NAV_GROUPS.map((group) => (
+        {navGroupsFor(getStoredUser()?.role).map((group) => (
           <NavSection
             key={group.title}
             title={group.title}
@@ -392,6 +392,9 @@ export default function SuperAdminShell({ children }) {
   const { pathname } = useLocation();
 
   useEffect(() => {
+    // Alerts are a Super Admin surface; support operators and Platform
+    // Security never call it (they would only get 403s).
+    if (getStoredUser()?.role !== "super_admin") return undefined;
     let cancelled = false;
     async function refreshAlerts() {
       try {

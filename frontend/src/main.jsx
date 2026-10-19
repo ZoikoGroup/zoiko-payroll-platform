@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import StepUpAuthModal from "./components/StepUpAuthModal";
 import { AuthProvider } from "./context/AuthContext";
 import { OrganizationProvider } from "./context/OrganizationContext";
 import { DarkModeProvider } from "./context/DarkModeContext";
@@ -14,6 +15,7 @@ createRoot(document.getElementById("root")).render(
         <OrganizationProvider>
           <DarkModeProvider>
             <App />
+            <StepUpAuthModal />
           </DarkModeProvider>
         </OrganizationProvider>
       </AuthProvider>
