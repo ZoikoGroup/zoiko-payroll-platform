@@ -117,6 +117,7 @@ export default function PayrollRunsPage() {
         wizardConfig.periodStart,
         wizardConfig.periodEnd,
         calculationMode,
+        wizardConfig.payDate,
       );
       setPreviewData(data);
       if (data?.calculationMode) setCalculationModeOverride(data.calculationMode);
@@ -126,7 +127,7 @@ export default function PayrollRunsPage() {
     } finally {
       setLoadingPreview(false);
     }
-  }, [jurisdictionCountry, wizardConfig.periodStart, wizardConfig.periodEnd, calculationMode, addToast]);
+  }, [jurisdictionCountry, wizardConfig.periodStart, wizardConfig.periodEnd, wizardConfig.payDate, calculationMode, addToast]);
 
   const loadReadiness = useCallback(async (empIds) => {
     if (!wizardConfig.periodStart || !wizardConfig.periodEnd || !empIds?.length) return;

@@ -32,3 +32,7 @@ docs/privacy/evidence_pack/attestations/
 backend/.privacy_attestation_junit.xml
 # Per-run privacy test evidence (CI uploads it as the privacy-evidence artifact)
 backend/tests/privacy/evidence/
+
+# Mexico Phase 1: stale CDMX Fiscal Code (2022 text, ISN 3%) served by the spec S22 URL.
+# Kept locally as evidence (SOURCES_MANIFEST.csv row WRONG_VERSION); never committed (49 MB).
+docs/mexico/sources/S22_CDMX_Codigo_Fiscal_2026.pdf

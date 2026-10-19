@@ -7,7 +7,18 @@ State-overlay template: **Australia state payroll tax accordion** (each state = 
 
 Line numbers below are from commit 6a8f989; current ones are in `docs/mexico/MEXICO_PHASE_0_GAP_ASSESSMENT.md`, which wins on any conflict.
 
-**Revision v1.1 (after Phase 0 and the Phase 1 review).** Changes are marked *[v1.1]*. Five points that the Phase 0 gap assessment had already established are restored and marked *[v1.1 carry-over from Phase 0]*. Status: Phase 0 complete and staged; Phase 1 approved, blocked on source downloads.
+**Revision v1.1 (after Phase 0 and the Phase 1 review).** Changes are marked *[v1.1]*. Five points that the Phase 0 gap assessment had already established are restored and marked *[v1.1 carry-over from Phase 0]*. Status: Phase 0 committed (c09f7e8); Phase 1 approved, value-free tooling built, transcription blocked on source downloads.
+
+**Production rule (2026-10-16).** Merging to main deploys to production and runs Alembic migrations. Every phase PR must keep Mexico dormant and fail-closed, and every migration must be additive and guarded. Phases 0–3 are in production (PR #97–#101; migrations `5d2c8f1a7b3e` and `6e4a1d9c3f27`) — see `PRODUCTION_STATE.md`. Each phase plan must include a section on what its migration and routes do in production when merged.
+
+**Prerequisites for turning Mexico on (beside G1–G8).** `MX_TENANT_ONBOARDING_ENABLED` (Phase 4a, default False) must not be turned on in **any environment other than development/test** until **all** of these are met:
+
+| Prerequisite | Decided / evidenced by |
+|---|---|
+| G1–G8 (spec §22) signed | Phase 10 gate evidence |
+| **Q9 — MX identifiers (RFC, CURP, NSS, CLABE) are plaintext at rest in `compliance_fields`**, the same platform-wide gap as HK owner decision **D-4** (encryption at rest; HK G5 assessment, fact F2 unverified): Q9-a MX application-level encryption, or Q9-b accepted risk tied to D-4 | **Security lead** (with privacy counsel for the 2025 privacy law) — recorded decision |
+| `MX_IDENTITY_TOKEN_KEY` provisioned in GCP Secret Manager (Q7: never the derived fallback outside dev/test) | deploy owner |
+| GCP Secret Manager live for per-employer CSD/PAC credentials (before Phase 7) | infrastructure |
 
 ---
 
@@ -25,7 +36,7 @@ Line numbers below are from commit 6a8f989; current ones are in `docs/mexico/MEX
 | Pack lifecycle / activation | Draft → In Review → QA → Approved → Active → Deprecated → Retired; `PackHotfixActivation`; `TaxConfigurationAudit`; four-eyes opt-in lists in `service.py` (~L8511–8530); golden PASS required (~L8674/8718) | Add MX to all opt-in lists (same as NL/SA) |
 | Report templates | `ReportTemplate` (+Component, +ComponentField), lifecycle Draft → Review → Approved → Published → Active → Superseded; `scripts/seed_statutory_report_templates.py` | MX templates seeded Draft |
 | Filing calendar | `StatutoryFilingCalendar`, seeded via `service.upsert_filing_calendar_entry` in `scripts/seed_statutory_report_templates.py` *[v1.1 carry-over from Phase 0]* (`seed_statutory_filings.py` seeds per-organisation filing instances, not the calendar) | ISR 17th, IMSS/INFONAVIT, ISN, aguinaldo, PTU, risk premium |
-| Evidence | `SourceArtifact` | S1–S27 (S24–S27 pending spec-owner approval) |
+| Evidence | `SourceArtifact` | S1–S30 (S24–S30 pending spec-owner approval) |
 | Golden tests | `TestCertificationRun`, `tests/fixtures/<cc>_golden`, `_GOLDEN_FIXTURES_DIR_BY_COUNTRY` (service.py ~L19268) | `mx_golden` |
 | Jurisdiction hooks | `jurisdiction_hooks.py` `_MODULES` (HK, SA, NL) | `"MX": "app.modules.payroll.mexico_service"` |
 | Employee statutory data | `EmployeeStatutoryProfile` with prefixed columns (`hk_*`, `sa_*`, `nl_*`), identity tokens not raw IDs | `mx_*` columns |
@@ -127,7 +138,7 @@ Data placement (no new tables)
 
 ## 5. Phase 2 — Super Admin: compliance configuration, version activation, report templates
 
-Version activation: reuse the existing pack lifecycle. *[v1.1] Replace the Phase 0 unconditional activation refusal with the gate-based check (four-eyes + golden PASS + evidence), same as NL.* Modify `service.py` opt-in lists (~L8511–8530) to add MX to `_APPROVER_NOT_ACTIVATOR_COUNTRIES`, `_SELF_APPROVAL_REFUSED_COUNTRIES`, `_REFUSAL_AUDIT_COUNTRIES`, `_PACK_TRANSITION_GRAPH_COUNTRIES`, the evidence/golden-PASS gates (~L8674, ~L8718), and `_GOLDEN_FIXTURES_DIR_BY_COUNTRY` (`"MX": "mx_golden"`). Hotfix activation and audit work unchanged.
+Version activation: reuse the existing pack lifecycle. *[v1.1] Replace the Phase 0 unconditional activation refusal with the gate-based check (four-eyes + golden PASS + evidence), same as NL.* *[v1.1 Phase 2 Q2]* The Mexico gates are: (1) content present and EXACT against mexico_content (every expected row, 11 ISR brackets per period, no extras); (2) every row linked to a hashed source; (3) G1 human review of every cited source by a Super Admin who is not the activator; (4) a pack-bound golden PASS. A [PENDING G2] parameter is a WARNING, never a block — G2 needs parallel-run output and go-live is already gated by the registry's G1–G8; the engine blocks only the affected ZLFN employees (decision 4). Modify `service.py` opt-in lists (~L8511–8530) to add MX to `_APPROVER_NOT_ACTIVATOR_COUNTRIES`, `_SELF_APPROVAL_REFUSED_COUNTRIES`, `_REFUSAL_AUDIT_COUNTRIES`, `_PACK_TRANSITION_GRAPH_COUNTRIES`, the evidence/golden-PASS gates (~L8674, ~L8718), and `_GOLDEN_FIXTURES_DIR_BY_COUNTRY` (`"MX": "mx_golden"`). Hotfix activation and audit work unchanged.
 
 Report templates: modify `scripts/seed_statutory_report_templates.py` with MX templates (all Draft):
 
@@ -153,13 +164,14 @@ Report templates: modify `scripts/seed_statutory_report_templates.py` with MX te
 | MX-JOURNAL | JOURNAL | AGGREGATE |
 
 Backend (create/modify)
-- `mexico_router.py` endpoints: `GET /organizations`, `GET /employees`, `GET/POST /employer-profile`, `GET /employer-profile/readiness`, `GET /isr-tariffs`, `GET /uma-min-wage`, `GET /imss-branches`, `GET /ceav-schedule`, `GET/POST /earning-classifications`, `GET/POST /cfdi-catalogs`, `PUT /cfdi-catalogs/{id}/{action}`, `GET /isn-states`, `GET /readiness`.
+- `mexico_router.py` endpoints: `GET /organizations`, `GET /employees`, `GET /packs`, `GET /packs/{id}/activation-readiness`, `GET /isr-tariffs`, `GET /uma-min-wage`, `GET /imss-branches`, `GET /ceav-schedule`, `GET /infonavit`, `GET /benefits-workweek`, `GET/POST /earning-classifications`, `POST /earning-classifications/{id}/approve`, `POST /earning-classifications/{id}/archive`, `GET/POST /cfdi-catalogs`, `GET/POST /cfdi-catalogs/{id}/entries`, `PUT /cfdi-catalogs/{id}/{action}`, `GET /isn-states`, `GET /readiness`. Content reads take an explicit `on` date; omitted, the pack's effective_from is used — never today. *[v1.1 Phase 2 Q5]*
+- *[v1.1 Phase 2 Q1]* `GET/POST /employer-profile`, `GET /employer-profile/readiness` and the Employer tab move to **Phase 3**, with their table (`payroll_mx_employer_profiles`, `mx_employer_m2`).
 - `mexico_service.py` — Super Admin reads/writes delegating to the shared pack/rate CRUD (no parallel editor).
 
 Frontend (create)
 - `pages/JurisdictionCompliance/MXCompliancePage.jsx`, `pages/JurisdictionStatutory/MXStatutoryPage.jsx`, `pages/ReportTemplates/MXReportTemplatesPage.jsx`
-- `config/jurisdictions/mexicoComplianceConfig.jsx` — extra tabs: Employer, ISR tariffs, Subsidy & UMA, Minimum wages, IMSS & CEAV, INFONAVIT, CFDI catalogs, Benefits & workweek, Earning classification, State ISN, Sources (SourceEvidencePanel), Tests (TestCertificationPanel), Readiness G1–G8
-- `components/jurisdiction/mexico/`: `MXEmployerProfileTab`, `MXIsrTariffsTab`, `MXSubsidyUmaTab`, `MXMinimumWageTab`, `MXImssCeavTab`, `MXInfonavitTab`, `MXCfdiCatalogTab`, `MXBenefitsWorkweekTab`, `MXEarningClassificationTab`, `MXReadinessGatesTab`, `mxShared.jsx`
+- `config/jurisdictions/mexicoComplianceConfig.jsx` — extra tabs (*Employer moved to Phase 3*): ISR tariffs, Subsidy & UMA, Minimum wages, IMSS & CEAV, INFONAVIT, CFDI catalogs, Benefits & workweek, Earning classification, State ISN, Sources (SourceEvidencePanel), Tests (TestCertificationPanel), Readiness G1–G8
+- `components/jurisdiction/mexico/` (*`MXEmployerProfileTab` moved to Phase 3*): `MXIsrTariffsTab`, `MXSubsidyUmaTab`, `MXMinimumWageTab`, `MXImssCeavTab`, `MXInfonavitTab`, `MXCfdiCatalogTab`, `MXBenefitsWorkweekTab`, `MXEarningClassificationTab`, `MXReadinessGatesTab`, `mxShared.jsx`
 - `components/jurisdiction/mexico/state/` (clone of AU state accordion): `MXStateAccordionWorkspace`, `MXStateAccordionRow`, `MXStateIsnTab`, `mxStateCodes.js`
 
 Frontend (modify)
@@ -173,7 +185,7 @@ DB (new, migration `mx_foundation_m1`)
 
 | Table | Columns |
 |---|---|
-| `payroll_mx_earning_classifications` | id, organization_id (null=canonical), earning_code, label, version, effective_from, effective_to, isr_treatment (TAXABLE/EXEMPT/PARTIAL), isr_exempt_rule_key, sbc_treatment (FIXED/VARIABLE/EXCLUDED), sbc_exclusion_condition, infonavit_included, isn_default_included, isn_state_overrides (JSON), ptu_wage_base_included, cfdi_node_type (PERCEPCION/DEDUCCION/OTRO_PAGO/SEPARACION), cfdi_concept_code, status, source_document_id, approved_by_id, created_by_id, created_at, updated_at |
+| `payroll_mx_earning_classifications` *(as built: + approved_at, sha256; status DRAFT → ACTIVE → SUPERSEDED/ARCHIVED; two partial unique indexes on (code, effective_from) for canonical rows and (org, code, effective_from) for org rows)* | id, organization_id (null=canonical), earning_code, label, version, effective_from, effective_to, isr_treatment (TAXABLE/EXEMPT/PARTIAL), isr_exempt_rule_key, sbc_treatment (FIXED/VARIABLE/EXCLUDED), sbc_exclusion_condition, infonavit_included, isn_default_included, isn_state_overrides (JSON), ptu_wage_base_included, cfdi_node_type (PERCEPCION/DEDUCCION/OTRO_PAGO/SEPARACION), cfdi_concept_code, status, source_document_id, approved_by_id, created_by_id, created_at, updated_at |
 | `payroll_mx_cfdi_schema_releases` | id, cfdi_version, complement_version, revision, xsd_checksum, catalog_release, pac_validation_version, source_document_id, status, approved_by_id, created_by_id, created_at, updated_at |
 | `payroll_mx_cfdi_catalog_entries` | id, schema_release_id, catalog_name, code, description, valid_from, valid_to, attributes (JSON) |
 
@@ -197,6 +209,15 @@ DB (migration `mx_employer_m2`)
 Frontend: `MXEmployerProfileTab` gains panels A–H; new `MXRegistrationsTab` (IMSS + risk premium), `MXIsnRegistrationsPanel`, `MXLaborPolicyPanel`, `useMexicoOrgData.js`. `pages/PolicyModule/MXPolicyPage.jsx` + `PolicyModule/index.js`.
 
 ---
+
+
+**[As built — Phase 3, commit 45d822a, merged to main by PR #101; plan `MEXICO_PHASE_3_PLAN.md` §19, report `MEXICO_PHASE_3_IMPLEMENTATION_REPORT.md`]**
+- Backend: **`mexico_employer_service.py`** (all employer logic — kept out of `mexico_service.py`, the jurisdiction-hook module) and **`mexico_org_router.py`** (`/api/payroll/mexico`, mounted in `router.py` with one `include_router`, NL pattern — not the France-style readiness endpoint in `router.py`). Super Admin employer routes in `mexico_router.py` are read-only and masked.
+- Migration **`6e4a1d9c3f27_mx_employer_m2`** (as planned name `mx_employer_m2`): the six planned tables plus **`payroll_mx_credential_refs`**; partial unique indexes on every open/ACTIVE row.
+- Secrets: `gcp-sm://` references + public certificate metadata only (`MX_SECRET_REF_SCHEMES`), expiry warning `MX_CREDENTIAL_EXPIRY_WARNING_DAYS = 30`; `.cer` ≤16 KB, DER/PEM, in memory.
+- Frontend: Payroll → Compliances → **Mexico Compliance Centre** (the repo's equivalent of the spec's Settings → Countries → Mexico); Super Admin **Employer** tab (read-only). `MXPolicyPage.jsx` not built (Phase 6).
+- Column changes against the table above: profiles are versioned (`version`, `previous_version_id`, `effective_from/to`, `taxpayer_type`); `csd_*` / `pac_credential_secret_ref` moved to `payroll_mx_credential_refs`; `infonavit_operating_model` moved to the IMSS registration; `readiness_status` / `readiness_evidence` dropped (computed on read); establishments derive `min_wage_zone` (not stored); risk premiums use `evidence_document_id` → `payroll_compliance_documents`; labour policies gain `employer_profile_id`, `version`, `sunday_premium_pct`, `time_record_dependency`, `status`.
+- **Seven deviations** (report §10): (1) service in `mexico_employer_service.py`; (2) ISN registration stores OPEN/CLOSED, PENDING_PACK/ACTIVE computed from the pack on read; (3) IMSS registration status ACTIVE/CLOSED, no DRAFT; (4) credential uniqueness via two partial indexes instead of one expression index; (5) floor check reports dates past the Active content horizon as `notYetCheckable`; (6) Super Admin org picker also lists orgs with an MX employer or MX company jurisdiction; (7) `MXPolicyPage.jsx` deferred to Phase 6 (OOS-6 logged: the shared Policy dispatcher falls back to India's page).
 
 ## 7. Phase 4 — Employee statutory profile (§12)
 
@@ -262,6 +283,8 @@ Frontend: `MXCfdiLifecycleTab.jsx` (Super Admin), `MXCfdiStagePanel.jsx`, `MXCfd
 
 ---
 
+**Reset rule (Phase 6, approved 2026-10-17):** a Mexico run reset deletes its ledger rows only while no downstream lifecycle has acted. Phase 7 must register in `mexico_service.run_downstream_actions` that any STAMPED CFDI of the run refuses reset (`MX_RESET_DOWNSTREAM_ACTED`), with a test.
+
 ## 11. Phase 8 — Authorities: IMSS / SUA / SIPARE / IDSE, INFONAVIT, ISR remittance, state ISN
 
 Backend (create): `mexico_imss_service.py` (movements alta/baja/modificación from committed events, 5-business-day due dates, IDSE export, SUA export + reconciliation, SIPARE, annual risk premium), `mexico_filing_service.py` (ISR monthly remittance by the 17th, ISN returns per state, INFONAVIT reconciliation), `mexico_payment_service.py` (authority liabilities). Reuse `StatutoryFiling` for generic filing status where it fits.
@@ -281,6 +304,8 @@ DB (migration `mx_authorities_m6`)
 Frontend: `MXSocialSecurityCenterTab.jsx` (cards: registration, movements, SUA, SIPARE, work-risk, differences), `MXIsrRemittanceTab.jsx`, `MXIsnReturnsTab.jsx`, `MXInfonavitReconTab.jsx`.
 
 ---
+
+**Reset rule (Phase 6, approved 2026-10-17):** Phase 8 must register in `mexico_service.run_downstream_actions` that any authority filing / liability (IMSS, SUA, SIPARE, INFONAVIT, ISR remittance, state ISN) including the run that is submitted or paid refuses reset, with a test.
 
 ## 12. Phase 9 — Annual and event modules
 
@@ -308,6 +333,8 @@ Tests: T2, T5, T7, T8; F6.
 
 ---
 
+**Reset rule (Phase 6, approved 2026-10-17):** Phase 10 must register in `mexico_service.run_downstream_actions` that any RELEASED bank instruction for the run refuses reset, with a test.
+
 ## 14. Decisions log
 
 | Decision | Outcome |
@@ -319,6 +346,9 @@ Tests: T2, T5, T7, T8; F6.
 | CEAV other years | Content only; 2026 seeded (decided) |
 | CEAV lowest band for ZLFN | Content parameter [PENDING G2], resolved by SUA reconciliation |
 | Sources S24–S27 | Added, pending spec-owner approval |
+| Source S29 — RACERF (work-risk premium validity window / determination) | Added in Phase 3 (Q3), pending spec-owner approval; not yet saved. Premium approval refused until the window (S10/S14/S29) and the LSS Art. 74 range (S10) are transcribed |
+| Source S30 — SAT CFDI 4.0 catalog workbook (catCFDI: `c_RegimenFiscal`, `c_CodigoPostal`) | Added in the Phase 3 follow-up, pending spec-owner approval; not yet saved. Employer catalog checks BLOCKED until loaded into an Active CFDI release (Phase 7) |
+| Secret store for MX credentials | GCP Secret Manager (`gcp-sm://` only, Phase 3 Q9); must be live in production before Phase 7 (infrastructure lead time) |
 | Git workflow | Claude Code stages, you commit; work on `nikhil` |
 | Large source PDFs in git vs evidence storage | **Open** (follow the `docs/hk-evidence/` precedent) |
 | First ISN states beyond CDMX | **Open**, needed by Phase 2 |
@@ -326,5 +356,6 @@ Tests: T2, T5, T7, T8; F6.
 | IDSE/SUA/SIPARE: file export only at launch, or integrated | **Open**, needed by Phase 8 |
 | SPEI bank file formats | **Open**, needed by Phase 10 |
 | Hosting / cross-border transfer stance (2025 privacy law) | **Open**, needed by Phase 10 |
+| CFDI XML retention (period, who may delete, legal hold) — stored via `app/core/object_storage` from Phase 7; nothing deletes a stored CFDI until decided | **Open**, legal / Phase 10 retention policy |
 
 Out-of-scope defects found during Mexico work are tracked in `docs/mexico/OUT_OF_SCOPE_DEFECTS.md` (NL simple-mode error handler, NL fallback entries, missing `nl_golden`, HK matrix CSV).

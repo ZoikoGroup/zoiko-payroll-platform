@@ -357,3 +357,23 @@ for _m, _p in (
 ):
     OVERRIDES[(_m, _p)] = Override(data_class="support", principals=frozenset(),
                                    retired_reason=R_ASSISTED, note="legacy assisted access retired")
+
+
+# ── Mexico / Brazil Super Admin routes (merged from main, 2026-10-19) ───────
+# Employee lists and records are worker data: the organization sees its own,
+# Zoiko staff only through an approved Support Access grant.
+_MX = "/api/super-admin/compliance/mexico"
+_BR = "/api/super-admin/compliance/brazil"
+_retire("GET", f"{_MX}/employees", R_JIT, "lists Mexican employees (names, codes) of one organization")
+_retire("GET", f"{_MX}/employees/{{employee_id}}", R_JIT, "one Mexican employee's record and readiness")
+_retire("GET", f"{_BR}/employees", R_JIT, "lists Brazilian employees (names, codes) of one organization")
+# Registry and counts only - no identity, pay or per-person row.
+_set("GET", f"{_MX}/organizations", data_class="aggregate",
+     note="reviewed: organization id + name of tenants with Mexico payroll (registry metadata)")
+_set("GET", f"{_BR}/organizations", data_class="aggregate",
+     note="reviewed: organization id + name of tenants with Brazil payroll (registry metadata)")
+_set("GET", f"{_MX}/cfdi", data_class="aggregate",
+     note="reviewed: CFDI counts by status + schema release; UNKNOWN documents reduced to a count")
+_set("GET", f"{_MX}/authorities", data_class="aggregate",
+     note="reviewed: IMSS / SUA / ISN counts by status and platform blocks; no movement rows")
+

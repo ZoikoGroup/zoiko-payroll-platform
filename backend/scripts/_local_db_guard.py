@@ -115,6 +115,44 @@ def is_local_database(url: str | None = None) -> bool:
     return host in _LOOPBACK_HOSTS
 
 
+_MIGRATION_OVERRIDE_ENV = "ZOIKO_ALLOW_REMOTE_MIGRATIONS"
+_MIGRATION_WRITE_COMMANDS = {"upgrade", "downgrade", "stamp"}
+
+
+def assert_migration_target_allowed(command_name: str | None, url: str) -> None:
+    """Guard for alembic/env.py (called before any connection is opened).
+
+    A migration that WRITES (upgrade / downgrade / stamp) may only target a
+    local database unless ZOIKO_ALLOW_REMOTE_MIGRATIONS=I_UNDERSTAND is set —
+    scripts/deploy_migrate.sh sets it; a developer laptop does not. Read-only
+    commands (current, heads, history, check, ...) are never blocked. An
+    unknown command (Alembic driven programmatically) is treated as a write:
+    the guard fails closed.
+
+    Why: local development resolves to the shared remote database, and on
+    2026-10-14 a migration run from a laptop moved production's
+    alembic_version to a head whose tables were never created, which failed
+    the next production deploy."""
+    if command_name is not None and command_name not in _MIGRATION_WRITE_COMMANDS:
+        return
+    if is_local_database(url):
+        return
+    if (os.environ.get(_MIGRATION_OVERRIDE_ENV) or "").strip() == _OVERRIDE_VALUE:
+        print(f"[alembic] {_MIGRATION_OVERRIDE_ENV} is set - running '{command_name}' against a NON-LOCAL "
+              f"database: {_redact(url)}", file=sys.stderr)
+        return
+    print(
+        f"\n[alembic] REFUSING '{command_name or 'migration'}' - the target database is not local:\n"
+        f"  {_redact(url) or '<not configured>'}\n\n"
+        "  Schema changes reach shared databases only through the deploy pipeline\n"
+        "  (scripts/deploy_migrate.sh). To migrate a local database, point\n"
+        "  PAYROLL_DATABASE_URL at localhost or SQLite. If you truly mean to migrate\n"
+        f"  this remote database by hand, set {_MIGRATION_OVERRIDE_ENV}={_OVERRIDE_VALUE}.\n",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+
 def assert_local_database(script_name: str) -> None:
     """Refuse to continue unless the configured database is local/isolated.
 

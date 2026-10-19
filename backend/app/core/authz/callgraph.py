@@ -83,12 +83,15 @@ def worker_model_names(base) -> Dict[str, str]:
 
 
 class _FnInfo:
-    __slots__ = ("module", "qualname", "calls", "names", "strings")
+    __slots__ = ("module", "qualname", "calls", "bare_calls", "attr_calls", "recv_calls", "names", "strings")
 
     def __init__(self, module: str, qualname: str):
         self.module = module
         self.qualname = qualname
         self.calls: Set[str] = set()
+        self.bare_calls: Set[str] = set()   # foo(...)  - Python's normal name lookup
+        self.attr_calls: Set[str] = set()   # x.foo(...) - any module's foo
+        self.recv_calls: Set[Tuple[str, str]] = set()  # (x, foo) when x is a plain name
         self.names: Set[str] = set()
         self.strings: Set[str] = set()
 
@@ -104,14 +107,43 @@ def _collect(fn_node, info: _FnInfo) -> None:
             f = node.func
             if isinstance(f, ast.Name):
                 info.calls.add(f.id)
+                info.bare_calls.add(f.id)
             elif isinstance(f, ast.Attribute):
                 info.calls.add(f.attr)
+                if isinstance(f.value, ast.Name):
+                    info.recv_calls.add((f.value.id, f.attr))
+                else:
+                    info.attr_calls.add(f.attr)
         elif isinstance(node, ast.Name):
             info.names.add(node.id)
         elif isinstance(node, ast.Attribute):
             info.names.add(node.attr)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) < 80:
             info.strings.add(node.value)
+
+
+def _module_aliases(tree, module: str) -> Dict[str, str]:
+    """name -> dotted module path for every `import a.b as x` /
+    `from a import b [as x]` in the file (including imports inside functions,
+    which this codebase uses for lazy loading). Non-module imports are kept
+    too; resolution only trusts an alias that names a module in the index."""
+    out: Dict[str, str] = {}
+    package = module.rsplit(".", 1)[0]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                out[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                parts = package.split(".")
+                base = ".".join(parts[: len(parts) - node.level + 1] + ([base] if base else []))
+            for a in node.names:
+                out[a.asname or a.name] = f"{base}.{a.name}" if base else a.name
+    return out
+
+
+_ALIASES: Dict[str, Dict[str, str]] = {}
 
 
 @lru_cache(maxsize=1)
@@ -126,6 +158,7 @@ def _index() -> Tuple[Dict[str, List[_FnInfo]], Dict[Tuple[str, str], _FnInfo]]:
         except (SyntaxError, UnicodeDecodeError):
             continue
         module = _module_name(path)
+        _ALIASES[module] = _module_aliases(tree, module)
 
         def visit(body, prefix=""):
             for node in body:
@@ -143,6 +176,44 @@ def _index() -> Tuple[Dict[str, List[_FnInfo]], Dict[Tuple[str, str], _FnInfo]]:
     return by_name, by_qual
 
 
+def _call_targets(info: _FnInfo, by_name, by_qual) -> List[_FnInfo]:
+    """Functions a call may reach. Precise where Python's own lookup is
+    unambiguous, otherwise every same-named function (conservative):
+
+    * foo(...)    -> the caller module's own foo if it defines one;
+    * mod.foo(...) where `mod` is an imported module -> that module's foo;
+    * anything else (obj.foo(...), chained calls) -> every function named foo.
+    """
+    aliases = _ALIASES.get(info.module, {})
+    known_modules = {m for m, _ in by_qual}
+    out: List[_FnInfo] = []
+    for call in info.bare_calls:
+        if call in _UNRESOLVED_CALLS:
+            continue
+        targets = by_name.get(call, ())
+        local = [t for t in targets if t.module == info.module]
+        imported = aliases.get(call)
+        if local:
+            targets = local
+        elif imported and "." in imported:
+            mod, _, fn = imported.rpartition(".")
+            if (mod, fn) in by_qual:
+                targets = [by_qual[(mod, fn)]]
+        out.extend(targets)
+    for recv, call in info.recv_calls:
+        if call in _UNRESOLVED_CALLS:
+            continue
+        mod = aliases.get(recv)
+        if mod in known_modules and (mod, call) in by_qual:
+            out.append(by_qual[(mod, call)])
+        else:
+            out.extend(by_name.get(call, ()))
+    for call in info.attr_calls:
+        if call not in _UNRESOLVED_CALLS:
+            out.extend(by_name.get(call, ()))
+    return out
+
+
 def reachable_functions(module: str, qualname: str, max_depth: int = MAX_DEPTH) -> List[_FnInfo]:
     by_name, by_qual = _index()
     start = by_qual.get((module, qualname))
@@ -155,10 +226,7 @@ def reachable_functions(module: str, qualname: str, max_depth: int = MAX_DEPTH) 
         info, depth = queue.popleft()
         if depth >= max_depth:
             continue
-        for call in info.calls:
-            if call in _UNRESOLVED_CALLS:
-                continue
-            for target in by_name.get(call, ()):
+        for target in _call_targets(info, by_name, by_qual):
                 if id(target) in seen:
                     continue
                 seen.add(id(target))

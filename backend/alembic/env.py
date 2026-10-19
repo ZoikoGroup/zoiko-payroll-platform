@@ -51,7 +51,19 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _command_name():
+    """The alembic CLI command being run (upgrade, current, ...), or None when
+    Alembic is driven programmatically."""
+    cmd = getattr(getattr(config, "cmd_opts", None), "cmd", None)
+    return getattr(cmd[0], "__name__", None) if cmd else None
+
+
 def run_migrations_online() -> None:
+    # Refuse a schema WRITE against a non-local database before connecting,
+    # unless the deploy pipeline set the override (see scripts/_local_db_guard.py).
+    from scripts._local_db_guard import assert_migration_target_allowed
+
+    assert_migration_target_allowed(_command_name(), str(engine.url))
     with engine.connect() as connection:
         if connection.dialect.name == "postgresql":
             # ZP-PRIV C.2: row-level security policies hide every row from a

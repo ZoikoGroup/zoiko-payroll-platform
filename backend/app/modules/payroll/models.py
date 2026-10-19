@@ -1150,6 +1150,37 @@ class EmployeeStatutoryProfile(Base):
     nl_contract_hours_per_week    = Column(Numeric(5, 2), nullable=True)
     nl_personnel_number           = Column(String(50), nullable=True)
 
+    # ── Mexico (ZP-MX-ENG-001 §12, Phase 4b, migration mx_employee_m3) ────
+    # All nullable, no default. Raw RFC/CURP/NSS live in the employee's
+    # compliance_fields (masked in every response); this table holds only
+    # keyed tokens + last-4. Minimum-wage zone and subsidy / annual-adjustment
+    # eligibility are DERIVED (never stored). Validated by
+    # mexico_employee_service through the statutory_profile_* hooks.
+    mx_rfc_token                  = Column(String(80), nullable=True)
+    mx_rfc_last4                  = Column(String(4), nullable=True)
+    mx_curp_token                 = Column(String(80), nullable=True)
+    mx_nss_token                  = Column(String(80), nullable=True)
+    mx_identifier_validation_status = Column(String(16), nullable=True)   # FORMAT_ONLY / VALID / MISMATCH
+    mx_identifier_findings        = Column(JSON, nullable=True)
+    mx_fiscal_postal_code         = Column(String(5), nullable=True)
+    mx_receiver_fiscal_regime     = Column(String(10), nullable=True)
+    mx_establishment_id           = Column(Integer, ForeignKey("payroll_mx_establishments.id", ondelete="SET NULL"), nullable=True)
+    mx_imss_registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="SET NULL"), nullable=True)
+    mx_work_state                 = Column(String(5), nullable=True)      # MX-038: the employee's own statutory attribute
+    mx_work_municipality          = Column(String(200), nullable=True)
+    mx_remote_state_exception_ref = Column(String(200), nullable=True)
+    mx_seniority_date             = Column(Date, nullable=True)
+    mx_contract_type_code         = Column(String(10), nullable=True)
+    mx_regime_type_code           = Column(String(10), nullable=True)
+    mx_workday_type_code          = Column(String(10), nullable=True)
+    mx_job_risk_code              = Column(String(10), nullable=True)
+    mx_professional_min_code      = Column(String(20), nullable=True)
+    mx_pay_frequency_code         = Column(String(10), nullable=True)
+    mx_daily_salary               = Column(Numeric(14, 2), nullable=True)
+    mx_salary_type                = Column(String(10), nullable=True)      # FIXED / VARIABLE / MIXED
+    mx_annual_adjustment_exclusion = Column(String(40), nullable=True)     # the employee's DECLARED exclusion code
+    mx_annual_adjustment_exclusion_evidence_ref = Column(String(200), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1469,6 +1500,14 @@ class PayrollRun(Base):
     # Netherlands (ZP-NL-ENG-001 NL-034): {fingerprint, approvedBy, approvedAt} —
     # binds approval to inputs + rule pack + premium decisions + VCR snapshot.
     nl_approval_fingerprint = Column(JSON, nullable=True)
+    # Mexico (ZP-MX-ENG-001 MX-040): {fingerprint, approvedBy, approvedAt,
+    # committedAt, items:[...]} — binds approval to every content row, input
+    # and classification; NULL for non-MX runs.
+    mx_approval_fingerprint = Column(JSON, nullable=True)
+    # Mexico run type: ORDINARY / AGUINALDO / PTU / FINIQUITO / CORRECTION
+    # (only ORDINARY in Phase 6). NULL = ORDINARY; no default, no CHECK
+    # (metadata-only ALTER on a live table) — values enforced in code.
+    mx_run_type = Column(String(16), nullable=True)
 
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -1903,6 +1942,13 @@ class PayslipItem(Base):
     # Netherlands (ZP-NL-ENG-001): frozen NL inputs + nl_result, replayed by
     # corrections exactly as computed (never reconstructed). NULL for non-NL.
     nl_calculation_snapshot = Column(JSON, nullable=True)
+    # Brazil (ZP-BR-ENG-001): frozen BR inputs + br_result (content hash,
+    # trace), replayed exactly as computed. Written from Phase 6; NULL for
+    # non-BR payslips.
+    br_calculation_snapshot = Column(JSON, nullable=True)
+    # Mexico (ZP-MX-ENG-001): mx_result + input / content hashes, frozen at
+    # generation (MX-063 trace). NULL for non-MX payslips.
+    mx_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -1925,6 +1971,20 @@ class PayslipItem(Base):
     # Also excluded from taxable salary under the New Regime only — see
     # india.py's _calculate_annual_tax_in.
     employer_nps            = Column(Numeric(12, 2), default=0, server_default="0")
+
+    # Brazil (CLT - ZP-BR-ENG-001): statutory bases and deductions snapshot
+    br_base_inss                  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_inss_employee              = Column(Numeric(12, 2), default=0, server_default="0")
+    br_base_irrf                  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_irrf                       = Column(Numeric(12, 2), default=0, server_default="0")
+    br_irrf_reduction             = Column(Numeric(12, 2), default=0, server_default="0")
+    br_salario_familia            = Column(Numeric(12, 2), default=0, server_default="0")
+    br_vale_transporte_deduction  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_base_fgts                  = Column(Numeric(12, 2), default=0, server_default="0")
+    br_fgts_deposit               = Column(Numeric(12, 2), default=0, server_default="0")
+    br_cpp_employer               = Column(Numeric(12, 2), default=0, server_default="0")
+    br_rat_adjusted               = Column(Numeric(12, 2), default=0, server_default="0")
+    br_third_parties              = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -9400,3 +9460,1119 @@ def _refuse_nl_ledger_mutation(mapper, connection, target):
 for _nl_ledger in (PayrollNlVcrSnapshot, PayrollNlWkrAccumulator, PayrollNlVacationAllowanceLedger):
     _sa_event.listen(_nl_ledger, "before_update", _refuse_nl_ledger_mutation)
     _sa_event.listen(_nl_ledger, "before_delete", _refuse_nl_ledger_mutation)
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 2 foundation (migration mx_foundation_m1) ──
+
+class PayrollMxEarningClassification(Base):
+    """Per-earning-code classification on independent statutory axes (MX-005):
+    ISR, SBC, INFONAVIT, state ISN, PTU and the CFDI node/concept — never one
+    universal 'taxable' flag. organization_id NULL = platform catalogue; an
+    org row overrides it. Versioned (MX-006): a change is a new row; nothing
+    is live until a second Super Admin approves it (DRAFT -> ACTIVE), and an
+    approved newer version SUPERSEDES the old row, whose window stays
+    queryable for historical results."""
+    __tablename__ = "payroll_mx_earning_classifications"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    earning_code             = Column(String(50), nullable=False, index=True)
+    label                    = Column(String(200), nullable=False)
+    version                  = Column(Integer, nullable=False, default=1)
+    effective_from           = Column(Date, nullable=False, index=True)
+    effective_to             = Column(Date, nullable=True, index=True)
+    isr_treatment            = Column(String(10), nullable=False)        # TAXABLE / EXEMPT / PARTIAL
+    isr_exempt_rule_key      = Column(String(80), nullable=True)         # names the exemption rule; no value here
+    sbc_treatment            = Column(String(10), nullable=False)        # FIXED / VARIABLE / EXCLUDED
+    sbc_exclusion_condition  = Column(String(300), nullable=True)        # MX-022: documentary condition for EXCLUDED
+    infonavit_included       = Column(Boolean, nullable=False)
+    isn_default_included     = Column(Boolean, nullable=False)
+    isn_state_overrides      = Column(JSON, nullable=True)               # {state: bool}
+    ptu_wage_base_included   = Column(Boolean, nullable=False)
+    cfdi_node_type           = Column(String(12), nullable=False)        # PERCEPCION / DEDUCCION / OTRO_PAGO / SEPARACION
+    cfdi_concept_code        = Column(String(10), nullable=True)         # SAT catalog code (S28) — none seeded until VERIFIED
+    status                   = Column(String(12), nullable=False, default="DRAFT")
+    source_document_id       = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    approved_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at              = Column(DateTime(timezone=True), nullable=True)
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sha256                   = Column(String(64), nullable=False)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("isr_treatment IN ('TAXABLE', 'EXEMPT', 'PARTIAL')", name="ck_mx_earn_isr"),
+        sa.CheckConstraint("sbc_treatment IN ('FIXED', 'VARIABLE', 'EXCLUDED')", name="ck_mx_earn_sbc"),
+        sa.CheckConstraint("cfdi_node_type IN ('PERCEPCION', 'DEDUCCION', 'OTRO_PAGO', 'SEPARACION')",
+                           name="ck_mx_earn_cfdi_node"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED', 'ARCHIVED')", name="ck_mx_earn_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_earn_window"),
+        Index("ix_mx_earn_org_code_eff", "organization_id", "earning_code", "effective_from"),
+        # One row per (code, effective_from) in each scope. A plain UNIQUE over a
+        # nullable organization_id would let duplicate canonical rows through
+        # (NULL != NULL), so — as ContributionRate does — two partial indexes,
+        # sqlite_where mirroring postgresql_where.
+        Index("uq_mx_earn_canonical_code_eff", "earning_code", "effective_from", unique=True,
+              postgresql_where=text("organization_id IS NULL"), sqlite_where=text("organization_id IS NULL")),
+        Index("uq_mx_earn_org_code_eff", "organization_id", "earning_code", "effective_from", unique=True,
+              postgresql_where=text("organization_id IS NOT NULL"), sqlite_where=text("organization_id IS NOT NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollMxEarningClassification org={self.organization_id} {self.earning_code} v{self.version} {self.status}>"
+
+
+class PayrollMxCfdiSchemaRelease(Base):
+    """A pinned CFDI 4.0 + Complemento de Nómina 1.2 release (MX-015): XSD
+    checksum, catalog release and PAC validation version are release-
+    controlled. Only one release is ever Active; activation needs the Phase 7
+    PAC validation and is refused before then."""
+    __tablename__ = "payroll_mx_cfdi_schema_releases"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    cfdi_version            = Column(String(10), nullable=False)
+    complement_version      = Column(String(10), nullable=False)
+    revision                = Column(String(40), nullable=True)
+    xsd_checksum            = Column(String(64), nullable=True)
+    catalog_release         = Column(String(40), nullable=True)
+    pac_validation_version  = Column(String(40), nullable=True)
+    source_document_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    status                  = Column(String(12), nullable=False, default="Draft")
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('Draft', 'In Review', 'Approved', 'Active', 'Superseded')",
+                           name="ck_mx_cfdi_release_status"),
+    )
+
+
+class PayrollMxCfdiCatalogEntry(Base):
+    """One SAT catalog code inside a pinned schema release (c_TipoPercepcion,
+    c_TipoDeduccion, c_TipoOtroPago, …). Entries are added only to a Draft
+    release; an approved release's entries are frozen."""
+    __tablename__ = "payroll_mx_cfdi_catalog_entries"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    schema_release_id  = Column(Integer, ForeignKey("payroll_mx_cfdi_schema_releases.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    catalog_name       = Column(String(60), nullable=False)
+    code               = Column(String(20), nullable=False)
+    description        = Column(String(500), nullable=False)
+    valid_from         = Column(Date, nullable=True)
+    valid_to           = Column(Date, nullable=True)
+    attributes         = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("schema_release_id", "catalog_name", "code", "valid_from", name="uq_mx_cfdi_catalog_entry"),
+    )
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 3 employer onboarding (migration mx_employer_m2) ──
+# Spec §11 panels A–H. An organisation (tenant) may hold several legal
+# employers (RFCs), each with establishments, several IMSS registrations and
+# state ISN registrations (MX-002). Secrets are NEVER stored: credential rows
+# hold a gcp-sm:// reference plus public certificate metadata only (MX-035).
+# Partial unique indexes guard open rows where effective_to / status allow
+# NULLs or history, sqlite_where mirroring postgresql_where (ContributionRate).
+
+class PayrollMxEmployerProfile(Base):
+    """One version of a legal employer (panels A and B). A change is a new
+    version from its effective_from; the RFC never changes inside a chain."""
+    __tablename__ = "payroll_mx_employer_profiles"
+
+    id                          = Column(Integer, primary_key=True, index=True)
+    organization_id             = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    version                     = Column(Integer, nullable=False, default=1)
+    previous_version_id         = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="SET NULL"), nullable=True)
+    effective_from              = Column(Date, nullable=False)
+    effective_to                = Column(Date, nullable=True)
+    taxpayer_type               = Column(String(10), nullable=False)          # MORAL / FISICA
+    rfc                         = Column(String(13), nullable=False)
+    legal_name                  = Column(String(300), nullable=False)
+    fiscal_regime_code          = Column(String(10), nullable=False)          # c_RegimenFiscal, checked against an Active catalog
+    fiscal_postal_code          = Column(String(5), nullable=False)
+    fiscal_address              = Column(JSON, nullable=True)
+    place_of_issue_postal_code  = Column(String(5), nullable=False)
+    withholding_obligation_active = Column(Boolean, nullable=False)
+    tax_contact                 = Column(JSON, nullable=True)
+    bank_contact                = Column(JSON, nullable=True)
+    pac_provider                = Column(String(100), nullable=True)
+    pac_environment             = Column(String(12), nullable=True)           # SANDBOX / PRODUCTION
+    stamp_test_status           = Column(String(12), nullable=False, default="NOT_TESTED")   # set only by Phase 7
+    stamp_test_uuid             = Column(String(40), nullable=True)
+    stamp_tested_at             = Column(DateTime(timezone=True), nullable=True)
+    created_by_id               = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                  = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("taxpayer_type IN ('MORAL', 'FISICA')", name="ck_mx_employer_taxpayer"),
+        sa.CheckConstraint("pac_environment IS NULL OR pac_environment IN ('SANDBOX', 'PRODUCTION')",
+                           name="ck_mx_employer_pac_env"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_employer_window"),
+        Index("uq_mx_employer_org_rfc_open", "organization_id", "rfc", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        UniqueConstraint("organization_id", "rfc", "effective_from", name="uq_mx_employer_org_rfc_from"),
+    )
+
+
+class PayrollMxImssRegistration(Base):
+    """One IMSS employer registration (Registro Patronal) — panel C, plus the
+    INFONAVIT operating model of panel D. Contribution parameters such as the
+    work-risk premium are registration-scoped (MX-024)."""
+    __tablename__ = "payroll_mx_imss_registrations"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id      = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    registro_patronal        = Column(String(11), nullable=False)
+    risk_class               = Column(String(10), nullable=False)
+    fraction                 = Column(String(10), nullable=False)
+    subdelegation_code       = Column(String(20), nullable=True)
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)
+    status                   = Column(String(10), nullable=False, default="ACTIVE")    # ACTIVE / CLOSED
+    infonavit_operating_model = Column(String(10), nullable=True)                     # SUA / SIPARE
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('ACTIVE', 'CLOSED')", name="ck_mx_imss_status"),
+        sa.CheckConstraint("infonavit_operating_model IS NULL OR infonavit_operating_model IN ('SUA', 'SIPARE')",
+                           name="ck_mx_imss_infonavit_model"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_imss_window"),
+        Index("uq_mx_imss_org_rp_open", "organization_id", "registro_patronal", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        UniqueConstraint("organization_id", "registro_patronal", "effective_from", name="uq_mx_imss_org_rp_from"),
+    )
+
+
+class PayrollMxEstablishment(Base):
+    """A workplace of a legal employer. The minimum-wage zone is DERIVED from
+    content (MX_ZLFN_MUNICIPALITIES), never typed."""
+    __tablename__ = "payroll_mx_establishments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    name                  = Column(String(200), nullable=False)
+    state_code            = Column(String(5), nullable=False)
+    municipality          = Column(String(200), nullable=False)
+    municipality_code     = Column(String(10), nullable=True)
+    postal_code           = Column(String(5), nullable=False)
+    imss_registration_id  = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_active             = Column(Boolean, nullable=False, default=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_mx_estab_profile_name_active", "employer_profile_id", "name", unique=True,
+              postgresql_where=text("is_active"), sqlite_where=text("is_active = 1")),
+    )
+
+
+class PayrollMxRiskPremium(Base):
+    """An employer's work-risk premium for one premium period of one IMSS
+    registration (MX-024/MX-026). The rate is tenant evidence (the annual
+    determination), approved four-eyes by a second org admin; the period
+    shape and the legal range come from content and block approval while
+    missing."""
+    __tablename__ = "payroll_mx_risk_premiums"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    determination_year    = Column(Integer, nullable=False)
+    premium_rate_pct      = Column(Numeric(9, 5), nullable=False)
+    period_from           = Column(Date, nullable=False)
+    period_to             = Column(Date, nullable=False)
+    evidence_document_id  = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status                = Column(String(12), nullable=False, default="DRAFT")     # DRAFT / ACTIVE / SUPERSEDED
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    approved_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_mx_riskprem_status"),
+        sa.CheckConstraint("period_to >= period_from", name="ck_mx_riskprem_window"),
+        Index("uq_mx_riskprem_reg_period_active", "registration_id", "period_from", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+
+class PayrollMxIsnRegistration(Base):
+    """A state payroll-tax (ISN) registration — panel E. Only states in
+    scope may register; it is effective only while the state's ISN pack is
+    Active, which is computed on read and never stored (MX-045)."""
+    __tablename__ = "payroll_mx_isn_registrations"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    state_code            = Column(String(5), nullable=False)
+    local_account_number  = Column(String(40), nullable=False)
+    jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=False)
+    return_frequency      = Column(String(12), nullable=True)          # from state content only; none transcribed yet
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    status                = Column(String(8), nullable=False, default="OPEN")    # OPEN / CLOSED
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'CLOSED')", name="ck_mx_isn_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_isn_window"),
+        Index("uq_mx_isn_profile_state_open", "employer_profile_id", "state_code", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        UniqueConstraint("employer_profile_id", "state_code", "effective_from", name="uq_mx_isn_profile_state_from"),
+    )
+
+
+class PayrollMxLaborPolicy(Base):
+    """An employer's workweek and benefit policy — panels F and G. Checked
+    against the statutory floors of the Active national pack (MX-051): it
+    may improve on a floor, never go below it; activation needs PASS."""
+    __tablename__ = "payroll_mx_labor_policies"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id     = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    collective_agreement_id = Column(Integer, ForeignKey("payroll_collective_agreements.id", ondelete="SET NULL"), nullable=True)
+    version                 = Column(Integer, nullable=False, default=1)
+    effective_from          = Column(Date, nullable=False)
+    effective_to            = Column(Date, nullable=True)
+    ordinary_weekly_hours   = Column(Numeric(5, 2), nullable=False)
+    weekly_schedule         = Column(JSON, nullable=True)
+    aguinaldo_days          = Column(Numeric(6, 2), nullable=False)
+    vacation_policy         = Column(JSON, nullable=False)          # [{serviceYearFrom, serviceYearTo, days}]
+    vacation_premium_pct    = Column(Numeric(7, 3), nullable=False)
+    sunday_premium_pct      = Column(Numeric(7, 3), nullable=False)
+    savings_fund            = Column(JSON, nullable=True)
+    food_vouchers           = Column(JSON, nullable=True)
+    other_benefits          = Column(JSON, nullable=True)
+    time_record_dependency  = Column(JSON, nullable=True)           # {required: bool, interfaceVersion: str}
+    # Phase 6 D13: salary days for QUINCENAL_15 / MONTHLY periods — CALENDAR
+    # (actual days) or FIXED (15 / 30). An employer / contract convention,
+    # never inferred: NULL BLOCKS a Mexican calculation. IMSS contribution
+    # days are always calendar days, independent of this.
+    salary_days_convention  = Column(String(10), nullable=True)
+    floor_check_status      = Column(String(16), nullable=False, default="BLOCKED_CONTENT")
+    floor_check_detail      = Column(JSON, nullable=True)
+    status                  = Column(String(12), nullable=False, default="DRAFT")    # DRAFT / ACTIVE / SUPERSEDED
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_mx_laborpol_status"),
+        sa.CheckConstraint("floor_check_status IN ('PASS', 'FAIL', 'BLOCKED_CONTENT')", name="ck_mx_laborpol_floor"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_laborpol_window"),
+        Index("uq_mx_laborpol_profile_open", "employer_profile_id", unique=True,
+              postgresql_where=text("effective_to IS NULL AND status = 'ACTIVE'"),
+              sqlite_where=text("effective_to IS NULL AND status = 'ACTIVE'")),
+        UniqueConstraint("employer_profile_id", "effective_from", "version", name="uq_mx_laborpol_profile_from"),
+    )
+
+
+class PayrollMxCredentialRef(Base):
+    """A reference to a secret held in GCP Secret Manager (gcp-sm://) plus
+    public certificate metadata — never the secret itself (MX-035). CSD/PAC
+    belong to the legal employer; IDSE/SUA to an IMSS registration; BANK to
+    either. Rotation keeps history (ACTIVE -> ROTATED)."""
+    __tablename__ = "payroll_mx_credential_refs"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    imss_registration_id  = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="CASCADE"), nullable=True, index=True)
+    kind                  = Column(String(8), nullable=False)          # CSD / PAC / IDSE / SUA / BANK
+    secret_ref            = Column(String(300), nullable=False)
+    certificate_serial    = Column(String(80), nullable=True)
+    fingerprint_sha256    = Column(String(64), nullable=True)
+    subject_summary       = Column(String(500), nullable=True)
+    valid_from            = Column(DateTime(timezone=True), nullable=True)
+    valid_to              = Column(DateTime(timezone=True), nullable=True)
+    status                = Column(String(8), nullable=False, default="ACTIVE")  # ACTIVE / ROTATED / REVOKED
+    rotated_from_id       = Column(Integer, ForeignKey("payroll_mx_credential_refs.id", ondelete="SET NULL"), nullable=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("kind IN ('CSD', 'PAC', 'IDSE', 'SUA', 'BANK')", name="ck_mx_cred_kind"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'ROTATED', 'REVOKED')", name="ck_mx_cred_status"),
+        Index("uq_mx_cred_profile_kind_active", "employer_profile_id", "kind", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND imss_registration_id IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND imss_registration_id IS NULL")),
+        Index("uq_mx_cred_registration_kind_active", "imss_registration_id", "kind", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND imss_registration_id IS NOT NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND imss_registration_id IS NOT NULL")),
+    )
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 4b employee records (migration mx_employee_m3) ──
+
+class PayrollMxInfonavitNotice(Base):
+    """An INFONAVIT credit notice for one employee (spec §10, MX-031/MX-032):
+    the ONLY way a housing-credit deduction can exist. The method and value
+    are copied from the authority's notice, with its evidence document —
+    payroll never invents a rate. Nothing deducts it before Phase 5. One
+    open notice per credit; a modification supersedes, a suspension or end
+    closes."""
+    __tablename__ = "payroll_mx_infonavit_notices"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    credit_number         = Column(String(30), nullable=False)
+    notice_type           = Column(String(12), nullable=False)       # RETENCION / SUSPENSION / MODIFICACION
+    discount_method       = Column(String(12), nullable=True)        # FIXED_AMOUNT / PERCENTAGE / VSM / UMA_FACTOR
+    discount_value        = Column(Numeric(14, 4), nullable=True)
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    authority_reference   = Column(String(100), nullable=False)
+    evidence_document_id  = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status                = Column(String(12), nullable=False, default="RECORDED")   # RECORDED / SUPERSEDED / CLOSED
+    recorded_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("notice_type IN ('RETENCION', 'SUSPENSION', 'MODIFICACION')", name="ck_mx_infonavit_type"),
+        sa.CheckConstraint("discount_method IS NULL OR discount_method IN ('FIXED_AMOUNT', 'PERCENTAGE', 'VSM', 'UMA_FACTOR')",
+                           name="ck_mx_infonavit_method"),
+        sa.CheckConstraint("status IN ('RECORDED', 'SUPERSEDED', 'CLOSED')", name="ck_mx_infonavit_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_mx_infonavit_window"),
+        Index("uq_mx_infonavit_employee_credit_open", "employee_id", "credit_number", unique=True,
+              postgresql_where=text("effective_to IS NULL AND status = 'RECORDED'"),
+              sqlite_where=text("effective_to IS NULL AND status = 'RECORDED'")),
+    )
+
+# ── Mexico (ZP-MX-ENG-001) Phase 6 — payroll run integration ────────────────
+# Written by mexico_run_service: preflight exceptions at generate time; every
+# ledger table ONLY at commit (the APPROVED transition, MX-039), idempotent by
+# its unique key, removed only by a Mexico run reset that no downstream
+# lifecycle has acted on. Ledger FKs are RESTRICT: a committed statutory
+# row is never removed by a cascade.
+
+class PayrollMxPreflightException(Base):
+    """A Mexico run preflight finding (MX-001/MX-036) — BLOCK cannot be
+    acknowledged; WARN can, with a note. Replaced on every regenerate."""
+    __tablename__ = "payroll_mx_preflight_exceptions"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    payroll_run_id       = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id      = Column(Integer, ForeignKey("payslip_items.id", ondelete="CASCADE"), nullable=True, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    code                 = Column(String(60), nullable=False)
+    severity             = Column(String(8), nullable=False)          # BLOCK / WARN
+    message              = Column(Text, nullable=False)
+    acknowledged_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledgement_note = Column(String(500), nullable=True)
+    acknowledged_at      = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("severity IN ('BLOCK', 'WARN')", name="ck_mx_preflight_severity"),
+    )
+
+
+class PayrollMxImssBranchLine(Base):
+    """One IMSS branch / side / contribution segment of a committed Mexican
+    payslip (MX-023): base × days × rate."""
+    __tablename__ = "payroll_mx_imss_branch_lines"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_code       = Column(String(30), nullable=False)
+    side              = Column(String(10), nullable=False)             # employer / employee
+    segment_start     = Column(Date, nullable=False)
+    base_amount       = Column(Numeric(14, 4), nullable=False)
+    contribution_days = Column(Numeric(6, 2), nullable=False)
+    rate_pct          = Column(Numeric(9, 5), nullable=False)
+    amount            = Column(Numeric(14, 4), nullable=False)
+    band              = Column(String(20), nullable=True)               # CEAV employer band label
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("payslip_item_id", "branch_code", "side", "segment_start", name="uq_mx_imss_line"),
+    )
+
+
+class PayrollMxIsnLiability(Base):
+    """State payroll-tax liability of a committed Mexican payslip — a ledger
+    line, not a filing (MX-046; returns are Phase 8)."""
+    __tablename__ = "payroll_mx_isn_liabilities"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    payslip_item_id      = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    state_code           = Column(String(5), nullable=False)
+    base_amount          = Column(Numeric(14, 4), nullable=False)
+    rate_pct             = Column(Numeric(9, 5), nullable=False)
+    amount               = Column(Numeric(14, 4), nullable=False)
+    jurisdiction_pack_id = Column(String(60), nullable=True)
+    period_key           = Column(String(10), nullable=False)          # YYYY-MM of the pay date
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("payslip_item_id", "state_code", name="uq_mx_isn_liability"),
+    )
+
+
+class PayrollMxSbcHistory(Base):
+    """The SBC an employee was contributed on, per committed run (MX-019/037)."""
+    __tablename__ = "payroll_mx_sbc_history"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    effective_from   = Column(Date, nullable=False)
+    sbc_fixed        = Column(Numeric(14, 4), nullable=False)
+    sbc_variable     = Column(Numeric(14, 4), nullable=False)
+    sbc_total        = Column(Numeric(14, 4), nullable=False)
+    factor           = Column(Numeric(14, 10), nullable=False)
+    components       = Column(JSON, nullable=False)
+    source           = Column(String(10), nullable=False, default="RUN")   # RUN / MOVEMENT
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "effective_from", "payroll_run_id", name="uq_mx_sbc_history"),
+    )
+
+
+class PayrollMxVariableAccumulator(Base):
+    """Variable pay committed per employee and IMSS bimester (MX-020). The
+    value a later bimester reads is the sum over committed rows; an OPENING
+    row (payroll_run_id NULL) is the evidenced, four-eyes opening balance for
+    a tenant's first bimester (Phase 6 D4)."""
+    __tablename__ = "payroll_mx_variable_accumulators"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id       = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
+    bimester_key         = Column(String(8), nullable=False)          # YYYY-Bn
+    variable_total       = Column(Numeric(14, 4), nullable=False)
+    days                 = Column(Numeric(6, 2), nullable=False)
+    kind                 = Column(String(8), nullable=False, default="RUN")    # RUN / OPENING
+    evidence_document_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    recorded_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("kind IN ('RUN', 'OPENING')", name="ck_mx_varacc_kind"),
+        UniqueConstraint("employee_id", "bimester_key", "payroll_run_id", name="uq_mx_varacc"),
+    )
+
+
+class PayrollMxBenefitAccrual(Base):
+    """Statutory vs employer benefit entitlement per committed run (MX-051),
+    for Phase 9 (aguinaldo, vacation, vacation premium)."""
+    __tablename__ = "payroll_mx_benefit_accruals"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    concept          = Column(String(20), nullable=False)              # AGUINALDO / VACATION / VACATION_PREMIUM
+    period_key       = Column(String(10), nullable=False)
+    statutory_amount = Column(Numeric(14, 4), nullable=False)
+    employer_amount  = Column(Numeric(14, 4), nullable=False)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "concept", "period_key", "payroll_run_id", name="uq_mx_benefit_accrual"),
+    )
+
+
+class PayrollMxApprovedHours(Base):
+    """Approved weekly hours of one employee (MX-049, Phase 6 D1) — the only
+    source of overtime / Sunday premium / rest-day work. Four-eyes: the
+    approver is never the recorder; evidence is required."""
+    __tablename__ = "payroll_mx_approved_hours"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    week_start           = Column(Date, nullable=False)
+    ordinary_hours       = Column(Numeric(6, 2), nullable=False)
+    overtime_hours       = Column(Numeric(6, 2), nullable=False, default=0)
+    sundays_worked       = Column(Integer, nullable=False, default=0)
+    rest_days_worked     = Column(Integer, nullable=False, default=0)
+    evidence_document_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT")   # DRAFT / APPROVED / SUPERSEDED
+    recorded_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_mx_hours_status"),
+        sa.CheckConstraint("ordinary_hours >= 0 AND overtime_hours >= 0 AND sundays_worked >= 0 "
+                           "AND rest_days_worked >= 0", name="ck_mx_hours_nonneg"),
+        Index("uq_mx_hours_employee_week_approved", "employee_id", "week_start", unique=True,
+              postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
+    )
+
+# ── Mexico (ZP-MX-ENG-001) Phase 7 — CFDI 4.0 + Nómina 1.2 lifecycle ────────
+# Fiscal documents are never cascade-deleted (RESTRICT); raw XML lives only in
+# durable object storage (xml_storage_ref), never in the DB or logs (MX-061).
+# The lifecycle is separate from payroll / authority / bank state (MX-041).
+
+class PayrollMxCfdiDocument(Base):
+    """One CFDI payroll receipt of one committed Mexican payslip (MX-016)."""
+    __tablename__ = "payroll_mx_cfdi_documents"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payslip_item_id          = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    series                   = Column(String(25), nullable=True)
+    folio                    = Column(String(40), nullable=False)
+    schema_release_id        = Column(Integer, ForeignKey("payroll_mx_cfdi_schema_releases.id", ondelete="RESTRICT"), nullable=False)
+    payload_hash             = Column(String(64), nullable=True)
+    xml_storage_ref          = Column(String(500), nullable=True)
+    status                   = Column(String(20), nullable=False, default="GENERATED")
+    unknown_action           = Column(String(10), nullable=True)          # STAMP / CANCEL while UNKNOWN
+    unknown_since            = Column(DateTime(timezone=True), nullable=True)
+    uuid                     = Column(String(40), nullable=True)
+    stamped_at               = Column(DateTime(timezone=True), nullable=True)
+    sat_certificate_number   = Column(String(30), nullable=True)
+    pac_provider             = Column(String(60), nullable=True)
+    pac_environment          = Column(String(12), nullable=True)
+    pac_response_code        = Column(String(40), nullable=True)
+    pac_message              = Column(String(500), nullable=True)
+    cancellation_reason_code = Column(String(10), nullable=True)
+    cancel_requested_at      = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at             = Column(DateTime(timezone=True), nullable=True)
+    replaces_document_id     = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=True)
+    replaces_uuid            = Column(String(40), nullable=True)
+    replaced_by_uuid         = Column(String(40), nullable=True)
+    idempotency_key          = Column(String(100), nullable=False, unique=True)   # the STAMP key, reused by every retry
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "status IN ('GENERATED', 'SIGNED', 'SUBMITTED', 'STAMPED', 'REJECTED', 'UNKNOWN', 'CANCEL_REQUESTED', "
+            "'CANCELLED', 'REPLACED', 'VOIDED')", name="ck_mx_cfdi_doc_status"),
+        UniqueConstraint("organization_id", "series", "folio", name="uq_mx_cfdi_doc_folio"),
+        Index("uq_mx_cfdi_doc_live_per_item", "payslip_item_id", unique=True,
+              postgresql_where=text("status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', 'REJECTED')"),
+              sqlite_where=text("status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', 'REJECTED')")),
+        Index("uq_mx_cfdi_doc_uuid", "uuid", unique=True,
+              postgresql_where=text("uuid IS NOT NULL"), sqlite_where=text("uuid IS NOT NULL")),
+    )
+
+
+class PayrollMxCfdiOutboxItem(Base):
+    """A durable outbound PAC action. A STAMP retry reuses the SAME payload
+    hash and idempotency key (Phase 7 §4.2); attempt_no distinguishes rows."""
+    __tablename__ = "payroll_mx_cfdi_outbox_items"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    document_id              = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=False, index=True)
+    action                   = Column(String(20), nullable=False)          # STAMP / CANCEL / STATUS_QUERY / CANCEL_STATUS_QUERY
+    attempt_no               = Column(Integer, nullable=False, default=1)
+    payload_hash             = Column(String(64), nullable=True)
+    idempotency_key          = Column(String(100), nullable=False, index=True)
+    status                   = Column(String(12), nullable=False, default="PENDING")   # PENDING / SENT / ACKNOWLEDGED / FAILED / UNKNOWN
+    last_error               = Column(String(500), nullable=True)
+    operator_confirmed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sent_at                  = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('STAMP', 'CANCEL', 'STATUS_QUERY', 'CANCEL_STATUS_QUERY')", name="ck_mx_cfdi_outbox_action"),
+        sa.CheckConstraint("status IN ('PENDING', 'SENT', 'ACKNOWLEDGED', 'FAILED', 'UNKNOWN')", name="ck_mx_cfdi_outbox_status"),
+        UniqueConstraint("document_id", "action", "attempt_no", name="uq_mx_cfdi_outbox_attempt"),
+    )
+
+
+class PayrollMxCfdiEvent(Base):
+    """Append-only lifecycle evidence of a CFDI document (MX-018). Nothing
+    in the code updates or deletes a row."""
+    __tablename__ = "payroll_mx_cfdi_events"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    document_id   = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=False, index=True)
+    event_type    = Column(String(40), nullable=False)
+    from_status   = Column(String(20), nullable=True)
+    to_status     = Column(String(20), nullable=True)
+    payload_hash  = Column(String(64), nullable=True)
+    detail        = Column(JSON, nullable=True)              # redacted: codes, uuids, counts — never XML
+    actor_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    occurred_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Mexico (ZP-MX-ENG-001) Phase 8 — authorities (migration mx_authorities_m6) ──
+# IMSS movements, the authority liability ledger (+ its committed sources), SUA
+# reconciliation periods / differences, state ISN returns and one append-only
+# event timeline. Fed ONLY from committed runs; file-export mode (D1) — nothing
+# here transmits. Identifiers (NSS) never stored here; views mask them (MX-061).
+
+class PayrollMxImssMovement(Base):
+    """An IMSS affiliation movement (alta / baja / modificación, MX-025)
+    generated once from a committed event (`source_key`)."""
+    __tablename__ = "payroll_mx_imss_movements"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    registration_id        = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payroll_run_id         = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
+    source_kind            = Column(String(20), nullable=False)       # FIRST_RUN / SBC_CHANGE / END_OF_EMPLOYMENT
+    source_key             = Column(String(120), nullable=False)
+    movement_type          = Column(String(14), nullable=False)       # ALTA / BAJA / MODIFICACION
+    event_date             = Column(Date, nullable=False)
+    sbc                    = Column(Numeric(14, 4), nullable=True)
+    due_date               = Column(Date, nullable=True)
+    due_rule_ref           = Column(String(80), nullable=True)
+    status                 = Column(String(12), nullable=False, default="PENDING")
+    unknown_since          = Column(DateTime(timezone=True), nullable=True)
+    export_batch_ref       = Column(String(60), nullable=True)
+    exported_at            = Column(DateTime(timezone=True), nullable=True)
+    payload_hash           = Column(String(64), nullable=True)
+    idempotency_key        = Column(String(100), nullable=False, unique=True)
+    authority_reference    = Column(String(120), nullable=True)
+    evidence_ref           = Column(String(200), nullable=True)
+    outcome_recorded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    accepted_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    withdrawn_reason       = Column(String(300), nullable=True)
+    replaces_movement_id   = Column(Integer, ForeignKey("payroll_mx_imss_movements.id", ondelete="RESTRICT"), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'EXPORTED', 'FILED', 'ACCEPTED', 'REJECTED', 'UNKNOWN', "
+                           "'WITHDRAWN', 'VOIDED')", name="ck_mx_imss_movement_status"),
+        sa.CheckConstraint("movement_type IN ('ALTA', 'BAJA', 'MODIFICACION')", name="ck_mx_imss_movement_type"),
+        Index("uq_mx_imss_movement_live_source", "source_key", unique=True,
+              postgresql_where=text("status NOT IN ('VOIDED', 'REJECTED')"),
+              sqlite_where=text("status NOT IN ('VOIDED', 'REJECTED')")),
+    )
+
+
+class PayrollMxAuthorityLiability(Base):
+    """One authority amount owed for a period (B3): SAT_ISR per organisation,
+    IMSS / INFONAVIT per IMSS registration, ISN per state — accrued only from
+    committed rows (see PayrollMxAuthorityLiabilitySource). `sequence` > 0 is
+    a complementary liability for rows committed after the period was filed."""
+    __tablename__ = "payroll_mx_authority_liabilities"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    authority             = Column(String(10), nullable=False)        # SAT_ISR / IMSS / INFONAVIT / ISN
+    registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=True, index=True)
+    state_code            = Column(String(5), nullable=True)
+    scope_key             = Column(String(30), nullable=False)        # ORG / REG:<id> / ST:<state>
+    period_key            = Column(String(7), nullable=False)         # YYYY-MM of the pay date (D4)
+    sequence              = Column(Integer, nullable=False, default=0)
+    amount                = Column(Numeric(14, 4), nullable=False, default=0)
+    components            = Column(JSON, nullable=True)               # amount by branch / side
+    due_date              = Column(Date, nullable=True)
+    due_rule_ref          = Column(String(80), nullable=True)
+    status                = Column(String(12), nullable=False, default="ACCRUED")
+    unknown_since         = Column(DateTime(timezone=True), nullable=True)
+    payload_hash          = Column(String(64), nullable=True)
+    idempotency_key       = Column(String(100), nullable=False, unique=True)
+    declaration_reference = Column(String(120), nullable=True)
+    payment_reference     = Column(String(120), nullable=True)
+    evidence_ref          = Column(String(200), nullable=True)
+    filed_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    paid_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reconciled_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("authority IN ('SAT_ISR', 'IMSS', 'INFONAVIT', 'ISN')", name="ck_mx_liability_authority"),
+        sa.CheckConstraint("status IN ('ACCRUED', 'FILED', 'PAID', 'RECONCILED', 'UNKNOWN', 'WITHDRAWN')",
+                           name="ck_mx_liability_status"),
+        UniqueConstraint("organization_id", "authority", "scope_key", "period_key", "sequence",
+                         name="uq_mx_liability_scope_period"),
+    )
+
+
+class PayrollMxAuthorityLiabilitySource(Base):
+    """One committed row inside a liability — unique per source row, so
+    nothing is counted twice and every amount traces to a payslip."""
+    __tablename__ = "payroll_mx_authority_liability_sources"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    liability_id    = Column(Integer, ForeignKey("payroll_mx_authority_liabilities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payslip_item_id = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    source_table    = Column(String(40), nullable=False)    # payroll_mx_imss_branch_lines / ..._isn_liabilities / payslip_items.isr …
+    source_row_id   = Column(Integer, nullable=False)
+    branch_code     = Column(String(30), nullable=False)    # IMSS branch, INFONAVIT, INFONAVIT_CREDIT, ISR, ISN
+    side            = Column(String(10), nullable=True)     # employer / employee
+    base_amount     = Column(Numeric(14, 4), nullable=True)
+    amount          = Column(Numeric(14, 4), nullable=False)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("source_table", "source_row_id", name="uq_mx_liability_source_row"),
+    )
+
+
+class PayrollMxSuaPeriod(Base):
+    """SUA reconciliation of one IMSS registration × month (B4, MX-033 /
+    MX-042): Zoiko's per-worker × per-branch totals against the figures the
+    operator enters from SUA (D5). RECONCILED only with no open difference,
+    by someone other than the person who entered the SUA figures (D6)."""
+    __tablename__ = "payroll_mx_sua_periods"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    registration_id        = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    period_key             = Column(String(7), nullable=False)
+    sua_version            = Column(String(20), nullable=True)        # as recorded by the operator, never assumed
+    zoiko_totals           = Column(JSON, nullable=True)
+    sua_totals             = Column(JSON, nullable=True)
+    difference_total       = Column(Numeric(14, 4), nullable=True)
+    status                 = Column(String(12), nullable=False, default="DRAFT")
+    unknown_since          = Column(DateTime(timezone=True), nullable=True)
+    payload_hash           = Column(String(64), nullable=True)
+    idempotency_key        = Column(String(100), nullable=False, unique=True)
+    figures_entered_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    figures_entered_at     = Column(DateTime(timezone=True), nullable=True)
+    reconciled_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reconciled_at          = Column(DateTime(timezone=True), nullable=True)
+    capture_line           = Column(String(60), nullable=True)        # recorded only (SIPARE layout X1)
+    payment_reference      = Column(String(120), nullable=True)
+    evidence_ref           = Column(String(200), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'RECONCILED', 'PAID', 'UNKNOWN', 'WITHDRAWN')",
+                           name="ck_mx_sua_period_status"),
+        UniqueConstraint("organization_id", "registration_id", "period_key", name="uq_mx_sua_period"),
+    )
+
+
+class PayrollMxSuaDifference(Base):
+    """One worker × branch difference between Zoiko and SUA — BLOCKING until
+    explained and approved by a second person (MX-033, D5/D6)."""
+    __tablename__ = "payroll_mx_sua_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    sua_period_id    = Column(Integer, ForeignKey("payroll_mx_sua_periods.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    branch_code      = Column(String(30), nullable=False)
+    zoiko_amount     = Column(Numeric(14, 4), nullable=False)
+    sua_amount       = Column(Numeric(14, 4), nullable=False)
+    difference       = Column(Numeric(14, 4), nullable=False)
+    explanation_code = Column(String(20), nullable=True)
+    explanation      = Column(String(500), nullable=True)
+    explained_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status           = Column(String(10), nullable=False, default="OPEN")
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'EXPLAINED', 'APPROVED')", name="ck_mx_sua_difference_status"),
+        UniqueConstraint("sua_period_id", "employee_id", "branch_code", name="uq_mx_sua_difference"),
+    )
+
+
+class PayrollMxIsnReturn(Base):
+    """A state ISN return for one state × month (B5, MX-046), built from that
+    state's committed ISN liability. A filed return is never edited — an
+    amendment is a new row (`amendment_of_id`, `sequence` + 1)."""
+    __tablename__ = "payroll_mx_isn_returns"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    isn_registration_id = Column(Integer, ForeignKey("payroll_mx_isn_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    liability_id        = Column(Integer, ForeignKey("payroll_mx_authority_liabilities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    state_code          = Column(String(5), nullable=False)
+    period_key          = Column(String(7), nullable=False)
+    sequence            = Column(Integer, nullable=False, default=0)
+    base_total          = Column(Numeric(14, 4), nullable=False, default=0)
+    amount              = Column(Numeric(14, 4), nullable=False, default=0)
+    due_date            = Column(Date, nullable=True)
+    due_rule_ref        = Column(String(80), nullable=True)
+    status              = Column(String(12), nullable=False, default="DRAFT")
+    unknown_since       = Column(DateTime(timezone=True), nullable=True)
+    payload_hash        = Column(String(64), nullable=True)
+    idempotency_key     = Column(String(100), nullable=False, unique=True)
+    filing_reference    = Column(String(120), nullable=True)
+    payment_reference   = Column(String(120), nullable=True)
+    evidence_ref        = Column(String(200), nullable=True)
+    amendment_of_id     = Column(Integer, ForeignKey("payroll_mx_isn_returns.id", ondelete="RESTRICT"), nullable=True)
+    filed_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    outcome_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'FILED', 'ACCEPTED', 'REJECTED', 'UNKNOWN', 'WITHDRAWN')",
+                           name="ck_mx_isn_return_status"),
+        UniqueConstraint("organization_id", "state_code", "period_key", "sequence", name="uq_mx_isn_return_period"),
+    )
+
+
+class PayrollMxAuthorityEvent(Base):
+    """Append-only timeline for every Phase 8 object (movement / liability /
+    SUA period / SUA difference / ISN return). Nothing updates or deletes a
+    row; `detail` never carries an identifier in clear."""
+    __tablename__ = "payroll_mx_authority_events"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type     = Column(String(20), nullable=False)
+    entity_id       = Column(Integer, nullable=False)
+    event_type      = Column(String(40), nullable=False)
+    from_status     = Column(String(12), nullable=True)
+    to_status       = Column(String(12), nullable=True)
+    payload_hash    = Column(String(64), nullable=True)
+    detail          = Column(JSON, nullable=True)
+    actor_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    occurred_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_mx_authority_events_entity", "entity_type", "entity_id"),
+    )
+
+
+# ── Mexico (ZP-MX-ENG-001) Phase 9a — correction runs (migration mx_corrections_m7) ──
+
+class PayrollMxRunCorrection(Base):
+    """One committed Mexican payslip being corrected by a CORRECTION run
+    (Phase 9 plan B2, D10). The original payslip, its CFDI and its ledgers are
+    never edited: the correction run recalculates the period and its commit
+    posts DELTAS (`deltas`, corrected − original). One live correction per
+    original payslip; a later correction targets the corrected payslip (chain).
+    A voided draft keeps this row for audit (its run is deleted → SET NULL)."""
+    __tablename__ = "payroll_mx_run_corrections"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    correction_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    original_run_id    = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    original_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    corrected_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    reason             = Column(String(500), nullable=False)
+    status             = Column(String(10), nullable=False, default="DRAFT")    # DRAFT / COMMITTED / VOIDED
+    deltas             = Column(JSON, nullable=True)                           # corrected − original, at commit
+    requested_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    voided_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    void_reason        = Column(String(300), nullable=True)
+    committed_at       = Column(DateTime(timezone=True), nullable=True)
+    voided_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at         = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'COMMITTED', 'VOIDED')", name="ck_mx_run_correction_status"),
+        Index("uq_mx_run_correction_live_original", "original_item_id", unique=True,
+              postgresql_where=text("status <> 'VOIDED'"), sqlite_where=text("status <> 'VOIDED'")),
+    )
+
+
+# ── Mexico (ZP-MX-ENG-001) Phase 9b — vacation records (migration mx_benefits_m8) ──
+
+class PayrollMxVacationRecord(Base):
+    """A vacation fact for one employee and service year (MX-051 / MX-053,
+    Phase 9 plan B5, D4): TAKEN days (dates), an OPENING balance, or days
+    PAID_OUT (written only by the termination workflow, 9c). Recorded by one
+    person, approved by another; an approved TAKEN record pays its premium in
+    the ordinary run whose period reaches its start date (PAID, linked)."""
+    __tablename__ = "payroll_mx_vacation_records"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    service_year     = Column(Integer, nullable=False)                 # 1 = the first year from the seniority date
+    kind             = Column(String(10), nullable=False)              # TAKEN / OPENING / PAID_OUT
+    days             = Column(Numeric(6, 2), nullable=False)
+    start_date       = Column(Date, nullable=True)
+    end_date         = Column(Date, nullable=True)
+    status           = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / APPROVED / PAID / WITHDRAWN
+    note             = Column(String(300), nullable=True)
+    recorded_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at      = Column(DateTime(timezone=True), nullable=True)
+    premium_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
+    premium_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=True, index=True)
+    withdrawn_reason = Column(String(300), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("kind IN ('TAKEN', 'OPENING', 'PAID_OUT')", name="ck_mx_vacation_record_kind"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'PAID', 'WITHDRAWN')", name="ck_mx_vacation_record_status"),
+        sa.CheckConstraint("days > 0", name="ck_mx_vacation_record_days"),
+    )
+
+
+
+
+# ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────
+
+class PayrollBrEmployerProfile(Base):
+    """Brazilian legal employer profile and eSocial master data (Event S-1000)."""
+    __tablename__ = "payroll_br_employer_profiles"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    cnpj_root             = Column(String(8), nullable=False)  # Alphanumeric-aware for post-2026 format (Rule BR-038)
+    legal_name            = Column(String(255), nullable=False)
+    trade_name            = Column(String(255), nullable=True)
+    tax_classification    = Column(String(2), nullable=False)  # eSocial Table 08 (e.g. '01', '99')
+    cnae_preponderant     = Column(String(7), nullable=False)
+    cprb_opted            = Column(Boolean, nullable=False, default=False)
+    cprb_rate_pct         = Column(Numeric(5, 2), nullable=True)
+    esocial_environment   = Column(String(25), nullable=False, default="RESTRICTED_PRODUCTION")
+    esocial_active_version= Column(String(10), nullable=False, default="S-1.3")
+    esocial_cert_alias    = Column(String(255), nullable=True)
+    contact_name          = Column(String(120), nullable=False)
+    contact_cpf           = Column(String(11), nullable=False)
+    contact_email         = Column(String(120), nullable=False)
+    contact_phone         = Column(String(20), nullable=True)
+    status                = Column(String(20), nullable=False, default="DRAFT")
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    establishments        = relationship("PayrollBrEstablishment", back_populates="employer_profile", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_br_employer_org"),  # one legal employer per organisation
+        sa.CheckConstraint("esocial_environment IN ('PRODUCTION', 'RESTRICTED_PRODUCTION')", name="ck_br_employer_env"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUSPENDED')", name="ck_br_employer_status"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrEmployerProfile org={self.organization_id} cnpj_root={self.cnpj_root} status={self.status}>"
+
+
+class PayrollBrEstablishment(Base):
+    """Brazilian establishment (filial/obra) and tax lotação (Events S-1005 / S-1020)."""
+    __tablename__ = "payroll_br_establishments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_br_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Unique per employer, not platform-wide: a global unique constraint would
+    # tell one tenant that another tenant already uses a CNPJ.
+    cnpj                  = Column(String(14), nullable=False, index=True)
+    establishment_name    = Column(String(255), nullable=False)
+    is_headquarters       = Column(Boolean, nullable=False, default=False)
+    cnae                  = Column(String(7), nullable=False)
+    rat_pct               = Column(Numeric(4, 2), nullable=False)  # 1.00, 2.00, 3.00
+    fap_factor            = Column(Numeric(5, 4), nullable=False, default=1.0000)  # 0.5000 to 2.0000
+    fpas_code             = Column(String(3), nullable=False)  # eSocial Table 04
+    third_party_code      = Column(String(4), nullable=False)  # Outras Entidades
+    third_party_pct       = Column(Numeric(5, 2), nullable=False)
+    lotacao_code          = Column(String(30), nullable=False)
+    postal_code           = Column(String(8), nullable=False)
+    street_address        = Column(String(255), nullable=False)
+    neighborhood          = Column(String(100), nullable=False)
+    city_ibge_code        = Column(String(7), nullable=False)
+    state_uf              = Column(String(2), nullable=False)
+    judicial_process_id   = Column(String(50), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    employer_profile      = relationship("PayrollBrEmployerProfile", back_populates="establishments")
+    statutory_profiles    = relationship("PayrollBrStatutoryProfile", back_populates="establishment")
+
+    __table_args__ = (
+        UniqueConstraint("employer_profile_id", "cnpj", name="uq_br_establishment_employer_cnpj"),
+        sa.CheckConstraint("rat_pct IN (1.00, 2.00, 3.00)", name="ck_br_establishment_rat"),
+        sa.CheckConstraint("fap_factor >= 0.5000 AND fap_factor <= 2.0000", name="ck_br_establishment_fap"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrEstablishment id={self.id} cnpj={self.cnpj} rat={self.rat_pct} fap={self.fap_factor}>"
+
+
+class PayrollBrRubric(Base):
+    """eSocial Table 03 rubrics and statutory multi-dimensional incidence matrix (Rule BR-005)."""
+    __tablename__ = "payroll_br_rubrics"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    rubric_code           = Column(String(30), nullable=False)
+    rubric_name           = Column(String(255), nullable=False)
+    nature_code           = Column(String(4), nullable=False)  # eSocial Table 03
+    rubric_type           = Column(String(15), nullable=False)  # EARNING / DEDUCTION / INFORMATIONAL
+    cod_inc_cp            = Column(String(2), nullable=False)  # Social Security incidence
+    cod_inc_irrf          = Column(String(2), nullable=False)  # IRRF incidence
+    cod_inc_fgts          = Column(String(2), nullable=False)  # FGTS incidence
+    is_system_standard    = Column(Boolean, nullable=False, default=False)
+    version               = Column(SmallInteger, nullable=False, default=1)
+    valid_from            = Column(Date, nullable=False)
+    valid_to              = Column(Date, nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "rubric_code", "version", name="uq_br_rubric_org_code_ver"),
+        sa.CheckConstraint("rubric_type IN ('EARNING', 'DEDUCTION', 'INFORMATIONAL')", name="ck_br_rubric_type"),
+        Index("ix_br_rubric_lookup", "organization_id", "rubric_code", "valid_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrRubric org={self.organization_id} code={self.rubric_code} nature={self.nature_code}>"
+
+
+class PayrollBrStatutoryProfile(Base):
+    """Effective-dated employee contract, eSocial category, and withholding configuration."""
+    __tablename__ = "payroll_br_statutory_profiles"
+
+    id                                = Column(Integer, primary_key=True, index=True)
+    employee_id                       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    establishment_id                  = Column(Integer, ForeignKey("payroll_br_establishments.id", ondelete="RESTRICT"), nullable=False, index=True)
+    effective_from                    = Column(Date, nullable=False)
+    effective_to                      = Column(Date, nullable=True)
+    esocial_category                  = Column(String(3), nullable=False, default="101")  # 101 CLT Ordinary, 103 Apprentice
+    cbo_code                          = Column(String(6), nullable=False)
+    contract_type                     = Column(String(20), nullable=False, default="INDEFINITE")  # INDEFINITE / DETERMINED / INTERMITTENT
+    weekly_hours                      = Column(Numeric(4, 2), nullable=False, default=44.00)
+    concurrent_inss_flag              = Column(Boolean, nullable=False, default=False)
+    concurrent_inss_base_external     = Column(Numeric(12, 2), nullable=False, default=0.00)
+    concurrent_inss_deducted_external = Column(Numeric(12, 2), nullable=False, default=0.00)
+    irrf_dependents_count             = Column(SmallInteger, nullable=False, default=0)
+    salario_familia_dependents_count  = Column(SmallInteger, nullable=False, default=0)
+    simplified_irrf_opt_out           = Column(Boolean, nullable=False, default=False)
+    alimony_deduction_fixed           = Column(Numeric(12, 2), nullable=False, default=0.00)
+    alimony_deduction_pct             = Column(Numeric(5, 2), nullable=False, default=0.00)
+    vale_transporte_elected           = Column(Boolean, nullable=False, default=False)
+    vale_transporte_daily_cost        = Column(Numeric(8, 2), nullable=False, default=0.00)
+    status                            = Column(String(20), nullable=False, default="ACTIVE")
+    created_at                        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    establishment                     = relationship("PayrollBrEstablishment", back_populates="statutory_profiles")
+
+    __table_args__ = (
+        sa.CheckConstraint("contract_type IN ('INDEFINITE', 'DETERMINED', 'INTERMITTENT')", name="ck_br_contract_type"),
+        # Launch wedge (spec §1): ordinary CLT employee (101) and apprentice (103) only.
+        sa.CheckConstraint("esocial_category IN ('101', '103')", name="ck_br_stat_profile_category"),
+        sa.CheckConstraint("weekly_hours > 0 AND weekly_hours <= 44", name="ck_br_stat_profile_weekly_hours"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'ON_LEAVE', 'TERMINATED')", name="ck_br_stat_profile_status"),
+        Index("ix_br_stat_profile_emp_dates", "employee_id", "effective_from", "effective_to"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrStatutoryProfile id={self.id} emp={self.employee_id} cat={self.esocial_category} status={self.status}>"
+

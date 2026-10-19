@@ -73,6 +73,7 @@ from app.modules.payroll.enterprise.router import enterprise_router
 from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.netherlands_org_router import router as netherlands_org_router
+from app.modules.payroll.mexico_org_router import router as mexico_org_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
     IrelandRpnSnapshotUpsert, IrelandRpnSnapshotResponse,
@@ -191,6 +192,8 @@ payroll_router.include_router(netherlands_org_router)
 from app.modules.payroll.tenant_statutory_router import router as tenant_statutory_router  # noqa: E402
 
 payroll_router.include_router(tenant_statutory_router)
+# Mexico employer onboarding (/payroll/mexico/...) — own module, not this file.
+payroll_router.include_router(mexico_org_router)
 
 
 # ── Employees ────────────────────────────────────────────────────────
@@ -1115,7 +1118,7 @@ def preview_run(
 ):
     return service.preview_payroll_run(
         db, current_user.organization_id, data.employee_ids, data.country,
-        data.period_start, data.period_end, data.calculation_mode,
+        data.period_start, data.period_end, data.calculation_mode, pay_date=data.pay_date,
     )
 
 

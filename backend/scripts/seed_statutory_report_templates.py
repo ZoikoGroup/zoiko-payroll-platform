@@ -1583,6 +1583,7 @@ def run():
         # would duplicate, not reuse, that existing architecture.
 
         seed_hong_kong(db)
+        seed_mexico(db)
         # ------------------------------------------------------------------
         # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) templates.
         # ------------------------------------------------------------------
@@ -2075,6 +2076,138 @@ def seed_hong_kong(db):
                 ), actor_id=None,
             )
             print(f"  seeded HK {report_type} {period_key} due {due_date} (id={entry.id}, status={entry.status})")
+
+
+# ── Mexico (ZP-MX-ENG-001) — Phase 2 ─────────────────────────────────────────
+# All 18 templates of plan v1.1 §5, DRAFT. Template activation stays refused
+# (mexico_service.template_activation_refusal) until the output each one
+# describes exists (Phases 6–10). Only the register, employer-cost and journal
+# templates have data today, so only they get components; every other
+# template is seeded with components=[] and a description naming the phase
+# that fills it. One ISN return template per state in scope (CDMX only).
+#
+# Filing calendar: entries come ONLY from mexico_content.MX_FILING_CALENDAR,
+# each rule transcribed from its saved primary-law source — and an entry is
+# seeded only when that source is VERIFIED in SOURCES_MANIFEST.csv. Until
+# then the Mexico calendar is empty rather than guessed.
+
+MX_TEMPLATE_YEAR = "2026"
+
+_MX_EMPLOYER = ("employer_info", "Employer", [
+    ("employer_name", "Employer (razón social)", "text", "EMPLOYER_PROFILE", "name", None),
+    ("employer_tax_no", "RFC", "text", "EMPLOYER_PROFILE", "tax_no", None),
+])
+_MX_PERIOD = [
+    ("period_label", "Period", "text", "PAYROLL_RUN", "period_label", None),
+    ("pay_date", "Pay Date (FechaPago)", "date", "PAYROLL_RUN", "pay_date", None),
+]
+_MX_EMPLOYEE = ("employee_info", "Employee", [
+    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+])
+
+
+def _mx_templates():
+    later = {
+        "MX-CFDI-NOMINA-RECEIPT": ("CFDI 4.0 + Nómina 1.2 payroll receipt", "CFDI_RECEIPT", "PER_EMPLOYEE", 7),
+        "MX-CFDI-STATUS": ("CFDI stamping / cancellation status", "CFDI_STATUS", "AGGREGATE", 7),
+        "MX-ISR-MONTHLY": ("ISR salary-withholding monthly remittance", "ISR_WITHHOLDING", "AGGREGATE", 8),
+        "MX-SUBSIDY": ("Employment subsidy (subsidio para el empleo) applied", "SUBSIDY", "AGGREGATE", 6),
+        "MX-IMSS-BRANCH": ("IMSS contributions by branch", "IMSS", "AGGREGATE", 6),
+        "MX-IDSE-MOVEMENTS": ("IDSE affiliation movements", "IDSE", "AGGREGATE", 8),
+        "MX-SUA-RECON": ("SUA reconciliation", "SUA", "AGGREGATE", 8),
+        "MX-SIPARE": ("SIPARE payment line", "SIPARE", "AGGREGATE", 8),
+        "MX-INFONAVIT": ("INFONAVIT contributions and credit withholding", "INFONAVIT", "AGGREGATE", 8),
+        "MX-AGUINALDO": ("Aguinaldo statement", "AGUINALDO", "PER_EMPLOYEE", 9),
+        "MX-VACATION-ACCRUAL": ("Vacation and vacation-premium accrual", "VACATION", "AGGREGATE", 9),
+        "MX-PTU-DISTRIBUTION": ("PTU distribution", "PTU", "AGGREGATE", 9),
+        "MX-FINIQUITO": ("Finiquito / severance statement", "FINIQUITO", "PER_EMPLOYEE", 9),
+        "MX-ANNUAL-ISR-ADJ": ("Annual ISR adjustment", "ANNUAL_ISR", "AGGREGATE", 9),
+    }
+    out = {key: dict(name=name, report_type=f"MX_{rtype}", scope=scope, components=[],
+                     description=f"Draft shell — filled in Phase {phase} of ZP-MX-ENG-001, when this output exists.")
+           for key, (name, rtype, scope, phase) in later.items()}
+    out["MX-PAYROLL-REGISTER"] = dict(
+        name="Mexico payroll register", report_type="MX_REGISTER", scope="AGGREGATE",
+        description="Per-employee payroll register for one run.",
+        components=[(_MX_EMPLOYER[0], _MX_EMPLOYER[1], _MX_EMPLOYER[2] + _MX_PERIOD), _MX_EMPLOYEE,
+                    ("earnings", "Perceptions", [
+                        ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None)]),
+                    ("deductions", "Deductions and Net Pay", [
+                        ("isr", "ISR Withheld", "currency", "PAYSLIP_ITEM", "tds", None),
+                        ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", None),
+                        ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", None)])])
+    out["MX-EMPLOYER-COST"] = dict(
+        name="Mexico employer cost", report_type="MX_EMPLOYER_COST", scope="AGGREGATE",
+        description="Employer-side statutory cost of one run (IMSS / RCV / INFONAVIT / ISN detail from Phase 6).",
+        components=[(_MX_EMPLOYER[0], _MX_EMPLOYER[1], _MX_EMPLOYER[2] + _MX_PERIOD),
+                    ("employer_contributions", "Employer Cost", [
+                        ("gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                        ("employer_social_security", "Employer Social Security", "currency", "PAYSLIP_ITEM",
+                         "employer_social_security", "SUM_RUN"),
+                        ("employer_pension", "Employer Retirement", "currency", "PAYSLIP_ITEM", "employer_pension",
+                         "SUM_RUN")])])
+    out["MX-JOURNAL"] = dict(
+        name="Mexico payroll journal", report_type="MX_JOURNAL", scope="AGGREGATE",
+        description="Run totals for the accounting journal (separate statutory liabilities from Phase 10).",
+        components=[(_MX_EMPLOYER[0], _MX_EMPLOYER[1], _MX_EMPLOYER[2] + _MX_PERIOD),
+                    ("totals", "Run Totals", [
+                        ("gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                        ("isr", "Total ISR Withheld", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                        ("net_pay", "Total Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", "SUM_RUN")])])
+    return out
+
+
+def seed_mexico(db, manifest=None):
+    from app.modules.payroll.engine.countries import mexico_content
+    from scripts.seed_mexico_canonical_packs import load_manifest
+
+    print("Seeding Mexico report templates (ZP-MX-ENG-001, Draft)...")
+    seeded = []
+    for key, t in _mx_templates().items():
+        seeded.append(_seed_template(
+            db, template_key=key, name=t["name"], report_type=t["report_type"], country="MX",
+            reporting_year=MX_TEMPLATE_YEAR, document_scope=t["scope"], components=t["components"],
+            description=t["description"], regulatory_authority="SAT / IMSS / INFONAVIT",
+            source_references=mexico_content.SPEC))
+    for state in mexico_content.MX_ISN_STATES_IN_SCOPE:
+        seeded.append(_seed_template(
+            db, template_key=f"MX-ISN-RETURN-{state}", name=f"Impuesto Sobre Nóminas return — {state}",
+            report_type="MX_ISN_RETURN", country="MX", state=state, reporting_year=MX_TEMPLATE_YEAR,
+            document_scope="AGGREGATE", components=[],
+            description="Draft shell — state ISN return, filled in Phase 8 from the certified state pack.",
+            regulatory_authority=f"{state} state treasury", source_references=mexico_content.SPEC))
+
+    manifest = load_manifest() if manifest is None else manifest
+    entries = []
+    for rule in mexico_content.MX_FILING_CALENDAR:
+        if rule.source not in manifest:
+            print(f"  SKIP Mexico {rule.report_type}: source {rule.source} is not VERIFIED — no due date seeded")
+            continue
+        for period_key, period_label, due in _mx_due_dates(rule, int(MX_TEMPLATE_YEAR)):
+            entries.append(service.upsert_filing_calendar_entry(
+                db, FilingCalendarUpsert(jurisdictionCountry="MX", jurisdictionState=rule.state,
+                                         reportType=rule.report_type, reportingYear=MX_TEMPLATE_YEAR,
+                                         periodKey=period_key, periodLabel=period_label, dueDate=due),
+                actor_id=None))
+    print(f"  Mexico filing calendar: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} "
+          f"(from {len(mexico_content.MX_FILING_CALENDAR)} transcribed rule(s))")
+    return {"templates": seeded, "calendar": entries}
+
+
+def _mx_due_dates(rule, year):
+    """(period_key, label, due date) for every period of `year` under one
+    transcribed rule. MONTHLY / BIMONTHLY rules are due on `due_day` of the
+    month after the period; ANNUAL rules on `due_day` of `due_month`."""
+    if rule.frequency == "ANNUAL":
+        return [(f"ANNUAL-{year}", f"{rule.report_type} {year}", date(year, rule.due_month, rule.due_day))]
+    step = 1 if rule.frequency == "MONTHLY" else 2
+    out = []
+    for month in range(1, 13, step):
+        end_month = month + step - 1
+        due_year, due_month = (year + 1, 1) if end_month == 12 else (year, end_month + 1)
+        out.append((f"{year}-{month:02d}", rule.period_label_format.format(year=year, month=month),
+                    date(due_year, due_month, rule.due_day)))
+    return out
 
 
 if __name__ == "__main__":

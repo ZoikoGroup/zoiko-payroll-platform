@@ -37,6 +37,18 @@ function SuppressedChip() {
   );
 }
 
+// Mexico: the shared employer total excludes Mexico's employer cost (IMSS,
+// INFONAVIT and state ISN live in each Mexican payslip's frozen result), so
+// show "—" rather than an understated figure.
+function EmployerCost({ amount, countryCode, explicitCurrency }) {
+  if ((countryCode || "").toUpperCase() === "MX") {
+    return (
+      <span title="Mexican employer cost (IMSS, INFONAVIT, state ISN) is not part of this shared total">—</span>
+    );
+  }
+  return <Money amount={amount} countryCode={countryCode} explicitCurrency={explicitCurrency} />;
+}
+
 // Money cell: the hidden token renders as the chip, never as a number.
 function Money({ amount, countryCode, explicitCurrency }) {
   if (isSuppressed(amount)) return <SuppressedChip />;
@@ -342,7 +354,7 @@ export default function FundingPaymentsPage() {
                   <dl className="space-y-1.5 border-t border-border-light pt-2.5 text-sm">
                     <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Deductions</dt><dd className="text-foreground-secondary">{money("totalDeductions")}</dd></div>
                     <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Taxes</dt><dd className="text-foreground-secondary">{money("totalTaxes")}</dd></div>
-                    <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{money("employerCost")}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary"><EmployerCost amount={row.employerCost} countryCode={row.country} explicitCurrency={row.currency} /></dd></div>
                   </dl>
                 </div>
               );
@@ -397,7 +409,7 @@ export default function FundingPaymentsPage() {
                     <td className="px-4 py-3 text-right font-medium text-foreground">{money("netPay")}</td>
                     <td className="px-4 py-3 text-right text-foreground-muted">{money("totalDeductions")}</td>
                     <td className="px-4 py-3 text-right text-foreground-muted">{money("totalTaxes")}</td>
-                    <td className="px-4 py-3 text-right text-foreground-muted">{money("employerCost")}</td>
+                    <td className="px-4 py-3 text-right text-foreground-muted"><EmployerCost amount={row.employerCost} countryCode={row.jurisdictionCountry} explicitCurrency={row.currency} /></td>
                   </tr>
                 );
               })}

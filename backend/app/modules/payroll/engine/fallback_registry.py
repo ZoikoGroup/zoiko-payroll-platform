@@ -31,9 +31,10 @@ skips them rather than flagging a false positive.
 from decimal import Decimal
 
 from app.modules.payroll.engine.countries import (
-    australia, canada, germany, hong_kong, india, italy, netherlands,
+    australia, canada, germany, hong_kong, india, italy, mexico, netherlands,
     saudi_arabia, singapore, sweden, switzerland, uk, us,
 )
+from app.modules.payroll.engine.countries import mexico_content
 from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
@@ -54,6 +55,7 @@ _MODULES = {
     "italy": italy,
     "saudi_arabia": saudi_arabia,
     "netherlands": netherlands,
+    "mexico": mexico,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -417,6 +419,35 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Wage-Tax Tables (white / special / derivation)", "resolverKey": "N/A — ACTIVE payroll_nl_tax_table_files rows (gate G1); a missing table BLOCKS the payslip", "note": ""},
     {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "Whk (WGA / ZW-flex)", "resolverKey": "N/A — employer-specific ACTIVE premium decision, never a pack rate (NL-017)", "note": ""},
     {"country": "NL", "module": "netherlands", "attr": "NL_NO_FALLBACK", "label": "VCR Period Maxima / Minimum Wage / WKR Bands / Car Addition", "resolverKey": "N/A — NL_PERIOD_MAX / NL_MIN_WAGE / NL_WKR_BAND / NL_CAR_ADDITION TaxSlab rows; a missing row BLOCKS", "note": ""},
+]
+
+# ── Mexico ───────────────────────────────────────────────────────────────
+# Fail-closed from day one (ZP-MX-ENG-001): no hard-coded statutory value
+# exists (master rules 2–3) — every row points at the defined sentinel
+# mexico.MX_NO_FALLBACK (None). Generated from mexico_content.MX_PARAMETER_KEYS
+# so the readiness key list can never drift from the content catalogue.
+# State-scoped keys (ISN) live in a state pack and are never required of the
+# national pack. Text parameters are not readiness requirements either: the
+# shared readiness predicate (service._check_missing_required_keys) counts a
+# side-less key as configured only via flat_amount, so the MX engine checks
+# its text parameters itself (same as NL's text keys). Per-case keys
+# (MX_PER_CASE_KEYS, e.g. overtime tiers) BLOCK only the case that needs
+# them, so they are not readiness requirements either. Notes carry no values:
+# those exist only in the transcribed, source-cited content.
+_ENGINE_CONSTANT_REGISTRY += [
+    {"country": "MX", "module": "mexico", "attr": "MX_NO_FALLBACK", "label": label, "resolverKey": key,
+     "side": {"employee_pct": "employee", "employer_pct": "employer"}.get(kind),
+     **({"required": False}
+        if scope != "national" or kind == "text" or key in mexico_content.MX_PER_CASE_KEYS else {}),
+     "note": "NO FALLBACK — a missing row BLOCKS"
+             + (" (state ISN pack only)" if scope != "national" else "")
+             + (" [PENDING G2]" if key in mexico_content.MX_PENDING_G2_KEYS else "") + "."}
+    for key, (kind, label, scope) in mexico_content.MX_PARAMETER_KEYS.items()
+] + [
+    {"country": "MX", "module": "mexico", "attr": "MX_NO_FALLBACK",
+     "label": "ISR Tariffs / Minimum Wages / CEAV Bands / Workweek / Vacation Schedule",
+     "resolverKey": "N/A — " + " / ".join(mexico_content.MX_SLAB_RULES) + " TaxSlab rows; a missing row BLOCKS",
+     "note": ""},
 ]
 
 

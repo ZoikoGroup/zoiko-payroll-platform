@@ -56,6 +56,10 @@ class EmployeeValidationStrategy:
     # Bank details (routing codes, IBAN, account numbers) are NOT in scope
     # here: they also feed the `routing` display and bank transfer files.
     SENSITIVE_FIELDS: tuple = ()
+    # True = the duplicate-identifier 409 shows the masked value instead of the
+    # raw one (Mexico, MX-061). False for every other strategy — their message
+    # is unchanged (the shared fix is OOS-7).
+    MASK_DUPLICATE_VALUE: bool = False
 
     # Maps a compliance_fields key to the PayrollEmployee dedicated column
     # it should ALSO populate, for strategies whose engine calculator
@@ -1442,6 +1446,215 @@ class NLEmployeeValidation(EmployeeValidationStrategy):
                                       "number against the employee's identity document.")
 
 
+def _mx_yymmdd_is_a_date(digits: str) -> bool:
+    import datetime as _dt
+
+    yy, mm, dd = int(digits[:2]), int(digits[2:4]), int(digits[4:6])
+    for century in (1900, 2000):
+        try:
+            _dt.date(century + yy, mm, dd)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+class MXEmployeeValidation(EmployeeValidationStrategy):
+    """Mexico (ZP-MX-ENG-001 §12 Identity, Phase 4b) — RFC (persona física),
+    CURP, NSS. DORMANT: registered in _DORMANT_STRATEGIES, consulted only
+    while MX_TENANT_ONBOARDING_ENABLED is on (mexico_dormancy), so production
+    keeps refusing MX employees with the unchanged message.
+
+    Format only: the CURP structure and check digit (S31, RENAPO), the NSS
+    check digit (S32, IMSS) and the RFC↔CURP agreement rule are not in any
+    saved source yet, so nothing beyond length / character class / the RFC
+    date part is checked, and the statutory profile records FORMAT_ONLY —
+    never VALID (MX-036: a mismatch is an exception, never auto-fixed).
+    The raw values are SENSITIVE (masked in every response) and, as for every
+    country, stored in clear in compliance_fields — plan Q9 / HK D-4.
+    The duplicate key is the CURP; its 409 message is masked (MX-061)."""
+    country_code = "MX"
+    duplicate_field = "curp"
+    SENSITIVE_FIELDS = ("rfc", "curp", "nss", "clabe")   # CLABE masked like SA's IBAN
+    MASK_DUPLICATE_VALUE = True
+    FIELD_SPECS = {
+        "rfc": {
+            "required": True, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-ZÑ&]{4}[0-9]{6}[A-Z0-9]{3}$"),
+            "error": "RFC must be the 13-character persona física RFC (4 letters, YYMMDD, 3-character homoclave).",
+        },
+        "curp": {
+            "required": True, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{18}$"),
+            "error": "CURP must be 18 letters or digits.",
+        },
+        "nss": {
+            "required": True, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{11}$"),
+            "error": "NSS (IMSS) must be 11 digits.",
+        },
+        "clabe": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{18}$"),
+            "error": "CLABE must be 18 digits (check digit not verified until S33 is saved).",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        rfc = cleaned.get("rfc")
+        if rfc and not _mx_yymmdd_is_a_date(rfc[4:10]):
+            raise BadRequestException("RFC: the six digits after the letters must be a real date (YYMMDD).")
+
+
+# ── Brazil (CLT - ZP-BR-ENG-001) ───────────────────────────────────────────
+
+def cpf_is_valid(value) -> bool:
+    """Validates Brazilian CPF (Cadastro de Pessoas Físicas) using Modulo 11 check digits.
+    Rejects values that are not 11 digits or where all digits are identical."""
+    raw = re.sub(r"[\s.-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{11}", raw):
+        return False
+    # Reject identical digits (e.g. 111.111.111-11)
+    if len(set(raw)) == 1:
+        return False
+
+    # First check digit
+    s1 = sum(int(d) * (10 - i) for i, d in enumerate(raw[:9]))
+    r1 = (s1 * 10) % 11
+    d1 = 0 if r1 == 10 else r1
+    if int(raw[9]) != d1:
+        return False
+
+    # Second check digit
+    s2 = sum(int(d) * (11 - i) for i, d in enumerate(raw[:10]))
+    r2 = (s2 * 10) % 11
+    d2 = 0 if r2 == 10 else r2
+    return int(raw[10]) == d2
+
+
+def pis_is_valid(value) -> bool:
+    """Validates Brazilian PIS/PASEP/NIS (11 digits) using Modulo 11 check digit."""
+    raw = re.sub(r"[\s.-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{11}", raw):
+        return False
+    weights = (3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    s = sum(int(d) * w for d, w in zip(raw[:10], weights))
+    rest = s % 11
+    dv = 0 if rest < 2 else 11 - rest
+    return int(raw[10]) == dv
+
+
+def cnpj_is_valid(value) -> bool:
+    """Validates Brazilian CNPJ (14 characters) with Modulo 11 check digits.
+    Supports standard numeric CNPJ and post-2026 alphanumeric CNPJ format (Rule BR-038)."""
+    raw = re.sub(r"[\s./-]", "", str(value or "")).upper()
+    if not re.fullmatch(r"[0-9A-Z]{14}", raw):
+        return False
+    # Character conversion: ASCII - 48 ('0'-'9' -> 0-9, 'A'-'Z' -> 17-42)
+    def char_val(c):
+        return ord(c) - 48
+
+    # First check digit
+    weights1 = (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    s1 = sum(char_val(c) * w for c, w in zip(raw[:12], weights1))
+    r1 = s1 % 11
+    d1 = 0 if r1 < 2 else 11 - r1
+    if char_val(raw[12]) != d1:
+        return False
+
+    # Second check digit
+    weights2 = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    s2 = sum(char_val(c) * w for c, w in zip(raw[:13], weights2))
+    r2 = s2 % 11
+    d2 = 0 if r2 < 2 else 11 - r2
+    return char_val(raw[13]) == d2
+
+
+class BREmployeeValidation(EmployeeValidationStrategy):
+    """Brazil (CLT - ZP-BR-ENG-001) — CPF, PIS/NIS and identity validation.
+    
+    CPF is validated mathematically via Modulo 11 check digits and is the
+    unique duplicate_field key. CPF and PIS/NIS are classified SENSITIVE and
+    masked in standard API outputs.
+    """
+    country_code = "BR"
+    duplicate_field = "cpf"
+    SENSITIVE_FIELDS = ("cpf", "pis_nis")
+    FIELD_SPECS = {
+        "cpf": {
+            "required": True,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^\d{11}$"),
+            "error": "CPF must be 11 digits and satisfy Modulo 11 check digits.",
+        },
+        "pis_nis": {
+            "required": True,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^\d{11}$"),
+            "error": "PIS/NIS must be 11 digits and satisfy Modulo 11 check digit.",
+        },
+        "rg_number": {
+            "required": False,
+            "strip_chars": ". -",
+            "pattern": re.compile(r"^[A-Za-z0-9]{4,20}$"),
+            "error": "RG must be 4 to 20 alphanumeric characters.",
+        },
+        "ctps_number": {
+            "required": False,
+            "strip_chars": " ",
+            "pattern": re.compile(r"^\d{1,15}$"),
+            "error": "CTPS number must be up to 15 digits.",
+        },
+        "ctps_series": {
+            "required": False,
+            "strip_chars": " ",
+            "pattern": re.compile(r"^\d{1,10}$"),
+            "error": "CTPS series must be up to 10 digits.",
+        },
+        "pix_key_type": {
+            "required": False,
+            "choices": ["CPF", "CNPJ", "EMAIL", "PHONE", "RANDOM"],
+            "upper": True,
+        },
+        "pix_key": {
+            "required": False,
+        },
+        "bank_compe": {
+            "required": False,
+            "strip_chars": " ",
+            "pattern": re.compile(r"^\d{3}$"),
+            "error": "COMPE bank code must be exactly 3 digits.",
+        },
+        "bank_agency": {
+            "required": False,
+            "strip_chars": " -",
+            "pattern": re.compile(r"^\d{1,5}$"),
+            "error": "Bank agency must be up to 5 digits.",
+        },
+        "bank_account": {
+            "required": False,
+            "strip_chars": " -",
+            "pattern": re.compile(r"^\d{1,12}$"),
+            "error": "Bank account must be up to 12 digits.",
+        },
+        "bank_account_type": {
+            "required": False,
+            "choices": ["CORRENTE", "POUPANCA"],
+            "upper": True,
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        cpf = cleaned.get("cpf")
+        if cpf and not cpf_is_valid(cpf):
+            raise BadRequestException("CPF fails the official Modulo 11 check digit algorithm.")
+        pis = cleaned.get("pis_nis")
+        if pis and not pis_is_valid(pis):
+            raise BadRequestException("PIS/NIS fails the official Modulo 11 check digit algorithm.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1466,14 +1679,37 @@ _STRATEGIES = {
     "CH": CHEmployeeValidation,
     "SA": SAEmployeeValidation,
     "NL": NLEmployeeValidation,
+    "BR": BREmployeeValidation,
 }
+
+# Strategies built but dormant (Mexico, Phase 4b): consulted only while
+# their country's onboarding flag is on, and never listed in _STRATEGIES —
+# so the "Supported: …" message every other country sees never changes.
+_DORMANT_STRATEGIES = {
+    "MX": MXEmployeeValidation,
+}
+
+
+def _dormant_strategy(code: str):
+    strategy = _DORMANT_STRATEGIES.get(code)
+    if strategy is None:
+        return None
+    from app.modules.payroll import mexico_dormancy
+
+    return strategy if mexico_dormancy.onboarding_enabled() else None
+
+
+def is_supported_employee_country(country_code: str) -> bool:
+    code = (country_code or "").upper()
+    return code in _STRATEGIES or _dormant_strategy(code) is not None
 
 
 def get_employee_validation_strategy(country_code: str) -> EmployeeValidationStrategy:
     """Factory/dispatcher — country_code must already be normalized to a
     2-letter code (callers use service._normalize_country() first, exactly
     like every other jurisdiction-aware lookup in service.py)."""
-    strategy = _STRATEGIES.get((country_code or "").upper())
+    code = (country_code or "").upper()
+    strategy = _STRATEGIES.get(code) or _dormant_strategy(code)
     if strategy is None:
         raise BadRequestException(
             f"Unsupported country code '{country_code}'. Supported: {', '.join(_STRATEGIES)}."
@@ -1523,7 +1759,10 @@ def _mask_field(key, value):
     return _FIELD_MASKERS.get(key, mask_identifier)(value)
 
 
-SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in _STRATEGIES.values() for f in cls.SENSITIVE_FIELDS)
+# Dormant strategies' fields are masked too (whether or not their flag is on),
+# so a Mexican identifier is never returned in clear by any shared path.
+SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in (*_STRATEGIES.values(), *_DORMANT_STRATEGIES.values())
+                                        for f in cls.SENSITIVE_FIELDS)
 
 
 def mask_compliance_fields(compliance_fields):
@@ -1581,5 +1820,5 @@ def mask_routing(routing):
     is itself an account identifier (IBAN) is masked."""
     if not isinstance(routing, list):
         return routing
-    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") == "iban" and r.get("value")
+    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") in ("iban", "clabe") and r.get("value")
              else r) for r in routing]

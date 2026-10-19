@@ -179,13 +179,38 @@ def test_alembic_heads_is_single_head():
     # e3a9c1f7b2d4 (2026-10-14, HK D-A): contractual overtime columns; additive,
     # single child of d1e5a7c3b9f2. f4b8d2a6c9e1 (HK D-C): pre-transition wage
     # overrides table; additive, single child of e3a9c1f7b2d4.
-    # ZP-PRIV-VERIFY-001 (2026-10-15/19): a7c3e91f2b60 (PDP denial audit) ->
-    # b2f4d6a8c0e1 (roles, temporary users, pay groups, user scope) ->
-    # c5e7a9b1d3f4 (MFA, refresh rotation, JIT support access) ->
-    # d7f9b1c3e5a6 (PostgreSQL row-level security) -> e1a3c5e7f9b2 (security
-    # events, alerts, machine clients, DSAR, data region); a linear chain on
-    # f4b8d2a6c9e1 - single head.
-    assert heads == ["e1a3c5e7f9b2"]
+    # 5d2c8f1a7b3e (2026-10-15, Mexico mx_foundation_m1): earning
+    # classifications + CFDI schema releases / catalog entries; additive and
+    # guarded, single child of f4b8d2a6c9e1.
+    # 6e4a1d9c3f27 (2026-10-16, Mexico mx_employer_m2): employer onboarding
+    # tables; additive and guarded, single child of 5d2c8f1a7b3e.
+    # 8b2f6d4e1a93 (2026-10-16, Mexico mx_employee_m3): mx_* profile columns +
+    # INFONAVIT notices; additive, guarded, lock_timeout.
+    # b7a1c9e3d5f2 (2026-10-15, Brazil ZP-BR-ENG-001 Phase 0): the four
+    # payroll_br_* foundation tables + br_* payslip snapshot columns; additive
+    # and guarded, single child of 8b2f6d4e1a93 (re-parented at the merge of
+    # main into venu — never applied anywhere, so the chain stays linear) —
+    # single head.
+    # c4f7a2d9e6b1 (2026-10-17, Mexico mx_run_m4): run snapshot / approval
+    # columns + run ledgers + approved hours; additive, guarded, lock_timeout,
+    # shared ALTERs last in their own transactions; single child of b7a1c9e3d5f2.
+    # d8b3e5f1a2c7 (2026-10-17, Mexico mx_cfdi_m5): CFDI documents / outbox /
+    # events — new tables only, lock_timeout; single child of c4f7a2d9e6b1.
+    # e3b9c2d7f4a1 (2026-10-19, Mexico mx_authorities_m6): IMSS movements,
+    # authority liabilities + sources, SUA periods / differences, ISN returns,
+    # events — new tables only, lock_timeout; single child of d8b3e5f1a2c7.
+    # f5c1a8d3e9b2 (2026-10-19, Mexico mx_corrections_m7): correction runs —
+    # one new table, lock_timeout; single child of e3b9c2d7f4a1.
+    # a6d2f9c4b8e1 (2026-10-19, Mexico mx_benefits_m8): vacation records —
+    # one new table, lock_timeout; single child of f5c1a8d3e9b2.
+    # ZP-PRIV-VERIFY-001 (2026-10-15/19), also a child of f5c1a8d3e9b2:
+    # a7c3e91f2b60 (PDP denial audit) -> b2f4d6a8c0e1 (roles, temporary users,
+    # pay groups, user scope) -> c5e7a9b1d3f4 (MFA, refresh rotation, JIT
+    # support access) -> d7f9b1c3e5a6 (PostgreSQL row-level security) ->
+    # e1a3c5e7f9b2 (security events, alerts, machine clients, DSAR, data
+    # region). Already applied to the shared database before M8, so it is
+    # joined to M8 by merge c3e5a7b9d1f4 rather than re-parented - single head.
+    assert heads == ["c3e5a7b9d1f4"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -197,7 +222,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["e1a3c5e7f9b2"]
+    assert list(script.get_heads()) == ["c3e5a7b9d1f4"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -225,14 +250,18 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # merge f898189cb4e3.
         "cd62503afe26",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
-        "f0b1c2d3e4f5", "f1b78410d568", "fbfe6d7eeb2e",
+        "f0b1c2d3e4f5", "f1b78410d568",
+        # f5c1a8d3e9b2: main's Mexico M8 (a6d2f9c4b8e1) and the ZP-PRIV chain
+        # (a7c3e91f2b60) both grow from it; rejoined by merge c3e5a7b9d1f4.
+        "f5c1a8d3e9b2",
+        "fbfe6d7eeb2e",
     ]
 
 
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 209   # + 8 Mexico/Brazil (5d2c8f1a7b3e .. f5c1a8d3e9b2, from main) + ZP-PRIV a7c3e91f2b60, b2f4d6a8c0e1, c5e7a9b1d3f4, d7f9b1c3e5a6, e1a3c5e7f9b2 + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
+    assert len(revs) == 211   # + c3e5a7b9d1f4 (merge ZP-PRIV with Mexico M8) + ZP-PRIV a7c3e91f2b60, b2f4d6a8c0e1, c5e7a9b1d3f4, d7f9b1c3e5a6, e1a3c5e7f9b2 + a6d2f9c4b8e1 (Mexico mx_benefits_m8) + f5c1a8d3e9b2 (Mexico mx_corrections_m7) + e3b9c2d7f4a1 (Mexico mx_authorities_m6) + d8b3e5f1a2c7 (Mexico mx_cfdi_m5) + c4f7a2d9e6b1 (Mexico mx_run_m4) + b7a1c9e3d5f2 (Brazil Phase 0 foundation) + 8b2f6d4e1a93 (Mexico mx_employee_m3) + 6e4a1d9c3f27 (Mexico mx_employer_m2) + 5d2c8f1a7b3e (Mexico mx_foundation_m1) + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
 
 
 def test_germany_head_chain_wiring_is_intact():

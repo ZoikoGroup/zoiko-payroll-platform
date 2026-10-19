@@ -21,7 +21,7 @@
 
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
-export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL"];
+export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX"];
 
 // Mirrors backend bank_routing.py's PAYMENT_MODE_LABEL.
 const PAYMENT_MODE_LABEL = {
@@ -34,6 +34,7 @@ const PAYMENT_MODE_LABEL = {
   FR: "SEPA",
   IE: "SEPA",
   NL: "SEPA",
+  MX: "SPEI",
   BB: "EFT",
   KY: "EFT",
   DO: "EFT",
@@ -58,6 +59,7 @@ const BTF_ROUTING_LABEL = {
   FR: "IBAN",
   IE: "IBAN",
   NL: "IBAN",
+  MX: "CLABE",
   BB: "Bank/Branch Code",
   KY: "Bank/Branch Code",
   DO: "Bank/Branch Code",

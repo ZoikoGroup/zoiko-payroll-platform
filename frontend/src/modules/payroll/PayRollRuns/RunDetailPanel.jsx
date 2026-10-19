@@ -12,6 +12,11 @@ import NLRunPreflightPanel from "./NLRunPreflightPanel";
 import NLPayslipBreakdown from "./NLPayslipBreakdown";
 import HKCorrectionRequestPanel from "./HKCorrectionRequestPanel";
 import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDrawer";
+import MXRunPreflightPanel from "../../../components/jurisdiction/mexico/run/MXRunPreflightPanel";
+import MXRunStatusBadges from "../../../components/jurisdiction/mexico/run/MXRunStatusBadges";
+import MXRunCalculationTrace from "../../../components/jurisdiction/mexico/run/MXRunCalculationTrace";
+import MXCfdiStagePanel from "../../../components/jurisdiction/mexico/run/MXCfdiStagePanel";
+import MXCorrectionsPanel from "../../../components/jurisdiction/mexico/run/MXCorrectionsPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -154,6 +159,9 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
   ].filter(([, v]) => Number(v) > 0);
   const employerContributionsTotal = employerContributions.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
   const employerTotalCost = (Number(item.salary) || 0) + employerContributionsTotal;
+  // Mexico: the employer cost lives in the frozen Mexican result (IMSS,
+  // INFONAVIT, state ISN) — never shown as an understated shared total.
+  const isMx = (item.country || item.countryCode) === "MX";
   // Phase 8BV: previously only discoverable via a truncated free-text
   // Remarks cell (item.notes) — the structured list the backend already
   // serializes (germanyUnavailableComponents) is now shown as its own
@@ -201,7 +209,11 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
       </div>
       <div>
         <p className="text-[11px] font-bold uppercase tracking-widest text-category-teal mb-2">Employer Contributions</p>
-        {employerContributions.length === 0 ? (
+        {isMx ? (
+          <p className="text-[12px] text-foreground-muted" data-testid="mx-employer-dash">
+            — <span className="text-[11px]">(Mexican employer cost: see the Mexico trace below)</span>
+          </p>
+        ) : employerContributions.length === 0 ? (
           <p className="text-[12px] text-foreground-muted">No employer contributions.</p>
         ) : (
           <dl className="space-y-1.5">
@@ -219,7 +231,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
             above. */}
         <div className="mt-2 flex items-center justify-between border-t border-border pt-1.5 text-[12px]">
           <dt className="font-bold text-foreground-muted">Employer Total Cost</dt>
-          <dd className="font-bold text-category-teal">{fmtCurrencyLocal(employerTotalCost, fmtCurrency)}</dd>
+          <dd className="font-bold text-category-teal">{isMx ? "—" : fmtCurrencyLocal(employerTotalCost, fmtCurrency)}</dd>
         </div>
       </div>
       </div>
@@ -284,6 +296,8 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
   const chSnapshot = (item.country || item.countryCode) === "CH" ? item.chCalculationSnapshot : null;
   // Netherlands: employee pay and employer cost from the frozen snapshot (NL-048)
   const nlSnapshot = (item.country || item.countryCode) === "NL" ? item.nlCalculationSnapshot : null;
+  // Mexico: the frozen engine result + input hashes (MX-063 trace)
+  const mxSnapshot = (item.country || item.countryCode) === "MX" ? item.mxCalculationSnapshot : null;
 
   async function handleRecalculate(e) {
     e.stopPropagation();
@@ -359,6 +373,7 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
               </button>
             </div>
             {nlSnapshot && <NLPayslipBreakdown snapshot={nlSnapshot} employeeName={item.employee} />}
+            {mxSnapshot && <MXRunCalculationTrace snapshot={mxSnapshot} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -469,6 +484,14 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               {items.some((i) => (i.country || i.countryCode) === "SG") && <SGRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "HK") && <HKRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "NL") && <NLRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "MX") && (
+                <>
+                  <MXRunStatusBadges runId={run.id} refreshKey={(detail || run).status} />
+                  <MXRunPreflightPanel runId={run.id} runStatus={(detail || run).status} onChanged={load} />
+                  <MXCfdiStagePanel runId={run.id} />
+                  <MXCorrectionsPanel runId={run.id} items={items} />
+                </>
+              )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

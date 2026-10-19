@@ -26,6 +26,8 @@ You are a senior engineer on the zoiko-payroll-platform repo (FastAPI + SQLAlche
 8. Zero behavior change for any other jurisdiction. Run the full backend test suite and `npm run build` (plus lint) before declaring a phase done.
 9. Separate lifecycles: payroll result, CFDI fiscal status, authority liability, bank settlement never advance each other (MX-041, MX-060).
 10. If the spec and the existing code conflict, or something is ambiguous, stop and ask me. Do not guess.
+11. **Production.** Merging to main deploys to production and runs Alembic migrations. Every phase PR must keep Mexico dormant and fail-closed, and every migration must be additive and guarded. (`.github/workflows/backend-deploy.yml` runs on every push to `main`: tests → SSH → `git pull` → `alembic upgrade head` → restart. Current production state: `docs/mexico/PRODUCTION_STATE.md`.)
+12. **Git and deploy state.** Verify git and deploy state before building; never assume it. Ask before any git operation other than staging (pull, stash, merge, checkout, reset). Never commit, push or merge.
 
 ## Working mode
 

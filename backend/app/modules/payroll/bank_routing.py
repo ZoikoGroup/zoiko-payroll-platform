@@ -46,7 +46,10 @@ from typing import List, Optional
 # read from compliance_fields, exactly like every non-India country.
 # Netherlands (ZP-NL-ENG-001) also rides SEPA with IBAN + BIC, following the
 # DE pattern (combined "{iban} {bic}" BTF routing value).
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL")
+# Mexico (ZP-MX-ENG-001 Phase 4b): the 18-digit CLABE on the SPEI rail —
+# inert until a Mexican employee can exist (MX_TENANT_ONBOARDING_ENABLED);
+# no Mexican payment file exists before Phase 10.
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -91,6 +94,12 @@ ROUTING_FIELDS = {
         {"key": "iban", "label": "IBAN"},
         {"key": "bic", "label": "BIC"},
     ],
+    "MX": [{"key": "clabe", "label": "CLABE"}],
+    "BR": [
+        {"key": "pix_key", "label": "PIX Key"},
+        {"key": "bank_compe", "label": "Bank COMPE"},
+        {"key": "bank_agency", "label": "Agency"},
+    ],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -107,6 +116,7 @@ BTF_ROUTING_LABEL = {
     "FR": "IBAN",
     "IE": "IBAN",
     "NL": "IBAN",
+    "MX": "CLABE",
     "BB": "Bank/Branch Code",
     "KY": "Bank/Branch Code",
     "DO": "Bank/Branch Code",
@@ -115,6 +125,7 @@ BTF_ROUTING_LABEL = {
     "TT": "Bank/Branch Code",
     "BS": "ACH Routing #",
     "PR": "ACH Routing #",
+    "BR": "PIX Key / COMPE",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -128,6 +139,7 @@ PAYMENT_MODE_LABEL = {
     "FR": "SEPA",
     "IE": "SEPA",
     "NL": "SEPA",
+    "MX": "SPEI",
     "BB": "EFT",
     "KY": "EFT",
     "DO": "EFT",
@@ -136,6 +148,7 @@ PAYMENT_MODE_LABEL = {
     "TT": "EFT",
     "BS": "ACH",
     "PR": "ACH",
+    "BR": "PIX / TED",
 }
 
 

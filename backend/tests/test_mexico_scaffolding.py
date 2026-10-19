@@ -105,7 +105,10 @@ def test_content_skeleton_declares_no_statutory_values():
     assert c.MX_2026 == ("MX-PAYROLL-2026", date(2026, 1, 1), date(2026, 12, 31))
     assert c.MX_ISN_STATES_IN_SCOPE == ("CDMX",)
     assert [g for g, _ in c.GATES] == [f"G{i}" for i in range(1, 9)]
-    assert c.MX_PARAMETER_KEYS == {}                 # Phase 1 adds values from saved official sources
+    # Phase 1 tooling names the parameter keys; every content table stays empty
+    # until transcription from the saved official sources.
+    assert all(k.startswith("mx_") for k in c.MX_PARAMETER_KEYS)
+    assert c.MX_SCALAR_CONTENT == () and c.MX_ISR_TARIFFS == ()
     assert all(rt.startswith("MX_") for rt in (c.MX_ISR_TARIFF_RULE, c.MX_CEAV_BAND_RULE, c.MX_MIN_WAGE_RULE,
                                                c.MX_VACATION_DAYS_RULE, c.MX_WORKWEEK_RULE))
 
@@ -136,7 +139,7 @@ def test_mx_calculation_blocks_in_every_mode():
     for mode in ("standard", "enterprise"):
         with pytest.raises(MexicoCalculationBlockedError) as exc:
             calculate_payroll(_ctx(), mode)
-        assert exc.value.key == "MX_ENGINE_NOT_IMPLEMENTED"
+        assert exc.value.key == "MX_PREFLIGHT_BLOCKED"          # Phase 5: no Mexico facts → every reason listed
     with pytest.raises(MexicoCalculationBlockedError) as exc:
         calculate_payroll(_ctx(), "simple")
     assert exc.value.key == "MX_SIMPLE_MODE_UNSUPPORTED"
@@ -180,8 +183,9 @@ def test_mx_hook_module_registered_with_full_contract():
     from app.modules.payroll import jurisdiction_hooks, mexico_service
 
     assert jurisdiction_hooks._MODULES["MX"] == "app.modules.payroll.mexico_service"
-    assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS
-    for name in _HOOK_KEYS:
+    # The 13 shared hooks, plus Mexico's optional Phase 2 approval gate.
+    assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS | {"pack_approval_refusal"}
+    for name in _HOOK_KEYS | {"pack_approval_refusal"}:
         assert callable(jurisdiction_hooks.get("MX", name)), name
 
 
@@ -193,13 +197,16 @@ def test_other_hook_modules_unchanged():
         "SA": "app.modules.payroll.saudi_arabia_service",
         "NL": "app.modules.payroll.netherlands_service",
         "MX": "app.modules.payroll.mexico_service",
+        # Brazil (ZP-BR-ENG-001) Phase 0, merged from venu — fail-closed module.
+        "BR": "app.modules.payroll.brazil_service",
     }
 
 
 def test_activation_and_template_refusals(db):
     from app.modules.payroll import jurisdiction_hooks
+    from scripts.seed_mexico_canonical_packs import seed_mexico
 
-    pack = SimpleNamespace(jurisdiction_country="MX", pack_type="tax")
+    pack = seed_mexico(db, manifest={})["national"]                 # Draft, empty content
     assert "refused" in jurisdiction_hooks.call("MX", "pack_activation_refusal", db, pack)
     assert "refused" in jurisdiction_hooks.call("MX", "template_activation_refusal", db, pack, 1)
     assert jurisdiction_hooks.call("MX", "statutory_editors", db, pack) == set()
@@ -211,21 +218,23 @@ def test_calc_inputs_and_run_approval_block(db):
     from app.modules.payroll.models import PayrollStatus
 
     employee = SimpleNamespace(organization_id=5, country_code="MX")
-    with pytest.raises(MexicoCalculationBlockedError):
+    with pytest.raises(MexicoCalculationBlockedError) as exc:     # Phase 6: dormant while the flag is off
         jurisdiction_hooks.call("MX", "calc_inputs", db, None, employee, None, as_of=date(2026, 2, 1))
+    assert exc.value.key == "MX_DORMANT"
     run = SimpleNamespace(organization_id=5)
-    for status in (PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
+    for status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):  # APPROVED: tests/test_mexico_run_integration.py
         with pytest.raises(MexicoCalculationBlockedError):
             jurisdiction_hooks.call("MX", "before_run_transition", db, run, status, 1)
     for status in (PayrollStatus.DRAFT, PayrollStatus.REVIEW):    # moving back is never blocked
         assert jurisdiction_hooks.call("MX", "before_run_transition", db, run, status, 1) is None
 
 
-def test_profile_hooks_refuse_mexican_profiles(db):
+def test_profile_hooks_are_phase_4b_and_other_hooks_stay_inert(db):
+    """Phase 4b replaced the Phase 0 profile refusal with real validation
+    (tests/test_mexico_statutory_profile.py); an empty profile has no errors."""
     from app.modules.payroll import jurisdiction_hooks
 
-    assert jurisdiction_hooks.call("MX", "statutory_profile_errors", SimpleNamespace())
-    assert jurisdiction_hooks.call("MX", "statutory_profile_values", db, None, None, None) == {}
+    assert jurisdiction_hooks.call("MX", "statutory_profile_errors", SimpleNamespace()) == []
     assert jurisdiction_hooks.call("MX", "payslip_hold_view", SimpleNamespace()) is None
     assert jurisdiction_hooks.call("MX", "pack_holidays", db, 2026) == []
     assert jurisdiction_hooks.call("MX", "payment_treatment", db, 1, None, []) == {}
@@ -268,7 +277,7 @@ def test_readiness_route_reports_every_gate_open(db):
         r = c.get(f"{BASE}/readiness")
     assert r.status_code == 200
     body = r.json()
-    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 0
+    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 6
     assert [g["gate"] for g in body["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in body["gates"]} == {"OPEN"}
 

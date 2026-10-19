@@ -5107,8 +5107,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_generated_reports",
-    "payroll_personal_data_access_events"
+    "payroll_generated_reports"
    ],
    "overridden": false
   },
@@ -5127,8 +5126,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_generated_reports",
-    "payroll_personal_data_access_events"
+    "payroll_generated_reports"
    ],
    "overridden": false
   },
@@ -5147,8 +5145,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_generated_reports",
-    "payroll_personal_data_access_events"
+    "payroll_generated_reports"
    ],
    "overridden": false
   },
@@ -5296,9 +5293,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
+    "payroll_employees"
    ],
    "overridden": false
   },
@@ -5897,8 +5892,6 @@
     "payroll_employee_statutory_profiles",
     "payroll_employees",
     "payroll_hk_average_wage_snapshots",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": false
@@ -6048,8 +6041,7 @@
     "payroll_hk_pre_transition_wage_overrides",
     "payroll_hk_tax_clearance_holds",
     "payroll_hk_termination_results",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
+    "payroll_hk_work_hours"
    ],
    "overridden": false
   },
@@ -7736,6 +7728,1531 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/aguinaldo-runs",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "aguinaldo-runs",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "organization_ytd_accumulators",
+    "payroll_attendance_records",
+    "payroll_ch_absence_benefit_events",
+    "payroll_ch_family_allowance_entitlements",
+    "payroll_court_ordered_deductions",
+    "payroll_employee_benefit_valuations",
+    "payroll_employee_establishments",
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_fr_pas_rates",
+    "payroll_hk_work_hours",
+    "payroll_ie_myfuturefund_statuses",
+    "payroll_ie_rpn_snapshots",
+    "payroll_leave_requests",
+    "payroll_ni_relief_facts",
+    "payroll_pr_withholding_certificates",
+    "payroll_salary_tds_claims",
+    "payroll_salary_tds_declarations",
+    "payroll_super_guarantee_liabilities",
+    "payroll_ytd_accumulators",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/accrue",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "accrue",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_run_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/isn-returns",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "isn-returns",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/isn-returns",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "isn-returns",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/isn-returns/{return_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "isn-returns",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/isn-returns/{return_id}/file",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "file",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/isn-returns/{return_id}/outcome",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "outcome",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/liabilities",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "liabilities",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/liabilities/{liability_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "liabilities",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/liabilities/{liability_id}/file",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "file",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/liabilities/{liability_id}/pay",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "pay",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/liabilities/{liability_id}/reconcile",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/movements",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "movements",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_imss_movements"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/movements/export",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "export",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_imss_movements"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/movements/generate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "generate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_imss_movements",
+    "payroll_mx_sbc_history"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/movements/{movement_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "movements",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/movements/{movement_id}/outcome",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "outcome",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/movements/{movement_id}/regenerate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "regenerate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_imss_movements"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/movements/{movement_id}/withdraw",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/sua-differences/{difference_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/sua-differences/{difference_id}/explain",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "explain",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/sua-periods",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "sua-periods",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/sua-periods",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "sua-periods",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/sua-periods/{period_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "sua-periods",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/sua-periods/{period_id}/figures",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "figures",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/sua-periods/{period_id}/payment",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "payment",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/sua-periods/{period_id}/reconcile",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/authorities/summary",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "summary",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_imss_movements",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/{kind}/{entity_id}/confirm-retry",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "confirm-retry",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/{kind}/{entity_id}/status-check",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "status-check",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/authorities/{kind}/{entity_id}/unknown",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "unknown",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_sua_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/cancellation-reasons",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "cancellation-reasons",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "documents",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/confirm-retry",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "confirm-retry",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/status-query",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "status-query",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/outbox/process",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "process",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/reconcile",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/collective-agreements",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "collective-agreements",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/corrections/{run_id}/void",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "void",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "organization_ytd_accumulators",
+    "payroll_mx_run_corrections",
+    "payroll_ytd_accumulators",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/credentials/{credential_id}/certificate",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "certificate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/credentials/{credential_id}/revoke",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "revoke",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employees",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/hours",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "hours",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employees/{employee_id}/hours",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "hours",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employees/{employee_id}/infonavit-notices",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "infonavit-notices",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employees/{employee_id}/opening-balances",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "opening-balances",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/readiness",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "readiness",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/vacation",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "vacation",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_vacation_records"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employees/{employee_id}/vacation",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "vacation",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_vacation_records"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employers",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "employers",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employers/{employer_id}",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers/{employer_id}/credentials",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "credentials",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers/{employer_id}/establishments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "establishments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers/{employer_id}/imss-registrations",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "imss-registrations",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers/{employer_id}/isn-registrations",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "isn-registrations",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers/{employer_id}/labor-policies",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "labor-policies",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employers/{employer_id}/versions",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "versions",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/establishments/{establishment_id}/deactivate",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "deactivate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/hours/{hours_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/imss-registrations/{registration_id}/close",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "close",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/imss-registrations/{registration_id}/infonavit",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "infonavit",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/imss-registrations/{registration_id}/risk-premiums",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "risk-premiums",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/isn-registrations/{isn_id}/close",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "close",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/labor-policies/{policy_id}/activate",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "activate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/labor-policies/{policy_id}/floor-check",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "floor-check",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/opening-balances/{row_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/readiness",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "readiness",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/mexico/risk-premiums/{premium_id}/approve",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/runs/{run_id}/cfdi",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "cfdi",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_attendance_records",
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_run_corrections",
+    "payroll_mx_vacation_records",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/cfdi/generate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "generate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_attendance_records",
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_run_corrections",
+    "payroll_mx_vacation_records",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/runs/{run_id}/corrections",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "corrections",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_run_corrections"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/corrections",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "corrections",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "organization_ytd_accumulators",
+    "payroll_attendance_records",
+    "payroll_ch_absence_benefit_events",
+    "payroll_ch_family_allowance_entitlements",
+    "payroll_court_ordered_deductions",
+    "payroll_employee_benefit_valuations",
+    "payroll_employee_establishments",
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_fr_pas_rates",
+    "payroll_hk_work_hours",
+    "payroll_ie_myfuturefund_statuses",
+    "payroll_ie_rpn_snapshots",
+    "payroll_leave_requests",
+    "payroll_mx_run_corrections",
+    "payroll_ni_relief_facts",
+    "payroll_pr_withholding_certificates",
+    "payroll_salary_tds_claims",
+    "payroll_salary_tds_declarations",
+    "payroll_super_guarantee_liabilities",
+    "payroll_ytd_accumulators",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/runs/{run_id}/preflight",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preflight",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/preflight/{exception_id}/acknowledge",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "acknowledge",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/reset",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reset",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_benefit_accruals",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_imss_branch_lines",
+    "payroll_mx_imss_movements",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_run_corrections",
+    "payroll_mx_sbc_history",
+    "payroll_mx_sua_differences",
+    "payroll_mx_vacation_records",
+    "payroll_mx_variable_accumulators",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/runs/{run_id}/status",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "status",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_attendance_records",
+    "payroll_employees",
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_benefit_accruals",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_imss_branch_lines",
+    "payroll_mx_imss_movements",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_run_corrections",
+    "payroll_mx_sbc_history",
+    "payroll_mx_vacation_records",
+    "payroll_mx_variable_accumulators",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/vacation/{record_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_vacation_records"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/vacation/{record_id}/withdraw",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_vacation_records"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/netherlands/absence-pay-policies",
    "data_class": "tenant_config",
@@ -8042,13 +9559,10 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_nl_income_relationships",
     "payroll_nl_termination_settlements",
-    "payroll_nl_vacation_allowance_ledger",
-    "payroll_ytd_accumulators"
+    "payroll_nl_vacation_allowance_ledger"
    ],
    "overridden": false
   },
@@ -8195,13 +9709,10 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_nl_income_relationships",
     "payroll_nl_loonaangifte_lines",
     "payroll_nl_vcr_snapshots",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": false
@@ -8257,13 +9768,10 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_nl_income_relationships",
     "payroll_nl_loonaangifte_lines",
     "payroll_nl_vcr_snapshots",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": false
@@ -9139,7 +10647,6 @@
     "payroll_employee_statutory_profiles",
     "payroll_employees",
     "payroll_fr_pas_rates",
-    "payroll_hk_work_hours",
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
@@ -9168,6 +10675,7 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
+    "payroll_mx_run_corrections",
     "payroll_ytd_accumulators",
     "payslip_items"
    ],
@@ -9262,8 +10770,13 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_attendance_records",
     "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_run_corrections",
+    "payroll_mx_vacation_records",
     "payroll_personal_data_access_events",
+    "payslip_allowance_items",
     "payslip_items",
     "sgp_ir21_cases"
    ],
@@ -9433,7 +10946,6 @@
     "payroll_employee_statutory_profiles",
     "payroll_employees",
     "payroll_fr_pas_rates",
-    "payroll_hk_work_hours",
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_ni_relief_facts",
@@ -9470,7 +10982,7 @@
   {
    "method": "POST",
    "path": "/api/payroll/saudi-arabia/calculation-preview",
-   "data_class": "worker",
+   "data_class": "tenant_config",
    "action": "create",
    "resource": "calculation-preview",
    "principals": [
@@ -9481,12 +10993,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": null,
-   "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": false
   },
   {
@@ -9707,9 +11214,6 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_ytd_accumulators",
     "payslip_items"
    ],
@@ -9730,10 +11234,6 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": false
@@ -10835,7 +12335,6 @@
     "payroll_ch_family_allowance_entitlements",
     "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_ytd_accumulators"
    ],
    "overridden": false
@@ -10856,9 +12355,6 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_ytd_accumulators",
     "payslip_items"
    ],
@@ -11747,8 +13243,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_generated_reports",
-    "payroll_personal_data_access_events"
+    "payroll_generated_reports"
    ],
    "overridden": false
   },
@@ -12443,6 +13938,136 @@
    "data_class": "platform",
    "action": "read",
    "resource": "active-tax-configuration",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/employees",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employees",
+   "principals": [],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
+   "note": "lists Brazilian employees (names, codes) of one organization",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/fpas-table",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "fpas-table",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/gates",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "gates",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/brazil/golden-check",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "golden-check",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/organizations",
+   "data_class": "aggregate",
+   "action": "read",
+   "resource": "organizations",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: organization id + name of tenants with Brazil payroll (registry metadata)",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/pack-rows",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "pack-rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/readiness",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/rubric-catalogue",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "rubric-catalogue",
    "principals": [
     "super_admin"
    ],
@@ -13899,10 +15524,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified metadata: PAP release status only",
-   "scan_worker_tables": [
-    "payroll_employees",
-    "support_grant_employees"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -13934,10 +15556,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified metadata: gate evaluation flags only",
-   "scan_worker_tables": [
-    "payroll_employees",
-    "support_grant_employees"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -13953,9 +15572,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified metadata: PAP release certification fields only",
-   "scan_worker_tables": [
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14227,12 +15844,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified synthetic: preview computes from inline synthetic facts; no employee fields returned",
-   "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14248,9 +15860,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified config: returns statutory pack row diffs only",
-   "scan_worker_tables": [
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14298,9 +15908,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified config: returns statutory pack rows only",
-   "scan_worker_tables": [
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14531,11 +16139,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified synthetic: runs golden fixtures; returns pass/fail counts",
-   "scan_worker_tables": [
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14551,9 +16155,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified metadata: readiness gates/status counts only",
-   "scan_worker_tables": [
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14748,12 +16350,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified synthetic: inline synthetic facts; returns gross/deductions/netPay only",
-   "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -14838,8 +16435,6 @@
    "note": "per-jurisdiction statutory summary returns counts only",
    "scan_worker_tables": [
     "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true
@@ -15022,10 +16617,448 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/authorities",
+   "data_class": "aggregate",
+   "action": "read",
+   "resource": "authorities",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: IMSS / SUA / ISN counts by status and platform blocks; no movement rows",
+   "scan_worker_tables": [
+    "payroll_mx_imss_movements"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/benefits-workweek",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "benefits-workweek",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/ceav-schedule",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "ceav-schedule",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/cfdi",
+   "data_class": "aggregate",
+   "action": "read",
+   "resource": "cfdi",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: CFDI counts by status + schema release; UNKNOWN documents reduced to a count",
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "cfdi-catalogs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "cfdi-catalogs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/{release_id}/entries",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "entries",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/{release_id}/entries",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "entries",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/{release_id}/{action}",
+   "data_class": "platform",
+   "action": "update",
+   "resource": "cfdi-catalogs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/earning-classifications",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "earning-classifications",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/earning-classifications",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "earning-classifications",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/earning-classifications/{classification_id}/approve",
+   "data_class": "platform",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/earning-classifications/{classification_id}/archive",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "archive",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/employees",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employees",
+   "principals": [],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
+   "note": "lists Mexican employees (names, codes) of one organization",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/employees/{employee_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employees",
+   "principals": [],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
+   "note": "one Mexican employee's record and readiness",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/employer-readiness",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "employer-readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/employer-readiness/summary",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "summary",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/employers",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/employers/{employer_id}",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/imss-branches",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "imss-branches",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/infonavit",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "infonavit",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/isn-states",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "isn-states",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/isr-tariffs",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "isr-tariffs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/organizations",
+   "data_class": "aggregate",
+   "action": "read",
+   "resource": "organizations",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: organization id + name of tenants with Mexico payroll (registry metadata)",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/packs",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "packs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/packs/{pack_row_id}/activation-readiness",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "activation-readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/readiness",
    "data_class": "platform",
    "action": "read",
    "resource": "readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/uma-min-wage",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "uma-min-wage",
    "principals": [
     "super_admin"
    ],
@@ -15263,13 +17296,10 @@
    "retired_reason": "statutory action is tenant-run (ZP-PRIV decision 3)",
    "note": "loonaangifte build moves to the tenant (decision 3); SA keeps status/metadata",
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_nl_income_relationships",
     "payroll_nl_loonaangifte_lines",
     "payroll_nl_vcr_snapshots",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true
@@ -15317,11 +17347,9 @@
    "note": "loonaangifte correction moves to the tenant (decision 3)",
    "scan_worker_tables": [
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_nl_income_relationships",
     "payroll_nl_loonaangifte_lines",
     "payroll_nl_vcr_snapshots",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true
@@ -15352,13 +17380,10 @@
    "retired_reason": "statutory action is tenant-run (ZP-PRIV decision 3)",
    "note": "loonaangifte reconcile moves to the tenant (decision 3)",
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_nl_income_relationships",
     "payroll_nl_loonaangifte_lines",
     "payroll_nl_vcr_snapshots",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true
@@ -15868,12 +17893,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified synthetic: inline synthetic facts; employeeId is input, not echoed",
-   "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -16090,11 +18110,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified synthetic: same golden-vector harness as HK; pass/fail counts only",
-   "scan_worker_tables": [
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -16110,9 +18126,6 @@
    "note": "payslip correction moves to the tenant (decision 3)",
    "scan_worker_tables": [
     "organization_ytd_accumulators",
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_ytd_accumulators",
     "payslip_items"
    ],
@@ -16312,10 +18325,7 @@
    "retired_reason": null,
    "note": "verified synthetic: inline synthetic facts; returns CPF/SDL/etc. only",
    "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
+    "payroll_employees"
    ],
    "overridden": true
   },
@@ -16385,8 +18395,6 @@
    "note": "Singapore statutory summary returns counts only",
    "scan_worker_tables": [
     "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true
@@ -16548,12 +18556,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified synthetic: inline synthetic facts; returns totals only",
-   "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
@@ -16588,7 +18591,6 @@
     "payroll_ch_family_allowance_entitlements",
     "payroll_employee_statutory_profiles",
     "payroll_employees",
-    "payroll_hk_work_hours",
     "payroll_ytd_accumulators"
    ],
    "overridden": true
@@ -17140,12 +19142,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "verified aggregate: returns case pass/fail counts, no worker rows",
-   "scan_worker_tables": [
-    "payroll_employee_statutory_profiles",
-    "payroll_employees",
-    "payroll_hk_work_hours",
-    "payroll_ytd_accumulators"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {

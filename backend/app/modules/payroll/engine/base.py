@@ -1000,6 +1000,67 @@ class PayrollContext:
     mx_ytd: dict = None                        # committed year-to-date bases
     mx_employee_id: int = None
     mx_organization_id: int = None
+    # Phase 5 engine inputs (filled by Phase 6 calc_inputs; tests build them).
+    mx_earnings: list = None                   # [{code, amount, kind}] earning lines of the period
+    mx_period: dict = None                     # {start, end, days_paid, absence_days, incapacity_days, segments}
+    mx_hours: dict = None                      # approved hours: {weeks:[{overtime_hours}], hourly_rate, sundays_worked, holiday_days}
+    mx_variable_accumulator: dict = None       # prior-bimester variable pay {total, days} (MX-020)
+    mx_min_wage_zone: str = None               # GENERAL / ZLFN / UNRESOLVED — derived by the service, never typed
+    mx_month_to_date: dict = None              # {taxable, subsidy_applied} already committed in the month
+    mx_pack: dict = None                       # {pack_id, version, source_codes} of the national rows (MX-063 trace)
+    # Phase 6: the national pack rows in force on the pay date as plain dicts
+    # {rate_map, slabs} (service.pack_rows_for_golden — row-level dates
+    # applied). When set, the Mexico engine reads these instead of rate_map /
+    # slabs (which the shared resolver fills with ORM rows keyed per key).
+    mx_pack_rows: dict = None
+    # Phase 6: per-input hashes bound by the approval fingerprint (MX-040);
+    # the engine never reads them — the payslip snapshot carries them.
+    mx_input_components: dict = None
+    # Phase 9: the Mexican run type (ORDINARY / CORRECTION / AGUINALDO / …) —
+    # a special run pays one concept on its own — and that payment's own
+    # computation detail (e.g. aguinaldo days × salary × proportion), carried
+    # into the result trace.
+    mx_run_type: str = None
+    mx_special_detail: dict = None
+
+    # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
+    # Resolved by the service layer before dispatch; engine/countries/brazil.py
+    # is a pure function of its context (no DB access from the engine layer,
+    # matching every other country's calculator). None/absent for every non-BR
+    # calculation — existing calculations for every other country are unaffected.
+    #
+    # brazil_inputs: dict carrying all Brazil-specific scalars:
+    #   {
+    #     "dependents":               int,    # IRRF + Salário-Família eligible dependents
+    #     "alimony":                  str,    # Decimal-string pension alimentícia (IRRF deduction)
+    #     "vt_benefit":               str,    # Decimal-string Vale-Transporte employer provision
+    #     "opt_out_simplified_irrf":  bool,   # True → always use legal deductions (rare)
+    #     "rat_pct":                  str,    # Decimal-string risk class rate e.g. "2" = 2%
+    #     "fap_factor":               str,    # Decimal-string FAP multiplier e.g. "1.0"
+    #     "third_party_pct":          str,    # Decimal-string Outras Entidades / FPAS rate
+    #     "cprb_opted":               bool,   # True → 10% CPRB transition rate
+    #     "financial_sector":         bool,   # True → +2.5% CPP add-on
+    #     "concurrent_inss_base":     str,    # Decimal-string salary already absorbed in concurrent jobs
+    #     "concurrent_inss_deducted": str,    # Decimal-string INSS already withheld in concurrent jobs
+    #     "concurrent_sf_base":       str,    # Decimal-string remuneration from concurrent employer (SF eligibility)
+    #   }
+    # Empty dict for every non-BR employee. Phase 0 (scaffolding): every
+    # Brazilian calculation BLOCKS in countries/brazil.py before these are
+    # read; Phase 5 makes each required key fail closed when absent (BR-001).
+    brazil_inputs: dict = field(default_factory=dict)
+
+    # brazil_is_apprentice: True → FGTS 2% (not ordinary 8%), per BR-045.
+    # False for every non-BR employee and for every regular CLT worker.
+    brazil_is_apprentice: bool = False
+
+    # brazil_statutory_profile / brazil_establishment / brazil_employer_profile:
+    # Pre-resolved ORM row objects for Phase 3+ — eSocial/DCTFWeb/FGTS Digital
+    # integration wiring. None for every Phase 2 calculation; engine/countries/
+    # brazil.py does not read these yet (Phase 2 scope: calculation engine only).
+    brazil_statutory_profile: object = None    # PayrollBrStatutoryProfile | None (Phase 3)
+    brazil_establishment: object = None        # PayrollBrEstablishment | None (Phase 3)
+    brazil_employer_profile: object = None     # PayrollBrEmployerProfile | None (Phase 3)
+    brazil_organization_id: int = None         # for blocked-error context only
 
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
@@ -1615,6 +1676,30 @@ class PayrollResult:
     # Mexico (ZP-MX-ENG-001) — the whole dict countries/mexico.py returns
     # under 'mx_result'. None for every non-MX country.
     mx_result: dict = None
+
+    # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
+    # The whole dict countries/brazil.py returns under 'br_result' key (spec,
+    # engine version, all statutory figures as decimal strings, full trace).
+    # None for every non-BR country.
+    br_result: dict = None
+    # Flat snapshot fields — persisted onto PayslipItem.br_* columns by
+    # service.py on commit. Zero/None for every non-BR calculation; never
+    # re-summed into total_deductions (employer liabilities are NOT employee
+    # deductions — BR-045). Employee-side deductions (inss_employee, irrf,
+    # vt_deduction) already flow into total_deductions via the employee_pf/tds/
+    # br_vale_transporte_deduction keys returned by brazil.calculate().
+    br_base_inss: Decimal = Decimal("0")
+    br_inss_employee: Decimal = Decimal("0")
+    br_base_irrf: Decimal = Decimal("0")
+    br_irrf: Decimal = Decimal("0")
+    br_irrf_reduction: Decimal = Decimal("0")
+    br_salario_familia: Decimal = Decimal("0")
+    br_vale_transporte_deduction: Decimal = Decimal("0")
+    br_base_fgts: Decimal = Decimal("0")
+    br_fgts_deposit: Decimal = Decimal("0")    # Employer liability — never in net pay
+    br_cpp_employer: Decimal = Decimal("0")    # Employer liability — never in net pay
+    br_rat_adjusted: Decimal = Decimal("0")    # Employer liability — never in net pay
+    br_third_parties: Decimal = Decimal("0")   # Employer liability — never in net pay
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through

@@ -705,7 +705,7 @@ export const deletePayRun = async (id) => {
   return await api.delete(`/api/payroll/runs/${id}`);
 };
 
-export const previewPayrollRun = async (employeeIds, country = "IN", periodStart = undefined, periodEnd = undefined, calculationMode = undefined) => {
+export const previewPayrollRun = async (employeeIds, country = "IN", periodStart = undefined, periodEnd = undefined, calculationMode = undefined, payDate = undefined) => {
   return await api.post("/api/payroll/runs/preview", {
     employeeIds,
     country,
@@ -717,6 +717,9 @@ export const previewPayrollRun = async (employeeIds, country = "IN", periodStart
     ...(periodStart ? { periodStart } : {}),
     ...(periodEnd ? { periodEnd } : {}),
     ...(calculationMode ? { calculationMode } : {}),
+    // The run's pay date — Mexico selects the law by it (MX-004) and refuses
+    // a preview without it; other countries ignore it.
+    ...(payDate ? { payDate } : {}),
   });
 };
 
@@ -2537,3 +2540,143 @@ export const listNlPaymentBatches = () => nlList(api.get(`${NL}/payment-batches`
 export const getNlPaymentBatch = (batchId) => api.get(`${NL}/payment-batches/${batchId}`);
 export const createNlSalaryBatch = (runId, payload = {}) => api.post(`${NL}/runs/${runId}/salary-batch`, payload);
 export const getNlWkr = (taxYear) => api.get(`${NL}/wkr`, { params: { tax_year: taxYear } });
+
+// ── Mexico (ZP-MX-ENG-001) — organisation API (/api/payroll/mexico), Phase 3 ──
+// Employer onboarding (spec §11, panels A–H) for YOUR organisation only.
+// No statutory value is ever sent (floors, premium range and period come
+// from governed content). Credentials are gcp-sm:// references only — never
+// a key, password or certificate private part. Readiness always takes an
+// explicit date (`on`); the server date is never used.
+const MX = "/api/payroll/mexico";
+const mxList = async (promise) => {
+  const res = await promise;
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listMxEmployers = () => mxList(api.get(`${MX}/employers`));
+export const getMxEmployer = (employerId) => api.get(`${MX}/employers/${employerId}`);
+export const createMxEmployer = (payload) => api.post(`${MX}/employers`, payload);
+export const createMxEmployerVersion = (employerId, payload) => api.post(`${MX}/employers/${employerId}/versions`, payload);
+export const createMxEstablishment = (employerId, payload) => api.post(`${MX}/employers/${employerId}/establishments`, payload);
+export const deactivateMxEstablishment = (id) => api.put(`${MX}/establishments/${id}/deactivate`, {});
+export const createMxImssRegistration = (employerId, payload) => api.post(`${MX}/employers/${employerId}/imss-registrations`, payload);
+export const setMxInfonavitModel = (registrationId, model) =>
+  api.put(`${MX}/imss-registrations/${registrationId}/infonavit`, { infonavitOperatingModel: model });
+export const closeMxImssRegistration = (id, effectiveTo) => api.put(`${MX}/imss-registrations/${id}/close`, { effectiveTo });
+export const createMxRiskPremium = (registrationId, payload) =>
+  api.post(`${MX}/imss-registrations/${registrationId}/risk-premiums`, payload);
+export const approveMxRiskPremium = (premiumId) => api.put(`${MX}/risk-premiums/${premiumId}/approve`, {});
+export const createMxIsnRegistration = (employerId, payload) => api.post(`${MX}/employers/${employerId}/isn-registrations`, payload);
+export const closeMxIsnRegistration = (id, effectiveTo) => api.put(`${MX}/isn-registrations/${id}/close`, { effectiveTo });
+export const createMxLaborPolicy = (employerId, payload) => api.post(`${MX}/employers/${employerId}/labor-policies`, payload);
+export const activateMxLaborPolicy = (policyId) => api.put(`${MX}/labor-policies/${policyId}/activate`, {});
+export const getMxFloorCheck = (policyId, on) => api.get(`${MX}/labor-policies/${policyId}/floor-check`, { params: { on } });
+export const listMxCollectiveAgreements = () => mxList(api.get(`${MX}/collective-agreements`));
+export const createMxCredential = (employerId, payload) => api.post(`${MX}/employers/${employerId}/credentials`, payload);
+export const revokeMxCredential = (credentialId) => api.put(`${MX}/credentials/${credentialId}/revoke`, {});
+export const getMxReadinessOn = (on) => api.get(`${MX}/readiness`, { params: { on } });
+// Phase 4b — employees. The profile itself is saved through createEmployeeStatutoryProfile (shared route).
+export const getMxEmployeeRecord = (employeeId) => api.get(`${MX}/employees/${employeeId}`);
+export const getMxEmployeeReadiness = (employeeId, on) => api.get(`${MX}/employees/${employeeId}/readiness`, { params: { on } });
+export const recordMxInfonavitNotice = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/infonavit-notices`, payload);
+// Phase 6 — payroll runs (generation / approval stay on the shared run routes).
+export const getMxRunPreflight = (runId) => api.get(`${MX}/runs/${runId}/preflight`);
+export const acknowledgeMxPreflight = (runId, exceptionId, note) =>
+  api.post(`${MX}/runs/${runId}/preflight/${exceptionId}/acknowledge`, { note });
+export const getMxRunStatus = (runId) => api.get(`${MX}/runs/${runId}/status`);
+export const resetMxRun = (runId, reason) => api.post(`${MX}/runs/${runId}/reset`, { reason });
+export const listMxHours = (employeeId) => api.get(`${MX}/employees/${employeeId}/hours`);
+export const recordMxHours = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/hours`, payload);
+export const approveMxHours = (hoursId) => api.post(`${MX}/hours/${hoursId}/approve`, {});
+export const recordMxOpeningBalance = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/opening-balances`, payload);
+export const approveMxOpeningBalance = (rowId) => api.post(`${MX}/opening-balances/${rowId}/approve`, {});
+// Phase 7 — CFDI 4.0 + Nómina 1.2 lifecycle (generation refused until S28/S30/S4, Secret Manager and a PAC exist).
+export const getMxRunCfdi = (runId) => api.get(`${MX}/runs/${runId}/cfdi`);
+export const generateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/generate`, {});
+export const processMxCfdiOutbox = () => api.post(`${MX}/cfdi/outbox/process`, {});
+export const getMxCfdiDocument = (docId) => api.get(`${MX}/cfdi/documents/${docId}`);
+export const queryMxCfdiStatus = (docId) => api.post(`${MX}/cfdi/documents/${docId}/status-query`, {});
+export const confirmMxCfdiRetry = (docId, reason) => api.post(`${MX}/cfdi/documents/${docId}/confirm-retry`, { reason });
+export const cancelMxCfdi = (docId, reasonCode, replacementUuid) =>
+  api.post(`${MX}/cfdi/documents/${docId}/cancel`, { reasonCode, replacementUuid: replacementUuid || null });
+export const listMxCfdiCancelReasons = () => api.get(`${MX}/cfdi/cancellation-reasons`);
+// Phase 8 — authorities (file-export mode: Zoiko never transmits; outcomes are recorded).
+export const getMxAuthoritiesSummary = () => api.get(`${MX}/authorities/summary`);
+export const accrueMxLiabilities = () => api.post(`${MX}/authorities/accrue`, {});
+export const listMxLiabilities = () => api.get(`${MX}/authorities/liabilities`);
+export const getMxLiability = (id) => api.get(`${MX}/authorities/liabilities/${id}`);
+export const fileMxLiability = (id, reference) => api.post(`${MX}/authorities/liabilities/${id}/file`, { reference });
+export const payMxLiability = (id, reference) => api.post(`${MX}/authorities/liabilities/${id}/pay`, { reference });
+export const reconcileMxLiability = (id) => api.post(`${MX}/authorities/liabilities/${id}/reconcile`, {});
+export const listMxMovements = () => api.get(`${MX}/authorities/movements`);
+export const generateMxMovements = () => api.post(`${MX}/authorities/movements/generate`, {});
+export const recordMxMovementOutcome = (id, payload) => api.post(`${MX}/authorities/movements/${id}/outcome`, payload);
+export const withdrawMxMovement = (id, reason) => api.post(`${MX}/authorities/movements/${id}/withdraw`, { reason });
+export const regenerateMxMovement = (id) => api.post(`${MX}/authorities/movements/${id}/regenerate`, {});
+export const listMxSuaPeriods = () => api.get(`${MX}/authorities/sua-periods`);
+export const openMxSuaPeriod = (registrationId, periodKey) => api.post(`${MX}/authorities/sua-periods`, { registrationId, periodKey });
+export const getMxSuaPeriod = (id) => api.get(`${MX}/authorities/sua-periods/${id}`);
+export const enterMxSuaFigures = (id, rows, suaVersion) => api.post(`${MX}/authorities/sua-periods/${id}/figures`, { rows, suaVersion });
+export const explainMxSuaDifference = (id, code, explanation) => api.post(`${MX}/authorities/sua-differences/${id}/explain`, { code, explanation });
+export const approveMxSuaDifference = (id) => api.post(`${MX}/authorities/sua-differences/${id}/approve`, {});
+export const reconcileMxSuaPeriod = (id) => api.post(`${MX}/authorities/sua-periods/${id}/reconcile`, {});
+export const recordMxSuaPayment = (id, reference, captureLine) => api.post(`${MX}/authorities/sua-periods/${id}/payment`, { reference, captureLine });
+export const listMxIsnReturns = () => api.get(`${MX}/authorities/isn-returns`);
+export const draftMxIsnReturn = (stateCode, periodKey) => api.post(`${MX}/authorities/isn-returns`, { stateCode, periodKey });
+export const getMxIsnReturn = (id) => api.get(`${MX}/authorities/isn-returns/${id}`);
+export const fileMxIsnReturn = (id, reference) => api.post(`${MX}/authorities/isn-returns/${id}/file`, { reference });
+export const recordMxIsnOutcome = (id, outcome) => api.post(`${MX}/authorities/isn-returns/${id}/outcome`, { outcome });
+// Phase 9a — correction runs of committed payslips.
+export const getMxRunCorrections = (runId) => api.get(`${MX}/runs/${runId}/corrections`);
+export const openMxRunCorrection = (runId, itemIds, reason) => api.post(`${MX}/runs/${runId}/corrections`, { itemIds, reason });
+export const voidMxRunCorrection = (runId, reason) => api.post(`${MX}/corrections/${runId}/void`, { reason });
+// Phase 9b — vacation records / ledger and the aguinaldo run.
+export const getMxVacationLedger = (employeeId) => api.get(`${MX}/employees/${employeeId}/vacation`);
+export const recordMxVacation = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/vacation`, payload);
+export const approveMxVacation = (recordId) => api.post(`${MX}/vacation/${recordId}/approve`, {});
+export const withdrawMxVacation = (recordId, reason) => api.post(`${MX}/vacation/${recordId}/withdraw`, { reason });
+export const openMxAguinaldoRun = (year, payDate) => api.post(`${MX}/aguinaldo-runs`, { year, payDate });
+// kind: movements | liabilities | isn-returns | sua-periods
+export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
+export const checkMxAuthorityStatus = (kind, id, found, reference) =>
+  api.post(`${MX}/authorities/${kind}/${id}/status-check`, { found, reference: reference || null });
+export const confirmMxAuthorityRetry = (kind, id, reason) => api.post(`${MX}/authorities/${kind}/${id}/confirm-retry`, { reason });
+
+// The IMSS worklist (D12): built on request and handed straight to the browser
+// as a download — never stored by Zoiko. It is NOT an IDSE file (layout X1).
+export async function exportMxMovementWorklist(movementIds) {
+  const res = await fetch(`${API_BASE_URL}${MX}/authorities/movements/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAccessToken()}` },
+    body: JSON.stringify({ movementIds: movementIds || null }),
+  });
+  if (!res.ok) {
+    let message = "The worklist export was refused.";
+    try { const j = await res.json(); message = j.message || j.detail || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  // The batch reference is the CSV's first row; the header is readable only same-origin.
+  const batch = res.headers.get("X-Zoiko-Batch") || `mx-imss-${new Date().toISOString().slice(0, 10)}`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${batch}-worklist.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return batch;
+}
+
+// The PUBLIC .cer is sent as the raw request body (the server reads it in
+// memory with a 16 KB cap; multipart would spool to a temp file there).
+export async function uploadMxCertificate(credentialId, file) {
+  const res = await fetch(`${API_BASE_URL}${MX}/credentials/${credentialId}/certificate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${getAccessToken()}` },
+    body: await file.arrayBuffer(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || data?.detail || "The certificate was refused.");
+  return data;
+}

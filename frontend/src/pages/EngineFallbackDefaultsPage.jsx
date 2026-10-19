@@ -35,6 +35,11 @@ const COUNTRIES = [
   // premies, vakantiegeld, WKR, minimumloon, ziektewet, transitievergoeding,
   // pensioen. NL has its own fallback registry in fallback_registry.py.
   { code: "NL", name: "Netherlands" },
+  // Mexico (ZP-MX-ENG-001): every row is MX_NO_FALLBACK — a missing pack row BLOCKS.
+  { code: "MX", name: "Mexico" },
+  // Brazil (ZP-BR-ENG-001) — engine fallback defaults for INSS, IRRF,
+  // salário-família, FGTS and CPP (Phase 2).
+  { code: "BR", name: "Brazil" },
 ];
 
 function toNumber(v) {
