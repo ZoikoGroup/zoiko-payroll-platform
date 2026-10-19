@@ -2589,6 +2589,16 @@ export const recordMxHours = (employeeId, payload) => api.post(`${MX}/employees/
 export const approveMxHours = (hoursId) => api.post(`${MX}/hours/${hoursId}/approve`, {});
 export const recordMxOpeningBalance = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/opening-balances`, payload);
 export const approveMxOpeningBalance = (rowId) => api.post(`${MX}/opening-balances/${rowId}/approve`, {});
+// Phase 7 — CFDI 4.0 + Nómina 1.2 lifecycle (generation refused until S28/S30/S4, Secret Manager and a PAC exist).
+export const getMxRunCfdi = (runId) => api.get(`${MX}/runs/${runId}/cfdi`);
+export const generateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/generate`, {});
+export const processMxCfdiOutbox = () => api.post(`${MX}/cfdi/outbox/process`, {});
+export const getMxCfdiDocument = (docId) => api.get(`${MX}/cfdi/documents/${docId}`);
+export const queryMxCfdiStatus = (docId) => api.post(`${MX}/cfdi/documents/${docId}/status-query`, {});
+export const confirmMxCfdiRetry = (docId, reason) => api.post(`${MX}/cfdi/documents/${docId}/confirm-retry`, { reason });
+export const cancelMxCfdi = (docId, reasonCode, replacementUuid) =>
+  api.post(`${MX}/cfdi/documents/${docId}/cancel`, { reasonCode, replacementUuid: replacementUuid || null });
+export const listMxCfdiCancelReasons = () => api.get(`${MX}/cfdi/cancellation-reasons`);
 
 // The PUBLIC .cer is sent as the raw request body (the server reads it in
 // memory with a 16 KB cap; multipart would spool to a temp file there).

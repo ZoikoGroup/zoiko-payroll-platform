@@ -8,6 +8,7 @@ import MXBenefitsWorkweekTab from "../../components/jurisdiction/mexico/MXBenefi
 import MXEarningClassificationTab from "../../components/jurisdiction/mexico/MXEarningClassificationTab";
 import MXCfdiCatalogTab from "../../components/jurisdiction/mexico/MXCfdiCatalogTab";
 import MXReadinessGatesTab from "../../components/jurisdiction/mexico/MXReadinessGatesTab";
+import MXCfdiLifecycleTab from "../../components/jurisdiction/mexico/MXCfdiLifecycleTab";
 import MXEmployerProfileTab from "../../components/jurisdiction/mexico/MXEmployerProfileTab";
 import MXStateAccordionWorkspace from "../../components/jurisdiction/mexico/state/MXStateAccordionWorkspace";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
@@ -39,6 +40,7 @@ export function mexicoExtraTabs(orgId, state) {
       <TestCertificationPanel jurisdiction="MX" label="Mexico (SAT / IMSS)" fixturesPath="backend/tests/fixtures/mx_golden/README.md" />
     )),
     tab("mx-readiness", "Readiness G1–G8", ClipboardCheck, "mx-tests", () => <MXReadinessGatesTab />),
+    tab("mx-cfdi-lifecycle", "CFDI lifecycle", FileCode2, "mx-readiness", () => <MXCfdiLifecycleTab />),
   ];
 }
 

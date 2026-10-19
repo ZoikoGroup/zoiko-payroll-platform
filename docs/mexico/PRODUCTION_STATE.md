@@ -16,8 +16,11 @@ Prepared 2026-10-16 from repository state and the public GitHub Actions API (rea
 | #105 (2026-10-16, from `venu`) | 8ae86ee | **38919092609** — success | **Not Mexico**: Brazil Phases 0–2 (ZP-BR-ENG-001), migration **`b7a1c9e3d5f2`** (brazil_statutory_foundation_phase1, parent `8b2f6d4e1a93`). Added `BR` beside `MX` in the shared country tuples. Production should be at `b7a1c9e3d5f2`. |
 | #106 (2026-10-17 ~01:50Z) | 5775299 | **38992536267** — test ✅ · single-head ✅ · deploy ✅ (SSH) · drift ✅ | **Phase 5** `1575015`: calculation engine (`engine/jurisdictions/mexico/`, orchestrator MX-ENGINE-2026.1). **No migration** — production stays at `b7a1c9e3d5f2`. Unreachable: `calc_inputs` still raises `MX_ENGINE_NOT_IMPLEMENTED`; `mx_golden` empty. |
 | #107 (2026-10-17 04:21Z) | 318aa20 | **39002236064** — test ✅ (24 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅ — completed 04:46Z; frontend build run 39002236174 ✅ | **Phase 6** `30ff892`: payroll run integration, migration **`c4f7a2d9e6b1`** (mx_run_m4: 7 new Mexico tables, `payroll_mx_labor_policies.salary_days_convention`, `payslip_items.mx_calculation_snapshot`, `payroll_runs.mx_approval_fingerprint` / `mx_run_type` — shared ALTERs last, each its own transaction, `lock_timeout` 5 s). Dormant: `calc_inputs` refuses `MX_DORMANT`. Production should be at **`c4f7a2d9e6b1`** (the SSH step's head check would have failed otherwise) — confirm with `alembic current`. |
+| #108 (2026-10-17 ~05:20Z) | 46c7957 | **39005680799** — test ✅ · single-head ✅ · deploy ✅ (SSH) · drift ✅; frontend build 39005680877 ✅ | **Phase 6 follow-up** `8d287f3`: preview takes the run's pay date (Mexico refuses without it), Mexico-only read-only policy in preview (OOS-8), "—" Mexican employer totals, blocked Mexican preview → coded 4xx (OOS-9), master-prompt rule 12. **No migration** — production stays at `c4f7a2d9e6b1`. |
 
-Everything committed on `nikhil` up to `30ff892` (Phase 6) is on `main` and deployed (run 39002236064); production database head expected **`c4f7a2d9e6b1`** (mx_run_m4) — confirm with `alembic current` (the job logs need admin rights).
+Everything committed on `nikhil` up to `8d287f3` (Phase 6 follow-up) is on `main` (`46c7957`) and deployed (run 39005680799); production database head expected **`c4f7a2d9e6b1`** — confirm with `alembic current`.
+
+**Pending (not on `main`):** Phase 7 (CFDI lifecycle, migration **`d8b3e5f1a2c7`** mx_cfdi_m5 — three new empty tables, no shared column) is staged on `nikhil` and not yet committed. Its merge moves the production head `c4f7a2d9e6b1` → `d8b3e5f1a2c7`; production effect in `MEXICO_PHASE_7_IMPLEMENTATION_REPORT.md` §4.
 
 **Migration result (inferred, see §6 to confirm).** The SSH step runs `alembic current --check-heads` and a script that exits non-zero unless the database heads equal the repository head; that step succeeded for run 38860348647, so production should be at **`6e4a1d9c3f27`**. The job logs themselves need repository admin rights (`403 Must have admin rights`), so the exact migration lines were not read.
 
@@ -104,6 +107,10 @@ Then `sudo nginx -t && sudo systemctl reload nginx`.
 ## 4. Infrastructure lead time
 
 Per-employer CSD/PAC credentials need **GCP Secret Manager** live in production before Phase 7 (today application secrets are in the VM `.env`; Secret Manager is the target in GCP_DEPLOYMENT.md).
+
+**Cloud Storage in production is a shared prerequisite.** Mexico Phase 7 D4 (CFDI XML storage) and the HK durable-storage item (G5 finding F-8) both go through `app/core/object_storage.durable_storage_refusal`, which refuses the local `/tmp` fallback in production. Configuring `PAYROLL_GCS_BUCKET` / `PAYROLL_STORAGE_BACKEND=gcs` once unblocks both; until then, both refuse to store anything in production.
+
+**OOS-4 is not a code defect.** The one failing HK test locally (`test_hong_kong_configuration.py::…documented_sourced_consumed_and_exposed`) depends on the untracked HK owner pack (`docs/HONG_KONG_RELEASE_EVIDENCE/`, HK "commit 8"). It fails only where that stale local pack exists. CI and production have no copy, so the deploy test job is unaffected.
 
 ## 5. Rule for every future Mexico PR
 

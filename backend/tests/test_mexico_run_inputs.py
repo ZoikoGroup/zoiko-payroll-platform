@@ -131,6 +131,71 @@ def test_month_to_date_counts_committed_runs_only(db, monkeypatch):
     assert mtd["taxable"] == D(first.mx_calculation_snapshot["result"]["isr_taxable"])
 
 
+def test_month_to_date_never_counts_a_later_payment_so_an_earlier_approval_survives(db, monkeypatch):
+    """Directional: Jun 30's month-to-date includes Jun 15; Jun 15's never
+    includes Jun 30 — committing the later run leaves the earlier approval valid."""
+    from app.modules.payroll import mexico_run_service, service
+    from app.modules.payroll.models import PayrollRun
+
+    w = rh.world(db, monkeypatch)
+    first = rh.generate(db, w)[0]
+    rh.advance(db, w)
+    rh.advance(db, w)                                       # Jun 1-15 (paid Jun 15) committed
+    second = PayrollRun(organization_id=w.org.id, period_label="Jun 16-30, 2026", period_start=date(2026, 6, 16),
+                        period_end=date(2026, 6, 30), pay_date=date(2026, 6, 30), status="Draft",
+                        created_by=w.users[0].id)
+    db.add(second)
+    db.commit()
+    service.generate_payslips_for_run(db, second, w.org.id, [w.employee.id])
+    for _ in range(2):
+        service.advance_payroll_run_status(db, second.id, w.users[1].id, w.org.id)   # Jun 16-30 committed
+    db.refresh(w.run)
+    later = mexico_run_service._month_to_date(db, w.employee.id, second, second.pay_date)
+    earlier = mexico_run_service._month_to_date(db, w.employee.id, w.run, w.run.pay_date)
+    assert later["taxable"] == D(first.mx_calculation_snapshot["result"]["isr_taxable"]) > 0
+    assert earlier["taxable"] == 0 < later["taxable"]
+    assert mexico_run_service.approval_drift(db, w.run) == []
+
+
+@pytest.mark.parametrize("higher_id_first", [False, True], ids=["id-order", "reverse-id-order"])
+def test_month_to_date_same_pay_date_tie_break_is_commit_order(db, monkeypatch, higher_id_first):
+    """Two committed runs with the SAME pay date. Tie-break = (pay date,
+    committedAt, run id): the one committed first never counts the other; the
+    one committed second counts the first — in either id order — and neither
+    commit invalidates the other run's approval."""
+    from app.modules.payroll import mexico_run_service, service
+    from app.modules.payroll.models import PayrollRun
+
+    w = rh.world(db, monkeypatch)
+    other = PayrollRun(organization_id=w.org.id, period_label="Jun 1-15, 2026 (2)", period_start=rh.PERIOD[0],
+                       period_end=rh.PERIOD[1], pay_date=rh.PAY_DATE, status="Draft", created_by=w.users[0].id)
+    db.add(other)
+    db.commit()
+    assert other.id > w.run.id and other.pay_date == w.run.pay_date
+
+    def commit(run):
+        service.generate_payslips_for_run(db, run, w.org.id, [w.employee.id])
+        for _ in range(2):
+            service.advance_payroll_run_status(db, run.id, w.users[1].id, w.org.id)
+        db.refresh(run)
+        assert run.status == "Approved" and run.mx_approval_fingerprint["committedAt"]
+        (item,) = rh.mx_items(db, run)
+        return item
+
+    first, second = (other, w.run) if higher_id_first else (w.run, other)
+    first_item = commit(first)
+    second_item = commit(second)
+
+    mtd_first = mexico_run_service._month_to_date(db, w.employee.id, first, first.pay_date)
+    mtd_second = mexico_run_service._month_to_date(db, w.employee.id, second, second.pay_date)
+    taxable_first = D(first_item.mx_calculation_snapshot["result"]["isr_taxable"])
+    assert mtd_first["taxable"] == 0 < mtd_second["taxable"] == taxable_first
+    assert second_item.mx_calculation_snapshot["components"]["monthToDate"] != \
+        first_item.mx_calculation_snapshot["components"]["monthToDate"]
+    assert mexico_run_service.approval_drift(db, first) == []
+    assert mexico_run_service.approval_drift(db, second) == []
+
+
 # ── add_payslip_item ─────────────────────────────────────────────────────────
 
 def _item(w, basic):
