@@ -99,10 +99,12 @@ def test_no_salary_line_blocks():
 
 
 @pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION"])
-def test_special_pays_block_until_phase9(kind):
+def test_special_pays_block_without_their_transcribed_rule(kind):
+    """Phase 9b: a special payment is routed to its own rule (never the
+    ordinary tariff, MX-009); with no rule transcribed it blocks."""
     earnings = [{"code": "SALARY", "kind": "ORDINARY_SALARY", "amount": D("9000")},
                 {"code": "X", "kind": kind, "amount": D("100")}]
-    assert "MX_SPECIAL_PAY_PHASE9" in {k for k, _ in _block(mx_earnings=earnings).reasons}
+    assert "MX_SPECIAL_PAY_RULE_MISSING" in {k for k, _ in _block(mx_earnings=earnings).reasons}
 
 
 @pytest.mark.parametrize("treatment", ["EXEMPT", "PARTIAL"])

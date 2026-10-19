@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from . import classification, isn, period, rounding
+from . import classification, isn, period, rounding, special_pay
 from .content import Content
 from .errors import MXBlock
 
@@ -41,7 +41,13 @@ def run(ctx) -> dict:
     content = (Content(rows.get("rate_map"), rows.get("slabs")) if rows
                else Content(getattr(ctx, "rate_map", None), getattr(ctx, "slabs", None)))
     resolved["content"] = content
-    attempt("period", lambda: period.resolve(ctx, content))
+    run_type = getattr(ctx, "mx_run_type", None)
+    special_run = run_type in special_pay.RUN_CONCEPT          # Phase 9b: a run that pays one special concept
+    resolved["special_run"] = run_type if special_run else None
+    if special_run:
+        resolved["period"] = None                               # no ordinary pay period, contribution days or tariff
+    else:
+        attempt("period", lambda: period.resolve(ctx, content))
     attempt("round", lambda: rounding.rounder(content))
 
     profile = getattr(ctx, "mx_profile", None)
@@ -73,7 +79,7 @@ def run(ctx) -> dict:
     registration = getattr(ctx, "mx_registration", None)
     if not registration or registration.get("status") != "ACTIVE":
         reasons.append(("MX_NO_REGISTRATION", "the employee has no ACTIVE IMSS employer registration"))
-    if not getattr(ctx, "mx_risk_premium", None):
+    if not special_run and not getattr(ctx, "mx_risk_premium", None):
         reasons.append(("MX_NO_RISK_PREMIUM", "no approved work-risk premium for the registration and period"))
     if not getattr(ctx, "mx_labor_policy", None):
         reasons.append(("MX_LABOR_POLICY_MISSING", "no employer labour policy is in force"))
@@ -82,17 +88,31 @@ def run(ctx) -> dict:
         reasons.append(("MX_MIN_WAGE_ZONE_UNRESOLVED", "the employee's minimum-wage zone is not resolved"))
 
     earnings = getattr(ctx, "mx_earnings", None) or []
-    if not any(str(l.get("kind") or "").upper() == classification.ORDINARY_SALARY for l in earnings):
+    special = [l for l in earnings if str(l.get("kind") or "").upper() in special_pay.CONCEPTS]
+    ordinary = [l for l in earnings if str(l.get("kind") or "").upper() not in special_pay.CONCEPTS]
+    on = resolved.get("on")
+    if special_run:
+        concept = special_pay.RUN_CONCEPT[run_type]
+        if not special or ordinary or any(str(l.get("kind")).upper() != concept for l in special):
+            reasons.append(("MX_SPECIAL_RUN_LINES_INVALID",
+                            f"a {run_type} run carries only {concept.lower()} lines"))
+    elif not any(str(l.get("kind") or "").upper() == classification.ORDINARY_SALARY for l in ordinary):
         reasons.append(("MX_SALARY_LINE_MISSING", "the period has no ordinary-salary earning line"))
     hour_kinds = (classification.OVERTIME, classification.SUNDAY_PREMIUM)
-    if any(str(l.get("kind") or "").upper() in hour_kinds for l in earnings):
+    if any(str(l.get("kind") or "").upper() in hour_kinds for l in ordinary):
         reasons.append(("MX_OVERTIME_NOT_FROM_HOURS",
                         "overtime / Sunday premium is derived only from approved hours (MX-049), never a supplied line"))
-    else:
-        on = resolved.get("on")
-        if on is not None:
-            attempt("lines", lambda: classification.classify(earnings, getattr(ctx, "mx_classifications", None), on,
-                                                             work_state))
+    elif on is not None:
+        facts = {"pay_date": on, "content": content, "daily_salary": fact(profile, "mx_daily_salary") if profile else None,
+                 "month_to_date": getattr(ctx, "mx_month_to_date", None), "run_type": run_type or "ORDINARY",
+                 "period": resolved.get("period")}
+        resolved["facts"] = facts
+        attempt("ordinary_lines", lambda: classification.classify(ordinary, getattr(ctx, "mx_classifications", None),
+                                                                  on, work_state) if ordinary else [])
+        attempt("special_lines", lambda: special_pay.classify(special, facts, work_state, special_run=special_run)
+                if special else [])
+        if "ordinary_lines" in resolved and "special_lines" in resolved:
+            resolved["lines"] = resolved["ordinary_lines"] + resolved["special_lines"]
 
     if reasons:
         seen, unique = set(), []

@@ -1016,6 +1016,12 @@ class PayrollContext:
     # Phase 6: per-input hashes bound by the approval fingerprint (MX-040);
     # the engine never reads them — the payslip snapshot carries them.
     mx_input_components: dict = None
+    # Phase 9: the Mexican run type (ORDINARY / CORRECTION / AGUINALDO / …) —
+    # a special run pays one concept on its own — and that payment's own
+    # computation detail (e.g. aguinaldo days × salary × proportion), carried
+    # into the result trace.
+    mx_run_type: str = None
+    mx_special_detail: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
     # Resolved by the service layer before dispatch; engine/countries/brazil.py
