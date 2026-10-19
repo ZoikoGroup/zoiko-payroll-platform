@@ -1,0 +1,77 @@
+{
+  "dedupe_window_seconds": 900,
+  "business_hours_utc": [
+    7,
+    20
+  ],
+  "large_export": {
+    "rows": 1000,
+    "bytes": 10485760
+  },
+  "rules": [
+    {
+      "key": "cross_tenant_access",
+      "description": "Any attempt to read another tenant's object, or a platform role reaching worker data",
+      "window_seconds": 900,
+      "threshold": 1,
+      "severity": "high",
+      "channel": "email+console"
+    },
+    {
+      "key": "employee_enumeration",
+      "description": "One principal touching 25 or more distinct employee records in 10 minutes",
+      "window_seconds": 600,
+      "threshold": 25,
+      "severity": "high",
+      "channel": "email+console"
+    },
+    {
+      "key": "large_export",
+      "description": "An export of 1,000 or more rows or 10 MB or more",
+      "window_seconds": 900,
+      "threshold": 1,
+      "severity": "medium",
+      "channel": "email+console"
+    },
+    {
+      "key": "unscheduled_elevation",
+      "description": "Support access granted outside 07:00-20:00 UTC, or any break-glass access",
+      "window_seconds": 900,
+      "threshold": 1,
+      "severity": "high",
+      "channel": "email+console"
+    },
+    {
+      "key": "mfa_failures",
+      "description": "Five or more failed MFA or step-up attempts by one user in 15 minutes",
+      "window_seconds": 900,
+      "threshold": 5,
+      "severity": "high",
+      "channel": "email+console"
+    },
+    {
+      "key": "overdue_break_glass_review",
+      "description": "A break-glass post-incident review passed its 24-hour due time",
+      "window_seconds": 900,
+      "threshold": 1,
+      "severity": "high",
+      "channel": "email+console"
+    },
+    {
+      "key": "failed_audit_write",
+      "description": "A security or audit record could not be written",
+      "window_seconds": 900,
+      "threshold": 1,
+      "severity": "high",
+      "channel": "email+console"
+    },
+    {
+      "key": "machine_client_new_network",
+      "description": "A machine client was used from a network it never used before",
+      "window_seconds": 900,
+      "threshold": 1,
+      "severity": "medium",
+      "channel": "email+console"
+    }
+  ]
+}

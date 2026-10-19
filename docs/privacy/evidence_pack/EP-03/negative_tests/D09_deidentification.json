@@ -1,0 +1,18 @@
+{
+  "testId": "D09_deidentification",
+  "timestampUtc": "2026-10-19T10:02:11.414537+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "restore operator",
+  "tokenScope": "non-production copy",
+  "syntheticTenantIds": null,
+  "endpoint": "scripts/deidentify_database.py",
+  "expectedStatus": 0,
+  "actualStatus": 0,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "40 tables scrubbed; credentials and audit emptied; guard unlocked"
+}

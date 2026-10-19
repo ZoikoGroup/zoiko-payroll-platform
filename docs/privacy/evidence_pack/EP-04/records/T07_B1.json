@@ -1,0 +1,29 @@
+{
+  "testId": "T07_B1",
+  "timestampUtc": "2026-10-19T10:04:32.706675+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "support_temp",
+  "tokenScope": "grant:1:employees[A1]:identifier+contact",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/payroll/employees/3",
+  "expectedStatus": 404,
+  "actualStatus": 404,
+  "redactedResponse": {
+    "success": false,
+    "error": "NOT_FOUND",
+    "message": "Resource not found.",
+    "detail": "Resource not found.",
+    "trace": {
+      "decisionId": "6337eb3ba9f14a71a268fac0f1888e1c"
+    }
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": "6337eb3ba9f14a71a268fac0f1888e1c",
+  "note": null
+}

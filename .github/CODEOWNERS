@@ -1,0 +1,28 @@
+# ZP-PRIV F07 / E06 change control.
+#
+# Changes to authorization, identity, tenant isolation, audit and the privacy
+# evidence need a review from the privacy reviewers, must pass the
+# privacy-isolation CI job, and invalidate any prior privacy attestation
+# (scripts/run_privacy_attestation.py compares these paths against
+# attestation.reviewed_git_sha in docs/privacy/control_register.yaml).
+#
+# The team below must exist in the GitHub organization and branch protection
+# must require code-owner review (human proof HP-10).
+
+/backend/app/core/dependencies.py          @ZoikoGroup/privacy-reviewers
+/backend/app/core/security.py              @ZoikoGroup/privacy-reviewers
+/backend/app/core/authz/                   @ZoikoGroup/privacy-reviewers
+/backend/app/core/redaction.py             @ZoikoGroup/privacy-reviewers
+/backend/app/core/job_auth.py              @ZoikoGroup/privacy-reviewers
+/backend/app/core/audit_immutability.py    @ZoikoGroup/privacy-reviewers
+/backend/app/core/nonprod_guard.py         @ZoikoGroup/privacy-reviewers
+/backend/app/modules/auth/                 @ZoikoGroup/privacy-reviewers
+/backend/app/modules/support_access/       @ZoikoGroup/privacy-reviewers
+/backend/app/modules/security/             @ZoikoGroup/privacy-reviewers
+/backend/app/modules/super_admin/aggregates.py @ZoikoGroup/privacy-reviewers
+/backend/alembic/versions/                 @ZoikoGroup/privacy-reviewers
+/backend/tests/privacy/                    @ZoikoGroup/privacy-reviewers
+/docs/privacy/                             @ZoikoGroup/privacy-reviewers
+/deploy/security/                          @ZoikoGroup/privacy-reviewers
+/.github/workflows/                        @ZoikoGroup/privacy-reviewers
+/.github/CODEOWNERS                        @ZoikoGroup/privacy-reviewers

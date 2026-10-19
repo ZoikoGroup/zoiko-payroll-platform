@@ -1,0 +1,29 @@
+{
+  "testId": "T03_api_payroll_payslips_1_download",
+  "timestampUtc": "2026-10-19T10:04:24.719874+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/payroll/payslips/1/download",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": {
+    "success": false,
+    "error": "ACCESS_DENIED",
+    "message": "You do not have permission to perform this action.",
+    "detail": "You do not have permission to perform this action.",
+    "trace": {
+      "decisionId": "f2330016ecaa4c7dbc92233bf382f737"
+    }
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": "f2330016ecaa4c7dbc92233bf382f737",
+  "note": null
+}

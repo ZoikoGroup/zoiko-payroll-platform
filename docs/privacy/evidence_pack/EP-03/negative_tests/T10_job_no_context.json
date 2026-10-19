@@ -1,0 +1,21 @@
+{
+  "testId": "T10_job_no_context",
+  "timestampUtc": "2026-10-19T10:01:44.993536+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "job",
+  "tokenScope": "requester:5",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "celery:generate_payslips_for_run_task",
+  "expectedStatus": 0,
+  "actualStatus": 0,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": 1,
+  "decisionId": null,
+  "note": "stale retry / replay refused: MISSING_PRINCIPAL_CONTEXT"
+}

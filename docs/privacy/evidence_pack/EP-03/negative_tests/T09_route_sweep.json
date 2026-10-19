@@ -1,0 +1,21 @@
+{
+  "testId": "T09_route_sweep",
+  "timestampUtc": "2026-10-19T10:04:46.507696+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "653 worker / tenant_config / retired routes",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "every route refused (403/404) with real tenant ids; no identity in any body"
+}

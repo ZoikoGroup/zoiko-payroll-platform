@@ -1,0 +1,43 @@
+{
+  "pack": "EP-05",
+  "title": "Audit samples, alert drill and immutability configuration",
+  "generatedAt": "2026-10-19T10:05:20Z",
+  "files": [
+    {
+      "path": "alert_drill.json",
+      "sha256": "d35c1a3978888bca8581f616a96cef9cb0cfa224b46d7007e88b97f4b0a84151"
+    },
+    {
+      "path": "alert_rules.json",
+      "sha256": "0f2805107367e95f511a5838c19c286ba243f1a01ccf2b35fb38455fc091a1db"
+    },
+    {
+      "path": "audit_samples/E02_tamper_detected.json",
+      "sha256": "294f64ee37dd8787ed5e6be38389e4c330c1e6cc810b1b2bee448f3d287156b8"
+    },
+    {
+      "path": "audit_samples/PG_security_events_tamper.json",
+      "sha256": "3771fbbe597b4a2f4c65df9448fb4fa37ca4145269f3896f964ca86dea93912e"
+    },
+    {
+      "path": "audit_samples/T12_attribution_and_drill.json",
+      "sha256": "dbbc425663831cd2a01d4d50a2c180f2775ab7c34cc528ec2ffaf18c0dc63aa5"
+    },
+    {
+      "path": "immutability_configuration.json",
+      "sha256": "7f629e4b13fc5a6b26f51ce617f8620592f7eebd796fa7259daea9e0efe6b05f"
+    },
+    {
+      "path": "redaction_samples/D03_log_sample_payroll_run.txt",
+      "sha256": "8f10df05162cf7f5af7a08c235729fc1cc8845ad811b1eb4c268d3c3c2f2d6c2"
+    },
+    {
+      "path": "redaction_samples/D04_sentry_sample.json",
+      "sha256": "96f314c4f2888643bce1c757bd8e0cd9b399f0fdbdfafb29a6814a496eddc5e6"
+    }
+  ],
+  "notes": [
+    "alert_drill.json comes from python -m scripts.alert_drill (synthetic database).",
+    "A live drill (--live) on the deployment is a human proof."
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "testId": "T06",
+  "timestampUtc": "2026-10-19T10:04:29.988437+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "support_operator",
+  "tokenScope": "platform (pending grant)",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/payroll/employees",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": {
+    "success": false,
+    "error": "ACCESS_DENIED",
+    "message": "You do not have permission to perform this action.",
+    "detail": "You do not have permission to perform this action.",
+    "trace": {
+      "decisionId": "2326268591254241a53455ba30927f37"
+    }
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": "2326268591254241a53455ba30927f37",
+  "note": null
+}

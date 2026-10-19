@@ -1,0 +1,20 @@
+{
+  "appendOnlyTables": [
+    "payroll_tax_configuration_audit",
+    "assisted_access_audit_events",
+    "payroll_personal_data_access_events",
+    "auth_audit_events",
+    "authz_decision_events",
+    "support_access_audit_events",
+    "security_events",
+    "security_event_anchors"
+  ],
+  "postgresTriggers": [
+    "<table>_append_only (zoiko_reject_audit_mutation)",
+    "security_events_append_only (zoiko_security_event_guard: set-once row_hash, jsonb compare)"
+  ],
+  "hashChain": "security_events.prev_hash -> row_hash; GET /api/super-admin/security-events/verify",
+  "anchoring": "security_event_anchors + GcsRetentionSink (bucket from SECURITY_ANCHOR_BUCKET; HP-04)",
+  "auditPurgeOnOrgHardDelete": false,
+  "auditRetentionYears": 7
+}

@@ -1,0 +1,17 @@
+id,title,control_id,control_priority,type,severity,status,owner,opened_at,closed_at,notes
+PD-001,Stripe webhook signing secret committed in stripe_listen.log (file removed; secret must be rotated),D06,P0,defect,high,open,Platform owner,2026-10-19T00:00:00Z,,HP-11; rotate in the Stripe dashboard then close
+PD-002,Payslip PDFs emailed as unencrypted attachments,D03,P0,defect,medium,open,Product,2026-10-19T00:00:00Z,,DEV-7 / indirect path G7
+PD-003,Development uvicorn logs with user emails were tracked in git (files removed),D03,P0,defect,medium,resolved,Platform Engineering,2026-10-19T00:00:00Z,2026-10-19T00:00:00Z,Removed from the index and ignored; history still contains them
+PD-004,RLS not enforced until production runs a NOBYPASSRLS non-owner role,B05,P0,defect,high,open,Infrastructure owner,2026-10-19T00:00:00Z,,DEV-3 / HP-03
+PD-005,Netherlands Digipoort ValidationServiceTransport fabricates an acknowledgement,,,defect,high,open,Netherlands payroll,2026-10-19T00:00:00Z,,Filing integrity (not a privacy control); do not use in production filings
+PD-006,Fresh Postgres migration chain fails at revision 71d815f06d78 (pre-existing),,,defect,medium,open,Platform Engineering,2026-10-19T00:00:00Z,,Postgres privacy tests use create_all plus the migration DDL functions
+PD-007,Sessions without tenant context run as unrestricted system context and any DB role can set app.rls_mode=system,B05,P0,defect,high,open,Platform Engineering,2026-10-19T00:00:00Z,,DEV-2 / DEV-8; target: a separate NOINHERIT system role for jobs and SECURITY DEFINER mode switch
+PD-008,Security event anchoring is not scheduled (anchor() never called; SECURITY_ANCHOR_BUCKET unused),E02,P0,defect,medium,open,Platform Engineering + Infrastructure,2026-10-19T00:00:00Z,,HP-04
+PD-009,Outbound webhooks never dispatched; no SSRF guard beyond https; no signing-secret rotation,D06,P0,defect,medium,open,Platform Engineering,2026-10-19T00:00:00Z,,DEV-9
+PD-010,No API to set data_region (all tenants EU); backups and replication do not call the region check,F02,P0,defect,medium,open,Platform Engineering,2026-10-19T00:00:00Z,,DEV-9
+PD-011,Assist: person names typed as free text in a question are not masked before model egress,D07,P0,defect,medium,open,Platform Engineering,2026-10-19T00:00:00Z,,Structured identity fields are masked; free-text NER not implemented
+PD-012,De-identification keeps pay amounts and misses non-personal-named text/XML columns and stored files,D09,P1,defect,medium,open,Platform Engineering,2026-10-19T00:00:00Z,,Restore drill must review coverage (HP-02)
+PD-013,Production deploys on push to the rugvedh feature branch,E06,P0,defect,medium,open,Repository admin,2026-10-19T00:00:00Z,,Restrict production deploys to main behind branch protection (HP-10)
+PD-014,scripts/audit_retention.py referenced by retention docs does not exist (no automated 7-year audit retention job),F03,P1,defect,low,open,Platform Engineering,2026-10-19T00:00:00Z,,
+PD-015,bulk_delete_employees_task builds BulkDeleteRequest(ids=...) but the schema field is employee_ids (task is never enqueued),,,defect,low,open,Platform Engineering,2026-10-19T00:00:00Z,,Pre-existing; found while adding job re-authorization
+PD-016,Two-step verification removed for privileged roles (DEC-11),B08,P0,exception,high,wont_fix_accepted,Platform owner,2026-10-19T00:00:00Z,,Re-enable with MFA_ENFORCEMENT=enforce

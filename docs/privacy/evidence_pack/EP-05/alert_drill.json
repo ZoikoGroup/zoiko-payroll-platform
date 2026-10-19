@@ -1,0 +1,81 @@
+{
+  "tag": "20261019T090512Z",
+  "mode": "synthetic",
+  "ranAt": "2026-10-19T09:05:12Z",
+  "rules": [
+    {
+      "rule": "cross_tenant_access",
+      "severity": "high",
+      "fired": true,
+      "alertId": 1,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "employee_enumeration",
+      "severity": "high",
+      "fired": true,
+      "alertId": 2,
+      "count": 2,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "large_export",
+      "severity": "medium",
+      "fired": true,
+      "alertId": 3,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "unscheduled_elevation",
+      "severity": "high",
+      "fired": true,
+      "alertId": 4,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "mfa_failures",
+      "severity": "high",
+      "fired": true,
+      "alertId": 5,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "overdue_break_glass_review",
+      "severity": "high",
+      "fired": true,
+      "alertId": 6,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "failed_audit_write",
+      "severity": "high",
+      "fired": true,
+      "alertId": 7,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    },
+    {
+      "rule": "machine_client_new_network",
+      "severity": "medium",
+      "fired": true,
+      "alertId": 8,
+      "count": 1,
+      "deliveryReceipt": "console",
+      "deliveredAt": "2026-10-19T09:05:12Z"
+    }
+  ],
+  "allFired": true,
+  "allDelivered": true
+}

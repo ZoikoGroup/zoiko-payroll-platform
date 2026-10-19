@@ -1,0 +1,590 @@
+{
+  "note": "Ratchet: may only shrink. Values are never stored.",
+  "findings": [
+    {
+      "kind": "iban",
+      "file": "backend/scripts/eval_assist.py",
+      "fingerprint": "4863305a9338b8266303"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_redaction_federation_governance.py",
+      "fingerprint": "8add9b07574e1407e7af"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_redaction_federation_governance.py",
+      "fingerprint": "8add9b07574e1407e7af"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_redaction_federation_governance.py",
+      "fingerprint": "8add9b07574e1407e7af"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_redaction_federation_governance.py",
+      "fingerprint": "8add9b07574e1407e7af"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_redaction_federation_governance.py",
+      "fingerprint": "8add9b07574e1407e7af"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_t09_t12.py",
+      "fingerprint": "a5d6fdf2fd4f770eeaea"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/privacy/test_t09_t12.py",
+      "fingerprint": "a5d6fdf2fd4f770eeaea"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_assist.py",
+      "fingerprint": "f991287b3c91a14d6115"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_bank_routing.py",
+      "fingerprint": "c2662fc85cb4902168f7"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_bulk_employees.py",
+      "fingerprint": "b2889357227f61646058"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_bulk_employees.py",
+      "fingerprint": "65ff3521be750e191af2"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_bulk_employees.py",
+      "fingerprint": "c5d022ea617739db99c2"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_communications_part0_gaps.py",
+      "fingerprint": "e2ba1df705b2ec75cff0"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_communications_part0_gaps.py",
+      "fingerprint": "0c74f876e538c705704c"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_email_end_to_end.py",
+      "fingerprint": "e2b85390b4b50cf3b213"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_email_mobile_layout.py",
+      "fingerprint": "6603f5332d414bdea094"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_employee_validation.py",
+      "fingerprint": "f9ca17f50cace156d5da"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_engine_jurisdiction_db_integration.py",
+      "fingerprint": "609e8c50c37e06b151d2"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_engine_jurisdiction_db_integration.py",
+      "fingerprint": "609e8c50c37e06b151d2"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_germany_payslip_surface.py",
+      "fingerprint": "0320735cd0027f8d18a1"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_germany_payslip_surface.py",
+      "fingerprint": "0320735cd0027f8d18a1"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_germany_report_templates.py",
+      "fingerprint": "976ada2593305acda173"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_germany_report_templates.py",
+      "fingerprint": "976ada2593305acda173"
+    },
+    {
+      "kind": "secret",
+      "file": "backend/tests/test_hong_kong_control.py",
+      "fingerprint": "c1eeac43dd1bb62ffbf4"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_annual.py",
+      "fingerprint": "49f81ff10832fd450984"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_annual.py",
+      "fingerprint": "e2140a2a90e259c6e523"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_content.py",
+      "fingerprint": "6a4584d81c41401fd861"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_digipoort.py",
+      "fingerprint": "51117a24d1160721be7d"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_loonaangifte.py",
+      "fingerprint": "0e69952e5c9b62092374"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_org_router.py",
+      "fingerprint": "3fe27918c2dbe1c5c5c3"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_payment.py",
+      "fingerprint": "edc3713ebed2520e5492"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_payment.py",
+      "fingerprint": "d79fa2194587d9cdafc9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_payment.py",
+      "fingerprint": "3079209cd4f104619b82"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_payment.py",
+      "fingerprint": "5691c2634a49598664f4"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_payment.py",
+      "fingerprint": "9dffbca327facc2f4180"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_payment.py",
+      "fingerprint": "5691c2634a49598664f4"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_security.py",
+      "fingerprint": "f90cb570c9f270df7988"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_security.py",
+      "fingerprint": "987c056e03598369af98"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_security.py",
+      "fingerprint": "fd3267d86cb1a0b682f3"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_security.py",
+      "fingerprint": "378e8591fecfef1078b1"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "421e820b23a8a4869452"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "421e820b23a8a4869452"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "421e820b23a8a4869452"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "12379af50b19893c379a"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "6dd8bb681b6894a653b9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "12379af50b19893c379a"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_netherlands_sepa.py",
+      "fingerprint": "5379d45c2dff18018bcb"
+    },
+    {
+      "kind": "bsn",
+      "file": "backend/tests/test_netherlands_service_integration.py",
+      "fingerprint": "bb32d74bcfa927652076"
+    },
+    {
+      "kind": "pan",
+      "file": "backend/tests/test_report_templates.py",
+      "fingerprint": "d5895219f402d2bc7eca"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "bf7a28f692a945996f86"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "4c334f149408a5801a9f"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "4c334f149408a5801a9f"
+    },
+    {
+      "kind": "iban",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "bf7a28f692a945996f86"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_singapore.py",
+      "fingerprint": "b3a01a951f6b34b51ee9"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_uk_rti_config_fields.py",
+      "fingerprint": "ce1edbcd67fcf1478987"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_ytd_posting_lifecycle.py",
+      "fingerprint": "28413c9dbb9a0e5c5238"
+    },
+    {
+      "kind": "nino",
+      "file": "backend/tests/test_ytd_posting_lifecycle.py",
+      "fingerprint": "28413c9dbb9a0e5c5238"
+    },
+    {
+      "kind": "email",
+      "file": "docs/GERMANY_2026_ORG38_REAL_PAYROLL_ACCURACY_FINAL.md",
+      "fingerprint": "72752f2c832ca554871b"
+    },
+    {
+      "kind": "email",
+      "file": "docs/GERMANY_2026_REPORT_TEMPLATES_FINAL_UAT_REPORT.md",
+      "fingerprint": "223be6fb661c1a9960fb"
+    },
+    {
+      "kind": "nino",
+      "file": "frontend/src/modules/payroll/Payroll_Employees/EmployeeBulkImportModal.jsx",
+      "fingerprint": "86e3fa6da611974fb6f1"
+    },
+    {
+      "kind": "nino",
+      "file": "frontend/src/modules/payroll/Payroll_Employees/countryFieldSpecs.js",
+      "fingerprint": "6526aabe8f416ee8f118"
+    },
+    {
+      "kind": "nino",
+      "file": "frontend/src/modules/payroll/Payroll_Employees/countryFieldSpecs.js",
+      "fingerprint": "6526aabe8f416ee8f118"
+    },
+    {
+      "kind": "pan",
+      "file": "frontend/src/utils/jurisdictionTax.js",
+      "fingerprint": "afc9f8d112e27593bc36"
+    }
+  ]
+}

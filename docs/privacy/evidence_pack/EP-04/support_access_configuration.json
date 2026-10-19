@@ -1,0 +1,6 @@
+{
+  "maxMinutes": 30,
+  "breakGlassMinutes": 30,
+  "allowedMinutes": "5,15,30",
+  "approval": "DEC-6: 30-minute hard maximum approved by venu@zoikogroup.com on 2026-10-15"
+}

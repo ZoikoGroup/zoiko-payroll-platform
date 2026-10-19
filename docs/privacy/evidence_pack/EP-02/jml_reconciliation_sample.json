@@ -1,0 +1,130 @@
+{
+  "dryRun": {
+    "applied": false,
+    "ranAt": "2026-10-19T09:05:19Z",
+    "results": [
+      {
+        "userId": 1,
+        "event": "leaver",
+        "actions": [
+          "deactivate",
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": 2,
+        "event": "mover",
+        "actions": [
+          "role:support_operator",
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": 3,
+        "event": "incident",
+        "actions": [
+          "deactivate",
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": null,
+        "event": "leaver",
+        "actions": [],
+        "status": "no matching account"
+      }
+    ],
+    "summary": {
+      "events": 4,
+      "withActions": 3,
+      "unmatched": 1
+    }
+  },
+  "applied": {
+    "applied": true,
+    "ranAt": "2026-10-19T09:05:19Z",
+    "results": [
+      {
+        "userId": 1,
+        "event": "leaver",
+        "actions": [
+          "deactivate",
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": 2,
+        "event": "mover",
+        "actions": [
+          "role:support_operator",
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": 3,
+        "event": "incident",
+        "actions": [
+          "deactivate",
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": null,
+        "event": "leaver",
+        "actions": [],
+        "status": "no matching account"
+      }
+    ],
+    "summary": {
+      "events": 4,
+      "withActions": 3,
+      "unmatched": 1
+    }
+  },
+  "rerun": {
+    "applied": true,
+    "ranAt": "2026-10-19T09:05:19Z",
+    "results": [
+      {
+        "userId": 1,
+        "event": "leaver",
+        "actions": [
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": 2,
+        "event": "mover",
+        "actions": [],
+        "status": "ok"
+      },
+      {
+        "userId": 3,
+        "event": "incident",
+        "actions": [
+          "revoke_sessions"
+        ],
+        "status": "ok"
+      },
+      {
+        "userId": null,
+        "event": "leaver",
+        "actions": [],
+        "status": "no matching account"
+      }
+    ],
+    "summary": {
+      "events": 4,
+      "withActions": 2,
+      "unmatched": 1
+    }
+  },
+  "note": "synthetic sample; awaiting HR / IdP owner (HP-05)"
+}
