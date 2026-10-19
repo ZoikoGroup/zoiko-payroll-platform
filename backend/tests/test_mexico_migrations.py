@@ -20,6 +20,7 @@ MX_M3_TABLES = {"payroll_mx_infonavit_notices"}   # + mx_* columns on the shared
 MX_M4_TABLES = {"payroll_mx_preflight_exceptions", "payroll_mx_imss_branch_lines", "payroll_mx_isn_liabilities",
                 "payroll_mx_sbc_history", "payroll_mx_variable_accumulators", "payroll_mx_benefit_accruals",
                 "payroll_mx_approved_hours"}   # Phase 6 mx_run_m4 (tests/test_mexico_run_migrations.py)
+MX_M5_TABLES = {"payroll_mx_cfdi_documents", "payroll_mx_cfdi_outbox_items", "payroll_mx_cfdi_events"}   # Phase 7
 
 
 def _path(rev):
@@ -58,7 +59,7 @@ def test_models_and_migration_define_the_same_mexico_tables():
     import app.modules.payroll.models  # noqa: F401
 
     model_tables = {t for t in Base.metadata.tables if t.startswith("payroll_mx_")}
-    assert model_tables == MX_TABLES | MX_M2_TABLES | MX_M3_TABLES | MX_M4_TABLES
+    assert model_tables == MX_TABLES | MX_M2_TABLES | MX_M3_TABLES | MX_M4_TABLES | MX_M5_TABLES
 
 
 @pytest.fixture()

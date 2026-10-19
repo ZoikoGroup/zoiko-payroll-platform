@@ -356,10 +356,29 @@ def _accumulator(db: Session, employee_id: int, salary_type: Optional[str], on: 
             "days": sum((_dec(r.days) for r in rows), _ZERO), "bimester": key, "rows": [r.id for r in rows]}
 
 
+_NOT_COMMITTED = datetime.max
+
+
+def _payment_order(run, on: date) -> tuple:
+    """Deterministic order of the month's payments: (pay date, committedAt,
+    run id). A run not committed yet sorts after every committed run of its
+    pay date; a preview (run None) sorts after everything on its date."""
+    if run is None:
+        return (on, _NOT_COMMITTED, float("inf"))
+    committed = (run.mx_approval_fingerprint or {}).get("committedAt")
+    return (on, datetime.fromisoformat(committed) if committed else _NOT_COMMITTED, run.id)
+
+
 def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
-    """Committed Mexican payslips of the same pay-date month (subsidy, MX-013)."""
+    """Committed Mexican payslips of the same pay-date month that come BEFORE
+    this one in `_payment_order` (subsidy, MX-013): an earlier pay date, or the
+    same pay date committed earlier (run id breaks an exact tie). A payment
+    ordered after this one never counts, so committing another run — a later
+    pay date, or the same pay date afterwards, in either id order — cannot
+    change (and invalidate) an already committed run's inputs."""
     from app.modules.payroll.models import PayrollRun, PayslipItem
 
+    me = _payment_order(run, on)
     q = (db.query(PayslipItem, PayrollRun).join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
          .filter(PayslipItem.employee_id == employee_id, PayslipItem.mx_calculation_snapshot.isnot(None)))
     taxable = applied = _ZERO
@@ -369,6 +388,8 @@ def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
         if not (r.pay_date.year == on.year and r.pay_date.month == on.month):
             continue
         if not (r.mx_approval_fingerprint or {}).get("committedAt"):
+            continue
+        if _payment_order(r, r.pay_date) >= me:
             continue
         res = (item.mx_calculation_snapshot or {}).get("result") or {}
         taxable += _dec(res.get("isr_taxable"))
@@ -770,11 +791,13 @@ def before_run_transition(db: Session, run, next_status, approver_id) -> None:
 
 def run_downstream_actions(db: Session, run) -> list:
     """Reasons a downstream lifecycle has acted on the run, which refuse a
-    reset. EMPTY in Phase 6 (no CFDI / authority / bank objects exist).
-    Phase 7 MUST add: any STAMPED CFDI of the run. Phase 8 MUST add: any
-    submitted / paid authority filing or liability including it. Phase 10
-    MUST add: any RELEASED bank instruction for it. Each with a test."""
-    return []
+    reset. Phase 7: every CFDI of the run that was transmitted or stamped
+    (SUBMITTED onward, Phase 7 D2). Phase 8 MUST add: any submitted / paid
+    authority filing or liability including it. Phase 10 MUST add: any
+    RELEASED bank instruction for it. Each with a test."""
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.downstream_reasons(db, run)
 
 
 def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
@@ -788,7 +811,10 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     if acted:
         raise HTTPException(http_status.HTTP_409_CONFLICT,
                             detail="MX_RESET_DOWNSTREAM_ACTED: " + "; ".join(acted))
-    removed = {}
+    from app.modules.payroll import mexico_cfdi_service
+
+    voided = mexico_cfdi_service.void_untransmitted(db, run, actor_id)   # never transmitted → VOIDED (D3)
+    removed = {"cfdiVoided": voided}
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)
@@ -818,13 +844,23 @@ def payment_treatment(db: Session, organization_id: int, run, items: list) -> di
     return {i.id: "MX_BANK_SETTLEMENT_PHASE10" for i in items if (i.country_code or "").upper() == MX}
 
 
+def _cfdi_lane(db: Session, run) -> dict:
+    from app.modules.payroll import mexico_cfdi_service
+
+    out = mexico_cfdi_service.run_summary(db, run)
+    if out["status"] == "NOT_STARTED":
+        out["detail"] = ("no CFDI generated — the builder needs S28 / S30 / S4, signing needs Secret Manager and no "
+                         "PAC is chosen (Phase 7 X1–X4)")
+    return out
+
+
 def run_status(db: Session, run) -> dict:
     stored = run.mx_approval_fingerprint or {}
     drift = approval_drift(db, run) if stored.get("committedAt") else []
     return {"runId": run.id, "runType": run.mx_run_type or "ORDINARY",
             "payroll": {"status": run.status, "committedAt": stored.get("committedAt"),
                         "approvalInvalidated": bool(drift), "drift": drift},
-            "cfdi": {"status": "NOT_STARTED", "detail": "CFDI stamping is built in Phase 7"},
+            "cfdi": _cfdi_lane(db, run),
             "authorities": {"status": "NOT_STARTED", "detail": "IMSS / SUA / ISR / ISN filings are built in Phase 8"},
             "bank": {"status": "HELD", "detail": "bank settlement is built in Phase 10; every Mexican payment is held"},
             "ledgers": ledger_counts(db, run)}

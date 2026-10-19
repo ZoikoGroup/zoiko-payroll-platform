@@ -34,6 +34,11 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/runs/1/preflight"), ("POST", "/runs/1/preflight/1/acknowledge"), ("GET", "/runs/1/status"),
     ("POST", "/runs/1/reset"), ("GET", "/employees/1/hours"), ("POST", "/employees/1/hours"),
     ("POST", "/hours/1/approve"), ("POST", "/employees/1/opening-balances"), ("POST", "/opening-balances/1/approve"),
+    # Phase 7 CFDI routes — dormant the same way
+    ("GET", "/runs/1/cfdi"), ("POST", "/runs/1/cfdi/generate"), ("POST", "/cfdi/outbox/process"),
+    ("GET", "/cfdi/documents/1"), ("POST", "/cfdi/documents/1/status-query"),
+    ("POST", "/cfdi/documents/1/confirm-retry"), ("POST", "/cfdi/documents/1/cancel"), ("POST", "/cfdi/reconcile"),
+    ("GET", "/cfdi/cancellation-reasons"),
 ]
 
 

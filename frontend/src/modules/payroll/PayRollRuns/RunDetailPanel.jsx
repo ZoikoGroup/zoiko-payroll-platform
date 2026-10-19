@@ -15,6 +15,7 @@ import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDraw
 import MXRunPreflightPanel from "../../../components/jurisdiction/mexico/run/MXRunPreflightPanel";
 import MXRunStatusBadges from "../../../components/jurisdiction/mexico/run/MXRunStatusBadges";
 import MXRunCalculationTrace from "../../../components/jurisdiction/mexico/run/MXRunCalculationTrace";
+import MXCfdiStagePanel from "../../../components/jurisdiction/mexico/run/MXCfdiStagePanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -486,6 +487,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 <>
                   <MXRunStatusBadges runId={run.id} refreshKey={(detail || run).status} />
                   <MXRunPreflightPanel runId={run.id} runStatus={(detail || run).status} onChanged={load} />
+                  <MXCfdiStagePanel runId={run.id} />
                 </>
               )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />

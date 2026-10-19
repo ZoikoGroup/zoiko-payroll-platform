@@ -10019,6 +10019,100 @@ class PayrollMxApprovedHours(Base):
               postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
     )
 
+# ── Mexico (ZP-MX-ENG-001) Phase 7 — CFDI 4.0 + Nómina 1.2 lifecycle ────────
+# Fiscal documents are never cascade-deleted (RESTRICT); raw XML lives only in
+# durable object storage (xml_storage_ref), never in the DB or logs (MX-061).
+# The lifecycle is separate from payroll / authority / bank state (MX-041).
+
+class PayrollMxCfdiDocument(Base):
+    """One CFDI payroll receipt of one committed Mexican payslip (MX-016)."""
+    __tablename__ = "payroll_mx_cfdi_documents"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payslip_item_id          = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    series                   = Column(String(25), nullable=True)
+    folio                    = Column(String(40), nullable=False)
+    schema_release_id        = Column(Integer, ForeignKey("payroll_mx_cfdi_schema_releases.id", ondelete="RESTRICT"), nullable=False)
+    payload_hash             = Column(String(64), nullable=True)
+    xml_storage_ref          = Column(String(500), nullable=True)
+    status                   = Column(String(20), nullable=False, default="GENERATED")
+    unknown_action           = Column(String(10), nullable=True)          # STAMP / CANCEL while UNKNOWN
+    unknown_since            = Column(DateTime(timezone=True), nullable=True)
+    uuid                     = Column(String(40), nullable=True)
+    stamped_at               = Column(DateTime(timezone=True), nullable=True)
+    sat_certificate_number   = Column(String(30), nullable=True)
+    pac_provider             = Column(String(60), nullable=True)
+    pac_environment          = Column(String(12), nullable=True)
+    pac_response_code        = Column(String(40), nullable=True)
+    pac_message              = Column(String(500), nullable=True)
+    cancellation_reason_code = Column(String(10), nullable=True)
+    cancel_requested_at      = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at             = Column(DateTime(timezone=True), nullable=True)
+    replaces_document_id     = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=True)
+    replaces_uuid            = Column(String(40), nullable=True)
+    replaced_by_uuid         = Column(String(40), nullable=True)
+    idempotency_key          = Column(String(100), nullable=False, unique=True)   # the STAMP key, reused by every retry
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "status IN ('GENERATED', 'SIGNED', 'SUBMITTED', 'STAMPED', 'REJECTED', 'UNKNOWN', 'CANCEL_REQUESTED', "
+            "'CANCELLED', 'REPLACED', 'VOIDED')", name="ck_mx_cfdi_doc_status"),
+        UniqueConstraint("organization_id", "series", "folio", name="uq_mx_cfdi_doc_folio"),
+        Index("uq_mx_cfdi_doc_live_per_item", "payslip_item_id", unique=True,
+              postgresql_where=text("status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', 'REJECTED')"),
+              sqlite_where=text("status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', 'REJECTED')")),
+        Index("uq_mx_cfdi_doc_uuid", "uuid", unique=True,
+              postgresql_where=text("uuid IS NOT NULL"), sqlite_where=text("uuid IS NOT NULL")),
+    )
+
+
+class PayrollMxCfdiOutboxItem(Base):
+    """A durable outbound PAC action. A STAMP retry reuses the SAME payload
+    hash and idempotency key (Phase 7 §4.2); attempt_no distinguishes rows."""
+    __tablename__ = "payroll_mx_cfdi_outbox_items"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    document_id              = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=False, index=True)
+    action                   = Column(String(20), nullable=False)          # STAMP / CANCEL / STATUS_QUERY / CANCEL_STATUS_QUERY
+    attempt_no               = Column(Integer, nullable=False, default=1)
+    payload_hash             = Column(String(64), nullable=True)
+    idempotency_key          = Column(String(100), nullable=False, index=True)
+    status                   = Column(String(12), nullable=False, default="PENDING")   # PENDING / SENT / ACKNOWLEDGED / FAILED / UNKNOWN
+    last_error               = Column(String(500), nullable=True)
+    operator_confirmed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sent_at                  = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('STAMP', 'CANCEL', 'STATUS_QUERY', 'CANCEL_STATUS_QUERY')", name="ck_mx_cfdi_outbox_action"),
+        sa.CheckConstraint("status IN ('PENDING', 'SENT', 'ACKNOWLEDGED', 'FAILED', 'UNKNOWN')", name="ck_mx_cfdi_outbox_status"),
+        UniqueConstraint("document_id", "action", "attempt_no", name="uq_mx_cfdi_outbox_attempt"),
+    )
+
+
+class PayrollMxCfdiEvent(Base):
+    """Append-only lifecycle evidence of a CFDI document (MX-018). Nothing
+    in the code updates or deletes a row."""
+    __tablename__ = "payroll_mx_cfdi_events"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    document_id   = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=False, index=True)
+    event_type    = Column(String(40), nullable=False)
+    from_status   = Column(String(20), nullable=True)
+    to_status     = Column(String(20), nullable=True)
+    payload_hash  = Column(String(64), nullable=True)
+    detail        = Column(JSON, nullable=True)              # redacted: codes, uuids, counts — never XML
+    actor_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    occurred_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

@@ -225,3 +225,13 @@ def sa_employee_record(employee_id: int, organization_id: int = Query(...), on: 
     record = mexico_employee_service.employee_record(db, organization_id, employee_id)
     record["readiness"] = mexico_employee_service.employee_readiness(db, organization_id, employee_id, on)
     return record
+
+
+@router.get("/cfdi", summary="CFDI lifecycle — read-only counts by status, UNKNOWN items, the pinned schema release")
+def sa_cfdi_lifecycle(organization_id: Optional[int] = Query(None), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    if organization_id is not None:
+        _mx()._org(db, organization_id)
+    return mexico_cfdi_service.lifecycle_overview(db, organization_id)

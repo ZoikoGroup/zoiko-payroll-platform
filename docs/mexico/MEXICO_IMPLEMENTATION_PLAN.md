@@ -356,5 +356,6 @@ Tests: T2, T5, T7, T8; F6.
 | IDSE/SUA/SIPARE: file export only at launch, or integrated | **Open**, needed by Phase 8 |
 | SPEI bank file formats | **Open**, needed by Phase 10 |
 | Hosting / cross-border transfer stance (2025 privacy law) | **Open**, needed by Phase 10 |
+| CFDI XML retention (period, who may delete, legal hold) — stored via `app/core/object_storage` from Phase 7; nothing deletes a stored CFDI until decided | **Open**, legal / Phase 10 retention policy |
 
 Out-of-scope defects found during Mexico work are tracked in `docs/mexico/OUT_OF_SCOPE_DEFECTS.md` (NL simple-mode error handler, NL fallback entries, missing `nl_golden`, HK matrix CSV).

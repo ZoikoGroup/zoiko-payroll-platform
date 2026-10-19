@@ -372,3 +372,75 @@ def approve_opening_balance(row_id: int, current_user=Depends(get_current_org_ad
     from app.modules.payroll import mexico_run_service
 
     return mexico_run_service.approve_opening_balance(db, _org_id(current_user), row_id, _actor(current_user))
+
+
+# ── CFDI 4.0 + Nómina 1.2 (Phase 7, spec §6 / §13 stage 6) ───────────────────
+# Generation refuses in production (builder / signer blocked, no PAC adapter);
+# the lifecycle, outbox, UNKNOWN rule and lineage are live behind the 4a guard.
+
+@router.get("/runs/{run_id}/cfdi", summary="CFDI preflight, documents and summary for a Mexican run")
+def run_cfdi(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.run_documents(db, _run(db, current_user, run_id))
+
+
+@router.post("/runs/{run_id}/cfdi/generate", summary="Generate + sign CFDI for a committed run (refused until X1–X4)")
+def generate_cfdi(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.generate(db, _run(db, current_user, run_id), _actor(current_user))
+
+
+@router.post("/cfdi/outbox/process", summary="Process pending PAC actions (explicit, operator-triggered — D5)")
+def process_cfdi_outbox(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.process_outbox(db, _org_id(current_user), _actor(current_user))
+
+
+@router.get("/cfdi/documents/{document_id}", summary="One CFDI: lineage, event timeline, outbox attempts (never XML)")
+def cfdi_document(document_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.document_detail(db, _org_id(current_user), document_id)
+
+
+@router.post("/cfdi/documents/{document_id}/status-query", summary="Query the PAC for an UNKNOWN / cancelling CFDI")
+def cfdi_status_query(document_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.request_status_query(db, _org_id(current_user), document_id, _actor(current_user))
+
+
+@router.post("/cfdi/documents/{document_id}/confirm-retry",
+             summary="Confirm a retry of an UNKNOWN stamp (same payload, same idempotency key; recorded)")
+def cfdi_confirm_retry(document_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.confirm_retry(db, _org_id(current_user), document_id, _actor(current_user),
+                                             str(body.get("reason") or ""))
+
+
+@router.post("/cfdi/documents/{document_id}/cancel", summary="Request cancellation with a catalog reason (MX-018)")
+def cfdi_cancel(document_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.cancel(db, _org_id(current_user), document_id, str(body.get("reasonCode") or ""),
+                                      body.get("replacementUuid"), _actor(current_user))
+
+
+@router.post("/cfdi/reconcile", summary="Move every in-flight CFDI action to UNKNOWN (after a timeout / restore, MX-062)")
+def cfdi_reconcile(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.reconcile_after_restore(db, _org_id(current_user), _actor(current_user))
+
+
+@router.get("/cfdi/cancellation-reasons", summary="Cancellation reasons from the Active CFDI catalog (empty until S30)")
+def cfdi_cancel_reasons(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_service
+
+    return mexico_cfdi_service.cancellation_reasons(db)
