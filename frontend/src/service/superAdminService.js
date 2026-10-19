@@ -242,6 +242,7 @@ export const getMxSaEmployerReadiness = (orgId, on) =>
 export const getMxSaEmployerReadinessSummary = (on) => apiFetch(`${MX_SA}/employer-readiness/summary`, { params: { on } });
 // Phase 7 — CFDI lifecycle, read-only (counts by status, UNKNOWN items, pinned release, blocks).
 export const getMxSaCfdiLifecycle = (orgId) => apiFetch(`${MX_SA}/cfdi`, { params: orgId ? { organization_id: orgId } : {} });
+export const getMxSaAuthorities = (orgId) => apiFetch(`${MX_SA}/authorities`, { params: orgId ? { organization_id: orgId } : {} });
 
 // ————— Brazil (ZP-BR-ENG-001) ————
 // Super Admin API: backend/app/modules/payroll/brazil_router.py (Phase 2).

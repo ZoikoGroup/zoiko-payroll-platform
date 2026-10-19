@@ -16,6 +16,7 @@ import CHEmployerProfileTab from "./CHEmployerProfileTab";
 import SAComplianceCentreTab from "./SAComplianceCentreTab";
 import NLComplianceCentreTab from "./NLComplianceCentreTab";
 import MXComplianceCentreTab from "./MXComplianceCentreTab";
+import MXSocialSecurityCenter from "../../../components/jurisdiction/mexico/authorities/MXSocialSecurityCenter";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -129,6 +130,8 @@ export default function CompliancePage() {
   // Centre; the generic Tax Configuration tab (US fallback) shows nothing true
   // for Mexico, so it is omitted for MX organisations only (Phase 3 Q6).
   const MX_TAB = "Mexico Compliance Centre";
+  // Mexico Phase 8 (spec §14 "Compliance → Mexico → Social Security"): MX organisations only.
+  const MX_SS_TAB = "Mexico Social Security";
   const isMexico = normalizeCountryCode(companyDetails.jurisdictionCountry) === "MX";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
@@ -143,7 +146,7 @@ export default function CompliancePage() {
     ...(companyDetails.jurisdictionCountry === "SA" ? [SA_TAB] : []),
     ...(isSwitzerland ? [CH_EMPLOYER_TAB] : []),
     ...(isNetherlands ? [NL_TAB] : []),
-    ...(isMexico ? [MX_TAB] : []),
+    ...(isMexico ? [MX_TAB, MX_SS_TAB] : []),
   ];
   const currentTab = tabs[activeTab];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
@@ -354,6 +357,7 @@ export default function CompliancePage() {
       {currentTab === CH_EMPLOYER_TAB && <CHEmployerProfileTab />}
       {currentTab === NL_TAB && <NLComplianceCentreTab />}
       {currentTab === MX_TAB && <MXComplianceCentreTab />}
+      {currentTab === MX_SS_TAB && <MXSocialSecurityCenter />}
 
       {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab

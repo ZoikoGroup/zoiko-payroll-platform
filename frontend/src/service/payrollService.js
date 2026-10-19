@@ -2599,6 +2599,64 @@ export const confirmMxCfdiRetry = (docId, reason) => api.post(`${MX}/cfdi/docume
 export const cancelMxCfdi = (docId, reasonCode, replacementUuid) =>
   api.post(`${MX}/cfdi/documents/${docId}/cancel`, { reasonCode, replacementUuid: replacementUuid || null });
 export const listMxCfdiCancelReasons = () => api.get(`${MX}/cfdi/cancellation-reasons`);
+// Phase 8 — authorities (file-export mode: Zoiko never transmits; outcomes are recorded).
+export const getMxAuthoritiesSummary = () => api.get(`${MX}/authorities/summary`);
+export const accrueMxLiabilities = () => api.post(`${MX}/authorities/accrue`, {});
+export const listMxLiabilities = () => api.get(`${MX}/authorities/liabilities`);
+export const getMxLiability = (id) => api.get(`${MX}/authorities/liabilities/${id}`);
+export const fileMxLiability = (id, reference) => api.post(`${MX}/authorities/liabilities/${id}/file`, { reference });
+export const payMxLiability = (id, reference) => api.post(`${MX}/authorities/liabilities/${id}/pay`, { reference });
+export const reconcileMxLiability = (id) => api.post(`${MX}/authorities/liabilities/${id}/reconcile`, {});
+export const listMxMovements = () => api.get(`${MX}/authorities/movements`);
+export const generateMxMovements = () => api.post(`${MX}/authorities/movements/generate`, {});
+export const recordMxMovementOutcome = (id, payload) => api.post(`${MX}/authorities/movements/${id}/outcome`, payload);
+export const withdrawMxMovement = (id, reason) => api.post(`${MX}/authorities/movements/${id}/withdraw`, { reason });
+export const regenerateMxMovement = (id) => api.post(`${MX}/authorities/movements/${id}/regenerate`, {});
+export const listMxSuaPeriods = () => api.get(`${MX}/authorities/sua-periods`);
+export const openMxSuaPeriod = (registrationId, periodKey) => api.post(`${MX}/authorities/sua-periods`, { registrationId, periodKey });
+export const getMxSuaPeriod = (id) => api.get(`${MX}/authorities/sua-periods/${id}`);
+export const enterMxSuaFigures = (id, rows, suaVersion) => api.post(`${MX}/authorities/sua-periods/${id}/figures`, { rows, suaVersion });
+export const explainMxSuaDifference = (id, code, explanation) => api.post(`${MX}/authorities/sua-differences/${id}/explain`, { code, explanation });
+export const approveMxSuaDifference = (id) => api.post(`${MX}/authorities/sua-differences/${id}/approve`, {});
+export const reconcileMxSuaPeriod = (id) => api.post(`${MX}/authorities/sua-periods/${id}/reconcile`, {});
+export const recordMxSuaPayment = (id, reference, captureLine) => api.post(`${MX}/authorities/sua-periods/${id}/payment`, { reference, captureLine });
+export const listMxIsnReturns = () => api.get(`${MX}/authorities/isn-returns`);
+export const draftMxIsnReturn = (stateCode, periodKey) => api.post(`${MX}/authorities/isn-returns`, { stateCode, periodKey });
+export const getMxIsnReturn = (id) => api.get(`${MX}/authorities/isn-returns/${id}`);
+export const fileMxIsnReturn = (id, reference) => api.post(`${MX}/authorities/isn-returns/${id}/file`, { reference });
+export const recordMxIsnOutcome = (id, outcome) => api.post(`${MX}/authorities/isn-returns/${id}/outcome`, { outcome });
+// kind: movements | liabilities | isn-returns | sua-periods
+export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
+export const checkMxAuthorityStatus = (kind, id, found, reference) =>
+  api.post(`${MX}/authorities/${kind}/${id}/status-check`, { found, reference: reference || null });
+export const confirmMxAuthorityRetry = (kind, id, reason) => api.post(`${MX}/authorities/${kind}/${id}/confirm-retry`, { reason });
+
+// The IMSS worklist (D12): built on request and handed straight to the browser
+// as a download — never stored by Zoiko. It is NOT an IDSE file (layout X1).
+export async function exportMxMovementWorklist(movementIds) {
+  const res = await fetch(`${API_BASE_URL}${MX}/authorities/movements/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAccessToken()}` },
+    body: JSON.stringify({ movementIds: movementIds || null }),
+  });
+  if (!res.ok) {
+    let message = "The worklist export was refused.";
+    try { const j = await res.json(); message = j.message || j.detail || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  // The batch reference is the CSV's first row; the header is readable only same-origin.
+  const batch = res.headers.get("X-Zoiko-Batch") || `mx-imss-${new Date().toISOString().slice(0, 10)}`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${batch}-worklist.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return batch;
+}
 
 // The PUBLIC .cer is sent as the raw request body (the server reads it in
 // memory with a 16 KB cap; multipart would spool to a temp file there).

@@ -14,6 +14,9 @@ const TONE = {
   UNKNOWN: "border-error/50 text-error",
   REJECTED: "border-error/50 text-error",
   IN_PROGRESS: "border-warning/50 text-warning",
+  ACCRUED: "border-warning/50 text-warning",
+  PAID: "border-success/40 text-success",
+  RECONCILED: "border-success/40 text-success",
 };
 
 function Badge({ label, status, detail, testId }) {
@@ -58,8 +61,9 @@ export default function MXRunStatusBadges({ runId, refreshKey }) {
       )}
       <p className="mt-2 text-[11px] text-foreground-muted">
         CFDI stamping is built but cannot run in production until a PAC is chosen and the SAT sources and Secret
-        Manager are in place; authority filings arrive in Phase 8 and bank settlement in Phase 10 — until then a
-        Mexican run stops at Approved and every payment is held.
+        Manager are in place. Authority liabilities, IMSS movements, SUA and ISN are prepared and recorded in
+        Compliance → Mexico Social Security (file-export: nothing is transmitted). Bank settlement is Phase 10 —
+        until then a Mexican run stops at Approved and every payment is held.
       </p>
     </div>
   );

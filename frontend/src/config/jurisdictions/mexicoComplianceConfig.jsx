@@ -1,4 +1,4 @@
-import { Building2, Calculator, ClipboardCheck, FileCheck2, FileCode2, HeartPulse, Home, ListChecks, MapPin, Scale, ShieldCheck, Sun, Wallet } from "lucide-react";
+import { Building2, Calculator, ClipboardCheck, FileCheck2, FileCode2, HeartPulse, Home, Landmark, ListChecks, MapPin, Scale, ShieldCheck, Sun, Wallet } from "lucide-react";
 import MXIsrTariffsTab from "../../components/jurisdiction/mexico/MXIsrTariffsTab";
 import MXSubsidyUmaTab from "../../components/jurisdiction/mexico/MXSubsidyUmaTab";
 import MXMinimumWageTab from "../../components/jurisdiction/mexico/MXMinimumWageTab";
@@ -9,6 +9,7 @@ import MXEarningClassificationTab from "../../components/jurisdiction/mexico/MXE
 import MXCfdiCatalogTab from "../../components/jurisdiction/mexico/MXCfdiCatalogTab";
 import MXReadinessGatesTab from "../../components/jurisdiction/mexico/MXReadinessGatesTab";
 import MXCfdiLifecycleTab from "../../components/jurisdiction/mexico/MXCfdiLifecycleTab";
+import MXAuthoritiesTab from "../../components/jurisdiction/mexico/MXAuthoritiesTab";
 import MXEmployerProfileTab from "../../components/jurisdiction/mexico/MXEmployerProfileTab";
 import MXStateAccordionWorkspace from "../../components/jurisdiction/mexico/state/MXStateAccordionWorkspace";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
@@ -41,6 +42,7 @@ export function mexicoExtraTabs(orgId, state) {
     )),
     tab("mx-readiness", "Readiness G1–G8", ClipboardCheck, "mx-tests", () => <MXReadinessGatesTab />),
     tab("mx-cfdi-lifecycle", "CFDI lifecycle", FileCode2, "mx-readiness", () => <MXCfdiLifecycleTab />),
+    tab("mx-authorities", "Authorities", Landmark, "mx-cfdi-lifecycle", () => <MXAuthoritiesTab />),
   ];
 }
 

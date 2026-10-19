@@ -792,12 +792,14 @@ def before_run_transition(db: Session, run, next_status, approver_id) -> None:
 def run_downstream_actions(db: Session, run) -> list:
     """Reasons a downstream lifecycle has acted on the run, which refuse a
     reset. Phase 7: every CFDI of the run that was transmitted or stamped
-    (SUBMITTED onward, Phase 7 D2). Phase 8 MUST add: any submitted / paid
-    authority filing or liability including it. Phase 10 MUST add: any
-    RELEASED bank instruction for it. Each with a test."""
-    from app.modules.payroll import mexico_cfdi_service
+    (SUBMITTED onward, Phase 7 D2). Phase 8: any IMSS movement exported /
+    filed / UNKNOWN, any liability past ACCRUED (or ever sent), any SUA
+    period RECONCILED onward and any ISN return past DRAFT that includes it
+    (Phase 8 plan §6). Phase 10 MUST add: any RELEASED bank instruction for
+    it. Each with a test."""
+    from app.modules.payroll import mexico_cfdi_service, mexico_filing_service
 
-    return mexico_cfdi_service.downstream_reasons(db, run)
+    return mexico_cfdi_service.downstream_reasons(db, run) + mexico_filing_service.downstream_reasons(db, run)
 
 
 def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
@@ -811,10 +813,10 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     if acted:
         raise HTTPException(http_status.HTTP_409_CONFLICT,
                             detail="MX_RESET_DOWNSTREAM_ACTED: " + "; ".join(acted))
-    from app.modules.payroll import mexico_cfdi_service
+    from app.modules.payroll import mexico_cfdi_service, mexico_filing_service
 
     voided = mexico_cfdi_service.void_untransmitted(db, run, actor_id)   # never transmitted → VOIDED (D3)
-    removed = {"cfdiVoided": voided}
+    removed = {"cfdiVoided": voided, **mexico_filing_service.withdraw_on_reset(db, run, actor_id)}
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)
@@ -854,6 +856,12 @@ def _cfdi_lane(db: Session, run) -> dict:
     return out
 
 
+def _authorities_lane(db: Session, run) -> dict:
+    from app.modules.payroll import mexico_filing_service
+
+    return mexico_filing_service.run_lane(db, run)
+
+
 def run_status(db: Session, run) -> dict:
     stored = run.mx_approval_fingerprint or {}
     drift = approval_drift(db, run) if stored.get("committedAt") else []
@@ -861,7 +869,7 @@ def run_status(db: Session, run) -> dict:
             "payroll": {"status": run.status, "committedAt": stored.get("committedAt"),
                         "approvalInvalidated": bool(drift), "drift": drift},
             "cfdi": _cfdi_lane(db, run),
-            "authorities": {"status": "NOT_STARTED", "detail": "IMSS / SUA / ISR / ISN filings are built in Phase 8"},
+            "authorities": _authorities_lane(db, run),
             "bank": {"status": "HELD", "detail": "bank settlement is built in Phase 10; every Mexican payment is held"},
             "ledgers": ledger_counts(db, run)}
 

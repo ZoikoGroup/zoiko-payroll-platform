@@ -297,7 +297,15 @@ def test_pg_real_cli_path_and_schema_drift(pg_engine):
     assert up.returncode == 0, up.stderr[-2000:]
     cur = subprocess.run([sys.executable, "-m", "alembic", "current"], cwd=BACKEND, env=env, capture_output=True,
                          text=True, timeout=120)
-    assert REVISION in cur.stdout, cur.stdout + cur.stderr[-500:]
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
+    (head,) = script.get_heads()
+    # The database is at the repository head, and this revision is in its history
+    # (a later phase's migration may sit above it).
+    assert head in cur.stdout, cur.stdout + cur.stderr[-500:]
+    assert REVISION in {rev.revision for rev in script.walk_revisions("base", head)}
     drift = subprocess.run([sys.executable, "-m", "scripts.check_schema_drift"], cwd=BACKEND, env=env,
                            capture_output=True, text=True, timeout=120)
     assert drift.returncode == 0, drift.stdout[-2000:] + drift.stderr[-2000:]
