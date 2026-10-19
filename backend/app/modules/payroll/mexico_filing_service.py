@@ -139,28 +139,46 @@ def _candidate_sources(db: Session, run, item):
     IMSS comes from the committed snapshot's per-branch / per-side amounts —
     the emitted amounts, each rounded once (engine _by_branch) — so a
     liability equals what the payslips charged. The Phase 6 branch-line
-    ledger keeps the unrounded segment lines (4 dp) as the trace."""
+    ledger keeps the unrounded segment lines (4 dp) as the trace.
+
+    Phase 9a: a CORRECTION payslip contributes its DELTAS (corrected −
+    original, possibly negative); its ISN delta rows are already in the ISN
+    ledger (mexico_run_service.commit_run)."""
+    from app.modules.payroll import mexico_correction_service as corrections
+
     m = L.models()
-    res = (item.mx_calculation_snapshot or {}).get("result") or {}
+    res = corrections.result_of(item)
+    is_correction = (run.mx_run_type or "ORDINARY") == "CORRECTION"
+    base = corrections.result_of(corrections.original_item_for(db, item)) if is_correction else {}
+    keep = (lambda v: v != 0) if is_correction else (lambda v: v > 0)
     out, skips = [], []
     reg = registration_for(db, item.employee_id, run.pay_date)
-    branches = [b for b in res.get("imss") or [] if b.get("branch")]
-    housing, credit = _dec(res.get("infonavit_employer")), _dec(res.get("infonavit_credit"))
-    if (branches or housing > 0 or credit > 0) and reg is None:
+    branches = {}
+    for r, sign in ((res, 1), (base, -1)):
+        for b in r.get("imss") or []:
+            if b.get("branch"):
+                key = (b["branch"], b.get("side"))
+                branches[key] = branches.get(key, _ZERO) + sign * _dec(b.get("amount"))
+    if is_correction:
+        branches = {k: v for k, v in branches.items() if v != 0}
+    housing = _dec(res.get("infonavit_employer")) - _dec(base.get("infonavit_employer"))
+    credit = _dec(res.get("infonavit_credit")) - _dec(base.get("infonavit_credit"))
+    if (branches or keep(housing) or keep(credit)) and reg is None:
         skips.append({"employeeId": item.employee_id, "payslipItemId": item.id, "code": "MX_REGISTRATION_MISSING",
                       "message": "no ACTIVE IMSS registration in force on the pay date — IMSS / INFONAVIT not accrued"})
     elif reg is not None:
-        for b in branches:
-            table = f"imss:{b['branch']}:{b.get('side') or '-'}"[:40]
-            out.append(("IMSS", reg.id, None, table, item.id, b["branch"], b.get("side"), None, _dec(b.get("amount"))))
-        if housing > 0:
+        for (branch, side), amount in branches.items():
+            table = f"imss:{branch}:{side or '-'}"[:40]
+            out.append(("IMSS", reg.id, None, table, item.id, branch, side, None, amount))
+        if keep(housing):
             out.append(("INFONAVIT", reg.id, None, _SRC_HOUSING, item.id, "INFONAVIT", "employer", None, housing))
-        if credit > 0:
+        if keep(credit):
             out.append(("INFONAVIT", reg.id, None, _SRC_CREDIT, item.id, "INFONAVIT_CREDIT", "employee", None,
                         credit))
-    if _dec(res.get("isr_withheld")) > 0:
-        out.append(("SAT_ISR", None, None, _SRC_ISR, item.id, "ISR", "employee", _dec(res.get("isr_taxable")),
-                    _dec(res.get("isr_withheld"))))
+    isr = _dec(res.get("isr_withheld")) - _dec(base.get("isr_withheld"))
+    if keep(isr):
+        out.append(("SAT_ISR", None, None, _SRC_ISR, item.id, "ISR", "employee",
+                    _dec(res.get("isr_taxable")) - _dec(base.get("isr_taxable")), isr))
     for isn in db.query(m.PayrollMxIsnLiability).filter(m.PayrollMxIsnLiability.payslip_item_id == item.id):
         out.append(("ISN", None, isn.state_code, _SRC_ISN, isn.id, "ISN", "employer", isn.base_amount, isn.amount))
     return out, skips

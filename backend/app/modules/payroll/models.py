@@ -10352,6 +10352,42 @@ class PayrollMxAuthorityEvent(Base):
     )
 
 
+# ── Mexico (ZP-MX-ENG-001) Phase 9a — correction runs (migration mx_corrections_m7) ──
+
+class PayrollMxRunCorrection(Base):
+    """One committed Mexican payslip being corrected by a CORRECTION run
+    (Phase 9 plan B2, D10). The original payslip, its CFDI and its ledgers are
+    never edited: the correction run recalculates the period and its commit
+    posts DELTAS (`deltas`, corrected − original). One live correction per
+    original payslip; a later correction targets the corrected payslip (chain).
+    A voided draft keeps this row for audit (its run is deleted → SET NULL)."""
+    __tablename__ = "payroll_mx_run_corrections"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    correction_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    original_run_id    = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    original_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    corrected_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    reason             = Column(String(500), nullable=False)
+    status             = Column(String(10), nullable=False, default="DRAFT")    # DRAFT / COMMITTED / VOIDED
+    deltas             = Column(JSON, nullable=True)                           # corrected − original, at commit
+    requested_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    voided_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    void_reason        = Column(String(300), nullable=True)
+    committed_at       = Column(DateTime(timezone=True), nullable=True)
+    voided_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at         = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'COMMITTED', 'VOIDED')", name="ck_mx_run_correction_status"),
+        Index("uq_mx_run_correction_live_original", "original_item_id", unique=True,
+              postgresql_where=text("status <> 'VOIDED'"), sqlite_where=text("status <> 'VOIDED'")),
+    )
+
+
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────
 

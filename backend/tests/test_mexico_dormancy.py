@@ -55,6 +55,8 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("POST", "/authorities/isn-returns/1/file"), ("POST", "/authorities/isn-returns/1/outcome"),
     ("POST", "/authorities/{kind}/1/unknown"), ("POST", "/authorities/{kind}/1/status-check"),
     ("POST", "/authorities/{kind}/1/confirm-retry"),
+    # Phase 9a — corrections
+    ("GET", "/runs/1/corrections"), ("POST", "/runs/1/corrections"), ("POST", "/corrections/1/void"),
 ]
 
 

@@ -694,3 +694,29 @@ def _authority_unknown_action(db, current_user, kind, entity_id, action, body):
              "ISN_RETURN": lambda: _filing().isn_view(db, obj, detail=True),
              "SUA_PERIOD": lambda: _filing().sua_view(db, obj, detail=True)}
     return views[entity_type]()
+
+
+# ── Corrections (Phase 9a): CORRECTION runs of committed payslips ────────────
+
+def _corrections():
+    from app.modules.payroll import mexico_correction_service
+
+    return mexico_correction_service
+
+
+@router.get("/runs/{run_id}/corrections", summary="Corrections of this run and corrections made by it")
+def run_corrections(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _corrections().run_view(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/corrections", summary="Open a CORRECTION run for committed payslips (recalculated)")
+def open_run_correction(run_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                        db: Session = Depends(get_db)):
+    return _corrections().create_correction(db, _org_id(current_user), run_id, body.get("itemIds") or [],
+                                            str(body.get("reason") or ""), _actor(current_user))
+
+
+@router.post("/corrections/{run_id}/void", summary="Void an uncommitted correction (its run is deleted, records kept)")
+def void_run_correction(run_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                        db: Session = Depends(get_db)):
+    return _corrections().void(db, _org_id(current_user), run_id, str(body.get("reason") or ""), _actor(current_user))

@@ -16,6 +16,7 @@ import MXRunPreflightPanel from "../../../components/jurisdiction/mexico/run/MXR
 import MXRunStatusBadges from "../../../components/jurisdiction/mexico/run/MXRunStatusBadges";
 import MXRunCalculationTrace from "../../../components/jurisdiction/mexico/run/MXRunCalculationTrace";
 import MXCfdiStagePanel from "../../../components/jurisdiction/mexico/run/MXCfdiStagePanel";
+import MXCorrectionsPanel from "../../../components/jurisdiction/mexico/run/MXCorrectionsPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -488,6 +489,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   <MXRunStatusBadges runId={run.id} refreshKey={(detail || run).status} />
                   <MXRunPreflightPanel runId={run.id} runStatus={(detail || run).status} onChanged={load} />
                   <MXCfdiStagePanel runId={run.id} />
+                  <MXCorrectionsPanel runId={run.id} items={items} />
                 </>
               )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
