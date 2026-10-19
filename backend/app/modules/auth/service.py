@@ -143,6 +143,19 @@ def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = N
         refresh_payload = decode_refresh_token(refresh_token)
         if refresh_payload and refresh_payload.get("jti"):
             revoke_token(db, refresh_payload["jti"], datetime.utcfromtimestamp(refresh_payload["exp"]))
+            from app.modules.auth.models import RefreshTokenRecord
+
+            record = (db.query(RefreshTokenRecord)
+                      .filter(RefreshTokenRecord.jti == refresh_payload["jti"]).first())
+            if record is not None:
+                _revoke_family(db, record.family_id, "LOGOUT")
+
+    # ZP-PRIV D.1 step 7: an operator logging out of their admin account
+    # ends their live support grant (and its temporary login) immediately.
+    if user is not None:
+        from app.modules.support_access.service import end_grants_on_logout
+
+        end_grants_on_logout(db, user, request=request)
 
     from app.modules.auth import audit as auth_audit
 
@@ -602,10 +615,135 @@ def complete_action_token(db: Session, raw_token: str, purpose, new_password: st
     return {"message": "Password set successfully. You can now sign in."}
 
 
+# ── Sessions (ZP-PRIV B08) ──────────────────────────────────────────────────
+
+TEMPORARY_ACCESS_ENDED_MESSAGE = "This temporary support access has ended."
+
+
+def _role_str(user) -> str:
+    role = getattr(user, "role", "") or ""
+    return role.value if hasattr(role, "value") else str(role)
+
+
+def is_privileged(user) -> bool:
+    from app.modules.auth.mfa import MFA_REQUIRED_ROLES
+
+    return _role_str(user) in MFA_REQUIRED_ROLES
+
+
+def temporary_access_ended(user) -> bool:
+    """A temporary support user whose window has passed (or was never set)."""
+    if not getattr(user, "is_temporary", False):
+        return False
+    expires = getattr(user, "access_expires_at", None)
+    return expires is None or expires <= datetime.utcnow()
+
+
+def _client_fingerprint(request) -> Optional[str]:
+    if request is None:
+        return None
+    host = getattr(getattr(request, "client", None), "host", None) or ""
+    agent = request.headers.get("user-agent", "") if hasattr(request, "headers") else ""
+    return hashlib.sha256(f"{host}|{agent}".encode("utf-8")).hexdigest()
+
+
+def _access_lifetime(user) -> timedelta:
+    minutes = (settings.PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES if is_privileged(user)
+               else settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    lifetime = timedelta(minutes=minutes)
+    if getattr(user, "is_temporary", False) and user.access_expires_at is not None:
+        # A temporary support token never outlives the grant window.
+        remaining = user.access_expires_at - datetime.utcnow()
+        lifetime = max(min(lifetime, remaining), timedelta(seconds=1))
+    return lifetime
+
+
+def _claims(user, mfa_at: Optional[int]) -> dict:
+    claims = {
+        "sub": user.email,
+        "role": user.role.value,
+        "user_id": user.id,
+        "organization_id": user.organization_id,
+    }
+    if mfa_at:
+        claims["mfa_at"] = int(mfa_at)
+    return claims
+
+
+def issue_access_token(user, mfa_at: Optional[int] = None) -> str:
+    return create_access_token(data=_claims(user, mfa_at), expires_delta=_access_lifetime(user))
+
+
+def issue_session(db: Session, user, request=None, *, mfa_at: Optional[int] = None,
+                  family_id: Optional[str] = None) -> dict:
+    """Access token + a rotating refresh token recorded for reuse detection."""
+    import secrets as _secrets
+
+    from app.core.security import decode_refresh_token
+    from app.modules.auth.models import RefreshTokenRecord
+
+    refresh_token = create_refresh_token(data=_claims(user, mfa_at))
+    payload = decode_refresh_token(refresh_token)
+    expires_at = datetime.utcfromtimestamp(payload["exp"])
+    if getattr(user, "is_temporary", False) and user.access_expires_at is not None:
+        expires_at = min(expires_at, user.access_expires_at)
+    db.add(RefreshTokenRecord(
+        jti=payload["jti"], family_id=family_id or _secrets.token_hex(16), user_id=user.id,
+        expires_at=expires_at, client_fingerprint=_client_fingerprint(request), mfa_at=mfa_at,
+    ))
+    db.commit()
+    return {
+        "access_token": issue_access_token(user, mfa_at),
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
+def _revoke_family(db: Session, family_id: str, reason: str) -> None:
+    from app.modules.auth.models import RefreshTokenRecord
+
+    now = datetime.utcnow()
+    (db.query(RefreshTokenRecord)
+     .filter(RefreshTokenRecord.family_id == family_id, RefreshTokenRecord.revoked_at.is_(None))
+     .update({RefreshTokenRecord.revoked_at: now, RefreshTokenRecord.revoke_reason: reason[:40]},
+             synchronize_session=False))
+    db.commit()
+
+
+def revoke_user_sessions(db: Session, user_id: int, reason: str) -> None:
+    """End every refresh family of a user (role/org change, deactivation,
+    temporary access ending). Access tokens die on their own per-request
+    DB check; this stops new ones being minted."""
+    from app.modules.auth.models import RefreshTokenRecord
+
+    now = datetime.utcnow()
+    (db.query(RefreshTokenRecord)
+     .filter(RefreshTokenRecord.user_id == user_id, RefreshTokenRecord.revoked_at.is_(None))
+     .update({RefreshTokenRecord.revoked_at: now, RefreshTokenRecord.revoke_reason: reason[:40]},
+             synchronize_session=False))
+    db.commit()
+
+
+def _post_registration_session(db: Session, admin) -> dict:
+    """A new organization admin must set up MFA before the first session
+    (ZP-PRIV B08): registration returns the same enrolment step as login."""
+    from app.core.security import MFA_ENROLL_TOKEN_TYPE, create_mfa_token
+    from app.modules.auth import mfa
+
+    if mfa.mfa_required_for(admin):
+        return {"mfa_enrollment_required": True,
+                "mfa_token": create_mfa_token(admin.id, MFA_ENROLL_TOKEN_TYPE),
+                "user": admin}
+    return issue_session(db, admin)
+
+
 # ── Login ───────────────────────────────────────────────────────────────────
 
 def login_user(db: Session, email: str, password: str, request=None) -> dict:
+    from app.core.security import MFA_CHALLENGE_TOKEN_TYPE, MFA_ENROLL_TOKEN_TYPE, create_mfa_token
     from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
 
     user = db.query(User).filter(User.email == email).first()
     if user is None:
@@ -623,43 +761,127 @@ def login_user(db: Session, email: str, password: str, request=None) -> dict:
                 "Your organization has been suspended. Please contact support."
             )
 
+    if temporary_access_ended(user):
+        auth_audit.record(db, auth_audit.TEMPORARY_ACCESS_ENDED, user=user, request=request, reason="LOGIN")
+        raise UnauthorizedException(TEMPORARY_ACCESS_ENDED_MESSAGE)
+
     if not user.is_active:
         auth_audit.record(db, auth_audit.ACCOUNT_INACTIVE, user=user, request=request, reason="ACCOUNT_DEACTIVATED")
         raise UnauthorizedException("Your account has been deactivated.")
 
+    # ZP-PRIV B08: with MFA_ENFORCEMENT=enforce a password alone never yields
+    # a session for an MFA user. Off (the default): password sign-in only.
+    if mfa.enforcement_on() and mfa.is_enrolled(db, user):
+        auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request)
+        return {"mfa_required": True, "mfa_token": create_mfa_token(user.id, MFA_CHALLENGE_TOKEN_TYPE)}
+    if mfa.mfa_required_for(user):
+        auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request, reason="ENROLL")
+        return {"mfa_enrollment_required": True, "mfa_token": create_mfa_token(user.id, MFA_ENROLL_TOKEN_TYPE)}
+
     auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
-
-    token_payload = {
-        "sub": user.email,
-        "role": user.role.value,
-        "user_id": user.id,
-        "organization_id": user.organization_id,
-    }
-    access_token = create_access_token(data=token_payload)
-    refresh_token = create_refresh_token(data=token_payload)
-
     logger.info("User %s (%s) logged in", user.email, user.role.value)
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": user,
-    }
+    return issue_session(db, user, request)
+
+
+def _redeem_mfa_token(db: Session, mfa_token: str, token_type: str):
+    """The user behind a valid, unused MFA challenge/enrolment token. The
+    token is single-use: its jti is revoked by the caller once redeemed."""
+    from app.core.security import decode_mfa_token
+
+    payload = decode_mfa_token(mfa_token or "", token_type)
+    if payload is None or is_token_revoked(db, payload.get("jti")):
+        raise UnauthorizedException("Your sign-in step has expired. Please sign in again.")
+    user = db.query(User).filter(User.id == payload.get("user_id")).first()
+    if user is None or not user.is_active or temporary_access_ended(user):
+        raise UnauthorizedException("Your sign-in step has expired. Please sign in again.")
+    return user, payload
+
+
+def complete_mfa_challenge(db: Session, mfa_token: str, code: Optional[str], recovery_code: Optional[str],
+                           request=None) -> dict:
+    import time as _time
+
+    from app.core.security import MFA_CHALLENGE_TOKEN_TYPE
+    from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
+
+    user, payload = _redeem_mfa_token(db, mfa_token, MFA_CHALLENGE_TOKEN_TYPE)
+    if not mfa.verify_second_factor(db, user, code=code, recovery_code=recovery_code, request=request):
+        raise UnauthorizedException("That code is not valid. Please try again.")
+    revoke_token(db, payload["jti"], datetime.utcfromtimestamp(payload["exp"]))
+    auth_audit.record(db, auth_audit.MFA_VERIFIED, user=user, request=request)
+    auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
+    return issue_session(db, user, request, mfa_at=int(_time.time()))
+
+
+def begin_mfa_enrollment_at_login(db: Session, mfa_token: str) -> dict:
+    from app.core.security import MFA_ENROLL_TOKEN_TYPE
+    from app.modules.auth import mfa
+
+    user, _ = _redeem_mfa_token(db, mfa_token, MFA_ENROLL_TOKEN_TYPE)
+    return mfa.begin_enrollment(db, user)
+
+
+def confirm_mfa_enrollment_at_login(db: Session, mfa_token: str, code: str, request=None) -> dict:
+    import time as _time
+
+    from app.core.security import MFA_ENROLL_TOKEN_TYPE
+    from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
+
+    user, payload = _redeem_mfa_token(db, mfa_token, MFA_ENROLL_TOKEN_TYPE)
+    codes = mfa.confirm_enrollment(db, user, code, request=request)
+    revoke_token(db, payload["jti"], datetime.utcfromtimestamp(payload["exp"]))
+    auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
+    session = issue_session(db, user, request, mfa_at=int(_time.time()))
+    session["recovery_codes"] = codes
+    return session
 
 
 def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
+    """Rotate a refresh token (ZP-PRIV B08).
+
+    * revoked, unknown or already-used token -> 401; a reused token revokes
+      its whole family (a stolen token being replayed);
+    * role / organization changed since issue -> family revoked, 401;
+    * temporary support access ended -> 401;
+    * privileged role idle longer than PRIVILEGED_REFRESH_IDLE_MINUTES, or on
+      a new client fingerprint -> family revoked, re-authentication required.
+    The MFA time (mfa_at) is carried forward unchanged, so refreshing never
+    refreshes a step-up."""
     from app.core.security import decode_refresh_token
     from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
+    from app.modules.auth.models import RefreshTokenRecord
 
     payload = decode_refresh_token(refresh_token)
     if payload is None:
         auth_audit.record(db, auth_audit.REFRESH_FAILED, request=request, reason="INVALID_TOKEN")
         raise UnauthorizedException("Invalid or expired refresh token.")
 
+    record = db.query(RefreshTokenRecord).filter(RefreshTokenRecord.jti == payload.get("jti")).first()
+    if record is None:
+        auth_audit.record(db, auth_audit.REFRESH_FAILED, request=request, reason="UNKNOWN_TOKEN")
+        raise UnauthorizedException("Please sign in again.")
+    if record.used_at is not None or record.revoked_at is not None or is_token_revoked(db, payload.get("jti")):
+        _revoke_family(db, record.family_id, "REUSE_DETECTED")
+        auth_audit.record(db, auth_audit.REFRESH_REUSE_DETECTED, request=request,
+                          user=db.query(User).filter(User.id == record.user_id).first(), reason="REUSE")
+        raise UnauthorizedException("Please sign in again.")
+
     user = db.query(User).filter(User.id == payload.get("user_id")).first()
     if user is None or not user.is_active:
+        _revoke_family(db, record.family_id, "USER_INACTIVE")
         auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="USER_MISSING_OR_INACTIVE")
         raise UnauthorizedException("User not found or inactive.")
+    if temporary_access_ended(user):
+        _revoke_family(db, record.family_id, "TEMPORARY_ACCESS_ENDED")
+        auth_audit.record(db, auth_audit.TEMPORARY_ACCESS_ENDED, user=user, request=request, reason="REFRESH")
+        raise UnauthorizedException(TEMPORARY_ACCESS_ENDED_MESSAGE)
+    if payload.get("role") != user.role.value or payload.get("organization_id") != user.organization_id:
+        _revoke_family(db, record.family_id, "ROLE_OR_ORG_CHANGED")
+        auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="ROLE_OR_ORG_CHANGED")
+        raise UnauthorizedException("Your access changed. Please sign in again.")
 
     if user.organization_id:
         org = db.query(Organization).filter(Organization.id == user.organization_id).first()
@@ -667,20 +889,21 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
             auth_audit.record(db, auth_audit.REFRESH_FAILED, user=user, request=request, reason="ORGANIZATION_SUSPENDED")
             raise UnauthorizedException("Your organization has been suspended.")
 
-    auth_audit.record(db, auth_audit.REFRESH, user=user, request=request, required=True)
+    if is_privileged(user):
+        idle = datetime.utcnow() - record.issued_at
+        new_device = (record.client_fingerprint is not None and request is not None
+                      and _client_fingerprint(request) != record.client_fingerprint)
+        missing_mfa = mfa.mfa_required_for(user) and not record.mfa_at
+        if idle > timedelta(minutes=settings.PRIVILEGED_REFRESH_IDLE_MINUTES) or new_device or missing_mfa:
+            reason = "IDLE" if not (new_device or missing_mfa) else ("NEW_DEVICE" if new_device else "MFA_MISSING")
+            _revoke_family(db, record.family_id, f"REAUTH_{reason}")
+            auth_audit.record(db, auth_audit.REAUTH_REQUIRED, user=user, request=request, reason=reason)
+            raise UnauthorizedException("For your security, please sign in again.")
 
-    new_access = create_access_token(data={
-        "sub": user.email,
-        "role": user.role.value,
-        "user_id": user.id,
-        "organization_id": user.organization_id,
-    })
-    return {
-        "access_token": new_access,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": user,
-    }
+    record.used_at = datetime.utcnow()
+    db.commit()
+    auth_audit.record(db, auth_audit.REFRESH, user=user, request=request, required=True)
+    return issue_session(db, user, request, mfa_at=record.mfa_at, family_id=record.family_id)
 
 
 # ── Registration (public self-serve onboarding) ─────────────────────────────
@@ -821,18 +1044,7 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     else:
         _dispatch_org_created_emails()
 
-    token_payload = {
-        "sub": admin.email,
-        "role": admin.role.value,
-        "user_id": admin.id,
-        "organization_id": admin.organization_id,
-    }
-    return {
-        "access_token": create_access_token(data=token_payload),
-        "refresh_token": create_refresh_token(data=token_payload),
-        "token_type": "bearer",
-        "user": admin,
-    }
+    return _post_registration_session(db, admin)
 
 
 def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Optional[BackgroundTasks] = None) -> dict:
@@ -983,18 +1195,7 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
     else:
         _dispatch_trial_org_created_email()
 
-    token_payload = {
-        "sub": admin.email,
-        "role": admin.role.value,
-        "user_id": admin.id,
-        "organization_id": admin.organization_id,
-    }
-    return {
-        "access_token": create_access_token(data=token_payload),
-        "refresh_token": create_refresh_token(data=token_payload),
-        "token_type": "bearer",
-        "user": admin,
-    }
+    return _post_registration_session(db, admin)
 
 
 # ── Password flows ──────────────────────────────────────────────────────────

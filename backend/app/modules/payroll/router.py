@@ -185,6 +185,12 @@ payroll_router.include_router(mail_router)
 payroll_router.include_router(forms_router)
 # Netherlands organisation API (/payroll/netherlands/...) — own module, not this file.
 payroll_router.include_router(netherlands_org_router)
+# Employer statutory configuration moved from Super Admin to the tenant
+# (ZP-PRIV decision 3): /payroll/france/employer-profile, /payroll/germany/
+# accident-insurance-profiles, /payroll/saudi-arabia/employer-profiles, ...
+from app.modules.payroll.tenant_statutory_router import router as tenant_statutory_router  # noqa: E402
+
+payroll_router.include_router(tenant_statutory_router)
 
 
 # ── Employees ────────────────────────────────────────────────────────
@@ -1244,8 +1250,17 @@ def generate_run_payslips(
         service._record_attendance_override(db, run, override, current_user.id)
 
     if async_dispatch and settings.REDIS_URL:
+        from app.core.correlation import task_headers
+        from app.core.job_auth import job_context, scoped_employee_ids
         from app.tasks.payroll_tasks import generate_payslips_for_run_task
-        task = generate_payslips_for_run_task.delay(run_id, current_user.organization_id)
+
+        # ZP-PRIV D08: ids only (requester, tenant, correlation); the task
+        # re-authorizes and re-scopes on every execution. A scoped payroll
+        # admin's async run covers their employees only - as the sync path.
+        scope = scoped_employee_ids(db, current_user)
+        task = generate_payslips_for_run_task.apply_async(
+            args=[run_id, current_user.organization_id, sorted(scope) if scope is not None else None],
+            kwargs={"job_ctx": job_context(current_user)}, headers=task_headers())
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content={
@@ -3886,7 +3901,7 @@ def preview_sa_correction(
     from app.modules.payroll.models import PayslipItem
     item = db.query(PayslipItem).filter(PayslipItem.id == payslip_id,
                                         PayslipItem.organization_id == current_user.organization_id).first()
-    if item is None or (item.country_code or "").upper() != SA:
+    if item is None or (item.country_code or "").upper() != saudi_arabia_service.SA:
         from fastapi import HTTPException, status as http_status
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Saudi payslip not found")
     snapshot = item.sa_calculation_snapshot or {}

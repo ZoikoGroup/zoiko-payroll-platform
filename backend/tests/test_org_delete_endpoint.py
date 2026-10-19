@@ -31,7 +31,10 @@ for key in list(_saved_app_modules):
 from sqlalchemy import text  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
-from app.core.dependencies import get_current_super_admin  # noqa: E402
+from app.core.dependencies import (
+    get_current_super_admin,
+    get_current_org_scoped_principal,
+)  # noqa: E402
 from app.database import Base, engine, SessionLocal  # noqa: E402
 from decimal import Decimal  # noqa: E402
 from app.modules.payroll.models import JurisdictionPack, ContributionRate  # noqa: E402
@@ -67,6 +70,8 @@ class FakeSuperAdmin:
 
 
 app.dependency_overrides[get_current_super_admin] = lambda: FakeSuperAdmin()
+# The PDP (ZP-PRIV A04) resolves the principal through this dependency too.
+app.dependency_overrides[get_current_org_scoped_principal] = lambda: FakeSuperAdmin()
 
 client = TestClient(app)
 db = SessionLocal()
@@ -133,12 +138,14 @@ def _audit_rows(uid):
     return db.execute(text("SELECT COUNT(*) FROM payroll_tax_configuration_audit WHERE actor_id = :u"), {"u": uid}).scalar()
 
 
-def test_org_hard_delete_still_purges_its_audit_rows_by_default():
-    """G5 F-6 keeps the previous behaviour behind AUDIT_PURGE_ON_ORG_HARD_DELETE (default true)."""
+def test_org_hard_delete_purges_audit_rows_only_when_explicitly_enabled(monkeypatch):
+    """ZP-PRIV E02 / decision 7: purging is OFF by default; an operator who
+    explicitly enables it gets the previous behaviour (audited purge scope)."""
     import app.config as app_config
 
-    assert app_config.settings.AUDIT_PURGE_ON_ORG_HARD_DELETE is True
-    oid, uid = _org_with_audited_user("Purge Default Org")
+    assert app_config.settings.AUDIT_PURGE_ON_ORG_HARD_DELETE is False
+    monkeypatch.setattr(app_config.settings, "AUDIT_PURGE_ON_ORG_HARD_DELETE", True)
+    oid, uid = _org_with_audited_user("Purge Enabled Org")
     r = client.delete(f"/api/organizations/{oid}")
     assert r.status_code == 200, r.text
     assert _audit_rows(uid) == 0
@@ -148,7 +155,7 @@ def test_org_hard_delete_is_refused_when_audit_purge_is_disabled(monkeypatch):
     import app.config as app_config
 
     oid, uid = _org_with_audited_user("Purge Disabled Org")
-    monkeypatch.setattr(app_config.settings, "AUDIT_PURGE_ON_ORG_HARD_DELETE", False)
+    assert app_config.settings.AUDIT_PURGE_ON_ORG_HARD_DELETE is False  # the default
     r = client.delete(f"/api/organizations/{oid}")
     assert r.status_code == 409 and "AUDIT_PURGE_ON_ORG_HARD_DELETE" in r.text, r.text
     assert _audit_rows(uid) == 1

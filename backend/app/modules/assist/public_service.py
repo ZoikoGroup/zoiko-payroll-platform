@@ -43,6 +43,9 @@ NO_MATCH_FALLBACK = (
 
 
 def create_public_session(db, ip_address: str | None, locale: str = "en") -> AssistPublicSession:
+    from app.modules.assist.service import require_assist_enabled
+
+    require_assist_enabled(db)
     session = AssistPublicSession(ip_address=ip_address, locale=locale or "en")
     db.add(session)
     db.commit()
@@ -68,6 +71,9 @@ def list_public_messages(db, session_id: int) -> list[AssistPublicMessage]:
 
 
 def submit_public_message(db, session_id: int, text: str) -> dict:
+    from app.modules.assist.service import require_assist_enabled
+
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers the public widget too
     session = _get_public_session(db, session_id)
 
     text = (text or "").strip()

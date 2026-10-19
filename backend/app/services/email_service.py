@@ -1789,3 +1789,73 @@ def send_employee_welcome_email(
         "employee_name": employee_name,
         "login_url": login_url,
     }, db=db, organization_id=organization_id)
+
+
+# ── JIT Support Access (ZP-PRIV Part D) ──────────────────────────────────────
+# None of these ever carries a password or a username: the operator reads the
+# temporary login on their Support Access page only.
+
+def send_support_access_request_email(
+    email: str, grant_id: int, reason: str, ticket_reference: str, minutes: int, scope_label: str,
+    organization_id=None, db=None,
+) -> bool:
+    return _payroll_send(email, "support_access_request.html", {
+        "subject": "Platform support is asking for temporary access | Zoiko Payroll",
+        "preheader": "Approve or decline a temporary, read-only support access request.",
+        "heading": "Support access request",
+        "cta_url": f"{_frontend_base()}/organization-admin/support-access?grant={grant_id}",
+        "cta_label": "Approve or decline",
+        "details_panel": _details_rows([
+            ("Requested by", "Platform support"),
+            ("Reason", reason),
+            ("Ticket", ticket_reference),
+            ("Duration", f"{minutes} minutes"),
+            ("Scope", scope_label),
+        ]),
+    }, organization_id=organization_id, db=db)
+
+
+def send_support_access_ready_email(email: str, grant_id: int, organization_name: str, db=None) -> bool:
+    return _payroll_send(email, "support_access_ready.html", {
+        "subject": "Your support access is approved | Zoiko Payroll",
+        "preheader": "Your temporary login is ready on the Support Access page.",
+        "heading": "Support access approved",
+        "cta_url": f"{_frontend_base()}/super-admin/support-access?tab=mine",
+        "cta_label": "Open Support Access",
+        "details_panel": _details_rows([
+            ("Request", f"#{grant_id}"),
+            ("Organization", organization_name),
+        ]),
+    }, db=db)
+
+
+def send_support_access_break_glass_email(
+    email: str, grant_id: int, incident_reference: str, reason: str, starts_at: str, expires_at: str,
+    organization_id=None, db=None,
+) -> bool:
+    return _payroll_send(email, "support_access_break_glass.html", {
+        "subject": "Emergency support access to your payroll workspace | Zoiko Payroll",
+        "preheader": "Zoiko Platform Security opened emergency read-only access to your organisation.",
+        "heading": "Emergency support access opened",
+        "cta_url": f"{_frontend_base()}/organization-admin/support-access",
+        "cta_label": "Review or revoke",
+        "details_panel": _details_rows([
+            ("Access", f"#{grant_id}"),
+            ("Incident", incident_reference),
+            ("Reason given", reason),
+            ("Access window (UTC)", f"{starts_at} - {expires_at}"),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["error"])
+
+
+def send_security_alert_email(email: str, rule_key: str, severity: str, summary: str, db=None) -> bool:
+    """ZP-PRIV E03: security alert to the platform security mailbox. The
+    summary carries ids and counts only, never personal data."""
+    return _payroll_send(email, "security_alert.html", {
+        "subject": f"[{severity.upper()}] Security alert: {rule_key} | Zoiko Payroll",
+        "preheader": "A platform security rule fired.",
+        "heading": "Security alert",
+        "cta_url": f"{_frontend_base()}/super-admin/alerts",
+        "cta_label": "Open Alerts",
+        "details_panel": _details_rows([("Rule", rule_key), ("Severity", severity), ("Summary", summary)]),
+    }, db=db, accent=PALETTE["error"])

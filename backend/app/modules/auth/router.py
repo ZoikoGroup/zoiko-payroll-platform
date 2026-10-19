@@ -13,12 +13,13 @@ Org admin: /auth/admin/users (list/create/update/deactivate/reset)
 import json
 import logging
 
+from pydantic import BaseModel
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.dependencies import get_current_org_admin, get_current_user, oauth2_scheme
+from app.core.dependencies import get_current_org_admin, get_current_user, oauth2_scheme, require_recent_mfa
 from app.core.exceptions import BadRequestException
 from app.core.rate_limiter import limiter
 from app.database import get_db
@@ -29,12 +30,16 @@ from app.modules.auth.schemas import (
     ForgotPasswordRequest,
     GeneratedPasswordResponse,
     LoginRequest,
+    LoginResponse,
+    MfaChallengeRequest,
+    MfaCodeRequest,
+    MfaEnrollConfirmRequest,
+    MfaTokenRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     SuccessResponse,
     TokenPasswordRequest,
-    TokenResponse,
     TrialRegisterRequest,
     TrialStatusResponse,
     UserCreateRequest,
@@ -109,32 +114,139 @@ def _action_form_page(title: str, token: str, action_path: str) -> HTMLResponse:
 
 # ── Public auth ─────────────────────────────────────────────────────────────
 
-@router.post("/login", response_model=TokenResponse, summary="Login and get access token")
+@router.post("/login", response_model=LoginResponse, summary="Login and get access token")
 @limiter.limit("10/minute")
 def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
     return service.login_user(db, data.email, data.password, request=request)
 
 
-@router.post("/register", response_model=TokenResponse, summary="Register a new organization")
+@router.post("/register", response_model=LoginResponse, summary="Register a new organization")
 @limiter.limit("5/minute")
 def register(request: Request, data: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     return service.register_enterprise(db, data, background_tasks)
 
 
-@router.post("/register-trial", response_model=TokenResponse, summary="Register a 30-day Professional Evaluation workspace")
+@router.post("/register-trial", response_model=LoginResponse, summary="Register a 30-day Professional Evaluation workspace")
 @limiter.limit("5/minute")
 def register_trial(request: Request, data: TrialRegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     return service.register_trial(db, data, background_tasks)
 
 
-@router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
+@router.post("/refresh", response_model=LoginResponse, summary="Refresh access token")
 def refresh_token(request: Request, data: RefreshRequest, db: Session = Depends(get_db)):
     return service.refresh_user_token(db, data.refresh_token, request=request)
 
 
+# ── Multi-factor authentication (ZP-PRIV B08) ───────────────────────────────
+# The /mfa/challenge and /mfa/enroll/* routes are reached with the
+# short-lived single-use mfa_token that /login returns instead of a session.
+
+@router.post("/mfa/challenge", response_model=LoginResponse, summary="Complete sign-in with a TOTP or recovery code")
+@limiter.limit("10/minute")
+def mfa_challenge(request: Request, data: MfaChallengeRequest, db: Session = Depends(get_db)):
+    return service.complete_mfa_challenge(db, data.mfa_token, data.code, data.recovery_code, request=request)
+
+
+@router.post("/mfa/enroll/begin", summary="Start the mandatory TOTP setup during sign-in")
+@limiter.limit("10/minute")
+def mfa_enroll_begin(request: Request, data: MfaTokenRequest, db: Session = Depends(get_db)):
+    return service.begin_mfa_enrollment_at_login(db, data.mfa_token)
+
+
+@router.post("/mfa/enroll/confirm", response_model=LoginResponse,
+             summary="Confirm TOTP setup during sign-in (recovery codes are returned once)")
+@limiter.limit("10/minute")
+def mfa_enroll_confirm(request: Request, data: MfaEnrollConfirmRequest, db: Session = Depends(get_db)):
+    if not data.mfa_token:
+        raise BadRequestException("mfaToken is required.")
+    return service.confirm_mfa_enrollment_at_login(db, data.mfa_token, data.code, request=request)
+
+
+class FederationExchangeRequest(BaseModel):
+    token: str
+
+
+@router.post("/federation/exchange", response_model=LoginResponse,
+             summary="Exchange a Zoiko One token for a tenant-scoped payroll session (integration pending)")
+@limiter.limit("10/minute")
+def federation_exchange(request: Request, data: FederationExchangeRequest, db: Session = Depends(get_db)):
+    from app.modules.security.federation import exchange
+
+    return exchange(db, data.token, request=request)
+
+
+@router.get("/mfa/status", summary="Your multi-factor authentication status")
+def mfa_status(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.modules.auth import mfa
+
+    return mfa.status(db, current_user)
+
+
+@router.post("/mfa/setup/begin", summary="Set up TOTP from Security Settings")
+def mfa_setup_begin(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.modules.auth import mfa
+
+    return mfa.begin_enrollment(db, current_user)
+
+
+@router.post("/mfa/setup/confirm", summary="Confirm TOTP setup (recovery codes are returned once)")
+def mfa_setup_confirm(request: Request, data: MfaEnrollConfirmRequest,
+                      current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    import time as _time
+
+    from app.modules.auth import mfa
+
+    codes = mfa.confirm_enrollment(db, current_user, data.code, request=request)
+    return {"recoveryCodes": codes,
+            "accessToken": service.issue_access_token(current_user, mfa_at=int(_time.time()))}
+
+
+@router.post("/mfa/step-up", summary="Re-verify with a fresh code before a sensitive action")
+@limiter.limit("10/minute")
+def mfa_step_up(request: Request, data: MfaCodeRequest,
+                current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Returns a new access token whose mfa_at is now. Sensitive actions
+    (approving support access, break-glass, exports, credential resets,
+    field reveals) require mfa_at within MFA_STEP_UP_MAX_AGE_SECONDS."""
+    import time as _time
+
+    from app.core.exceptions import UnauthorizedException
+    from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
+
+    if not mfa.verify_second_factor(db, current_user, code=data.code, recovery_code=data.recovery_code,
+                                    request=request, failure_event=auth_audit.MFA_STEP_UP_FAILED):
+        raise UnauthorizedException("That code is not valid. Please try again.")
+    auth_audit.record(db, auth_audit.MFA_STEP_UP, user=current_user, request=request)
+    mfa_at = int(_time.time())
+    return {"accessToken": service.issue_access_token(current_user, mfa_at=mfa_at), "mfaAt": mfa_at}
+
+
+@router.post("/mfa/recovery-codes", summary="Replace your recovery codes (step-up required)")
+def mfa_regenerate_recovery_codes(request: Request, current_user=Depends(require_recent_mfa),
+                                  db: Session = Depends(get_db)):
+    from app.modules.auth import mfa
+
+    return {"recoveryCodes": mfa.regenerate_recovery_codes(db, current_user, request=request)}
+
+
+@router.post("/mfa/disable", response_model=SuccessResponse,
+             summary="Turn off MFA (only where it is optional; step-up required)")
+def mfa_disable(request: Request, current_user=Depends(require_recent_mfa), db: Session = Depends(get_db)):
+    from app.modules.auth import mfa
+
+    mfa.disable(db, current_user, request=request)
+    return {"message": "Multi-factor authentication is turned off."}
+
+
 @router.get("/me", response_model=UserResponse, summary="Get current logged-in user")
-def get_me(current_user=Depends(get_current_user)):
-    return current_user
+def get_me(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    out = UserResponse.model_validate(current_user)
+    if getattr(current_user, "is_temporary", False) and getattr(current_user, "support_grant_id", None):
+        from app.modules.support_access import service as support
+
+        out.support_session = support.temp_session_summary(db, current_user)
+    return out
 
 
 @router.get(
@@ -260,7 +372,9 @@ def list_users(
     from app.core.dependencies import get_organization_id
 
     org_id = get_organization_id(current_user)
-    query = db.query(User).filter(User.organization_id == org_id)
+    # Temporary JIT support logins are shown on Platform Support Access,
+    # not in the Team list (ZP-PRIV D.3).
+    query = db.query(User).filter(User.organization_id == org_id, User.is_temporary.is_(False))
     if search:
         like = f"%{search}%"
         query = query.filter(

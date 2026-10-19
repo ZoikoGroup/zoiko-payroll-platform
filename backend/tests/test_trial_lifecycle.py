@@ -71,6 +71,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.database import Base, SessionLocal, engine, initialize_database  # noqa: E402
 from app.modules.auth.models import User, UserRole  # noqa: E402
 from app.modules.billing import plan_catalog  # noqa: E402
+from tests._mfa_login import mfa_login  # noqa: E402  ZP-PRIV B08: real MFA sign-in
 from app.modules.billing.models import (  # noqa: E402
     BillingAuthority,
     BillingCommercialAuditEvent,
@@ -184,15 +185,13 @@ def client():
 
 @pytest.fixture(scope="module")
 def super_headers(client):
-    login = client.post("/api/auth/login", json={"email": "trial-super-admin@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "trial-super-admin@example.com", "password": "strong-password"})
     assert login.status_code == 200, login.text
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
 def _org_headers(client, org):
-    login = client.post(
-        "/api/auth/login",
-        json={"email": f"{org.organization_code.lower()}@example.com", "password": "strong-password"},
+    login = mfa_login(client, json={"email": f"{org.organization_code.lower()}@example.com", "password": "strong-password"},
     )
     assert login.status_code == 200, login.text
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -292,7 +291,7 @@ def test_sweep_closes_org_past_grace_and_is_idempotent(client, super_headers):
     # A CLOSED org's users can no longer log in at all (Organization.is_active
     # == False → login rejects it), which is the strongest form of the guard.
     # 429 = auth rate limiter across the shared suite; both prove no session.
-    login = client.post("/api/auth/login", json={"email": "evalclosedb@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "evalclosedb@example.com", "password": "strong-password"})
     assert login.status_code in (401, 429), login.text
 
 

@@ -25,14 +25,38 @@ Two scopes of coverage live here:
    test_engine_jurisdiction_db_integration.py.
 """
 
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Two-step verification is off by default (DEC-11). The suite keeps testing
+# the enforced path, which is still supported via MFA_ENFORCEMENT=enforce;
+# tests/privacy/test_mfa_sessions.py covers the default (off) path.
+os.environ.setdefault("MFA_ENFORCEMENT", "enforce")
+
 import pytest
+from sqlalchemy import event as _sa_event
+from sqlalchemy.engine import Engine as _Engine
 
 import app.modules.payroll.engine.countries.shared as _rollout_shared
+
+_LOCAL_DB_HOSTS = {None, "", "localhost", "127.0.0.1", "::1"}
+
+
+@_sa_event.listens_for(_Engine, "do_connect")
+def _refuse_non_local_databases(dialect, conn_rec, cargs, cparams):
+    """Tests may only ever reach SQLite or a loopback Postgres (the
+    disposable ZP_TEST_POSTGRES_URL container). A code path that falls back
+    to the app's configured engine (backend/.env -> a shared remote
+    database) fails here instead of reading or writing real data."""
+    if dialect.name == "sqlite":
+        return None
+    host = cparams.get("host")
+    if host not in _LOCAL_DB_HOSTS:
+        raise RuntimeError(f"tests must not connect to a non-local database (host {host!r})")
+    return None
 
 
 @pytest.fixture(autouse=True)
@@ -231,6 +255,8 @@ def db():
     import app.modules.payroll.models  # noqa: F401
     import app.modules.billing.models  # noqa: F401
     import app.modules.communications.models  # noqa: F401
+    import app.modules.support_access.models  # noqa: F401
+    import app.modules.security.models  # noqa: F401
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -295,3 +321,25 @@ def published_professional_plan(db):
     plan_catalog.publish_plan_version(db, version.id, published_by_user_id=actor.id)
     db.refresh(version)
     return version
+
+
+@pytest.fixture()
+def raw_log_messages():
+    """For the few tests that verify email routing by reading log lines:
+    lift the ZP-PRIV D03 redaction filter (which masks addresses once
+    app.main has been imported) for this test only. Redaction itself is
+    covered by tests/privacy/test_redaction_federation_governance.py."""
+    import logging
+
+    from app.core.redaction import RedactingLogFilter
+
+    removed = []
+    for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "celery", "celery.task"):
+        for handler in logging.getLogger(name).handlers:
+            for f in list(handler.filters):
+                if isinstance(f, RedactingLogFilter):
+                    handler.removeFilter(f)
+                    removed.append((handler, f))
+    yield
+    for handler, f in removed:
+        handler.addFilter(f)

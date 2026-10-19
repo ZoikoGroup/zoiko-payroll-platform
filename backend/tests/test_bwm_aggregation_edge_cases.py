@@ -215,15 +215,13 @@ def test_retroactive_correction_updates_past_month_not_processing_month(db, orga
 
 
 def test_transfer_between_entities_is_not_representable_today(db, organization):
-    """Documenting assertion, not a passing behavioral test: this schema
-    has no PayrollEmployee -> LegalEntity relationship at all (LegalEntity
-    was added purely for MAX_ENTITIES counting — see organizations/models.py),
-    and BillingWorkerMonthRecord.employer_entity_id is never set by any
-    code path. "Transfer between legal entities mid-month" cannot
-    double-count today because there is nothing to attribute an employee
-    to per-entity in the first place — this is a real, disclosed schema
-    gap, not a bug in aggregate_billing_month."""
-    assert not hasattr(PayrollEmployee, "legal_entity_id")
+    """Documenting assertion: PayrollEmployee now carries legal_entity_id /
+    pay_group_id (ZP-PRIV C.1, for access scope), but billing attribution
+    per entity is still not implemented - BillingWorkerMonthRecord.
+    employer_entity_id is never set by any code path, so "transfer between
+    legal entities mid-month" cannot double-count. A real, disclosed gap in
+    per-entity billing, not a bug in aggregate_billing_month."""
+    assert hasattr(PayrollEmployee, "legal_entity_id")
 
     emp = _make_employee(db, organization, "E4", scope_status=PayrollScopeStatus.ACTIVE.value)
     month = date(2026, 9, 1)

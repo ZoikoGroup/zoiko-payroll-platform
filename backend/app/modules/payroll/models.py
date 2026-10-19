@@ -140,6 +140,10 @@ class PayrollEmployee(Base):
 
     id               = Column(Integer, primary_key=True, index=True)
     organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    # ZP-PRIV C.1: the scope units a scoped payroll admin or a JIT support
+    # grant is limited to. NULL = unassigned (visible org-wide only).
+    legal_entity_id  = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    pay_group_id     = Column(Integer, ForeignKey("pay_groups.id", ondelete="SET NULL"), nullable=True, index=True)
 
     employee_code    = Column(String(20), nullable=False)
     legacy_code      = Column(String(20), nullable=True)

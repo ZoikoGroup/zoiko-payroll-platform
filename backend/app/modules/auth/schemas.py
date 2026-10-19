@@ -3,7 +3,7 @@ modules/auth/schemas.py
 -----------------------
 """
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -108,6 +108,9 @@ class UserResponse(BaseModel):
     phone: Optional[str] = None
     is_active: bool
     created_at: datetime
+    # Only for a temporary support login (role support_temp): what this
+    # session is for, so its read-only screen can show it. Never personal data.
+    support_session: Optional[dict] = None
 
 
 class TokenResponse(BaseModel):
@@ -115,6 +118,46 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class LoginResponse(BaseModel):
+    """Login / registration / refresh outcome (ZP-PRIV B08). Either a session
+    (access + refresh token) or an MFA step: ``mfa_required`` (enter a code
+    via /auth/mfa/challenge) or ``mfa_enrollment_required`` (set up TOTP via
+    /auth/mfa/enroll/*). ``recovery_codes`` appears once, right after
+    enrolment."""
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: str = "bearer"
+    user: Optional[UserResponse] = None
+    mfa_required: bool = False
+    mfa_enrollment_required: bool = False
+    mfa_token: Optional[str] = None
+    recovery_codes: Optional[List[str]] = None
+
+
+class MfaChallengeRequest(BaseModel):
+    mfa_token: str = Field(..., alias="mfaToken")
+    code: Optional[str] = None
+    recovery_code: Optional[str] = Field(None, alias="recoveryCode")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaTokenRequest(BaseModel):
+    mfa_token: str = Field(..., alias="mfaToken")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaEnrollConfirmRequest(BaseModel):
+    mfa_token: Optional[str] = Field(None, alias="mfaToken")
+    code: str
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaCodeRequest(BaseModel):
+    code: Optional[str] = None
+    recovery_code: Optional[str] = Field(None, alias="recoveryCode")
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SuccessResponse(BaseModel):

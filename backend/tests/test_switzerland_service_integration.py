@@ -323,13 +323,18 @@ def test_readiness_reports_gates_and_per_canton_status(db, ch):
 
 def test_super_admin_calculation_preview_is_read_only(db, ch):
     body = {"organizationId": ch.org.id, "employeeId": ch.emp.id, "payDate": "2026-03-31"}
+    # ZP-PRIV B.1: a preview for a REAL employee (their salary) is worker
+    # data - refused for Super Admin, available to the tenant itself.
     with _http(db, SA_A) as c:
-        out = c.post("/api/super-admin/compliance/switzerland/calculation-preview", json=body).json()
+        assert c.post("/api/super-admin/compliance/switzerland/calculation-preview", json=body).status_code == 403
+    admin = SimpleNamespace(id=PREPARER, organization_id=ch.org.id, role="org_admin", is_active=True)
+    with _http(db, admin) as c:
+        out = c.post("/api/payroll/switzerland/calculation-preview", json=body).json()
         assert out["blocked"] is False and out["result"]["gross"] == "8000.00"
         assert D(out["switzerland"]["totals"]["ch_qst_total"]) == D("640")
         db.query(TaxabilityRule).filter(TaxabilityRule.tax_component == "ch_alv").update({"status": "Draft"})
         db.commit()
-        blocked = c.post("/api/super-admin/compliance/switzerland/calculation-preview", json=body).json()
+        blocked = c.post("/api/payroll/switzerland/calculation-preview", json=body).json()
     assert blocked["blocked"] is True and blocked["blockedKey"] == "ch_taxability:ch_alv"
     assert db.query(PayslipItem).count() == 0 and db.query(PayrollYtdAccumulator).count() == 0
 

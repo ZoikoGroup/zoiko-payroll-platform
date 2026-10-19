@@ -39,7 +39,13 @@ from app.modules.payroll.engine.countries.shared import MissingComplianceConfigu
 
 logger = logging.getLogger("zoiko_payroll")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(correlation_id)s] %(message)s")
+
+# ZP-PRIV D03/D04: every log line carries the request's correlation id and is
+# scrubbed of secrets and worker personal data before any handler sees it.
+from app.core.redaction import install_log_filters  # noqa: E402
+
+install_log_filters()
 
 # ── Error tracking (Sentry) ──────────────────────────────────────────────
 # Inert until SENTRY_DSN is set (empty by default -- see config.py). No
@@ -47,7 +53,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 if settings.SENTRY_DSN:
     import sentry_sdk
 
-    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False)
+    from app.core.redaction import sentry_before_breadcrumb, sentry_before_send
+
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False, max_request_body_size="never",
+                    include_local_variables=False,
+                    before_send=sentry_before_send, before_breadcrumb=sentry_before_breadcrumb)
 
 # ── Access-log redaction for security tokens in query strings ───────────────
 
@@ -65,8 +75,28 @@ class _RedactSensitiveQueryFilter(logging.Filter):
 
 
 @asynccontextmanager
+def _enforce_nonprod_data_guard() -> None:
+    """ZP-PRIV D09: production stamps its data origin; a named non-production
+    environment refuses to start on production-origin data that was not
+    de-identified (core/nonprod_guard.py)."""
+    from app.core import nonprod_guard
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        result = nonprod_guard.enforce(db)
+        logger.info("[startup] non-production data guard: %s", result)
+    finally:
+        db.close()
+
+
 async def lifespan(app: FastAPI):
     initialize_database()
+    install_log_filters()  # uvicorn's own handlers exist by now
+    from app.database import check_row_level_security
+
+    check_row_level_security()
+    _enforce_nonprod_data_guard()
     from app.modules.assisted_access.models import ensure_tables
     from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
     from app.modules.auth.scheduler import start_token_cleanup_scheduler, stop_token_cleanup_scheduler
@@ -75,17 +105,21 @@ async def lifespan(app: FastAPI):
         start_dunning_scheduler, stop_dunning_scheduler,
         start_bwm_aggregation_scheduler, stop_bwm_aggregation_scheduler,
     )
-    from app.modules.assisted_access.scheduler import (
-        start_assisted_access_scheduler, stop_assisted_access_scheduler,
+    from app.modules.support_access.scheduler import (
+        retire_legacy_assisted_access, start_support_access_scheduler, stop_support_access_scheduler,
     )
 
     start_assist_scheduler(run_now=True)
     start_trial_scheduler(run_now=True)
     start_dunning_scheduler(run_now=True)
     start_bwm_aggregation_scheduler(run_now=True)
-    start_assisted_access_scheduler(run_now=True)
     start_token_cleanup_scheduler(run_now=True)
     ensure_tables()
+    # ZP-PRIV Part D supersedes Assisted Access: close any legacy session
+    # still open (its tokens are refused regardless), then run the JIT
+    # Support Access minute sweep.
+    retire_legacy_assisted_access()
+    start_support_access_scheduler(run_now=True)
 
     from app.modules.billing.router import _missing_checkout_config
     missing_checkout_config = _missing_checkout_config()
@@ -103,7 +137,7 @@ async def lifespan(app: FastAPI):
     stop_trial_scheduler()
     stop_dunning_scheduler()
     stop_bwm_aggregation_scheduler()
-    stop_assisted_access_scheduler()
+    stop_support_access_scheduler()
 
 
 from app.modules.communications.service import bind_request_background_tasks  # noqa: E402
@@ -198,6 +232,94 @@ app.include_router(billing_admin_router, prefix="/api")
 app.include_router(assisted_access_sa_router, prefix="/api")
 app.include_router(assisted_access_org_router, prefix="/api")
 
+# ZP-PRIV Part D: JIT Support Access (supersedes Assisted Access).
+from app.modules.support_access.router import operator_router as support_access_operator_router  # noqa: E402
+from app.modules.support_access.router import tenant_router as support_access_tenant_router  # noqa: E402
+
+app.include_router(support_access_operator_router, prefix="/api")
+app.include_router(support_access_tenant_router, prefix="/api")
+
+# ZP-PRIV C.3: pay groups, user scope, employee placement (org admins).
+from app.modules.organizations.scope_router import router as organization_scope_router  # noqa: E402
+
+app.include_router(organization_scope_router, prefix="/api")
+
+# ZP-PRIV D/E/F: security events, alerts, inventory, machine clients.
+from app.modules.security.router import platform_router as security_platform_router  # noqa: E402
+from app.modules.security.router import tenant_router as security_tenant_router  # noqa: E402
+
+app.include_router(security_platform_router, prefix="/api")
+app.include_router(security_tenant_router, prefix="/api")
+
+
+@app.middleware("http")
+async def export_size_middleware(request: Request, call_next):
+    """ZP-PRIV E03: record the size of every completed export (rows for JSON
+    lists, bytes otherwise) as a security event - feeds the large-export
+    alert. Metadata only; the body itself is never stored."""
+    response = await call_next(request)
+    policy = getattr(request.state, "authz_policy", None)
+    if policy is None or policy.action != "export" or response.status_code >= 400:
+        return response
+    size = int(response.headers.get("content-length") or 0)
+    from app.modules.security import events as security_events
+
+    principal = getattr(request.state, "authz_principal", None)
+    security_events.emit(
+        getattr(request.state, "authz_db"), "EXPORT_COMPLETED", result="allow",
+        actor_user_id=getattr(principal, "user_id", None), actor_role=getattr(principal, "role", None),
+        organization_id=getattr(principal, "organization_id", None), target_type=f"route:{policy.data_class}",
+        target_id=f"{request.method} {policy.path}|0:{size}", action="export", request=request)
+    return response
+
+
+@app.middleware("http")
+async def no_store_middleware(request: Request, call_next):
+    """ZP-PRIV T09: nothing a credentialed request returns may be kept by a
+    browser, proxy or CDN cache and replayed to someone else later."""
+    response = await call_next(request)
+    policy = getattr(request.state, "authz_policy", None)
+    credentialed = "authorization" in request.headers or "cookie" in request.headers
+    if credentialed or (policy is not None and policy.data_class != "public"):
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+        vary = response.headers.get("Vary")
+        response.headers["Vary"] = f"{vary}, Authorization" if vary and "Authorization" not in vary else (vary or "Authorization")
+    return response
+
+
+@app.middleware("http")
+async def support_access_projection_middleware(request: Request, call_next):
+    """Field-class projection of worker records for temporary support users
+    (ZP-PRIV B04); a no-op for every other principal."""
+    from app.modules.support_access.projection import project_support_response
+
+    response = await call_next(request)
+    return await project_support_response(request, response)
+
+# ── Correlation id (ZP-PRIV E01) ────────────────────────────────────────────
+# Registered first = innermost: it wraps the application itself, so every
+# handler, the PDP, audit rows, security events and log lines see the id (the
+# middlewares registered after it read request.state.correlation_id), and the
+# response echoes it.
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    from app.core import correlation
+
+    cid = correlation.accept(request.headers.get(correlation.HEADER))
+    request.state.correlation_id = cid
+    token = correlation.set_current(cid)
+    ip_token = correlation.client_ip.set(request.client.host if request.client else None)
+    try:
+        response = await call_next(request)
+    finally:
+        correlation._current.reset(token)
+        correlation.client_ip.reset(ip_token)
+    response.headers[correlation.HEADER] = cid
+    return response
+
+
 # ── Assisted Access audit middleware ────────────────────────────────────────
 # Single chokepoint: every request that ran under a SafeGuard assisted-access
 # token is appended to assisted_access_audit_events. Best-effort by design —
@@ -210,6 +332,22 @@ async def assisted_access_audit_middleware(request: Request, call_next):
     response = await call_next(request)
     record_request_if_assisted(request, response.status_code)
     return response
+
+
+# Registered last = outermost. When the client disconnects before a response
+# exists (a health probe or browser tab giving up), Starlette's
+# BaseHTTPMiddleware raises "No response returned." That is not an
+# application error: answer 499 quietly instead of logging a traceback.
+@app.middleware("http")
+async def client_disconnect_middleware(request: Request, call_next):
+    from starlette.responses import Response
+
+    try:
+        return await call_next(request)
+    except RuntimeError as exc:
+        if str(exc) == "No response returned." and await request.is_disconnected():
+            return Response(status_code=499)
+        raise
 
 # ── Root health ──────────────────────────────────────────────────────────────
 
@@ -279,3 +417,12 @@ def health_celery():
         "workers": active_workers,
         "worker_count": worker_count,
     }
+
+
+# ── Privacy PDP: default-deny route policy install ──────────────────────────
+# Must run AFTER every include_router (and the health routes above) so the
+# PDP dependency lands in front of every existing route's own gates. Routes
+# with no registry entry get a deny-all policy (fail closed).
+from app.core.authz.policy import install_route_policies  # noqa: E402
+
+install_route_policies(app)

@@ -178,8 +178,14 @@ def test_alembic_heads_is_single_head():
     # never on main nor applied to production — so the chain stays linear.
     # e3a9c1f7b2d4 (2026-10-14, HK D-A): contractual overtime columns; additive,
     # single child of d1e5a7c3b9f2. f4b8d2a6c9e1 (HK D-C): pre-transition wage
-    # overrides table; additive, single child of e3a9c1f7b2d4 — single head.
-    assert heads == ["f4b8d2a6c9e1"]
+    # overrides table; additive, single child of e3a9c1f7b2d4.
+    # ZP-PRIV-VERIFY-001 (2026-10-15/19): a7c3e91f2b60 (PDP denial audit) ->
+    # b2f4d6a8c0e1 (roles, temporary users, pay groups, user scope) ->
+    # c5e7a9b1d3f4 (MFA, refresh rotation, JIT support access) ->
+    # d7f9b1c3e5a6 (PostgreSQL row-level security) -> e1a3c5e7f9b2 (security
+    # events, alerts, machine clients, DSAR, data region); a linear chain on
+    # f4b8d2a6c9e1 - single head.
+    assert heads == ["e1a3c5e7f9b2"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -191,7 +197,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["f4b8d2a6c9e1"]
+    assert list(script.get_heads()) == ["e1a3c5e7f9b2"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -226,7 +232,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 196   # + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
+    assert len(revs) == 209   # + 8 Mexico/Brazil (5d2c8f1a7b3e .. f5c1a8d3e9b2, from main) + ZP-PRIV a7c3e91f2b60, b2f4d6a8c0e1, c5e7a9b1d3f4, d7f9b1c3e5a6, e1a3c5e7f9b2 + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
 
 
 def test_germany_head_chain_wiring_is_intact():

@@ -433,7 +433,7 @@ def test_org_currency_change_notifies(db, organization, caplog):
 
 # ── Trigger wiring: ops + org lifecycle senders (direct surrogate) ─────────
 
-def test_kill_switch_alert_is_internal_ops(db, caplog, monkeypatch):
+def test_kill_switch_alert_is_internal_ops(db, caplog, monkeypatch, raw_log_messages):
     from app.config import settings
     monkeypatch.setattr(settings, "ASSIST_SUPPORT_EMAIL", "ops@zoiko.example")
     from app.services.email_service import send_assist_kill_switch_alert_email

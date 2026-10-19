@@ -131,9 +131,22 @@ def generate_llm_answer(
     tool_result: dict | None = None,
 ) -> dict:
     """Call the configured OpenAI-compatible provider and validate the result."""
+    from app.core import outbound
+    from app.core.redaction import scrub_for_egress as scrub
+    from app.core.redaction import scrub_text
+
+    # ZP-PRIV D07: the model provider is an external processor. Nothing leaves
+    # outside a production-like environment (core/outbound.py, like email),
+    # and what does leave is scrubbed first: identifiers, bank/tax numbers and
+    # email addresses in the user's text, the tool output and the evidence are
+    # masked; salary / bank / tax keyed values are removed; person names and
+    # employee codes in structured data become [PERSON].
+    if not outbound.real_delivery_allowed("assist_llm"):
+        raise GatewayError("External model delivery is disabled in this environment.", "blocked")
     system_prompt = prompts.build_system_prompt()
-    evidence_envelope = prompts.build_evidence_envelope(evidence, knowledge, tool_result)
-    task_prompt = prompts.build_task_prompt(intent_id, user_text, jurisdiction_codes)
+    evidence_envelope = scrub_text(prompts.build_evidence_envelope(
+        scrub(evidence), scrub(knowledge), scrub(tool_result) if tool_result else None))
+    task_prompt = scrub_text(prompts.build_task_prompt(intent_id, user_text, jurisdiction_codes))
 
     url = f"{settings.ASSIST_MODEL_BASE_URL.rstrip('/')}/chat/completions"
     headers = {

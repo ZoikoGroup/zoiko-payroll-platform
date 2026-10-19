@@ -76,6 +76,17 @@ def task_session(db, monkeypatch):
     """
     monkeypatch.setattr(payroll_tasks, "SessionLocal", lambda: db)
     monkeypatch.setattr(db, "close", lambda: None)
+
+    # These tests cover chord mechanics. Job re-authorization (ZP-PRIV D08)
+    # is exercised against the real authorized_job in
+    # tests/privacy/test_jobs_and_machines.py; here it is a pass-through.
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _authorized(db_, ctx, **kw):
+        yield {"user": None, "principal": None, "employee_ids": None}
+
+    monkeypatch.setattr(payroll_tasks, "authorized_job", _authorized)
     return db
 
 
@@ -476,7 +487,9 @@ def test_header_task_returns_error_result_instead_of_raising(
         args=[run.id, organization.id, emp.id, None]).get()
 
     assert result["status"] == "error"
-    assert "synthetic resolver failure" in result["error"]
+    # ZP-PRIV D03: the result in the Celery backend carries the exception TYPE
+    # only - a message can carry worker values (it is still logged, scrubbed).
+    assert result["error"] == "RuntimeError" and "synthetic" not in str(result)
     assert result["employee_id"] == emp.id
     # Nothing was persisted for the failed employee.
     assert db.query(PayslipItem).filter(

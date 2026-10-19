@@ -11,6 +11,7 @@ from datetime import date, datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
+from app.core.job_auth import requires_job_principal
 from app.core.celery_app import celery_app
 from app.database import SessionLocal
 from app.modules.payroll import service as payroll_service
@@ -38,6 +39,7 @@ from app.modules.payroll.attendance_importer import import_attendance_from_strea
     max_retries=3,
     queue="attendance",
 )
+@requires_job_principal("bulk_upload_attendance_task")
 def bulk_upload_attendance_task(self, organization_id: int, file_content_b64: str, 
                                   filename: str, upload_mode: str = "day",
                                   upload_month: Optional[int] = None,
@@ -76,6 +78,7 @@ def bulk_upload_attendance_task(self, organization_id: int, file_content_b64: st
     max_retries=3,
     queue="attendance",
 )
+@requires_job_principal("bulk_generate_attendance_task")
 def bulk_generate_attendance_task(self, organization_id: int, employee_ids: List[int],
                                    start_date: str, end_date: str,
                                    check_in: str, check_out: str,
@@ -125,6 +128,7 @@ def bulk_generate_attendance_task(self, organization_id: int, employee_ids: List
     max_retries=2,
     queue="attendance",
 )
+@requires_job_principal("validate_attendance_upload_task")
 def validate_attendance_upload_task(self, organization_id: int, file_content_b64: str,
                                      filename: str) -> Dict[str, Any]:
     """
@@ -150,6 +154,7 @@ def validate_attendance_upload_task(self, organization_id: int, file_content_b64
     bind=True,
     queue="attendance",
 )
+@requires_job_principal("generate_attendance_report_task")
 def generate_attendance_report_task(self, organization_id: int, start_date: str, 
                                      end_date: str, format: str = "xlsx") -> Dict[str, Any]:
     """
@@ -181,6 +186,7 @@ def generate_attendance_report_task(self, organization_id: int, start_date: str,
     bind=True,
     queue="attendance",
 )
+@requires_job_principal("sync_attendance_to_leave_task")
 def sync_attendance_to_leave_task(self, organization_id: int, start_date: str, end_date: str):
     """
     Sync attendance records to leave requests for the date range.

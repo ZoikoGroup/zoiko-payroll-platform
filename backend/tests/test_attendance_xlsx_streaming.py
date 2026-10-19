@@ -284,12 +284,21 @@ def test_malformed_rows_graceful_degradation(db: Session, seeded_employees):
     assert rec.hours == "0.0"
 
 
-def test_celery_task_integration(monkeypatch, seeded_employees):
-    """Verify Celery task bulk_upload_attendance_task executes end-to-end."""
+def test_celery_task_integration(monkeypatch, db, seeded_employees):
+    """Verify Celery task bulk_upload_attendance_task executes end-to-end,
+    re-authorizing its requester first (ZP-PRIV D08)."""
     import base64
+    from app.core.job_auth import job_context
+    from app.modules.auth.models import User, UserRole
     from app.tasks.attendance_tasks import bulk_upload_attendance_task
 
     org_id = seeded_employees["org_id"]
+    admin = User(email="attendance-admin@example.com", hashed_password="x", role=UserRole.ORG_ADMIN,
+                 organization_id=org_id, first_name="A", last_name="Admin", is_active=True)
+    db.add(admin)
+    db.commit()
+    assert bulk_upload_attendance_task.apply(args=(org_id, "", "test.xlsx")).get() == {
+        "error": "not authorized", "reason": "MISSING_PRINCIPAL_CONTEXT"}
     headers = ["Employee ID", "Date", "Status", "Hours"]
     rows = [
         ["EMP001", "2026-11-01", "Present", "8.0"],
@@ -300,7 +309,7 @@ def test_celery_task_integration(monkeypatch, seeded_employees):
 
     # Run eager task
     result = bulk_upload_attendance_task.apply(
-        args=(org_id, b64_content, "test.xlsx")
+        args=(org_id, b64_content, "test.xlsx"), kwargs={"job_ctx": job_context(admin)}
     ).get()
 
     assert result["saved"] == 2

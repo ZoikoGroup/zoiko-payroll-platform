@@ -96,3 +96,21 @@ def _decode(token: str, expected_type: str) -> Optional[dict]:
     if payload.get("iss") != settings.JWT_ISSUER:
         return None
     return payload
+
+
+# ── ZP-PRIV B08: MFA challenge / enrolment tokens ────────────────────────────
+# A password alone never yields a session for an MFA user. Login returns one of
+# these instead: short-lived (MFA_CHALLENGE_TOKEN_MINUTES), single-use (its jti
+# is revoked once redeemed), and a distinct type so no endpoint that expects an
+# access token can ever accept it.
+MFA_CHALLENGE_TOKEN_TYPE = "mfa_challenge"
+MFA_ENROLL_TOKEN_TYPE = "mfa_enroll"
+
+
+def create_mfa_token(user_id: int, token_type: str) -> str:
+    assert token_type in (MFA_CHALLENGE_TOKEN_TYPE, MFA_ENROLL_TOKEN_TYPE)
+    return _encode({"user_id": user_id}, timedelta(minutes=settings.MFA_CHALLENGE_TOKEN_MINUTES), token_type)
+
+
+def decode_mfa_token(token: str, token_type: str) -> Optional[dict]:
+    return _decode(token, expected_type=token_type)

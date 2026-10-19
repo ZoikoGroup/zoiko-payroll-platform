@@ -71,6 +71,7 @@ from app.modules.organizations.models import Organization  # noqa: E402
 from app.modules.payroll.models import PayrollRun, PayrollStatus  # noqa: E402
 
 from sqlalchemy.engine import make_url as _make_url  # noqa: E402
+from tests._mfa_login import mfa_login  # ZP-PRIV B08: real MFA sign-in
 
 assert _make_url(engine.url).get_backend_name() == "sqlite", (
     f"test_step5_subscription_tax must run on its own sqlite DB, got {engine.url}"
@@ -143,7 +144,7 @@ def client():
 
 
 def _headers(client, email):
-    login = client.post("/api/auth/login", json={"email": email, "password": "strong-password"})
+    login = mfa_login(client, json={"email": email, "password": "strong-password"})
     assert login.status_code == 200, login.text
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 

@@ -40,6 +40,25 @@ class Settings(BaseSettings):
     JWT_ISSUER: str = "zoiko-payroll-platform"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # ZP-PRIV B08: privileged roles (super_admin, support_operator,
+    # platform_security, org_admin) get short access tokens, mandatory TOTP
+    # and idle/new-device re-authentication on refresh.
+    PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    PRIVILEGED_REFRESH_IDLE_MINUTES: int = 30
+    MFA_STEP_UP_MAX_AGE_SECONDS: int = 300
+    MFA_CHALLENGE_TOKEN_MINUTES: int = 5
+    # "enforce": privileged roles must enrol and pass TOTP at login.
+    # "off" exists only for local development; production refuses it.
+    # Two-step verification is switched off (owner decision 2026-10-19,
+    # DEC-11). Set MFA_ENFORCEMENT=enforce to require an authenticator app
+    # at sign-in for privileged roles and fresh codes for sensitive actions.
+    MFA_ENFORCEMENT: str = "off"
+    MFA_ISSUER_NAME: str = "Zoiko Payroll"
+    # ZP-PRIV C.2: refuse to start when the database role bypasses row-level
+    # security (superuser or BYPASSRLS). Off by default until the dedicated
+    # NOBYPASSRLS application role is provisioned (docs/privacy/rls_runbook.md);
+    # a CRITICAL log line is written either way.
+    DB_RLS_REQUIRE_ENFORCED: bool = False
 
     # ── App Info ──────────────────────────────────────────────────────
     APP_NAME: str = "Zoiko Payroll Platform Backend"
@@ -91,11 +110,28 @@ class Settings(BaseSettings):
     LOCAL_MAIL_SANDBOX_HOST: str = "127.0.0.1"
     LOCAL_MAIL_SANDBOX_PORT: int = 1025
 
-    # G5 F-6: audit rows are append-only. Organisation hard-delete purges that
-    # organisation's configuration / auth audit rows only while this is true
-    # (the previous behaviour, kept as the default). OPEN decision for
-    # Security and counsel (sign-off packets 03 / 04); false refuses the delete.
-    AUDIT_PURGE_ON_ORG_HARD_DELETE: bool = True
+    # G5 F-6 / ZP-PRIV E02: audit rows are append-only. Decision 7 (recorded
+    # 2026-10-19 by venu@zoikogroup.com): default OFF - an organisation
+    # hard-delete never purges audit or security-event rows (it is refused
+    # while they exist). Audit is kept 7 years and removed only by the explicit,
+    # logged retention job (scripts/audit_retention.py), never under legal hold.
+    AUDIT_PURGE_ON_ORG_HARD_DELETE: bool = False
+    AUDIT_RETENTION_YEARS: int = 7
+    # ZP-PRIV E03: comma-separated platform security mailbox(es) for alert
+    # email; empty = Super Admin Alerts page only (no secondary channel).
+    SECURITY_ALERT_EMAILS: str = ""
+    # Optional external anchor bucket (retention-locked) for the security
+    # event hash chain; empty = anchors recorded in the database only.
+    SECURITY_ANCHOR_BUCKET: str = ""
+    # ZP-PRIV F02: this deployment's home data region (decision 9).
+    DATA_REGION: str = "EU"
+    # ZP-PRIV D05: Zoiko One federation (integration pending - disabled
+    # until both are set). PEM of the IdP's RS256 public key.
+    FEDERATION_ISSUER: str = ""
+    FEDERATION_PUBLIC_KEY_PEM: str = ""
+    FEDERATION_MAX_TOKEN_SECONDS: int = 300
+    # Worker data retention after termination / offboarding (decision 10).
+    WORKER_DATA_RETENTION_YEARS: int = 7
     # Optional public https URL of the email logo (a hosted copy of
     # app/email_assets/zoikopayroll-logo-email.png). Empty (default): the logo
     # is embedded in every message as an inline CID image, so it renders even
@@ -208,6 +244,19 @@ class Settings(BaseSettings):
     ASSISTED_ACCESS_SWEEP_ENABLED: bool = True
     ASSISTED_ACCESS_SWEEP_INTERVAL_MINUTES: int = 60
 
+    # ── JIT Support Access (ZP-PRIV Part D) ─────────────────────────────
+    # Hard maximum 30 minutes: a documented alternative to the checklist's
+    # proposed 60, approved by venu@zoikogroup.com on 2026-10-15.
+    SUPPORT_ACCESS_ALLOWED_MINUTES: str = "5,15,30"
+    SUPPORT_ACCESS_MAX_MINUTES: int = 30
+    SUPPORT_ACCESS_APPROVAL_WINDOW_MINUTES: int = 60
+    SUPPORT_ACCESS_BREAK_GLASS_MINUTES: int = 30
+    SUPPORT_ACCESS_BREAK_GLASS_REVIEW_HOURS: int = 24
+    SUPPORT_ACCESS_MAX_EMPLOYEES: int = 10
+    SUPPORT_ACCESS_LOGIN_DOMAIN: str = "support.zoikopayroll.com"
+    SUPPORT_ACCESS_SWEEP_ENABLED: bool = True
+    SUPPORT_ACCESS_SWEEP_INTERVAL_SECONDS: int = 60
+
     # ── Staging/test billing isolation (Part 11) ────────────────────────
     # When true: refuse to boot with a Stripe LIVE key, force seed/demo
     # data to synthetic values, and sandbox outbound billing email. See
@@ -250,3 +299,8 @@ if settings.STAGING_MODE and settings.STRIPE_SECRET_KEY.startswith("sk_live_"):
         "STAGING_MODE is enabled but STRIPE_SECRET_KEY is a LIVE key (sk_live_...). "
         "Refusing to start — staging must only ever use a Stripe TEST key (sk_test_...)."
     )
+
+
+if settings.SUPPORT_ACCESS_MAX_MINUTES > 30 or settings.SUPPORT_ACCESS_BREAK_GLASS_MINUTES > 30:
+    # ZP-PRIV D: 30 minutes is the hard maximum (approved alternative to 60).
+    raise RuntimeError("Support access durations are capped at 30 minutes.")

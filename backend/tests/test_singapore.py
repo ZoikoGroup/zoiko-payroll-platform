@@ -4746,9 +4746,21 @@ def test_every_platform_role_is_a_payroll_operator_so_shg_reads_stay_restricted(
     from app.core import dependencies
     from app.modules.auth.models import UserRole
 
-    operators = {dependencies.ROLE_ORG_ADMIN, dependencies.ROLE_PAYROLL_ADMIN, dependencies.ROLE_SUPER_ADMIN,
-                 dependencies.ROLE_ASSISTED_ACCESS}
-    assert {r.value for r in UserRole} <= operators
+    from app.core.authz.policy import MATRIX
+
+    # Every login role is either a payroll operator (whose SHG reads are
+    # audited), or a role the privacy PDP keeps away from worker data
+    # entirely (platform roles) or limits to read-only, grant / self scoped,
+    # field-projected access (support_temp, employee) - ZP-PRIV A/B/D.
+    operators = {dependencies.ROLE_ORG_ADMIN, dependencies.ROLE_PAYROLL_ADMIN}
+    for role in {r.value for r in UserRole} - operators:
+        worker_actions = MATRIX.get(role, {}).get("worker", frozenset())
+        if role == "support_temp":
+            assert worker_actions == {"read"}, role
+        elif role == "employee":
+            assert worker_actions <= {"read", "export"}, role  # own record only (PDP self check)
+        else:
+            assert not worker_actions, role
 
 
 def test_phase53_and_54_sources_record_their_real_retrieval_date(db):

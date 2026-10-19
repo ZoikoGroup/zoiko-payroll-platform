@@ -282,4 +282,35 @@ import app.modules.payroll.mail.models  # noqa: F401,E402
 import app.modules.assist.models  # noqa: F401,E402
 import app.modules.billing.models  # noqa: F401,E402
 import app.modules.assisted_access.models  # noqa: F401,E402
+import app.modules.support_access.models  # noqa: F401,E402
+import app.modules.security.models  # noqa: F401,E402
 import app.modules.communications.models  # noqa: F401,E402
+
+
+
+def check_row_level_security(bind=None) -> dict:
+    """ZP-PRIV C.2: report whether PostgreSQL will actually enforce the RLS
+    policies for this connection's role. Superusers and BYPASSRLS roles skip
+    every policy, so the data-layer guarantee depends on the role."""
+    target = bind or engine
+    if target.dialect.name != "postgresql":
+        return {"dialect": target.dialect.name, "enforced": None}
+    with target.connect() as conn:
+        row = conn.execute(text(
+            "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+        )).first()
+        policies = conn.execute(text(
+            "SELECT count(*) FROM pg_policies WHERE schemaname = current_schema() AND policyname = 'zoiko_rls'"
+        )).scalar() or 0
+    role, is_super, bypass = (row or (None, None, None))
+    enforced = bool(policies) and not is_super and not bypass
+    report = {"dialect": "postgresql", "role": role, "superuser": bool(is_super),
+              "bypassRls": bool(bypass), "policies": int(policies), "enforced": enforced}
+    if not enforced:
+        logger.critical(
+            "[rls] Row-level security is NOT enforced for role %s (superuser=%s bypassrls=%s policies=%s). "
+            "Connect as the NOBYPASSRLS application role - see docs/privacy/rls_runbook.md.",
+            role, is_super, bypass, policies)
+        if settings.DB_RLS_REQUIRE_ENFORCED:
+            raise RuntimeError("Row-level security is not enforced for the database role; refusing to start.")
+    return report

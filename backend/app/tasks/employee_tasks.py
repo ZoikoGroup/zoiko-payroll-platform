@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from datetime import date
 
+from app.core.job_auth import requires_job_principal
 from app.database import SessionLocal
 from app.modules.payroll import service as payroll_service
 from app.modules.payroll.models import PayrollEmployee, EmployeeStatus
@@ -34,6 +35,7 @@ def get_db() -> Session:
     max_retries=3,
     queue="employees",
 )
+@requires_job_principal("bulk_create_employees_task")
 def bulk_create_employees_task(self, organization_id: int, employees_data: List[Dict[str, Any]],
                                 actor_id: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -77,6 +79,7 @@ def bulk_create_employees_task(self, organization_id: int, employees_data: List[
     max_retries=3,
     queue="employees",
 )
+@requires_job_principal("bulk_update_employees_task")
 def bulk_update_employees_task(self, organization_id: int, employees_data: List[Dict[str, Any]],
                                 actor_id: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -119,6 +122,7 @@ def bulk_update_employees_task(self, organization_id: int, employees_data: List[
     max_retries=3,
     queue="employees",
 )
+@requires_job_principal("bulk_delete_employees_task")
 def bulk_delete_employees_task(self, organization_id: int, employee_ids: List[int],
                                 actor_id: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -156,6 +160,7 @@ def bulk_delete_employees_task(self, organization_id: int, employee_ids: List[in
     bind=True,
     queue="employees",
 )
+@requires_job_principal("import_employees_from_xlsx_task")
 def import_employees_from_xlsx_task(self, organization_id: int, file_content_b64: str,
                                      filename: str, actor_id: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -243,6 +248,7 @@ def import_employees_from_xlsx_task(self, organization_id: int, file_content_b64
     bind=True,
     queue="employees",
 )
+@requires_job_principal("sync_employee_statutory_profiles_task")
 def sync_employee_statutory_profiles_task(self, organization_id: int, country: str) -> Dict[str, Any]:
     """
     Sync employee statutory profiles for a country.
@@ -270,6 +276,7 @@ def sync_employee_statutory_profiles_task(self, organization_id: int, country: s
     bind=True,
     queue="employees",
 )
+@requires_job_principal("export_employees_task")
 def export_employees_task(self, organization_id: int, format: str = "xlsx",
                            filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
@@ -300,6 +307,7 @@ def export_employees_task(self, organization_id: int, format: str = "xlsx",
     bind=True,
     queue="employees",
 )
+@requires_job_principal("sync_employee_statutory_profile_task")
 def sync_employee_statutory_profile_task(self, organization_id: int, employee_id: int,
                                           country: str, profile_data: Dict[str, Any]) -> Dict[str, Any]:
     """
