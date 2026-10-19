@@ -20,10 +20,23 @@ Prepared 2026-10-16 from repository state and the public GitHub Actions API (rea
 | #109 (2026-10-19 04:42Z) | b041ead | **39200794145** — test ✅ (16 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅ — completed 05:00Z; frontend build 39200794149 ✅ | **Phase 7** `9e00a20` (commit message reads "phase 6 mexico"; content is Phase 7): CFDI lifecycle + thin PAC seam, migration **`d8b3e5f1a2c7`** (mx_cfdi_m5: three new empty tables, no shared column), same-pay-date month-to-date tie-break. Dormant: routes 403, builder/signer refuse, no PAC adapter. Production should be at **`d8b3e5f1a2c7`** (the SSH step's head check would have failed otherwise) — confirm with `alembic current`. |
 | #110 (2026-10-19 07:08Z) | 422d4d2 | **39214061815** — test ✅ (17 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅ — completed 07:27Z; frontend build 39214061602 ✅ | **Phase 8** `8ee13dd` (commit message reads "phase 7 mexico"; content is Phase 8): authorities — IMSS movements, liability ledger, SUA reconciliation, ISN returns, file-export mode; migration **`e3b9c2d7f4a1`** (mx_authorities_m6: seven new empty tables, no shared column). Dormant: routes 403, nothing transmits. Production should be at **`e3b9c2d7f4a1`** — confirm with `alembic current`. |
 | #111 (2026-10-19 08:41Z) | 4adac17 | **39224575881** — test ✅ (22 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅ — completed 09:05Z; frontend build 39224575888 ✅ | **Phase 9a** `14bf883` (commit message reads "phase 8 mexico"; content is Phase 9a): correction runs, migration **`f5c1a8d3e9b2`** (mx_corrections_m7: one new empty table, no shared column); MX-only guard in `service.delete_payroll_run`. Dormant: routes 403. Production should be at **`f5c1a8d3e9b2`** — confirm with `alembic current`. |
+| #112 (2026-10-19 11:35Z) | 9e49df0 | **39245798162** — test ✅ · single-head ✅ · **deploy ❌ (SSH step)** · drift skipped; frontend build 39245797978 ✅ | **Phase 9b** `47455d4`: aguinaldo + vacation, migration `a6d2f9c4b8e1`. **Not applied** — see the incident below. |
 
 Everything committed on `nikhil` up to `14bf883` (Phase 9a) is on `main` (`4adac17`) and deployed (run 39224575881); production database head expected **`f5c1a8d3e9b2`** — confirm with `alembic current`.
 
-**Pending (not on `main`):** Phase 9b (aguinaldo + vacation, migration **`a6d2f9c4b8e1`** mx_benefits_m8 — one new empty table, no shared column) is staged on `nikhil`, not committed. Its merge moves the production head `f5c1a8d3e9b2` → `a6d2f9c4b8e1`; production effect in `MEXICO_PHASE_9B_IMPLEMENTATION_REPORT.md` §4.
+**INCIDENT 2026-10-19 — PR #112 deploy failed (Copilot "Explain error" on the SSH step).** The production
+`alembic_version` row reads **`e1a3c5e7f9b2`** — a revision that exists in **no branch on GitHub** and nowhere in this
+checkout. Someone applied it to production between 09:05Z (PR #111 deploy, `f5c1a8d3e9b2`) and 12:04Z, outside the CI
+pipeline. `deploy_migrate.sh` has an orphan self-heal, but it refuses to stamp unless the live schema matches the
+models — and the models already included 9b's new `payroll_mx_vacation_records`, the very table the deploy was about to
+create, so the self-heal could never succeed for a deploy that brings a new table. Rehearsed exactly on SQLite (old
+script: same refusal). The production database was NOT changed by the failed run; the server pulled 9b's code but was
+NOT restarted (it still runs 9a). **Fix staged:** the orphan path now finds the stamp point first and ignores only the
+objects the pending migrations create (`backend/scripts/drift_pending_filter.py`); any other drift — including DB
+columns the models do not know — still refuses. **Open:** who applied `e1a3c5e7f9b2`, and what did it change? If it
+added columns to existing tables, the next deploy will refuse again (correctly) and that change must be reconciled first.
+
+**Pending (not on `main`):** the deploy-script fix for the PR #112 incident (staged). Phase 9b's code is on `main` but its migration `a6d2f9c4b8e1` is not applied in production until a deploy succeeds.
 
 **Migration result (inferred, see §6 to confirm).** The SSH step runs `alembic current --check-heads` and a script that exits non-zero unless the database heads equal the repository head; that step succeeded for run 38860348647, so production should be at **`6e4a1d9c3f27`**. The job logs themselves need repository admin rights (`403 Must have admin rights`), so the exact migration lines were not read.
 

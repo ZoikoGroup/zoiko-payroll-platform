@@ -153,17 +153,7 @@ if printf '%s\n' "$(known_revisions)" | grep -q -x "$ORPHAN"; then
   exit 1
 fi
 
-echo "==> '${ORPHAN}' absent from alembic/versions - orphan version row confirmed. Checking (read-only) that the schema matches the models before re-stamping..."
-if ! DRIFT="$(schema_drift 2>&1)"; then
-  echo "!! Schema is NOT in sync with the models. Refusing to stamp over pending migrations."
-  echo "    The schema was NOT modified. Drift found (manual review required):"
-  printf '%s\n' "$DRIFT" | sed 's/^/      /'
-  echo "    Bring the DB to the models through Alembic (restore / reconcile), then re-run this script."
-  print_diagnostics
-  exit 1
-fi
-
-echo "==> Schema matches models. Finding correct stamp ancestor..."
+echo "==> Orphan version row confirmed. Finding (read-only) the deepest revision already reflected in the DB..."
 # Rather than stamping directly to HEAD (upgrade = no-op, missing tables stay
 # missing) or blindly one step before HEAD (only runs the last migration), we
 # walk the revision chain from HEAD backwards and find the deepest revision
@@ -254,6 +244,28 @@ if [ -z "$STAMP_REV" ]; then
   echo "!! Could not determine correct stamp revision. State:"
   print_diagnostics
   exit 1
+fi
+
+echo "==> '${ORPHAN}' absent from alembic/versions - orphan version row confirmed. Checking (read-only) that the schema matches the models, apart from what the pending migrations after '${STAMP_REV}' create..."
+# The models already include what the pending migrations (after the stamp
+# point) are about to create, so those objects are expected to be missing;
+# scripts/drift_pending_filter.py removes exactly them from the report. Any
+# other drift - including DB columns the models do not know (a change made
+# outside this repository) - still refuses (2026-10-19, PR #112).
+if ! DRIFT="$(schema_drift 2>&1)"; then
+  UNEXPLAINED="$(printf '%s\n' "$DRIFT" | python -m scripts.drift_pending_filter "$STAMP_REV")"
+  if [ -n "$UNEXPLAINED" ]; then
+    echo "!! Schema is NOT in sync with the models. Refusing to stamp over pending migrations."
+    echo "    The schema was NOT modified. Drift not explained by the pending migrations (manual review required):"
+    printf '%s\n' "$UNEXPLAINED" | sed 's/^/      /'
+    echo "    Full drift report:"
+    printf '%s\n' "$DRIFT" | sed 's/^/      /'
+    echo "    Bring the DB to the models through Alembic (restore / reconcile), then re-run this script."
+    print_diagnostics
+    exit 1
+  fi
+  echo "==> Only objects created by the pending migrations are missing - safe to stamp and upgrade:"
+  printf '%s\n' "$DRIFT" | sed 's/^/      /'
 fi
 
 echo "==> Stamping to '${STAMP_REV}' (deepest revision already reflected in DB)..."
