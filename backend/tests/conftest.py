@@ -331,13 +331,15 @@ def raw_log_messages():
     covered by tests/privacy/test_redaction_federation_governance.py."""
     import logging
 
-    from app.core.redaction import RedactingLogFilter
-
+    # By class NAME, not isinstance: a test module that re-imports app modules
+    # (e.g. clears sys.modules) leaves filters of an older RedactingLogFilter
+    # class on pytest's session-wide handlers (live-logging / log-file), which
+    # sit before caplog's handler and would still mask the record in place.
     removed = []
     for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "celery", "celery.task"):
         for handler in logging.getLogger(name).handlers:
             for f in list(handler.filters):
-                if isinstance(f, RedactingLogFilter):
+                if type(f).__name__ == "RedactingLogFilter":
                     handler.removeFilter(f)
                     removed.append((handler, f))
     yield
