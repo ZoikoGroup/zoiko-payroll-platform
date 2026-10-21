@@ -26,6 +26,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.authz.scopes import organization_scoped
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import mexico_employer_service as _employer
 from app.modules.payroll import mexico_identity as _identity
@@ -171,8 +172,7 @@ def profile_values(db: Session, employee, data, previous) -> dict:
 def _mx_employee(db: Session, org_id: int, employee_id: int):
     from app.modules.payroll.models import PayrollEmployee
 
-    emp = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id,
-                                           PayrollEmployee.organization_id == org_id).first()
+    emp = organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.id == employee_id).first()
     if emp is None:
         raise NotFoundException("PayrollEmployee", employee_id)
     if (emp.country_code or "").upper() != MX:

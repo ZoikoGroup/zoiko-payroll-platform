@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.authz.scopes import organization_scoped
 from app.core.dependencies import get_current_super_admin
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import get_db
@@ -107,8 +108,7 @@ def list_br_employees(org_id: int = Query(...), current_user=Depends(get_current
     from app.modules.payroll.models import PayrollEmployee
 
     _org(db, org_id)
-    rows = (db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id,
-                                             PayrollEmployee.country_code == BR)
+    rows = (organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.country_code == BR)
             .order_by(PayrollEmployee.name).all())
     return [{"id": e.id, "name": e.name, "employee_code": e.employee_code} for e in rows]
 

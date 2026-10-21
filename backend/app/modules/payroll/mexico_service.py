@@ -29,6 +29,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.authz.scopes import organization_scoped
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import retention_service, service
 from app.modules.payroll.engine.countries.mexico import ENGINE_VERSION
@@ -574,8 +575,7 @@ def _org(db: Session, org_id: int):
 
 def list_employees(db: Session, org_id: int) -> list:
     _org(db, org_id)
-    rows = (db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id,
-                                             PayrollEmployee.country_code == MX)
+    rows = (organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.country_code == MX)
             .order_by(PayrollEmployee.id).all())
     return [{"id": e.id, "name": e.name, "employee_code": e.employee_code} for e in rows]
 
