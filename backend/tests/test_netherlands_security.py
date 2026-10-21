@@ -139,6 +139,20 @@ class TestNoBlindResend:
         with pytest.raises(digi.DigipoortError, match="status UNKNOWN"):
             digi.submit_return(db, ret.id, digi.DigipoortChannel.VALIDATION_SERVICE)
 
+    def test_a_crash_during_send_is_unknown_and_blocks_a_resend(self, db, nlx):
+        """An exception while sending does not prove the return never arrived."""
+        ret = _reconciled_return(db, nlx)
+        transport = MagicMock()
+        transport.send.side_effect = ConnectionError("connection reset by peer")
+        with patch.object(digi, "get_transport", return_value=transport):
+            with pytest.raises(ConnectionError):
+                digi.submit_return(db, ret.id, digi.DigipoortChannel.VALIDATION_SERVICE)
+        sub = db.query(PayrollNlDigipoortSubmission).filter_by(return_id=ret.id).one()
+        assert sub.transport_status == "UNKNOWN"
+        assert sub.error_codes[0]["code"] == "TRANSPORT_ERROR"
+        with pytest.raises(digi.DigipoortError, match="status UNKNOWN"):
+            digi.submit_return(db, ret.id, digi.DigipoortChannel.VALIDATION_SERVICE)
+
 
 # ── NL-051: no BSN / IBAN / certificate material in logs ─────────────────────
 

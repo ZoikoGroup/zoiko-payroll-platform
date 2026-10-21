@@ -371,7 +371,7 @@ def create_earning_classification(payload: Dict[str, Any] = Body(...), current_u
 
 _EXPAT_FIELDS = ("id", "organization_id", "employee_id", "decision_reference", "decision_date", "granted_from",
                  "granted_to", "method", "threshold_category", "allowance_pct", "evidence_artifact_id", "status",
-                 "verified_by", "verified_at")
+                 "recorded_by", "verified_by", "verified_at")
 
 
 @router.get("/expat-decisions", summary="30% facility decisions of one organisation")
@@ -398,7 +398,7 @@ def create_expat_decision(payload: Dict[str, Any] = Body(...), org_id: int = Que
             granted_from=date.fromisoformat(payload["granted_from"]),
             granted_to=date.fromisoformat(payload["granted_to"]) if payload.get("granted_to") else None,
             method=payload["method"], threshold_category=payload["threshold_category"],
-            allowance_pct=Decimal(str(payload["allowance_pct"])),
+            allowance_pct=Decimal(str(payload["allowance_pct"])), actor_id=_actor(current_user),
             evidence_artifact_id=payload.get("evidence_artifact_id") or None)
     except (KeyError, ValueError) as exc:
         raise BadRequestException(f"invalid expat decision: {exc}")
