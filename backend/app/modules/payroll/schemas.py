@@ -410,6 +410,21 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     mx_annual_adjustment_exclusion: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusion")
     mx_annual_adjustment_exclusion_evidence_ref: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusionEvidenceRef")
 
+    # br_* block (ZP-BR-ENG-001 §7, Phase 4b) — the CLT employee statutory facts.
+    # Validated by brazil_employee_service (statutory_profile_errors / _values);
+    # fields not sent carry forward; br_establishment_id must be the org's own
+    # establishment, ACTIVE on the profile's effective date.
+    br_establishment_id: Optional[int] = Field(None, validation_alias="brEstablishmentId")
+    br_esocial_category: Optional[str] = Field(None, validation_alias="brEsocialCategory")
+    br_cbo_code: Optional[str] = Field(None, validation_alias="brCboCode")
+    br_contract_type: Optional[str] = Field(None, validation_alias="brContractType")
+    br_weekly_hours: Optional[Decimal] = Field(None, validation_alias="brWeeklyHours")
+    br_simplified_irrf_opt_out: Optional[bool] = Field(None, validation_alias="brSimplifiedIrrfOptOut")
+    br_irrf_dependents_count: Optional[int] = Field(None, validation_alias="brIrrfDependentsCount")
+    br_irrf_dependents_evidence_ref: Optional[str] = Field(None, validation_alias="brIrrfDependentsEvidenceRef")
+    br_salario_familia_dependents_count: Optional[int] = Field(None, validation_alias="brSalarioFamiliaDependentsCount")
+    br_salario_familia_dependents_evidence_ref: Optional[str] = Field(None, validation_alias="brSalarioFamiliaDependentsEvidenceRef")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -603,6 +618,18 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     mxRfcLast4: Optional[str] = Field(None, validation_alias="mx_rfc_last4", serialization_alias="mxRfcLast4")
     mxIdentifierValidationStatus: Optional[str] = Field(None, validation_alias="mx_identifier_validation_status", serialization_alias="mxIdentifierValidationStatus")
     mxIdentifierFindings: Optional[list] = Field(None, validation_alias="mx_identifier_findings", serialization_alias="mxIdentifierFindings")
+
+    # br_* block (ZP-BR-ENG-001 §7, Phase 4b). See the Create schema's docstring.
+    brEstablishmentId: Optional[int] = Field(None, validation_alias="br_establishment_id", serialization_alias="brEstablishmentId")
+    brEsocialCategory: Optional[str] = Field(None, validation_alias="br_esocial_category", serialization_alias="brEsocialCategory")
+    brCboCode: Optional[str] = Field(None, validation_alias="br_cbo_code", serialization_alias="brCboCode")
+    brContractType: Optional[str] = Field(None, validation_alias="br_contract_type", serialization_alias="brContractType")
+    brWeeklyHours: Optional[Decimal] = Field(None, validation_alias="br_weekly_hours", serialization_alias="brWeeklyHours")
+    brSimplifiedIrrfOptOut: Optional[bool] = Field(None, validation_alias="br_simplified_irrf_opt_out", serialization_alias="brSimplifiedIrrfOptOut")
+    brIrrfDependentsCount: Optional[int] = Field(None, validation_alias="br_irrf_dependents_count", serialization_alias="brIrrfDependentsCount")
+    brIrrfDependentsEvidenceRef: Optional[str] = Field(None, validation_alias="br_irrf_dependents_evidence_ref", serialization_alias="brIrrfDependentsEvidenceRef")
+    brSalarioFamiliaDependentsCount: Optional[int] = Field(None, validation_alias="br_salario_familia_dependents_count", serialization_alias="brSalarioFamiliaDependentsCount")
+    brSalarioFamiliaDependentsEvidenceRef: Optional[str] = Field(None, validation_alias="br_salario_familia_dependents_evidence_ref", serialization_alias="brSalarioFamiliaDependentsEvidenceRef")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses

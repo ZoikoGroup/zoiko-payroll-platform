@@ -86,8 +86,21 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
     here = os.getcwd()
     os.chdir(Path(__file__).resolve().parents[1])
     try:
+        brazil_tables = {"payroll_br_risk_assignments", "payroll_br_cprb_options", "payroll_br_credential_refs",
+                         "payroll_br_concurrent_inss_declarations", "payroll_br_alimony_orders",
+                         "payroll_br_vale_transporte_elections"}
         tables, _ = pending_objects("c6e1a9d4f2b7")
-        assert tables == {"payroll_mx_annual_isr_adjustments"}
+        assert tables == {"payroll_mx_annual_isr_adjustments"} | brazil_tables
+        # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c): every table AND every
+        # column on an existing table must be explained, or a self-heal refuses.
+        tables, columns = pending_objects("e7a2c4f9b1d6")
+        assert tables == brazil_tables
+        assert columns["payroll_runs"] == {"br_approval_fingerprint"}
+        assert len(columns["payroll_employee_statutory_profiles"]) == 10
+        assert {"version", "previous_version_id", "effective_from", "effective_to",
+                "created_by_id"} == columns["payroll_br_employer_profiles"]
+        assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
+                "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

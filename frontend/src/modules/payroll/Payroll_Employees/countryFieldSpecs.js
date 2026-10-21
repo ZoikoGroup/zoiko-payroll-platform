@@ -53,6 +53,12 @@ export const COUNTRIES = [
   // instruction, contract (AWf) and insurance facts live on the Netherlands
   // statutory profile (employee detail → "Manage"), never here.
   { code: "NL", name: "Netherlands" },
+  // Brazil (ZP-BR-ENG-001 Phase 4) — mirrors employee_validation.py's
+  // BREmployeeValidation (CPF/PIS Modulo 11 check digits, PIX) plus
+  // bank_routing.py's BR PIX/COMPE routing. Contract, eSocial category, CBO
+  // and dependants live on the Brazil statutory profile (employee detail →
+  // "Manage"), never here.
+  { code: "BR", name: "Brazil" },
 ];
 
 // Dutch BSN eleven-test (mirrors employee_validation.py's bsn_is_valid):
@@ -62,6 +68,56 @@ function bsnPassesElfproef(value) {
   const weights = [9, 8, 7, 6, 5, 4, 3, 2, -1];
   const total = value.split("").reduce((sum, d, i) => sum + Number(d) * weights[i], 0);
   return total % 11 === 0;
+}
+
+// Brazilian CPF Modulo 11 check digits (mirrors employee_validation.py's
+// cpf_is_valid): 11 digits, all-identical values rejected, both check digits.
+function cpfPassesCheckDigits(value) {
+  const raw = String(value || "").replace(/[\s.-]/g, "");
+  if (!/^\d{11}$/.test(raw)) return false;
+  if (new Set(raw).size === 1) return false;
+  let s = 0;
+  for (let i = 0; i < 9; i += 1) s += Number(raw[i]) * (10 - i);
+  const r1 = (s * 10) % 11;
+  if (Number(raw[9]) !== (r1 === 10 ? 0 : r1)) return false;
+  s = 0;
+  for (let i = 0; i < 10; i += 1) s += Number(raw[i]) * (11 - i);
+  const r2 = (s * 10) % 11;
+  return Number(raw[10]) === (r2 === 10 ? 0 : r2);
+}
+
+// Brazilian PIS/PASEP/NIS Modulo 11 check digit (mirrors pis_is_valid).
+function pisPassesCheckDigits(value) {
+  const raw = String(value || "").replace(/[\s.-]/g, "");
+  if (!/^\d{11}$/.test(raw)) return false;
+  const weights = [3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const total = raw.slice(0, 10).split("").reduce((sum, d, i) => sum + Number(d) * weights[i], 0);
+  const rest = total % 11;
+  return Number(raw[10]) === (rest < 2 ? 0 : 11 - rest);
+}
+
+// Brazilian CNPJ Modulo 11 check digits (mirrors cnpj_is_valid) — numeric or
+// the post-2026 alphanumeric form (Rule BR-038, ASCII − 48 per character).
+function cnpjPassesCheckDigits(value) {
+  const raw = String(value || "").replace(/[\s./-]/g, "").toUpperCase();
+  if (!/^[0-9A-Z]{14}$/.test(raw)) return false;
+  const charVal = (c) => c.charCodeAt(0) - 48;
+  const digit = (weights) => {
+    const total = weights.reduce((sum, w, i) => sum + charVal(raw[i]) * w, 0);
+    const rest = total % 11;
+    return rest < 2 ? 0 : 11 - rest;
+  };
+  if (charVal(raw[12]) !== digit([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])) return false;
+  return charVal(raw[13]) === digit([6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+}
+
+// A PIX key only carries check digits when its declared type is CPF or CNPJ;
+// EMAIL / PHONE / RANDOM are validated server-side by type (BR-K6).
+function pixKeyPassesCheckDigits(value, keyType) {
+  const kind = String(keyType || "").toUpperCase();
+  if (kind === "CPF") return cpfPassesCheckDigits(value);
+  if (kind === "CNPJ") return cnpjPassesCheckDigits(value);
+  return true;
 }
 
 export const COUNTRY_FIELD_SPECS = {
@@ -331,6 +387,25 @@ export const COUNTRY_FIELD_SPECS = {
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.MX): CLABE on SPEI.
     { key: "clabe", label: "CLABE", type: "text", placeholder: "18 digits", strip: " -", pattern: /^\d{18}$/, error: "CLABE must be 18 digits." },
   ],
+  // Brazil — mirrors backend BREmployeeValidation (ZP-BR-ENG-001 Phase 4). CPF
+  // and PIS/NIS are checked client-side with the same Modulo 11 check digits
+  // the server enforces; the PIX key is validated server-side by type (its
+  // value may be a CPF, CNPJ, e-mail, +55 phone or an EPV UUID), so only the
+  // non-empty structure is checked here. Salary bank routing (bank_routing.py
+  // ROUTING_FIELDS.BR) rides PIX / COMPE / agency / account.
+  BR: [
+    { key: "cpf", label: "CPF", type: "text", placeholder: "11 digits", required: true, strip: ". -", pattern: /^\d{11}$/, check: cpfPassesCheckDigits, error: "CPF must be 11 digits and satisfy the Modulo 11 check digits." },
+    { key: "pis_nis", label: "PIS / NIS", type: "text", placeholder: "11 digits", required: true, strip: ". -", pattern: /^\d{11}$/, check: pisPassesCheckDigits, error: "PIS/NIS must be 11 digits and satisfy the Modulo 11 check digit." },
+    { key: "rg_number", label: "RG (identity)", type: "text", placeholder: "4–20 characters", strip: ". -", pattern: /^[A-Za-z0-9]{4,20}$/, error: "RG must be 4 to 20 alphanumeric characters." },
+    { key: "ctps_number", label: "CTPS number", type: "text", placeholder: "up to 15 digits", strip: " ", pattern: /^\d{1,15}$/, error: "CTPS number must be up to 15 digits." },
+    { key: "ctps_series", label: "CTPS series", type: "text", placeholder: "up to 10 digits", strip: " ", pattern: /^\d{1,10}$/, error: "CTPS series must be up to 10 digits." },
+    { key: "pix_key_type", label: "PIX key type", type: "select", choices: ["CPF", "CNPJ", "EMAIL", "PHONE", "RANDOM"] },
+    { key: "pix_key", label: "PIX key", type: "text", placeholder: "CPF / CNPJ / e-mail / +55 phone / EPV UUID", pattern: /^\S+$/, check: (value, cf) => pixKeyPassesCheckDigits(value, cf?.pix_key_type), error: "PIX key looks incorrect." },
+    { key: "bank_compe", label: "Bank COMPE", type: "text", placeholder: "3 digits", strip: " ", pattern: /^\d{3}$/, error: "COMPE bank code must be exactly 3 digits." },
+    { key: "bank_agency", label: "Bank agency", type: "text", placeholder: "up to 5 digits", strip: " -", pattern: /^\d{1,5}$/, error: "Bank agency must be up to 5 digits." },
+    { key: "bank_account", label: "Bank account", type: "text", placeholder: "up to 12 digits", strip: " -", pattern: /^\d{1,12}$/, error: "Bank account must be up to 12 digits." },
+    { key: "bank_account_type", label: "Bank account type", type: "select", choices: ["CORRENTE", "POUPANCA"] },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -385,7 +460,7 @@ export function validateComplianceFields(countryCode, complianceFields) {
     }
     // Sensitive identifiers come back from the API masked (e.g. S****567D);
     // a round-tripped mask is resolved server-side against the stored value.
-    if (spec.pattern && !raw.includes("*") && (!spec.pattern.test(raw) || (spec.check && !spec.check(raw)))) {
+    if (spec.pattern && !raw.includes("*") && (!spec.pattern.test(raw) || (spec.check && !spec.check(raw, complianceFields)))) {
       errors.push(`${spec.error} (got "${raw}")`);
     }
   }

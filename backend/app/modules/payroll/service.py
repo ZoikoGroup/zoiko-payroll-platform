@@ -20083,6 +20083,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             overtime = _mx_split["overtime"]
             additional_compensation = _mx_split["extras"]
             gross = _mx_split["gross"]
+        # Brazil (ZP-BR-ENG-001 Phase 6): read-only input resolution — a preview
+        # never commits anything; just resolves the statutory profile, establishment,
+        # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
+        brazil_inputs = (
+            jurisdiction_hooks.call("BR", "calc_inputs", db, None, emp, None,
+                                    as_of=period_end or date.today())
+            if emp_country == "BR" else None
+        )
         # Switzerland (CH spec): every resolver check, read-only; a blocked
         # worker raises SwitzerlandCalculationBlockedError (same surfacing as
         # Italy's blocks). Applied to ctx after it is built.
@@ -20230,6 +20238,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             saudi_inputs=saudi_inputs,
             netherlands_inputs=netherlands_inputs,
             mexico_inputs=mexico_inputs,
+            brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -25229,6 +25238,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         overtime = _mx_split["overtime"]
         additional_compensation = _mx_split["extras"]
         gross = _mx_split["gross"]
+    # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
+    # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
+    brazil_inputs = (
+        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "BR" else None
+    )
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
     # raises SwitzerlandCalculationBlockedError, same surfacing as Italy.
     switzerland_attrs = (
@@ -25329,6 +25344,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         saudi_inputs=saudi_inputs,
         netherlands_inputs=netherlands_inputs,
         mexico_inputs=mexico_inputs,
+        brazil_inputs=brazil_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -25468,6 +25484,19 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "au_calculation_trace": result.au_calculation_trace,
         "sgp_calculation_trace": _sg_trace_with_pwm_classification(result.sgp_calculation_trace, employee),
         "hk_calculation_trace": result.hk_calculation_trace,
+        # Brazil (ZP-BR-ENG-001 Phase 6): flat BR statutory fields on PayslipItem
+        "br_base_inss": result.br_base_inss,
+        "br_inss_employee": result.br_inss_employee,
+        "br_base_irrf": result.br_base_irrf,
+        "br_irrf": result.br_irrf,
+        "br_irrf_reduction": result.br_irrf_reduction,
+        "br_salario_familia": result.br_salario_familia,
+        "br_vale_transporte_deduction": result.br_vale_transporte_deduction,
+        "br_base_fgts": result.br_base_fgts,
+        "br_fgts_deposit": result.br_fgts_deposit,
+        "br_cpp_employer": result.br_cpp_employer,
+        "br_rat_adjusted": result.br_rat_adjusted,
+        "br_third_parties": result.br_third_parties,
         # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
         # same splat-then-pop contract as "_org_levy_result" above. Only
         # ever non-empty when a real order actually contributed a
@@ -25510,6 +25539,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "nl_calculation_snapshot": result.nl_result,
         "mx_calculation_snapshot": (_mx_run.payslip_snapshot(result.mx_result, mexico_inputs)
                                     if mexico_inputs is not None else None),
+        # Brazil (ZP-BR-ENG-001 Phase 6): the frozen BR inputs + br_result (content
+        # hash, trace, bases, employer charges) — replayed exactly as computed.
+        "br_calculation_snapshot": result.br_result,
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -31989,6 +32021,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, None)
         if country == "SA" else None
     )
+    # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
+    # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
+    brazil_inputs = (
+        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, None)
+        if country == "BR" else None
+    )
     # Netherlands: refuses (409) once the run's NL ledgers are committed.
     netherlands_inputs = (
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, None)
@@ -32138,6 +32176,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         saudi_inputs=saudi_inputs,
         netherlands_inputs=netherlands_inputs,
         mexico_inputs=mexico_inputs,
+        brazil_inputs=brazil_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -36060,6 +36099,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
             if code and entering_mexico_refusal(row.jurisdiction_country, code):
                 code = None
+            # Brazil (Phase 3 dormancy): the same rule — never back-fill INTO Brazil.
+            from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
+            if code and entering_brazil_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -36150,6 +36193,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     mx_refusal = entering_mexico_refusal(row.jurisdiction_country, incoming_country)
     if mx_refusal:
         raise BadRequestException(mx_refusal)
+    # Brazil (ZP-BR-ENG-001 Phase 3): choosing Brazil is refused the same way
+    # while Brazil onboarding is disabled.
+    from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
+    br_refusal = entering_brazil_refusal(row.jurisdiction_country, incoming_country)
+    if br_refusal:
+        raise BadRequestException(br_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",

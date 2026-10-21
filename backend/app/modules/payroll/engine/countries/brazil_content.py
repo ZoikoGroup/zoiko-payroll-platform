@@ -88,6 +88,9 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("A2", "Presidency — Law 8.212/1991, art. 22 (employer contribution, financial add-on)"),
     ("A3", "Presidency — Law 8.036/1990, art. 15 (FGTS 8%, apprentice 2%)"),
     ("A4", "MPS/MF — Portaria Interministerial nº 13, de 9 de janeiro de 2026"),
+    ("A5", "Presidency — Law 7.418/1985, art. 4 (Vale-Transporte max deduction 6%)"),
+    ("A6", "Presidency — Law 5.452/1943 (CLT original), arts. 59 & 73"),
+    ("A7", "Presidency — Law 605/1949 (DSR on overtime and variable pay)"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -105,8 +108,10 @@ BR_MIN_WAGE_RULE = "BR_MIN_WAGE"
 BR_SAL_FAMILIA_RULE = "BR_SAL_FAMILIA"
 BR_FGTS_RATE_RULE = "BR_FGTS_RATE"
 BR_CPP_RATE_RULE = "BR_CPP_RATE"
+BR_VT_RATE_RULE = "BR_VT_RATE"
+BR_LABOR_RULE = "BR_LABOR"
 BR_SLAB_RULES = (BR_INSS_BAND_RULE, BR_IRRF_TABLE_RULE, BR_IRRF_REDUCTION_RULE, BR_MIN_WAGE_RULE,
-                 BR_SAL_FAMILIA_RULE, BR_FGTS_RATE_RULE, BR_CPP_RATE_RULE)
+                 BR_SAL_FAMILIA_RULE, BR_FGTS_RATE_RULE, BR_CPP_RATE_RULE, BR_VT_RATE_RULE, BR_LABOR_RULE)
 
 
 class ContentRow(NamedTuple):
@@ -176,6 +181,14 @@ BR_CONTENT_ROWS: Tuple[ContentRow, ...] = (
          rate="10"),
     _row(BR_CPP_RATE_RULE, "CPRB_2026_REVENUE_FACTOR", "CPRB 2026 — 60% das alíquotas dos arts. 7-A/8-A", "S8",
          rate="60"),
+    # ── 8. Vale-Transporte max deduction 6% (A5, Lei 7.418/1985 art. 4) ────────
+    _row(BR_VT_RATE_RULE, "MAX_DEDUCTION", "Vale-Transporte — desconto máximo 6% do salário-base", "A5", rate="6"),
+    # ── 9. Working-time rules (A6 CLT arts. 59/73, A7 Lei 605/1949) ───────────
+    _row(BR_LABOR_RULE, "OVERTIME_50", "Hora extra 50% (CLT art. 59 §1)", "A6", rate="50"),
+    _row(BR_LABOR_RULE, "OVERTIME_100", "Hora extra 100% (CLT art. 59 §1 — domingos/feriados)", "A6", rate="100"),
+    _row(BR_LABOR_RULE, "NIGHT_PREMIUM", "Adicional noturno 20% (CLT art. 73)", "A6", rate="20"),
+    _row(BR_LABOR_RULE, "NIGHT_HOUR_MINUTES", "Hora noturna legal 52m30s (CLT art. 73)", "A6", flat="52.5"),
+    _row(BR_LABOR_RULE, "DSR", "DSR sobre variáveis (Lei 605/1949 art. 7)", "A7", flat="1"),
 )
 
 
@@ -274,6 +287,101 @@ CPRB_2026_SERVICE_RETENTION = D("0.035")         # UNSOURCED
 FGTS_TERMINATION_FINE_RATE = D("0.40")           # UNSOURCED (Phase 7)
 FGTS_MUTUAL_TERMINATION_FINE_RATE = D("0.20")    # UNSOURCED (Phase 7)
 VALE_TRANSPORTE_MAX_DEDUCTION_PCT = D("0.06")    # UNSOURCED (Phase 5, Lei 7.418)
+
+
+# ── Date-driven accessors (Phase 5 — BR-001 fail-closed) ──────────────────────
+# The constants above are pinned to 2026 (_AS_OF_2026) for the draft engine and
+# existing callers. The Phase 5 engine resolves each rule from the row actually
+# in force on the correct date (INSS/FGTS/SF/min-wage: the competence month's
+# first day; IRRF: the payment date — BR-014) and BLOCKS via BrazilContentMissing
+# when no row covers it, never falling back to another year. Every accessor
+# returns the same shape the pinned constants do, so the engine treats the two
+# identically.
+
+def inss_brackets(as_of: date) -> Tuple[Tuple[Decimal, Decimal, Decimal, Decimal], ...]:
+    """(lower, upper, marginal rate as a FRACTION, full-band contribution) rows
+    of the employee INSS table in force on `as_of`."""
+    return tuple((r.min_amount, r.max_amount, _pct(r), (r.max_amount - r.min_amount) * _pct(r))
+                 for r in rows_in_force(BR_INSS_BAND_RULE, as_of))
+
+
+def inss_ceiling(as_of: date) -> Decimal:
+    return inss_brackets(as_of)[-1][1]
+
+
+def inss_maximum_on(as_of: date) -> Decimal:
+    """The employee-INSS maximum, summed over the bands in force on `as_of` and
+    rounded once (decision D1)."""
+    total = D("0")
+    for row in rows_in_force(BR_INSS_BAND_RULE, as_of):
+        total += (row.max_amount - row.min_amount) * _pct(row)
+    return total.quantize(D("0.01"), rounding=ROUND_HALF_UP)
+
+
+def irrf_table(as_of: date) -> Tuple[Tuple[Decimal, Optional[Decimal], Decimal, Decimal], ...]:
+    """(lower, upper, marginal rate as a FRACTION, deductible parcel) rows of
+    the monthly IRRF table in force on the PAYMENT date `as_of` (BR-014)."""
+    return tuple((r.min_amount, r.max_amount, _pct(r), r.flat_amount)
+                 for r in rows_in_force(BR_IRRF_TABLE_RULE, as_of) if r.key.startswith("T"))
+
+
+def irrf_deduction_dependent(as_of: date) -> Decimal:
+    return row_in_force(BR_IRRF_TABLE_RULE, "DEDUCTION_DEPENDENT", as_of).flat_amount
+
+
+def irrf_deduction_simplified(as_of: date) -> Decimal:
+    return row_in_force(BR_IRRF_TABLE_RULE, "DEDUCTION_SIMPLIFIED", as_of).flat_amount
+
+
+def irrf_reduction_params(as_of: date) -> Tuple[Decimal, Decimal, Decimal, Decimal, Decimal]:
+    """(zero_ceiling, max_zero_reduction, phase_ceiling, A, B) for the Law
+    15.270/2025 monthly reduction in force on the payment date `as_of`."""
+    zero = row_in_force(BR_IRRF_REDUCTION_RULE, "ZERO_BAND", as_of)
+    phase = row_in_force(BR_IRRF_REDUCTION_RULE, "PHASE_OUT", as_of)
+    return (zero.max_amount, zero.flat_amount, phase.max_amount, phase.flat_amount, _pct(phase))
+
+
+def salario_familia_params(as_of: date) -> Tuple[Decimal, Decimal]:
+    """(ceiling, quota-per-dependent) in force on the competence month."""
+    sf = row_in_force(BR_SAL_FAMILIA_RULE, "QUOTA", as_of)
+    return (sf.max_amount, sf.flat_amount)
+
+
+def minimum_wage(as_of: date, key: str = "MONTHLY") -> Decimal:
+    """The statutory minimum wage (MONTHLY/DAILY/HOURLY) in force on `as_of`."""
+    return row_in_force(BR_MIN_WAGE_RULE, key, as_of).flat_amount
+
+
+def fgts_rates(as_of: date) -> Tuple[Decimal, Decimal]:
+    """(ordinary, apprentice) FGTS deposit rates as FRACTIONS on `as_of`."""
+    return (_pct(row_in_force(BR_FGTS_RATE_RULE, "ORDINARY", as_of)),
+            _pct(row_in_force(BR_FGTS_RATE_RULE, "APPRENTICE", as_of)))
+
+
+def cpp_rates(as_of: date) -> Tuple[Decimal, Decimal, Decimal]:
+    """(standard, financial add-on, CPRB-2026 transition) employer CPP rates as
+    FRACTIONS in force on `as_of`."""
+    return (_pct(row_in_force(BR_CPP_RATE_RULE, "STANDARD", as_of)),
+            _pct(row_in_force(BR_CPP_RATE_RULE, "FINANCIAL_ADDON", as_of)),
+            _pct(row_in_force(BR_CPP_RATE_RULE, "CPRB_2026", as_of)))
+
+
+def vale_transporte_max_deduction_pct(as_of: date) -> Decimal:
+    """Vale-Transporte maximum deduction as a FRACTION (0.06 = 6%) in force on
+    the competence month."""
+    return _pct(row_in_force(BR_VT_RATE_RULE, "MAX_DEDUCTION", as_of))
+
+
+def labor_rates(as_of: date) -> Tuple[Decimal, Decimal, Decimal, Decimal, bool]:
+    """(overtime_50_pct, overtime_100_pct, night_premium_pct, night_hour_minutes, dsr_flag)
+    as FRACTIONS/flag in force on the competence month."""
+    ot_50 = _pct(row_in_force(BR_LABOR_RULE, "OVERTIME_50", as_of))
+    ot_100 = _pct(row_in_force(BR_LABOR_RULE, "OVERTIME_100", as_of))
+    night = _pct(row_in_force(BR_LABOR_RULE, "NIGHT_PREMIUM", as_of))
+    night_min = row_in_force(BR_LABOR_RULE, "NIGHT_HOUR_MINUTES", as_of).flat_amount
+    dsr = bool(row_in_force(BR_LABOR_RULE, "DSR", as_of).flat_amount)
+    return (ot_50, ot_100, night, night_min, dsr)
+
 
 # ── 6. Mandatory System Rubric Matrix (eSocial Table 03 - Rule BR-005) ────────
 STANDARD_SYSTEM_RUBRICS: List[Dict[str, Any]] = [

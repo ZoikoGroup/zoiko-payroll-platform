@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     # Mexican and the Mexico organisation API refuses. Leave UNSET in
     # production until G1–G8 are signed; tests / local harnesses set it.
     MX_TENANT_ONBOARDING_ENABLED: bool = False
+    # Brazil (ZP-BR-ENG-001 Phase 3): the eSocial A1 certificate and bank
+    # credentials are stored only as references into GCP Secret Manager
+    # (comma-separated allowed schemes), never the secret itself.
+    BR_SECRET_REF_SCHEMES: str = "gcp-sm://"
+    # Readiness WARNING window before a Brazilian credential/certificate expires
+    # (a product setting, not statutory content).
+    BR_CREDENTIAL_EXPIRY_WARNING_DAYS: int = 30
+    # Brazil dormancy switch (brazil_dormancy). False = no organisation can
+    # become Brazilian and the Brazil organisation API refuses. Leave UNSET in
+    # production until G1–G8 are signed; tests / local harnesses set it.
+    BR_TENANT_ONBOARDING_ENABLED: bool = False
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.

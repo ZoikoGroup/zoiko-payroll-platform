@@ -1,0 +1,39 @@
+{
+  "description": "F1 - Ordinary CLT monthly wage R$5,000: INSS R$501.51 (rounded once, D1), IRRF R$0.00 (Law 15.270/2025 reduction R$312.89), FGTS R$400.00, net R$4,498.49.",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-BR-ENG-001 v1.0. NOT an official golden vector: the content is DRAFT (every row [PENDING G1]); replace once gate G1 is signed.",
+  "context": {
+    "country": "BR",
+    "gross": "5000.00",
+    "basic": "5000.00",
+    "pay_date": "2026-01-31",
+    "brazil_inputs": {
+      "competence_month": "2026-01-01",
+      "esocial_category": "101",
+      "contract_salary": "5000.00",
+      "rat_pct": "2",
+      "fap_factor": "1.0",
+      "third_party_pct": "0",
+      "cprb_opted": false,
+      "financial_sector": false,
+      "earnings": [
+        {"rubricCode": "BR_SALARIO_BASE", "amount": "5000.00"}
+      ]
+    }
+  },
+  "expected": {
+    "br_base_inss": "5000.00",
+    "br_inss_employee": "501.51",
+    "br_base_irrf": "5000.00",
+    "br_irrf": "0.00",
+    "br_irrf_reduction": "312.89",
+    "br_base_fgts": "5000.00",
+    "br_fgts_deposit": "400.00",
+    "br_cpp_employer": "1000.00",
+    "br_rat_adjusted": "100.00",
+    "br_third_parties": "0.00",
+    "tds": "0.00",
+    "total_deductions": "501.51",
+    "net_pay": "4498.49"
+  }
+}

@@ -2529,6 +2529,12 @@ export const prepareNlTerminationSettlement = (employeeId, payload) => api.post(
 export const approveNlTerminationSettlement = (settlementId) => api.put(`${NL}/termination-settlements/${settlementId}/approve`, {});
 export const getNlRunPreflight = (runId) => api.get(`${NL}/runs/${runId}/preflight`);
 export const getNlRunFingerprint = (runId) => api.get(`${NL}/runs/${runId}/fingerprint`);
+
+// Brazil (ZP-BR-ENG-001 Phase 6)
+const BR = "/api/payroll/brazil";
+export const getBrRunPreflight = (runId) => api.get(`${BR}/runs/${runId}/preflight`);
+export const getBrRunFingerprint = (runId) => api.get(`${BR}/runs/${runId}/fingerprint`);
+
 export const listNlReturns = (taxYear) => nlList(api.get(`${NL}/loonaangifte`, { params: taxYear ? { tax_year: taxYear } : {} }));
 export const getNlReturn = (returnId) => api.get(`${NL}/loonaangifte/${returnId}`);
 export const buildNlReturn = (payload) => api.post(`${NL}/loonaangifte/build`, payload);
@@ -2697,6 +2703,57 @@ export async function exportMxMovementWorklist(movementIds) {
 // memory with a 16 KB cap; multipart would spool to a temp file there).
 export async function uploadMxCertificate(credentialId, file) {
   const res = await fetch(`${API_BASE_URL}${MX}/credentials/${credentialId}/certificate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${getAccessToken()}` },
+    body: await file.arrayBuffer(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || data?.detail || "The certificate was refused.");
+  return data;
+}
+
+// ── Brazil (ZP-BR-ENG-001) — organisation API (/api/payroll/brazil), Phase 3 ──
+// Employer onboarding for YOUR organisation only: legal employers (CNPJ-root
+// version chains), establishments, RAT/FAP per year, CPRB option per year,
+// credential references (gcp-sm:// only — never a key, password or the A1
+// PKCS#12 bundle) and readiness on an explicit date (`on`).
+const BR_ORG = "/api/payroll/brazil";
+const brList = async (promise) => {
+  const res = await promise;
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listBrEmployers = () => brList(api.get(`${BR_ORG}/employers`));
+export const getBrEmployer = (employerId) => api.get(`${BR_ORG}/employers/${employerId}`);
+export const createBrEmployer = (payload) => api.post(`${BR_ORG}/employers`, payload);
+export const createBrEmployerVersion = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/versions`, payload);
+export const createBrEstablishment = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/establishments`, payload);
+export const deactivateBrEstablishment = (id, activeTo) => api.put(`${BR_ORG}/establishments/${id}/deactivate`, { activeTo });
+export const createBrRiskAssignment = (establishmentId, payload) =>
+  api.post(`${BR_ORG}/establishments/${establishmentId}/risk-assignments`, payload);
+export const activateBrRiskAssignment = (riskId) => api.put(`${BR_ORG}/risk-assignments/${riskId}/activate`, {});
+export const createBrCprbOption = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/cprb-options`, payload);
+export const createBrCredential = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/credentials`, payload);
+export const revokeBrCredential = (credentialId) => api.put(`${BR_ORG}/credentials/${credentialId}/revoke`, {});
+export const getBrReadinessOn = (on) => api.get(`${BR_ORG}/readiness`, { params: { on } });
+
+// Phase 4b — employees. The profile itself is saved through
+// createEmployeeStatutoryProfile (shared route); these read the employee's
+// Brazilian record and readiness, and write the child records.
+export const getBrEmployeeRecord = (employeeId) => api.get(`${BR_ORG}/employees/${employeeId}`);
+export const getBrEmployeeReadiness = (employeeId, on) =>
+  api.get(`${BR_ORG}/employees/${employeeId}/readiness`, { params: { on } });
+export const recordBrConcurrentInss = (employeeId, payload) =>
+  api.post(`${BR_ORG}/employees/${employeeId}/concurrent-inss-declarations`, payload);
+export const recordBrAlimonyOrder = (employeeId, payload) =>
+  api.post(`${BR_ORG}/employees/${employeeId}/alimony-orders`, payload);
+export const closeBrAlimonyOrder = (orderId, payload) =>
+  api.put(`${BR_ORG}/alimony-orders/${orderId}/close`, payload);
+export const recordBrValeTransporte = (employeeId, payload) =>
+  api.post(`${BR_ORG}/employees/${employeeId}/vale-transporte-elections`, payload);
+
+// The PUBLIC .cer is sent as the raw request body (in memory, 16 KB cap).
+export async function uploadBrCertificate(credentialId, file) {
+  const res = await fetch(`${API_BASE_URL}${BR_ORG}/credentials/${credentialId}/certificate`, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${getAccessToken()}` },
     body: await file.arrayBuffer(),

@@ -1,0 +1,25 @@
+{
+  "description": "F6 - Minimum-wage floor: a contracted monthly salary of R$1,000.00 is below the 2026 statutory minimum (R$1,621.00) -> the engine BLOCKS (BR_BELOW_MINIMUM_WAGE, BR-040).",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-BR-ENG-001 v1.0. NOT an official golden vector: the content is DRAFT (every row [PENDING G1]); replace once gate G1 is signed.",
+  "context": {
+    "country": "BR",
+    "gross": "1000.00",
+    "basic": "1000.00",
+    "pay_date": "2026-01-31",
+    "brazil_inputs": {
+      "competence_month": "2026-01-01",
+      "esocial_category": "101",
+      "contract_salary": "1000.00",
+      "rat_pct": "2",
+      "fap_factor": "1.0",
+      "third_party_pct": "0",
+      "cprb_opted": false,
+      "financial_sector": false,
+      "earnings": [
+        {"rubricCode": "BR_SALARIO_BASE", "amount": "1000.00"}
+      ]
+    }
+  },
+  "expected_blocked_key": "BR_BELOW_MINIMUM_WAGE"
+}

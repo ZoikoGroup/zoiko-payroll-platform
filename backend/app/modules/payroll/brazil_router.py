@@ -235,3 +235,44 @@ def golden_check(current_user=Depends(get_current_super_admin), db: Session = De
         "failure_details": result.failure_details,
         "run_at": _plain(result.run_at),
     }
+
+
+# ── employers (Phase 3) — READ ONLY: the tenant owns its employer facts ──────
+
+@router.get("/employers", summary="One organisation's Brazil legal employers (identifiers masked, read-only)")
+def list_br_employers(organization_id: int = Query(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import brazil_employer_service as emp
+
+    _org(db, organization_id)
+    return [{**e, "detail": emp.employer_detail(db, organization_id, e["employerId"], masked=True)}
+            for e in emp.list_employers(db, organization_id, masked=True)]
+
+
+@router.get("/employer-readiness", summary="One organisation's employer readiness on an explicit date")
+def get_br_employer_readiness(organization_id: int = Query(...), on: date = Query(...),
+                              current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import brazil_employer_service as emp
+
+    _org(db, organization_id)
+    return emp.organisation_readiness(db, organization_id, on)
+
+
+@router.get("/employer-readiness/summary", summary="Per gate, how many legal employers have its items passing")
+def get_br_employer_readiness_summary(on: date = Query(...), current_user=Depends(get_current_super_admin),
+                                      db: Session = Depends(get_db)):
+    from app.modules.payroll import brazil_employer_service as emp
+
+    return emp.readiness_summary(db, on)
+
+
+# ── employees (Phase 4) — READ ONLY: the tenant owns its employee facts ─────
+
+@router.get("/employees/{employee_id}",
+            summary="One employee's Brazil statutory profile and children (identifiers masked, read-only)")
+def get_br_employee(employee_id: int, organization_id: int = Query(...), on: Optional[date] = Query(None),
+                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import brazil_employee_service as emp
+
+    _org(db, organization_id)
+    return emp.employee_record(db, organization_id, employee_id, on)

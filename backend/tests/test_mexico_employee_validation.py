@@ -96,9 +96,9 @@ def test_strategy_map_and_message_unchanged():
     from app.modules.payroll.employee_validation import _DORMANT_STRATEGIES, _STRATEGIES
 
     assert list(_STRATEGIES) == ["IN", "US", "UK", "AU", "CA", "DE", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR",
-                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL",
-                                 "BR"]  # Brazil (ZP-BR-ENG-001), merged from venu
-    assert list(_DORMANT_STRATEGIES) == ["MX"]
+                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL"]
+    # Brazil (ZP-BR-ENG-001 Phase 3) is dormant like Mexico, behind its own flag.
+    assert list(_DORMANT_STRATEGIES) == ["MX", "BR"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())
 
 
@@ -125,7 +125,9 @@ def test_sensitive_field_set_only_gains_mexican_keys():
     from app.modules.payroll.employee_validation import _STRATEGIES, SENSITIVE_COMPLIANCE_FIELDS
 
     before = frozenset(f for cls in _STRATEGIES.values() for f in cls.SENSITIVE_FIELDS)
-    assert SENSITIVE_COMPLIANCE_FIELDS - before == {"rfc", "curp", "nss", "clabe"}
+    # + Brazil (ZP-BR-ENG-001 Phases 3–4): its validator is dormant too, so its
+    # CPF / PIS / PIX / bank-account keys come only from there.
+    assert SENSITIVE_COMPLIANCE_FIELDS - before == {"rfc", "curp", "nss", "clabe", "cpf", "pis_nis", "pix_key", "bank_account"}
     for cls in _STRATEGIES.values():                                     # no other country uses these keys
         assert not {"rfc", "curp", "nss", "clabe"} & set(cls.FIELD_SPECS), cls.country_code
 

@@ -99,6 +99,7 @@ ROUTING_FIELDS = {
         {"key": "pix_key", "label": "PIX Key"},
         {"key": "bank_compe", "label": "Bank COMPE"},
         {"key": "bank_agency", "label": "Agency"},
+        {"key": "bank_account", "label": "Account"},
     ],
 }
 

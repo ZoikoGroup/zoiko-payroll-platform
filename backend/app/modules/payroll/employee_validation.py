@@ -1571,16 +1571,66 @@ def cnpj_is_valid(value) -> bool:
     return char_val(raw[13]) == d2
 
 
+# ── PIX key formats (ZP-BR-ENG-001 Phase 4 / BR-K6) ──────────────────────
+# The five key types Banco Central accepts (Resolução BCEN/BACEN Pix key
+# formats), each with its own syntax. CPF and CNPJ reuse the official
+# check-digit validators; EMAIL, PHONE (E.164) and RANDOM (UUID v4, the
+# "EVP" random key) are format-checked here.
+PIX_KEY_TYPES = ("CPF", "CNPJ", "EMAIL", "PHONE", "RANDOM")
+
+_PIX_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PIX_PHONE_RE = re.compile(r"^\+?[1-9]\d{9,14}$")      # E.164: 10–15 digits, optional +
+_PIX_RANDOM_RE = re.compile(                                    # UUID v4 (EVP random key)
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+
+def pix_key_is_valid(value: str, key_type: Optional[str]) -> bool:
+    """Validate a PIX key against the syntax of its declared type (empty
+    value or unknown/missing type → False)."""
+    if not value:
+        return False
+    kind = (key_type or "").strip().upper()
+    if kind == "CPF":
+        return cpf_is_valid(str(value))
+    if kind == "CNPJ":
+        return cnpj_is_valid(str(value))
+    if kind == "EMAIL":
+        return bool(_PIX_EMAIL_RE.match(value))
+    if kind == "PHONE":
+        return bool(_PIX_PHONE_RE.match(str(value).replace(" ", "")))
+    if kind == "RANDOM":
+        return bool(_PIX_RANDOM_RE.match(value))
+    return False
+
+
+def mask_pix_key(value, key_type=None) -> Optional[str]:
+    """Mask a PIX key by type: the type's own structure stays legible but the
+    identifying value does not. CPF/CNPJ/RANDOM/PHONE keep only the last 4
+    characters; EMAIL keeps the first character and the domain
+    (j•••@bank.com) — a domain is not identifying, the local part is. When
+    `key_type` is not supplied an "@" therefore implies EMAIL."""
+    if value in (None, ""):
+        return None
+    value = str(value)
+    kind = (key_type or "").strip().upper()
+    if (kind == "EMAIL" or (not kind and "@" in value)) and "@" in value:
+        local, _, domain = value.partition("@")
+        return (local[:1] or "*") + "*" * max(len(local) - 1, 0) + "@" + domain
+    return mask_identifier(value)
+
+
 class BREmployeeValidation(EmployeeValidationStrategy):
-    """Brazil (CLT - ZP-BR-ENG-001) — CPF, PIS/NIS and identity validation.
-    
+    """Brazil (CLT - ZP-BR-ENG-001) — CPF, PIS/NIS, PIX and identity validation.
+
     CPF is validated mathematically via Modulo 11 check digits and is the
-    unique duplicate_field key. CPF and PIS/NIS are classified SENSITIVE and
-    masked in standard API outputs.
+    unique duplicate_field key. CPF, PIS/NIS, the PIX key and the bank
+    account number are classified SENSITIVE and masked in standard API
+    outputs (BR-K6).
     """
     country_code = "BR"
     duplicate_field = "cpf"
-    SENSITIVE_FIELDS = ("cpf", "pis_nis")
+    SENSITIVE_FIELDS = ("cpf", "pis_nis", "pix_key", "bank_account")
     FIELD_SPECS = {
         "cpf": {
             "required": True,
@@ -1653,6 +1703,18 @@ class BREmployeeValidation(EmployeeValidationStrategy):
         pis = cleaned.get("pis_nis")
         if pis and not pis_is_valid(pis):
             raise BadRequestException("PIS/NIS fails the official Modulo 11 check digit algorithm.")
+        pix_key = cleaned.get("pix_key")
+        if pix_key:
+            pix_type = cleaned.get("pix_key_type")
+            if not pix_type:
+                raise BadRequestException(
+                    f"pix_key requires pix_key_type (one of {list(PIX_KEY_TYPES)})."
+                )
+            if not pix_key_is_valid(pix_key, pix_type):
+                raise BadRequestException(
+                    f"PIX key {pix_type} is invalid — CPF/CNPJ must pass Modulo 11 "
+                    "check digits, EMAIL/PHONE/RANDOM must match their format."
+                )
 
 
 _STRATEGIES = {
@@ -1679,7 +1741,6 @@ _STRATEGIES = {
     "CH": CHEmployeeValidation,
     "SA": SAEmployeeValidation,
     "NL": NLEmployeeValidation,
-    "BR": BREmployeeValidation,
 }
 
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while
@@ -1687,16 +1748,26 @@ _STRATEGIES = {
 # so the "Supported: …" message every other country sees never changes.
 _DORMANT_STRATEGIES = {
     "MX": MXEmployeeValidation,
+    # Brazil (ZP-BR-ENG-001 Phase 3): dormant until BR_TENANT_ONBOARDING_ENABLED.
+    "BR": BREmployeeValidation,
 }
+
+
+def _dormancy_module(code: str):
+    if code == "BR":
+        from app.modules.payroll import brazil_dormancy
+
+        return brazil_dormancy
+    from app.modules.payroll import mexico_dormancy
+
+    return mexico_dormancy
 
 
 def _dormant_strategy(code: str):
     strategy = _DORMANT_STRATEGIES.get(code)
     if strategy is None:
         return None
-    from app.modules.payroll import mexico_dormancy
-
-    return strategy if mexico_dormancy.onboarding_enabled() else None
+    return strategy if _dormancy_module(code).onboarding_enabled() else None
 
 
 def is_supported_employee_country(country_code: str) -> bool:
@@ -1817,8 +1888,21 @@ def restore_masked_employee_columns(values, employee):
 
 def mask_routing(routing):
     """`routing` display rows: bank ROUTING codes stay visible; an entry that
-    is itself an account identifier (IBAN) is masked."""
+    is itself an account identifier is masked. IBAN/CLABE and Brazil's PIX
+    key / bank account are identifiers; PIX is masked by inferred type
+    (BR-K6)."""
     if not isinstance(routing, list):
         return routing
-    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") in ("iban", "clabe") and r.get("value")
-             else r) for r in routing]
+    out = []
+    for r in routing:
+        if not (isinstance(r, dict) and r.get("value")):
+            out.append(r)
+            continue
+        key = r.get("key")
+        if key == "pix_key":
+            out.append({**r, "value": mask_pix_key(r.get("value"))})
+        elif key in ("iban", "clabe", "bank_account"):
+            out.append({**r, "value": mask_identifier(r.get("value"))})
+        else:
+            out.append(r)
+    return out

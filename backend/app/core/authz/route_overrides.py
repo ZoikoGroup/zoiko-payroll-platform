@@ -367,6 +367,8 @@ _BR = "/api/super-admin/compliance/brazil"
 _retire("GET", f"{_MX}/employees", R_JIT, "lists Mexican employees (names, codes) of one organization")
 _retire("GET", f"{_MX}/employees/{{employee_id}}", R_JIT, "one Mexican employee's record and readiness")
 _retire("GET", f"{_BR}/employees", R_JIT, "lists Brazilian employees (names, codes) of one organization")
+_retire("GET", f"{_BR}/employees/{{employee_id}}", R_JIT,
+       "one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)")
 # Registry and counts only - no identity, pay or per-person row.
 _set("GET", f"{_MX}/organizations", data_class="aggregate",
      note="reviewed: organization id + name of tenants with Mexico payroll (registry metadata)")
