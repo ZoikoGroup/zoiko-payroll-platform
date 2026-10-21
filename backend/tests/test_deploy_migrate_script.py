@@ -92,6 +92,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables
         assert "data_region" in columns.get("organizations", set())
+        tables, _ = pending_objects("f5c1a8d3e9b2")
+        assert tables == {"payroll_mx_vacation_records"}
         tables, _ = pending_objects("e3b9c2d7f4a1")
         assert {"payroll_mx_run_corrections", "payroll_mx_vacation_records"} <= tables
     finally:
