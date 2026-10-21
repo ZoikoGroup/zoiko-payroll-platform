@@ -184,7 +184,10 @@ def test_transition_graph_publishes_only_from_approved():
 def test_status_route_returns_the_structured_400_for_a_shortcut(db):
     from fastapi.testclient import TestClient
 
-    from app.core.dependencies import get_current_super_admin
+    from app.core.dependencies import (
+        get_current_super_admin,
+        get_current_org_scoped_principal,
+    )
     from app.database import get_db
     from app.main import app
 
@@ -197,6 +200,7 @@ def test_status_route_returns_the_structured_400_for_a_shortcut(db):
 
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_current_super_admin] = lambda: _SuperAdmin()
+    app.dependency_overrides[get_current_org_scoped_principal] = lambda: _SuperAdmin()
     app.dependency_overrides[get_db] = lambda: db
     try:
         r = TestClient(app).put(f"/api/super-admin/report-templates/{t.id}/status", json={"status": "Published"})

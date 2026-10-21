@@ -83,11 +83,6 @@ export const getHotfixActivations = (params) =>
 export const reviewHotfixActivation = (id, payload) =>
   apiFetch(`/api/super-admin/compliance/hotfix-activations/${id}/review`, { method: "PUT", body: payload });
 
-// Cross-org UK RTI filing summary (FPS/EPS/P45/P60) with submission
-// tracking status.
-export const getRtiFormsSummary = (params) =>
-  apiFetch("/api/super-admin/compliance/rti-forms", { params });
-
 // Golden-test certification (Part 10's harness, generalized to Canada
 // gap-closure Phase 8) — trigger a run for a jurisdiction, and read run
 // history. jurisdictionCountry defaults to "UK" for back-compat.
@@ -124,18 +119,16 @@ export const previewItalyCalculation = (payload) =>
   apiFetch("/api/super-admin/compliance/italy/calculation-preview", { method: "POST", body: payload });
 
 // ————— Netherlands (ZP-NL-ENG-001) ————
-// Super Admin API: backend/app/modules/payroll/netherlands_router.py. Every
-// organisation-scoped call takes an explicit orgId (no default organisation).
+// Super Admin API: backend/app/modules/payroll/netherlands_router.py. ZP-PRIV:
+// the employee list, employer profile, premium decisions, VCR, expat
+// decisions and loonaangifte routes are retired (tenant-run / worker data).
+// Earning classifications and pension schemes are the PLATFORM catalog only.
 // Statutory pack rows (minimum wage, WKR, car windows, period maxima) are
 // read-only here — they change only through the governed pack editor.
 const NL_SA = "/api/super-admin/compliance/netherlands";
 
 export const listNlOrganizations = () => apiFetch(`${NL_SA}/organizations`);
-export const listNlEmployees = (orgId) => apiFetch(`${NL_SA}/employees`, { params: { org_id: orgId } });
 
-export const getNlEmployerProfile = (orgId) => apiFetch(`${NL_SA}/employer-profile`, { params: { org_id: orgId } });
-export const createNlEmployerProfile = (orgId, payload) =>
-  apiFetch(`${NL_SA}/employer-profile`, { method: "POST", body: payload, params: { org_id: orgId } });
 export const getNlEmployerReadiness = (orgId) =>
   apiFetch(`${NL_SA}/employer-profile/readiness`, { params: { org_id: orgId } });
 
@@ -159,43 +152,16 @@ export const importNlTaxTable = async (file, fields) => {
 
 export const getNlPackRows = (kind, on) => apiFetch(`${NL_SA}/${kind}`, { params: on ? { on } : {} });
 
-export const listNlPremiumDecisions = (orgId) => apiFetch(`${NL_SA}/premium-decisions`, { params: { org_id: orgId } });
-export const createNlPremiumDecision = (orgId, payload) =>
-  apiFetch(`${NL_SA}/premium-decisions`, { method: "POST", body: payload, params: { org_id: orgId } });
-export const activateNlPremiumDecision = (orgId, id) =>
-  apiFetch(`${NL_SA}/premium-decisions/${id}/activate`, { method: "PUT", params: { org_id: orgId } });
-
-export const getNlVcr = (orgId, employeeId, taxYear) =>
-  apiFetch(`${NL_SA}/vcr`, { params: { org_id: orgId, employee_id: employeeId, tax_year: taxYear } });
-
-export const listNlEarningClassifications = (orgId) =>
-  apiFetch(`${NL_SA}/earning-classifications`, { params: orgId ? { org_id: orgId } : {} });
+export const listNlEarningClassifications = () => apiFetch(`${NL_SA}/earning-classifications`);
 export const createNlEarningClassification = (payload) =>
   apiFetch(`${NL_SA}/earning-classifications`, { method: "POST", body: payload });
 
-export const listNlExpatDecisions = (orgId) => apiFetch(`${NL_SA}/expat-decisions`, { params: { org_id: orgId } });
-export const createNlExpatDecision = (orgId, payload) =>
-  apiFetch(`${NL_SA}/expat-decisions`, { method: "POST", body: payload, params: { org_id: orgId } });
-export const transitionNlExpatDecision = (orgId, id, action) =>
-  apiFetch(`${NL_SA}/expat-decisions/${id}/${action}`, { method: "PUT", params: { org_id: orgId } });
-
 export const listNlCaos = () => apiFetch(`${NL_SA}/caos`);
-export const listNlPensionSchemes = (orgId) =>
-  apiFetch(`${NL_SA}/pension-schemes`, { params: orgId ? { org_id: orgId } : {} });
+export const listNlPensionSchemes = () => apiFetch(`${NL_SA}/pension-schemes`);
 export const createNlPensionScheme = (payload) =>
   apiFetch(`${NL_SA}/pension-schemes`, { method: "POST", body: payload });
 
 export const getNlReadiness = () => apiFetch(`${NL_SA}/readiness`);
-
-export const listNlReturns = (orgId, taxYear) =>
-  apiFetch(`${NL_SA}/loonaangifte`, { params: { org_id: orgId, ...(taxYear ? { tax_year: taxYear } : {}) } });
-export const getNlReturn = (orgId, id) => apiFetch(`${NL_SA}/loonaangifte/${id}`, { params: { org_id: orgId } });
-export const buildNlReturn = (orgId, payload) =>
-  apiFetch(`${NL_SA}/loonaangifte/build`, { method: "POST", body: payload, params: { org_id: orgId } });
-export const reconcileNlReturn = (orgId, id) =>
-  apiFetch(`${NL_SA}/loonaangifte/${id}/reconcile`, { method: "PUT", params: { org_id: orgId } });
-export const correctNlReturn = (orgId, id) =>
-  apiFetch(`${NL_SA}/loonaangifte/${id}/correction`, { method: "POST", params: { org_id: orgId } });
 
 // ————— Mexico (ZP-MX-ENG-001) ————
 // Super Admin API: backend/app/modules/payroll/mexico_router.py. Statutory
@@ -322,26 +288,9 @@ export const deleteCanonicalContributionRate = (id) =>
 export const getTaxConfigurationAudit = (params) =>
   apiFetch("/api/super-admin/compliance/tax-configuration/audit", { params });
 
-// ── US: Employer-Specific Tax Profiles (SUI and similar) ─────────────────
-// Tenant-specific, agency-assigned rates — a separate schema/table from
-// the canonical Contribution Rate/Tax Slab endpoints above (see
-// EmployerTaxProfile's model docstring for why).
-
-export const getEmployerTaxProfiles = (params) =>
-  apiFetch("/api/super-admin/compliance/employer-tax-profiles", { params });
-
-export const upsertEmployerTaxProfile = (payload) =>
-  apiFetch("/api/super-admin/compliance/employer-tax-profiles", { method: "PUT", body: payload });
-
-export const deleteEmployerTaxProfile = (id) =>
-  apiFetch(`/api/super-admin/compliance/employer-tax-profiles/${id}`, { method: "DELETE" });
-
-// Small organization picker for the Germany Employer Levies (Accident
-// Insurance) tab — EmployerTaxProfile is org-scoped (unlike every other
-// Germany registry, all global), so its Super Admin UI needs to let the
-// operator pick which employer they're configuring (Phase 8AJ).
-export const listOrganizationsForPicker = () =>
-  apiFetch("/api/organizations", { params: { limit: 200 } }).then((data) => data.organizations || []);
+// US employer-specific tax profiles (SUI and similar) are tenant
+// configuration (ZP-PRIV decision 3): the Super Admin routes are retired and
+// tenants use /api/payroll/compliance/employer-tax-profiles.
 
 // ── US: Cross-State Reciprocity ───────────────────────────────────────────
 
@@ -496,20 +445,6 @@ export const upsertTaxabilityRule = (payload) =>
 export const deleteTaxabilityRule = (id) =>
   apiFetch(`/api/super-admin/compliance/taxability-rules/${id}`, { method: "DELETE" });
 
-// ── India: Salary TDS / Forms cross-org status (gap-closure Phase F) ──────
-// A Super Admin token has no organization_id of its own, so these call
-// dedicated cross-org endpoints (organizationId required) rather than the
-// org-facing payrollService.js versions of the same underlying data.
-
-export const getIndiaSalaryTdsDeclarationsForOrg = (organizationId, taxYear) =>
-  apiFetch("/api/super-admin/india/salary-tds-declarations", { params: { organizationId, taxYear } });
-
-export const getIndiaSalaryTdsClaimsForOrg = (organizationId, taxYear) =>
-  apiFetch("/api/super-admin/india/salary-tds-claims", { params: { organizationId, taxYear } });
-
-export const getIndiaFormsForOrg = (organizationId, reportType) =>
-  apiFetch("/api/super-admin/india/forms", { params: { organizationId, reportType } });
-
 // ── Germany statutory registries (Phase 8O) ─────────────────────────────
 // Every function below is a thin wrapper over a pre-existing Super-Admin-
 // only backend endpoint (Phases 3/4/5/6/8G-1) — this phase adds the
@@ -596,19 +531,8 @@ export const approveHealthFund = (id) =>
 export const setHealthFundStatus = (id, statusValue) =>
   apiFetch(`/api/super-admin/compliance/germany/health-funds/${id}/status`, { method: "PUT", params: { status: statusValue } });
 
-// Germany accident-insurance profiles (Phase 8AJ, 2nd pass) — maker-checker
-// workspace, organization-scoped (unlike health funds above, which are
-// global). Publishing one materializes it into the existing
-// EmployerTaxProfile mechanism the engine actually reads — see
-// models.GermanyAccidentInsuranceProfile's own docstring.
-export const listGermanyAccidentInsuranceProfiles = (organizationId) =>
-  apiFetch("/api/super-admin/compliance/germany/accident-insurance-profiles", { params: organizationId ? { organizationId } : {} });
-export const createGermanyAccidentInsuranceProfile = (payload) =>
-  apiFetch("/api/super-admin/compliance/germany/accident-insurance-profiles", { method: "POST", body: payload });
-export const approveGermanyAccidentInsuranceProfile = (id) =>
-  apiFetch(`/api/super-admin/compliance/germany/accident-insurance-profiles/${id}/approve`, { method: "PUT" });
-export const setGermanyAccidentInsuranceProfileStatus = (id, statusValue) =>
-  apiFetch(`/api/super-admin/compliance/germany/accident-insurance-profiles/${id}/status`, { method: "PUT", params: { status: statusValue } });
+// Germany accident-insurance profiles are tenant configuration (ZP-PRIV
+// decision 3); tenants use /api/payroll/germany/accident-insurance-profiles.
 
 // U1 tariffs (sickness reimbursement) — child records of health funds
 export const listU1Tariffs = (healthFundId) =>
@@ -705,7 +629,44 @@ export const approveMinijobMidijobParameter = (id) =>
 export const setMinijobMidijobParameterStatus = (id, statusValue) =>
   apiFetch(`/api/super-admin/compliance/germany/minijob-midijob-parameters/${id}/status`, { method: "PUT", params: { status: statusValue } });
 
+// ── Platform aggregates (ZP-PRIV B.1/B.2) ────────────────────────────────
+// Every cross-tenant total the Super Admin plane sees is k-suppressed: a
+// cell covering fewer than 5 workers (money cells: or fewer than 2
+// organizations) comes back as this literal token instead of a number.
+
+export const SUPPRESSED = "<5, hidden";
+
+export const SUPPRESSED_EXPLANATION =
+  "Hidden: fewer than 5 workers or fewer than 2 organizations in this cell, to protect individuals.";
+
+export const isSuppressed = (value) => value === SUPPRESSED;
+
+// Recharts can't plot the hidden token — chart series get null (a gap)
+// instead, and the UI says so next to the chart.
+export const numericOrNull = (value) => {
+  if (value === null || value === undefined || isSuppressed(value)) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+// The probing defences on aggregate reads (429 query budget, 403
+// differencing guard) are expected, recoverable refusals — never an error
+// screen. Returns a friendly sentence for them, or null for any other error.
+export function aggregateRefusalMessage(err) {
+  if (err?.errorCode === "AGGREGATE_QUERY_BUDGET_EXCEEDED" || err?.status === 429) {
+    return "You've run a lot of aggregate queries in the last few minutes. Wait a moment, then refresh.";
+  }
+  if (err?.errorCode === "AGGREGATE_DIFFERENCING_DETECTED") {
+    return "This filter combination overlaps a previous query closely enough that it could single out a few people, so it was not run. Broaden or change the filters.";
+  }
+  return null;
+}
+
 // ── Finance ──────────────────────────────────────────────────────────────
+// All three are platform aggregates — no per-run rows and no single-
+// organization filter. /overview returns jurisdiction x currency x month x
+// status cells; /summary per-jurisdiction totals; /by-organization the
+// tenant registry with a headcount bucket and payroll activity (no money).
 
 export const getFinanceOverview = (params) => apiFetch("/api/super-admin/finance/overview", { params });
 
@@ -723,9 +684,6 @@ export const updateOrganizationCurrency = (organizationId, currency) =>
 
 // ── Statutory Rates ──────────────────────────────────────────────────────
 
-export const getOrganizationContributionRates = (params) =>
-  apiFetch("/api/super-admin/statutory-rates/organization-rates", { params });
-
 // Read-only: the canonical rates/slabs from whichever tax pack is
 // currently Active for this jurisdiction — the same data Compliance's
 // Rates editor writes to. Editing happens on the Compliance page.
@@ -736,15 +694,30 @@ export const getActiveTaxConfiguration = (params) =>
 
 export const getReportsOrganizations = (params) => apiFetch("/api/super-admin/reports/organizations", { params });
 
+// "Workforce totals": k-suppressed headcounts by organization, jurisdiction,
+// status and employment type — never a name, code or other identity.
+// Params: organization_id, country, status, skip, limit (no search).
 export const getReportsEmployees = (params) => apiFetch("/api/super-admin/reports/employees", { params });
 
+// Server-built CSV for a report category. `employees` exports the same
+// workforce counts, `payroll` the same aggregate cells as /finance/overview.
 export async function downloadReportCsv(type, params = {}) {
-  const query = new URLSearchParams({ type, ...params }).toString();
+  const query = new URLSearchParams({ type });
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== "" && v !== undefined && v !== null) query.set(k, v);
+  });
   const token = getAccessToken();
-  const res = await fetch(`${API_BASE}/api/super-admin/reports/export?${query}`, {
+  const res = await fetch(`${API_BASE}/api/super-admin/reports/export?${query.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new Error("Failed to export report");
+  if (!res.ok) {
+    let data = {};
+    try { data = await res.json(); } catch { data = {}; }
+    const err = new Error(data.detail || data.message || "Failed to export report");
+    err.status = res.status;
+    err.errorCode = data.error || null;
+    throw err;
+  }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -758,7 +731,12 @@ export async function downloadReportCsv(type, params = {}) {
 
 // ── Dashboard charts ───────────────────────────────────────────────────────
 
+// Money points (payrollTrend gross/net, grossVsNet, payrollByJurisdiction
+// grossPay) and employeesByCountry may be SUPPRESSED.
 export const getDashboardCharts = (params) => apiFetch("/api/super-admin/dashboard/charts", { params });
+
+// total_payroll_employees / total_payroll_runs may be SUPPRESSED.
+export const getDashboardStats = () => apiFetch("/api/super-admin/dashboard/stats");
 
 // ── Organizations (for filter dropdowns — reuses the existing endpoint) ───
 
@@ -874,84 +852,20 @@ export const getHongKongPackGoldenCheck = (packRowId) =>
 export const getSaudiArabiaPackGoldenCheck = (packRowId) =>
   apiFetch(`/api/super-admin/compliance/saudi-arabia/packs/${packRowId}/golden-check`);
 
-// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
-// Super-Admin-owned authority data for the France Compliance workspace:
-// SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate
-// packs, DGFiP PAS rates, governed effectif, plus the read-only DSN/outbox
-// transport diagnostics and the launch-gate H readiness dry-run.
-//
-// Everything below is organization-scoped (organizationId travels as a
-// query param, the body stays the authority payload) — the org itself only
-// opens DSN filings via /payroll/france/* (see payrollService).
-export const getFranceReadiness = (params) =>
-  apiFetch("/api/super-admin/compliance/france/readiness", { params });
+// ————— France (ZP-FR-ENG-001) ————
+// ZP-PRIV decision 3: the France employer identity, establishments, AT/MP
+// rate packs, effectif, readiness/go-live and DSN are tenant-run (tenant
+// routes /api/payroll/france/*), and PAS rates are worker data; their Super
+// Admin routes are retired. Only the org picker and pack tooling remain.
 
-export const getFranceEmployerProfile = async (params) => {
-  // 404 is a legitimate empty state — the org has no France profile
-  // configured yet ("SIREN identity missing" / "Not configured" in the
-  // overview) — never a hard failure that should blank the whole dashboard.
-  try {
-    return await apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
-  } catch (err) {
-    if (err && err.status === 404) return null;
-    throw err;
-  }
-};
-
-export const upsertFranceEmployerProfile = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/employer-profile", { method: "PUT", body: payload, params });
-
-export const recordFranceEffectif = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/effectif", { method: "POST", body: payload, params });
-
-export const upsertFranceEstablishmentRatePack = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { method: "PUT", body: payload, params });
-
-export const listFranceEstablishmentRatePacks = (params) =>
-  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { params });
-
-export const ingestFrancePASRate = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/pas-rates", { method: "POST", body: payload, params });
-
-export const listFrancePASRates = (params) =>
-  apiFetch("/api/super-admin/compliance/france/pas-rates", { params });
-
-export const listFranceDsnSubmissions = (params) =>
-  apiFetch("/api/super-admin/compliance/france/dsn-submissions", { params });
-
-export const listFranceDsnOutboxItems = (params) =>
-  apiFetch("/api/super-admin/compliance/france/dsn-outbox", { params });
-
-// France organizations only (the org's country resolves to FR) — the France
-// endpoints reject any other organization.
+// France organizations only (the org's country resolves to FR).
 export const listFranceOrganizations = () =>
   apiFetch("/api/organizations", { params: { limit: 200, country_code: "FR" } }).then((data) => data.organizations || []);
-
-export const correctFranceEffectif = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/effectif/corrections", { method: "POST", body: payload, params });
-
-export const listFranceEstablishments = (params) =>
-  apiFetch("/api/super-admin/compliance/france/establishments", { params });
-
-export const createFranceEstablishment = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/establishments", { method: "POST", body: payload, params });
-
-export const updateFranceEstablishment = (id, payload, params) =>
-  apiFetch(`/api/super-admin/compliance/france/establishments/${id}`, { method: "PUT", body: payload, params });
-
-export const updateFranceEstablishmentRatePack = (id, payload, params) =>
-  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}`, { method: "PATCH", body: payload, params });
-
-export const closeFranceEstablishmentRatePack = (id, payload, params) =>
-  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}/close`, { method: "POST", body: payload, params });
 
 // Fill a France tax pack's missing statutory rows from the 2026 catalog
 // (insert-only; editable packs only).
 export const loadFranceStatutoryDefaults = (packId) =>
   apiFetch(`/api/super-admin/compliance/france/packs/${packId}/load-statutory-defaults`, { method: "POST" });
-
-export const setFranceLive = (payload, params) =>
-  apiFetch("/api/super-admin/compliance/france/go-live", { method: "POST", body: payload, params });
 
 // ————— Switzerland (ZP-CH-PAYROLL-001) ————
 // Super-Admin-owned authority data for the Switzerland Compliance workspace:
@@ -1000,11 +914,6 @@ async function _chRequest(path, { method = "POST", body } = {}) {
 export const getSwissReadiness = (on) =>
   apiFetch(`${CH_SA}/readiness`, { params: on ? { on } : {} });
 
-// Read-only: run the production resolver + Swiss engine for one real CH
-// employee (organizationId + employeeId, an `on` payDate) — writes nothing.
-export const previewSwissCalculation = (payload) =>
-  apiFetch(`${CH_SA}/calculation-preview`, { method: "POST", body: payload });
-
 // QST tariff files (statuses: IMPORTED/VALIDATED/APPROVED/ACTIVE/REJECTED/
 // SUPERSEDED; every status stays readable for replay).
 export const listSwissQstTariffFiles = (params) => apiFetch(`${CH_SA}/qst-tariffs`, { params });
@@ -1047,12 +956,6 @@ export const approveSwissQstTariffFile = (id, reason) =>
 export const activateSwissQstTariffFile = (id, reason) =>
   _chRequest(`${CH_SA}/qst-tariffs/${id}/activate`, { body: { reason: reason || null } });
 
-// Read-only: the payslips / months a payslip was calculated on a tariff file
-// (a tariff correction lists them for deliberate correction — never
-// recalculates anything itself).
-export const getSwissQstTariffAffectedPayslips = (id) =>
-  apiFetch(`${CH_SA}/qst-tariffs/${id}/affected-payslips`);
-
 // Platform scheme catalog (organization_id NULL definitions; the org-facing
 // payrollService.js listSwissSchemes returns these plus the tenant's own).
 export const listSwissCatalogSchemes = (params) => apiFetch(`${CH_SA}/schemes`, { params });
@@ -1080,10 +983,10 @@ export const approveSwissWageFloor = (id, reason) =>
 export const activateSwissWageFloor = (id, reason) =>
   _chRequest(`${CH_SA}/wage-floors/${id}/activate`, { body: { reason: reason || null } });
 
-// ── Saudi Arabia ledgers (ZP-SA-ENG-001 §7/§12) ─────────────────────────────
-// Employer GOSI registration, employee contracts, the monthly GOSI liability,
-// the EOS accrual ledger, final settlement and the WPS SIE extract. Every one
-// builds server-side from committed payroll + configured content.
+// ── Saudi Arabia (ZP-SA-ENG-001) ──────────────────────────────────────────
+// ZP-PRIV decision 3: employer GOSI registration, contracts, GOSI liability,
+// EOS, final settlement and WPS are tenant-run (tenant routes under
+// /api/payroll/saudi-arabia/*); their Super Admin routes are retired.
 const SA_SA = "/api/super-admin/compliance/saudi-arabia";
 
 // Release gates for one SA tax pack (packId omitted = the pack in force) and a
@@ -1094,48 +997,3 @@ export const getSaReadiness = (packId) =>
 export const previewSaudiArabiaCalculation = (payload) =>
   apiFetch(`${SA_SA}/calculation-preview`, { method: "POST", body: payload });
 
-export const listSaEmployerProfiles = (organizationId) =>
-  apiFetch(`${SA_SA}/employer-profiles`, { params: { organizationId } });
-export const createSaEmployerProfile = (organizationId, payload) =>
-  apiFetch(`${SA_SA}/employer-profiles`, { method: "POST", params: { organizationId }, body: payload });
-export const approveSaEmployerProfile = (organizationId, profileId) =>
-  apiFetch(`${SA_SA}/employer-profiles/${profileId}/approve`, { method: "POST", params: { organizationId } });
-
-export const listSaContractVersions = (organizationId, employeeId) =>
-  apiFetch(`${SA_SA}/employees/${employeeId}/contracts`, { params: { organizationId } });
-export const createSaContractVersion = (organizationId, employeeId, payload) =>
-  apiFetch(`${SA_SA}/employees/${employeeId}/contracts`, { method: "POST", params: { organizationId }, body: payload });
-export const approveSaContractVersion = (organizationId, employeeId, contractId) =>
-  apiFetch(`${SA_SA}/employees/${employeeId}/contracts/${contractId}/approve`, { method: "POST", params: { organizationId } });
-
-export const listSaGosiLiabilities = (organizationId) =>
-  apiFetch(`${SA_SA}/gosi-liabilities`, { params: { organizationId } });
-export const buildSaGosiLiability = (organizationId, runId) =>
-  apiFetch(`${SA_SA}/runs/${runId}/gosi-liability`, { method: "POST", params: { organizationId } });
-export const markSaGosiLiabilityPaid = (organizationId, liabilityId, paymentReference) =>
-  apiFetch(`${SA_SA}/gosi-liabilities/${liabilityId}/paid`, { method: "POST", params: { organizationId }, body: { paymentReference } });
-
-export const accrueSaEos = (organizationId, runId) =>
-  apiFetch(`${SA_SA}/runs/${runId}/eos-accrual`, { method: "POST", params: { organizationId } });
-export const listSaEosLedger = (organizationId, employeeId) =>
-  apiFetch(`${SA_SA}/eos-ledger`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
-
-export const listSaFinalSettlements = (organizationId, employeeId) =>
-  apiFetch(`${SA_SA}/final-settlements`, { params: employeeId ? { organizationId, employeeId } : { organizationId } });
-export const createSaFinalSettlement = (organizationId, payload) =>
-  apiFetch(`${SA_SA}/final-settlements`, { method: "POST", params: { organizationId }, body: payload });
-export const approveSaFinalSettlement = (organizationId, settlementId) =>
-  apiFetch(`${SA_SA}/final-settlements/${settlementId}/approve`, { method: "POST", params: { organizationId } });
-export const paySaFinalSettlement = (organizationId, settlementId, paymentReference) =>
-  apiFetch(`${SA_SA}/final-settlements/${settlementId}/pay`, { method: "POST", params: { organizationId }, body: { paymentReference } });
-
-export const listSaWpsFiles = (organizationId) =>
-  apiFetch(`${SA_SA}/wps-files`, { params: { organizationId } });
-export const buildSaWpsFile = (organizationId, runId) =>
-  apiFetch(`${SA_SA}/runs/${runId}/wps-file`, { method: "POST", params: { organizationId } });
-export const listSaWpsObservations = (organizationId, wpsFileId) =>
-  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/observations`, { params: { organizationId } });
-export const acceptSaWpsFile = (organizationId, wpsFileId) =>
-  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/accepted`, { method: "POST", params: { organizationId } });
-export const rejectSaWpsFile = (organizationId, wpsFileId, reason) =>
-  apiFetch(`${SA_SA}/wps-files/${wpsFileId}/rejected`, { method: "POST", params: { organizationId }, body: { reason } });

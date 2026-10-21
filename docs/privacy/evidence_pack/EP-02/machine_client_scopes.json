@@ -1,0 +1,27 @@
+{
+  "employees:read": {
+    "routes": [
+      "GET /api/payroll/employees",
+      "GET /api/payroll/employees/{employee_id}"
+    ],
+    "fieldClasses": [
+      "contact",
+      "identifier"
+    ]
+  },
+  "payroll_runs:read": {
+    "routes": [
+      "GET /api/payroll/runs",
+      "GET /api/payroll/runs/{run_id}"
+    ],
+    "fieldClasses": []
+  },
+  "reports:read": {
+    "routes": [
+      "GET /api/payroll/generated-reports"
+    ],
+    "fieldClasses": [
+      "identifier"
+    ]
+  }
+}

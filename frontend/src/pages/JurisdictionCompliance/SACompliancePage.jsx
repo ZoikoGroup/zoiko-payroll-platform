@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Building2, Calculator, ClipboardList, FileCheck2, FileText, Gauge, Landmark, Lock, Settings2, ShieldCheck, ToggleRight, Users, Building, FileSignature, History, Search, ChevronDown } from "lucide-react";
 import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
@@ -15,8 +15,7 @@ import { SAEarningClassesTab } from "../../components/jurisdiction/saudi_arabia/
 import { SAParametersTab } from "../../components/jurisdiction/saudi_arabia/SAParametersTab";
 import { SAReadinessPreviewTab } from "../../components/jurisdiction/saudi_arabia/SAReadinessPreviewTab";
 import { SAPackGoldenCheckTab } from "../../components/jurisdiction/saudi_arabia/SAPackGoldenCheckTab";
-import { getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations } from "../../service/superAdminService";
-import { useToast } from "../../context/ToastContext";
+import { getCompliancePolicyEligibleOrganizations } from "../../service/superAdminService";
 
 function saAutoSelectPack(packs) {
   const today = new Date().toISOString().slice(0, 10);
@@ -28,7 +27,6 @@ function saAutoSelectPack(packs) {
 const isTax = (pack) => pack.packType === "tax";
 
 export default function SACompliancePage() {
-  const { addToast } = useToast();
   const [selectedOrgId, setSelectedOrgId] = useState(null);
   const [orgSearch, setOrgSearch] = useState("");
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
@@ -65,7 +63,12 @@ export default function SACompliancePage() {
     o.code.toLowerCase().includes(orgSearch.toLowerCase())
   );
 
-  const orgDisplayName = eligibleOrgs.find(o => o.id === selectedOrgId)?.name || "Select organization…";
+  const selectedOrg = eligibleOrgs.find(o => o.id === selectedOrgId);
+  const orgDisplayName = selectedOrg?.name || "Select organization…";
+  // ZP-PRIV: the organization-scoped tabs (employer profile, contracts, GOSI
+  // liability, EOS, final settlement, WPS) are tenant-run and render a locked
+  // explanation; the selected org only pre-fills the Support Access link.
+  const selectedOrgCode = selectedOrg?.code || undefined;
 
   const handleOrgSelect = (orgId) => {
     setSelectedOrgId(orgId);
@@ -77,67 +80,31 @@ export default function SACompliancePage() {
     autoSelectPack: saAutoSelectPack,
     extraTabs: [
       { key: "sa-employer-profiles", label: "Employer GOSI Profiles", icon: Building, after: "organizations", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
-          <SAEmployerProfileTab 
-            organizationId={selectedOrgId} 
-            packId={pack?.id}
-            disabled={!selectedOrgId}
-          />
-        )},
+        render: () => <SAEmployerProfileTab organizationCode={selectedOrgCode} /> },
       { key: "sa-contract-versions", label: "Employee Contracts", icon: Users, after: "sa-employer-profiles", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
-          <SAContractVersionTab 
-            organizationId={selectedOrgId} 
-            packId={pack?.id}
-            disabled={!selectedOrgId}
-          />
-        )},
+        render: () => <SAContractVersionTab organizationCode={selectedOrgCode} /> },
       { key: "sa-gosi-liability", label: "GOSI Liability", icon: FileSignature, after: "sa-contract-versions", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
-          <SAGosiLiabilityTab 
-            organizationId={selectedOrgId} 
-            packId={pack?.id}
-            disabled={!selectedOrgId}
-          />
-        )},
+        render: () => <SAGosiLiabilityTab organizationCode={selectedOrgCode} /> },
       { key: "sa-eos-ledger", label: "EOS Ledger", icon: History, after: "sa-gosi-liability", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
-          <SAEosLedgerTab 
-            organizationId={selectedOrgId} 
-            packId={pack?.id}
-            disabled={!selectedOrgId}
-          />
-        )},
+        render: () => <SAEosLedgerTab organizationCode={selectedOrgCode} /> },
       { key: "sa-final-settlement", label: "Final Settlement", icon: ClipboardList, after: "sa-eos-ledger", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
-          <SAFinalSettlementTab 
-            organizationId={selectedOrgId} 
-            packId={pack?.id}
-            disabled={!selectedOrgId}
-          />
-        )},
+        render: () => <SAFinalSettlementTab organizationCode={selectedOrgCode} /> },
       { key: "sa-wps", label: "WPS SIE Extract", icon: FileText, after: "sa-final-settlement", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
-          <SAWpsTab 
-            organizationId={selectedOrgId} 
-            packId={pack?.id}
-            disabled={!selectedOrgId}
-          />
-        )},
+        render: () => <SAWpsTab organizationCode={selectedOrgCode} /> },
       { key: "sa-gosi-branches", label: "GOSI Branches", icon: Settings2, after: "sa-wps", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
+        render: ({ pack }) => (
           <SAGosiBranchesTab packId={pack?.id} />
         )},
       { key: "sa-earning-classes", label: "Earning Classification", icon: ClipboardList, after: "sa-gosi-branches", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
+        render: ({ pack }) => (
           <SAEarningClassesTab packId={pack?.id} />
         )},
       { key: "sa-parameters", label: "Parameters", icon: Landmark, after: "sa-gosi-branches", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
+        render: ({ pack }) => (
           <SAParametersTab packId={pack?.id} />
         )},
       { key: "sa-readiness-preview", label: "Readiness & Preview", icon: Gauge, after: "sa-parameters", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
+        render: ({ pack }) => (
           <SAReadinessPreviewTab packId={pack?.id} />
         )},
       { key: "sa-evidence", label: "Source Evidence", icon: FileCheck2, after: "sa-readiness-preview", isVisible: isTax,
@@ -148,7 +115,7 @@ export default function SACompliancePage() {
             fixturesPath="backend/tests/fixtures/sa_golden/README.md" />
         ) },
       { key: "sa-golden-check", label: "Pack Golden Check", icon: ShieldCheck, after: "sa-golden", isVisible: isTax,
-        render: ({ pack, addToast, onReload }) => (
+        render: ({ pack, onReload }) => (
           <SAPackGoldenCheckTab pack={pack} onReload={onReload} />
         ) },
     ],

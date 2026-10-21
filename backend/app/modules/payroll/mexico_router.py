@@ -234,7 +234,12 @@ def sa_cfdi_lifecycle(organization_id: Optional[int] = Query(None), current_user
 
     if organization_id is not None:
         _mx()._org(db, organization_id)
-    return mexico_cfdi_service.lifecycle_overview(db, organization_id)
+    out = mexico_cfdi_service.lifecycle_overview(db, organization_id)
+    # ZP-PRIV B.1: the platform plane gets counts only. UNKNOWN documents name
+    # an employee, run and payslip - the organization resolves them in its own
+    # workspace (or Zoiko support through an approved Support Access grant).
+    out["unknownCount"] = len(out.pop("unknown", None) or [])
+    return out
 
 
 @router.get("/authorities", summary="Authorities — read-only counts (movements, liabilities, SUA, ISN) and the blocks")

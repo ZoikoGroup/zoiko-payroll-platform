@@ -1,0 +1,178 @@
+{
+  "super_admin": {
+    "platform": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "aggregate": [
+      "export",
+      "read"
+    ],
+    "tenant_lifecycle": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "security": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "support": [
+      "create",
+      "read",
+      "update"
+    ],
+    "self": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ]
+  },
+  "platform_security": {
+    "security": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "support": [
+      "approve",
+      "create",
+      "read",
+      "update"
+    ],
+    "self": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ]
+  },
+  "support_operator": {
+    "support": [
+      "create",
+      "read",
+      "update"
+    ],
+    "self": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ]
+  },
+  "org_admin": {
+    "tenant_config": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "worker": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "aggregate": [
+      "export",
+      "read"
+    ],
+    "support": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "self": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ]
+  },
+  "payroll_admin": {
+    "tenant_config": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "worker": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ],
+    "aggregate": [
+      "export",
+      "read"
+    ],
+    "self": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ]
+  },
+  "support_temp": {
+    "worker": [
+      "read"
+    ],
+    "tenant_config": [
+      "read"
+    ],
+    "self": [
+      "create",
+      "read"
+    ]
+  },
+  "employee": {
+    "worker": [
+      "export",
+      "read"
+    ],
+    "self": [
+      "approve",
+      "create",
+      "delete",
+      "export",
+      "read",
+      "update"
+    ]
+  }
+}

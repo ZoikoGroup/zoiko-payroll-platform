@@ -1,0 +1,18 @@
+{
+  "testId": "PG_security_events_tamper",
+  "timestampUtc": "2026-10-19T10:02:36.618989+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "table owner",
+  "tokenScope": "security_events",
+  "syntheticTenantIds": null,
+  "endpoint": "UPDATE/DELETE",
+  "expectedStatus": 0,
+  "actualStatus": 0,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "chained on Postgres; edit, re-hash and delete refused by trigger; anchor append-only"
+}

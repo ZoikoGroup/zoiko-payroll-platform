@@ -1,0 +1,29 @@
+{
+  "testId": "T07_export",
+  "timestampUtc": "2026-10-19T10:04:32.707194+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "support_temp",
+  "tokenScope": "grant:1:employees[A1]:identifier+contact",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/payroll/payslips/1/download",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": {
+    "success": false,
+    "error": "ACCESS_DENIED",
+    "message": "You do not have permission to perform this action.",
+    "detail": "You do not have permission to perform this action.",
+    "trace": {
+      "decisionId": "fcb68c53cb4449d2ad17ce3627b5116d"
+    }
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": "fcb68c53cb4449d2ad17ce3627b5116d",
+  "note": null
+}

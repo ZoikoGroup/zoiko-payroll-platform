@@ -1,0 +1,21 @@
+{
+  "testId": "T12_attribution_and_drill",
+  "timestampUtc": "2026-10-19T10:05:14.185632+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "platform_security",
+  "tokenScope": "break-glass:1",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/super-admin/security-events",
+  "expectedStatus": 200,
+  "actualStatus": 200,
+  "redactedResponse": null,
+  "correlationId": "t12-bg-use",
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "attributable: ['cross_tenant', 'sa_probe', 'support_no_grant'] + tool tampering + drill events ['PRIVILEGED_READ', 'SUPPORT_BREAK_GLASS_OPENED', 'SUPPORT_BREAK_GLASS_REVIEWED', 'SUPPORT_CREDENTIALS_VIEWED', 'SUPPORT_EXITED', 'SUPPORT_GRANTED', 'SUPPORT_TENANT_NOTIFIED']; chain verified"
+}

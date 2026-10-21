@@ -129,8 +129,60 @@ celery_app.autodiscover_tasks([
 
 @celery_app.task(bind=True, ignore_result=True)
 def debug_task(self):
-    """Debug task for testing Celery connectivity."""
-    print(f"Request: {self.request!r}")
+    """Debug task for testing Celery connectivity (prints the task id only -
+    the full request can carry task arguments)."""
+    print(f"Request id: {self.request.id}")
+
+
+# ── ZP-PRIV D03/D04/E01: worker log redaction + correlation ids ─────────────
+# Workers never import app.main, so the API's log filters are installed here
+# too, and the correlation id travels as a task header (set by the enqueuer
+# via core.correlation.task_headers(), or added automatically below) and is
+# re-bound around every task execution.
+
+from celery.signals import after_setup_logger, after_setup_task_logger, before_task_publish, task_postrun, task_prerun  # noqa: E402
+
+_task_tokens: dict = {}
+
+
+@after_setup_logger.connect
+@after_setup_task_logger.connect
+def _install_worker_log_filters(logger=None, **kwargs):
+    from app.core.redaction import install_log_filters
+
+    install_log_filters()
+    if logger is not None:
+        from app.core.correlation import CorrelationLogFilter
+        from app.core.redaction import RedactingLogFilter
+
+        for handler in logger.handlers:
+            handler.addFilter(CorrelationLogFilter())
+            handler.addFilter(RedactingLogFilter())
+
+
+@before_task_publish.connect
+def _add_correlation_header(headers=None, **kwargs):
+    from app.core import correlation
+
+    if headers is not None and not headers.get("correlation_id"):
+        headers["correlation_id"] = correlation.current() or correlation.new_id()
+
+
+@task_prerun.connect
+def _bind_correlation(task_id=None, task=None, **kwargs):
+    from app.core import correlation
+
+    cid = getattr(task.request, "correlation_id", None) if task is not None else None
+    _task_tokens[task_id] = correlation.set_current(correlation.accept(cid))
+
+
+@task_postrun.connect
+def _unbind_correlation(task_id=None, **kwargs):
+    from app.core import correlation
+
+    token = _task_tokens.pop(task_id, None)
+    if token is not None:
+        correlation._current.reset(token)
 
 
 if __name__ == "__main__":

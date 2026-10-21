@@ -8,7 +8,9 @@ def _user(db, email="f5user@zoikotest.example.com", active=True, org_id=None, pa
     from app.core.security import hash_password
     from app.modules.auth.models import User, UserRole
 
-    u = User(email=email, hashed_password=hash_password(password), role=UserRole.ORG_ADMIN, organization_id=org_id,
+    # Payroll admin: MFA is optional for this role, so these tests exercise the
+    # plain password flow (MFA events are covered in tests/privacy).
+    u = User(email=email, hashed_password=hash_password(password), role=UserRole.PAYROLL_ADMIN, organization_id=org_id,
              first_name="T", last_name="User", is_active=active)
     db.add(u)
     db.commit()

@@ -19,7 +19,16 @@ import {
   FileSignature,
   CircleDollarSign,
   Bell,
+  LifeBuoy,
+  ScanSearch,
+  Fingerprint,
+  Bot,
+  ClipboardCheck,
+  Siren,
 } from "lucide-react";
+
+// ZP-PRIV E: security readers (server: get_current_security_reader).
+const SECURITY_READERS = ["platform_security"];  // removed from Super Admin (owner request)
 
 // Same grouped enterprise-nav format as the Organization Admin sidebar
 // (components/PayrollShell.jsx) — short section labels, few items each.
@@ -83,7 +92,34 @@ export const NAV_GROUPS = [
       { label: "Security & Audit", href: "/super-admin/security-audit", icon: ShieldAlert },
     ],
   },
+  {
+    title: "Security & privacy",
+    items: [
+      { label: "Audit Explorer", href: "/super-admin/audit-explorer", icon: ScanSearch, roles: SECURITY_READERS },
+      // Super Admin reaches the same tabs through "Alerts & Incidents" above.
+      { label: "Security Alerts", href: "/super-admin/alerts", icon: Siren, roles: ["platform_security"] },
+      { label: "Privileged Inventory", href: "/super-admin/privileged-inventory", icon: Fingerprint, roles: SECURITY_READERS },
+      { label: "Machine Clients", href: "/super-admin/machine-clients", icon: Bot, roles: SECURITY_READERS },
+      { label: "Privacy Assurance", href: "/super-admin/privacy-assurance", icon: ClipboardCheck, roles: SECURITY_READERS },
+    ],
+  },
+  {
+    title: "Access",
+    items: [
+      // ZP-PRIV Part D: the only route to worker data for any Zoiko staff role.
+      { label: "Support Access", href: "/super-admin/support-access", icon: LifeBuoy, roles: ["super_admin", "support_operator", "platform_security"] },
+    ],
+  },
 ];
+
+// Nav items a role may use. Items without `roles` are Super Admin only; the
+// server enforces the same rule (route policy), this just hides dead links.
+export function navGroupsFor(role) {
+  return NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => (item.roles ? item.roles.includes(role) : role === "super_admin")),
+  })).filter((group) => group.items.length > 0);
+}
 
 export function isItemActive(item, pathname) {
   if (item.end) return pathname === item.href;

@@ -316,6 +316,41 @@ def _at_risk_payroll_runs(db: Session, at_risk_window_days: int = 5) -> list[dic
     return at_risk
 
 
+def _payroll_run_aggregates(db: Session, status: Optional[str], at_risk_window_days: int) -> dict:
+    """ZP-PRIV B.1: run monitoring as platform aggregates only — counts of
+    runs and of organizations per jurisdiction and status. No run row, run
+    code, organization name, pay date, headcount or money ever leaves here:
+    those are a tenant's own payroll workflow."""
+    jurisdictions = dict(
+        db.query(CompanyComplianceDetails.organization_id, CompanyComplianceDetails.jurisdiction_country).all()
+    )
+    q = db.query(PayrollRun.organization_id, PayrollRun.status, PayrollRun.pay_date)
+    if status:
+        q = q.filter(PayrollRun.status == status)
+    today = date.today()
+    cutoff = today + timedelta(days=at_risk_window_days)
+    cells: dict = {}
+    at_risk_runs, at_risk_orgs = 0, set()
+    for org_id, run_status, pay_date in q.all():
+        country = ((jurisdictions.get(org_id) or "").strip().upper()) or "UNASSIGNED"
+        cell = cells.setdefault((country, run_status), {"runs": 0, "orgs": set()})
+        cell["runs"] += 1
+        cell["orgs"].add(org_id)
+        if run_status in AT_RISK_STATUSES and pay_date is not None and pay_date <= cutoff:
+            at_risk_runs += 1
+            at_risk_orgs.add(org_id)
+    by_status = [
+        {"jurisdiction": country, "status": run_status, "run_count": c["runs"],
+         "organization_count": len(c["orgs"])}
+        for (country, run_status), c in sorted(cells.items())
+    ]
+    return {
+        "by_status": by_status,
+        "at_risk": {"run_count": at_risk_runs, "organization_count": len(at_risk_orgs)},
+        "at_risk_window_days": at_risk_window_days,
+    }
+
+
 @router.get("/payroll/runs")
 def list_all_payroll_runs(
     status: Optional[str] = Query(None),
@@ -323,12 +358,15 @@ def list_all_payroll_runs(
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
-    """Cross-tenant payroll run monitor. Surfaces 'what's due soon and not
-    yet AUTHORIZED' as its own at-risk section rather than a flat,
-    unprioritized row list. Read-only: run status changes stay in each
-    org's own existing approval workflow."""
-    at_risk, all_runs = _load_payroll_runs(db, status=status, at_risk_window_days=at_risk_window_days)
-    return {"at_risk": at_risk, "all_runs": all_runs, "at_risk_window_days": at_risk_window_days}
+    """Cross-tenant payroll run monitor (ZP-PRIV B.1): counts by
+    jurisdiction and status, plus how many runs (across how many
+    organizations) are due soon and not yet authorized. Individual runs are
+    a tenant's own workflow and are visible only inside that tenant, or to
+    Zoiko support through an approved JIT Support Access grant."""
+    out = _payroll_run_aggregates(db, status, at_risk_window_days)
+    out["privacy_note"] = ("Individual payroll runs are tenant data. Use Support Access with the "
+                           "tenant's approval to look at a specific run.")
+    return out
 
 
 # ── Payroll Operations: Filings & Remittances ──────────────────────────────
@@ -450,7 +488,7 @@ def _load_org_filing_coverage(db: Session) -> tuple[dict, list[dict]]:
     def _section(code: str) -> dict:
         if code not in jurisdictions:
             jurisdictions[code] = {
-                "label": CODE_TO_COUNTRY_NAME.get(code, code),
+                "label": CODE_TO_COUNTRY_NAME.get(code) or CODE_TO_COUNTRY_NAME.get({"GB": "UK"}.get(code, ""), code),
                 "total": 0,
                 "blocked_count": 0,
                 "total_orgs": 0,
@@ -492,26 +530,35 @@ def list_filings_remittances(
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
-    """Cross-tenant statutory filing status, with every organization visible.
-
-    Backed by two persisted sources, merged per org: GermanyElsterTransmission
-    (Germany's live ELSTER transport state) and StatutoryFiling (the manual
-    cross-jurisdiction model that covers AU GST/BAS, IN TDS/GST, … and any
-    manual record for a German org). Every org is bucketed under its
-    configured compliance jurisdiction — never silently dropped — and an org
-    with no filing records shows an explicit empty state, not a fabricated
-    "filed" status. Orgs with no jurisdiction set land in 'unconfigured'.
-    Bank-export/remittance file generation (modules/payroll/bank_export/)
-    still has no persisted status model — that gap is stated below rather
-    than faked."""
+    """Cross-tenant statutory filing coverage as platform aggregates
+    (ZP-PRIV B.1): per jurisdiction, how many organizations are configured,
+    how many filing records exist, how many are blocked and across how many
+    organizations. Individual filings, periods and organization names stay
+    in each tenant (/api/payroll/filings)."""
     jurisdictions, unconfigured = _load_org_filing_coverage(db)
+    summary = {}
+    for code, section in jurisdictions.items():
+        blocked_orgs = sum(
+            1 for org in section["organizations"]
+            if any(f["status"] in BLOCKED_FILING_STATUSES for f in org["filings"])
+        )
+        orgs_without_records = sum(1 for org in section["organizations"] if not org["filings"])
+        summary[code] = {
+            "label": section["label"],
+            "total": section["total"],
+            "blocked_count": section["blocked_count"],
+            "total_orgs": section["total_orgs"],
+            "orgs_with_blocked_filings": blocked_orgs,
+            "orgs_without_filing_records": orgs_without_records,
+        }
     return {
-        "jurisdictions": jurisdictions,
-        "unconfigured": unconfigured,
+        "jurisdictions": summary,
+        "unconfigured_count": len(unconfigured),
         "known_gaps": [
             "Bank-export/remittance file generation has no persisted status "
             "model yet — only on-demand file generation. Not represented here."
         ],
+        "privacy_note": "Individual filings are tenant data and are recorded by each organization.",
     }
 
 
@@ -614,24 +661,17 @@ def list_exceptions(
     computable reconciliation between two systems that don't otherwise talk
     to each other. No auto-remediation actions here — this page surfaces
     problems; fixing them uses each domain's existing workflow."""
-    stuck_runs = []
+    # ZP-PRIV B.1: stuck runs are a tenant's own workflow - reported as
+    # counts only (no run, organization name, period or date).
     cutoff = datetime.utcnow() - timedelta(days=stuck_review_days)
-    q = (
-        db.query(PayrollRun, Organization)
-        .join(Organization, Organization.id == PayrollRun.organization_id)
-        .filter(PayrollRun.status == PayrollStatus.REVIEW.value)
-    )
-    for run, org in q.all():
-        marker = getattr(run, "updated_at", None) or getattr(run, "created_at", None)
+    stuck_run_count, stuck_orgs = 0, set()
+    for run in db.query(PayrollRun).filter(PayrollRun.status == PayrollStatus.REVIEW.value).all():
+        # Postgres returns tz-aware timestamps, SQLite naive ones: compare
+        # both as naive UTC (comparing mixed kinds raised a 500 in prod).
+        marker = _naive_utc(getattr(run, "updated_at", None) or getattr(run, "created_at", None))
         if marker is not None and marker <= cutoff:
-            stuck_runs.append({
-                "run_id": run.id,
-                "organization_id": org.id,
-                "organization_name": org.organization_name,
-                "period_label": run.period_label,
-                "pay_date": run.pay_date,
-                "stuck_since": marker,
-            })
+            stuck_run_count += 1
+            stuck_orgs.add(run.organization_id)
 
     current_month_start = date.today().replace(day=1)
     bwm_overages = _load_bwm_scale_limit_overages(db, current_month_start)
@@ -646,28 +686,68 @@ def list_exceptions(
     bwm_invoice_mismatches = find_bwm_invoice_discrepancies(db)
 
     return {
-        "stuck_reviews": stuck_runs,
+        "stuck_reviews": {"run_count": stuck_run_count, "organization_count": len(stuck_orgs),
+                          "older_than_days": stuck_review_days},
         "bwm_scale_limit_overages": bwm_overages,
         "bwm_invoice_mismatches": bwm_invoice_mismatches,
         "note": (
-            "bwm_scale_limit_overages counts billable workers live (the "
-            "same inclusion logic require_scope_limit(MAX_BWM) uses at "
-            "employee creation) and resolves the plan limit through "
-            "entitlements, so it reports real demand vs. the plan even "
-            "before the background BWM aggregation has run."
+            "Plan-limit checks count billable workers live, the same way new employees are checked "
+            "against the plan, so they show real demand even before the monthly billing count has run."
         ),
     }
 
 
 # ── Platform: Service Health ───────────────────────────────────────────────
 
-def _job_health(name: str, tracker: dict) -> dict:
+def _z(ts: Optional[datetime]) -> Optional[str]:
+    """UTC timestamp with an explicit Z (naive values are UTC by convention)."""
+    if ts is None:
+        return None
+    if ts.tzinfo is not None:
+        ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+    return ts.replace(microsecond=0).isoformat() + "Z"
+
+
+# job key -> (label, what it does)
+_JOB_INFO = {
+    "trial_expiry_sweep": ("Trial expiry sweep", "Moves expired trials into grace and closes lapsed ones."),
+    "dunning_sweep": ("Dunning sweep", "Retries failed payments and sends payment reminders."),
+    "bwm_aggregation": ("Billable-worker aggregation", "Computes monthly billable workers per organization."),
+    "assist_sweep": ("Assist maintenance", "Knowledge expiry and Assist retention clean-up."),
+    "support_access_sweep": ("Support access sweep", "Ends expired support grants and escalates overdue reviews."),
+    "token_cleanup_sweep": ("Token clean-up", "Removes expired revoked tokens and one-time links."),
+}
+
+
+def _job_interval_seconds(name: str) -> int:
+    from app.config import settings
+
+    return {
+        "trial_expiry_sweep": settings.TRIAL_SWEEP_INTERVAL_HOURS * 3600,
+        "dunning_sweep": settings.DUNNING_SWEEP_INTERVAL_HOURS * 3600,
+        "bwm_aggregation": settings.BWM_AGGREGATION_INTERVAL_HOURS * 3600,
+        "assist_sweep": settings.ASSIST_SWEEP_INTERVAL_HOURS * 3600,
+        "support_access_sweep": settings.SUPPORT_ACCESS_SWEEP_INTERVAL_SECONDS,
+        "token_cleanup_sweep": settings.TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS * 3600,
+    }.get(name, 86400)
+
+
+def _job_health(name: str, tracker: dict, now: Optional[datetime] = None) -> dict:
+    """unknown (never ran in this process) / error (last run failed) / stale
+    (missed its schedule: no run for 2x its interval + 5 min) / healthy."""
+    now = now or datetime.utcnow()
+    label, description = _JOB_INFO.get(name, (name.replace("_", " ").capitalize(), ""))
+    interval = _job_interval_seconds(name)
     last_run = tracker.get("last_run_at")
+    base = {"job": name, "label": label, "description": description, "interval_seconds": interval,
+            "last_run_at": _z(last_run), "last_success_at": _z(tracker.get("last_success_at"))}
     if last_run is None:
-        return {"job": name, "state": "unknown", "detail": "Has not run since this process started."}
+        return {**base, "state": "unknown", "detail": "Has not run since this server process started."}
     if tracker.get("last_error"):
-        return {"job": name, "state": "error", "last_run_at": last_run, "error": tracker["last_error"]}
-    return {"job": name, "state": "healthy", "last_run_at": last_run, "last_success_at": tracker.get("last_success_at")}
+        return {**base, "state": "error", "error": str(tracker["last_error"])[:500]}
+    if (now - last_run).total_seconds() > 2 * interval + 300:
+        return {**base, "state": "stale", "detail": "Missed its schedule: the scheduler may have stopped."}
+    return {**base, "state": "healthy"}
 
 
 def _service_health_report(db: Session) -> dict:
@@ -679,7 +759,7 @@ def _service_health_report(db: Session) -> dict:
     from app.modules.assist import scheduler as assist_scheduler
     from app.modules.auth import scheduler as auth_scheduler
     from app.modules.billing import scheduler as billing_scheduler
-    from app.modules.assisted_access import scheduler as assisted_access_scheduler
+    from app.modules.support_access import scheduler as support_access_scheduler
 
     db_status = {"status": "unknown", "latency_ms": None}
     try:
@@ -688,26 +768,37 @@ def _service_health_report(db: Session) -> dict:
         latency_ms = (datetime.utcnow() - start).total_seconds() * 1000
         db_status = {"status": "healthy", "latency_ms": round(latency_ms, 2)}
     except Exception as exc:  # noqa: BLE001
-        db_status = {"status": "error", "error": str(exc)}
+        db_status = {"status": "error", "latency_ms": None, "error": type(exc).__name__}
 
+    now = datetime.utcnow()
+    jobs = [
+        _job_health("trial_expiry_sweep", billing_scheduler.last_run_status, now),
+        _job_health("dunning_sweep", billing_scheduler.dunning_last_run_status, now),
+        _job_health("bwm_aggregation", billing_scheduler.bwm_last_run_status, now),
+        _job_health("assist_sweep", assist_scheduler.last_run_status, now),
+        _job_health("support_access_sweep", support_access_scheduler.last_run_status, now),
+        _job_health("token_cleanup_sweep", auth_scheduler.last_run_status, now),
+    ]
+    summary = {s: sum(1 for j in jobs if j["state"] == s) for s in ("healthy", "stale", "error", "unknown")}
+    if db_status["status"] != "healthy" or summary["error"]:
+        overall = "error"
+    elif summary["stale"] or summary["unknown"]:
+        overall = "degraded"
+    else:
+        overall = "healthy"
     return {
+        "overall": overall,
         "database": db_status,
-        "scheduled_jobs": [
-            _job_health("trial_expiry_sweep", billing_scheduler.last_run_status),
-            _job_health("dunning_sweep", billing_scheduler.dunning_last_run_status),
-            _job_health("bwm_aggregation", billing_scheduler.bwm_last_run_status),
-            _job_health("assist_sweep", assist_scheduler.last_run_status),
-            _job_health("assisted_access_sweep", assisted_access_scheduler.last_run_status),
-            _job_health("token_cleanup_sweep", auth_scheduler.last_run_status),
-        ],
-        "checked_at": datetime.utcnow(),
+        "scheduled_jobs": jobs,
+        "summary": summary,
+        "checked_at": _z(now),
     }
 
 
 def _unhealthy_scheduler_jobs(db: Session, health: Optional[dict] = None) -> list[dict]:
-    """Scheduler jobs whose last signal is error or unknown — platform
-    alerts. A job that ran cleanly or is paused-intentionally is NOT a
-    fabricated alert; only real error/never-ran states surface."""
+    """Scheduler jobs whose last signal is error, stale or unknown — platform
+    alerts. A job that ran cleanly is NOT a fabricated alert; only real
+    error / missed-schedule / never-ran states surface."""
     report = health if health is not None else _service_health_report(db)
     return [job for job in report["scheduled_jobs"] if job["state"] != "healthy"]
 
@@ -726,74 +817,84 @@ def service_health(
 
 # ── Platform: Integrations (real, computed from this deployment's config) ──
 
+def _integration(slug, name, category, configured, status, description, optional=False):
+    return {"slug": slug, "name": name, "category": category, "configured": bool(configured),
+            "optional": optional, "status": status, "description": description}
+
+
 @router.get("/platform/integrations")
 def list_integrations(_admin=Depends(get_current_super_admin)):
-    """Every external-service integration this deployment has available to
-    it, computed from live settings — not a fabricated card for something
-    that isn't configured. Each entry carries `configured` (bool) and a
-    status string so the page can show a real state per provider:
-
-      - stripe_billing   — self-service checkout/subs/invoices (STRIPE_SECRET_KEY)
-      - email_smtp       — outbound email (SMTP_HOST)
-      - sentry           — error tracking (SENTRY_DSN; optional, no-op when empty)
-      - assist_model     — Assist model gateway (ASSIST_MODEL_PROVIDER; deterministic-only when unset)
-
-    Nothing here pings a provider: `configured` reflects configuration, not
-    liveness. Stripe/SMTP liveness is exercised separately by real money/
-    email flows and would fail loudly in their own logs.
-    """
+    """Every external-service integration this deployment uses, computed from
+    live settings. ``configured`` reflects configuration, not liveness —
+    nothing here pings a provider, and no secret or URL is ever returned."""
     from app.config import settings
+    from app.core import outbound
 
+    stripe_key = settings.STRIPE_SECRET_KEY or ""
+    stripe_mode = "live" if stripe_key.startswith(("sk_live_", "rk_live_")) else "test" if stripe_key else None
+    real_email = outbound.real_delivery_allowed("email")
     integrations = [
-        {
-            "slug": "stripe_billing",
-            "name": "Stripe Billing",
-            "configured": bool(settings.STRIPE_SECRET_KEY),
-            "status": "Connected" if settings.STRIPE_SECRET_KEY else "Not configured",
-            "description": "Self-service checkout, subscriptions and invoicing.",
-        },
-        {
-            "slug": "email_smtp",
-            "name": "Email delivery (SMTP)",
-            "configured": bool(settings.SMTP_HOST),
-            "status": "Connected" if settings.SMTP_HOST else "Not configured",
-            "description": "Transactional email (verify, onboarding, templates).",
-        },
-        {
-            "slug": "sentry",
-            "name": "Sentry (error tracking)",
-            "configured": bool(settings.SENTRY_DSN),
-            "status": "Configured" if settings.SENTRY_DSN else "Not configured (optional)",
-            "description": "Server-side error monitoring.",
-        },
-        {
-            "slug": "assist_model",
-            "name": "Assist model gateway",
-            "configured": bool(settings.ASSIST_MODEL_PROVIDER),
-            "status": "Connected" if settings.ASSIST_MODEL_PROVIDER else "Deterministic-only",
-            "description": "LLM provider for grounded Assist answers.",
-        },
+        _integration("stripe_billing", "Stripe billing", "Payments", stripe_key,
+                     f"Connected ({stripe_mode} mode)" if stripe_key else "Not configured",
+                     "Self-service checkout, subscriptions and invoicing."),
+        _integration("stripe_webhooks", "Stripe webhooks", "Payments", settings.STRIPE_WEBHOOK_SECRET,
+                     "Signing secret set" if settings.STRIPE_WEBHOOK_SECRET else "No signing secret",
+                     "Verified payment and subscription events from Stripe."),
+        _integration("email_smtp", "Email delivery (SMTP)", "Messaging", settings.SMTP_HOST,
+                     ("Connected" if real_email else "Configured (delivery blocked in this environment)")
+                     if settings.SMTP_HOST else "Not configured",
+                     "Transactional email: verification, onboarding, payslips, notices."),
+        _integration("security_alert_email", "Security alert recipients", "Security",
+                     settings.SECURITY_ALERT_EMAILS,
+                     f"{len([e for e in settings.SECURITY_ALERT_EMAILS.split(',') if e.strip()])} recipient(s)"
+                     if settings.SECURITY_ALERT_EMAILS else "Console only",
+                     "Where security alerts are emailed in addition to the Alerts page.", optional=True),
+        _integration("job_queue", "Background job queue (Redis / Celery)", "Infrastructure", settings.REDIS_URL,
+                     "Configured" if settings.REDIS_URL else "Not configured (jobs run in-process)",
+                     "Parallel payslip generation and other background work.", optional=True),
+        _integration("audit_anchor", "Audit anchoring bucket", "Security", settings.SECURITY_ANCHOR_BUCKET,
+                     "Configured" if settings.SECURITY_ANCHOR_BUCKET else "Not configured",
+                     "Retention-locked storage for the security-log hash anchors.", optional=True),
+        _integration("sentry", "Sentry (error tracking)", "Monitoring", settings.SENTRY_DSN,
+                     "Configured" if settings.SENTRY_DSN else "Not configured (optional)",
+                     "Server-side error monitoring (personal data scrubbed before sending).", optional=True),
+        _integration("assist_model", "Assist model gateway", "AI", settings.ASSIST_MODEL_PROVIDER,
+                     "Connected" if settings.ASSIST_MODEL_PROVIDER else "Deterministic answers only",
+                     "LLM provider for grounded Assist answers (identities masked before sending).", optional=True),
+        _integration("zoiko_one", "Zoiko One sign-in (federation)", "Identity", settings.FEDERATION_ISSUER,
+                     "Configured" if settings.FEDERATION_ISSUER else "Not configured (integration pending)",
+                     "Single sign-on from Zoiko One, limited to the user's own organization.", optional=True),
     ]
+    required = [it for it in integrations if not it["optional"]]
     connected = sum(1 for it in integrations if it["configured"])
+    missing_required = [it["name"] for it in required if not it["configured"]]
     return {
         "integrations": integrations,
+        "summary": {"configured": connected, "total": len(integrations), "missingRequired": missing_required},
         "message": f"{connected} of {len(integrations)} integrations configured.",
+        "checked_at": _z(datetime.utcnow()),
     }
 
 
-# ── Platform: Security & Audit (merged read model across 3 audit tables) ──
+# ── Platform: Security & Audit (merged read model across the audit tables) ──
 
 def _naive_utc(ts: Optional[datetime]) -> Optional[datetime]:
-    """The three source tables mix tz-aware (DateTime(timezone=True)) and
-    tz-naive (plain DateTime, default=datetime.utcnow) columns — comparing
-    them directly during the merge-sort below raises TypeError. Strip
-    tzinfo (after converting to UTC) so every entry sorts on the same
-    naive-UTC basis regardless of source."""
+    """The source tables mix tz-aware and tz-naive columns; normalize to
+    naive UTC so every entry sorts on the same basis."""
     if ts is None:
         return None
     if ts.tzinfo is not None:
         return ts.astimezone(timezone.utc).replace(tzinfo=None)
     return ts
+
+
+AUDIT_SOURCES = {
+    "compliance": "Compliance configuration",
+    "billing": "Billing",
+    "support_access": "Support access",
+    "assist": "Assist",
+    "assisted_access": "Assisted access (retired)",
+}
 
 
 @router.get("/security/audit")
@@ -807,129 +908,119 @@ def security_audit_log(
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
-    """No single audit table exists — TaxConfigurationAudit (compliance),
-    BillingCommercialAuditEvent (billing/trial), AssistAuditEvent (assist)
-    and AssistedAccessAuditEvent are four separately-shaped tables. Rather
-    than a risky consolidation migration, this normalizes and merge-sorts
-    across all four as a read model.
+    """Platform audit trail merged across the append-only audit tables
+    (compliance configuration, billing, support access, Assist and the
+    retired Assisted Access). Metadata only: no tenant payloads, request
+    paths or worker values reach the platform plane.
 
-    Filters are pushed down to the SQL queries (actor + inclusive date
-    range on the source's own timestamp column) BEFORE any row is loaded,
-    so a filtered page can never silently drop rows that fall outside the
-    loaded limit; then all matching rows across the requested sources are
-    merge-sorted once and sliced for the page. `total` is the exact count
-    of the filtered union, so pagination is exact (not "more rows than
-    page_size on this page"). Append-only by nature — no edit/delete
-    endpoint exists or should ever exist here."""
+    Filters are pushed down to SQL. Each source loads only its newest
+    ``page * page_size`` matching rows (enough for an exact merge of the
+    requested page); ``total`` is the exact count of the filtered union."""
+    from app.core.exceptions import BadRequestException
+
+    if source and source not in AUDIT_SOURCES:
+        raise BadRequestException(f"Unknown source. Use one of: {', '.join(AUDIT_SOURCES)}.")
+    page = max(1, page)
+    page_size = min(max(1, page_size), 200)
+    need = page * page_size
     end_exclusive = end_date + timedelta(days=1) if end_date else None
 
-    def _date_filter(ts_column):
-        clause = []
+    def _filtered(q, ts_column, actor_column):
+        if actor_id:
+            q = q.filter(actor_column == actor_id)
         if start_date:
-            clause.append(func.date(ts_column) >= start_date)
+            q = q.filter(func.date(ts_column) >= start_date)
         if end_exclusive:
-            clause.append(func.date(ts_column) < end_exclusive)
-        return clause
+            q = q.filter(func.date(ts_column) < end_exclusive)
+        return q
 
     normalized = []
-    totals = {"compliance": 0, "billing": 0, "assist": 0, "assisted_access": 0}
+    totals = {key: 0 for key in AUDIT_SOURCES}
 
     if source in (None, "compliance"):
-        q = db.query(TaxConfigurationAudit)
-        if actor_id:
-            q = q.filter(TaxConfigurationAudit.actor_id == actor_id)
-        for predicate in _date_filter(TaxConfigurationAudit.created_at):
-            q = q.filter(predicate)
+        from app.modules.payroll.service import platform_audit_filter
+
+        # ZP-PRIV B.1: platform configuration changes only; tenant/worker
+        # audit rows never reach the platform plane.
+        q = _filtered(platform_audit_filter(db.query(TaxConfigurationAudit)),
+                      TaxConfigurationAudit.created_at, TaxConfigurationAudit.actor_id)
         totals["compliance"] = q.count()
-        for row in q.order_by(TaxConfigurationAudit.id.desc()).all():
+        for row in q.order_by(TaxConfigurationAudit.created_at.desc()).limit(need).all():
             normalized.append({
-                "timestamp": _naive_utc(row.created_at),
-                "actor_id": row.actor_id,
-                "action": row.action,
-                "entity_type": row.entity_type,
-                "entity_id": row.entity_id,
+                "timestamp": _naive_utc(row.created_at), "actor_id": row.actor_id, "action": row.action,
+                "entity_type": row.entity_type, "entity_id": row.entity_id, "organization_id": None,
                 "source": "compliance",
                 "detail": {"reason": row.reason, "old_value": row.old_value, "new_value": row.new_value},
             })
 
     if source in (None, "billing"):
-        q = db.query(BillingCommercialAuditEvent)
-        if actor_id:
-            q = q.filter(BillingCommercialAuditEvent.actor_user_id == actor_id)
-        for predicate in _date_filter(BillingCommercialAuditEvent.created_at):
-            q = q.filter(predicate)
+        q = _filtered(db.query(BillingCommercialAuditEvent), BillingCommercialAuditEvent.created_at,
+                      BillingCommercialAuditEvent.actor_user_id)
         totals["billing"] = q.count()
-        for row in q.order_by(BillingCommercialAuditEvent.id.desc()).all():
+        for row in q.order_by(BillingCommercialAuditEvent.created_at.desc()).limit(need).all():
             normalized.append({
-                "timestamp": _naive_utc(row.created_at),
-                "actor_id": row.actor_user_id,
-                "action": row.event_type,
-                "entity_type": "billing_subscription",
-                "entity_id": row.organization_id,
-                "source": "billing",
-                "detail": row.payload,
+                "timestamp": _naive_utc(row.created_at), "actor_id": row.actor_user_id, "action": row.event_type,
+                "entity_type": "billing_subscription", "entity_id": row.organization_id,
+                "organization_id": row.organization_id, "source": "billing", "detail": row.payload,
+            })
+
+    if source in (None, "support_access"):
+        from app.modules.support_access.models import SupportAccessAuditEvent
+
+        q = _filtered(db.query(SupportAccessAuditEvent), SupportAccessAuditEvent.recorded_at,
+                      SupportAccessAuditEvent.actor_user_id)
+        totals["support_access"] = q.count()
+        for row in q.order_by(SupportAccessAuditEvent.recorded_at.desc()).limit(need).all():
+            normalized.append({
+                "timestamp": _naive_utc(row.recorded_at), "actor_id": row.actor_user_id, "action": row.event_type,
+                "entity_type": "support_grant", "entity_id": row.grant_id, "organization_id": row.organization_id,
+                "source": "support_access",
+                # Who acted and on whose behalf; never request paths or values.
+                "detail": {"actor_role": row.actor_role, "requested_by_user_id": row.requested_by_user_id},
             })
 
     if source in (None, "assist"):
-        q = db.query(AssistAuditEvent)
-        if actor_id:
-            q = q.filter(AssistAuditEvent.user_id == actor_id)
-        for predicate in _date_filter(AssistAuditEvent.recorded_at):
-            q = q.filter(predicate)
+        q = _filtered(db.query(AssistAuditEvent), AssistAuditEvent.recorded_at, AssistAuditEvent.user_id)
         totals["assist"] = q.count()
-        for row in q.order_by(AssistAuditEvent.id.desc()).all():
+        for row in q.order_by(AssistAuditEvent.recorded_at.desc()).limit(need).all():
             normalized.append({
-                "timestamp": _naive_utc(row.recorded_at),
-                "actor_id": row.user_id,
-                "action": row.event_type,
-                "entity_type": "assist",
-                "entity_id": row.id,
+                "timestamp": _naive_utc(row.recorded_at), "actor_id": row.user_id, "action": row.event_type,
+                "entity_type": "assist", "entity_id": row.id, "organization_id": row.organization_id,
                 "source": "assist",
-                "detail": row.payload,
+                # The payload can quote a tenant user's question; event only.
+                "detail": {},
             })
 
     if source in (None, "assisted_access"):
         from app.modules.assisted_access.models import AssistedAccessAuditEvent
 
-        q = db.query(AssistedAccessAuditEvent)
-        if actor_id:
-            q = q.filter(AssistedAccessAuditEvent.actor_user_id == actor_id)
-        for predicate in _date_filter(AssistedAccessAuditEvent.recorded_at):
-            q = q.filter(predicate)
+        q = _filtered(db.query(AssistedAccessAuditEvent), AssistedAccessAuditEvent.recorded_at,
+                      AssistedAccessAuditEvent.actor_user_id)
         totals["assisted_access"] = q.count()
-        for row in q.order_by(AssistedAccessAuditEvent.id.desc()).all():
+        for row in q.order_by(AssistedAccessAuditEvent.recorded_at.desc()).limit(need).all():
             normalized.append({
-                "timestamp": _naive_utc(row.recorded_at),
-                "actor_id": row.actor_user_id,
-                "action": row.event_type,
-                "entity_type": "assisted_access_session",
-                "entity_id": row.organization_id,
-                "source": "assisted_access",
-                "detail": {
-                    "session_id": row.assisted_access_session_id,
-                    "method": row.method,
-                    "path": row.path,
-                    "status_code": row.status_code,
-                    **(row.payload or {}),
-                },
+                "timestamp": _naive_utc(row.recorded_at), "actor_id": row.actor_user_id, "action": row.event_type,
+                "entity_type": "assisted_access_session", "entity_id": row.organization_id,
+                "organization_id": row.organization_id, "source": "assisted_access",
+                # Request paths name tenant objects: kept in the tenant's view.
+                "detail": {"session_id": row.assisted_access_session_id, "method": row.method,
+                           "status_code": row.status_code},
             })
 
-    def _sort_key(entry):
-        ts = entry["timestamp"]
-        return ts if ts is not None else datetime.min
-
-    normalized.sort(key=_sort_key, reverse=True)
-
-    total_filtered = sum(totals.values()) if source is None else totals.get(source, 0)
+    normalized.sort(key=lambda e: e["timestamp"] or datetime.min, reverse=True)
     start_idx = (page - 1) * page_size
     page_rows = normalized[start_idx:start_idx + page_size]
-
+    for entry in page_rows:
+        entry["timestamp"] = _z(entry["timestamp"])
+    total_filtered = sum(totals.values()) if source is None else totals.get(source, 0)
     return {
         "entries": page_rows,
         "page": page,
         "page_size": page_size,
         "returned": len(page_rows),
         "total": total_filtered,
+        "totals_by_source": totals,
+        "sources": [{"key": k, "label": v} for k, v in AUDIT_SOURCES.items()],
     }
 
 
@@ -961,19 +1052,25 @@ def list_alerts(
                           restriction is not imminently destructive."""  # noqa: E501
     alerts = []
 
-    for run in _at_risk_payroll_runs(db):
+    # ZP-PRIV B.1: tenant workflow signals are reported as counts only —
+    # never an organization name, a pay date or a filing.
+    at_risk = _at_risk_payroll_runs(db)
+    if at_risk:
+        orgs = len({r["organization_id"] for r in at_risk})
         alerts.append({
             "severity": "high",
             "category": "payroll_run",
-            "message": f"{run['organization_name']}: run due {run['pay_date']} not yet authorized",
+            "message": f"{len(at_risk)} payroll run(s) across {orgs} organization(s) are due soon and not yet authorized",
             "link": "/super-admin/payroll-runs",
         })
 
-    for tx in _blocked_filings(db):
+    blocked = _blocked_filings(db)
+    if blocked:
+        orgs = len({f["organization_id"] for f in blocked})
         alerts.append({
             "severity": "high",
             "category": "filing",
-            "message": f"{tx['organization_name']}: filing blocked",
+            "message": f"{len(blocked)} filing(s) across {orgs} organization(s) are blocked",
             "link": "/super-admin/filings-remittances",
         })
 
@@ -982,7 +1079,7 @@ def list_alerts(
         alerts.append({
             "severity": "medium",
             "category": "platform",
-            "message": f"{job['job']} last run: {job['state']}",
+            "message": f"{job.get('label', job['job'])}: {job['state']}",
             "link": "/super-admin/service-health",
         })
     if health["database"]["status"] != "healthy":
@@ -991,6 +1088,22 @@ def list_alerts(
             "category": "platform",
             "message": "Database unreachable — Service Health reports a connectivity error",
             "link": "/super-admin/service-health",
+        })
+
+    # ZP-PRIV Part D: open break-glass access and overdue post-incident
+    # reviews are high-severity security alerts.
+    from app.modules.support_access import models as support_models
+
+    for grant in (db.query(support_models.SupportAccessGrant)
+                  .filter(support_models.SupportAccessGrant.is_break_glass.is_(True),
+                          support_models.SupportAccessGrant.reviewed_at.is_(None)).all()):
+        overdue = grant.review_due_at is not None and grant.review_due_at <= datetime.utcnow()
+        alerts.append({
+            "severity": "high",
+            "category": "security",
+            "message": (f"Break-glass access #{grant.id}: post-incident review overdue" if overdue
+                        else f"Break-glass access #{grant.id} is waiting for its independent review"),
+            "link": "/super-admin/support-access?tab=reviews",
         })
 
     from app.modules.assisted_access.service import break_glass_notification_alerts

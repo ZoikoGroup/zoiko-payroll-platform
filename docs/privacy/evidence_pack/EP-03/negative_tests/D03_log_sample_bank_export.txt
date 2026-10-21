@@ -1,0 +1,6 @@
+ERROR [-] Unhandled error in bank_export for [EMAIL] [REDACTED]
+Traceback (most recent call last):
+  File "D:\zoiko-payroll-platform\backend\tests\privacy\test_redaction_federation_governance.py", line 53, in test_forced_errors_leave_no_sensitive_values_in_logs
+    raise ValueError(f"{area} failed for [EMAIL] account [IBAN] "
+                     f"PAN [PAN] NINO [NINO] SSN [SSN]")
+ValueError: bank_export failed for [EMAIL] account [IBAN] PAN [PAN] NINO [NINO] SSN [SSN]

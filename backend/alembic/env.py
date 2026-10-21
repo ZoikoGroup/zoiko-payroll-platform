@@ -65,6 +65,17 @@ def run_migrations_online() -> None:
 
     assert_migration_target_allowed(_command_name(), str(engine.url))
     with engine.connect() as connection:
+        if connection.dialect.name == "postgresql":
+            # ZP-PRIV C.2: row-level security policies hide every row from a
+            # connection that sets no context; migrations are system work.
+            from sqlalchemy import text
+
+            connection.execute(text("SELECT set_config('app.rls_mode', 'system', false)"))
+            # Session-level setting (is_local=false) survives this commit. The
+            # commit ends the transaction the execute() auto-began; without it
+            # alembic's begin_transaction() below would nest inside it and the
+            # migrations would be rolled back when the connection closes.
+            connection.commit()
         context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
         with context.begin_transaction():
             context.run_migrations()

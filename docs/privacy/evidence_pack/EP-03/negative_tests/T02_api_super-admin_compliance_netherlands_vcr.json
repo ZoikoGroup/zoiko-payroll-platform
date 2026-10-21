@@ -1,0 +1,29 @@
+{
+  "testId": "T02_api_super-admin_compliance_netherlands_vcr",
+  "timestampUtc": "2026-10-19T10:04:23.054035+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/super-admin/compliance/netherlands/vcr",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": {
+    "success": false,
+    "error": "ACCESS_DENIED",
+    "message": "You do not have permission to perform this action.",
+    "detail": "You do not have permission to perform this action.",
+    "trace": {
+      "decisionId": "df5a6ea40b334905b621472ede1978c6"
+    }
+  },
+  "correlationId": null,
+  "securityEventId": "df5a6ea40b334905b621472ede1978c6",
+  "decisionId": "df5a6ea40b334905b621472ede1978c6",
+  "note": null
+}

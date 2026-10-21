@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
   Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio, Banknote, FileStack,
 } from "lucide-react";
 import DEOverviewDashboard from "./components/germany/DEOverviewDashboard";
-import GermanyPayrollSummaryTab from "./components/germany/GermanyPayrollSummaryTab";
+import WorkerDataLocked from "../../components/WorkerDataLocked";
 import GermanyDeuvTab from "./components/germany/GermanyDeuvTab";
 import GermanyCompliancePackSection from "./components/germany/GermanyCompliancePackSection";
 import {
@@ -58,16 +57,10 @@ const SECTIONS = [
 export default function DECompliancePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const sectionFromUrl = searchParams.get("section");
-  const [section, setSection] = useState(sectionFromUrl || "overview");
-
-  // Keeps on-screen state in sync when the URL changes without going
-  // through selectSection below — e.g. the browser Back/Forward buttons.
-  useEffect(() => {
-    setSection(sectionFromUrl || "overview");
-  }, [sectionFromUrl]);
+  // Derived from the URL, so Back/Forward and selectSection stay in sync.
+  const section = sectionFromUrl || "overview";
 
   function selectSection(key) {
-    setSection(key);
     // Push (not replace) — each section change is its own history entry.
     setSearchParams(key === "overview" ? {} : { section: key });
   }
@@ -114,7 +107,11 @@ export default function DECompliancePage() {
       {section === "elstam-batches" && <ElstamBatchesTab />}
       {section === "elster" && <ElsterTab />}
       {section === "deuv" && <GermanyDeuvTab />}
-      {section === "payroll-summary" && <GermanyPayrollSummaryTab />}
+      {section === "payroll-summary" && (
+        // ZP-PRIV: the payroll summary aggregates one organization's payslips
+        // (tenant route /api/payroll/germany/reports/summary); not shown here.
+        <WorkerDataLocked variant="tenant" title="The payroll summary is the organization's own report" />
+      )}
       {section === "source-evidence" && <SourceEvidenceTab />}
       {section === "audit" && <AuditTab />}
     </div>

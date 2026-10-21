@@ -1,0 +1,18 @@
+{
+  "testId": "T11_llm_egress_scrub",
+  "timestampUtc": "2026-10-19T10:05:07.832056+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "org_admin",
+  "tokenScope": "assist",
+  "syntheticTenantIds": null,
+  "endpoint": "POST model provider /chat/completions",
+  "expectedStatus": 0,
+  "actualStatus": 0,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "prompt-injection asking for names / wages / bank: none present in the outbound payload"
+}

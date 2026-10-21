@@ -985,6 +985,7 @@ def stop_response(db, org_id, user, response_id) -> AssistResponse:
 
 
 def get_evidence_set(db, org_id, user, evidence_set_id) -> AssistEvidenceSet:
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers every path
     evidence_set = db.query(AssistEvidenceSet).filter(AssistEvidenceSet.id == evidence_set_id, AssistEvidenceSet.organization_id == org_id).first()
     if evidence_set is None:
         raise NotFoundException("Evidence set", evidence_set_id)
@@ -992,6 +993,7 @@ def get_evidence_set(db, org_id, user, evidence_set_id) -> AssistEvidenceSet:
 
 
 def get_evidence_item(db, org_id, user, evidence_id) -> AssistEvidenceItem:
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers every path
     item = db.query(AssistEvidenceItem).filter(AssistEvidenceItem.id == evidence_id).first()
     if item is None:
         raise NotFoundException("Evidence item", evidence_id)
@@ -1149,6 +1151,7 @@ def _handoff_cooldown_message(handoff: AssistHandoff) -> str:
 
 
 def create_handoff_preview(db, org_id, user, payload: dict) -> AssistHandoffPreview:
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers every path
     existing = _recent_handoff(db, org_id, user.id)
     if existing is not None:
         raise BadRequestException(_handoff_cooldown_message(existing))
@@ -1180,6 +1183,7 @@ def get_handoff_preview(db, org_id, user, preview_id) -> AssistHandoffPreview:
 
 
 def confirm_handoff(db, org_id, user, preview_id) -> AssistHandoff:
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers every path
     preview = get_handoff_preview(db, org_id, user, preview_id)
     if preview.state != "PREVIEWED":
         raise BadRequestException(f"Handoff preview is in state {preview.state}.")
@@ -1316,6 +1320,7 @@ def _check_action_role(tool: dict, user) -> None:
 
 
 def create_action_preview(db, org_id, user, payload: dict, idempotency_key: str = None) -> dict:
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers every path
     action_id = payload["action_id"]
     tool = get_action_tool(action_id)
     if tool is None:
@@ -1391,6 +1396,7 @@ def get_action_preview(db, org_id, user, preview_id) -> AssistActionPreview:
 
 
 def confirm_action(db, org_id, user, preview_id, payload: dict, idempotency_key: str = None, if_match: str = None) -> dict:
+    require_assist_enabled(db)  # ZP-PRIV D07: the kill switch covers every path
     preview = get_action_preview(db, org_id, user, preview_id)
     if preview.state != "READY_FOR_CONFIRMATION":
         raise BadRequestException(f"Action preview is in state {preview.state}.")

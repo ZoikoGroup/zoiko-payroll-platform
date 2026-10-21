@@ -236,6 +236,8 @@ def test_direct_callers_keep_bool_contract(real_smtp_path):
 class _Actor:
     id = 1
     email = "sa@zoiko-dev.example.com"
+    role = "super_admin"
+    organization_id = None
 
 
 def test_organizations_duplicate_deactivate_sends_once(db, organization, monkeypatch):
@@ -339,7 +341,10 @@ def test_auth_sends_are_mirrored_into_communication_events(db, organization):
 def test_deactivate_organization_response_precedes_email_send(db, organization, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from app.core.dependencies import get_current_super_admin
+    from app.core.dependencies import (
+        get_current_super_admin,
+        get_current_org_scoped_principal,
+    )
     from app.database import get_db
     from app.main import app
     from app.services import email_service
@@ -362,11 +367,13 @@ def test_deactivate_organization_response_precedes_email_send(db, organization, 
 
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_super_admin] = lambda: _Actor()
+    app.dependency_overrides[get_current_org_scoped_principal] = lambda: _Actor()
     try:
         response = TestClient(recording_app).patch(f"/api/organizations/{organization.id}/status?is_active=false")
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_super_admin, None)
+        app.dependency_overrides.pop(get_current_org_scoped_principal, None)
 
     assert response.status_code == 200, response.text
     assert timeline == ["response_sent", "email_sent"]

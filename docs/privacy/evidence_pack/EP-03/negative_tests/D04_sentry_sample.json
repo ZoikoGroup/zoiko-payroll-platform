@@ -1,0 +1,49 @@
+{
+  "request": {
+    "data": {
+      "name": "Jane",
+      "bank_account": "[REDACTED]",
+      "note": "IBAN [IBAN]"
+    },
+    "headers": {
+      "Authorization": "[REDACTED]",
+      "User-Agent": "x"
+    },
+    "cookies": "[REDACTED]",
+    "query_string": "email=[EMAIL]"
+  },
+  "extra": {
+    "salary": "[REDACTED]",
+    "pan": "[REDACTED]"
+  },
+  "user": {
+    "id": 7
+  },
+  "exception": {
+    "values": [
+      {
+        "value": "failed for [EMAIL] SSN [SSN]",
+        "stacktrace": {
+          "frames": [
+            {
+              "vars": {
+                "iban": "[REDACTED]",
+                "employee": "x"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "breadcrumbs": {
+    "values": [
+      {
+        "message": "PAN [PAN]",
+        "data": {
+          "bank": "[REDACTED]"
+        }
+      }
+    ]
+  }
+}

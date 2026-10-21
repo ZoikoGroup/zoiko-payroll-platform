@@ -62,6 +62,16 @@ def _org(db: Session, org_id: int) -> Organization:
     return org
 
 
+def _platform_catalog_only(org_id) -> None:
+    """ZP-PRIV B.1: Super Admin maintains the platform catalog only. An
+    organization's own overrides are tenant configuration and are managed
+    by that organization (/api/payroll/netherlands/...)."""
+    if org_id not in (None, ""):
+        raise BadRequestException(
+            "Organization-specific entries are managed by the organization itself; "
+            "Super Admin maintains the platform catalog only.")
+
+
 def _commit(db: Session, obj=None):
     db.commit()
     if obj is not None:
@@ -327,6 +337,8 @@ def list_earning_classifications(org_id: Optional[int] = Query(None), current_us
                                  db: Session = Depends(get_db)):
     from app.modules.payroll.models import PayrollNlEarningClassification as M
 
+    _platform_catalog_only(org_id)
+
     q = db.query(M).filter(M.organization_id.is_(None) if org_id is None
                            else or_(M.organization_id.is_(None), M.organization_id == org_id))
     return [_row(r, _CLASS_FIELDS) for r in q.order_by(M.earning_code, M.effective_from.desc()).all()]
@@ -339,8 +351,7 @@ def create_earning_classification(payload: Dict[str, Any] = Body(...), current_u
     from app.modules.payroll import netherlands_service as nl
 
     org_id = payload.get("organization_id")
-    if org_id is not None:
-        _org(db, int(org_id))
+    _platform_catalog_only(org_id)
     try:
         row = nl.create_earning_classification(
             db, organization_id=None if org_id is None else int(org_id), earning_code=payload["earning_code"].strip(),
@@ -429,6 +440,8 @@ def list_pension_schemes(org_id: Optional[int] = Query(None), current_user=Depen
                          db: Session = Depends(get_db)):
     from app.modules.payroll.models import PayrollNlPensionScheme as M
 
+    _platform_catalog_only(org_id)
+
     q = db.query(M).filter(M.organization_id.is_(None) if org_id is None
                            else or_(M.organization_id.is_(None), M.organization_id == org_id))
     return [_row(r, _PENSION_FIELDS) for r in q.order_by(M.fund_name, M.effective_from.desc()).all()]
@@ -440,8 +453,7 @@ def create_pension_scheme(payload: Dict[str, Any] = Body(...), current_user=Depe
     from app.modules.payroll import netherlands_service as nl
 
     org_id = payload.get("organization_id")
-    if org_id is not None:
-        _org(db, int(org_id))
+    _platform_catalog_only(org_id)
     try:
         row = nl.create_pension_scheme(
             db, organization_id=None if org_id is None else int(org_id), fund_name=payload["fund_name"],

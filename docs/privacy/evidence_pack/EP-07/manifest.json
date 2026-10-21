@@ -1,0 +1,56 @@
+{
+  "pack": "EP-07",
+  "title": "Privacy and legal review pack",
+  "generatedAt": "2026-10-19T10:05:20Z",
+  "files": [
+    {
+      "path": "control_register.yaml",
+      "sha256": "774764da68aa8f41b64a094e566b708de60dc4196bead22b8939435afe27d33f"
+    },
+    {
+      "path": "dpa_role_mapping.md",
+      "sha256": "c73bc836ce04c66f8c87dbf0b5165f7fac26d49daec2e712a23f19ecb38410fb"
+    },
+    {
+      "path": "evidence_index.md",
+      "sha256": "ae6fff9039e21f658fa8632c4fcf4a5c73ea5ca20533824db52fd711d382bd14"
+    },
+    {
+      "path": "incident_playbook.md",
+      "sha256": "927489226df82587f04b2aa7147d9579e95d62fc141d6bd320f2e44243a6ab6e"
+    },
+    {
+      "path": "independent_tester_handover.md",
+      "sha256": "3ba50a17ac4ab93c21afae1874a63df9f4c10fc68bc94b73b503ad4cdf507798"
+    },
+    {
+      "path": "indirect_paths_audit.md",
+      "sha256": "3d500ff989c19fc7088f1a7c911306193e3fb832b3949b35791eb983db54c92f"
+    },
+    {
+      "path": "region_policy.md",
+      "sha256": "234fc0f6ab1b33bd17d914a0740090555093945cd2282b076f094f4b09557bd2"
+    },
+    {
+      "path": "rls_runbook.md",
+      "sha256": "34a9627c9a4fa7efc338a0b6943d0fdf607aa3dc19f68730f5fd1b084ae86c44"
+    },
+    {
+      "path": "tabletop_record_template.md",
+      "sha256": "0f7b254aa7272001ed9553b97259a1c44f207679acff76f6d5b5dbf535b029bd"
+    },
+    {
+      "path": "tabletop_script.md",
+      "sha256": "3b6c9342dacbdd26c644103391761399b220c8b0043f1ff54f9315d9c3e449c7"
+    },
+    {
+      "path": "test_data_lineage.md",
+      "sha256": "7877b1edf4a844c7e8a9d44845a8e0e2acdf94bbfcb6943e5404145fdb3c6ac9"
+    }
+  ],
+  "notes": [
+    "Included: 11 documents.",
+    "Missing: none.",
+    "Counsel sign-off (F01) and the tabletop (F04) are human proofs."
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "testId": "E02_tamper_detected",
+  "timestampUtc": "2026-10-19T10:03:24.692453+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "attacker",
+  "tokenScope": "security_events",
+  "syntheticTenantIds": null,
+  "endpoint": "UPDATE security_events",
+  "expectedStatus": 0,
+  "actualStatus": 0,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "{'ok': False, 'broken_at': 1, 'checked': 0}"
+}

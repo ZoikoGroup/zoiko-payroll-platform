@@ -1,3 +1,6 @@
+import { tryRefreshToken } from "../service/api";
+import { requestStepUp, STEP_UP_REQUIRED } from "../utils/stepUp";
+
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
 
 const TOKEN_KEY = "zoiko_payroll_access";
@@ -37,20 +40,10 @@ export function clearSession() {
 }
 
 async function refreshSession() {
-  const refresh = getRefreshToken();
-  if (!refresh) return false;
-  const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refresh }),
-  });
-  if (!res.ok) {
-    clearSession();
-    return false;
-  }
-  const data = await res.json();
-  setSession({ ...data, user: getStoredUser() });
-  return true;
+  // Rotating refresh tokens: use the shared single-flight refresh (ZP-PRIV B08).
+  const result = await tryRefreshToken();
+  if (!result.ok && result.invalidSession) clearSession();
+  return result.ok;
 }
 
 export async function apiFetch(path, { method = "GET", body, params } = {}) {
@@ -76,6 +69,16 @@ export async function apiFetch(path, { method = "GET", body, params } = {}) {
     data = await res.json();
   } catch {
     data = {};
+  }
+
+  if (res.status === 403 && (data?.error === STEP_UP_REQUIRED) && (await requestStepUp(data.detail))) {
+    // ZP-PRIV B08 step-up: one retry with the freshly minted access token.
+    res = await rawFetch(url, method, body);
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
   }
 
   if (!res.ok) {

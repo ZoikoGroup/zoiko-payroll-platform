@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
 import PublicAssistWidget from "../modules/assist/PublicAssistWidget";
+import MfaLoginStep from "../components/MfaLoginStep";
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -67,11 +68,21 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState(null);
+  // ZP-PRIV B08: {mode: "challenge" | "enroll", mfaToken} after a password step.
+  const [mfaStep, setMfaStep] = useState(null);
 
   function defaultRedirectFor(role) {
     return VALID_ROLES.includes(role)
       ? ROLE_DEFAULT_REDIRECT[role]
       : "/payroll";
+  }
+
+  async function completeSignIn(data) {
+    setSession(data);
+    await login(data.user);
+    const fallback = defaultRedirectFor(data.user?.role);
+    const from = location.state?.from?.pathname || fallback;
+    navigate(from, { replace: true });
   }
 
   async function handleSubmit(e) {
@@ -83,11 +94,11 @@ export default function LoginPage() {
         method: "POST",
         body: { email, password },
       });
-      setSession(data);
-      await login(data.user);
-      const fallback = defaultRedirectFor(data.user?.role);
-      const from = location.state?.from?.pathname || fallback;
-      navigate(from, { replace: true });
+      if (data.mfa_required || data.mfa_enrollment_required) {
+        setMfaStep({ mode: data.mfa_required ? "challenge" : "enroll", mfaToken: data.mfa_token });
+        return;
+      }
+      await completeSignIn(data);
     } catch (err) {
       setLocalError(err.message || "Unable to sign in. Please check your credentials.");
     } finally {
@@ -133,6 +144,18 @@ export default function LoginPage() {
           `,
         }}>
           <div style={{ width: "100%", maxWidth: "400px" }}>
+            {mfaStep ? (
+              <MfaLoginStep
+                mode={mfaStep.mode}
+                mfaToken={mfaStep.mfaToken}
+                onComplete={(session) => completeSignIn(session)}
+                onCancel={() => {
+                  setMfaStep(null);
+                  setPassword("");
+                }}
+              />
+            ) : (
+            <>
             <h1 style={{ fontSize: "28px", fontWeight: "800", color: "#0F172A", margin: "0 0 32px 0", letterSpacing: "-0.5px" }}>
               Sign in to Zoiko Payroll.
             </h1>
@@ -239,6 +262,8 @@ export default function LoginPage() {
             <p style={{ fontSize: "11px", color: "#9CA3AF", marginTop: "24px", lineHeight: "1.6" }}>
               🔵 Your access is governed by your organization&apos;s permissions, roles, workspace settings and security policies.
             </p>
+            </>
+            )}
           </div>
         </div>
 

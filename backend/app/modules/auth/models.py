@@ -37,6 +37,14 @@ class UserRole(str, enum.Enum):
     SUPER_ADMIN = "super_admin"
     ORG_ADMIN = "org_admin"
     PAYROLL_ADMIN = "payroll_admin"
+    # ZP-PRIV A.1 platform roles: never any tenant payroll permission.
+    SUPPORT_OPERATOR = "support_operator"
+    PLATFORM_SECURITY = "platform_security"
+    # Temporary, read-only, grant-bound tenant user (JIT Support Access).
+    SUPPORT_TEMP = "support_temp"
+    # Employee own-record persona (policy only; self-service login stays
+    # disabled - ZP-PRIV decision 2).
+    EMPLOYEE = "employee"
 
 
 class User(Base):
@@ -61,6 +69,15 @@ class User(Base):
 
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
+
+    # ZP-PRIV D.2: temporary support accounts. Login, refresh and the
+    # per-request auth check all refuse a user whose access_expires_at has
+    # passed; the account is also deactivated when its grant ends.
+    access_expires_at = Column(DateTime, nullable=True)
+    is_temporary = Column(Boolean, default=False, nullable=False, server_default="0")
+    support_grant_id = Column(Integer, nullable=True, index=True)
+    # Employee persona only: the PayrollEmployee this login represents.
+    self_service_employee_id = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -198,6 +215,87 @@ class AuthAuditEvent(Base):
     reason = Column(String(80), nullable=True)
     client_address = Column(String(64), nullable=True)
     user_agent = Column(String(300), nullable=True)
+
+
+class AuthzDecisionEvent(Base):
+    """ZP-PRIV A04: append-only record of every PDP denial (immutable, F-6).
+
+    Deliberately stores no payload and no token. The reason code lives only
+    here, never in the response body, so a caller cannot learn whether an
+    object exists in another tenant. One row per denied request."""
+
+    __tablename__ = "authz_decision_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(String(64), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    principal_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    principal_role = Column(String(40), nullable=False)
+    organization_id = Column(Integer, nullable=True, index=True)
+    method = Column(String(10), nullable=False)
+    route_template = Column(String(300), nullable=False)
+    action = Column(String(20), nullable=False)
+    resource = Column(String(80), nullable=False)
+    data_class = Column(String(40), nullable=False)
+    reason_code = Column(String(60), nullable=False, index=True)
+    status_code = Column(Integer, nullable=False)
+    client_address = Column(String(64), nullable=True)
+    user_agent = Column(String(300), nullable=True)
+    correlation_id = Column(String(64), nullable=True, index=True)
+    path_params = Column(Text, nullable=True)
+
+
+
+class MfaCredential(Base):
+    """ZP-PRIV B08: one TOTP credential per user. The seed is encrypted with
+    core/secretbox (purpose "mfa-totp"); confirmed_at is set only after the
+    user proves possession with a valid code. last_used_step blocks replay
+    of a code inside its own 30-second window."""
+
+    __tablename__ = "mfa_credentials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    type = Column(String(20), nullable=False, default="TOTP")
+    secret_encrypted = Column(Text, nullable=False)
+    enrolled_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    confirmed_at = Column(DateTime, nullable=True)
+    last_used_step = Column(Integer, nullable=True)
+
+
+class MfaRecoveryCode(Base):
+    """Single-use recovery codes, stored only as SHA-256 hashes. Shown to the
+    user exactly once, at generation."""
+
+    __tablename__ = "mfa_recovery_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+
+
+class RefreshTokenRecord(Base):
+    """ZP-PRIV B08: refresh-token rotation with reuse detection. Every issued
+    refresh token is a row; using one marks it used and issues its successor
+    in the same family. Presenting an already-used (or revoked) token revokes
+    the whole family — the signature of a stolen token being replayed."""
+
+    __tablename__ = "auth_refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    jti = Column(String(64), nullable=False, unique=True, index=True)
+    family_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    issued_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    revoke_reason = Column(String(40), nullable=True)
+    # Risk signals for privileged re-authentication (hashes, never raw).
+    client_fingerprint = Column(String(64), nullable=True)
+    mfa_at = Column(Integer, nullable=True)
 
 
 from app.core import audit_immutability as _audit_immutability  # noqa: E402

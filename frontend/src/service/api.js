@@ -1,4 +1,6 @@
 
+import { requestStepUp, STEP_UP_REQUIRED } from "../utils/stepUp";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
 const TOKEN_KEY = "zoiko_payroll_access";
 const REFRESH_KEY = "zoiko_payroll_refresh";
@@ -54,7 +56,7 @@ function createApiError(message, status, extra = {}) {
  * Automatically attaches the bearer token (if present) and JSON headers,
  * and attempts a single silent refresh on a 401 response.
  */
-export async function apiRequest(path, { method = "GET", body, headers = {}, auth = true, retry = true, params, signal } = {}) {
+export async function apiRequest(path, { method = "GET", body, headers = {}, auth = true, retry = true, stepUpRetry = true, params, signal } = {}) {
   let url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
   if (params) {
     const query = Object.entries(params)
@@ -116,6 +118,12 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
     } catch {
       detail = res.statusText;
     }
+    if (res.status === 403 && errorCode === STEP_UP_REQUIRED && auth && stepUpRetry) {
+      // ZP-PRIV B08: ask for a fresh code once, then retry the same request.
+      if (await requestStepUp(detail)) {
+        return apiRequest(path, { method, body, headers, auth, retry, stepUpRetry: false, params, signal });
+      }
+    }
     throw createApiError(detail, res.status, { errorCode, trace });
   }
 
@@ -126,7 +134,11 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
   return res.text();
 }
 
-async function tryRefreshToken() {
+// Single-flight refresh shared by BOTH API clients (service/api.js and
+// api/client.js). Refresh tokens rotate (ZP-PRIV B08): two concurrent
+// refreshes with the same token would look like token theft and end the
+// session, so every caller must go through this one promise.
+export async function tryRefreshToken() {
   if (refreshPromise) return refreshPromise;
   refreshPromise = refreshAccessToken().finally(() => {
     refreshPromise = null;

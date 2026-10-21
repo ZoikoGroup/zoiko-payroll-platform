@@ -1,0 +1,18 @@
+{
+  "testId": "P12_record_review",
+  "timestampUtc": "2026-10-19T10:01:12.742331+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "platform_security",
+  "tokenScope": "privacy assurance",
+  "syntheticTenantIds": null,
+  "endpoint": "POST /api/super-admin/privacy-assurance/controls/{id}/reviews",
+  "expectedStatus": 200,
+  "actualStatus": 200,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": 2,
+  "decisionId": null,
+  "note": "step-up + proof required; reviewer identity stored"
+}

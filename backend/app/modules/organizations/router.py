@@ -727,6 +727,11 @@ def delete_organization(
     if org is None:
         raise NotFoundException("Organization", "id")
 
+    # ZP-PRIV F03: no tenant data is destroyed while any legal hold is active.
+    from app.modules.security import governance
+
+    governance.assert_not_on_hold(db, organization_id)
+
     org_name = org.organization_name
     org_code = org.organization_code
     org_email = org.email

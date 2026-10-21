@@ -1,0 +1,29 @@
+{
+  "testId": "T03_api_super-admin_india_salary-tds-declarations",
+  "timestampUtc": "2026-10-19T10:04:24.728493+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/super-admin/india/salary-tds-declarations",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": {
+    "success": false,
+    "error": "ACCESS_DENIED",
+    "message": "You do not have permission to perform this action.",
+    "detail": "You do not have permission to perform this action.",
+    "trace": {
+      "decisionId": "3a8df2d87aad4cde9ea46579ecd17f90"
+    }
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": "3a8df2d87aad4cde9ea46579ecd17f90",
+  "note": null
+}

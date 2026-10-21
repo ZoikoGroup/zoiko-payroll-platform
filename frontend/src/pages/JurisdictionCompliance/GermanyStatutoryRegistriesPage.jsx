@@ -19,16 +19,8 @@ import {
   listEarningTaxabilityRules, createEarningTaxabilityRule, approveEarningTaxabilityRule, setEarningTaxabilityRuleStatus,
   listOvertimePremiumCategories, createOvertimePremiumCategory, approveOvertimePremiumCategory, setOvertimePremiumCategoryStatus,
   listOvertimeGrundlohnCaps, createOvertimeGrundlohnCap, approveOvertimeGrundlohnCap, setOvertimeGrundlohnCapStatus,
-  listOrganizationsForPicker,
-  listGermanyAccidentInsuranceProfiles, createGermanyAccidentInsuranceProfile,
-  approveGermanyAccidentInsuranceProfile, setGermanyAccidentInsuranceProfileStatus,
 } from "../../service/superAdminService";
-import {
-  createElstamChangeListBatch, listElstamChangeListBatches, updateElstamChangeListBatchStatus,
-  getGermanyElsterCertificateConfig, setGermanyElsterCertificateConfig,
-  createGermanyElsterTransmission, listGermanyElsterTransmissions,
-  validateGermanyElsterTransmission, transmitGermanyElsterTransmission,
-} from "../../service/payrollService";
+import WorkerDataLocked from "../../components/WorkerDataLocked";
 import { describeLoadError } from "../../service/errorClassification";
 
 export const TABS = [
@@ -140,6 +132,8 @@ function useLoader(fn, deps) {
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
+    // Reset to a loading state for the new deps before the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError("");
     fn()
@@ -1028,253 +1022,30 @@ function ChurchTaxExceptionsTab() {
   );
 }
 
-// ── ELStAM change-list batches ────────────────────────────────────────────
-
+// ── ELStAM change-list batches / ELSTER transmission boundary ─────────────
+// ZP-PRIV decision 3: ELStAM change lists (per-employee tax attributes) and
+// ELSTER transmissions are the organization's own payroll workflow. Their
+// /api/payroll/germany/* routes are tenant-only, so the Super Admin plane no
+// longer calls them; these tabs explain where the work happens.
 export function ElstamBatchesTab() {
-  const [batches, error, loading, reload] = useLoader(() => listElstamChangeListBatches(), []);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ batchReference: "", receivedAt: "", effectiveDate: "2026-01-01", scopeDescription: "" });
-  const [actionError, setActionError] = useState("");
-
-  async function handleCreate(e) {
-    e.preventDefault();
-    setActionError("");
-    try {
-      await createElstamChangeListBatch({ ...form, receivedAt: new Date(form.receivedAt || Date.now()).toISOString() });
-      setShowForm(false);
-      reload();
-    } catch (err) {
-      setActionError(err.message || "Could not save.");
-    }
-  }
-
-  async function transition(id, status) {
-    setActionError("");
-    try {
-      await updateElstamChangeListBatchStatus(id, { status });
-      reload();
-    } catch (err) {
-      setActionError(err.message || "Transition failed.");
-    }
-  }
-
   return (
-    <Card
-      title="ELStAM change-list batches (received — never live-polled)"
-      action={<button className={btnSecondary} onClick={() => setShowForm((v) => !v)}><Plus size={12} className="inline -mt-0.5 mr-1" /> Record received batch</button>}
-    >
-      <ErrorBanner message={actionError} />
-      <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
-        This is an operations/review surface only — it records that a batch was received and its review status.
-        Nothing here polls ELSTER/BZSt or auto-applies attribute changes; each employee&apos;s actual change is entered
-        separately via the employee statutory-profile screen&apos;s &quot;Structured ELStAM import&quot; mode.
-      </div>
-      {showForm && (
-        <form onSubmit={handleCreate} className="mb-4 grid grid-cols-2 gap-2 rounded-[10px] border border-border p-3">
-          <input className={inputCls} placeholder="Batch reference (e.g. 2026-07)" required value={form.batchReference} onChange={(e) => setForm((f) => ({ ...f, batchReference: e.target.value }))} />
-          <input type="date" className={inputCls} required value={form.effectiveDate} onChange={(e) => setForm((f) => ({ ...f, effectiveDate: e.target.value }))} />
-          <input type="datetime-local" className={inputCls} placeholder="Received at" value={form.receivedAt} onChange={(e) => setForm((f) => ({ ...f, receivedAt: e.target.value }))} />
-          <input className={inputCls} placeholder="Scope (e.g. all active DE employees)" value={form.scopeDescription} onChange={(e) => setForm((f) => ({ ...f, scopeDescription: e.target.value }))} />
-          <button type="submit" className={`${btnPrimary} col-span-2`}>Record batch</button>
-        </form>
-      )}
-      {loading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
-      <ErrorBanner message={error} />
-      {batches && batches.length === 0 && <p className="text-[12px] text-foreground-muted">No change-list batches recorded yet.</p>}
-      {batches && batches.length > 0 && (
-        <table className="w-full text-[12px]">
-          <thead><tr><Th>Reference</Th><Th>Effective date</Th><Th>Status</Th><Th>Actions</Th></tr></thead>
-          <tbody>
-            {batches.map((b) => (
-              <tr key={b.id} className="border-t border-border">
-                <Td>{b.batchReference}</Td>
-                <Td>{b.effectiveDate}</Td>
-                <Td><StatusPill value={b.processingStatus} /></Td>
-                <Td>
-                  <div className="flex gap-1.5">
-                    {b.processingStatus === "RECEIVED" && <button className={btnSecondary} onClick={() => transition(b.id, "VALIDATED")}>Mark validated</button>}
-                    {b.processingStatus === "VALIDATED" && <button className={btnPrimary} onClick={() => transition(b.id, "APPLIED")}>Mark applied</button>}
-                    {["RECEIVED", "VALIDATED"].includes(b.processingStatus) && <button className={btnSecondary} onClick={() => transition(b.id, "REJECTED")}>Reject</button>}
-                  </div>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </Card>
+    <WorkerDataLocked variant="tenant" title="ELStAM change lists are run by the organization">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Change-list batches carry each employee&apos;s tax attributes and are imported and reviewed by the
+        organization in its own payroll workspace.
+      </p>
+    </WorkerDataLocked>
   );
 }
 
-// ── ELSTER transmission boundary ──────────────────────────────────────────
-// Operations surface for the Phase 8BF ELSTER boundary. Transmission stays
-// BLOCKED_EXTERNAL by design (no BZSt registration, no certificate, no ERiC
-// integration) — the backend never fabricates a Transferticket, and
-// recording a certificate reference here is metadata only and does NOT
-// unblock transmission. See engine/germany_elster.py's docstring.
-
-const ELSTER_TRANSMISSION_TYPES = [
-  "Lohnsteuer-Anmeldung", "Beitrags-Nachweis", "U1/U2-Erstattung", "Sonstige",
-];
-
 export function ElsterTab() {
-  const [config, configError, configLoading, reloadConfig] = useLoader(() => getGermanyElsterCertificateConfig(), []);
-  const [transmissions, transError, transLoading, reloadTrans] = useLoader(() => listGermanyElsterTransmissions(), []);
-  const [showConfig, setShowConfig] = useState(false);
-  const [configForm, setConfigForm] = useState({ certificateReference: "", referenceDescription: "" });
-  const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ transmissionType: ELSTER_TRANSMISSION_TYPES[0], periodStart: "2026-01-01", periodEnd: "2026-01-31", payloadSummary: "" });
-  const [actionError, setActionError] = useState("");
-
-  async function handleSaveConfig(e) {
-    e.preventDefault();
-    setActionError("");
-    try {
-      await setGermanyElsterCertificateConfig({
-        certificateReference: configForm.certificateReference,
-        referenceDescription: configForm.referenceDescription || null,
-      });
-      setShowConfig(false);
-      reloadConfig();
-    } catch (err) {
-      setActionError(describeLoadError(err));
-    }
-  }
-
-  async function handleCreate(e) {
-    e.preventDefault();
-    setActionError("");
-    let payloadSummary = {};
-    if (createForm.payloadSummary) {
-      try { payloadSummary = JSON.parse(createForm.payloadSummary); }
-      catch { setActionError(describeLoadError({ message: "Payload summary must be valid JSON." })); return; }
-    }
-    try {
-      await createGermanyElsterTransmission({
-        transmissionType: createForm.transmissionType,
-        periodStart: createForm.periodStart,
-        periodEnd: createForm.periodEnd,
-        payloadSummary,
-      });
-      setShowCreate(false);
-      reloadTrans();
-    } catch (err) {
-      setActionError(describeLoadError(err));
-    }
-  }
-
-  async function doValidate(id) {
-    setActionError("");
-    try {
-      await validateGermanyElsterTransmission(id);
-      reloadTrans();
-    } catch (err) {
-      setActionError(describeLoadError(err));
-    }
-  }
-
-  async function doTransmit(id) {
-    setActionError("");
-    try {
-      await transmitGermanyElsterTransmission(id);
-      reloadTrans();
-    } catch (err) {
-      setActionError(describeLoadError(err));
-    }
-  }
-
-  const lastBlocked = transmissions && [...transmissions].reverse().find((t) => t.status === "BLOCKED_EXTERNAL" && t.blockedReason);
-
   return (
-    <>
-      <Card
-        title="ELSTER transmission boundary"
-        action={<button className={btnSecondary} onClick={() => setShowConfig((v) => !v)}><Plus size={12} className="inline -mt-0.5 mr-1" /> Record certificate reference</button>}
-      >
-        <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
-          Zoiko holds no ELSTER organizational certificate and no BZSt employer registration, so live submission is{" "}
-          <span className="font-bold">BLOCKED_EXTERNAL</span> by design — the backend never transmits and never
-          fabricates a Transferticket. Recording a certificate reference is metadata only and does NOT unblock
-          transmission (see engine/germany_elster.py).
-        </div>
-        {showConfig && (
-          <form onSubmit={handleSaveConfig} className="mb-4 grid grid-cols-2 gap-2 rounded-[10px] border border-border p-3">
-            <input className={inputCls} placeholder="Certificate reference (e.g. key-vault path) — never raw bytes" required value={configForm.certificateReference} onChange={(e) => setConfigForm((f) => ({ ...f, certificateReference: e.target.value }))} />
-            <input className={inputCls} placeholder="Description (optional)" value={configForm.referenceDescription} onChange={(e) => setConfigForm((f) => ({ ...f, referenceDescription: e.target.value }))} />
-            <button type="submit" className={`${btnPrimary} col-span-2`}>Save reference</button>
-          </form>
-        )}
-        {configLoading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
-        <ErrorBanner message={configError} />
-        {!configLoading && (
-          <div className="text-[12px]">
-            {!config
-              ? <p className="text-foreground-muted">No certificate reference recorded for this organization.</p>
-              : (
-                <div className="flex flex-wrap items-center gap-3">
-                  <StatusPill value={config.isConfigured ? "ACTIVE" : "INACTIVE"} />
-                  <span className="font-mono text-[11px]">{config.certificateReference}</span>
-                  {config.referenceDescription && <span className="text-foreground-muted">{config.referenceDescription}</span>}
-                  {config.configuredAt && <span className="text-[11px] text-foreground-muted">recorded {new Date(config.configuredAt).toLocaleString()}</span>}
-                </div>
-              )}
-          </div>
-        )}
-      </Card>
-
-      <Card
-        title="Transmission records"
-        action={<button className={btnSecondary} onClick={() => setShowCreate((v) => !v)}><Plus size={12} className="inline -mt-0.5 mr-1" /> Prepare transmission record</button>}
-      >
-        <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
-          Records only — validation is structural (non-empty type, sane period), and &quot;Transmit&quot; runs against the
-          fail-closed boundary: it records <span className="font-bold">BLOCKED_EXTERNAL</span> with the reason, never a
-          fake acknowledgement. Retry is safe and idempotent.
-        </div>
-        {showCreate && (
-          <form onSubmit={handleCreate} className="mb-4 grid grid-cols-2 gap-2 rounded-[10px] border border-border p-3">
-            <select className={inputCls} value={createForm.transmissionType} onChange={(e) => setCreateForm((f) => ({ ...f, transmissionType: e.target.value }))}>
-              {ELSTER_TRANSMISSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <input className={inputCls} placeholder="Payload summary (JSON, optional)" value={createForm.payloadSummary} onChange={(e) => setCreateForm((f) => ({ ...f, payloadSummary: e.target.value }))} />
-            <label className="flex flex-col gap-1 text-[11px] text-foreground-muted">Period start<input type="date" className={inputCls} required value={createForm.periodStart} onChange={(e) => setCreateForm((f) => ({ ...f, periodStart: e.target.value }))} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-foreground-muted">Period end<input type="date" className={inputCls} required value={createForm.periodEnd} onChange={(e) => setCreateForm((f) => ({ ...f, periodEnd: e.target.value }))} /></label>
-            <button type="submit" className={`${btnPrimary} col-span-2`}>Prepare record (DRAFT)</button>
-          </form>
-        )}
-        {transLoading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
-        <ErrorBanner message={transError} />
-        <ErrorBanner message={actionError} />
-        {!transLoading && transmissions && transmissions.length === 0 && <p className="text-[12px] text-foreground-muted">No transmission records yet.</p>}
-        {!transLoading && transmissions && transmissions.length > 0 && (
-          <table className="w-full text-[12px]">
-            <thead><tr><Th>Type</Th><Th>Period</Th><Th>Status</Th><Th>Actions</Th></tr></thead>
-            <tbody>
-              {transmissions.map((t) => (
-                <tr key={t.id} className="border-t border-border">
-                  <Td>{t.transmissionType}</Td>
-                  <Td>{t.periodStart} → {t.periodEnd}</Td>
-                  <Td><StatusPill value={t.status} /></Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      {t.status === "DRAFT" && <button className={btnSecondary} onClick={() => doValidate(t.id)}>Validate</button>}
-                      {t.status === "VALIDATED" && <button className={btnPrimary} onClick={() => doTransmit(t.id)}>Transmit</button>}
-                      {t.status === "BLOCKED_EXTERNAL" && <button className={btnSecondary} onClick={() => doTransmit(t.id)}>Retry</button>}
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {lastBlocked && (
-          <div className="mt-3 rounded-[10px] bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
-            <span className="font-bold">Last blocked reason: </span>
-            {lastBlocked.blockedReason}
-          </div>
-        )}
-      </Card>
-    </>
+    <WorkerDataLocked variant="tenant" title="ELSTER transmissions are run by the organization">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        The ELSTER certificate configuration and the Lohnsteuer-Anmeldung transmissions belong to each employer
+        and are prepared, validated and transmitted from its own payroll workspace.
+      </p>
+    </WorkerDataLocked>
   );
 }
 
@@ -1439,6 +1210,9 @@ export function AuditTab() {
 }
 
 // ── Employer Levies / Accident Insurance (Phase 8AJ) ────────────────────
+// ZP-PRIV decision 3 (2026-10-19): the profiles are tenant configuration;
+// the Super Admin routes are retired and this tab only explains where the
+// work moved. Historical notes follow.
 // Unlike every other tab on this page, accident insurance is
 // organization-scoped, not global (spec DE-D06/Table 35: accident
 // insurance is a carrier/employer-specific statutory fact, not a
@@ -1457,88 +1231,23 @@ export function AuditTab() {
 // — this tab is configuration + audit visibility only, never a calculator.
 
 export function EmployerLeviesTab() {
-  const [orgs, setOrgs] = useState(null);
-  const [orgsError, setOrgsError] = useState("");
-  const [selectedOrgId, setSelectedOrgId] = useState("");
-
-  useEffect(() => {
-    listOrganizationsForPicker()
-      .then(setOrgs)
-      .catch((err) => setOrgsError(err.message || "Could not load organizations."));
-  }, []);
-
   return (
     <>
       <Card title="Germany accident insurance (Unfallversicherung) — employer-specific">
         <p className="text-[11px] text-foreground-muted">
           Statutory accident insurance is <strong>carrier/industry/employer specific</strong> (spec DE-D06) — there
-          is no national rate to publish. Each profile below is one employer&apos;s own Berufsgenossenschaft-assigned
-          rate, carried through the same DRAFT → VERIFIED → APPROVED → PUBLISHED maker-checker workflow as every
-          other Germany registry on this page. Publishing a profile records it for configuration and
-          calculation-trace audit visibility only — German accident insurance is assessed <strong>annually</strong>
-          {" "}against reported wage totals, so no monthly payslip deduction is ever computed from it. U1 (sickness
-          reimbursement), U2 (maternity levy) and U3 (insolvency levy) each have their own dedicated tab/mechanism
-          elsewhere and are not managed here.
+          is no national rate to publish. Each profile is one employer&apos;s own Berufsgenossenschaft-assigned rate,
+          assessed <strong>annually</strong> against reported wage totals, so no monthly payslip deduction is ever
+          computed from it. U1 (sickness reimbursement), U2 (maternity levy) and U3 (insolvency levy) each have their
+          own dedicated tab/mechanism elsewhere and are not managed here.
         </p>
       </Card>
-
-      <Card title="Select employer">
-        <ErrorBanner message={orgsError} />
-        {orgs === null && !orgsError && <p className="text-[12px] text-foreground-muted">Loading organizations…</p>}
-        {orgs && (
-          <select className={inputCls} value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}>
-            <option value="">Select an organization…</option>
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.organizationName || o.name || `Org #${o.id}`}</option>
-            ))}
-          </select>
-        )}
-      </Card>
-
-      {selectedOrgId ? (
-        // key={selectedOrgId} forces a clean remount (and therefore a
-        // fresh useLoader fetch) whenever the selected employer changes —
-        // LifecycleRegistryTab's own list() call has a fixed, empty
-        // dependency array, exactly like every other tab that reuses it.
-        <LifecycleRegistryTab
-          key={selectedOrgId}
-          title={`Accident-insurance profiles for this employer (org #${selectedOrgId})`}
-          entityType="germany_accident_insurance_profile"
-          list={() => listGermanyAccidentInsuranceProfiles(selectedOrgId)}
-          create={(f) => createGermanyAccidentInsuranceProfile({
-            organizationId: Number(selectedOrgId), carrierName: f.carrierName,
-            agencyAccountId: f.agencyAccountId || undefined, riskClassDescription: f.riskClassDescription || undefined,
-            employerRatePct: f.employerRatePct, effectiveFrom: f.effectiveFrom, effectiveTo: f.effectiveTo || undefined,
-            authoritySourceId: f.authoritySourceId || undefined,
-        jurisdictionPackId: f.jurisdictionPackId || undefined,
-          })}
-          approve={approveGermanyAccidentInsuranceProfile}
-          setStatus={setGermanyAccidentInsuranceProfileStatus}
-          columns={[
-            { key: "carrierName", label: "Carrier (Berufsgenossenschaft)" },
-            { key: "agencyAccountId", label: "Member/account no.", render: (r) => r.agencyAccountId || "—" },
-            { key: "riskClassDescription", label: "Risk class", render: (r) => r.riskClassDescription || "—" },
-            { key: "employerRatePct", label: "Rate %" },
-            { key: "effectiveFrom", label: "Effective from" },
-            { key: "effectiveTo", label: "Effective to", render: (r) => r.effectiveTo || "open" },
-          ]}
-          formFields={[
-            { key: "carrierName", label: "Carrier (Berufsgenossenschaft) name", required: true },
-            { key: "agencyAccountId", label: "Member/account number (Mitgliedsnummer)" },
-            { key: "riskClassDescription", label: "Risk class (Gefahrtarifstelle), if disclosed on the notice" },
-            { key: "employerRatePct", label: "Employer rate % (from the annual notice)", type: "number", required: true },
-            { key: "effectiveFrom", label: "Effective from", type: "date", required: true },
-            { key: "effectiveTo", label: "Effective to (leave blank if open-ended)", type: "date" },
-            { key: "authoritySourceId", label: "Source evidence artifact ID (the employer's own Beitragsbescheid)" },
-          ]}
-          defaultForm={{
-            carrierName: "", agencyAccountId: "", riskClassDescription: "", employerRatePct: "",
-            effectiveFrom: "2026-01-01", effectiveTo: "", authoritySourceId: "",
-          }}
-        />
-      ) : (
-        <p className="text-[12px] text-foreground-muted">Select an employer above to view or configure its accident-insurance profiles.</p>
-      )}
+      <WorkerDataLocked variant="tenant" title="Accident-insurance profiles are maintained by the organization">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Each employer records its own Beitragsbescheid rate and a second admin of that organization approves it
+          (Payroll → Employer statutory → Germany). Zoiko staff no longer read or edit these profiles.
+        </p>
+      </WorkerDataLocked>
     </>
   );
 }

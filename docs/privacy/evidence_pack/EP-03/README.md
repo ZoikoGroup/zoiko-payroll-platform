@@ -1,0 +1,72 @@
+# EP-03 - Negative-test evidence
+
+Generated 2026-10-19T10:05:19Z. Status: awaiting independent review.
+
+- 63 evidence files from tests/privacy/evidence (written by the test run).
+- Test ids present: T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12.
+
+Files (sha256 in manifest.json):
+
+- `negative_tests/A06_differencing.json`
+- `negative_tests/D03_log_sample_bank_export.txt`
+- `negative_tests/D03_log_sample_employee_import.txt`
+- `negative_tests/D03_log_sample_payroll_run.txt`
+- `negative_tests/D03_log_sample_payslip.txt`
+- `negative_tests/D04_sentry_sample.json`
+- `negative_tests/D05_federation_cross_tenant.json`
+- `negative_tests/D05_federation_entity_scope_widening.json`
+- `negative_tests/D05_federation_expired.json`
+- `negative_tests/D05_federation_global_admin_claim.json`
+- `negative_tests/D05_federation_missing_org.json`
+- `negative_tests/D05_federation_no_payroll_entitlement.json`
+- `negative_tests/D05_federation_other_product_audience.json`
+- `negative_tests/D05_federation_platform_role.json`
+- `negative_tests/D05_federation_too_long_lived.json`
+- `negative_tests/D05_federation_unknown_user.json`
+- `negative_tests/D05_federation_wildcard_tenant.json`
+- `negative_tests/D05_federation_wrong_issuer.json`
+- `negative_tests/D09_deidentification.json`
+- `negative_tests/D_break_glass_review.json`
+- `negative_tests/E02_tamper_detected.json`
+- `negative_tests/P12_record_review.json`
+- `negative_tests/PG_RLS_no_context.json`
+- `negative_tests/PG_security_events_tamper.json`
+- `negative_tests/PG_support_audit_tamper.json`
+- `negative_tests/T01.json`
+- `negative_tests/T02_api_payroll_employees.json`
+- `negative_tests/T02_api_payroll_employees_{employee_id}.json`
+- `negative_tests/T02_api_payroll_payslips.json`
+- `negative_tests/T02_api_super-admin_compliance_netherlands_vcr.json`
+- `negative_tests/T03_api_payroll_employees_1_statutory-profile.json`
+- `negative_tests/T03_api_payroll_payslips_1_download.json`
+- `negative_tests/T03_api_payroll_runs_1_bank-transfer-file.json`
+- `negative_tests/T03_api_super-admin_compliance_france_pas-rates.json`
+- `negative_tests/T03_api_super-admin_india_salary-tds-declarations.json`
+- `negative_tests/T04.json`
+- `negative_tests/T05_EA_A2.json`
+- `negative_tests/T05_PA_A2.json`
+- `negative_tests/T05_TA_B1.json`
+- `negative_tests/T06.json`
+- `negative_tests/T07_A2.json`
+- `negative_tests/T07_B1.json`
+- `negative_tests/T07_export.json`
+- `negative_tests/T07_payslips.json`
+- `negative_tests/T07_write.json`
+- `negative_tests/T08_expiry.json`
+- `negative_tests/T08_revoke.json`
+- `negative_tests/T09_route_sweep.json`
+- `negative_tests/T09_search_and_bi.json`
+- `negative_tests/T10_job_deactivate.json`
+- `negative_tests/T10_job_demote.json`
+- `negative_tests/T10_job_no_context.json`
+- `negative_tests/T10_job_suspend.json`
+- `negative_tests/T10_job_tenant_swap.json`
+- `negative_tests/T10_machine_tenant_claim.json`
+- `negative_tests/T11_llm_egress_scrub.json`
+- `negative_tests/T11_tool_EA_payroll.getRunSummary_EMPLOYEE_SELF_ONLY.json`
+- `negative_tests/T11_tool_PA_payroll.comparePeriods_ORG_WIDE_TOOL_FOR_SCOPED_PRINCIPAL.json`
+- `negative_tests/T11_tool_SA_payroll.getRunSummary_TENANT_MISMATCH.json`
+- `negative_tests/T11_tool_TA_payroll.getRunSummary_TENANT_MISMATCH.json`
+- `negative_tests/T11_tool_TA_payroll.getRunSummary_TOOL_PARAMETER_TAMPERING.json`
+- `negative_tests/T11_tool_TA_payroll.listExceptions_TOOL_PARAMETER_TAMPERING.json`
+- `negative_tests/T12_attribution_and_drill.json`

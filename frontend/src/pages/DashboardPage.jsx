@@ -8,11 +8,38 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 
-import { apiFetch } from "../api/client";
 import StatusPill from "../components/StatusPill";
 import DateRangeFilter from "../components/DateRangeFilter";
 import { resolveDateRange } from "../utils/dateRangePresets";
-import { getDashboardCharts } from "../service/superAdminService";
+import { parseUtc } from "../utils/time";
+import {
+  getDashboardCharts, getDashboardStats, isSuppressed, numericOrNull,
+  SUPPRESSED, SUPPRESSED_EXPLANATION, aggregateRefusalMessage,
+} from "../service/superAdminService";
+
+// Muted chip for a k-suppressed value (ZP-PRIV B.2).
+function SuppressedChip({ large = false }) {
+  return (
+    <span
+      title={SUPPRESSED_EXPLANATION}
+      aria-label={SUPPRESSED_EXPLANATION}
+      className={`inline-flex cursor-help items-center rounded-full border border-border bg-surface-muted font-medium text-foreground-muted dark:bg-white/5 ${large ? "px-2.5 py-1 text-sm" : "px-2 py-0.5 text-[11px]"}`}
+    >
+      {SUPPRESSED}
+    </span>
+  );
+}
+
+// Note under a chart when some of its points are hidden — the chart itself
+// draws those points as gaps, never as zero.
+function HiddenPointsNote({ count }) {
+  if (!count) return null;
+  return (
+    <p className="mt-2 text-xs text-foreground-disabled" title={SUPPRESSED_EXPLANATION}>
+      {count} point{count === 1 ? "" : "s"} hidden (fewer than 5 workers or 2 organizations) to protect individuals.
+    </p>
+  );
+}
 
 const CARDS = [
   { key: "total_organizations", label: "Organizations", icon: Building2 },
@@ -44,7 +71,7 @@ function CardSkeleton() {
   );
 }
 
-function ChartCard({ title, note, children, height = 280 }) {
+function ChartCard({ title, note, footer, children, height = 280 }) {
   return (
     <div className="bg-surface border border-border rounded-xl shadow-sm p-5">
       <div className="mb-4 flex items-start justify-between gap-2">
@@ -56,6 +83,7 @@ function ChartCard({ title, note, children, height = 280 }) {
         )}
       </div>
       <div style={{ height }}>{children}</div>
+      {footer}
     </div>
   );
 }
@@ -87,35 +115,44 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [charts, setCharts] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({ preset: "thisYear", ...resolveDateRange("thisYear") });
 
   const load = useCallback(() => {
     setLoading(true);
     setError("");
+    setNotice("");
     Promise.all([
-      apiFetch("/api/super-admin/dashboard/stats"),
+      getDashboardStats(),
       getDashboardCharts({ start_date: dateRange.startDate || undefined, end_date: dateRange.endDate || undefined }),
     ])
       .then(([statsRes, chartsRes]) => {
         setStats(statsRes);
         setCharts(chartsRes);
       })
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        const friendly = aggregateRefusalMessage(err);
+        if (friendly) setNotice(friendly);
+        else setError(err.message);
+      })
       .finally(() => setLoading(false));
   }, [dateRange]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
-  const orgStatusData = charts
-    ? [
-        { name: "Active", value: charts.organizationsByStatus?.active || 0 },
-        { name: "Inactive", value: charts.organizationsByStatus?.inactive || 0 },
-      ]
-    : [];
   const orgCountryData = charts?.organizationsByCountry?.map((r) => ({ name: r.country, value: r.count })) || [];
+  // Hidden money/headcount points become null so Recharts leaves a gap.
+  const payrollTrend = (charts?.payrollTrend || []).map((p) => ({ ...p, gross: numericOrNull(p.gross), net: numericOrNull(p.net) }));
+  const trendHidden = (charts?.payrollTrend || []).filter((p) => isSuppressed(p.gross) || isSuppressed(p.net)).length;
+  const payrollByJurisdiction = (charts?.payrollByJurisdiction || []).map((p) => ({ ...p, grossPay: numericOrNull(p.grossPay) }));
+  const jurisdictionHidden = (charts?.payrollByJurisdiction || []).filter((p) => isSuppressed(p.grossPay)).length;
+  const employeesByCountry = (charts?.employeesByCountry || []).map((p) => ({ ...p, employees: numericOrNull(p.employees) }));
+  const employeesHidden = (charts?.employeesByCountry || []).filter((p) => isSuppressed(p.employees)).length;
+  const grossVsNetHidden = isSuppressed(charts?.grossVsNet?.gross) || isSuppressed(charts?.grossVsNet?.net);
   const complianceByStatus = charts ? Object.entries(charts.complianceOverview?.byStatus || {}).map(([name, value]) => ({ name, value })) : [];
 
   return (
@@ -139,6 +176,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {notice && (
+        <p className="mb-4 rounded-lg border border-warning/30 bg-warning-light px-4 py-3 text-sm text-warning">
+          {notice}
+        </p>
+      )}
+
       {error && (
         <p className="mb-4 rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
           {error}
@@ -153,7 +196,9 @@ export default function DashboardPage() {
               <div key={key} className="bg-surface border border-border rounded-xl shadow-sm p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-3xl font-bold text-foreground">{stats[key] ?? 0}</div>
+                    <div className="text-3xl font-bold text-foreground">
+                      {isSuppressed(stats[key]) ? <SuppressedChip large /> : stats[key] ?? 0}
+                    </div>
                     <div className="text-xs text-foreground-muted mt-1">{label}</div>
                   </div>
                   <Icon size={20} className="text-primary" />
@@ -165,13 +210,14 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-8">
         <ChartCard
           title="Payroll Trend"
-          note="Operational trend only — sums across every organization's currency. For currency-accurate totals, see Funding &amp; Payments."
+          note="Operational trend only — sums across every organization's currency. For currency-accurate totals, see Funding & Payments. Months with fewer than 5 workers or 2 organizations are hidden."
+          footer={<HiddenPointsNote count={trendHidden} />}
         >
-          {!charts || charts.payrollTrend.length === 0 ? (
+          {payrollTrend.length === 0 ? (
             <EmptyChart message="No payroll runs in this period." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={charts.payrollTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <AreaChart data={payrollTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gGross" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.18} />
@@ -198,7 +244,12 @@ export default function DashboardPage() {
           title="Gross vs Net Pay"
           note="Operational total for the selected period — sums across every organization's currency."
         >
-          {!charts || (!charts.grossVsNet?.gross && !charts.grossVsNet?.net) ? (
+          {charts && grossVsNetHidden ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-foreground-disabled">
+              <SuppressedChip large />
+              <span>Hidden: too few workers or organizations in this period to show a total.</span>
+            </div>
+          ) : !charts || (!charts.grossVsNet?.gross && !charts.grossVsNet?.net) ? (
             <EmptyChart message="No payroll data in this period." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -215,12 +266,16 @@ export default function DashboardPage() {
           )}
         </ChartCard>
 
-        <ChartCard title="Payroll by Jurisdiction" note="Each bar is its own currency — figures are never combined across countries.">
-          {!charts || charts.payrollByJurisdiction.length === 0 ? (
+        <ChartCard
+          title="Payroll by Jurisdiction"
+          note="Each bar is its own currency — figures are never combined across countries."
+          footer={<HiddenPointsNote count={jurisdictionHidden} />}
+        >
+          {payrollByJurisdiction.length === 0 ? (
             <EmptyChart message="No payroll data yet." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts.payrollByJurisdiction} layout="vertical" margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+              <BarChart data={payrollByJurisdiction} layout="vertical" margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--color-border)" />
                 <XAxis type="number" tick={{ fontSize: 11, fill: "var(--color-foreground-muted)" }} axisLine={false} tickLine={false} />
                 <YAxis type="category" dataKey="country" tick={{ fontSize: 11, fill: "var(--color-foreground-muted)" }} axisLine={false} tickLine={false} width={70} />
@@ -276,12 +331,12 @@ export default function DashboardPage() {
           )}
         </ChartCard>
 
-        <ChartCard title="Employee Distribution by Jurisdiction">
-          {!charts || charts.employeesByCountry.length === 0 ? (
+        <ChartCard title="Employee Distribution by Jurisdiction" footer={<HiddenPointsNote count={employeesHidden} />}>
+          {employeesByCountry.length === 0 ? (
             <EmptyChart message="No employees yet." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts.employeesByCountry} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <BarChart data={employeesByCountry} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" />
                 <XAxis dataKey="country" tick={{ fontSize: 11, fill: "var(--color-foreground-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "var(--color-foreground-muted)" }} axisLine={false} tickLine={false} width={40} />
@@ -318,7 +373,7 @@ export default function DashboardPage() {
                   <StatusPill status={org.is_active ? "active" : "inactive"} />
                 </td>
                 <td className="px-4 py-3 text-foreground-muted">
-                  {new Date(org.created_at).toLocaleDateString()}
+                  {parseUtc(org.created_at)?.toLocaleDateString() ?? "—"}
                 </td>
               </tr>
             ))}

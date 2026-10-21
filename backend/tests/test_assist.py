@@ -43,6 +43,7 @@ from app.database import Base, SessionLocal, engine, initialize_database  # noqa
 from app.modules.auth.models import User, UserRole  # noqa: E402
 from app.modules.organizations.models import Organization  # noqa: E402
 from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem  # noqa: E402
+from tests._mfa_login import mfa_login  # ZP-PRIV B08: real MFA sign-in
 
 Base.metadata.create_all(bind=engine)
 initialize_database()
@@ -170,7 +171,7 @@ def client():
 
 @pytest.fixture(scope="module")
 def headers(client):
-    r = client.post("/api/auth/login", json={"email": "assist-test@example.com", "password": "strong-password"})
+    r = mfa_login(client, json={"email": "assist-test@example.com", "password": "strong-password"})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -227,7 +228,7 @@ def test_notice_gate_blocks_until_acknowledged(client):
         )
     )
     _db.commit()
-    login = client.post("/api/auth/login", json={"email": "gate-check@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "gate-check@example.com", "password": "strong-password"})
     h = {"Authorization": f"Bearer {login.json()['access_token']}"}
     s = client.post("/api/assist/sessions", headers=h, json={"title": "gate"})
     sid = s.json()["id"]
@@ -676,7 +677,7 @@ def test_audit_and_retention_admin(client, headers):
 
 
 def test_kill_switch_blocks_new_sessions_and_messages(client, headers, session_id):
-    login = client.post("/api/auth/login", json={"email": "assist-super-admin@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "assist-super-admin@example.com", "password": "strong-password"})
     if login.status_code != 200:
         _db.add(
             User(
@@ -690,7 +691,7 @@ def test_kill_switch_blocks_new_sessions_and_messages(client, headers, session_i
             )
         )
         _db.commit()
-        login = client.post("/api/auth/login", json={"email": "assist-super-admin@example.com", "password": "strong-password"})
+        login = mfa_login(client, json={"email": "assist-super-admin@example.com", "password": "strong-password"})
     assert login.status_code == 200, login.text
     super_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -883,7 +884,7 @@ def test_kb_four_eyes_review(client, headers):
     assert self_approve.status_code == 403, self_approve.text
 
     # A different user can.
-    login = client.post("/api/auth/login", json={"email": "gate-check@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "gate-check@example.com", "password": "strong-password"})
     reviewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     approved = client.patch(
         f"/api/assist/knowledge/items/{item_id}", headers=reviewer_headers, json={"state": "APPROVED"}
@@ -937,7 +938,7 @@ def test_action_confirm_stale_if_match(client, headers):
 
 @pytest.fixture(scope="module")
 def ess_headers(client):
-    r = client.post("/api/auth/login", json={"email": "employee-ess@example.com", "password": "strong-password"})
+    r = mfa_login(client, json={"email": "employee-ess@example.com", "password": "strong-password"})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -1088,7 +1089,7 @@ def test_kb_supersede_and_withdraw(client, headers):
     old_id = _new_kb_item(client, headers, "old-published")
     new_id = _new_kb_item(client, headers, "new-published")
 
-    login = client.post("/api/auth/login", json={"email": "gate-check@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "gate-check@example.com", "password": "strong-password"})
     reviewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     for item_id in (old_id, new_id):
         client.patch(f"/api/assist/knowledge/items/{item_id}", headers=reviewer_headers, json={"state": "APPROVED"})
@@ -1151,7 +1152,7 @@ def test_kb_expiry_sweep(client, headers):
         headers=headers,
         json={"effective_to": "2020-01-01"},
     )
-    login = client.post("/api/auth/login", json={"email": "gate-check@example.com", "password": "strong-password"})
+    login = mfa_login(client, json={"email": "gate-check@example.com", "password": "strong-password"})
     reviewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     client.patch(f"/api/assist/knowledge/items/{item_id}", headers=reviewer_headers, json={"state": "APPROVED"})
     client.post(f"/api/assist/knowledge/items/{item_id}/publish", headers=reviewer_headers, json={})

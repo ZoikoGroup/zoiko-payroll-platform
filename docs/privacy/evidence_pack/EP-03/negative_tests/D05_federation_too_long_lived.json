@@ -1,0 +1,26 @@
+{
+  "testId": "D05_federation_too_long_lived",
+  "timestampUtc": "2026-10-19T10:02:53.477532+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "federated",
+  "tokenScope": "fake IdP",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "POST /api/auth/federation/exchange",
+  "expectedStatus": 401,
+  "actualStatus": 401,
+  "redactedResponse": {
+    "success": false,
+    "error": "UNAUTHORIZED",
+    "message": "This sign-in could not be accepted.",
+    "detail": "This sign-in could not be accepted."
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "integration pending: fake IdP"
+}

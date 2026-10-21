@@ -1,0 +1,35 @@
+{
+  "pack": "EP-02",
+  "title": "Effective roles, entitlements, service accounts and IAM",
+  "generatedAt": "2026-10-19T10:05:18Z",
+  "files": [
+    {
+      "path": "field_classes.json",
+      "sha256": "3c0d641e9fa34e447c73630a6f59e3aa7f3c5db961a451dfe5aa963b3e773b1e"
+    },
+    {
+      "path": "iam_and_iac.json",
+      "sha256": "6d74932459070085803383918b2ad7910f4a021a7699bee749af4300ff2237b1"
+    },
+    {
+      "path": "jml_reconciliation_sample.json",
+      "sha256": "6a8b8002afe4c2d9ac39684ef79813a6fb187ea9e62273d97f7516a4780ccbe0"
+    },
+    {
+      "path": "machine_client_scopes.json",
+      "sha256": "c984df93b01c2365982f47437827676cedff61596abc31deddeeab2ccd78eb32"
+    },
+    {
+      "path": "privileged_inventory_format_sample.json",
+      "sha256": "f439c182fbdd2dc6879686a6c259889c2d984b8770d0239558b2b8b6362884be"
+    },
+    {
+      "path": "role_matrix.json",
+      "sha256": "cf32df7f29ece5d06f3d5553de852a2297f7ee13b35d81a50188cb3bf1e9903e"
+    }
+  ],
+  "notes": [
+    "role_matrix.json is the PDP matrix in code.",
+    "privileged_inventory_format_sample.json / jml_reconciliation_sample.json are synthetic samples; the live inventory export is a human proof."
+  ]
+}
