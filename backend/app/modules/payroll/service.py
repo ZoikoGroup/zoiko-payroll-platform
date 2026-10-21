@@ -26664,7 +26664,13 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
     # Mexico (Phase 9c): a FINIQUITO run pays exactly its termination's
     # employee; any other run drops an employee whose approved termination
     # ended the employment before its period. MX runs / employees only.
-    if getattr(run, "mx_run_type", None) == "FINIQUITO" or any(e.country_code == "MX" for e in employees):
+    # Mexico (Phase 9d): a PTU run pays exactly its cycle's eligible workers
+    # (leavers keep the right). MX runs only.
+    if getattr(run, "mx_run_type", None) == "PTU":
+        from app.modules.payroll import mexico_ptu_service as _mx_ptu
+
+        employees = _mx_ptu.select_for_run(db, organization_id, run, employee_ids)
+    elif getattr(run, "mx_run_type", None) == "FINIQUITO" or any(e.country_code == "MX" for e in employees):
         from app.modules.payroll import mexico_termination_service as _mx_term
 
         employees = _mx_term.select_for_run(db, organization_id, run, employees, employee_ids)

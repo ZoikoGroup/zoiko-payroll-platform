@@ -827,3 +827,87 @@ def open_finiquito_run(termination_id: int, body: Dict[str, Any] = Body(...),
                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
     return _terminations().create_finiquito_run(db, _org_id(current_user), termination_id,
                                                 _opt_date(body.get("payDate"), "payDate"), _actor(current_user))
+
+
+# ── PTU (Phase 9d) ───────────────────────────────────────────────────────────
+
+def _ptu():
+    from app.modules.payroll import mexico_ptu_service
+
+    return mexico_ptu_service
+
+
+@router.get("/ptu/exclusion-reasons", summary="The transcribed PTU exclusion catalog (empty until S26)")
+def ptu_exclusion_reasons(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().exclusion_reasons(db, _org_id(current_user))
+
+
+@router.get("/ptu/cycles", summary="PTU cycles of the organisation's legal employers")
+def ptu_cycles(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().list_cycles(db, _org_id(current_user))
+
+
+@router.post("/ptu/cycles", summary="Record a PTU cycle: employer, fiscal year, distributable amount, evidence")
+def create_ptu_cycle(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear"),
+            "distributable_amount": body.get("distributableAmount"), "evidence_ref": body.get("evidenceRef"),
+            "note": body.get("note")}
+    return _ptu().create_cycle(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.get("/ptu/cycles/{cycle_id}", summary="One PTU cycle with its allocation")
+def ptu_cycle(cycle_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().get_cycle(db, _org_id(current_user), cycle_id)
+
+
+@router.post("/ptu/cycles/{cycle_id}/approve-amount", summary="Approve the distributable amount (a different person)")
+def approve_ptu_amount(cycle_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _ptu().approve_amount(db, _org_id(current_user), cycle_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/exclusions", summary="Record an operator exclusion (catalog reason + evidence)")
+def record_ptu_exclusion(cycle_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"employee_id": body.get("employeeId"), "reason_code": body.get("reasonCode"),
+            "evidence_ref": body.get("evidenceRef")}
+    return _ptu().record_exclusion(db, _org_id(current_user), cycle_id, data, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/exclusions/{employee_id}/approve",
+             summary="Approve an operator exclusion (a different person)")
+def approve_ptu_exclusion(cycle_id: int, employee_id: int, current_user=Depends(get_current_org_admin),
+                          db: Session = Depends(get_db)):
+    return _ptu().approve_exclusion(db, _org_id(current_user), cycle_id, employee_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/allocate",
+             summary="Allocate the pool by the transcribed rule from committed runs (blocks until S26)")
+def allocate_ptu(cycle_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _ptu().allocate(db, _org_id(current_user), cycle_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/approve-allocation",
+             summary="Approve the allocation (a different person; refused if the inputs changed)")
+def approve_ptu_allocation(cycle_id: int, current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    return _ptu().approve_allocation(db, _org_id(current_user), cycle_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/ptu-run", summary="Open the PTU run of an approved cycle")
+def open_ptu_run(cycle_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                 db: Session = Depends(get_db)):
+    return _ptu().create_ptu_run(db, _org_id(current_user), cycle_id, _opt_date(body.get("payDate"), "payDate"),
+                                 _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/cancel", summary="Cancel a PTU cycle before its PTU run exists")
+def cancel_ptu_cycle(cycle_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    return _ptu().cancel_cycle(db, _org_id(current_user), cycle_id, str(body.get("reason") or ""),
+                               _actor(current_user))
+
+
+@router.get("/employees/{employee_id}/ptu", summary="The employee's PTU allocations by fiscal year")
+def employee_ptu(employee_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().employee_ptu(db, _org_id(current_user), employee_id)

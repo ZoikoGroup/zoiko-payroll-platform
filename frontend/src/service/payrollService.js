@@ -2641,6 +2641,17 @@ export const recordMxTermination = (employeeId, payload) => api.post(`${MX}/empl
 export const approveMxTermination = (terminationId) => api.post(`${MX}/terminations/${terminationId}/approve`, {});
 export const cancelMxTermination = (terminationId, reason) => api.post(`${MX}/terminations/${terminationId}/cancel`, { reason });
 export const openMxFiniquitoRun = (terminationId, payDate) => api.post(`${MX}/terminations/${terminationId}/finiquito-run`, { payDate });
+export const getMxPtuExclusionReasons = () => api.get(`${MX}/ptu/exclusion-reasons`);
+export const listMxPtuCycles = () => api.get(`${MX}/ptu/cycles`);
+export const createMxPtuCycle = (payload) => api.post(`${MX}/ptu/cycles`, payload);
+export const approveMxPtuAmount = (cycleId) => api.post(`${MX}/ptu/cycles/${cycleId}/approve-amount`, {});
+export const recordMxPtuExclusion = (cycleId, payload) => api.post(`${MX}/ptu/cycles/${cycleId}/exclusions`, payload);
+export const approveMxPtuExclusion = (cycleId, employeeId) => api.post(`${MX}/ptu/cycles/${cycleId}/exclusions/${employeeId}/approve`, {});
+export const allocateMxPtu = (cycleId) => api.post(`${MX}/ptu/cycles/${cycleId}/allocate`, {});
+export const approveMxPtuAllocation = (cycleId) => api.post(`${MX}/ptu/cycles/${cycleId}/approve-allocation`, {});
+export const openMxPtuRun = (cycleId, payDate) => api.post(`${MX}/ptu/cycles/${cycleId}/ptu-run`, { payDate });
+export const cancelMxPtuCycle = (cycleId, reason) => api.post(`${MX}/ptu/cycles/${cycleId}/cancel`, { reason });
+export const getMxEmployeePtu = (employeeId) => api.get(`${MX}/employees/${employeeId}/ptu`);
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>

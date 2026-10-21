@@ -36,8 +36,8 @@ _ZERO, _ONE = Decimal("0"), Decimal("1")
 CONCEPTS = ("AGUINALDO", "VACATION_PREMIUM", "VACATION_PAYOUT", "PTU", "SEPARATION")
 # The concepts a special run may carry (Phase 9b: aguinaldo; 9c: the finiquito
 # — proportional aguinaldo, vacation paid out and its premium, separation
-# components; PTU arrives in 9d). Never an ordinary line (MX-009).
-RUN_CONCEPTS = {"AGUINALDO": ("AGUINALDO",),
+# components; 9d: PTU). Never an ordinary line (MX-009).
+RUN_CONCEPTS = {"AGUINALDO": ("AGUINALDO",), "PTU": ("PTU",),
                 "FINIQUITO": ("AGUINALDO", "VACATION_PAYOUT", "VACATION_PREMIUM", "SEPARATION")}
 
 

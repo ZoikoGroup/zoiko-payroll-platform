@@ -63,6 +63,12 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     # Phase 9c — termination and finiquito
     ("GET", "/termination-reasons"), ("GET", "/employees/1/terminations"), ("POST", "/employees/1/terminations"),
     ("POST", "/terminations/1/approve"), ("POST", "/terminations/1/cancel"), ("POST", "/terminations/1/finiquito-run"),
+    # Phase 9d — PTU
+    ("GET", "/ptu/exclusion-reasons"), ("GET", "/ptu/cycles"), ("POST", "/ptu/cycles"), ("GET", "/ptu/cycles/1"),
+    ("POST", "/ptu/cycles/1/approve-amount"), ("POST", "/ptu/cycles/1/exclusions"),
+    ("POST", "/ptu/cycles/1/exclusions/1/approve"), ("POST", "/ptu/cycles/1/allocate"),
+    ("POST", "/ptu/cycles/1/approve-allocation"), ("POST", "/ptu/cycles/1/ptu-run"), ("POST", "/ptu/cycles/1/cancel"),
+    ("GET", "/employees/1/ptu"),
 ]
 
 
@@ -93,6 +99,10 @@ def test_every_route_is_listed():
     assert mounted == {(m, shape(ORG_BASE + p)) for m, p in ORG_ROUTES}
 
 
+def _names_an_employee(path):
+    return "/employees/1" in path or "/exclusions/1/" in path
+
+
 @pytest.mark.parametrize("method,path", ORG_ROUTES)
 def test_flag_off_every_org_route_refuses_even_for_a_mexican_org(db, method, path):
     t = make_org(db)                                            # payroll jurisdiction MX
@@ -106,9 +116,9 @@ def test_flag_off_every_org_route_refuses_even_for_a_mexican_org(db, method, pat
             r = _call(c, method, path)
         body = r.json()
         dormant = r.status_code == 403 and "not open for onboarding" in body["message"]
-        by_policy = (r.status_code == 403 and body.get("error") == "ACCESS_DENIED") or                     (r.status_code == 404 and "/employees/1" in path)
+        by_policy = (r.status_code == 403 and body.get("error") == "ACCESS_DENIED") or                     (r.status_code == 404 and _names_an_employee(path))
         assert dormant or by_policy, (role, r.text)
-        if role == "org_admin" and "/employees/1" not in path:
+        if role == "org_admin" and not _names_an_employee(path):
             assert dormant, r.text
 
 

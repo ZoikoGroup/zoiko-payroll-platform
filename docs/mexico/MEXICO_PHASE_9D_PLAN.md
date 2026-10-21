@@ -8,7 +8,7 @@ Spec ZP-MX-ENG-001 v1.0 §17 MX-054–MX-056 · Phase 9 plan B7, D7, D8, X5 · i
 
 **Production.** The database is at Rugvedh's `e1a3c5e7f9b2`. `main`'s last two deploys refused, correctly. The next deploy that succeeds is the integration of `nikhil` (see `PRODUCTION_STATE.md`).
 
-**Status.** Plan only. **Waiting for approval.**
+**Status.** Approved 2026-10-21 as recommended (D1–D10). **Built and committed on `nikhil`** — `MEXICO_PHASE_9D_IMPLEMENTATION_REPORT.md`.
 
 ## 1. What PTU is, and what Zoiko does and does not decide
 

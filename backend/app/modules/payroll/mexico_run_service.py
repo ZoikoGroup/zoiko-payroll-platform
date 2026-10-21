@@ -44,7 +44,7 @@ SPEC = _content.SPEC
 GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
-BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO")   # 9a, 9b, 9c; PTU: 9d
+BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO", "PTU")   # 9a, 9b, 9c, 9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
@@ -443,6 +443,8 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         return _aguinaldo_inputs(db, run, employee, pack, pay_rates, pay_slabs)
     if run_type == "FINIQUITO":
         return _finiquito_inputs(db, run, employee, pack, pay_rates, pay_slabs)
+    if run_type == "PTU":
+        return _ptu_inputs(db, run, employee, pack, pay_rates, pay_slabs)
 
     prof = _profile(db, employee, on)
     reg = _registration(db, prof, on)
@@ -656,6 +658,58 @@ def _finiquito_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
         "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
         "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
         "mx_input_components": components, "mx_run_type": "FINIQUITO", "mx_special_detail": _plain(detail),
+    }
+
+
+def _ptu_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
+    """Phase 9d: the inputs of one PTU payslip — the worker's final amount from
+    the APPROVED allocation of the run's cycle. Profile and registration are
+    those in force on the pay date, or on the last day employed for a leaver;
+    the content is the pay date's (MX-004). No ordinary period: the engine's
+    special-run path (withheld by the special-pay rule, never in ordinary pay
+    or accumulators — MX-056)."""
+    from app.modules.payroll import mexico_employer_service, mexico_ptu_service
+
+    on = run.pay_date
+    cycle, alloc = mexico_ptu_service.allocation_for(db, run, employee.id)
+    if cycle.status not in ("APPROVED", "DISTRIBUTED"):
+        raise MXBlock("MX_PTU_CYCLE_NOT_APPROVED", f"PTU cycle {cycle.id} is {cycle.status}", employee.organization_id)
+    as_of = employee.date_of_leaving if employee.date_of_leaving and employee.date_of_leaving < on else on
+    prof = _profile(db, employee, as_of)
+    reg = _registration(db, prof, as_of)
+    policy_row = _labor_policy(db, reg, as_of)
+    zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
+    isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
+    earnings = [{"code": "MX_PTU", "kind": "PTU", "amount": _dec(alloc.final_amount)}]
+    policy = None if policy_row is None else {"id": policy_row.id, "version": policy_row.version}
+    registration = None if reg is None else {"id": reg.id, "status": reg.status,
+                                             "employer_profile_id": reg.employer_profile_id}
+    profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
+                                                    "mx_seniority_date", "mx_imss_registration_id")}
+    allocation = {"cycle": cycle.id, "fingerprint": cycle.allocation_fingerprint, "final": alloc.final_amount,
+                  "days": alloc.qualifying_days, "salary": alloc.qualifying_salary}
+    components = {
+        "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs]}),
+        "isnPack": _hash(isn_pack), "registration": _hash(registration), "laborPolicy": _hash(policy),
+        "profile": _hash(profile_facts), "ptuAllocation": _hash(allocation), "earnings": _hash(earnings),
+    }
+    special_detail = {"concept": "PTU", "cycleId": cycle.id, "fiscalYear": cycle.fiscal_year,
+                      "qualifyingDays": alloc.qualifying_days, "qualifyingSalary": alloc.qualifying_salary,
+                      "daysShare": alloc.days_share, "salaryShare": alloc.salary_share,
+                      "capReference": alloc.cap_reference, "capApplied": alloc.cap_applied,
+                      "finalAmount": alloc.final_amount, "allocationRule": cycle.rule_source,
+                      "paymentDeadline": cycle.payment_deadline, "deadlineRule": cycle.deadline_rule_ref}
+    return {
+        "mx_payroll_date": on, "mx_payment_period": None, "mx_profile": prof, "mx_registration": registration,
+        "mx_risk_premium": None, "mx_labor_policy": policy, "mx_classifications": {}, "mx_infonavit_notices": [],
+        "mx_isn_state_pack": isn_pack, "mx_earnings": earnings, "mx_hours": None, "mx_min_wage_zone": zone,
+        "mx_period": {"start": run.period_start, "end": run.period_end, "days_paid": _ZERO, "segments": []},
+        "mx_variable_accumulator": {"total": _ZERO, "days": _ZERO},
+        "mx_month_to_date": {"taxable": _ZERO, "subsidy_applied": _ZERO},
+        "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
+        "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
+        "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
+        "mx_input_components": components, "mx_run_type": "PTU", "mx_special_detail": _plain(special_detail),
     }
 
 
@@ -921,6 +975,9 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
     from app.modules.payroll import mexico_termination_service
 
     counts["vacationPaidOut"] = mexico_termination_service.on_commit(db, run)
+    from app.modules.payroll import mexico_ptu_service
+
+    counts["ptuAllocationsPaid"] = mexico_ptu_service.on_commit(db, run)
     db.flush()
     return {"committed": True, **counts}
 
@@ -1025,6 +1082,9 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     from app.modules.payroll import mexico_termination_service
 
     removed["vacationPaidOutRemoved"] = mexico_termination_service.on_reset(db, run)
+    from app.modules.payroll import mexico_ptu_service
+
+    removed["ptuAllocationsReopened"] = mexico_ptu_service.on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)

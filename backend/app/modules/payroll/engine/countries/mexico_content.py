@@ -376,6 +376,17 @@ MX_SPECIAL_PAY_ISN_INCLUSION: dict = {}   # (state, concept) -> (included: bool,
 MX_TERMINATION_REASONS: dict = {}     # reason code -> TerminationReason (S26)
 MX_FINIQUITO_RULE = None              # FiniquitoRule (S26 + S24 / S25)
 
+# Phase 9d (plan 9d D2-D8): PTU. The employer enters the distributable amount
+# (never derived, MX-054); the RULE OBJECT decides the split, which days and
+# salary count, eligibility, the caps, the rounding residue and the payment
+# deadline (LFT Arts. 117-131 - S26; windows - S21). The operator-exclusion
+# CATALOG lists the reasons an operator may assert, with evidence and a second
+# approver. Interfaces in engine/jurisdictions/mexico/ptu.py. EMPTY: no PTU is
+# allocated (MX_PTU_RULE_MISSING) and no operator exclusion is recorded
+# (MX_PTU_EXCLUSION_RULE_MISSING).
+MX_PTU_RULE = None                    # PtuRule (S26 / S21)
+MX_PTU_EXCLUSION_REASONS: dict = {}   # reason code -> PtuExclusionReason (label, source, source_ref) - S26
+
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
 # "CDMX" code its ISN pack already uses). Geography, not statutory content.
