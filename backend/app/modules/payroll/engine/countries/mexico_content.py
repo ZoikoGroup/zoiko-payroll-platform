@@ -387,6 +387,16 @@ MX_FINIQUITO_RULE = None              # FiniquitoRule (S26 + S24 / S25)
 MX_PTU_RULE = None                    # PtuRule (S26 / S21)
 MX_PTU_EXCLUSION_REASONS: dict = {}   # reason code -> PtuExclusionReason (label, source, source_ref) - S26
 
+# Phase 9e (plan 9e D1-D10): the annual ISR adjustment (LISR Art. 97 / 152 -
+# S24). The RULE OBJECT decides eligibility, the annual ISR and how a
+# difference is applied in a later run; the CATALOG lists the exclusions an
+# operator may assert (with evidence and a second approver). Interfaces in
+# engine/jurisdictions/mexico/annual_adjustment.py. EMPTY: nothing is computed
+# (MX_ANNUAL_ADJUSTMENT_RULE_MISSING) and no operator exclusion is recorded
+# (MX_ANNUAL_ADJUSTMENT_EXCLUSION_RULE_MISSING).
+MX_ANNUAL_ADJUSTMENT_RULE = None                 # AnnualAdjustmentRule (S24)
+MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = {}   # reason code -> exclusion reason (label, source, source_ref)
+
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
 # "CDMX" code its ISN pack already uses). Geography, not statutory content.

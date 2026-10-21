@@ -359,9 +359,13 @@ def test_deactivate_organization_response_precedes_email_send(db, organization, 
     )
 
     async def recording_app(scope, receive, send):
+        # The response START (status + headers) is the point the client has its
+        # answer. With several BaseHTTPMiddleware layers (ZP-PRIV) a background
+        # task may begin before the final body chunk reaches this outer send,
+        # so the final chunk is not a stable marker; the start is.
         async def _send(message):
             await send(message)
-            if message["type"] == "http.response.body" and not message.get("more_body", False):
+            if message["type"] == "http.response.start":
                 timeline.append("response_sent")
         await app(scope, receive, _send)
 

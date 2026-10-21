@@ -69,6 +69,11 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("POST", "/ptu/cycles/1/exclusions/1/approve"), ("POST", "/ptu/cycles/1/allocate"),
     ("POST", "/ptu/cycles/1/approve-allocation"), ("POST", "/ptu/cycles/1/ptu-run"), ("POST", "/ptu/cycles/1/cancel"),
     ("GET", "/employees/1/ptu"),
+    # Phase 9e — annual ISR adjustment
+    ("GET", "/annual-adjustments/exclusion-reasons"), ("GET", "/annual-adjustments"),
+    ("POST", "/annual-adjustments/compute"), ("POST", "/annual-adjustments/approve"),
+    ("POST", "/annual-adjustments/apply"), ("POST", "/annual-adjustments/1/exclusion"),
+    ("POST", "/annual-adjustments/1/exclusion/approve"), ("GET", "/employees/1/annual-adjustments"),
 ]
 
 
