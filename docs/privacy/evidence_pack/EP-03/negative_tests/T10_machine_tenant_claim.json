@@ -1,0 +1,21 @@
+{
+  "testId": "T10_machine_tenant_claim",
+  "timestampUtc": "2026-10-19T10:01:25.286233+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "machine_client",
+  "tokenScope": "tenant:A employees:read",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/payroll/employees?organization_id=<B>",
+  "expectedStatus": 404,
+  "actualStatus": 404,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "tenant claim change refused and audited"
+}

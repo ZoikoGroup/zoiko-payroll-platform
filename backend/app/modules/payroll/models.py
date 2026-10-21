@@ -140,6 +140,10 @@ class PayrollEmployee(Base):
 
     id               = Column(Integer, primary_key=True, index=True)
     organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    # ZP-PRIV C.1: the scope units a scoped payroll admin or a JIT support
+    # grant is limited to. NULL = unassigned (visible org-wide only).
+    legal_entity_id  = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    pay_group_id     = Column(Integer, ForeignKey("pay_groups.id", ondelete="SET NULL"), nullable=True, index=True)
 
     employee_code    = Column(String(20), nullable=False)
     legacy_code      = Column(String(20), nullable=True)
@@ -10130,7 +10134,7 @@ class PayrollMxImssMovement(Base):
     registration_id        = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
     employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
     payroll_run_id         = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
-    source_kind            = Column(String(20), nullable=False)       # FIRST_RUN / SBC_CHANGE / END_OF_EMPLOYMENT
+    source_kind            = Column(String(20), nullable=False)       # FIRST_RUN / SBC_CHANGE / TERMINATION (9c; END_OF_EMPLOYMENT before)
     source_key             = Column(String(120), nullable=False)
     movement_type          = Column(String(14), nullable=False)       # ALTA / BAJA / MODIFICACION
     event_date             = Column(Date, nullable=False)
@@ -10421,6 +10425,118 @@ class PayrollMxVacationRecord(Base):
         sa.CheckConstraint("kind IN ('TAKEN', 'OPENING', 'PAID_OUT')", name="ck_mx_vacation_record_kind"),
         sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'PAID', 'WITHDRAWN')", name="ck_mx_vacation_record_status"),
         sa.CheckConstraint("days > 0", name="ck_mx_vacation_record_days"),
+    )
+
+
+class PayrollMxTermination(Base):
+    """One end of employment (MX-057 / MX-058, Phase 9 plan B6, D5 / D6): the
+    date, a reason from the transcribed catalog (S26) and an evidence
+    reference, recorded by one person and approved by another. Approval sets
+    the employee's date of leaving and is the ONLY source of the IMSS BAJA
+    (Phase 8). A FINIQUITO run settles it (COMMITTED); it can be cancelled
+    only before that run exists."""
+    __tablename__ = "payroll_mx_terminations"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    termination_date          = Column(Date, nullable=False)                    # the last day employed
+    reason_code               = Column(String(40), nullable=False)
+    reason_source             = Column(String(200), nullable=True)              # the catalog entry's source at recording
+    evidence_ref              = Column(String(300), nullable=False)
+    note                      = Column(String(300), nullable=True)
+    status                    = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / APPROVED / COMMITTED / CANCELLED
+    recorded_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at               = Column(DateTime(timezone=True), nullable=True)
+    previous_date_of_leaving  = Column(Date, nullable=True)                    # restored on cancel
+    baja_movement_ids         = Column(JSON, nullable=True)                    # the Phase 8 BAJA movements it generated
+    finiquito_run_id          = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    cancelled_reason          = Column(String(300), nullable=True)
+    cancelled_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'COMMITTED', 'CANCELLED')",
+                           name="ck_mx_termination_status"),
+        # One live termination per employee.
+        sa.Index("uq_mx_termination_live_employee", "employee_id", unique=True,
+                 sqlite_where=sa.text("status <> 'CANCELLED'"), postgresql_where=sa.text("status <> 'CANCELLED'")),
+    )
+
+
+class PayrollMxPtuCycle(Base):
+    """One PTU (profit-sharing) cycle of a legal employer and fiscal year
+    (MX-054–MX-056, Phase 9d plan D1–D8): the distributable amount the employer
+    enters with evidence (never derived), approved by a second person; the
+    allocation the transcribed rule makes from committed runs (inputs frozen by
+    fingerprint, re-checked at approval); then one PTU run."""
+    __tablename__ = "payroll_mx_ptu_cycles"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id       = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="RESTRICT"), nullable=False, index=True)
+    fiscal_year               = Column(Integer, nullable=False)
+    distributable_amount      = Column(Numeric(16, 2), nullable=False)
+    evidence_ref              = Column(String(300), nullable=False)
+    note                      = Column(String(300), nullable=True)
+    status                    = Column(String(16), nullable=False, default="DRAFT")
+    recorded_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    amount_approved_at        = Column(DateTime(timezone=True), nullable=True)
+    operator_exclusions       = Column(JSON, nullable=True)                 # [{employeeId, reason, evidenceRef, recordedById, approvedById}]
+    allocated_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    allocated_at              = Column(DateTime(timezone=True), nullable=True)
+    allocation_fingerprint    = Column(String(64), nullable=True)
+    allocation_residue        = Column(Numeric(16, 2), nullable=True)
+    allocation_approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    ptu_run_id                = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    payment_deadline          = Column(Date, nullable=True)
+    deadline_rule_ref         = Column(String(200), nullable=True)
+    rule_source               = Column(String(200), nullable=True)
+    cancelled_reason          = Column(String(300), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'AMOUNT_APPROVED', 'ALLOCATED', 'APPROVED', 'DISTRIBUTED', 'CANCELLED')",
+                           name="ck_mx_ptu_cycle_status"),
+        sa.CheckConstraint("distributable_amount > 0", name="ck_mx_ptu_cycle_amount"),
+        sa.Index("uq_mx_ptu_cycle_live", "employer_profile_id", "fiscal_year", unique=True,
+                 sqlite_where=sa.text("status <> 'CANCELLED'"), postgresql_where=sa.text("status <> 'CANCELLED'")),
+    )
+
+
+class PayrollMxPtuAllocation(Base):
+    """One worker's PTU in a cycle: the qualifying facts from committed runs,
+    the rule's shares, cap comparison and final amount, or the exclusion with
+    its reason (and, for an operator exclusion, its evidence and approver)."""
+    __tablename__ = "payroll_mx_ptu_allocations"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    cycle_id                  = Column(Integer, ForeignKey("payroll_mx_ptu_cycles.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    eligible                  = Column(sa.Boolean, nullable=False, default=False)
+    exclusion_reason          = Column(String(60), nullable=True)
+    exclusion_evidence_ref    = Column(String(300), nullable=True)
+    exclusion_approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    qualifying_days           = Column(Numeric(8, 2), nullable=False)
+    qualifying_salary         = Column(Numeric(16, 2), nullable=False)
+    salary_by_kind            = Column(JSON, nullable=True)
+    days_share                = Column(Numeric(16, 2), nullable=False)
+    salary_share              = Column(Numeric(16, 2), nullable=False)
+    cap_reference             = Column(JSON, nullable=True)
+    cap_applied               = Column(sa.Boolean, nullable=False, default=False)
+    final_amount              = Column(Numeric(16, 2), nullable=False)
+    payslip_item_id           = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=True, index=True)
+    rule_source               = Column(String(200), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.UniqueConstraint("cycle_id", "employee_id", name="uq_mx_ptu_allocation_worker"),
+        sa.CheckConstraint("final_amount >= 0", name="ck_mx_ptu_allocation_amount"),
     )
 
 

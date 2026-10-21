@@ -1,0 +1,59 @@
+{
+  "pack": "EP-04",
+  "title": "Support-access and break-glass records",
+  "generatedAt": "2026-10-19T10:05:20Z",
+  "files": [
+    {
+      "path": "records/D_break_glass_review.json",
+      "sha256": "4c877e2037b61270edaae83f4d18b9d1e90114bdbc3178805e1b18b5b1f54318"
+    },
+    {
+      "path": "records/PG_support_audit_tamper.json",
+      "sha256": "db6dcb3ce1f3c15793ffce9543a824a83238a6daa121233d4c1894f94cfe772e"
+    },
+    {
+      "path": "records/T06.json",
+      "sha256": "6f74d97d5247238cc90233c847a18ce4f7919b33f6b3603713c40f909ffaf6e4"
+    },
+    {
+      "path": "records/T07_A2.json",
+      "sha256": "ce2598a51b2a0cccfa29a014fed708c930ff2bd7a04d0ebf7ad19c0d0dc039fd"
+    },
+    {
+      "path": "records/T07_B1.json",
+      "sha256": "5a2f6aea342f3738916b9ea9f173cbc8cf34666f8be28776459cc01cc93c0951"
+    },
+    {
+      "path": "records/T07_export.json",
+      "sha256": "4bb7aaaadba48abc1f0af4287c0a77b89916b6ad0da8fc5c09237a42aba736c6"
+    },
+    {
+      "path": "records/T07_payslips.json",
+      "sha256": "08624e734b38167958551dac39bc1221128838f7983395448c1637c324091a83"
+    },
+    {
+      "path": "records/T07_write.json",
+      "sha256": "ae1b449b54e13c1b152ba7659943a3239b85e0f5b7ea45ce0bc5c016b7445c41"
+    },
+    {
+      "path": "records/T08_expiry.json",
+      "sha256": "03c778d5514131383fd00ec72b02504a1ce6ad6bd95180c3fbe8fb1dedb19683"
+    },
+    {
+      "path": "records/T08_revoke.json",
+      "sha256": "76d5a867315a90775128f448994303fe3d8378ae0de8c84f40ecbbc39f460791"
+    },
+    {
+      "path": "records/T12_attribution_and_drill.json",
+      "sha256": "dbbc425663831cd2a01d4d50a2c180f2775ab7c34cc528ec2ffaf18c0dc63aa5"
+    },
+    {
+      "path": "support_access_configuration.json",
+      "sha256": "c235d5f6987205b4eaf1460efa5ac9b3bcba25d0dd90060f190be2be147fe235"
+    }
+  ],
+  "notes": [
+    "Synthetic grant, break-glass and review records from the test run.",
+    "Production support-access records are exported from the tenant Audit tab / security events."
+  ]
+}

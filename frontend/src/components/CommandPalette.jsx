@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, CornerDownLeft, Command } from "lucide-react";
-import { NAV_GROUPS } from "./superAdminNav";
+import { navGroupsFor } from "./superAdminNav";
+import { getStoredUser } from "../api/client";
 
 function normalize(value) {
   return value.toLowerCase().replace(/_/g, " ").trim();
@@ -28,7 +29,7 @@ export default function CommandPalette() {
 
   const flatEntries = useMemo(
     () =>
-      NAV_GROUPS.flatMap((group) =>
+      navGroupsFor(getStoredUser()?.role).flatMap((group) =>
         group.items.map((item) => ({
           label: item.label,
           href: item.href,

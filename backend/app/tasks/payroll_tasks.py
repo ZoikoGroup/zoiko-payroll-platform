@@ -34,6 +34,8 @@ way it does:
    callback so N employees do not trigger N full re-aggregations. There
    is no second commit of the same work anywhere in this file.
 """
+import contextlib
+
 from celery import chord, group
 from celery import shared_task
 from celery.utils.log import get_task_logger
@@ -47,6 +49,7 @@ from app.modules.payroll.models import (
     PayrollRun, PayrollStatus, PayrollEmployee, PayslipItem, EmployeeStatus,
 )
 from app.core.exceptions import NotFoundException
+from app.core.job_auth import JobAuthorizationError, authorized_job, requires_job_principal
 
 logger = get_task_logger(__name__)
 
@@ -71,7 +74,8 @@ STATUS_ERROR = "error"
     queue="payroll",
 )
 def generate_payslips_for_run_task(self, run_id: int, organization_id: int,
-                                   employee_ids: Optional[List[int]] = None):
+                                   employee_ids: Optional[List[int]] = None,
+                                   job_ctx: Optional[dict] = None):
     """Generate payslips for a payroll run.
 
     Dispatches a Celery chord — a header group of one task per pending
@@ -90,7 +94,15 @@ def generate_payslips_for_run_task(self, run_id: int, organization_id: int,
     resolves, not hide behind backoff.
     """
     db = SessionLocal()
+    stack = contextlib.ExitStack()
     try:
+        # ZP-PRIV D08: re-authorize the requesting user and bind the tenant
+        # scope on EVERY execution (including a retry or a replay); the
+        # employee set is narrowed to the user's current scope.
+        auth = stack.enter_context(authorized_job(
+            db, job_ctx, task_name="generate_payslips_for_run_task", organization_id=organization_id,
+            roles=("org_admin", "payroll_admin")))
+        employee_ids = _restrict_to_scope(employee_ids, auth["employee_ids"])
         run = db.query(PayrollRun).filter(
             PayrollRun.id == run_id,
             PayrollRun.organization_id == organization_id
@@ -112,7 +124,7 @@ def generate_payslips_for_run_task(self, run_id: int, organization_id: int,
             # an operator who asked for generation on an empty run should
             # not get silence.
             return finalize_payroll_run_task.apply(
-                args=[[], run_id, organization_id, 0]
+                args=[[], run_id, organization_id, 0], kwargs={"job_ctx": job_ctx}
             ).get()
 
         blocker = payroll_service.parallel_payslip_generation_blocker(
@@ -142,11 +154,11 @@ def generate_payslips_for_run_task(self, run_id: int, organization_id: int,
 
         header = group(
             generate_payslip_for_employee_task.s(
-                run_id, organization_id, emp.id, payslip_numbers[idx])
+                run_id, organization_id, emp.id, payslip_numbers[idx], job_ctx=job_ctx)
             for idx, emp in enumerate(pending_employees)
         )
         callback = finalize_payroll_run_task.s(
-            run_id, organization_id, len(pending_employees))
+            run_id, organization_id, len(pending_employees), job_ctx=job_ctx)
         chord(header)(callback)
 
         return {
@@ -155,12 +167,26 @@ def generate_payslips_for_run_task(self, run_id: int, organization_id: int,
             "parallel": True,
             "employee_count": len(pending_employees),
         }
+    except JobAuthorizationError:
+        db.rollback()
+        raise  # fail closed; never retried (the task declares no autoretry)
     except Exception as exc:
         logger.error(f"Payroll run {run_id} generation dispatch failed: {exc}")
         db.rollback()
         raise
     finally:
+        stack.close()
         db.close()
+
+
+def _restrict_to_scope(employee_ids: Optional[List[int]], scope) -> Optional[List[int]]:
+    """Intersect a requested employee set with the requester's live scope
+    (None scope = whole organization; None request = everyone in scope)."""
+    if scope is None:
+        return employee_ids
+    if employee_ids is None:
+        return sorted(scope)
+    return [e for e in employee_ids if e in scope]
 
 
 def _pending_employees(db: Session, run: PayrollRun, organization_id: int,
@@ -260,7 +286,8 @@ def _allocate_payslip_numbers(db: Session, run: PayrollRun, count: int) -> List[
 )
 def generate_payslip_for_employee_task(self, run_id: int, organization_id: int,
                                        employee_id: int,
-                                       payslip_number: Optional[str] = None):
+                                       payslip_number: Optional[str] = None,
+                                       job_ctx: Optional[dict] = None):
     """Generate ONE employee's payslip — a Celery chord header member.
 
     Owns one short transaction: it resolves and writes a single payslip
@@ -278,7 +305,18 @@ def generate_payslip_for_employee_task(self, run_id: int, organization_id: int,
     visible and retryable rather than becoming a silent, half-written run.
     """
     db = SessionLocal()
+    stack = contextlib.ExitStack()
     try:
+        try:
+            auth = stack.enter_context(authorized_job(
+                db, job_ctx, task_name="generate_payslip_for_employee_task", organization_id=organization_id,
+                roles=("org_admin", "payroll_admin")))
+        except JobAuthorizationError as exc:
+            return {"status": STATUS_ERROR, "run_id": run_id, "employee_id": employee_id,
+                    "error": "not authorized", "reason": str(exc).split(": ")[-1]}
+        if auth["employee_ids"] is not None and employee_id not in auth["employee_ids"]:
+            return {"status": STATUS_ERROR, "run_id": run_id, "employee_id": employee_id,
+                    "error": "not authorized", "reason": "OUT_OF_SCOPE"}
         run = db.query(PayrollRun).filter(
             PayrollRun.id == run_id,
             PayrollRun.organization_id == organization_id
@@ -300,9 +338,11 @@ def generate_payslip_for_employee_task(self, run_id: int, organization_id: int,
             f"employee {employee_id}: {exc}"
         )
         db.rollback()
+        # The type only: an exception message can carry worker values (D03).
         return {"status": STATUS_ERROR, "run_id": run_id,
-                "employee_id": employee_id, "error": str(exc)}
+                "employee_id": employee_id, "error": type(exc).__name__}
     finally:
+        stack.close()
         db.close()
 
 
@@ -311,7 +351,7 @@ def generate_payslip_for_employee_task(self, run_id: int, organization_id: int,
     queue="payroll",
 )
 def finalize_payroll_run_task(self, results: List[dict], run_id: int,
-                              organization_id: int, expected_count: int):
+                              organization_id: int, expected_count: int, job_ctx: Optional[dict] = None):
     """Chord callback — recomputes the run's aggregates exactly once.
 
     `results` is supplied by Celery (the chord's collective header
@@ -340,7 +380,13 @@ def finalize_payroll_run_task(self, results: List[dict], run_id: int,
         same work.
     """
     db = SessionLocal()
+    stack = contextlib.ExitStack()
     try:
+        # ZP-PRIV D08: the callback re-authorizes the requester and binds the
+        # tenant too (org-wide: run totals cover every payslip of the run).
+        stack.enter_context(authorized_job(
+            db, job_ctx, task_name="finalize_payroll_run_task", organization_id=organization_id,
+            roles=("org_admin", "payroll_admin"), org_wide=True))
         run = db.query(PayrollRun).filter(
             PayrollRun.id == run_id,
             PayrollRun.organization_id == organization_id
@@ -399,6 +445,7 @@ def finalize_payroll_run_task(self, results: List[dict], run_id: int,
         db.rollback()
         raise
     finally:
+        stack.close()
         db.close()
 
 
@@ -406,6 +453,7 @@ def finalize_payroll_run_task(self, results: List[dict], run_id: int,
     bind=True,
     queue="payroll",
 )
+@requires_job_principal("preview_payroll_run_task")
 def preview_payroll_run_task(self, organization_id: int, employee_ids: List[int],
                               country: str, period_start: str, period_end: str,
                               calculation_mode: str):

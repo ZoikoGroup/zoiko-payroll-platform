@@ -1,0 +1,26 @@
+{
+  "testId": "A06_differencing",
+  "timestampUtc": "2026-10-19T10:01:03.118133+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/super-admin/reports/employees",
+  "expectedStatus": 403,
+  "actualStatus": 403,
+  "redactedResponse": {
+    "success": false,
+    "error": "AGGREGATE_DIFFERENCING_DETECTED",
+    "message": "Overlapping aggregate queries were refused to protect small cohorts.",
+    "detail": "Overlapping aggregate queries were refused to protect small cohorts."
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "9 vs 8 workers: the second, nested filter would isolate 1 person"
+}

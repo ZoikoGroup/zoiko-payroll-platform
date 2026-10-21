@@ -7,10 +7,9 @@ import {
   listPapReleases, listHealthFunds, listContributionCeilings, listPvConfigurations,
   listMinijobMidijobParameters,
   listEarningTaxabilityRules, listOvertimePremiumCategories, listOvertimeGrundlohnCaps,
-  listGermanyAccidentInsuranceProfiles, listGermanyChurchTaxExceptions, getChurchTaxMatrix,
+  listGermanyChurchTaxExceptions, getChurchTaxMatrix,
   getSourceArtifacts, getCompliancePolicies,
 } from "../../../../service/superAdminService";
-import { listElstamChangeListBatches } from "../../../../service/payrollService";
 import { describeLoadError } from "../../../../service/errorClassification";
 import { countLabel, latestStatus, churchTaxSummary } from "./germanyOverviewSummaries";
 
@@ -42,7 +41,9 @@ const AREAS = [
   { key: "earning-taxability", label: "Earning Taxability", icon: Layers, loader: () => listEarningTaxabilityRules(), summarize: countLabel("rule") },
   { key: "overtime-premium-categories", label: "Overtime Premium Categories", icon: Clock3, loader: () => listOvertimePremiumCategories(), summarize: countLabel("category", "categories") },
   { key: "overtime-grundlohn-caps", label: "Overtime Grundlohn Caps", icon: Gauge, loader: () => listOvertimeGrundlohnCaps(), summarize: countLabel("cap") },
-  { key: "employer-levies", label: "Employer Levies (Accident Insurance)", icon: Landmark, loader: () => listGermanyAccidentInsuranceProfiles(), summarize: countLabel("profile") },
+  // ZP-PRIV decision 3: accident-insurance profiles are tenant configuration
+  // (the Super Admin list route is retired) — no count is loaded.
+  { key: "employer-levies", label: "Employer Levies (Accident Insurance)", icon: Landmark, loader: () => Promise.resolve(null), summarize: () => "Managed by each organization" },
   {
     key: "church-tax",
     label: "Church Tax",
@@ -57,7 +58,7 @@ const AREAS = [
       .then(([matrix, exceptions]) => ({ laender: matrix?.laender, exceptions })),
     summarize: churchTaxSummary,
   },
-  { key: "elstam-batches", label: "ELStAM Change-List Batches", icon: RefreshCcw, loader: () => listElstamChangeListBatches(), summarize: countLabel("batch") },
+  { key: "elstam-batches", label: "ELStAM Change-List Batches", icon: RefreshCcw, loader: () => Promise.resolve(null), summarize: () => "Managed by each organization" },
   { key: "source-evidence", label: "Source Evidence", icon: FileSearch, loader: () => getSourceArtifacts(), summarize: countLabel("artifact") },
 ];
 

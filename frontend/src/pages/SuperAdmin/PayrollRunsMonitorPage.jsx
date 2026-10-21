@@ -1,60 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { PlayCircle, RefreshCcw, AlertTriangle, ShieldCheck, Building2, ChevronDown, ChevronUp } from "lucide-react";
+import { PlayCircle, RefreshCcw, AlertTriangle, ShieldCheck, Info } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
-import { useToast } from "../../context/ToastContext";
+import WorkerDataLocked from "../../components/WorkerDataLocked";
+import { LoadError, LoadingBlocks } from "../../components/LoadState";
 import { listAllPayrollRuns } from "../../service/commandCenterService";
-import { listAllOrganizationsBrief } from "../../service/superAdminService";
+
+const RUN_STATUSES = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
 
 const STATUS_PILL_MAP = { Paid: "active", Closed: "active", Approved: "approved", Authorized: "approved", Review: "pending", Draft: "inactive" };
 
 const SECTION_LABEL_CLS = "text-xs font-semibold uppercase tracking-wider text-foreground-muted";
 
-function RunsTable({ rows, emptyLabel }) {
-  return (
-    <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
-      <table className="w-full text-sm min-w-[900px]">
-        <thead className="bg-background text-left text-xs text-foreground-muted">
-          <tr>
-            <th className="px-4 py-3">Organization</th>
-            <th className="px-4 py-3">Run</th>
-            <th className="px-4 py-3">Period</th>
-            <th className="px-4 py-3">Pay Date</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3 text-right">Employees</th>
-            <th className="px-4 py-3 text-right">Net</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.run_id} className="border-t border-border-light">
-              <td className="px-4 py-3 font-medium text-foreground">{row.organization_name}</td>
-              <td className="px-4 py-3 text-foreground-muted">{row.run_code || `#${row.run_id}`}</td>
-              <td className="px-4 py-3 text-foreground-secondary">{row.period_label}</td>
-              <td className="px-4 py-3 text-foreground-muted">{row.pay_date}</td>
-              <td className="px-4 py-3"><StatusPill status={STATUS_PILL_MAP[row.status] || "pending"} label={row.status} /></td>
-              <td className="px-4 py-3 text-right text-foreground-muted">{row.employee_count}</td>
-              <td className="px-4 py-3 text-right font-medium text-foreground">{row.total_net ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length === 0 && (
-        <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-          <p className="text-sm text-foreground-disabled">{emptyLabel}</p>
-        </div>
-      )}
-    </div>
-  );
-}
+const EMPTY_DATA = { by_status: [], at_risk: { run_count: 0, organization_count: 0 }, at_risk_window_days: 5, privacy_note: "" };
 
-// At-Risk gets a structurally distinct shell, not just first position: an
-// amber-tinted escalation card when something needs attention, or a calm,
-// unmistakably reassuring panel when nothing does — "0 at risk" is the good
-// outcome here and should read as one, not as a blank table shell.
-function AtRiskSection({ rows, windowDays }) {
-  const count = rows.length;
-  if (count === 0) {
+// At-Risk gets a structurally distinct shell: an amber escalation card when
+// something needs attention, or a calm reassuring panel when nothing does.
+// Counts only (ZP-PRIV B.1) — which runs/organizations is tenant data.
+function AtRiskSection({ atRisk, windowDays }) {
+  const runs = atRisk?.run_count || 0;
+  const orgs = atRisk?.organization_count || 0;
+  if (runs === 0) {
     return (
       <div className="mb-6 flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-10 text-center shadow-sm">
         <ShieldCheck size={26} className="text-success" />
@@ -66,92 +32,30 @@ function AtRiskSection({ rows, windowDays }) {
     );
   }
   return (
-    <div className="mb-6 rounded-xl border-2 border-warning/40 bg-warning-light/20 p-3">
-      <h2 className={`${SECTION_LABEL_CLS} mb-3 flex items-center gap-1.5`}>
-        <AlertTriangle size={14} className="text-warning" />
-        At Risk
-        <StatusPill status="pending" label={`${count} due within ${windowDays}d, not Authorized`} />
-      </h2>
-      <RunsTable rows={rows} emptyLabel="" />
-    </div>
-  );
-}
-
-// Runs grouped under an organization's own header don't need to repeat the
-// organization name in every row — same columns as RunsTable minus that one.
-function OrgRunsTable({ rows }) {
-  return (
-    <table className="w-full text-sm min-w-[700px]">
-      <thead className="bg-background text-left text-xs text-foreground-muted">
-        <tr>
-          <th className="px-4 py-2.5">Run</th>
-          <th className="px-4 py-2.5">Period</th>
-          <th className="px-4 py-2.5">Pay Date</th>
-          <th className="px-4 py-2.5">Status</th>
-          <th className="px-4 py-2.5 text-right">Employees</th>
-          <th className="px-4 py-2.5 text-right">Net</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.run_id} className="border-t border-border-light">
-            <td className="px-4 py-2.5 text-foreground-muted">{row.run_code || `#${row.run_id}`}</td>
-            <td className="px-4 py-2.5 text-foreground-secondary">{row.period_label}</td>
-            <td className="px-4 py-2.5 text-foreground-muted">{row.pay_date}</td>
-            <td className="px-4 py-2.5"><StatusPill status={STATUS_PILL_MAP[row.status] || "pending"} label={row.status} /></td>
-            <td className="px-4 py-2.5 text-right text-foreground-muted">{row.employee_count}</td>
-            <td className="px-4 py-2.5 text-right font-medium text-foreground">{row.total_net ?? "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-// Every organization gets exactly one row here, including one with zero
-// payroll runs — same "don't silently drop orgs with nothing to join
-// against" fix already applied to Funding & Payments' by-organization view.
-// Expand/collapse keeps a fleet of many organizations scannable instead of
-// one giant flat table where runs from different orgs interleave by date.
-function OrgRunsGroup({ org, runs, atRiskCount, expanded, onToggle }) {
-  const hasRuns = runs.length > 0;
-  const totalNet = runs.reduce((sum, r) => sum + (Number(r.total_net) || 0), 0);
-
-  return (
-    <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden">
-      <button
-        type="button"
-        onClick={hasRuns ? onToggle : undefined}
-        disabled={!hasRuns}
-        aria-expanded={expanded}
-        className={`flex w-full items-center gap-3 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${hasRuns ? "hover:bg-surface-muted" : "cursor-default"}`}
-      >
-        <Building2 size={15} className="shrink-0 text-foreground-muted" />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{org.organization_name}</span>
-        {atRiskCount > 0 && <StatusPill status="pending" label={`${atRiskCount} at risk`} />}
-        <span className="shrink-0 text-xs text-foreground-muted">
-          {hasRuns ? `${runs.length} run${runs.length === 1 ? "" : "s"} · net ${totalNet.toLocaleString()}` : "No payroll runs"}
-        </span>
-        {hasRuns && (expanded ? <ChevronUp size={15} className="shrink-0 text-foreground-muted" /> : <ChevronDown size={15} className="shrink-0 text-foreground-muted" />)}
-      </button>
-      {hasRuns && expanded && (
-        <div className="overflow-x-auto border-t border-border-light">
-          <OrgRunsTable rows={runs} />
-        </div>
-      )}
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border-2 border-warning/40 bg-warning-light/20 p-4">
+      <AlertTriangle size={22} className="shrink-0 text-warning" />
+      <div className="min-w-0 flex-1">
+        <h2 className={`${SECTION_LABEL_CLS} mb-1`}>At Risk</h2>
+        <p className="text-sm font-medium text-foreground">
+          {runs} payroll run{runs === 1 ? "" : "s"} across {orgs} organization{orgs === 1 ? "" : "s"} due within{" "}
+          {windowDays} day(s) and not yet Authorized.
+        </p>
+        <p className="mt-0.5 text-xs text-foreground-muted">
+          Each organization sees and resolves its own runs. Contact the tenant, or use Support Access with their approval.
+        </p>
+      </div>
+      <StatusPill status="pending" label={`${runs} at risk`} />
     </div>
   );
 }
 
 export default function PayrollRunsMonitorPage() {
-  const { addToast } = useToast() || {};
   const [searchParams, setSearchParams] = useSearchParams();
-  const [data, setData] = useState({ at_risk: [], all_runs: [], at_risk_window_days: 5 });
-  const [organizations, setOrganizations] = useState([]);
+  const [data, setData] = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
   const [status, setStatus] = useState(searchParams.get("status") || "");
-  const [keyword, setKeyword] = useState("");
-  const [expandedOrgIds, setExpandedOrgIds] = useState(() => new Set());
 
   const setStatusAndUrl = (value) => {
     setStatus(value);
@@ -162,60 +66,42 @@ export default function PayrollRunsMonitorPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const res = await listAllPayrollRuns({ status: status || undefined });
-      setData(res);
+      setData({ ...EMPTY_DATA, ...res });
+      setLoaded(true);
     } catch (err) {
-      addToast?.(err.message, "error");
+      setError(err?.message || "Payroll run totals could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
-  // Every organization on the platform, not just ones that happen to have a
-  // run matching the current filter — fetched once, independent of `status`,
-  // so an org with zero matching runs still shows up (with "No payroll
-  // runs") instead of silently vanishing the way a plain join would.
-  useEffect(() => {
-    listAllOrganizationsBrief()
-      .then((res) => setOrganizations(res.organizations || []))
-      .catch((err) => addToast?.(err.message, "error"));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const runsByOrgId = useMemo(() => {
+  // Totals per status across every jurisdiction (run counts add up; the
+  // organization count does not, so it's shown per jurisdiction only).
+  const runsByStatus = useMemo(() => {
     const map = new Map();
-    data.all_runs.forEach((run) => {
-      if (!map.has(run.organization_id)) map.set(run.organization_id, []);
-      map.get(run.organization_id).push(run);
+    (data.by_status || []).forEach((row) => {
+      map.set(row.status, (map.get(row.status) || 0) + (row.run_count || 0));
     });
     return map;
-  }, [data.all_runs]);
+  }, [data.by_status]);
 
-  const atRiskCountByOrgId = useMemo(() => {
+  const byJurisdiction = useMemo(() => {
     const map = new Map();
-    data.at_risk.forEach((run) => {
-      map.set(run.organization_id, (map.get(run.organization_id) || 0) + 1);
+    (data.by_status || []).forEach((row) => {
+      if (!map.has(row.jurisdiction)) map.set(row.jurisdiction, []);
+      map.get(row.jurisdiction).push(row);
     });
-    return map;
-  }, [data.at_risk]);
+    return [...map.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)));
+  }, [data.by_status]);
 
-  const visibleOrganizations = useMemo(() => {
-    const k = keyword.trim().toLowerCase();
-    const filtered = k
-      ? organizations.filter((o) => (o.organization_name || "").toLowerCase().includes(k))
-      : organizations;
-    return [...filtered].sort((a, b) => (a.organization_name || "").localeCompare(b.organization_name || ""));
-  }, [organizations, keyword]);
-
-  function toggleOrg(orgId) {
-    setExpandedOrgIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(orgId)) next.delete(orgId); else next.add(orgId);
-      return next;
-    });
-  }
+  const totalRuns = [...runsByStatus.values()].reduce((sum, n) => sum + n, 0);
+  const statusesShown = status ? [status] : RUN_STATUSES;
 
   return (
     <div>
@@ -224,12 +110,14 @@ export default function PayrollRunsMonitorPage() {
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <PlayCircle size={22} className="text-primary" /> Payroll Runs
           </h1>
-          <p className="text-sm text-foreground-muted mt-0.5">Cross-organization payroll run monitor — read-only.</p>
+          <p className="text-sm text-foreground-muted mt-0.5">
+            Cross-organization payroll run counts by jurisdiction and status — read-only.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <select value={status} onChange={(e) => setStatusAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
             <option value="">All Statuses</option>
-            {["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"].map((s) => <option key={s} value={s}>{s}</option>)}
+            {RUN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <button
             onClick={load}
@@ -241,39 +129,86 @@ export default function PayrollRunsMonitorPage() {
         </div>
       </div>
 
-      <AtRiskSection rows={data.at_risk} windowDays={data.at_risk_window_days} />
+      <div className="mb-5 flex items-start gap-2 rounded-lg border border-info/30 bg-info-light px-4 py-3 text-sm text-info">
+        <Info size={16} className="mt-0.5 shrink-0" />
+        <span>
+          {data.privacy_note || "Individual payroll runs are tenant data. Use Support Access with the tenant's approval to look at a specific run."}
+        </span>
+      </div>
 
-      <div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className={SECTION_LABEL_CLS}>
-            Every Organization ({visibleOrganizations.length})
-          </h2>
-          <input
-            type="text"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            placeholder="Filter by organization name…"
-            className="w-full max-w-xs rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          {visibleOrganizations.map((org) => (
-            <OrgRunsGroup
-              key={org.id}
-              org={org}
-              runs={runsByOrgId.get(org.id) || []}
-              atRiskCount={atRiskCountByOrgId.get(org.id) || 0}
-              expanded={expandedOrgIds.has(org.id)}
-              onToggle={() => toggleOrg(org.id)}
-            />
+      <LoadError message={error} onRetry={load} />
+      {!loaded && !error && <LoadingBlocks count={3} />}
+      {loaded && <AtRiskSection atRisk={data.at_risk} windowDays={data.at_risk_window_days} />}
+
+      <div className="mb-6">
+        <h2 className={`${SECTION_LABEL_CLS} mb-3`}>Runs by Status ({totalRuns} total)</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {statusesShown.map((s) => (
+            <div key={s} className="bg-surface border border-border rounded-xl shadow-sm p-4">
+              <div className="text-2xl font-bold text-foreground">{runsByStatus.get(s) || 0}</div>
+              <div className="mt-1.5"><StatusPill status={STATUS_PILL_MAP[s] || "pending"} label={s} /></div>
+            </div>
           ))}
-          {visibleOrganizations.length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-10 text-center shadow-sm">
-              <p className="text-sm text-foreground-disabled">No organizations match &quot;{keyword}&quot;.</p>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <h2 className={`${SECTION_LABEL_CLS} mb-1`}>By Jurisdiction ({byJurisdiction.length})</h2>
+        <p className="mb-3 text-xs text-foreground-muted">
+          Run counts per status. Hover a number to see how many organizations it covers.
+        </p>
+        <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Jurisdiction</th>
+                {statusesShown.map((s) => (
+                  <th key={s} className="px-3 py-3 text-right">
+                    <span className="inline-flex justify-end"><StatusPill status={STATUS_PILL_MAP[s] || "pending"} label={s} /></span>
+                  </th>
+                ))}
+                <th className="px-4 py-3 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byJurisdiction.map(([jurisdiction, rows]) => {
+                const cell = Object.fromEntries(rows.map((r) => [r.status, r]));
+                const total = rows.reduce((n, r) => n + (r.run_count || 0), 0);
+                return (
+                  <tr key={jurisdiction} className="border-t border-border-light">
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {jurisdiction === "UNASSIGNED" ? "Unassigned" : jurisdiction}
+                    </td>
+                    {statusesShown.map((s) => (
+                      <td key={s} className="px-3 py-3 text-right tabular-nums"
+                        title={cell[s] ? `${cell[s].organization_count} organization(s)` : undefined}>
+                        {cell[s]?.run_count ? (
+                          <span className="text-foreground">{cell[s].run_count}</span>
+                        ) : (
+                          <span className="text-foreground-disabled">–</span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">{total}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {loaded && !loading && byJurisdiction.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+              <p className="text-sm text-foreground-disabled">No payroll runs match this filter.</p>
             </div>
           )}
         </div>
       </div>
+
+      <WorkerDataLocked variant="support" title="Need to look at a specific run?">
+        <p className="leading-relaxed">
+          Run details — employees, amounts and pay dates — belong to the organization. Zoiko staff can view them only
+          through a time-limited Support Access grant the organization approves.
+        </p>
+      </WorkerDataLocked>
     </div>
   );
 }

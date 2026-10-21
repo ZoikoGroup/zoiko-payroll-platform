@@ -244,7 +244,7 @@ def test_delete_employee_notifies(db, organization, caplog):
 
 # ── Trigger wiring: leave request submission (real service function) ─────
 
-def test_leave_request_submission_notifies_org(db, organization, caplog, monkeypatch):
+def test_leave_request_submission_notifies_org(db, organization, caplog, monkeypatch, raw_log_messages):
     from types import SimpleNamespace
     # generate_business_code's real impl takes a Postgres advisory lock
     # (pg_advisory_xact_lock) — not available on the sqlite test DB.

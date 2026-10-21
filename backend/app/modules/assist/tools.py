@@ -485,7 +485,8 @@ def preview_create_handoff(db, org_id, session_id, user, target, arguments) -> d
 def execute_create_handoff(db, org_id, session_id, user, preview) -> dict:
     handoff_preview = (
         db.query(AssistHandoffPreview)
-        .filter(AssistHandoffPreview.id == int(preview.target_id))
+        .filter(AssistHandoffPreview.id == int(preview.target_id),
+                AssistHandoffPreview.organization_id == org_id)  # ZP-PRIV D07: never another tenant's
         .first()
         if preview.target_type == "HANDOFF" and preview.target_id.isdigit()
         else None
@@ -581,12 +582,70 @@ def _record_audit(db, org_id, user, session_id, event_type, payload) -> AssistAu
     return event
 
 
+# ZP-PRIV D07: every Assist tool runs through the PDP as the requesting
+# principal. tool -> data class it reads; "org_wide" tools return
+# organization-level totals and are refused to a scoped principal (a payroll
+# admin limited to entities / pay groups, or an employee), whose rows the
+# data-layer scope already narrows.
+TOOL_POLICY = {
+    "payroll.getRunSummary": ("worker", True),
+    "payroll.getRunReadiness": ("tenant_config", True),
+    "payroll.listExceptions": ("worker", True),
+    "payroll.getApprovalStatus": ("tenant_config", False),
+    "payroll.comparePeriods": ("worker", True),
+    "payroll.getMyProfile": ("worker", False),
+    "payroll.getMyPayslips": ("worker", False),
+    "payroll.getEmployeeCount": ("tenant_config", False),
+    "payroll.getActiveRunCount": ("tenant_config", False),
+}
+_TENANT_ARGUMENT_KEYS = ("organization_id", "organizationId", "org_id", "orgId", "tenant_id", "tenantId")
+_NEUTRAL_DENIAL = {"found": False, "reason": "No visible payroll run."}
+
+
+def authorize_tool(db, org_id, tool_id, user, arguments=None):
+    """None when allowed; otherwise a neutral result (the same wording as
+    'nothing exists') after auditing the denial."""
+    from app.core.authz import policy as P
+    from app.core.authz.principal import principal_from_user
+    from app.core.authz.scopes import employee_scope
+    from app.modules.security import events as security_events
+
+    def deny(reason):
+        security_events.emit(db, "ASSIST_TOOL_DENIED", result="deny", actor_user_id=getattr(user, "id", None),
+                             actor_role=role_value(user) if user is not None else None,
+                             organization_id=getattr(user, "organization_id", None),
+                             target_type="assist_tool", target_id=tool_id, action="read", reason_code=reason)
+        return dict(_NEUTRAL_DENIAL)
+
+    if user is None:
+        return deny("NO_PRINCIPAL")
+    principal = principal_from_user(user)
+    if principal.organization_id is None or principal.organization_id != org_id:
+        return deny("TENANT_MISMATCH")
+    for key in _TENANT_ARGUMENT_KEYS:
+        value = (arguments or {}).get(key) if isinstance(arguments, dict) else None
+        if value not in (None, "") and str(value) != str(org_id):
+            return deny("TOOL_PARAMETER_TAMPERING")
+    data_class, org_wide = TOOL_POLICY.get(tool_id, ("worker", True))
+    decision = P.evaluate(principal, P.RoutePolicy(
+        method="TOOL", path=tool_id, data_class=data_class, action="read", resource="assist_tool",
+        principals=frozenset({"org_admin", "payroll_admin", "employee"}), scope_level="tenant"), db=db)
+    if not decision.allowed:
+        return deny(decision.reason)
+    if org_wide and (principal.role == "employee" or employee_scope(db, principal) is not None):
+        return deny("ORG_WIDE_TOOL_FOR_SCOPED_PRINCIPAL")
+    return None
+
+
 def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, arguments=None, user=None, text=None) -> dict:
     import inspect
 
     handler = READ_TOOLS.get(tool_id)
     if handler is None:
         return {"found": False, "reason": f"Tool {tool_id} is not registered."}
+    denial = authorize_tool(db, org_id, tool_id, user, arguments)
+    if denial is not None:
+        return denial
     if user is not None and role_value(user) == "employee" and tool_id not in _EMPLOYEE_ALLOWED_TOOL_IDS:
         # Neutral denial — identical wording to a genuinely missing run, so
         # an employee probing for run-wide data can't distinguish "you're

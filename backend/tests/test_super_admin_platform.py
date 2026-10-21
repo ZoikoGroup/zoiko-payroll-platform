@@ -135,11 +135,11 @@ def test_service_health_reports_all_six_jobs(db):
         "dunning_sweep",
         "bwm_aggregation",
         "assist_sweep",
-        "assisted_access_sweep",
+        "support_access_sweep",
         "token_cleanup_sweep",
     }
     for job in report["scheduled_jobs"]:
-        assert job["state"] in {"unknown", "healthy", "error"}
+        assert job["state"] in {"unknown", "healthy", "stale", "error"}   # stale: a sweep run earlier in this process missed its schedule
 
 
 # ── Integrations ───────────────────────────────────────────────────────────
@@ -148,7 +148,8 @@ def test_integrations_lists_configured_providers():
     result = list_integrations(_admin=None)
 
     slugs = {it["slug"] for it in result["integrations"]}
-    assert slugs == {"stripe_billing", "email_smtp", "sentry", "assist_model"}
+    assert {"stripe_billing", "email_smtp", "sentry", "assist_model"} <= slugs
+    assert {"stripe_webhooks", "job_queue", "audit_anchor", "security_alert_email", "zoiko_one"} <= slugs
     for it in result["integrations"]:
         assert {"slug", "name", "configured", "status", "description"} <= set(it)
         assert isinstance(it["configured"], bool)
@@ -166,6 +167,10 @@ def test_integrations_lists_configured_providers():
 
 # ── Security & Audit ───────────────────────────────────────────────────────
 
+def _ts(entry):
+    return datetime.fromisoformat(entry["timestamp"].rstrip("Z"))
+
+
 def test_audit_merges_all_sources_sorted_desc(db, organization):
     admin = _make_admin(db)
     _seed_one_per_source(db, admin, organization)
@@ -177,8 +182,8 @@ def test_audit_merges_all_sources_sorted_desc(db, organization):
     sources = {e["source"] for e in result["entries"]}
     assert sources == {"compliance", "billing", "assist", "assisted_access"}
 
-    stamps = [e["timestamp"] for e in result["entries"]]
-    assert all(isinstance(ts, datetime) for ts in stamps)
+    assert all(e["timestamp"].endswith("Z") for e in result["entries"])
+    stamps = [_ts(e) for e in result["entries"]]
     assert stamps == sorted(stamps, reverse=True)
 
     ordered = {e["source"]: e for e in result["entries"]}
@@ -204,7 +209,9 @@ def test_audit_actor_filter_matches_across_sources(db, organization):
         TaxConfigurationAudit(
             actor_id=other.id,
             action="create",
-            entity_type="contribution_rate",
+            # A platform entity type: tenant/worker audit rows never reach the
+            # Super Admin feed (ZP-PRIV B.1).
+            entity_type="tax_slab",
             entity_id=2,
             created_at=datetime(2026, 8, 5, 12, 0, 0),
         )
@@ -249,7 +256,7 @@ def test_audit_date_range_is_exact_when_many_out_of_range(db, organization):
         _admin=None,
     )
     assert result["total"] == 3
-    entry_days = sorted(e["timestamp"].day for e in result["entries"])
+    entry_days = sorted(_ts(e).day for e in result["entries"])
     assert entry_days == [10, 11, 12]
 
 
@@ -272,10 +279,44 @@ def test_audit_pagination_is_exact_over_union(db, organization):
     page3 = security_audit_log(page=3, page_size=3, db=db, _admin=None)
 
     assert page1["total"] == 7
-    assert [e["timestamp"].day for e in page1["entries"]] == [7, 6, 5]
-    assert [e["timestamp"].day for e in page2["entries"]] == [4, 3, 2]
-    assert [e["timestamp"].day for e in page3["entries"]] == [1]
+    assert [_ts(e).day for e in page1["entries"]] == [7, 6, 5]
+    assert [_ts(e).day for e in page2["entries"]] == [4, 3, 2]
+    assert [_ts(e).day for e in page3["entries"]] == [1]
 
     past_end = security_audit_log(page=3, page_size=5, db=db, _admin=None)
     assert past_end["returned"] == 0
     assert past_end["total"] == 7
+
+def test_service_health_labels_summary_stale_and_utc(db):
+    from datetime import datetime, timedelta
+
+    from app.modules.super_admin.command_center_router import _job_health, service_health
+
+    report = service_health(db=db, _admin=None)
+    assert report["checked_at"].endswith("Z") and report["overall"] in ("healthy", "degraded", "error")
+    assert sum(report["summary"].values()) == len(report["scheduled_jobs"]) == 6
+    assert all(j["label"] and j["description"] and j["interval_seconds"] > 0 for j in report["scheduled_jobs"])
+    now = datetime.utcnow()
+    fresh = _job_health("support_access_sweep", {"last_run_at": now - timedelta(seconds=30)}, now)
+    stale = _job_health("support_access_sweep", {"last_run_at": now - timedelta(hours=2)}, now)
+    failed = _job_health("dunning_sweep", {"last_run_at": now, "last_error": "boom"}, now)
+    assert (fresh["state"], stale["state"], failed["state"]) == ("healthy", "stale", "error")
+    assert fresh["last_run_at"].endswith("Z")
+
+
+def test_audit_includes_support_access_and_rejects_unknown_source(db, organization):
+    import pytest
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.super_admin.command_center_router import security_audit_log
+    from app.modules.support_access.models import SupportAccessAuditEvent
+
+    db.add(SupportAccessAuditEvent(event_type="REQUESTED", grant_id=7, organization_id=organization.id,
+                                   actor_user_id=5, actor_role="support_operator", reason="r"))
+    db.commit()
+    result = security_audit_log(source="support_access", db=db, _admin=None)
+    assert result["total"] == 1 and result["entries"][0]["entity_id"] == 7
+    assert result["entries"][0]["detail"] == {"actor_role": "support_operator", "requested_by_user_id": None}
+    assert {s["key"] for s in result["sources"]} >= {"support_access", "compliance"}
+    with pytest.raises(BadRequestException):
+        security_audit_log(source="nope", db=db, _admin=None)

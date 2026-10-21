@@ -31,7 +31,11 @@ for key in list(_saved_app_modules):
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
-from app.core.dependencies import get_current_user, get_current_payroll_operator  # noqa: E402
+from app.core.dependencies import (
+    get_current_user,
+    get_current_payroll_operator,
+    get_current_org_scoped_principal,
+)  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
 
 
@@ -85,6 +89,8 @@ class FakeOrgAdmin:
 
 app.dependency_overrides[get_current_user] = lambda: FakeOrgAdmin()
 app.dependency_overrides[get_current_payroll_operator] = lambda: FakeOrgAdmin()
+# The PDP (ZP-PRIV A04) resolves the principal through this dependency too.
+app.dependency_overrides[get_current_org_scoped_principal] = lambda: FakeOrgAdmin()
 
 client = TestClient(app)
 

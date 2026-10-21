@@ -14,7 +14,7 @@ export default function MXCfdiLifecycleTab() {
         <h4 className="mb-2 text-[13px] font-bold text-foreground">CFDI lifecycle — all Mexican organisations</h4>
         <p className="text-[12px] text-foreground-muted">
           {data.total} document(s){counts.length ? ": " + counts.map(([k, v]) => `${k} ${v}`).join(" · ") : ""}.
-          {" "}{data.unknown.length} UNKNOWN (awaiting a status query).
+          {" "}{data.unknownCount ?? data.unknown?.length ?? 0} UNKNOWN (awaiting a status query; the organization resolves them in its own workspace).
         </p>
         <p className="mt-1 text-[12px] text-foreground-muted">
           Schema release: {data.schemaRelease ? `CFDI ${data.schemaRelease.cfdiVersion} + Nómina ${data.schemaRelease.complementVersion} (${data.schemaRelease.status})` : "none Active"}

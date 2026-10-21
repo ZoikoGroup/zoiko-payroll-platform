@@ -1,0 +1,26 @@
+{
+  "testId": "T08_revoke",
+  "timestampUtc": "2026-10-19T10:04:35.366245+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "support_temp",
+  "tokenScope": "grant:1 (revoked)",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/payroll/employees",
+  "expectedStatus": 401,
+  "actualStatus": 401,
+  "redactedResponse": {
+    "success": false,
+    "error": "UNAUTHORIZED",
+    "message": "Your account is disabled. Contact your administrator.",
+    "detail": "Your account is disabled. Contact your administrator."
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "old token replayed after tenant revocation, before any sweep"
+}

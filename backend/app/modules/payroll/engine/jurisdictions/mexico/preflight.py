@@ -42,7 +42,7 @@ def run(ctx) -> dict:
                else Content(getattr(ctx, "rate_map", None), getattr(ctx, "slabs", None)))
     resolved["content"] = content
     run_type = getattr(ctx, "mx_run_type", None)
-    special_run = run_type in special_pay.RUN_CONCEPT          # Phase 9b: a run that pays one special concept
+    special_run = run_type in special_pay.RUN_CONCEPTS         # Phase 9b / 9c: a run that pays special concepts only
     resolved["special_run"] = run_type if special_run else None
     if special_run:
         resolved["period"] = None                               # no ordinary pay period, contribution days or tariff
@@ -92,10 +92,12 @@ def run(ctx) -> dict:
     ordinary = [l for l in earnings if str(l.get("kind") or "").upper() not in special_pay.CONCEPTS]
     on = resolved.get("on")
     if special_run:
-        concept = special_pay.RUN_CONCEPT[run_type]
-        if not special or ordinary or any(str(l.get("kind")).upper() != concept for l in special):
+        allowed = special_pay.RUN_CONCEPTS[run_type]
+        # A finiquito may owe nothing (aguinaldo already paid, no vacation left,
+        # a reason with no separation component); an aguinaldo run always pays.
+        if (not special and run_type != "FINIQUITO") or ordinary                 or any(str(l.get("kind")).upper() not in allowed for l in special):
             reasons.append(("MX_SPECIAL_RUN_LINES_INVALID",
-                            f"a {run_type} run carries only {concept.lower()} lines"))
+                            f"a {run_type} run carries only {' / '.join(allowed).lower()} lines"))
     elif not any(str(l.get("kind") or "").upper() == classification.ORDINARY_SALARY for l in ordinary):
         reasons.append(("MX_SALARY_LINE_MISSING", "the period has no ordinary-salary earning line"))
     hour_kinds = (classification.OVERTIME, classification.SUNDAY_PREMIUM)

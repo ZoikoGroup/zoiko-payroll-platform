@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.core.authz.scopes import organization_scoped
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException, ZoikoException
 from app.modules.auth.schemas import SuccessResponse
 from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit, require_not_dunning_restricted
@@ -364,10 +365,10 @@ def get_my_organization_detail(
         .order_by(User.created_at.asc())
         .first()
     )
-    total_employees = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id).count()
+    total_employees = organization_scoped(db, PayrollEmployee, org_id).count()
     active_employees = (
-        db.query(PayrollEmployee)
-        .filter(PayrollEmployee.organization_id == org_id, PayrollEmployee.status == "Active")
+        organization_scoped(db, PayrollEmployee, org_id)
+        .filter(PayrollEmployee.status == "Active")
         .count()
     )
     hr_admins = (
@@ -726,6 +727,11 @@ def delete_organization(
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     if org is None:
         raise NotFoundException("Organization", "id")
+
+    # ZP-PRIV F03: no tenant data is destroyed while any legal hold is active.
+    from app.modules.security import governance
+
+    governance.assert_not_on_hold(db, organization_id)
 
     org_name = org.organization_name
     org_code = org.organization_code

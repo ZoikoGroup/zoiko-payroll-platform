@@ -7,12 +7,14 @@ on:
       - 'backend/**'
       - '.github/workflows/**'
       - 'scripts/**'
+      - 'docs/privacy/**'
   pull_request:
     branches: [main, rugvedh]
     paths:
       - 'backend/**'
       - '.github/workflows/**'
       - 'scripts/**'
+      - 'docs/privacy/**'
   workflow_dispatch:
 
 jobs:
@@ -28,6 +30,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Set up Python 3.12 (matches the production image)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Set up Python and install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -40,9 +48,17 @@ jobs:
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      HAS_SMOKE: ${{ secrets.ZP_SMOKE_BASE_URL != '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Set up Python 3.12 (matches the production image)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Set up Python and install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -127,6 +143,25 @@ jobs:
 
             deactivate
             sudo systemctl restart zoiko-payroll-backend
+      - name: Post-deploy privacy smoke
+        # Runs once the production smoke identities are configured (HP-10).
+        if: ${{ env.HAS_SMOKE == 'true' }}
+        env:
+          ZP_SMOKE_BASE_URL: ${{ secrets.ZP_SMOKE_BASE_URL }}
+          ZP_SMOKE_IDENTITIES: ${{ secrets.ZP_SMOKE_IDENTITIES }}
+          ZP_SMOKE_EMPLOYEE_ID: ${{ secrets.ZP_SMOKE_EMPLOYEE_ID }}
+          ZP_SMOKE_ALERT_WEBHOOK: ${{ secrets.ZP_SMOKE_ALERT_WEBHOOK }}
+          ZP_SMOKE_RUN_ID: privacy-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          python -m pip install pyotp
+          python backend/scripts/post_deploy_privacy_smoke.py --output privacy_smoke_result.json
+      - name: Record privacy smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: privacy-smoke-${{ github.run_id }}
+          path: privacy_smoke_result.json
+          if-no-files-found: warn
       - name: Check for model/schema drift
         uses: appleboy/ssh-action@v1.0.3
         with:

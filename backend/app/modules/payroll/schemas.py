@@ -19,7 +19,7 @@ Python field names.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, List, Dict, Annotated, ClassVar
+from typing import Optional, List, Dict, Annotated, ClassVar, Union
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, BeforeValidator, field_validator, model_validator
 from app.modules.payroll.models import PayrollStatus, PayslipStatus, ActivityStatus
@@ -139,6 +139,9 @@ class EmployeeResponse(BaseModel):
     designation:     Optional[str] = None
     employmentType:  str = Field(validation_alias="employment_type", serialization_alias="employmentType")
     status:          str
+    # ZP-PRIV C.1 scope placement (legal entity / pay group).
+    legalEntityId:   Optional[int] = Field(None, validation_alias="legal_entity_id", serialization_alias="legalEntityId")
+    payGroupId:      Optional[int] = Field(None, validation_alias="pay_group_id", serialization_alias="payGroupId")
     dateOfJoining:   Optional[date] = Field(None, validation_alias="date_of_joining", serialization_alias="dateOfJoining")
     dateOfBirth:     Optional[date] = Field(None, validation_alias="date_of_birth", serialization_alias="dateOfBirth")
     ctc:             Optional[Decimal] = Decimal("0")
@@ -2354,7 +2357,9 @@ class PackImpactOrganizationEntry(BaseModel):
     organizationName: str
     organizationCode: str
     optedIntoCanonicalTracking: bool
-    activeEmployeeCount: int
+    # Union[..., str]: the suppression token ("<5, hidden") when the cohort
+    # is below k. ZP-PRIV B.2.
+    activeEmployeeCount: Union[int, str]
     unfinalizedRunCount: int
 
 
@@ -2366,7 +2371,7 @@ class JurisdictionPackImpactPreviewResponse(BaseModel):
     organizations: List[PackImpactOrganizationEntry]
     totalOrganizationsEligible: int
     totalOrganizationsGenuinelyAffected: int
-    totalActiveEmployeesAffected: int
+    totalActiveEmployeesAffected: Union[int, str]
     totalUnfinalizedRunsAffected: int
 
 
@@ -3249,7 +3254,9 @@ class TaxConfigurationAuditResponse(BaseModel):
 
 class EmployerTaxProfileUpsert(BaseModel):
     id: Optional[int] = None
-    organizationId: int
+    # Optional on the wire: the tenant route always sets it from the login
+    # (ZP-PRIV decision 3); the service still requires a value.
+    organizationId: Optional[int] = None
     jurisdictionId: str          # "US-CA"
     componentCode: str = "SUI"   # "SUI" | "ETT" | "WF" | "JDA" | "FAMLI" | "PFML" | "PAID_LEAVE"
     # Widened to Optional: a headcount-only row (component_code FAMLI/
@@ -3730,7 +3737,8 @@ class EmployeeBenefitValuationResponse(BaseModel):
 # own docstring for why this is a separate table from EmployerTaxProfile.
 
 class GermanyAccidentInsuranceProfileCreate(BaseModel):
-    organization_id:         int = Field(validation_alias="organizationId")
+    # Optional on the wire: the tenant route sets it from the login.
+    organization_id:         Optional[int] = Field(None, validation_alias="organizationId")
     carrier_name:            str = Field(validation_alias="carrierName")
     agency_account_id:       Optional[str] = Field(None, validation_alias="agencyAccountId")
     risk_class_description:  Optional[str] = Field(None, validation_alias="riskClassDescription")

@@ -1,0 +1,19 @@
+{
+  "pack": "EP-01",
+  "title": "Architecture and decision-point inventory",
+  "generatedAt": "2026-10-19T10:05:17Z",
+  "files": [
+    {
+      "path": "decision_point_summary.json",
+      "sha256": "fded3e1240198380c1b0bd84a1707c7ccc9a9f060f49415501c7f755dec8981c"
+    },
+    {
+      "path": "route_policy_inventory.csv",
+      "sha256": "9e07ca006a66b0ee92c9fc733f006e93d3e456a8e20a1f275b9e96a8c52335f0"
+    }
+  ],
+  "notes": [
+    "Generated from app/core/authz/route_registry.json (python -m app.core.authz.generate).",
+    "workerRoutesReachableByPlatformRoles must be empty."
+  ]
+}

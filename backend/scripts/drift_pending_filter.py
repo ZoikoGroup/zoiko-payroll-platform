@@ -37,6 +37,26 @@ _TABLE_MISSING = re.compile(r"Model table '(\w+)' has no matching DB table\.")
 _MODEL_ONLY = re.compile(r"(\w+): model has columns not in the DB: \[(.*)\]")
 _CREATE_TABLE = re.compile(r"op\.create_table\s*\(\s*['\"](\w+)['\"]")
 _ADD_COLUMN = re.compile(r"op\.add_column\s*\(\s*['\"](\w+)['\"].*?sa\.Column\s*\(\s*['\"](\w+)['\"]", re.S)
+_BATCH = re.compile(r"op\.batch_alter_table\s*\(\s*['\"](\w+)['\"][^)]*\)\s+as\s+(\w+)")
+_UPGRADE = re.compile(r"^def upgrade\b.*?(?=^def |\Z)", re.S | re.M)
+
+
+def _upgrade_body(src: str) -> str:
+    """Only what upgrade() does counts (a downgrade may re-add a column)."""
+    found = _UPGRADE.search(src)
+    return found.group(0) if found else ""
+
+
+def _added_columns(src: str) -> list:
+    """(table, column) added by op.add_column or inside a batch_alter_table block."""
+    out = list(_ADD_COLUMN.findall(src))
+    marks = list(_BATCH.finditer(src))
+    for i, m in enumerate(marks):
+        block = src[m.end(): marks[i + 1].start() if i + 1 < len(marks) else len(src)]
+        alias = re.escape(m.group(2))
+        out += [(m.group(1), col) for col in
+                re.findall(alias + r"\.add_column\s*\(\s*sa\.Column\s*\(\s*['\"](\w+)['\"]", block)]
+    return out
 
 
 def pending_revisions(stamp_rev: str, alembic_ini: str = "alembic.ini") -> list:
@@ -60,9 +80,9 @@ def pending_objects(stamp_rev: str, alembic_ini: str = "alembic.ini") -> tuple:
     """(tables, {table: columns}) the pending migrations create / add."""
     tables, columns = set(), {}
     for rev in pending_revisions(stamp_rev, alembic_ini):
-        src = Path(rev.module.__file__).read_text(encoding="utf-8")
+        src = _upgrade_body(Path(rev.module.__file__).read_text(encoding="utf-8"))
         tables.update(_CREATE_TABLE.findall(src))
-        for table, column in _ADD_COLUMN.findall(src):
+        for table, column in _added_columns(src):
             columns.setdefault(table, set()).add(column)
     return tables, columns
 

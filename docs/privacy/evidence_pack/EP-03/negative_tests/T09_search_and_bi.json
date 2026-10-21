@@ -1,0 +1,21 @@
+{
+  "testId": "T09_search_and_bi",
+  "timestampUtc": "2026-10-19T10:04:50.435527+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "160 Super Admin GETs with search/q/name/email probes",
+  "expectedStatus": 200,
+  "actualStatus": 200,
+  "redactedResponse": null,
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "no worker name, code, email, bank or tax value in any response"
+}

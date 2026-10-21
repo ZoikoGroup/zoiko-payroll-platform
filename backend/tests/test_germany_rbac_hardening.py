@@ -227,10 +227,13 @@ def test_payroll_operator_gate_accepts_every_real_tenant_role_and_rejects_others
     payslip delete, etc. — see later sections). Prove its real accept/
     reject boundary directly, matching the existing PAP test's style of
     calling the dependency function with fake user objects."""
-    for role in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_SUPER_ADMIN):
+    for role in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN):
         user = get_current_payroll_operator(current_user=_fake_user(role, organization_id=1))
         assert user.role == role
-    for role in ("auditor", "viewer", "", None):
+    # ZP-PRIV A05: a platform role (super_admin) holds no tenant payroll
+    # permission, and a temporary support login is read-only by construction.
+    for role in (ROLE_SUPER_ADMIN, "support_operator", "platform_security", "support_temp",
+                 "auditor", "viewer", "", None):
         with pytest.raises(ForbiddenException):
             get_current_payroll_operator(current_user=_fake_user(role, organization_id=1))
 

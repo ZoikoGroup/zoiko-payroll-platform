@@ -4,7 +4,7 @@ modules/super_admin/schemas.py
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -62,8 +62,8 @@ class DashboardStats(BaseModel):
     super_admins: int
     org_admins: int
     payroll_admins: int
-    total_payroll_employees: int
-    total_payroll_runs: int
+    total_payroll_employees: Union[int, str]
+    total_payroll_runs: Union[int, str]
     recent_organizations: list[dict]
 
 
@@ -248,23 +248,22 @@ class PolicyStatusUpdate(BaseModel):
 # ── Finance (Super Admin) ───────────────────────────────────────────────────
 
 class FinanceOverviewItem(BaseModel):
-    id: int
-    organizationId: int
-    organizationName: str
-    organizationCode: Optional[str] = None
+    """One aggregate money cell (ZP-PRIV B.1/B.2). Never a single run, never
+    one organization: money and headcount are replaced by the suppression
+    token ("<5, hidden") unless the cell covers >= k workers and >= 2
+    organizations."""
     jurisdictionCountry: Optional[str] = None
     currency: Optional[str] = None
-    periodLabel: str
-    periodStart: Optional[date] = None
-    periodEnd: Optional[date] = None
-    payDate: Optional[date] = None
+    period: str
     status: str
-    grossPay: Decimal
-    netPay: Decimal
-    totalDeductions: Decimal
-    totalTaxes: Decimal
-    employerCost: Decimal
-    employeeCount: int
+    runCount: int
+    organizationCount: int
+    grossPay: Union[Decimal, str]
+    netPay: Union[Decimal, str]
+    totalDeductions: Union[Decimal, str]
+    totalTaxes: Union[Decimal, str]
+    employerCost: Union[Decimal, str]
+    employeeCount: Union[int, str]
 
 
 class FinanceOverviewResponse(BaseModel):
@@ -274,12 +273,15 @@ class FinanceOverviewResponse(BaseModel):
 
 class FinanceCountryTotal(BaseModel):
     country: str
+    currency: Optional[str] = None
     organizations: int
     payrollRuns: int
-    grossPay: Decimal
-    netPay: Decimal
-    totalDeductions: Decimal
-    employerCost: Decimal
+    employeeCount: Union[int, str]
+    grossPay: Union[Decimal, str]
+    netPay: Union[Decimal, str]
+    totalDeductions: Union[Decimal, str]
+    totalTaxes: Union[Decimal, str]
+    employerCost: Union[Decimal, str]
 
 
 class FinanceSummaryResponse(BaseModel):
@@ -291,16 +293,14 @@ class FinanceSummaryResponse(BaseModel):
 
 
 class FinanceOrganizationTotal(BaseModel):
+    """Tenant registry + payroll activity. No per-organization money."""
     organizationId: int
     organizationName: str
+    organizationCode: Optional[str] = None
     jurisdictionCountry: Optional[str] = None
     currency: Optional[str] = None
-    runCount: int
-    grossPay: Decimal
-    netPay: Decimal
-    totalDeductions: Decimal
-    employerCost: Decimal
-    lastPayDate: Optional[date] = None
+    headcount: str
+    payrollActive: bool
 
 
 class FinanceByOrganizationResponse(BaseModel):

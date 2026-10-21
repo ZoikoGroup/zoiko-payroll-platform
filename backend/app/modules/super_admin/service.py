@@ -24,13 +24,27 @@ from datetime import date, timedelta
 from typing import Optional, List
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func, or_, and_
+from sqlalchemy import func as sa_func, or_
 
 from app.modules.payroll.models import (
-    PayrollRun, PayrollEmployee, CompanyComplianceDetails, JurisdictionPack, ContributionRate, TaxSlab, PayrollStatus,
+    PayrollRun, PayrollEmployee, PayslipItem, CompanyComplianceDetails, JurisdictionPack, ContributionRate, TaxSlab,
+    PayrollStatus,
 )
 from app.modules.organizations.models import Organization
 from app.core.exceptions import NotFoundException
+from app.modules.super_admin import aggregates
+
+def _employee_counts_by_org(db: Session, org_ids: List[int]) -> dict:
+    """Live worker headcount per organization — the cohort used to decide
+    whether a per-organization money cell may be shown at all."""
+    if not org_ids:
+        return {}
+    return dict(
+        db.query(PayrollEmployee.organization_id, sa_func.count(PayrollEmployee.id))
+        .filter(PayrollEmployee.organization_id.in_(org_ids))
+        .group_by(PayrollEmployee.organization_id)
+        .all()
+    )
 
 
 def _date_filter(query, column, start_date: Optional[date], end_date: Optional[date]):
@@ -48,199 +62,168 @@ def _date_filter(query, column, start_date: Optional[date], end_date: Optional[d
 
 # ── Finance ──────────────────────────────────────────────────────────────
 
-def finance_overview(
-    db: Session, organization_id: Optional[int] = None, country: Optional[str] = None,
-    status: Optional[str] = None, start_date: Optional[date] = None, end_date: Optional[date] = None,
-    skip: int = 0, limit: int = 50,
-) -> dict:
-    """Cross-org payroll run listing. Each row carries its own operating
-    jurisdiction so the client can group/format currency correctly —
-    amounts from different jurisdictions are never combined here."""
+_MONEY_KEYS = ("grossPay", "netPay", "totalDeductions", "totalTaxes", "employerCost")
+
+
+def _filtered_runs(db: Session, country: Optional[str], status: Optional[str],
+                   start_date: Optional[date], end_date: Optional[date]):
+    """Every run matching the platform filters, with its jurisdiction and
+    currency. Never filtered to one organization: a platform view is an
+    aggregate across tenants (ZP-PRIV B.1/B.2)."""
     query = (
-        db.query(
-            PayrollRun, Organization.organization_name, Organization.organization_code, Organization.currency,
-            CompanyComplianceDetails.jurisdiction_country,
-        )
+        db.query(PayrollRun, CompanyComplianceDetails.jurisdiction_country, Organization.currency)
         .join(Organization, Organization.id == PayrollRun.organization_id)
-        .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
+        .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == PayrollRun.organization_id)
     )
-    if organization_id:
-        query = query.filter(PayrollRun.organization_id == organization_id)
     if country:
         query = query.filter(CompanyComplianceDetails.jurisdiction_country == country)
     if status:
         query = query.filter(PayrollRun.status == status)
-    query = _date_filter(query, PayrollRun.period_start, start_date, end_date)
+    return _date_filter(query, PayrollRun.period_start, start_date, end_date).all()
 
-    total = query.count()
-    rows = query.order_by(PayrollRun.period_start.desc()).offset(skip).limit(limit).all()
 
+def _workers_by_run(db: Session, run_ids: List[int]) -> dict:
+    """run id -> set of worker ids paid in it (the cohort of a money cell)."""
+    out: dict = {}
+    if not run_ids:
+        return out
+    for i in range(0, len(run_ids), 500):
+        chunk = run_ids[i:i + 500]
+        for run_id, employee_id in (
+            db.query(PayslipItem.payroll_run_id, PayslipItem.employee_id)
+            .filter(PayslipItem.payroll_run_id.in_(chunk)).all()
+        ):
+            out.setdefault(run_id, set()).add(employee_id)
+    return out
+
+
+def _money_cells(rows, workers_by_run: dict, key_fn) -> dict:
+    """Group runs into cells; each cell tracks runs, orgs, distinct workers
+    and money. ``key_fn(run, jurisdiction, currency)`` names the cell."""
+    cells: dict = {}
+    for run, jurisdiction, currency in rows:
+        key = key_fn(run, jurisdiction, currency)
+        cell = cells.setdefault(key, {
+            "runs": 0, "orgs": set(), "workers": set(),
+            "grossPay": 0, "netPay": 0, "totalDeductions": 0, "totalTaxes": 0, "employerCost": 0,
+        })
+        cell["runs"] += 1
+        cell["orgs"].add(run.organization_id)
+        cell["workers"] |= workers_by_run.get(run.id, set())
+        cell["grossPay"] += run.total_gross or 0
+        cell["netPay"] += run.total_net or 0
+        cell["totalDeductions"] += run.total_deductions or 0
+        cell["totalTaxes"] += run.total_taxes or 0
+        cell["employerCost"] += run.total_employer_contribution or 0
+    return cells
+
+
+def _cell_out(cell: dict, **labels) -> dict:
+    out = dict(labels)
+    out.update({
+        "runCount": cell["runs"],
+        "organizationCount": len(cell["orgs"]),
+        "employeeCount": len(cell["workers"]),
+        **{k: cell[k] for k in _MONEY_KEYS},
+    })
+    aggregates.suppress_money_row(out, len(cell["workers"]), len(cell["orgs"]), _MONEY_KEYS)
+    aggregates.suppress_row(out, len(cell["workers"]), ("employeeCount",))
+    return out
+
+
+def finance_overview(
+    db: Session, country: Optional[str] = None,
+    status: Optional[str] = None, start_date: Optional[date] = None, end_date: Optional[date] = None,
+    skip: int = 0, limit: int = 50,
+) -> dict:
+    """Payroll money as platform aggregates (ZP-PRIV B.1/B.2): one cell per
+    jurisdiction x currency x month x run status. A cell shows money only
+    when it covers at least k distinct workers AND at least two
+    organizations, so no cell is one tenant's payroll or one person's pay.
+    Individual runs, run codes and organization names are tenant data and
+    are never listed here."""
+    rows = _filtered_runs(db, country, status, start_date, end_date)
+    workers = _workers_by_run(db, [r[0].id for r in rows])
+    cells = _money_cells(
+        rows, workers,
+        lambda run, j, c: (j or "Unassigned", c or "", run.period_start.strftime("%Y-%m") if run.period_start else "—",
+                           run.status),
+    )
     items = [
-        {
-            "id": run.id,
-            "organizationId": run.organization_id,
-            "organizationName": org_name,
-            "organizationCode": org_code,
-            "jurisdictionCountry": jurisdiction,
-            "currency": org_currency,
-            "periodLabel": run.period_label,
-            "periodStart": run.period_start,
-            "periodEnd": run.period_end,
-            "payDate": run.pay_date,
-            "status": run.status,
-            "grossPay": run.total_gross,
-            "netPay": run.total_net,
-            "totalDeductions": run.total_deductions,
-            "totalTaxes": run.total_taxes,
-            "employerCost": run.total_employer_contribution,
-            "employeeCount": run.employee_count,
-        }
-        for run, org_name, org_code, org_currency, jurisdiction in rows
+        _cell_out(cell, jurisdictionCountry=j, currency=c or None, period=period, status=st)
+        for (j, c, period, st), cell in sorted(cells.items(), key=lambda kv: (kv[0][2], kv[0][0]), reverse=True)
     ]
-    return {"items": items, "total": total}
+    cohort = len(set().union(*workers.values())) if workers else 0
+    return {"items": items[skip:skip + limit], "total": len(items), "_cohort": cohort}
 
 
 def finance_summary(
-    db: Session, organization_id: Optional[int] = None, country: Optional[str] = None,
+    db: Session, country: Optional[str] = None,
     start_date: Optional[date] = None, end_date: Optional[date] = None,
 ) -> dict:
-    """Financial totals grouped by jurisdiction country — the only
-    currency-safe way to aggregate across organizations. Also returns
-    currency-agnostic platform counts (orgs, runs, pending/completed)."""
-    grouped = (
-        db.query(
-            CompanyComplianceDetails.jurisdiction_country.label("country"),
-            sa_func.count(sa_func.distinct(PayrollRun.organization_id)).label("org_count"),
-            sa_func.count(PayrollRun.id).label("run_count"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_deductions), 0).label("deductions"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_employer_contribution), 0).label("employer_cost"),
-        )
-        .select_from(PayrollRun)
-        .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == PayrollRun.organization_id)
-    )
-    if organization_id:
-        grouped = grouped.filter(PayrollRun.organization_id == organization_id)
-    if country:
-        grouped = grouped.filter(CompanyComplianceDetails.jurisdiction_country == country)
-    grouped = _date_filter(grouped, PayrollRun.period_start, start_date, end_date)
-    rows = grouped.group_by(CompanyComplianceDetails.jurisdiction_country).all()
+    """Financial totals per jurisdiction country plus currency-agnostic
+    platform counts. Money cells follow the same k-worker / two-org rule as
+    finance_overview; the cohort is the set of workers actually paid in the
+    filtered runs (not the jurisdiction's whole headcount)."""
+    rows = _filtered_runs(db, country, None, start_date, end_date)
+    workers = _workers_by_run(db, [r[0].id for r in rows])
+    cells = _money_cells(rows, workers, lambda run, j, c: (j or "Unassigned", c or ""))
+    by_country = []
+    for (j, c), cell in sorted(cells.items()):
+        out = _cell_out(cell, country=j, currency=c or None)
+        out["organizations"] = out.pop("organizationCount")
+        out["payrollRuns"] = out.pop("runCount")
+        by_country.append(out)
 
-    by_country = [
-        {
-            "country": r.country or "Unassigned",
-            "organizations": r.org_count,
-            "payrollRuns": r.run_count,
-            "grossPay": r.gross,
-            "netPay": r.net,
-            "totalDeductions": r.deductions,
-            "employerCost": r.employer_cost,
-        }
-        for r in rows
-    ]
-
-    status_query = db.query(PayrollRun.status, sa_func.count(PayrollRun.id))
-    if organization_id:
-        status_query = status_query.filter(PayrollRun.organization_id == organization_id)
-    if country:
-        status_query = status_query.join(
-            CompanyComplianceDetails, CompanyComplianceDetails.organization_id == PayrollRun.organization_id
-        ).filter(CompanyComplianceDetails.jurisdiction_country == country)
-    status_query = _date_filter(status_query, PayrollRun.period_start, start_date, end_date)
-    status_counts = dict(status_query.group_by(PayrollRun.status).all())
+    status_counts: dict = {}
+    for run, _, _ in rows:
+        status_counts[run.status] = status_counts.get(run.status, 0) + 1
     pending = sum(
         v for k, v in status_counts.items()
         if k in (PayrollStatus.REVIEW.value, PayrollStatus.APPROVED.value, PayrollStatus.AUTHORIZED.value)
     )
     completed = status_counts.get(PayrollStatus.PAID.value, 0) + status_counts.get(PayrollStatus.CLOSED.value, 0)
-
-    org_count_query = db.query(sa_func.count(sa_func.distinct(PayrollRun.organization_id)))
-    if organization_id:
-        org_count_query = org_count_query.filter(PayrollRun.organization_id == organization_id)
-    org_count_query = _date_filter(org_count_query, PayrollRun.period_start, start_date, end_date)
-
+    cohort = len(set().union(*workers.values())) if workers else 0
     return {
         "byCountry": by_country,
-        "totalOrganizations": org_count_query.scalar() or 0,
+        "totalOrganizations": len({run.organization_id for run, _, _ in rows}),
         "totalPayrollRuns": sum(status_counts.values()),
         "payrollsPending": pending,
         "payrollsCompleted": completed,
+        "_cohort": cohort,
     }
 
 
 def finance_by_organization(
-    db: Session, organization_id: Optional[int] = None, country: Optional[str] = None,
+    db: Session, country: Optional[str] = None,
     status: Optional[str] = None, start_date: Optional[date] = None, end_date: Optional[date] = None,
 ) -> dict:
-    """Per-organization financial totals — every organization appears
-    exactly once, including one with zero payroll runs, because this
-    outer-joins from Organization (unlike finance_overview/finance_summary,
-    which join from PayrollRun and so silently omit any organization that
-    has never run payroll). That omission is exactly the gap this exists to
-    close: "every organization's payroll money movement" isn't answerable
-    from a query that only ever starts from PayrollRun.
-
-    status/date filters are applied on the PayrollRun join condition, not a
-    WHERE clause — a WHERE on the outer-joined table would silently turn
-    this back into an inner join for any org with zero matching rows,
-    reintroducing the exact omission this function exists to avoid. An org
-    with no runs in the filtered window still appears, with zero totals,
-    which is itself a meaningful answer ("nothing happened here"). country
-    is a genuine WHERE, since an org actually in a different country should
-    be excluded when filtering by country, not zeroed out."""
-    run_conditions = [PayrollRun.organization_id == Organization.id]
-    if status:
-        run_conditions.append(PayrollRun.status == status)
-    if start_date:
-        run_conditions.append(PayrollRun.period_start >= start_date)
-    if end_date:
-        run_conditions.append(PayrollRun.period_start < end_date + timedelta(days=1))
-
+    """The tenant registry with payroll ACTIVITY, not payroll money
+    (ZP-PRIV B.1): one row per organization with its jurisdiction,
+    currency, a k-suppressed headcount bucket and whether it ran payroll in
+    the window. An organization's own payroll totals, run counts and pay
+    dates are tenant data and appear only inside that tenant."""
     query = (
-        db.query(
-            Organization.id.label("organization_id"),
-            Organization.organization_name,
-            CompanyComplianceDetails.jurisdiction_country,
-            Organization.currency,
-            sa_func.count(PayrollRun.id).label("run_count"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_deductions), 0).label("deductions"),
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_employer_contribution), 0).label("employer_cost"),
-            sa_func.max(PayrollRun.pay_date).label("last_pay_date"),
-        )
+        db.query(Organization.id, Organization.organization_name, Organization.organization_code,
+                 Organization.currency, CompanyComplianceDetails.jurisdiction_country)
         .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
-        .outerjoin(PayrollRun, and_(*run_conditions))
     )
-    if organization_id:
-        query = query.filter(Organization.id == organization_id)
     if country:
         query = query.filter(CompanyComplianceDetails.jurisdiction_country == country)
-
-    rows = (
-        query.group_by(
-            Organization.id, Organization.organization_name,
-            CompanyComplianceDetails.jurisdiction_country, Organization.currency,
-        )
-        .order_by(Organization.organization_name.asc())
-        .all()
-    )
-
+    orgs = query.order_by(Organization.organization_name.asc()).all()
+    active = {run.organization_id for run, _, _ in _filtered_runs(db, country, status, start_date, end_date)}
+    headcounts = _employee_counts_by_org(db, [o[0] for o in orgs])
     organizations = [
         {
-            "organizationId": r.organization_id,
-            "organizationName": r.organization_name,
-            "jurisdictionCountry": r.jurisdiction_country,
-            "currency": r.currency,
-            "runCount": r.run_count,
-            "grossPay": r.gross,
-            "netPay": r.net,
-            "totalDeductions": r.deductions,
-            "employerCost": r.employer_cost,
-            "lastPayDate": r.last_pay_date,
+            "organizationId": org_id,
+            "organizationName": name,
+            "organizationCode": code,
+            "jurisdictionCountry": jurisdiction,
+            "currency": currency,
+            "headcount": aggregates.cohort_bucket(headcounts.get(org_id, 0)),
+            "payrollActive": org_id in active,
         }
-        for r in rows
+        for org_id, name, code, currency, jurisdiction in orgs
     ]
     return {"organizations": organizations, "total": len(organizations)}
 
@@ -448,7 +431,10 @@ def list_compliance_configurations(db: Session, country: Optional[str] = None, s
             "jurisdictionCountry": details.jurisdiction_country or None,
             "jurisdictionState": details.jurisdiction_state or None,
             "compliancePack": details.compliance_pack or None,
-            "taxIdentifiers": details.tax_identifiers,
+            # ZP-PRIV B.1: an employer's tax identifiers are tenant data;
+            # the platform only needs to know whether they are recorded.
+            "taxIdentifiers": None,
+            "taxIdentifiersRecorded": bool(details.tax_identifiers),
             "isConfigured": details.configured_at is not None,
             "configuredAt": details.configured_at,
             "updatedAt": details.updated_at,
@@ -562,7 +548,8 @@ def reports_organizations(
             "jurisdictionCountry": jurisdictions.get(o.id),
             "isActive": o.is_active,
             "createdAt": o.created_at,
-            "employeeCount": emp_counts.get(o.id, 0),
+            # ZP-PRIV B.2: never an exact headcount for a small tenant.
+            "employeeCount": aggregates.cohort_bucket(emp_counts.get(o.id, 0)),
             "payrollRunCount": run_counts.get(o.id, 0),
         }
         for o in orgs
@@ -570,12 +557,25 @@ def reports_organizations(
     return {"items": items, "total": total}
 
 
-def reports_employees(
+def reports_employee_totals(
     db: Session, organization_id: Optional[int] = None, country: Optional[str] = None,
-    status: Optional[str] = None, search: Optional[str] = None, skip: int = 0, limit: int = 50,
+    status: Optional[str] = None, skip: int = 0, limit: int = 50,
 ) -> dict:
+    """ZP-PRIV B.1/B.2: the Super Admin "Employees" report is an aggregate —
+    counts by tenant, jurisdiction and status. It never returns a name, an
+    employee code, a department, a designation or any other identity, and
+    every cell with a cohort below k is suppressed. This replaces the old
+    cross-tenant employee listing (which also carried a ?search= name oracle)
+    and every field the CSV export used to write out."""
     query = (
-        db.query(PayrollEmployee, Organization.organization_name, CompanyComplianceDetails.jurisdiction_country)
+        db.query(
+            Organization.organization_name.label("organization_name"),
+            Organization.organization_code.label("organization_code"),
+            CompanyComplianceDetails.jurisdiction_country.label("jurisdiction_country"),
+            PayrollEmployee.status.label("status"),
+            PayrollEmployee.employment_type.label("employment_type"),
+            sa_func.count(PayrollEmployee.id).label("employee_count"),
+        )
         .join(Organization, Organization.id == PayrollEmployee.organization_id)
         .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
     )
@@ -585,27 +585,38 @@ def reports_employees(
         query = query.filter(CompanyComplianceDetails.jurisdiction_country == country)
     if status:
         query = query.filter(PayrollEmployee.status == status)
-    if search:
-        like = f"%{search}%"
-        query = query.filter(or_(PayrollEmployee.name.ilike(like), PayrollEmployee.employee_code.ilike(like)))
 
-    total = query.count()
-    rows = query.order_by(Organization.organization_name, PayrollEmployee.name).offset(skip).limit(limit).all()
+    grouped = (
+        query.group_by(
+            Organization.organization_name, Organization.organization_code,
+            CompanyComplianceDetails.jurisdiction_country,
+            PayrollEmployee.status, PayrollEmployee.employment_type,
+        )
+        .order_by(Organization.organization_name.asc())
+    )
+    rows = grouped.all()
+
     items = [
         {
-            "id": e.id,
-            "employeeCode": e.employee_code,
-            "name": e.name,
-            "department": e.department,
-            "designation": e.designation,
-            "status": e.status,
-            "employmentType": e.employment_type,
-            "organizationName": org_name,
-            "jurisdictionCountry": jurisdiction,
+            "organizationName": r.organization_name,
+            "organizationCode": r.organization_code,
+            "jurisdictionCountry": r.jurisdiction_country,
+            "status": r.status,
+            "employmentType": r.employment_type,
+            "employeeCount": r.employee_count,
         }
-        for e, org_name, jurisdiction in rows
+        for r in rows
     ]
-    return {"items": items, "total": total}
+    cohort = sum(r.employee_count for r in rows)
+    # Primary + complementary suppression per organization: the org's own
+    # total is visible elsewhere (registry headcount), so a single hidden
+    # cell could otherwise be recovered by subtraction.
+    by_org: dict = {}
+    for cell in items:
+        by_org.setdefault(cell["organizationCode"], []).append(cell)
+    for cells in by_org.values():
+        aggregates.suppress_group(cells, "employeeCount", ())
+    return {"items": items[skip:skip + limit], "total": len(items), "_cohort": cohort}
 
 
 def rows_to_csv_bytes(columns: List[tuple], rows: List[dict]) -> bytes:
@@ -637,22 +648,27 @@ def dashboard_charts(db: Session, start_date: Optional[date] = None, end_date: O
     # currency-mixed monetary totals are clearly labelled as such in the
     # UI), whereas finance_summary's per-country totals are the
     # currency-safe view used wherever a real amount is displayed.
-    month_expr = sa_func.date_trunc("month", PayrollRun.period_start)
-    trend_query = db.query(
-        month_expr.label("month"),
-        sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
-        sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
+    # ZP-PRIV B.2: monthly money cells need >= k distinct workers and >= 2
+    # organizations, or they would be one tenant's payroll (or one person's
+    # pay) whenever a single tenant ran payroll that month.
+    trend_rows = _filtered_runs(db, None, None, start_date, end_date)
+    trend_workers = _workers_by_run(db, [r[0].id for r in trend_rows])
+    trend_cells = _money_cells(
+        trend_rows, trend_workers,
+        lambda run, j, c: run.period_start.replace(day=1) if run.period_start else None,
     )
-    trend_query = _date_filter(trend_query, PayrollRun.period_start, start_date, end_date)
-    trend_rows = trend_query.group_by(month_expr).order_by(month_expr).all()
-    payroll_trend = [
-        {"month": r.month.strftime("%b %Y") if r.month else "—", "gross": r.gross, "net": r.net}
-        for r in trend_rows
-    ]
-    gross_vs_net = {
-        "gross": sum((r.gross for r in trend_rows), 0),
-        "net": sum((r.net for r in trend_rows), 0),
-    }
+    payroll_trend = []
+    for month, cell in sorted(trend_cells.items(), key=lambda kv: (kv[0] is None, kv[0])):
+        point = {"month": month.strftime("%b %Y") if month else "—",
+                 "gross": cell["grossPay"], "net": cell["netPay"]}
+        aggregates.suppress_money_row(point, len(cell["workers"]), len(cell["orgs"]), ("gross", "net"))
+        payroll_trend.append(point)
+    all_trend = _money_cells(trend_rows, trend_workers, lambda run, j, c: "all").get("all")
+    gross_vs_net = {"gross": all_trend["grossPay"] if all_trend else 0,
+                    "net": all_trend["netPay"] if all_trend else 0}
+    if all_trend:
+        aggregates.suppress_money_row(gross_vs_net, len(all_trend["workers"]), len(all_trend["orgs"]),
+                                      ("gross", "net"))
 
     # Organization distribution — by jurisdiction and by status.
     org_by_country = dict(
@@ -666,20 +682,14 @@ def dashboard_charts(db: Session, start_date: Optional[date] = None, end_date: O
         db.query(Organization.is_active, sa_func.count(Organization.id)).group_by(Organization.is_active).all()
     )
 
-    # Payroll by jurisdiction — gross pay grouped by operating country.
-    payroll_by_jurisdiction_query = (
-        db.query(
-            CompanyComplianceDetails.jurisdiction_country,
-            sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0),
-        )
-        .select_from(PayrollRun)
-        .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == PayrollRun.organization_id)
-    )
-    payroll_by_jurisdiction_query = _date_filter(payroll_by_jurisdiction_query, PayrollRun.period_start, start_date, end_date)
-    payroll_by_jurisdiction = [
-        {"country": country or "Unassigned", "grossPay": gross}
-        for country, gross in payroll_by_jurisdiction_query.group_by(CompanyComplianceDetails.jurisdiction_country).all()
-    ]
+    # Payroll by jurisdiction — gross pay per operating country, same rule.
+    payroll_by_jurisdiction = []
+    for country, cell in sorted(
+        _money_cells(trend_rows, trend_workers, lambda run, j, c: j or "Unassigned").items()
+    ):
+        point = {"country": country, "grossPay": cell["grossPay"]}
+        aggregates.suppress_money_row(point, len(cell["workers"]), len(cell["orgs"]), ("grossPay",))
+        payroll_by_jurisdiction.append(point)
 
     # Compliance overview — policy status counts + expiring/overdue-review.
     today = date.today()
@@ -701,9 +711,9 @@ def dashboard_charts(db: Session, start_date: Optional[date] = None, end_date: O
         .scalar()
     ) or 0
 
-    # Employee distribution — headcount by jurisdiction.
+    # Employee distribution — headcount by jurisdiction (sub-k cohorts hidden).
     employees_by_country = [
-        {"country": country or "Unassigned", "employees": count}
+        {"country": country or "Unassigned", "employees": aggregates.cohort_bucket(count)}
         for country, count in (
             db.query(CompanyComplianceDetails.jurisdiction_country, sa_func.count(PayrollEmployee.id))
             .select_from(PayrollEmployee)

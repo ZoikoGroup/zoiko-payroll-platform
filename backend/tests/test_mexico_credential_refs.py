@@ -53,7 +53,7 @@ def test_other_schemes_and_shapes_are_refused(ref):
 
 
 SECRET_LIKE = [
-    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",  # privacy-scan: allow — SYNTHETIC marker; the test proves it is refused
     "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKjMzEfYyjiWA4R4",
     "my pac password 123",
     "gcp-sm://projects/zoiko-test-project/secrets/PRIVATE KEY",
@@ -207,6 +207,14 @@ def test_upload_over_http_is_in_memory_and_bytes_are_not_stored(db, monkeypatch)
     assert der.hex()[:40] not in stored and base64.b64encode(der).decode()[:40] not in stored
 
 
+def _http_middleware_layers():
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from app.main import app
+
+    return sum(1 for m in app.user_middleware if m.cls is BaseHTTPMiddleware)
+
+
 def _raw_asgi_upload(db, org_id, credential_id, *, total, chunk=64 * 1024, declare_length):
     """Drive the REAL app (all middleware) at the ASGI level with a streamed
     body of `total` bytes, counting how many chunks the app actually pulls —
@@ -274,9 +282,11 @@ def test_a_10_mb_body_is_refused_without_reading_it_all(db, declare_length):
     total = 10 * 1024 * 1024
     status, pulled, body = _raw_asgi_upload(db, t.org.id, cred["id"], total=total, declare_length=declare_length)
     assert status == 400 and b"larger than 16 KB" in body
-    # What the route read before answering: nothing with a declared length,
-    # one 64 KB chunk (of 160) when streamed.
-    assert pulled["before_response"] == (0 if declare_length else 1)
+    # What was read before answering: the route itself reads nothing with a
+    # declared length and one 64 KB chunk (of 160) when streamed. Each of the
+    # app's BaseHTTPMiddleware layers can pull at most one more chunk while it
+    # listens for a disconnect (discarded, never accumulated).
+    assert pulled["before_response"] <= _http_middleware_layers() + (0 if declare_length else 1)
     # Starlette's BaseHTTPMiddleware (the app's audit middleware) listens for
     # a disconnect while the 400 is written and discards any chunk that
     # arrives meanwhile — it never accumulates them, and it stops with the

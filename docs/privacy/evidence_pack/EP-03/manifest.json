@@ -1,0 +1,263 @@
+{
+  "pack": "EP-03",
+  "title": "Negative-test evidence",
+  "generatedAt": "2026-10-19T10:05:19Z",
+  "files": [
+    {
+      "path": "negative_tests/A06_differencing.json",
+      "sha256": "5eb171411f9fa017636f5bd3d0893e0980c4e5812c925f8aca65757a3be600ca"
+    },
+    {
+      "path": "negative_tests/D03_log_sample_bank_export.txt",
+      "sha256": "056c421c1a0db73ab5e7f7f5844659c30d68c9fbf2ea0de309f1e04392cba045"
+    },
+    {
+      "path": "negative_tests/D03_log_sample_employee_import.txt",
+      "sha256": "1180527ef322919eda66542eacd0b32c25ccd24802204239f517267743744379"
+    },
+    {
+      "path": "negative_tests/D03_log_sample_payroll_run.txt",
+      "sha256": "8f10df05162cf7f5af7a08c235729fc1cc8845ad811b1eb4c268d3c3c2f2d6c2"
+    },
+    {
+      "path": "negative_tests/D03_log_sample_payslip.txt",
+      "sha256": "f6440bcb7e10280f6dd80f51df9ad822744d14c0311d22c36de2eabb873c2dc0"
+    },
+    {
+      "path": "negative_tests/D04_sentry_sample.json",
+      "sha256": "96f314c4f2888643bce1c757bd8e0cd9b399f0fdbdfafb29a6814a496eddc5e6"
+    },
+    {
+      "path": "negative_tests/D05_federation_cross_tenant.json",
+      "sha256": "36424001894346eba014a7e7b8b2feb8150e98c576759cdb76d75d9aa148e026"
+    },
+    {
+      "path": "negative_tests/D05_federation_entity_scope_widening.json",
+      "sha256": "52330956b10d3c62937c55688ca8531036a2946b11fa0fbe48e2bbd148dc87cf"
+    },
+    {
+      "path": "negative_tests/D05_federation_expired.json",
+      "sha256": "d36ff6578a4a8779e2e93d42b01a23f2b43e4f468d45936605a9f9ebfe88dabc"
+    },
+    {
+      "path": "negative_tests/D05_federation_global_admin_claim.json",
+      "sha256": "c047d41f334a96cb57d13c8f074a4c0b60d282339fa33b305080e5c810e3c989"
+    },
+    {
+      "path": "negative_tests/D05_federation_missing_org.json",
+      "sha256": "af6f8a92ab949d5af081c93e1cc6d68642cb80a1c3772e3ae2674ac62a951b9a"
+    },
+    {
+      "path": "negative_tests/D05_federation_no_payroll_entitlement.json",
+      "sha256": "018f5341092b12ab06a46ce3454d9ad75666a12b73dc4120ab9823367f1d46f6"
+    },
+    {
+      "path": "negative_tests/D05_federation_other_product_audience.json",
+      "sha256": "ca9950602a8d8bf210cdef9af4a13ff0c2150efa20e2bc3bc45cd3dc3a30aa63"
+    },
+    {
+      "path": "negative_tests/D05_federation_platform_role.json",
+      "sha256": "a8b8621fa7eb524249188a6310455c664b3238db5e388442f0f2fec112c7f3ed"
+    },
+    {
+      "path": "negative_tests/D05_federation_too_long_lived.json",
+      "sha256": "807aa83d830823ef743361d345f8480cf66cedb89f7e5127c5ffa08ea1517afc"
+    },
+    {
+      "path": "negative_tests/D05_federation_unknown_user.json",
+      "sha256": "a7a2c1306b66135f3315dee703f26e97e1b5faa8b73aca0493b40e02595aaf33"
+    },
+    {
+      "path": "negative_tests/D05_federation_wildcard_tenant.json",
+      "sha256": "181a64c29fa2d3e9c6d8739c8f960ccd1a807f0c1bfc633630dde9bca13a3d8e"
+    },
+    {
+      "path": "negative_tests/D05_federation_wrong_issuer.json",
+      "sha256": "e498d579faa59365b955a5d9b72d318e1f002f66329d412c8a365d4dbc1d8e0f"
+    },
+    {
+      "path": "negative_tests/D09_deidentification.json",
+      "sha256": "4e7b93386e5ecb5d2088e49aaf70cde1dc8b9e31424b5be0b55b39d251e38d4e"
+    },
+    {
+      "path": "negative_tests/D_break_glass_review.json",
+      "sha256": "4c877e2037b61270edaae83f4d18b9d1e90114bdbc3178805e1b18b5b1f54318"
+    },
+    {
+      "path": "negative_tests/E02_tamper_detected.json",
+      "sha256": "294f64ee37dd8787ed5e6be38389e4c330c1e6cc810b1b2bee448f3d287156b8"
+    },
+    {
+      "path": "negative_tests/P12_record_review.json",
+      "sha256": "445006a87d998dd51bd6fa4ebd2191dd7944925e873cc08dad3a9f3edf8215ef"
+    },
+    {
+      "path": "negative_tests/PG_RLS_no_context.json",
+      "sha256": "cfe0d454959b48fa1abb04546ab3948c1b49322099b4481a655c8fb811f6c53b"
+    },
+    {
+      "path": "negative_tests/PG_security_events_tamper.json",
+      "sha256": "3771fbbe597b4a2f4c65df9448fb4fa37ca4145269f3896f964ca86dea93912e"
+    },
+    {
+      "path": "negative_tests/PG_support_audit_tamper.json",
+      "sha256": "db6dcb3ce1f3c15793ffce9543a824a83238a6daa121233d4c1894f94cfe772e"
+    },
+    {
+      "path": "negative_tests/T01.json",
+      "sha256": "8431d8f5326eebaf29f3589f9c665117ead1a67747ba99bd5c6db138360967bd"
+    },
+    {
+      "path": "negative_tests/T02_api_payroll_employees.json",
+      "sha256": "5ab01323b0dc5422bf866a76ecb06e228f7bc00293377428d0fd1c18c76b8489"
+    },
+    {
+      "path": "negative_tests/T02_api_payroll_employees_{employee_id}.json",
+      "sha256": "b0940c7732231b29da8ff7952eb8adb759e04264663f720290db4e707c85e443"
+    },
+    {
+      "path": "negative_tests/T02_api_payroll_payslips.json",
+      "sha256": "0b5f758715b6e2fad6ab4e26c69a0beb1bb2962314d8e58ca827629266e42c7b"
+    },
+    {
+      "path": "negative_tests/T02_api_super-admin_compliance_netherlands_vcr.json",
+      "sha256": "5a391b46318a29e6ba2fa28df407483f13b89823c458d0e6874bcf2b19fbab0a"
+    },
+    {
+      "path": "negative_tests/T03_api_payroll_employees_1_statutory-profile.json",
+      "sha256": "6a8e30e3da8ae40e271c87cb50dd2679e8f62d331845acdeba9a202acb8a886e"
+    },
+    {
+      "path": "negative_tests/T03_api_payroll_payslips_1_download.json",
+      "sha256": "474c7c03d0dc324695bb4f1f75b862395e86ca9c078fb8e37d75337dae25e0c0"
+    },
+    {
+      "path": "negative_tests/T03_api_payroll_runs_1_bank-transfer-file.json",
+      "sha256": "058632cd72c132e776c559deb5e412dfe054c83903a9c999ac30c85edce8da6e"
+    },
+    {
+      "path": "negative_tests/T03_api_super-admin_compliance_france_pas-rates.json",
+      "sha256": "3c7fa27be6bba1e0a105f3bcd8b8def89e574b3851085c8df84c450bb7467162"
+    },
+    {
+      "path": "negative_tests/T03_api_super-admin_india_salary-tds-declarations.json",
+      "sha256": "9d7fe59aee5337892c0d371188c95411097459ad8b54fd7943d45c3da1b07bcc"
+    },
+    {
+      "path": "negative_tests/T04.json",
+      "sha256": "8918bdd95b0c6582f5b7cd3aa47eda100adcb5af49fc474e6542eed7f5d77b13"
+    },
+    {
+      "path": "negative_tests/T05_EA_A2.json",
+      "sha256": "a6eee79503f3e88647c412acd40d264879742e4df7caf69e27861047ab8193c4"
+    },
+    {
+      "path": "negative_tests/T05_PA_A2.json",
+      "sha256": "b3f80fd5b18bdf8d54b39d85594041b43cd1a3ea9e47503f216e02f3b1ed8bf4"
+    },
+    {
+      "path": "negative_tests/T05_TA_B1.json",
+      "sha256": "fa6bfd01bcbbdd0b1e852f6779d7dc8495fcb4cee2be4e3f9d0a4e29d223bbb2"
+    },
+    {
+      "path": "negative_tests/T06.json",
+      "sha256": "6f74d97d5247238cc90233c847a18ce4f7919b33f6b3603713c40f909ffaf6e4"
+    },
+    {
+      "path": "negative_tests/T07_A2.json",
+      "sha256": "ce2598a51b2a0cccfa29a014fed708c930ff2bd7a04d0ebf7ad19c0d0dc039fd"
+    },
+    {
+      "path": "negative_tests/T07_B1.json",
+      "sha256": "5a2f6aea342f3738916b9ea9f173cbc8cf34666f8be28776459cc01cc93c0951"
+    },
+    {
+      "path": "negative_tests/T07_export.json",
+      "sha256": "4bb7aaaadba48abc1f0af4287c0a77b89916b6ad0da8fc5c09237a42aba736c6"
+    },
+    {
+      "path": "negative_tests/T07_payslips.json",
+      "sha256": "08624e734b38167958551dac39bc1221128838f7983395448c1637c324091a83"
+    },
+    {
+      "path": "negative_tests/T07_write.json",
+      "sha256": "ae1b449b54e13c1b152ba7659943a3239b85e0f5b7ea45ce0bc5c016b7445c41"
+    },
+    {
+      "path": "negative_tests/T08_expiry.json",
+      "sha256": "03c778d5514131383fd00ec72b02504a1ce6ad6bd95180c3fbe8fb1dedb19683"
+    },
+    {
+      "path": "negative_tests/T08_revoke.json",
+      "sha256": "76d5a867315a90775128f448994303fe3d8378ae0de8c84f40ecbbc39f460791"
+    },
+    {
+      "path": "negative_tests/T09_route_sweep.json",
+      "sha256": "dc5ef2bcf2c96c5e5e3c0bb39537bbddbe91c3dbe4ab91451b32a53877eb3d41"
+    },
+    {
+      "path": "negative_tests/T09_search_and_bi.json",
+      "sha256": "aedb4133f7763ff911c752de331296a763f4a0f09d822a246251b63b60a2b3db"
+    },
+    {
+      "path": "negative_tests/T10_job_deactivate.json",
+      "sha256": "50c9d5e6f763d3af6d2646bbd68c91cb23f66e4c673e2375c0aba2c2de03e262"
+    },
+    {
+      "path": "negative_tests/T10_job_demote.json",
+      "sha256": "22f4f7fcebd9834d3458c223de948087f9f7a6f36d4a6cc1a5f0214d658dddfd"
+    },
+    {
+      "path": "negative_tests/T10_job_no_context.json",
+      "sha256": "43db63b4d9165235a8251b2f3e1f74b152a1ed742d7dc8f7a28492b72ae9e174"
+    },
+    {
+      "path": "negative_tests/T10_job_suspend.json",
+      "sha256": "8eca82b28df31f561be3804e71c6b9af038a66e0917651a313d1290fd0d38e10"
+    },
+    {
+      "path": "negative_tests/T10_job_tenant_swap.json",
+      "sha256": "13c225aa5e0662d7a276699d038a3f7b00ebc780f39a1e90aa4b3eec16c98783"
+    },
+    {
+      "path": "negative_tests/T10_machine_tenant_claim.json",
+      "sha256": "49ce4a8f54fed24b35744f681d6273b015f73d5cb35e23bcf5eebaec5b0b3aa1"
+    },
+    {
+      "path": "negative_tests/T11_llm_egress_scrub.json",
+      "sha256": "820d2033c6704d0e02faafe36dae0f1bc42cb401ee8095224a21f802d76e80e3"
+    },
+    {
+      "path": "negative_tests/T11_tool_EA_payroll.getRunSummary_EMPLOYEE_SELF_ONLY.json",
+      "sha256": "6a26288cc7748322d9c26c878717acb180d15afcbe7ebe1d4f0e42c674e0b2ac"
+    },
+    {
+      "path": "negative_tests/T11_tool_PA_payroll.comparePeriods_ORG_WIDE_TOOL_FOR_SCOPED_PRINCIPAL.json",
+      "sha256": "80f762891b930ae0d9d975b51dc3238f881024415bcf4406f5b2224a5ad1ffbe"
+    },
+    {
+      "path": "negative_tests/T11_tool_SA_payroll.getRunSummary_TENANT_MISMATCH.json",
+      "sha256": "03c9c8fdcc17e1f1e8233e9453a6ae323cea278a2d4660fcc0bc0418b147349d"
+    },
+    {
+      "path": "negative_tests/T11_tool_TA_payroll.getRunSummary_TENANT_MISMATCH.json",
+      "sha256": "2f501859e11faa41ae90051032d4df6b427f4acacf00c325695c3d00457982bc"
+    },
+    {
+      "path": "negative_tests/T11_tool_TA_payroll.getRunSummary_TOOL_PARAMETER_TAMPERING.json",
+      "sha256": "e3870792441931bfc9314fcd3aff2680d961d7a5af6a1e418ac7bf6014d9a477"
+    },
+    {
+      "path": "negative_tests/T11_tool_TA_payroll.listExceptions_TOOL_PARAMETER_TAMPERING.json",
+      "sha256": "3e3caa589cd8a4775ac946df29a5a9a27e9ceb52eec532533feae055d37797af"
+    },
+    {
+      "path": "negative_tests/T12_attribution_and_drill.json",
+      "sha256": "dbbc425663831cd2a01d4d50a2c180f2775ab7c34cc528ec2ffaf18c0dc63aa5"
+    }
+  ],
+  "notes": [
+    "63 evidence files from tests/privacy/evidence (written by the test run).",
+    "Test ids present: T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12."
+  ]
+}

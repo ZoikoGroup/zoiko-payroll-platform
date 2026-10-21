@@ -1,0 +1,10 @@
+{
+  "iac": [
+    "deploy/security/iam_roles.tf",
+    "deploy/security/backup_iam.tf",
+    "deploy/security/anchor_bucket.tf",
+    "deploy/security/pam_runbook.md"
+  ],
+  "liveExports": "python -m scripts.privileged_inventory --output EP-02/privileged_inventory.json (run by the platform security owner on the deployment)",
+  "status": "awaiting infra owner (HP-01, HP-02)"
+}

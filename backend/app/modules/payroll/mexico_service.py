@@ -29,6 +29,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.authz.scopes import organization_scoped
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import retention_service, service
 from app.modules.payroll.engine.countries.mexico import ENGINE_VERSION
@@ -551,12 +552,11 @@ def list_organizations(db: Session) -> list:
 
     from app.modules.payroll.models import CompanyComplianceDetails, PayrollMxEmployerProfile
 
-    # An organisation is "Mexican" here if it has a Mexico employee, a Mexico
-    # legal employer (Phase 3 onboarding comes before any employee), or Mexico
-    # as its company jurisdiction.
-    org_ids = {row[0] for row in db.query(PayrollEmployee.organization_id)
-               .filter(PayrollEmployee.country_code == MX).distinct().all()}
-    org_ids |= {row[0] for row in db.query(PayrollMxEmployerProfile.organization_id).distinct().all()}
+    # An organisation is "Mexican" here if it has a Mexico legal employer
+    # (Phase 3 onboarding comes before any employee) or Mexico as its company
+    # jurisdiction. ZP-PRIV: a platform principal never reads worker rows, so
+    # employees are not consulted (a Mexican employee needs a Mexican employer).
+    org_ids = {row[0] for row in db.query(PayrollMxEmployerProfile.organization_id).distinct().all()}
     org_ids |= {row[0] for row in db.query(CompanyComplianceDetails.organization_id)
                 .filter(CompanyComplianceDetails.jurisdiction_country.in_((MX, "Mexico"))).all()}
     orgs = db.query(Organization).filter(Organization.id.in_(org_ids or {-1})).order_by(Organization.id).all()
@@ -574,8 +574,7 @@ def _org(db: Session, org_id: int):
 
 def list_employees(db: Session, org_id: int) -> list:
     _org(db, org_id)
-    rows = (db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id,
-                                             PayrollEmployee.country_code == MX)
+    rows = (organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.country_code == MX)
             .order_by(PayrollEmployee.id).all())
     return [{"id": e.id, "name": e.name, "employee_code": e.employee_code} for e in rows]
 

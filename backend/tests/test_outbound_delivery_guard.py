@@ -90,7 +90,8 @@ def test_a_test_run_is_test_mode_and_blocks_real_delivery():
     assert outbound.smtp_target(dict(REAL)) is None
 
 
-def test_real_looking_smtp_settings_are_never_contacted_in_test_or_local_mode(recorder, caplog, monkeypatch):
+def test_real_looking_smtp_settings_are_never_contacted_in_test_or_local_mode(recorder, caplog, monkeypatch,
+                                                                              raw_log_messages):
     from app.core import outbound
 
     for mode in (outbound.TEST, outbound.LOCAL):

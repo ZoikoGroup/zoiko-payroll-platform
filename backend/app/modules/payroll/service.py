@@ -891,10 +891,43 @@ def record_tax_audit(
         db.flush()
 
 
+# ZP-PRIV B.1: the audit entity types that describe PLATFORM configuration
+# (statutory packs, rates, registries, certification). Everything else in
+# payroll_tax_configuration_audit is a tenant's own record — employee
+# statutory profiles, payslip corrections, ledgers, filings, employer
+# profiles — and its old/new values carry worker or tenant data, so a
+# platform principal never sees those rows.
+PLATFORM_AUDIT_ENTITY_TYPES = frozenset({
+    "jurisdiction_pack", "tax_slab", "locality_dataset", "locality_rate", "reciprocity_rule",
+    "jurisdiction_service_registry", "source_artifact", "report_template",
+    "pap_release", "pap_algorithm_asset", "hk_statutory_slab", "ch_qst_tariff_file",
+    "germany_pv_configuration", "germany_overtime_premium_category",
+    "germany_overtime_grundlohn_cap", "germany_overtime_premium_component",
+    "germany_minijob_midijob_parameter", "germany_health_fund",
+    "germany_earning_taxability_rule", "germany_contribution_ceiling",
+    "germany_church_tax_exception", "germany_elster_certificate_config",
+})
+# contribution_rate rows are platform data only when they belong to a
+# statutory pack (canonical); org-scoped overrides are tenant config.
+_PACK_SCOPED_AUDIT_ENTITY_TYPES = frozenset({"contribution_rate"})
+
+
+def platform_audit_filter(query):
+    """Restrict a TaxConfigurationAudit query to platform configuration."""
+    return query.filter(or_(
+        TaxConfigurationAudit.entity_type.in_(sorted(PLATFORM_AUDIT_ENTITY_TYPES)),
+        and_(TaxConfigurationAudit.entity_type.in_(sorted(_PACK_SCOPED_AUDIT_ENTITY_TYPES)),
+             TaxConfigurationAudit.jurisdiction_pack_id.isnot(None)),
+    ))
+
+
 def list_tax_configuration_audit(
     db: Session, jurisdiction_pack_id: Optional[int] = None, entity_type: Optional[str] = None,
+    platform_only: bool = False,
 ) -> List[TaxConfigurationAudit]:
     query = db.query(TaxConfigurationAudit)
+    if platform_only:
+        query = platform_audit_filter(query)
     if jurisdiction_pack_id:
         query = query.filter(TaxConfigurationAudit.jurisdiction_pack_id == jurisdiction_pack_id)
     if entity_type:
@@ -2566,6 +2599,8 @@ def upsert_employer_tax_profile(db: Session, data: EmployerTaxProfileUpsert, act
     Berufsgenossenschaft Beitragsbescheid) must carry sourceDocumentId.
     STATE_DEFAULT/NEW_EMPLOYER profiles are unaffected — those
     legitimately have no single notice document to attach."""
+    if data.organizationId is None:
+        raise BadRequestException("organizationId is required.")
     if data.rateSource == "EMPLOYER_NOTICE" and not data.sourceDocumentId:
         raise BadRequestException(
             "An EMPLOYER_NOTICE-sourced profile must reference its source notice document "
@@ -2695,6 +2730,8 @@ def create_germany_accident_insurance_profile_record(
     """Append a new effective-dated DRAFT accident-insurance profile
     version for one organization. Never updates an existing row — same
     auto-close-previous-open-row behavior as create_health_fund_record."""
+    if data.organization_id is None:
+        raise BadRequestException("organizationId is required.")
     if not data.carrier_name or not data.carrier_name.strip():
         raise BadRequestException("carrierName is required.")
     if data.employer_rate_pct is None or data.employer_rate_pct < 0:
@@ -9103,12 +9140,20 @@ def get_jurisdiction_pack_impact_preview(db: Session, pack_row_id: int) -> dict:
         })
 
     orgs_genuinely_affected = [o for o in affected if o["optedIntoCanonicalTracking"]]
+    # ZP-PRIV B.2: this is a cross-tenant view, so a per-organization worker
+    # cohort below k must not be shown as a number (it would single people
+    # out once combined with the tenant registry). Run counts are kept — a
+    # run is not a person.
+    from app.modules.super_admin import aggregates
+
+    for entry in affected:
+        aggregates.suppress_row(entry, entry.get("activeEmployeeCount", 0), ("activeEmployeeCount",))
     return {
         "packRowId": pack_row_id, "packId": pack.pack_id, "packVersion": pack.version, "packType": pack.pack_type,
         "organizations": affected,
         "totalOrganizationsEligible": len(affected),
         "totalOrganizationsGenuinelyAffected": len(orgs_genuinely_affected),
-        "totalActiveEmployeesAffected": total_employees,
+        "totalActiveEmployeesAffected": aggregates.suppress(total_employees, total_employees),
         "totalUnfinalizedRunsAffected": total_unfinalized_runs,
     }
 
@@ -26616,6 +26661,19 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
         from app.modules.payroll import mexico_benefits_service as _mx_benefits
 
         employees += _mx_benefits.year_joiners(db, organization_id, run, employee_ids, {e.id for e in employees})
+    # Mexico (Phase 9c): a FINIQUITO run pays exactly its termination's
+    # employee; any other run drops an employee whose approved termination
+    # ended the employment before its period. MX runs / employees only.
+    # Mexico (Phase 9d): a PTU run pays exactly its cycle's eligible workers
+    # (leavers keep the right). MX runs only.
+    if getattr(run, "mx_run_type", None) == "PTU":
+        from app.modules.payroll import mexico_ptu_service as _mx_ptu
+
+        employees = _mx_ptu.select_for_run(db, organization_id, run, employee_ids)
+    elif getattr(run, "mx_run_type", None) == "FINIQUITO" or any(e.country_code == "MX" for e in employees):
+        from app.modules.payroll import mexico_termination_service as _mx_term
+
+        employees = _mx_term.select_for_run(db, organization_id, run, employees, employee_ids)
 
     # Phase 8BI: a FAILED item (a prior statutorily-blocked attempt —
     # e.g. Germany PAP unavailable) does NOT count as "already generated"
@@ -30211,7 +30269,8 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
         )
 
     sensitive_changes = _sensitive_field_changes(employee, sensitive_snapshot)
-    _notify_employee_sensitive_fields_changed(db, employee, sensitive_changes, organization_id)
+    _notify_employee_sensitive_fields_changed(db, employee, sensitive_changes, organization_id,
+                                             previous_email=sensitive_snapshot.get("email"))
 
     return employee
 
@@ -30314,12 +30373,32 @@ def _snapshot_sensitive_fields(employee) -> dict:
     return {
         "columns": {f: getattr(employee, f, None) for f in _SENSITIVE_EMPLOYEE_COLUMNS},
         "compliance": dict(employee.compliance_fields or {}),
+        "email": employee.email,
     }
 
 
+# ZP-PRIV D03: the change notice says WHAT changed, never the values. An
+# identifier shows its last 4 characters; pay amounts and tax details only
+# say they were updated. (The raw values used to travel in plaintext email
+# and in the email's idempotency fingerprint.)
+_MASK_LAST4_FIELDS = frozenset({"bank_account", "ifsc", "pan", "uan"})
+_VALUE_HIDDEN_FIELDS = frozenset({"ctc", "basic", "hra"})
+
+
+def _masked(field: str, value) -> Optional[str]:
+    if value is None:
+        return None
+    if field in _VALUE_HIDDEN_FIELDS:
+        return "(not shown)"
+    text = str(value)
+    if field in _MASK_LAST4_FIELDS:
+        return ("•" * max(len(text) - 4, 0)) + text[-4:] if len(text) > 4 else "•" * len(text)
+    return text
+
+
 def _sensitive_field_changes(employee, snapshot: dict) -> list:
-    """(label, old, new) triples for every sensitive field that changed since
-    `snapshot` (taken by _snapshot_sensitive_fields before the mutation)."""
+    """(label, old, new) triples - values masked - for every sensitive field
+    that changed since `snapshot` (taken before the mutation)."""
     changes = []
     for field in _SENSITIVE_EMPLOYEE_COLUMNS:
         old_value = snapshot["columns"][field]
@@ -30327,17 +30406,16 @@ def _sensitive_field_changes(employee, snapshot: dict) -> list:
         if old_value != new_value:
             changes.append((
                 _SENSITIVE_FIELD_LABELS.get(field, field),
-                str(old_value) if old_value is not None else None,
-                str(new_value) if new_value is not None else None,
+                _masked(field, old_value),
+                _masked(field, new_value),
             ))
     new_compliance_values = employee.compliance_fields or {}
     if snapshot["compliance"] != new_compliance_values:
-        import json as _json
-        changes.append((
-            "Tax identifiers / compliance details",
-            _json.dumps(snapshot["compliance"], sort_keys=True, default=str) or "—",
-            _json.dumps(new_compliance_values, sort_keys=True, default=str) or "—",
-        ))
+        changed_keys = sorted(set(snapshot["compliance"]) ^ set(new_compliance_values) | {
+            k for k in set(snapshot["compliance"]) & set(new_compliance_values)
+            if snapshot["compliance"][k] != new_compliance_values[k]})
+        changes.append(("Tax identifiers / compliance details", "(not shown)",
+                        "updated: " + ", ".join(changed_keys)))
     return changes
 
 
@@ -30646,7 +30724,8 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
     for emp in updated_employees:
         changes = _sensitive_field_changes(emp, sensitive_snapshots[emp.id])
         if changes and emp.email:
-            _notify_employee_sensitive_fields_changed(db, emp, changes, organization_id)
+            _notify_employee_sensitive_fields_changed(db, emp, changes, organization_id,
+                                                     previous_email=sensitive_snapshots[emp.id].get("email"))
             sensitive_notified += 1
     _notify_bulk_employee_operation(
         db, organization_id, "update", [emp.id for emp in updated_employees], failed,
@@ -30660,7 +30739,11 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
 
 
 def delete_employee(db: Session, employee_id: int, organization_id: int):
+    from app.modules.security import governance
+
     employee = get_employee_by_id(db, employee_id, organization_id)
+    # ZP-PRIV F03: a platform-wide (or worker) legal hold blocks deletion.
+    governance.assert_not_on_hold(db, organization_id, employee.id)
     employee_country = _normalize_country(employee.country_code or "")
     if retention_service.enabled(employee_country):
         # Shared records governance (Hong Kong: D-19): a legal hold or any
@@ -30701,9 +30784,14 @@ def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id:
     deleted = []
     failed = []
 
+    from app.modules.security import governance
+
     for emp_id in data.employee_ids:
         try:
             employee = get_employee_by_id(db, emp_id, organization_id)
+            if governance.active_holds(db, organization_id, emp_id):
+                failed.append({"id": emp_id, "reason": "Under a legal hold."})
+                continue
             has_payslips = db.query(PayslipItem.id).filter(PayslipItem.employee_id == emp_id).first()
             if has_payslips:
                 failed.append({"id": emp_id, "reason": "Has payslip history — set status to Inactive instead."})
@@ -31212,26 +31300,38 @@ def _notify_payslips_ready(db: Session, run: "PayrollRun", organization_id: int)
         logger.warning(f"[payroll-mail] payslip-ready notification pass failed for run {run.id}: {exc}")
 
 
-def _run_notifications_in_background(run_id: int, organization_id: int, kind: str) -> None:
+def _run_notifications_in_background(run_id: int, organization_id: int, kind: str,
+                                     job_ctx: Optional[dict] = None) -> None:
     """Entry point for BackgroundTasks — runs AFTER the HTTP response is sent,
     so it needs its own DB session (the request's session is closed by then
-    via get_db's `finally: db.close()`)."""
+    via get_db's `finally: db.close()`).
+
+    ZP-PRIV D08: re-authorizes the user who advanced the run (still active,
+    still an operator of this organization, organization not suspended) and
+    binds the tenant context before reading anything; fails closed and is
+    audited otherwise."""
     import logging
+    from app.core.job_auth import JobAuthorizationError, authorized_job
     from app.database import SessionLocal
     logger = logging.getLogger("zoiko")
     from app.modules.communications.service import dispatch_inline
     db = SessionLocal()
     try:
-        run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
-        if not run:
-            return
-        with dispatch_inline():
-            if kind == "approved":
-                _notify_payroll_run_approved(db, run, organization_id)
-            elif kind == "paid":
-                _notify_payslips_ready(db, run, organization_id)
+        with authorized_job(db, job_ctx, task_name=f"payroll_run_{kind}_notifications",
+                            organization_id=organization_id, org_wide=True):
+            run = (db.query(PayrollRun)
+                   .filter(PayrollRun.id == run_id, PayrollRun.organization_id == organization_id).first())
+            if not run:
+                return
+            with dispatch_inline():
+                if kind == "approved":
+                    _notify_payroll_run_approved(db, run, organization_id)
+                elif kind == "paid":
+                    _notify_payslips_ready(db, run, organization_id)
+    except JobAuthorizationError:
+        logger.warning("[payroll-mail] notification job for run %s refused: requester no longer authorized", run_id)
     except Exception as exc:
-        logger.warning(f"[payroll-mail] background notification pass failed for run {run_id}: {exc}")
+        logger.warning(f"[payroll-mail] background notification pass failed for run {run_id}: {type(exc).__name__}")
     finally:
         db.close()
 
@@ -31289,28 +31389,32 @@ def _notify_employee_deleted(db: Session, employee_email: str, employee_name: st
         logger.warning(f"[payroll-mail] employee-deleted email failed for org {organization_id}: {exc}")
 
 
-def _notify_employee_sensitive_fields_changed(db: Session, employee, changes, organization_id: int) -> None:
+def _notify_employee_sensitive_fields_changed(db: Session, employee, changes, organization_id: int,
+                                             previous_email: Optional[str] = None) -> None:
     import logging
     logger = logging.getLogger("zoiko")
     try:
-        if not changes or not employee or not employee.email:
+        if not changes or not employee:
             return
         from app.modules.communications.service import queue_email, repeatable_idempotency_key
         from app.services.email_service import send_employee_sensitive_fields_changed_email
-        # Repeatable: the same employee can be edited many times. Keyed on the
-        # change itself within the dedup window.
-        queue_email(
-            "payroll", "payroll.employee_sensitive_fields_changed", None, employee.email,
-            repeatable_idempotency_key(
-                organization_id, "payroll.employee_sensitive_fields_changed", employee.email, None,
-                f"employee:{employee.id}", changes,
-            ),
-            send_employee_sensitive_fields_changed_email, employee.email, employee.name, list(changes),
-            send_kwargs={"organization_id": organization_id},
-            organization_id=organization_id, db=db,
-        )
+        # ZP-PRIV D03: also tell the PREVIOUS address when the email changed in
+        # the same edit - a redirected address must not hide a bank change.
+        recipients = [e for e in dict.fromkeys([employee.email, previous_email]) if e]
+        for recipient in recipients:
+            queue_email(
+                "payroll", "payroll.employee_sensitive_fields_changed", None, recipient,
+                repeatable_idempotency_key(
+                    organization_id, "payroll.employee_sensitive_fields_changed", recipient, None,
+                    f"employee:{employee.id}", changes,
+                ),
+                send_employee_sensitive_fields_changed_email, recipient, employee.name, list(changes),
+                send_kwargs={"organization_id": organization_id},
+                organization_id=organization_id, db=db,
+            )
     except Exception as exc:
-        logger.warning(f"[payroll-mail] employee-sensitive-change email failed for org {organization_id}: {exc}")
+        logger.warning(f"[payroll-mail] employee-sensitive-change email failed for org {organization_id}: "
+                       f"{type(exc).__name__}")
 
 
 def _notify_payroll_run_created(db: Session, run, organization_id: int) -> None:
@@ -31645,7 +31749,12 @@ def advance_payroll_run_status(
     )
     if notify_kind:
         if background_tasks is not None:
-            background_tasks.add_task(_run_notifications_in_background, run.id, organization_id, notify_kind)
+            from app.core.correlation import current as _current_correlation
+
+            background_tasks.add_task(
+                _run_notifications_in_background, run.id, organization_id, notify_kind,
+                {"principal_user_id": approver_id, "organization_id": organization_id,
+                 "correlation_id": _current_correlation()})
         elif notify_kind == "approved":
             _notify_payroll_run_approved(db, run, organization_id)
         else:

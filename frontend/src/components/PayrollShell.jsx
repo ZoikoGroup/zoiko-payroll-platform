@@ -20,6 +20,8 @@ import {
   ChevronRight,
   Bell,
   CreditCard,
+  Landmark,
+  LifeBuoy,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useOrganization } from "../context/OrganizationContext";
@@ -28,9 +30,9 @@ import ThemeToggle from "./ThemeToggle";
 import AssistLauncher from "../modules/assist/AssistLauncher";
 import TrialBanner from "./TrialBanner";
 import DunningBanner from "./DunningBanner";
-import AssistedAccessBanner from "./AssistedAccessBanner";
 
-const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
+// Tenant payroll operators only (ZP-PRIV A05: no platform role here).
+const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN]);
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_sidebar_collapsed";
 
@@ -51,6 +53,8 @@ function buildNavGroups(role) {
   // the backend), so they don't get this nav item at all.
   if (role === ROLES.ORG_ADMIN) {
     overviewItems.push({ label: "Team", href: "/organization-admin/team", icon: Users, end: true });
+    // ZP-PRIV D.6: the tenant's control over Zoiko support.
+    overviewItems.push({ label: "Platform Support Access", href: "/organization-admin/support-access", icon: LifeBuoy });
   }
   overviewItems.push({
     label: "Subscription",
@@ -80,7 +84,13 @@ function buildNavGroups(role) {
     },
     {
       title: "Compliance",
-      items: [{ label: "Compliance", href: "/payroll/compliances", icon: ShieldCheck }],
+      items: [
+        { label: "Compliance", href: "/payroll/compliances", icon: ShieldCheck },
+        // Employer statutory configuration is tenant-run (ZP-PRIV decision 3).
+        ...(OPERATOR_ROLES.has(role)
+          ? [{ label: "Employer Statutory", href: "/payroll/employer-statutory", icon: Landmark }]
+          : []),
+      ],
     },
     {
       title: "Reporting",
@@ -405,7 +415,6 @@ export default function PayrollShell({ children }) {
           collapsed={collapsed}
           menuButtonRef={menuButtonRef}
         />
-        <AssistedAccessBanner />
         <TrialBanner />
         <DunningBanner />
         <main className="w-full">{children}</main>

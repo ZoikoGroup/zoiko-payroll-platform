@@ -28,7 +28,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ..jurisdictions.mexico import (ceav, classification, entitlements, imss, infonavit, isn, isr, labor, preflight,
-                                    sbc, special_pay, subsidy, trace)
+                                    sbc, special_pay, subsidy, termination, trace)
 from ..jurisdictions.mexico.errors import MexicoCalculationBlockedError, MXBlock  # noqa: F401  (re-exported)
 
 __all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoCalculationBlockedError", "MXBlock", "calculate"]
@@ -74,11 +74,22 @@ def _special_run(ctx, pre) -> dict:
     gross = sum((l["amount"] for l in lines), _ZERO)
     if ctx.gross is not None and Decimal(str(ctx.gross)) != gross:
         raise MXBlock("MX_GROSS_MISMATCH", f"the payslip gross {ctx.gross} is not the sum of its special lines {gross}")
-    concept = special_pay.RUN_CONCEPT[pre["special_run"]]
-    rule = special_pay.rule(concept)
     taxable = sum((l["isr_taxable"] for l in lines), _ZERO)
     exempt = sum((l["isr_exempt"] for l in lines), _ZERO)
-    withheld = rnd(special_pay._dec(rule.standalone_isr(taxable, pre["facts"]), "ISR amount"))
+    if pre["special_run"] == "FINIQUITO":
+        # Phase 9c: the finiquito's lines are withheld together by the
+        # transcribed finiquito rule (S24 / S25), per concept.
+        concept = "FINIQUITO"
+        by_concept = {}
+        for l in lines:
+            by_concept[l["kind"]] = by_concept.get(l["kind"], _ZERO) + l["isr_taxable"]
+        withheld = rnd(termination.isr(by_concept, {**pre["facts"], "lines": lines}))
+        rule_source = termination.rule_source()
+    else:
+        concept = special_pay.RUN_CONCEPTS[pre["special_run"]][0]
+        rule = special_pay.rule(concept)
+        withheld = rnd(special_pay._dec(rule.standalone_isr(taxable, pre["facts"]), "ISR amount"))
+        rule_source = f"{rule.source} {rule.source_ref}"
     if withheld < _ZERO:
         raise MXBlock("MX_SPECIAL_PAY_RULE_INVALID", f"the {concept} rule returned a negative withholding")
     state_tax = isn.employer(lines, work_state, ctx.mx_isn_state_pack)
@@ -94,8 +105,7 @@ def _special_run(ctx, pre) -> dict:
         "concepts": trace.concepts(lines), "rounding_rule": rnd.text,
         "content_rows": trace.content_rows(content, state_tax["content"]), "pack": getattr(ctx, "mx_pack", None),
         "special": {"run_type": pre["special_run"], "concept": concept, "isr_exempt": exempt,
-                    "rule_source": f"{rule.source} {rule.source_ref}",
-                    "detail": getattr(ctx, "mx_special_detail", None)},
+                    "rule_source": rule_source, "detail": getattr(ctx, "mx_special_detail", None)},
     }
     return {"tds": withheld, "mx_employee_total": _ZERO, "mx_result": trace.build(**result)}
 

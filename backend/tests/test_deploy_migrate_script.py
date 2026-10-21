@@ -86,9 +86,34 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
     here = os.getcwd()
     os.chdir(Path(__file__).resolve().parents[1])
     try:
-        tables, _ = pending_objects("f5c1a8d3e9b2")
-        assert tables == {"payroll_mx_vacation_records"}
+        tables, _ = pending_objects("b4d8f2c6a9e3")
+        assert tables == {"payroll_mx_ptu_cycles", "payroll_mx_ptu_allocations"}
+        # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
+        tables, columns = pending_objects("f5c1a8d3e9b2")
+        assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables
+        assert "data_region" in columns.get("organizations", set())
         tables, _ = pending_objects("e3b9c2d7f4a1")
         assert {"payroll_mx_run_corrections", "payroll_mx_vacation_records"} <= tables
     finally:
         os.chdir(here)
+
+
+def test_batch_added_columns_count_and_downgrade_does_not():
+    """A column added inside `with op.batch_alter_table(...) as batch:` is
+    explained; one a downgrade() re-adds is not."""
+    from scripts.drift_pending_filter import _added_columns, _upgrade_body
+
+    src = (
+        "def upgrade():\n"
+        "    with op.batch_alter_table('organizations') as batch:\n"
+        "        batch.add_column(sa.Column('data_region', sa.String(8)))\n"
+        "    with op.batch_alter_table('users') as b2:\n"
+        "        b2.add_column(sa.Column('is_temporary', sa.Boolean()))\n"
+        "    op.add_column('runs', sa.Column('flag', sa.Boolean()))\n"
+        "\n"
+        "\n"
+        "def downgrade():\n"
+        "    op.add_column('legacy', sa.Column('old_col', sa.Integer()))\n"
+    )
+    assert sorted(_added_columns(_upgrade_body(src))) == [
+        ("organizations", "data_region"), ("runs", "flag"), ("users", "is_temporary")]

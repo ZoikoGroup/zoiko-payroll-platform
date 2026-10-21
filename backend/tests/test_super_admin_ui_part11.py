@@ -71,11 +71,31 @@ def test_impact_preview_includes_opted_in_org_with_employee_and_run_counts(db, o
     preview = service.get_jurisdiction_pack_impact_preview(db, pack.id)
     org_entry = preview["organizations"][0]
     assert org_entry["optedIntoCanonicalTracking"] is True
-    assert org_entry["activeEmployeeCount"] == 1
+    # ZP-PRIV B.2: a cohort of 1 is below k (5) and must be suppressed, not
+    # printed. Run counts are not a worker cohort and stay exact.
+    assert org_entry["activeEmployeeCount"] == "<5, hidden"
     assert org_entry["unfinalizedRunCount"] == 1  # only the Draft run, not the Paid one
     assert preview["totalOrganizationsGenuinelyAffected"] == 1
-    assert preview["totalActiveEmployeesAffected"] == 1
+    assert preview["totalActiveEmployeesAffected"] == "<5, hidden"
     assert preview["totalUnfinalizedRunsAffected"] == 1
+
+
+def test_impact_preview_shows_employee_count_only_at_or_above_k(db, organization):
+    """A cohort of k or more is reported exactly; below k is hidden."""
+    pack = _make_tax_pack(db, "UK-IMPACT-TESTK")
+    _make_company(db, organization.id, country="UK", active_pack_id=pack.id)
+    db.add_all([
+        PayrollEmployee(
+            organization_id=organization.id, employee_code=f"K{i}", name=f"P{i}",
+            status=EmployeeStatus.ACTIVE,
+        )
+        for i in range(5)
+    ])
+    db.commit()
+
+    preview = service.get_jurisdiction_pack_impact_preview(db, pack.id)
+    assert preview["organizations"][0]["activeEmployeeCount"] == 5
+    assert preview["totalActiveEmployeesAffected"] == 5
 
 
 def test_impact_preview_missing_pack_raises(db, organization):

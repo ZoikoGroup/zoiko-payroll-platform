@@ -188,6 +188,26 @@ def test_overtime_approval_decision_notifies_employee(db, organization, captured
 
 # ── 0.4 Super Admin forced password reset ──────────────────────────────────
 
+def _live_tenant_grant(db, organization, requester):
+    from datetime import datetime, timedelta
+
+    from app.core.security import hash_password
+    from app.modules.auth.models import User, UserRole
+    from app.modules.support_access.models import SupportAccessGrant
+
+    approver = User(email="orgadmin@testorg.test", hashed_password=hash_password("x-Pass-3!"),
+                    role=UserRole.ORG_ADMIN, organization_id=organization.id, first_name="Org", last_name="Admin",
+                    is_active=True)
+    db.add(approver)
+    db.flush()
+    now = datetime.utcnow()
+    db.add(SupportAccessGrant(organization_id=organization.id, requested_by_user_id=requester.id, reason="ticket",
+                              ticket_reference="T-1", requested_minutes=15, status="active", correlation_id="c",
+                              scope_type="diagnostics", requested_at=now, approved_by_user_id=approver.id,
+                              approved_at=now, activated_at=now, expires_at=now + timedelta(minutes=15)))
+    db.commit()
+
+
 def test_admin_reset_uses_iam007_admin_variant_and_is_audited(db, organization, captured):
     from app.core.security import hash_password
     from app.modules.auth import service as auth_service
@@ -204,6 +224,17 @@ def test_admin_reset_uses_iam007_admin_variant_and_is_audited(db, organization, 
     )
     db.add_all([target, admin])
     db.commit()
+
+    # ZP-PRIV A03: platform staff may reset a TENANT user's credentials only
+    # under a live, tenant-approved support grant; without one it is refused.
+    import pytest
+
+    from app.core.exceptions import ForbiddenException
+
+    with pytest.raises(ForbiddenException):
+        sa_router.admin_reset_password(target.id, current_user=admin, db=db)
+    assert captured == []
+    _live_tenant_grant(db, organization, admin)
 
     sa_router.admin_reset_password(target.id, current_user=admin, db=db)
 

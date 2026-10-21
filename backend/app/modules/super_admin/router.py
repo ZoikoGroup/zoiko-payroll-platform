@@ -23,6 +23,7 @@ from app.database import get_db
 from app.modules.auth.models import User
 from app.modules.auth.schemas import SuccessResponse
 from app.modules.organizations.models import Organization
+from app.modules.super_admin import aggregates
 from app.modules.super_admin.schemas import (
     ApplicableOrganization,
     AssignPolicyRequest,
@@ -119,9 +120,12 @@ router = APIRouter(prefix="/super-admin", tags=["Super Admin"])
 def dashboard_stats(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
     from app.modules.payroll.models import PayrollEmployee, PayrollRun
 
+    aggregates.guard_aggregate_request(current_user.id, {})
+
     total_orgs = db.query(Organization).count()
     active_orgs = db.query(Organization).filter(Organization.is_active == True).count()
-    total_users = db.query(User).count()
+    # Temporary JIT support logins are not platform users (ZP-PRIV D.3).
+    total_users = db.query(User).filter(User.is_temporary.is_(False)).count()
 
     recent_orgs = (
         db.query(Organization)
@@ -130,6 +134,12 @@ def dashboard_stats(current_user=Depends(get_current_super_admin), db: Session =
         .all()
     )
 
+    # ZP-PRIV B.2: the two worker-touching cells are suppressed below k so a
+    # tiny platform can't be enumerated from here. Organization/user counts
+    # are platform administration data, not worker data.
+    payroll_employees = db.query(PayrollEmployee).count()
+    payroll_runs = db.query(PayrollRun).count()
+
     return DashboardStats(
         total_organizations=total_orgs,
         active_organizations=active_orgs,
@@ -137,8 +147,8 @@ def dashboard_stats(current_user=Depends(get_current_super_admin), db: Session =
         super_admins=db.query(User).filter(User.role == "super_admin").count(),
         org_admins=db.query(User).filter(User.role == "org_admin").count(),
         payroll_admins=db.query(User).filter(User.role == "payroll_admin").count(),
-        total_payroll_employees=db.query(PayrollEmployee).count(),
-        total_payroll_runs=db.query(PayrollRun).count(),
+        total_payroll_employees=aggregates.suppress(payroll_employees, payroll_employees),
+        total_payroll_runs=aggregates.suppress(payroll_runs, payroll_runs),
         recent_organizations=[
             {
                 "id": o.id,
@@ -243,15 +253,39 @@ def admin_reset_password(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Force a password reset: email the user a single-use reset link."""
+    """Force a password reset: email the user a single-use reset link.
+
+    ZP-PRIV A03: a platform-staff reset of a *tenant* user's credentials is a
+    takeover path, so it is refused unless the target is a platform user or a
+    live tenant-approved support grant covers the organization. No session is
+    ever created for the actor; only the target receives a single-use link.
+    """
     from app.core.exceptions import NotFoundException
     from app.modules.auth import service as auth_service
+    from app.modules.super_admin import consent
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise NotFoundException("User", "id")
 
+    from app.core.exceptions import ForbiddenException
+    from app.modules.security import events as security_events
+
+    def _credential_reset_event(result, reason):
+        security_events.emit(db, "CREDENTIAL_RESET", result=result, actor_user_id=current_user.id,
+                             actor_role="super_admin", organization_id=user.organization_id,
+                             target_type="account", target_id=f"user:{user.id}", action="update",
+                             reason_code=reason)
+
+    try:
+        consent.require_tenant_consent_for_credential_action(
+            db, user, current_user.id, action="reset_password",
+        )
+    except ForbiddenException:
+        _credential_reset_event("deny", "NO_TENANT_CONSENT")
+        raise
     auth_service.admin_initiated_password_reset(db, user, current_user)
+    _credential_reset_event("allow", "TENANT_CONSENT_OR_PLATFORM_USER")
     logger.info("Super Admin %s reset password for %s", current_user.email, user.email)
     return {"message": "Password reset link sent to the user."}
 
@@ -879,9 +913,15 @@ def list_collective_agreements(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    from app.core.exceptions import BadRequestException
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_collective_agreements(db, country, organization_id)
+    # ZP-PRIV B.1: agreement DEFINITIONS are platform content; an employer's
+    # own assignments are tenant configuration (/api/payroll/compliance/
+    # collective-agreements).
+    if organization_id is not None:
+        raise BadRequestException("Employer assignments are managed by the organization itself.")
+    return payroll_service.list_collective_agreements(db, country, None)
 
 
 @router.post(
@@ -893,8 +933,16 @@ def upsert_collective_agreement(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    from app.core.exceptions import BadRequestException
     from app.modules.payroll import service as payroll_service
+    from app.modules.payroll.models import CollectiveAgreement
 
+    if data.organizationId is not None:
+        raise BadRequestException("Employer assignments are managed by the organization itself.")
+    if data.id:
+        row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == data.id).first()
+        if row is not None and row.organization_id is not None:
+            raise BadRequestException("Employer assignments are managed by the organization itself.")
     return payroll_service.upsert_collective_agreement(db, data, actor_id=current_user.id)
 
 
@@ -909,8 +957,14 @@ def set_collective_agreement_status(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    from app.core.exceptions import NotFoundException
     from app.modules.payroll import service as payroll_service
+    from app.modules.payroll.models import CollectiveAgreement
 
+    row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == agreement_id).first()
+    if row is None or row.organization_id is not None:
+        # An employer's own assignment is not addressable from the platform.
+        raise NotFoundException("CollectiveAgreement", agreement_id)
     return payroll_service.set_collective_agreement_status(db, agreement_id, data.status,
                                                            actor_id=current_user.id, reason=data.reason)
 
@@ -1824,7 +1878,11 @@ def list_tax_configuration_audit(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_tax_configuration_audit(db, jurisdiction_pack_id=jurisdictionPackId, entity_type=entityType)
+    # ZP-PRIV B.1: platform configuration entries only - tenant/worker
+    # audit rows (employee profiles, payslip corrections, ...) never leave
+    # the tenant plane.
+    return payroll_service.list_tax_configuration_audit(
+        db, jurisdiction_pack_id=jurisdictionPackId, entity_type=entityType, platform_only=True)
 
 
 @router.get(
@@ -4138,9 +4196,11 @@ def set_germany_church_tax_exception_status(
 # replace or duplicate an org's own Payroll module, which remains the
 # system of record for its own runs.
 
-@router.get("/finance/overview", response_model=FinanceOverviewResponse, summary="Cross-org payroll run listing")
+@router.get(
+    "/finance/overview", response_model=FinanceOverviewResponse,
+    summary="Cross-tenant payroll money as aggregate cells (jurisdiction x month x status; k-suppressed)",
+)
 def finance_overview(
-    organization_id: Optional[int] = Query(None),
     country: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
@@ -4150,17 +4210,23 @@ def finance_overview(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    """ZP-PRIV B.1/B.2: no per-run rows and no single-organization filter —
+    a platform principal only ever sees cells covering >= k workers and >= 2
+    organizations."""
     from app.modules.super_admin import service as sa_service
 
-    return sa_service.finance_overview(
-        db, organization_id=organization_id, country=country, status=status,
-        start_date=start_date, end_date=end_date, skip=skip, limit=limit,
+    filters = {"country": country, "status": status, "start_date": start_date, "end_date": end_date}
+    aggregates.guard_aggregate_request(current_user.id, filters)
+    out = sa_service.finance_overview(
+        db, country=country, status=status, start_date=start_date, end_date=end_date, skip=skip, limit=limit,
     )
+    aggregates.guard_cohort(current_user.id, "finance", filters, out.pop("_cohort"))
+    return out
 
 
-@router.get("/finance/summary", response_model=FinanceSummaryResponse, summary="Financial totals grouped by jurisdiction (currency-safe)")
+@router.get("/finance/summary", response_model=FinanceSummaryResponse,
+            summary="Financial totals grouped by jurisdiction (currency-safe, k-suppressed)")
 def finance_summary(
-    organization_id: Optional[int] = Query(None),
     country: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
@@ -4169,16 +4235,19 @@ def finance_summary(
 ):
     from app.modules.super_admin import service as sa_service
 
-    return sa_service.finance_summary(db, organization_id=organization_id, country=country, start_date=start_date, end_date=end_date)
+    filters = {"country": country, "start_date": start_date, "end_date": end_date}
+    aggregates.guard_aggregate_request(current_user.id, filters)
+    out = sa_service.finance_summary(db, country=country, start_date=start_date, end_date=end_date)
+    aggregates.guard_cohort(current_user.id, "finance", filters, out.pop("_cohort"))
+    return out
 
 
 @router.get(
     "/finance/by-organization",
     response_model=FinanceByOrganizationResponse,
-    summary="Financial totals per organization — every organization appears, including ones with zero payroll runs",
+    summary="Tenant registry with payroll activity (no per-organization money)",
 )
 def finance_by_organization(
-    organization_id: Optional[int] = Query(None),
     country: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
@@ -4188,8 +4257,12 @@ def finance_by_organization(
 ):
     from app.modules.super_admin import service as sa_service
 
+    aggregates.guard_aggregate_request(
+        current_user.id,
+        {"country": country, "status": status, "start_date": start_date, "end_date": end_date},
+    )
     return sa_service.finance_by_organization(
-        db, organization_id=organization_id, country=country, status=status, start_date=start_date, end_date=end_date,
+        db, country=country, status=status, start_date=start_date, end_date=end_date,
     )
 
 
@@ -4236,25 +4309,40 @@ def reports_organizations(
 ):
     from app.modules.super_admin import service as sa_service
 
+    aggregates.guard_aggregate_request(
+        current_user.id, {"search": search, "country": country, "status": status},
+    )
     return sa_service.reports_organizations(db, search=search, country=country, status=status, skip=skip, limit=limit)
 
 
-@router.get("/reports/employees", response_model=ReportsListResponse, summary="Cross-org employee report")
+@router.get(
+    "/reports/employees", response_model=ReportsListResponse,
+    summary="Cross-org workforce totals — aggregate counts by tenant, jurisdiction and status (k-suppressed, never an identity)",
+)
 def reports_employees(
     organization_id: Optional[int] = Query(None),
     country: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    """ZP-PRIV B.1/B.2: the old cross-tenant employee listing — every name,
+    employee code, department and designation on the platform, plus a
+    ``?search=`` name oracle — is gone. This returns only k-suppressed
+    counts, which is what an operator legitimately needs for capacity work.
+    Actual worker records are reachable only through a JIT Support Access
+    grant (Part D)."""
     from app.modules.super_admin import service as sa_service
 
-    return sa_service.reports_employees(
-        db, organization_id=organization_id, country=country, status=status, search=search, skip=skip, limit=limit,
+    filters = {"organization_id": organization_id, "country": country, "status": status}
+    aggregates.guard_aggregate_request(current_user.id, filters)
+    out = sa_service.reports_employee_totals(
+        db, organization_id=organization_id, country=country, status=status, skip=skip, limit=limit,
     )
+    aggregates.guard_cohort(current_user.id, "workforce", filters, out.pop("_cohort"))
+    return out
 
 
 _REPORT_EXPORT_COLUMNS = {
@@ -4264,13 +4352,15 @@ _REPORT_EXPORT_COLUMNS = {
         ("employeeCount", "Employees"), ("payrollRunCount", "Payroll Runs"),
     ],
     "employees": [
-        ("employeeCode", "Employee Code"), ("name", "Name"), ("department", "Department"),
-        ("designation", "Designation"), ("status", "Status"), ("employmentType", "Employment Type"),
-        ("organizationName", "Organization"), ("jurisdictionCountry", "Jurisdiction"),
+        ("organizationName", "Organization"), ("organizationCode", "Code"),
+        ("jurisdictionCountry", "Jurisdiction"), ("status", "Status"),
+        ("employmentType", "Employment Type"), ("employeeCount", "Employees"),
     ],
+    # ZP-PRIV B.1: aggregate cells only (no organization, run or pay date).
     "payroll": [
-        ("organizationName", "Organization"), ("jurisdictionCountry", "Jurisdiction"), ("periodLabel", "Period"),
-        ("payDate", "Pay Date"), ("status", "Status"), ("grossPay", "Gross Pay"), ("netPay", "Net Pay"),
+        ("jurisdictionCountry", "Jurisdiction"), ("currency", "Currency"), ("period", "Period"),
+        ("status", "Status"), ("runCount", "Runs"), ("organizationCount", "Organizations"),
+        ("employeeCount", "Workers"), ("grossPay", "Gross Pay"), ("netPay", "Net Pay"),
         ("totalDeductions", "Deductions"), ("employerCost", "Employer Cost"),
     ],
     "compliance": [
@@ -4296,13 +4386,24 @@ def export_report(
     from app.modules.payroll import service as payroll_service
     from app.modules.super_admin import service as sa_service
 
+    # ZP-PRIV B.2: exports count against the same probing budget as reads.
+    aggregates.guard_aggregate_request(
+        current_user.id,
+        {"type": type, "organization_id": organization_id, "country": country, "status": status},
+    )
     if type == "organizations":
         rows = sa_service.reports_organizations(db, search=search, country=country, status=status, limit=10000)["items"]
     elif type == "employees":
-        rows = sa_service.reports_employees(db, organization_id=organization_id, country=country, status=status, search=search, limit=10000)["items"]
+        totals = sa_service.reports_employee_totals(
+            db, organization_id=organization_id, country=country, status=status, limit=10000)
+        aggregates.guard_cohort(
+            current_user.id, "workforce",
+            {"organization_id": organization_id, "country": country, "status": status},
+            totals.pop("_cohort"))
+        rows = totals["items"]
     elif type == "payroll":
         rows = sa_service.finance_overview(
-            db, organization_id=organization_id, country=country, status=status,
+            db, country=country, status=status,
             start_date=start_date, end_date=end_date, limit=10000,
         )["items"]
     else:  # compliance
@@ -4335,6 +4436,9 @@ def dashboard_charts(
 ):
     from app.modules.super_admin import service as sa_service
 
+    aggregates.guard_aggregate_request(
+        current_user.id, {"start_date": start_date, "end_date": end_date},
+    )
     return sa_service.dashboard_charts(db, start_date=start_date, end_date=end_date)
 
 

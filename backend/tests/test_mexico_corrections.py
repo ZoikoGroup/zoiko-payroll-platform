@@ -213,17 +213,12 @@ def test_imss_modification_movement_from_a_corrected_sbc(db, monkeypatch):
     assert moves[1].payroll_run_id == corr_run.id and moves[1].sbc > moves[0].sbc
 
 
-def test_other_phase9_run_types_are_still_refused(db, monkeypatch):
+def test_every_phase9_run_type_is_built(db, monkeypatch):
+    """9a corrections, 9b aguinaldo, 9c finiquito, 9d PTU: no run type is still
+    refused with MX_RUN_TYPE_PHASE9."""
     from app.modules.payroll import mexico_run_service
-    from app.modules.payroll.engine.countries.mexico import MXBlock
 
-    w = ah.committed_world(db, monkeypatch, code="MXT9")
-    for kind in ("PTU", "FINIQUITO"):                   # AGUINALDO is built in 9b
-        w.run.mx_run_type = kind
-        with pytest.raises(MXBlock) as exc:
-            mexico_run_service.guard(db, w.employee, w.run)
-        assert exc.value.key == "MX_RUN_TYPE_PHASE9"
-    db.rollback()
+    assert set(mexico_run_service.RUN_TYPES) == set(mexico_run_service.BUILT_RUN_TYPES)
 
 
 def test_cfdi_of_a_correction_replaces_the_stamped_original(db, monkeypatch, tmp_path):

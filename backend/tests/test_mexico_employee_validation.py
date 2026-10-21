@@ -140,7 +140,7 @@ def test_bank_routing_other_countries_unchanged():
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing
 
-    rows = [{"key": "iban", "value": "NL91ABNA0417164300"}, {"key": "sort_code", "value": "123456"},
+    rows = [{"key": "iban", "value": "NL00ZOIK0000000001"}, {"key": "sort_code", "value": "123456"},
             {"key": "clabe", "value": "002180700012345678"}]
     masked = mask_routing(rows)
     assert masked[1]["value"] == "123456" and masked[0]["value"] != rows[0]["value"]

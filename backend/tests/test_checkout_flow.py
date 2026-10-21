@@ -67,6 +67,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.database import Base, SessionLocal, engine, initialize_database  # noqa: E402
 from app.modules.auth.models import User, UserRole  # noqa: E402
 from app.modules.billing import plan_catalog  # noqa: E402
+from tests._mfa_login import mfa_login  # noqa: E402  ZP-PRIV B08: real MFA sign-in
 from app.modules.billing.models import (  # noqa: E402
     BillingAuthority,
     BillingCommercialAuditEvent,
@@ -329,7 +330,7 @@ def mock_stripe_pkg():
 
 
 def _login(client, email, password="strong-password"):
-    r = client.post("/api/auth/login", json={"email": email, "password": password})
+    r = mfa_login(client, json={"email": email, "password": password})
     assert r.status_code == 200, r.text
     return r.json()["access_token"]
 

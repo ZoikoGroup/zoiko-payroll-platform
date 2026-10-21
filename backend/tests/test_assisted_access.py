@@ -177,7 +177,10 @@ def test_sessions_created_before_consent_existed_keep_working(db, people):
     assert [s.id for s in svc.get_active_sessions_for_org(db, people.org.id)] == [legacy.id]
 
 
-def test_org_admins_and_other_tenants_cannot_drive_the_privileged_endpoints_over_http(db, people):
+def test_the_retired_assisted_access_api_is_refused_for_every_principal_over_http(db, people):
+    """ZP-PRIV Part D retired Assisted Access (JIT Support Access replaces it):
+    every one of its endpoints is denied by the route policy for every role,
+    including the Super Admins who used to drive it."""
     from fastapi.testclient import TestClient
 
     from app.core.dependencies import get_current_org_scoped_principal, get_current_user
@@ -191,27 +194,15 @@ def test_org_admins_and_other_tenants_cannot_drive_the_privileged_endpoints_over
 
     saved = dict(app.dependency_overrides)
     try:
-        c = client(people.admin)
-        assert c.post(f"/api/super-admin/assisted-access/{people.org.id}/request",
-                      json={"reason": "x"}).status_code == 403                     # org admin cannot request
-        assert c.post(f"/api/super-admin/assisted-access/{people.org.id}/start", json={"reason": "x"}).status_code == 403
-        c = client(people.sa1)
-        r = c.post(f"/api/super-admin/assisted-access/{people.org.id}/request", json={"reason": "TEST"})
-        sid = r.json()["session_id"]
-        assert r.status_code == 200 and "token" not in r.json() and r.json()["approval_status"] == "PENDING"
-        assert c.post(f"/api/super-admin/assisted-access/{sid}/activate").status_code == 403
-        assert c.post(f"/api/organization-admin/assisted-access/requests/{sid}/approve", json={}).status_code in (403, 404)
-        c = client(people.other_admin)                                             # another tenant's admin
-        assert c.post(f"/api/organization-admin/assisted-access/requests/{sid}/approve", json={}).status_code == 404
-        c = client(people.admin)
-        assert [x["session_id"] for x in c.get("/api/organization-admin/assisted-access/requests").json()["requests"]] == [sid]
-        assert c.post(f"/api/organization-admin/assisted-access/requests/{sid}/approve", json={}).status_code == 200
-        assert c.get("/api/organization-admin/assisted-access/status").json()["active"] is False   # not activated yet
-        c = client(people.sa1)
-        r = c.post(f"/api/super-admin/assisted-access/{sid}/activate")
-        assert r.status_code == 200 and r.json()["token"]
-        c = client(people.admin)
-        assert c.get("/api/organization-admin/assisted-access/status").json()["active"] is True
+        for principal in (people.sa1, people.sa2, people.admin, people.other_admin, people.payroll):
+            c = client(principal)
+            assert c.post(f"/api/super-admin/assisted-access/{people.org.id}/request",
+                          json={"reason": "x"}).status_code == 403
+            assert c.post(f"/api/super-admin/assisted-access/{people.org.id}/start",
+                          json={"reason": "x"}).status_code == 403
+            assert c.post("/api/super-admin/assisted-access/1/activate").status_code == 403
+            assert c.get("/api/organization-admin/assisted-access/status").status_code == 403
+            assert c.post("/api/organization-admin/assisted-access/requests/1/approve", json={}).status_code == 403
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(saved)

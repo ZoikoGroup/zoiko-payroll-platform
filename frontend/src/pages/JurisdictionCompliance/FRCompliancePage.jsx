@@ -71,7 +71,7 @@ export default function FRCompliancePage() {
             France statutory content ships as the Draft packs <span className="font-mono">FR-2026-H1</span> (Jan–Apr)
             and <span className="font-mono">FR-2026-H2</span> (from 1 May, the PAS neutral-grid boundary). Review and edit
             values on a pack&apos;s <b>Statutory Values</b> tab, then approve and set it Active. Organization data (PAS,
-            establishments, employer rates, DSN) is under <b>Employer &amp; Authority Configuration</b>.
+            establishments, employer rates, DSN) is run by each organization from its own workspace.
           </p>
           <JurisdictionLayout
             country="FR" countryName="France"

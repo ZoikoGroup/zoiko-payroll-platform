@@ -71,14 +71,39 @@ import ServiceHealthPage from "./pages/SuperAdmin/ServiceHealthPage";
 import IntegrationsPage from "./pages/SuperAdmin/IntegrationsPage";
 import SecurityAuditPage from "./pages/SuperAdmin/SecurityAuditPage";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "./config/roles";
+// ZP-PRIV: JIT Support Access, MFA, tenant scoping, tenant-run statutory config.
+import SupportAccessPage from "./pages/SuperAdmin/SupportAccessPage";
+import OrganizationSupportAccessPage from "./modules/organization-admin/SupportAccessPage";
+import ScopePage from "./modules/organization-admin/ScopePage";
+import AuditExplorerPage from "./pages/SuperAdmin/AuditExplorerPage";
+import PrivilegedInventoryPage from "./pages/SuperAdmin/PrivilegedInventoryPage";
+import MachineClientsPage from "./pages/SuperAdmin/MachineClientsPage";
+import PrivacyAssurancePage from "./pages/SuperAdmin/PrivacyAssurancePage";
+import SecurityActivityPage from "./modules/organization-admin/SecurityActivityPage";
+import ApiClientsPage from "./modules/organization-admin/ApiClientsPage";
+import DataGovernancePage from "./modules/organization-admin/DataGovernancePage";
+import SecuritySettingsPage from "./pages/SecuritySettingsPage";
+import SupportSessionPage from "./pages/SupportSessionPage";
+import EmployerStatutoryPage from "./modules/payroll/EmployerStatutory/EmployerStatutoryPage";
 
 function LandingRedirect() {
   const user = JSON.parse(localStorage.getItem("zoiko_payroll_user") || "null");
   if (user?.role && user.role !== "super_admin") {
-    const target = VALID_ROLES.includes(user.role) ? ROLE_DEFAULT_REDIRECT[user.role] : "/payroll";
+    const target = VALID_ROLES.includes(user.role) ? ROLE_DEFAULT_REDIRECT[user.role] || "/payroll" : "/payroll";
     return <Navigate to={target} replace />;
   }
   return <Navigate to="/super-admin/dashboard" replace />;
+}
+
+// Security settings live inside whichever shell the signed-in role uses.
+function AccountSecurityRoute() {
+  const role = JSON.parse(localStorage.getItem("zoiko_payroll_user") || "null")?.role;
+  const Shell = ["super_admin", "support_operator", "platform_security"].includes(role) ? SuperAdminShell : PayrollShell;
+  return (
+    <Shell>
+      <SecuritySettingsPage />
+    </Shell>
+  );
 }
 
 export default function App() {
@@ -393,6 +418,50 @@ export default function App() {
             </PayrollShell>
           }
         />
+        <Route
+          path="/super-admin/support-access"
+          element={
+            <SuperAdminShell>
+              <SupportAccessPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/organization-admin/support-access"
+          element={
+            <PayrollShell>
+              <OrganizationSupportAccessPage />
+            </PayrollShell>
+          }
+        />
+        {/* Security & privacy plane (ZP-PRIV D/E/F). ProtectedRoute keeps each
+            role on its own screens; each page also fails closed by role and
+            the server is the control. */}
+        <Route path="/super-admin/audit-explorer" element={<SuperAdminShell><AuditExplorerPage /></SuperAdminShell>} />
+        <Route path="/super-admin/privileged-inventory" element={<SuperAdminShell><PrivilegedInventoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/machine-clients" element={<SuperAdminShell><MachineClientsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/privacy-assurance" element={<SuperAdminShell><PrivacyAssurancePage /></SuperAdminShell>} />
+        <Route path="/organization-admin/security-activity" element={<PayrollShell><SecurityActivityPage /></PayrollShell>} />
+        <Route path="/organization-admin/api-clients" element={<PayrollShell><ApiClientsPage /></PayrollShell>} />
+        <Route path="/organization-admin/data-governance" element={<PayrollShell><DataGovernancePage /></PayrollShell>} />
+        <Route
+          path="/organization-admin/scope"
+          element={
+            <PayrollShell>
+              <ScopePage />
+            </PayrollShell>
+          }
+        />
+        <Route
+          path="/payroll/employer-statutory"
+          element={
+            <PayrollShell>
+              <EmployerStatutoryPage />
+            </PayrollShell>
+          }
+        />
+        <Route path="/account/security" element={<AccountSecurityRoute />} />
+        <Route path="/support-session" element={<SupportSessionPage />} />
         <Route
           path="/payroll/assist-admin"
           element={

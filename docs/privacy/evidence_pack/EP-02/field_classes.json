@@ -1,0 +1,30 @@
+{
+  "classes": [
+    "bank",
+    "contact",
+    "identifier",
+    "leave",
+    "salary",
+    "tax"
+  ],
+  "defaultSupportFieldClasses": [
+    "contact",
+    "identifier"
+  ],
+  "maskedColumns": [
+    "address_line1",
+    "address_line2",
+    "address_postcode",
+    "bank_account",
+    "date_of_birth",
+    "ifsc",
+    "pan",
+    "routing",
+    "tax_code",
+    "uan"
+  ],
+  "operatorRoles": [
+    "org_admin",
+    "payroll_admin"
+  ]
+}

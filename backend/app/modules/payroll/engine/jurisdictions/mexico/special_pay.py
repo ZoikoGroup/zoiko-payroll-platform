@@ -33,9 +33,12 @@ from ...countries import mexico_content as _content
 from .errors import MXBlock
 
 _ZERO, _ONE = Decimal("0"), Decimal("1")
-CONCEPTS = ("AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION")
-# A special run pays one concept on its own (Phase 9b: aguinaldo; PTU and finiquito arrive in 9c / 9d).
-RUN_CONCEPT = {"AGUINALDO": "AGUINALDO"}
+CONCEPTS = ("AGUINALDO", "VACATION_PREMIUM", "VACATION_PAYOUT", "PTU", "SEPARATION")
+# The concepts a special run may carry (Phase 9b: aguinaldo; 9c: the finiquito
+# — proportional aguinaldo, vacation paid out and its premium, separation
+# components; 9d: PTU). Never an ordinary line (MX-009).
+RUN_CONCEPTS = {"AGUINALDO": ("AGUINALDO",), "PTU": ("PTU",),
+                "FINIQUITO": ("AGUINALDO", "VACATION_PAYOUT", "VACATION_PREMIUM", "SEPARATION")}
 
 
 def _dec(value, what: str) -> Decimal:

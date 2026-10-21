@@ -48,6 +48,12 @@ ROLE_ASSISTED_ACCESS = "assisted_access"
 
 VALID_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN}
 
+# ZP-PRIV A.1 platform plane (never any tenant payroll permission).
+ROLE_SUPPORT_OPERATOR = "support_operator"
+ROLE_PLATFORM_SECURITY = "platform_security"
+ROLE_SUPPORT_TEMP = "support_temp"
+PLATFORM_ROLES = frozenset({ROLE_SUPER_ADMIN, ROLE_SUPPORT_OPERATOR, ROLE_PLATFORM_SECURITY})
+
 # What each role may create (org admin manages org users; super admin
 # manages org admins platform-wide).
 ROLE_CREATION_RULES = {
@@ -224,9 +230,25 @@ def _resolve_access_user(db: Session, payload: dict):
     if jwt_org_id != user.organization_id:
         raise UnauthorizedException("Your organization assignment changed. Please log in again.")
 
-    # A super_admin token must not carry an organization_id.
-    if _role_value(user) == ROLE_SUPER_ADMIN and user.organization_id is not None:
-        raise UnauthorizedException("Super Admin token is invalid.")
+    # A platform-role token must not carry an organization_id; a tenant
+    # role must carry exactly the one it holds (checked above).
+    if _role_value(user) in PLATFORM_ROLES and user.organization_id is not None:
+        raise UnauthorizedException("Platform token is invalid.")
+
+    # ZP-PRIV D: a temporary support user stops working the moment its
+    # window passes, on every request - not only when the sweep runs.
+    if getattr(user, "is_temporary", False):
+        expires = getattr(user, "access_expires_at", None)
+        if expires is None or expires <= datetime.utcnow():
+            raise UnauthorizedException("This temporary support access has ended.")
+
+    # ZP-PRIV B08: a role with mandatory MFA needs a token minted after a
+    # second factor. A password-only token (or one from before MFA was
+    # enforced) is refused.
+    from app.modules.auth.mfa import mfa_required_for
+
+    if mfa_required_for(user) and not payload.get("mfa_at"):
+        raise ZoikoException(401, "MFA_REQUIRED", "Multi-factor authentication is required. Please sign in again.")
 
     return user
 
@@ -258,8 +280,19 @@ def get_current_user(
     get_current_org_scoped_principal (and the org gates built on it), so a
     SafeGuard session can never reach plain get_current_user endpoints that
     serialize or depend on full User ORM fields."""
+    if token and token.startswith("zpmc_"):
+        return _resolve_machine(token, db)
     payload, _is_assisted = _decode_required(token, db)
     return _resolve_access_user(db, payload)
+
+
+def _resolve_machine(token: str, db: Session):
+    """ZP-PRIV D06: a tenant-pinned machine credential. The PDP then limits
+    it to its scopes' routes, read-only, inside its own organization."""
+    from app.core.correlation import client_ip
+    from app.modules.security.machine_clients import resolve
+
+    return resolve(db, token, client_ip.get())
 
 
 def get_current_org_scoped_principal(
@@ -267,13 +300,23 @@ def get_current_org_scoped_principal(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
-    """Either access principal — a User ORM row from a normal login token,
-    or an AssistedAccessPrincipal from a validated SafeGuard aided token.
-    This is the integrity boundary for org-scoped endpoints."""
+    """The access principal for org-scoped endpoints: a User ORM row from a
+    normal login token, re-validated against the database on every request.
+
+    ZP-PRIV Part D retired SafeGuard assisted-access tokens: platform staff
+    reach tenant data only through a JIT Support Access grant, whose
+    temporary login is a normal (grant-bound) user. A legacy assisted token
+    is refused outright."""
+    if token and token.startswith("zpmc_"):
+        return _resolve_machine(token, db)
     raw = decode_access_token(token)
     if raw is not None:
         return _resolve_access_user(db, raw)
-    return _resolve_assisted_principal(token, db, request)
+    if decode_assisted_access_token(token) is not None:
+        raise UnauthorizedException(
+            "Assisted access has been replaced by Support Access. Request access from the Support Access page."
+        )
+    raise UnauthorizedException("Invalid or expired token. Please log in again.")
 
 
 def get_current_super_admin(current_user=Depends(get_current_user)):
@@ -286,10 +329,12 @@ def get_current_super_admin(current_user=Depends(get_current_user)):
 
 
 def get_current_org_admin(current_user=Depends(get_current_org_scoped_principal)):
-    """Org-scoped admin: org_admin (or super_admin, who may act cross-org,
-    or an active assisted-access session acting as the org's admin)."""
+    """Org-scoped admin: org_admin only. Platform roles (super_admin) are
+    deliberately excluded (ZP-PRIV A05): a platform principal holds no tenant
+    permission and must go through a JIT support grant to touch tenant data
+    (whose temporary login is read-only and never an admin)."""
     role = _role_value(current_user)
-    if role not in (ROLE_ORG_ADMIN, ROLE_SUPER_ADMIN, ROLE_ASSISTED_ACCESS):
+    if role != ROLE_ORG_ADMIN:
         raise ForbiddenException(
             f"This action requires organization admin privileges. Your role: {role}"
         )
@@ -297,12 +342,12 @@ def get_current_org_admin(current_user=Depends(get_current_org_scoped_principal)
 
 
 def get_current_payroll_operator(current_user=Depends(get_current_org_scoped_principal)):
-    """Org-scoped payroll operator: org_admin or payroll_admin (or super_admin
-    acting cross-org, or an active assisted-access session). This is the gate
-    used by the copied payroll routers — it replaces the old platform's
-    get_current_org_admin for payroll ops."""
+    """Org-scoped payroll operator: org_admin or payroll_admin. Platform roles
+    (super_admin) are deliberately excluded (ZP-PRIV A05) and so is a
+    temporary support user (read-only by construction) - this gate replaces
+    the old platform's get_current_org_admin for payroll ops."""
     role = _role_value(current_user)
-    if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_SUPER_ADMIN, ROLE_ASSISTED_ACCESS):
+    if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN):
         raise ForbiddenException(
             f"This action requires payroll operator privileges. Your role: {role}"
         )
@@ -359,3 +404,62 @@ def require_organization_access(
     return True
 
 
+
+
+def _token_payload(token: str) -> dict:
+    payload = decode_access_token(token)
+    if payload is None:
+        raise UnauthorizedException("Invalid or expired token. Please log in again.")
+    return payload
+
+
+def require_recent_mfa(
+    token: str = Depends(oauth2_scheme),
+    current_user=Depends(get_current_user),
+):
+    """ZP-PRIV B08 step-up: the caller passed a second factor within the last
+    MFA_STEP_UP_MAX_AGE_SECONDS (the token's mfa_at claim, minted by
+    /auth/mfa/challenge or /auth/mfa/step-up). 403 STEP_UP_REQUIRED tells the
+    frontend to open the step-up dialog and retry."""
+    import time
+
+    from app.config import settings
+    from app.modules.auth.mfa import enforcement_on
+
+    if not enforcement_on():
+        return current_user  # two-step verification switched off: no step-up
+    mfa_at = _token_payload(token).get("mfa_at")
+    if not mfa_at or time.time() - int(mfa_at) > settings.MFA_STEP_UP_MAX_AGE_SECONDS:
+        raise ZoikoException(403, "STEP_UP_REQUIRED",
+                             "Please confirm it is you with a fresh authentication code.")
+    return current_user
+
+
+def get_current_support_requester(current_user=Depends(get_current_user)):
+    """Platform principals who may request JIT support access (ZP-PRIV D)."""
+    if _role_value(current_user) not in (ROLE_SUPER_ADMIN, ROLE_SUPPORT_OPERATOR, ROLE_PLATFORM_SECURITY):
+        raise ForbiddenException("This action requires a platform support role.")
+    if current_user.organization_id is not None:
+        raise ForbiddenException("Platform roles must not belong to an organization.")
+    return current_user
+
+
+def get_current_platform_security(current_user=Depends(get_current_user)):
+    """platform_security only: Zoiko approvals, live sessions, revoke,
+    break-glass and its reviews (ZP-PRIV D)."""
+    if _role_value(current_user) != ROLE_PLATFORM_SECURITY:
+        raise ForbiddenException("This action requires the Platform Security role.")
+    if current_user.organization_id is not None:
+        raise ForbiddenException("Platform roles must not belong to an organization.")
+    return current_user
+
+
+def get_current_security_reader(current_user=Depends(get_current_user)):
+    """Who may read platform security data (security events, alerts,
+    privileged inventory): super_admin and platform_security only, never a
+    tenant or a support operator (ZP-PRIV E02 'restrict who can read')."""
+    if _role_value(current_user) not in (ROLE_SUPER_ADMIN, ROLE_PLATFORM_SECURITY):
+        raise ForbiddenException("This action requires the Super Admin or Platform Security role.")
+    if current_user.organization_id is not None:
+        raise ForbiddenException("Platform roles must not belong to an organization.")
+    return current_user

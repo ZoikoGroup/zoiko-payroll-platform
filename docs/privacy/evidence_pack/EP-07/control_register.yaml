@@ -1,0 +1,574 @@
+# ZP-PRIV-VERIFY-001 control register
+#
+# 46 controls: 41 P0 + 5 P1 (A06, D09, E07, F03, F07).
+#
+# Status vocabulary (engineering may only ever write these three):
+#   NT                                    not tested / proof lives outside the repo
+#   ENGINEERING_COMPLETE_AWAITING_REVIEW  built + automated tests green; not yet reviewed
+#   FAIL                                  a known failing control
+# There is deliberately no PASS. A control becomes "reviewed" only through a
+# recorded independent review (Privacy Assurance page -> "Record review",
+# platform_security + step-up MFA, or a `reviews:` entry below naming the
+# reviewer and proof). scripts/run_privacy_attestation.py can never print
+# VERIFIED unless every control carries an accepted review by a named human and
+# `attestation.independent_reviewer` is filled in.
+#
+# Any change under the CODEOWNERS privacy paths invalidates the prior
+# attestation (F07): the attestation stamps the git SHA it ran on.
+
+schema_version: 1
+checklist: ZP-PRIV-VERIFY-001
+management_status: NOT ATTESTED
+
+attestation:
+  independent_reviewer: null          # name + organisation of the independent reviewer
+  reviewed_git_sha: null
+  signed_at: null
+
+decisions:
+  - id: DEC-1
+    topic: Small-cohort threshold
+    decision: k = 5; money cells also need >= 2 organizations
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-15
+  - id: DEC-2
+    topic: Employee self-service login
+    decision: policy + test persona only (no employee login shipped)
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-15
+  - id: DEC-3
+    topic: Statutory actions
+    decision: moved to tenant-run routes; Super Admin keeps catalog/config only
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-15
+  - id: DEC-4
+    topic: Zoiko approval for diagnostics grants
+    decision: diagnostics grants need tenant approval only; worker-scope grants also need platform_security
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-15
+  - id: DEC-5
+    topic: Break-glass pre-approval
+    decision: none; fresh MFA + incident reference + mandatory independent review within 24 h
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-15
+  - id: DEC-6
+    topic: Support access hard maximum
+    decision: 30 minutes (DB check constraint + config guard)
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-15
+  - id: DEC-7
+    topic: Audit retention and purge
+    decision: AUDIT_PURGE_ON_ORG_HARD_DELETE default OFF; audit retained 7 years
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-19
+  - id: DEC-8
+    topic: Alert thresholds
+    decision: cross-tenant 1; enumeration 25 ids / 10 min; export 1,000 rows or 10 MB; MFA failures 5 / 15 min; grants outside 07-20 UTC and every break-glass; dedupe 15 min
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-19
+  - id: DEC-9
+    topic: Supported data regions
+    decision: EU, UK, US, IN, ME, APAC
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-19
+  - id: DEC-10
+    topic: Retention and alert channels
+    decision: worker payroll data 7 years after leaving; no secondary SMTP / alert channel (single channel is a recorded risk)
+    recorded_by: venu@zoikogroup.com
+    recorded_on: 2026-10-19
+
+deviations:
+  - id: DEV-1
+    controls: [B05]
+    text: legal_entity_id / pay_group_id live on payroll_employees only; worker child tables are scoped through employee_id (scoped-employee subquery), not a denormalised column.
+  - id: DEV-2
+    controls: [B05]
+    text: The "no raw db.query(PayrollEmployee)" lint is a ratchet (121 legacy call sites, may only go down). The ORM guard scopes TENANT sessions and refuses PLATFORM sessions on worker tables; a session with NO context (jobs, schedulers, audit writers, public token routes) is unrestricted system context and maps to RLS mode "system". Background jobs that act for a user bind tenant context through core/job_auth.py; the rest rely on explicit organization_id filters (PD-007).
+  - id: DEV-3
+    controls: [B05, D01]
+    text: Postgres RLS is installed and tested, but enforcement in production requires ops to run the app as a NOBYPASSRLS, non-owner role; DB_RLS_REQUIRE_ENFORCED defaults to false until that role exists.
+  - id: DEV-4
+    controls: [A06]
+    text: The differencing / query-budget ledger is per process (not shared across workers).
+  - id: DEV-5
+    controls: [B08]
+    text: Refresh-token rotation invalidates all pre-existing refresh tokens at deploy; every user signs in again once.
+  - id: DEV-6
+    controls: [D05]
+    text: Zoiko One does not exist in the repo; the claim contract, gate and tests run against a fake IdP. Integration pending.
+  - id: DEV-8
+    controls: [B05, E02]
+    text: app.rls_mode / app.tenant_id are custom settings any database role can set, so RLS defends against application query bugs, not against code that deliberately switches to system mode (PD-007). The audit purge flag is additionally gated on membership of the zoiko_audit_purger role, which the application role must never hold.
+  - id: DEV-9
+    controls: [D06, F02]
+    text: Outbound webhook delivery is built and signed but not yet dispatched by any job; data_region has no admin API (every tenant is EU) and only support access / break-glass call the region check (PD-009, PD-010).
+  - id: DEV-7
+    controls: [D03]
+    text: Payslip PDFs are still emailed as unencrypted attachments (indirect-path gap G7, owner Product).
+
+human_and_infrastructure_proofs:
+  - id: HP-01
+    controls: [D01]
+    proof: PAM / JIT access with session recording for DBA, cloud console and production shell; separate from application roles
+    owner: Infrastructure owner
+    artefacts: [deploy/security/pam_runbook.md, deploy/security/iam_roles.tf]
+  - id: HP-02
+    controls: [D02]
+    proof: Backup / snapshot / object-store IAM applied, and a restore drill run with deploy/scripts/restore_drill.sh showing RLS + tenant segregation after restore
+    owner: Infrastructure owner
+    artefacts: [deploy/security/backup_iam.tf, deploy/scripts/restore_drill.sh, docs/privacy/rls_runbook.md]
+  - id: HP-03
+    controls: [B05]
+    proof: Production database runs the application as a NOBYPASSRLS non-owner role; DB_RLS_REQUIRE_ENFORCED=true in production
+    owner: Infrastructure owner
+    artefacts: [docs/privacy/rls_runbook.md]
+  - id: HP-04
+    controls: [E02]
+    proof: Retention-locked anchor bucket provisioned and the anchor job scheduled (GcsRetentionSink)
+    owner: Infrastructure owner
+    artefacts: [deploy/security/anchor_bucket.tf]
+  - id: HP-05
+    controls: [E05]
+    proof: Joiner / mover / leaver feed from HR / IdP wired to scripts/jml_reconcile.py and one quarterly reconciliation signed
+    owner: HR / IdP owner
+    artefacts: [backend/scripts/jml_reconcile.py]
+  - id: HP-06
+    controls: [E07]
+    proof: Independent tester executes the handover pack and files results in the defect register
+    owner: Independent QA
+    artefacts: [docs/privacy/independent_tester_handover.md, docs/privacy/defect_register.csv]
+  - id: HP-07
+    controls: [F01]
+    proof: Counsel completes the DPA role mapping
+    owner: Privacy counsel / DPO
+    artefacts: [docs/privacy/dpa_role_mapping.md]
+  - id: HP-08
+    controls: [F04]
+    proof: Tabletop exercise run and recorded
+    owner: Security lead
+    artefacts: [docs/privacy/incident_playbook.md, docs/privacy/tabletop_record_template.md]
+  - id: HP-09
+    controls: [F05]
+    proof: Evidence index signed by the independent reviewer
+    owner: Independent reviewer
+    artefacts: [docs/privacy/evidence_index.md]
+  - id: HP-10
+    controls: [E06]
+    proof: Branch protection makes the privacy-isolation job a required check; staging post-deploy smoke run recorded
+    owner: Repository admin
+    artefacts: [.github/workflows/backend-deploy.yml, .github/workflows/backend-deploy-staging.yml]
+  - id: HP-11
+    controls: [D06]
+    proof: Rotate the Stripe webhook signing secret that was committed in stripe_listen.log (file removed from the repo)
+    owner: Platform owner
+    artefacts: []
+
+reviews: []
+# Example (only an independent human adds these):
+#  - control: A01
+#    reviewer: "Name Surname, Org"
+#    decision: accepted        # accepted | rejected
+#    proof_reference: "QA-2026-11 run 42, EP-03 T01-T04"
+#    recorded_at: "2026-11-02T10:00:00Z"
+
+controls:
+  # ── A: platform roles never imply tenant data ─────────────────────────────
+  - id: A01
+    title: Super Admin has no standing access to identifiable worker data
+    section: A
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T01, T02, T03, T09, tests/privacy/test_route_registry.py::test_no_worker_route_allows_super_admin]
+    evidence: [tests/privacy/evidence/T01.json, tests/privacy/evidence/T02.json, tests/privacy/evidence/T09_route_sweep.json]
+  - id: A02
+    title: Super Admin reports and exports are aggregate-only (employee report and export removed)
+    section: A
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T01, T03, tests/privacy/test_t09_t12.py::test_t09_search_parameters_on_every_platform_list_reveal_no_worker]
+    evidence: [tests/privacy/evidence/T01.json, tests/privacy/evidence/T09_search_and_bi.json]
+  - id: A03
+    title: Account administration does not imply read rights (tenant-admin credential reset needs consent or a JIT grant)
+    section: A
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_security_events.py::test_grant_events_mfa_failures_and_credential_resets_emit, tests/test_super_admin_platform.py]
+    evidence: [tests/privacy/evidence/]
+  - id: A04
+    title: Tenant comes from the authenticated principal, re-verified in the DB; ids in URL / body / header never widen scope
+    section: A
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T04, T05, T10, tests/privacy/test_pdp_enforcement.py]
+    evidence: [tests/privacy/evidence/T04.json, tests/privacy/evidence/T10_machine_tenant_claim.json]
+  - id: A05
+    title: Separate actions (read / create / update / delete / approve / export); read never implies write
+    section: A
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_pdp_policy.py, T07]
+    evidence: [docs/privacy/route_policy_inventory.csv]
+  - id: A06
+    title: Aggregates suppress small cohorts (k=5) and resist differencing
+    section: A
+    priority: P1
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T01, tests/privacy/test_t09_t12.py::test_t09_bi_aggregates_suppress_small_cohorts, tests/privacy/test_pdp_policy.py]
+    evidence: [tests/privacy/evidence/T01.json]
+    deviation: DEV-4
+  - id: A07
+    title: Fail closed and uniform denials (missing / stale scope, PDP or DB error deny; 404 vs 403 convention)
+    section: A
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T04, tests/privacy/test_pdp_enforcement.py, tests/privacy/test_support_access.py::test_support_intent_audit_fails_closed]
+    evidence: [tests/privacy/evidence/T04.json]
+
+  # ── B: decision point, scoping, field policy, DB enforcement, MFA ─────────
+  - id: B01
+    title: Default-deny policy decision point on every route
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_pdp_policy.py, tests/privacy/test_pdp_enforcement.py]
+    evidence: [backend/app/core/authz/route_registry.json]
+  - id: B02
+    title: Complete route policy registry, CI-enforced (no unregistered route; no worker route for a platform role)
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_route_registry.py]
+    evidence: [docs/privacy/route_policy_inventory.csv, backend/app/core/authz/route_registry.json]
+  - id: B03
+    title: Lists, pagination, bulk and search never leak identities across scope
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T05, T07, T09, tests/privacy/test_data_layer.py]
+    evidence: [tests/privacy/evidence/T05.json]
+  - id: B04
+    title: Per-role field projection (bank, tax, salary, identifiers) incl. API aliases
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T07, tests/privacy/test_pdp_policy.py, tests/privacy/test_jobs_and_machines.py::test_machine_client_reads_only_its_scope_inside_its_tenant]
+    evidence: [tests/privacy/evidence/T07.json]
+  - id: B05
+    title: Data-layer enforcement (ORM tenant guard + Postgres RLS ENABLE/FORCE)
+    section: B
+    priority: P0
+    owner: Platform Engineering + Infrastructure
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_data_layer.py, tests/privacy/test_postgres_guards.py]
+    evidence: [tests/privacy/evidence/]
+    deviation: DEV-1, DEV-2, DEV-3, DEV-8
+    human_proofs: [HP-03]
+  - id: B06
+    title: Tenant-namespaced caches; no cacheable worker responses
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_t09_t12.py::test_t09_responses_are_never_cacheable, tests/privacy/test_data_layer.py]
+    evidence: [tests/privacy/evidence/T09_route_sweep.json]
+  - id: B07
+    title: Files and job results re-authorize at creation, execution and download
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_t09_t12.py::test_t09_file_urls_and_job_results_are_not_reachable, T10]
+    evidence: [tests/privacy/evidence/T10_job_deactivate.json]
+  - id: B08
+    title: MFA for privileged roles; short privileged tokens; refresh rotation with reuse detection; step-up
+    section: B
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_mfa_sessions.py]
+    evidence: [tests/privacy/evidence/]
+    deviation: DEV-5
+
+  # ── C: JIT support access ─────────────────────────────────────────────────
+  - id: C01
+    title: Support access only via a request with reason + ticket, approved by the tenant
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T06, tests/privacy/test_support_access.py]
+    evidence: [tests/privacy/evidence/T06.json]
+  - id: C02
+    title: Independent approvals; no self-approval (service + DB constraint)
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_support_access.py::test_self_approval_is_impossible_in_the_service_and_the_database]
+    evidence: [tests/privacy/evidence/]
+  - id: C03
+    title: Time-bound temporary credentials, 30-minute hard maximum
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T08, tests/privacy/test_support_access.py::test_hard_maximum_30_minutes]
+    evidence: [tests/privacy/evidence/T08.json]
+  - id: C04
+    title: Grants are read-only, scope- and field-class-limited, never export
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T07]
+    evidence: [tests/privacy/evidence/T07.json]
+  - id: C05
+    title: Access ends on every path (expiry, exit, revoke, logout); replay of old tokens denied
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T08, tests/privacy/test_support_access.py::test_sweep_ends_overdue_grants_and_deactivates_accounts]
+    evidence: [tests/privacy/evidence/T08.json]
+  - id: C06
+    title: Break-glass with fresh MFA, alert, tenant notice and independent review within 24 h
+    section: C
+    priority: P0
+    owner: Platform Engineering + Security
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T12, tests/privacy/test_support_access.py::test_break_glass_flow_review_and_lockout]
+    evidence: [tests/privacy/evidence/D_break_glass_review.json, tests/privacy/evidence/T12_attribution_and_drill.json]
+  - id: C07
+    title: Tenant sees its own support-access audit with named attribution
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_support_access.py::test_tenant_audit_tab_shows_named_attribution_and_the_chain_verifies]
+    evidence: [tests/privacy/evidence/]
+  - id: C08
+    title: Support-access audit is append-only (jsonb compare, set-once hash), tested on Postgres
+    section: C
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_postgres_guards.py::test_support_audit_is_append_only_with_set_once_hash_and_jsonb_compare]
+    evidence: [tests/privacy/evidence/PG_support_audit_tamper.json]
+
+  # ── D: indirect data paths ────────────────────────────────────────────────
+  - id: D01
+    title: Privileged infrastructure access (DBA, console, prod shell) separated from app roles, JIT with session recording
+    section: D
+    priority: P0
+    owner: Infrastructure owner
+    status: NT
+    tests: []
+    evidence: [deploy/security/pam_runbook.md, deploy/security/iam_roles.tf]
+    human_proofs: [HP-01]
+    deviation: DEV-3
+  - id: D02
+    title: Backups, snapshots and object storage restricted; restore drill proves RLS + segregation
+    section: D
+    priority: P0
+    owner: Infrastructure owner
+    status: NT
+    tests: [deploy/scripts/restore_drill.sh]
+    evidence: [deploy/security/backup_iam.tf, docs/privacy/rls_runbook.md]
+    human_proofs: [HP-02]
+  - id: D03
+    title: Logs carry no secrets or worker personal data (central filter, forced-error tests)
+    section: D
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_redaction_federation_governance.py::test_forced_errors_leave_no_sensitive_values_in_logs]
+    evidence: [tests/privacy/evidence/D03_log_sample_payroll_run.txt, tests/privacy/evidence/D03_log_sample_bank_export.txt]
+    deviation: DEV-7
+  - id: D04
+    title: Telemetry (Sentry) and BI egress scrubbed / aggregate-only
+    section: D
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_redaction_federation_governance.py::test_sentry_before_send_scrubs_body_headers_frames_and_breadcrumbs, T09]
+    evidence: [tests/privacy/evidence/D04_sentry_sample.json, tests/privacy/evidence/T09_search_and_bi.json]
+  - id: D05
+    title: Identity federation (Zoiko One) yields only tenant-scoped principals; global claims refused
+    section: D
+    priority: P0
+    owner: Identity Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_redaction_federation_governance.py]
+    evidence: [tests/privacy/evidence/D05_federation_global_admin_claim.json]
+    deviation: DEV-6
+  - id: D06
+    title: Machine clients and webhooks tenant-pinned, least-privilege, rotated, signed and replay-protected
+    section: D
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T10, tests/privacy/test_jobs_and_machines.py]
+    evidence: [tests/privacy/evidence/T10_machine_tenant_claim.json]
+    deviation: DEV-9
+    human_proofs: [HP-11]
+  - id: D07
+    title: Assist tools run through the PDP; tenant-partitioned retrieval; scrubbed model egress; kill switch
+    section: D
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T11]
+    evidence: [tests/privacy/evidence/T11_llm_egress_scrub.json]
+  - id: D08
+    title: Background jobs re-authorize principal and tenant on execution and every retry
+    section: D
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T10, tests/privacy/test_jobs_and_machines.py]
+    evidence: [tests/privacy/evidence/T10_job_deactivate.json, tests/privacy/evidence/T10_job_tenant_swap.json]
+  - id: D09
+    title: Non-production uses synthetic data; production restore into non-prod blocked
+    section: D
+    priority: P1
+    owner: Platform Engineering + Infrastructure
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_nonprod_data.py]
+    evidence: [docs/privacy/test_data_lineage.md]
+    human_proofs: [HP-02]
+
+  # ── E: audit, alerting, release gates ─────────────────────────────────────
+  - id: E01
+    title: Unified security events with correlation ids end to end
+    section: E
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [T12, tests/privacy/test_security_events.py]
+    evidence: [tests/privacy/evidence/T12_attribution_and_drill.json]
+  - id: E02
+    title: Tamper evidence (append-only triggers, hash chain, external anchoring); purge off by default
+    section: E
+    priority: P0
+    owner: Platform Engineering + Infrastructure
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_postgres_guards.py::test_security_events_chain_on_postgres_and_tamper_is_refused, tests/privacy/test_security_events.py::test_hash_chain_detects_tampering]
+    evidence: [tests/privacy/evidence/PG_security_events_tamper.json, tests/privacy/evidence/E02_tamper_detected.json]
+    deviation: DEV-8
+    human_proofs: [HP-04]
+  - id: E03
+    title: Security alerting (8 rules, deduped, no personal data) with a drill
+    section: E
+    priority: P0
+    owner: Security Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_security_events.py::test_every_rule_fires_dedupes_and_never_carries_personal_data]
+    evidence: [docs/privacy/alert_rules.json, docs/privacy/evidence_pack/EP-05/alert_drill.json]
+  - id: E04
+    title: Privileged access inventory (humans, machine accounts, live and emergency grants, MFA)
+    section: E
+    priority: P0
+    owner: Security Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_security_events.py::test_privileged_inventory]
+    evidence: [docs/privacy/evidence_pack/EP-02/privileged_inventory.json]
+  - id: E05
+    title: Joiner / mover / leaver revokes accounts, sessions and grants
+    section: E
+    priority: P0
+    owner: Security Engineering + HR / IdP owner
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_governance_scripts.py]
+    evidence: [docs/privacy/evidence_pack/EP-02/jml_reconciliation_sample.json]
+    human_proofs: [HP-05]
+  - id: E06
+    title: CI privacy-isolation gate before deploy + post-deploy privacy smoke
+    section: E
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [.github/workflows/backend-deploy.yml#privacy-isolation, backend/scripts/post_deploy_privacy_smoke.py]
+    evidence: [docs/privacy/evidence_pack/EP-06/]
+    human_proofs: [HP-10]
+  - id: E07
+    title: Independent tester handover and execution
+    section: E
+    priority: P1
+    owner: Independent QA
+    status: NT
+    tests: []
+    evidence: [docs/privacy/independent_tester_handover.md]
+    human_proofs: [HP-06]
+
+  # ── F: governance ─────────────────────────────────────────────────────────
+  - id: F01
+    title: DPA controller / processor role mapping
+    section: F
+    priority: P0
+    owner: Privacy counsel / DPO
+    status: NT
+    tests: []
+    evidence: [docs/privacy/dpa_role_mapping.md]
+    human_proofs: [HP-07]
+  - id: F02
+    title: Data region recorded per tenant and enforced on privileged retrieval, processing, replication and backup
+    section: F
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_redaction_federation_governance.py::test_cross_region_privileged_retrieval_is_blocked]
+    evidence: [docs/privacy/region_policy.md]
+    deviation: DEV-9
+  - id: F03
+    title: Platform-wide retention, legal hold (four-eyes release) and DSAR lifecycle
+    section: F
+    priority: P1
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_redaction_federation_governance.py::test_legal_hold_blocks_every_deletion_path_and_needs_four_eyes, tests/privacy/test_redaction_federation_governance.py::test_retention_candidates_respect_holds_and_dsar_lifecycle]
+    evidence: [docs/privacy/region_policy.md]
+  - id: F04
+    title: Incident playbook for suspected staff / partner access, with tabletop
+    section: F
+    priority: P0
+    owner: Security lead
+    status: NT
+    tests: []
+    evidence: [docs/privacy/incident_playbook.md, docs/privacy/tabletop_record_template.md]
+    human_proofs: [HP-08]
+  - id: F05
+    title: Evidence index (build hash, environments, sample tenants, reviewer; signatures)
+    section: F
+    priority: P0
+    owner: Independent reviewer
+    status: NT
+    tests: []
+    evidence: [docs/privacy/evidence_index.md]
+    human_proofs: [HP-09]
+  - id: F06
+    title: Defect register gate (fails on open critical privacy defect or P0 exception)
+    section: F
+    priority: P0
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_governance_scripts.py, backend/scripts/check_privacy_defects.py]
+    evidence: [docs/privacy/defect_register.csv]
+  - id: F07
+    title: Change control - privacy-path changes need CODEOWNERS review and invalidate the prior attestation
+    section: F
+    priority: P1
+    owner: Platform Engineering
+    status: ENGINEERING_COMPLETE_AWAITING_REVIEW
+    tests: [tests/privacy/test_governance_scripts.py]
+    evidence: [.github/CODEOWNERS]

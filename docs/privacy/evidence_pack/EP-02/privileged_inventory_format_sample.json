@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-10-19T09:05:21Z",
+  "summary": {
+    "platformHumans": 0,
+    "tenantAdmins": 0,
+    "withoutMfa": 0,
+    "machineClients": 0,
+    "liveGrants": 0,
+    "emergencyGrantsAwaitingReview": 0
+  },
+  "humans": [],
+  "machineClients": [],
+  "grants": []
+}

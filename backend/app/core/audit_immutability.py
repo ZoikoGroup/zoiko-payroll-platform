@@ -27,6 +27,10 @@ AUDIT_TABLES = (
     "assisted_access_audit_events",
     "payroll_personal_data_access_events",
     "auth_audit_events",
+    "authz_decision_events",
+    "support_access_audit_events",
+    "security_events",
+    "security_event_anchors",
 )
 _SQLITE_FLAG = "zoiko_audit_purge_flag"
 

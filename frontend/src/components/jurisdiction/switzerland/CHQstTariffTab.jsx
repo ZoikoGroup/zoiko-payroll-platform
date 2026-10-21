@@ -3,7 +3,6 @@ import { Download, Eye, FileUp, ShieldCheck, Zap, FileSearch } from "lucide-reac
 import {
   importSwissQstTariffFile, listSwissQstTariffFiles, validateSwissQstTariffFile,
   approveSwissQstTariffFile, activateSwissQstTariffFile, getSwissQstTariffFile,
-  getSwissQstTariffAffectedPayslips,
 } from "../../../service/superAdminService";
 import StatusPill from "../../StatusPill";
 import { inputClass, labelClass } from "../constants";
@@ -29,7 +28,6 @@ export default function CHQstTariffTab({ addToast }) {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState(null);
   const [detail, setDetail] = useState(null);
-  const [affected, setAffected] = useState(null);
   // The lifecycle action in flight; its optional reason is entered inline.
   const [confirming, setConfirming] = useState(null);
   const [reason, setReason] = useState("");
@@ -81,19 +79,10 @@ export default function CHQstTariffTab({ addToast }) {
 
   async function openDetail(file) {
     setError(null);
-    setAffected(null);
     try {
       if (!detail || detail.id !== file.id) setDetail(await getSwissQstTariffFile(file.id));
       else setDetail(null);
     } catch (e) { setError(e?.message || "Failed to load the tariff file."); }
-  }
-
-  async function openAffected(file) {
-    setError(null);
-    setDetail(null);
-    try {
-      setAffected(affected?.tariffFileId === file.id ? null : await getSwissQstTariffAffectedPayslips(file.id));
-    } catch (e) { setError(e?.message || "Failed to load affected payslips."); }
   }
 
   const nextStepFor = (file) => {
@@ -109,7 +98,7 @@ export default function CHQstTariffTab({ addToast }) {
         <h3 id="ch-qst-heading" className="text-sm font-semibold text-foreground">Quellensteuer tariff files</h3>
         <p className="text-xs text-foreground-muted">
           ESTV source-tax tariffs are imported unmodified (SHA-256 identity — an identical file for a canton is refused)
-          and move IMPORTED → VALIDATED → APPROVED → ACTIVE by distinct Super Admins. A canton's overlapping ACTIVE
+          and move IMPORTED → VALIDATED → APPROVED → ACTIVE by distinct Super Admins. A canton&apos;s overlapping ACTIVE
           files are superseded on activation; nothing here is ever recalculated automatically.
         </p>
       </div>
@@ -210,12 +199,6 @@ export default function CHQstTariffTab({ addToast }) {
                         {nextStepFor(f).label}
                       </button>
                     )}
-                    <button type="button"
-                      onClick={() => openAffected(f)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-foreground-muted hover:bg-surface-muted"
-                      title="Payslips calculated on this tariff — read-only">
-                      impacted
-                    </button>
                   </div>
                 </td>
               </tr>
@@ -273,31 +256,9 @@ export default function CHQstTariffTab({ addToast }) {
         </div>
       )}
 
-      {affected && (
-        <div className="rounded-xl border border-border p-4 text-xs">
-          <p className="mb-2 font-semibold text-foreground">
-            Payslips calculated on tariff file #{affected.tariffFileId} ({affected.payslipCount})
-            {affected.months?.length > 0 ? ` — months: ${affected.months.join(", ")}` : ""}
-          </p>
-          {affected.affected?.length === 0 ? (
-            <p className="text-foreground-disabled">No payslips reference this tariff file.</p>
-          ) : (
-            <ul className="space-y-1">
-              {affected.affected.map((a, i) => (
-                <li key={i} className="rounded-lg bg-surface-muted px-2 py-1 font-mono text-[11px] text-foreground-secondary">
-                  runs/{a.payrollRunId} · employee #{a.employeeId} · payslip #{a.payslipId}
-                  {a.rowId ? ` · QST row ${a.rowId}` : ""}
-                  {a.isCorrection ? " · correction" : ""}
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-2 text-foreground-muted">
-            Read-only — a changed tariff never recalculates automatically; each affected payslip is corrected deliberately
-            (organisations do this from Payroll).
-          </p>
-        </div>
-      )}
+      {/* ZP-PRIV: the "impacted payslips" list is cross-tenant worker data
+          (retired for Super Admin). Organisations correct affected payslips
+          from Payroll. */}
     </section>
   );
 }

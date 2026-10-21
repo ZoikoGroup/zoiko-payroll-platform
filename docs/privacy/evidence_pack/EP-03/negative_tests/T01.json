@@ -1,0 +1,41 @@
+{
+  "testId": "T01",
+  "timestampUtc": "2026-10-19T10:04:21.269900+00:00",
+  "environment": "test",
+  "gitSha": "aeddba2426e52280da44c076d5ad88d7c386acd6",
+  "runId": "9f683f985b58",
+  "role": "super_admin",
+  "tokenScope": "platform",
+  "syntheticTenantIds": {
+    "A": 1,
+    "B": 2
+  },
+  "endpoint": "GET /api/super-admin/reports/employees",
+  "expectedStatus": 200,
+  "actualStatus": 200,
+  "redactedResponse": {
+    "items": [
+      {
+        "organizationName": "***",
+        "organizationCode": "***",
+        "jurisdictionCountry": null,
+        "status": "Active",
+        "employmentType": "Full-time",
+        "employeeCount": "<5, hidden"
+      },
+      {
+        "organizationName": "***",
+        "organizationCode": "***",
+        "jurisdictionCountry": null,
+        "status": "Active",
+        "employmentType": "Full-time",
+        "employeeCount": "<5, hidden"
+      }
+    ],
+    "total": 2
+  },
+  "correlationId": null,
+  "securityEventId": null,
+  "decisionId": null,
+  "note": "tenant registry + k-suppressed workforce totals; no worker identity"
+}

@@ -12,7 +12,7 @@ role that may see across organizations.
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, ForeignKey
+from sqlalchemy import JSON, Boolean, CheckConstraint, Column, DateTime, Integer, String, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -62,6 +62,10 @@ class Organization(Base):
     # /auth/register-trial). Existing rows created before this column existed
     # read as PRODUCTION (NULL == PRODUCTION).
     workspace_type = Column(String(20), nullable=False, default="PRODUCTION")
+    # ZP-PRIV F02: where this tenant's data lives (EU, UK, US, IN, ME, APAC -
+    # decision 9). Privileged retrieval from a deployment in another region is
+    # refused (app/modules/security/governance.py).
+    data_region = Column(String(8), nullable=False, default="EU", server_default="EU")
     # Explicit onboarding state for paid self-service registration. A failed
     # Checkout leaves the organization recoverable instead of looking subscribed.
     billing_onboarding_status = Column(String(30), nullable=False, default="PENDING_CHECKOUT")
@@ -149,3 +153,48 @@ class LegalEntity(Base):
 
     def __repr__(self):
         return f"<LegalEntity id={self.id} organization_id={self.organization_id} name={self.name!r}>"
+
+
+class PayGroup(Base):
+    """A pay group inside an organization (ZP-PRIV C.1): the unit a scoped
+    payroll admin or a JIT support grant can be limited to. Optionally tied
+    to one legal entity."""
+    __tablename__ = "pay_groups"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_pay_groups_org_name"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    name = Column(String(120), nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class UserScopeAssignment(Base):
+    """Limits a tenant user to legal entities and/or pay groups (ZP-PRIV
+    B02/C.1). A user with no rows is organization-wide; a user with at least
+    one row sees ONLY workers whose legal entity or pay group is assigned —
+    an unassigned worker is invisible to a scoped user (fail closed).
+    org_admin is always organization-wide; assignments apply to
+    payroll_admin."""
+    __tablename__ = "user_scope_assignments"
+    __table_args__ = (
+        CheckConstraint(
+            "(legal_entity_id IS NOT NULL AND pay_group_id IS NULL) OR "
+            "(legal_entity_id IS NULL AND pay_group_id IS NOT NULL)",
+            name="ck_user_scope_exactly_one_target",
+        ),
+        UniqueConstraint("user_id", "legal_entity_id", "pay_group_id", name="uq_user_scope_target"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id = Column(Integer, ForeignKey("legal_entities.id", ondelete="CASCADE"), nullable=True, index=True)
+    pay_group_id = Column(Integer, ForeignKey("pay_groups.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

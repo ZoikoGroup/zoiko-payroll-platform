@@ -3,12 +3,11 @@ import { listFranceOrganizations } from "../../../service/superAdminService";
 import { describeLoadError, loadErrorText } from "../../../service/errorClassification";
 import { inputClass } from "../constants";
 
-// The one France organization picker. Lists ONLY France organizations (the
-// France authority endpoints reject any other org), and distinguishes
+// The one France organization picker. Lists ONLY France organizations, and distinguishes
 // loading / failed / genuinely-empty instead of showing every failure as
 // "No organizations". The selection itself is owned by FRCompliancePage
 // (kept in the URL) so it survives switching views and sections.
-export default function FranceOrgPicker({ organizationId, onOrganizationIdChange, hint }) {
+export default function FranceOrgPicker({ organizationId, onOrganizationIdChange, hint, render }) {
   const [state, setState] = useState({ loading: true, organizations: [], error: null });
 
   useEffect(() => {
@@ -20,8 +19,10 @@ export default function FranceOrgPicker({ organizationId, onOrganizationIdChange
   }, []);
 
   const { loading, organizations, error } = state;
+  const selectedOrg = organizations.find((org) => org.id === organizationId) || null;
 
   return (
+    <>
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-muted px-3 py-2.5">
       <label className="text-xs font-semibold text-foreground-muted">France organization</label>
       <select
@@ -35,7 +36,7 @@ export default function FranceOrgPicker({ organizationId, onOrganizationIdChange
         </option>
         {organizations.map((org) => (
           <option key={org.id} value={org.id}>
-            {org.organizationName || org.name || `Org #${org.id}`}
+            {org.organization_name || org.organizationName || org.name || `Org #${org.id}`}
           </option>
         ))}
       </select>
@@ -44,8 +45,10 @@ export default function FranceOrgPicker({ organizationId, onOrganizationIdChange
           ? loadErrorText(error)
           : !loading && organizations.length === 0
             ? "No organization has France as its country yet."
-            : hint || "France authority data is per-employer — select the org you're configuring."}
+            : hint || "France employer data is run by each organization — select one to see where."}
       </span>
     </div>
+    {render ? render(selectedOrg) : null}
+    </>
   );
 }

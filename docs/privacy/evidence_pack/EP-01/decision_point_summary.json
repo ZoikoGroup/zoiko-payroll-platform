@@ -1,0 +1,18 @@
+{
+  "routes": 1003,
+  "byDataClass": {
+    "public": 24,
+    "tenant_config": 227,
+    "platform": 252,
+    "self": 20,
+    "worker": 415,
+    "support": 28,
+    "tenant_lifecycle": 1,
+    "security": 15,
+    "aggregate": 21
+  },
+  "retired": 93,
+  "overridden": 140,
+  "workerRoutesReachableByPlatformRoles": [],
+  "enforcement": "app/core/authz/policy.py install_route_policies: a policy dependency at index 0 of every route; unregistered routes fail closed"
+}

@@ -1,0 +1,27 @@
+{
+  "pack": "EP-06",
+  "title": "CI gate, QA report template, defect register and build manifest",
+  "generatedAt": "2026-10-19T10:05:20Z",
+  "files": [
+    {
+      "path": "build_manifest.json",
+      "sha256": "f5955898997f65a8c554f3e205b8789fe0461a38035e9e9f7ef2475b40132285"
+    },
+    {
+      "path": "ci_privacy_gate.yml",
+      "sha256": "500b0ac1e6f0043609f8c954186bb83ffe005115a772f24bbe6be8749a2d286e"
+    },
+    {
+      "path": "defect_register.csv",
+      "sha256": "ed2c738b185ab85a5cb8e9b9868228f8d202c87cc0ad6239a8cadb8975c55279"
+    },
+    {
+      "path": "qa_report_template.md",
+      "sha256": "da035f39962ea16a1dea4eb87754f4d376b3948162d22fb6f4593c8ddca850ff"
+    }
+  ],
+  "notes": [
+    "ci_privacy_gate.yml is the job that blocks deploys.",
+    "Branch protection making it required is a human proof (HP-10)."
+  ]
+}
