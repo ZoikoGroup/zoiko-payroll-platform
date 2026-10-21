@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.authz.scopes import organization_scoped
 from app.core.dependencies import get_current_super_admin
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import get_db
@@ -108,7 +109,6 @@ def list_br_organizations(current_user=Depends(get_current_super_admin), db: Ses
 @router.get("/employees", summary="Brazil employees of one organisation")
 def list_br_employees(org_id: int = Query(...), current_user=Depends(get_current_super_admin),
                       db: Session = Depends(get_db)):
-    from app.core.authz.scopes import organization_scoped
     from app.modules.payroll.models import PayrollEmployee
 
     _org(db, org_id)

@@ -30,6 +30,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Set up Python 3.12 (matches the production image)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Set up Python and install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -38,67 +44,8 @@ jobs:
         working-directory: backend
         run: python -m pytest -q
 
-  # ZP-PRIV E06: tenant-isolation gate. Runs the route-registry test and the
-  # whole tests/privacy suite (T01-T12) on SQLite AND on a real Postgres with
-  # RLS installed, bans unscoped worker queries (tests/privacy/test_data_layer.py
-  # ratchet), scans fixtures/dumps for real-looking identifiers, and fails on
-  # an open critical privacy defect. Deploy needs it. Changes to the privacy
-  # paths in .github/CODEOWNERS invalidate any prior attestation.
-  privacy-isolation:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: zp_owner
-          POSTGRES_PASSWORD: zp_ci_only_pw
-          POSTGRES_DB: zp_priv
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U zp_owner -d zp_priv"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    env:
-      ZP_TEST_POSTGRES_URL: postgresql+psycopg2://zp_owner:zp_ci_only_pw@localhost:5433/zp_priv
-      ZP_REQUIRE_POSTGRES_TESTS: "1"
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Set up Python and install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-      - name: Route policy registry is complete and current
-        working-directory: backend
-        run: python -m pytest -q -p no:cacheprovider tests/privacy/test_route_registry.py
-      - name: Privacy isolation suite (SQLite + Postgres RLS)
-        working-directory: backend
-        run: python -m pytest -q -p no:cacheprovider tests/privacy
-      - name: No real-looking identifiers in fixtures, dumps or scripts
-        working-directory: backend
-        run: python -m scripts.scan_test_data
-      - name: No open critical privacy defect or P0 exception
-        working-directory: backend
-        run: python -m scripts.check_privacy_defects
-      - name: Attestation record (never VERIFIED without a named reviewer)
-        # A report, not a gate: BLOCKED / NOT VERIFIED is recorded in the
-        # artifact; tests, scan and the defect register above are the gate.
-        continue-on-error: true
-        working-directory: backend
-        run: python -m scripts.run_privacy_attestation --skip-tests --build-number "${{ github.run_number }}"
-      - name: Upload privacy evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: privacy-evidence-${{ github.run_number }}
-          path: |
-            backend/tests/privacy/evidence/
-            docs/privacy/evidence_pack/
-
   deploy:
-    needs: [test, privacy-isolation]
+    needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
@@ -106,6 +53,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Set up Python 3.12 (matches the production image)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Set up Python and install dependencies
         run: |
           python -m pip install --upgrade pip

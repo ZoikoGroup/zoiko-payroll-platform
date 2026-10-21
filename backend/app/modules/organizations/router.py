@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.core.authz.scopes import organization_scoped
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException, ZoikoException
 from app.modules.auth.schemas import SuccessResponse
 from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit, require_not_dunning_restricted
@@ -364,10 +365,10 @@ def get_my_organization_detail(
         .order_by(User.created_at.asc())
         .first()
     )
-    total_employees = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id).count()
+    total_employees = organization_scoped(db, PayrollEmployee, org_id).count()
     active_employees = (
-        db.query(PayrollEmployee)
-        .filter(PayrollEmployee.organization_id == org_id, PayrollEmployee.status == "Active")
+        organization_scoped(db, PayrollEmployee, org_id)
+        .filter(PayrollEmployee.status == "Active")
         .count()
     )
     hr_admins = (

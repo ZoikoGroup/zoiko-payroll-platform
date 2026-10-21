@@ -26,6 +26,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.authz.scopes import organization_scoped
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import mexico_employer_service as _employer
 from app.modules.payroll import mexico_identity as _identity
@@ -169,7 +170,6 @@ def profile_values(db: Session, employee, data, previous) -> dict:
 # ── INFONAVIT credit notices (MX-031 / MX-032) ───────────────────────────
 
 def _mx_employee(db: Session, org_id: int, employee_id: int):
-    from app.core.authz.scopes import organization_scoped
     from app.modules.payroll.models import PayrollEmployee
 
     emp = organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.id == employee_id).first()
