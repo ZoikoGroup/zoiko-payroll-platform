@@ -83,16 +83,19 @@ def test_golden_check_is_super_admin_only(db):
 # ── organisation scoping ─────────────────────────────────────────────────────
 
 def test_org_scoping_is_explicit(db):
+    from app.modules.payroll.models import CompanyComplianceDetails
+
     br_org, other = _org(db), _org(db, "Org US", "ORGUS")
-    emp = _employee(db, br_org, "BR-001", "BR")
+    _employee(db, br_org, "BR-001", "BR")
     _employee(db, other, "US-001", "US")
+    db.add(CompanyComplianceDetails(organization_id=br_org.id, name="Org BR", jurisdiction_country="BR"))
+    db.commit()
     with _http(db, SA_A) as c:
-        assert c.get(f"{BASE}/employees").status_code == 422            # no default organisation
-        assert c.get(f"{BASE}/employees", params={"org_id": 99999}).status_code == 404
         assert [o["id"] for o in c.get(f"{BASE}/organizations").json()] == [br_org.id]
-        assert c.get(f"{BASE}/employees", params={"org_id": br_org.id}).json() == [
-            {"id": emp.id, "name": "Emp BR-001", "employee_code": "BR-001"}]
-        assert c.get(f"{BASE}/employees", params={"org_id": other.id}).json() == []
+        # ZP-PRIV: the employee list is worker-level data — retired for Super
+        # Admin in the route registry (a live JIT support grant is needed).
+        for params in ({}, {"org_id": 99999}, {"org_id": br_org.id}):
+            assert c.get(f"{BASE}/employees", params=params).status_code == 403
 
 
 def test_organizations_include_an_employer_profile_without_employees(db):

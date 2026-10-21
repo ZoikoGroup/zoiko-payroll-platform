@@ -737,7 +737,7 @@ GET,/api/super-admin/compliance/brazil/employees,worker,read,employees,,tenant,,
 GET,/api/super-admin/compliance/brazil/fpas-table,platform,read,fpas-table,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/gates,platform,read,gates,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/brazil/golden-check,platform,create,golden-check,super_admin,platform,,,,no,
-GET,/api/super-admin/compliance/brazil/organizations,aggregate,read,organizations,super_admin,platform,,,payroll_employees,yes,reviewed: organization id + name of tenants with Brazil payroll (registry metadata)
+GET,/api/super-admin/compliance/brazil/organizations,aggregate,read,organizations,super_admin,platform,,,,yes,reviewed: organization id + name of tenants with Brazil payroll (registry metadata)
 GET,/api/super-admin/compliance/brazil/pack-rows,platform,read,pack-rows,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/readiness,platform,read,readiness,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/rubric-catalogue,platform,read,rubric-catalogue,super_admin,platform,,,,no,

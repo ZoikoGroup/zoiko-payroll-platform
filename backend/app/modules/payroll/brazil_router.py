@@ -90,12 +90,16 @@ def _pack_slabs(db: Session, rule_type: str, on: Optional[date]) -> Dict[str, An
 
 # ── organisations & employees ────────────────────────────────────────────────
 
-@router.get("/organizations", summary="Organisations with Brazil payroll (employees or an employer profile)")
+@router.get("/organizations", summary="Organisations with Brazil payroll (an employer profile or Brazil jurisdiction)")
 def list_br_organizations(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll.models import PayrollEmployee, PayrollBrEmployerProfile
+    from app.modules.payroll.models import CompanyComplianceDetails, PayrollBrEmployerProfile
 
-    ids = {r[0] for r in db.query(PayrollEmployee.organization_id).filter(PayrollEmployee.country_code == BR).distinct()}
-    ids |= {r[0] for r in db.query(PayrollBrEmployerProfile.organization_id).distinct()}
+    # ZP-PRIV: a platform principal never reads worker rows, so employees are
+    # not consulted — an organisation is Brazilian by its employer profile or
+    # its company jurisdiction.
+    ids = {r[0] for r in db.query(PayrollBrEmployerProfile.organization_id).distinct()}
+    ids |= {r[0] for r in db.query(CompanyComplianceDetails.organization_id)
+            .filter(CompanyComplianceDetails.jurisdiction_country.in_((BR, "Brazil")))}
     orgs = db.query(Organization).filter(Organization.id.in_(ids)).all() if ids else []
     return sorted(({"id": o.id, "name": getattr(o, "organization_name", None) or f"Organisation #{o.id}"}
                    for o in orgs), key=lambda o: o["name"].lower())
@@ -104,11 +108,11 @@ def list_br_organizations(current_user=Depends(get_current_super_admin), db: Ses
 @router.get("/employees", summary="Brazil employees of one organisation")
 def list_br_employees(org_id: int = Query(...), current_user=Depends(get_current_super_admin),
                       db: Session = Depends(get_db)):
+    from app.core.authz.scopes import organization_scoped
     from app.modules.payroll.models import PayrollEmployee
 
     _org(db, org_id)
-    rows = (db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id,
-                                             PayrollEmployee.country_code == BR)
+    rows = (organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.country_code == BR)
             .order_by(PayrollEmployee.name).all())
     return [{"id": e.id, "name": e.name, "employee_code": e.employee_code} for e in rows]
 

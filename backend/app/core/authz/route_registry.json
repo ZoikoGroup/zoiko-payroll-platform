@@ -14175,9 +14175,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "reviewed: organization id + name of tenants with Brazil payroll (registry metadata)",
-   "scan_worker_tables": [
-    "payroll_employees"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {
