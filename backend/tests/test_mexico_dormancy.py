@@ -60,6 +60,9 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     # Phase 9b — vacation and aguinaldo
     ("GET", "/employees/1/vacation"), ("POST", "/employees/1/vacation"), ("POST", "/vacation/1/approve"),
     ("POST", "/vacation/1/withdraw"), ("POST", "/aguinaldo-runs"),
+    # Phase 9c — termination and finiquito
+    ("GET", "/termination-reasons"), ("GET", "/employees/1/terminations"), ("POST", "/employees/1/terminations"),
+    ("POST", "/terminations/1/approve"), ("POST", "/terminations/1/cancel"), ("POST", "/terminations/1/finiquito-run"),
 ]
 
 
@@ -93,10 +96,20 @@ def test_every_route_is_listed():
 @pytest.mark.parametrize("method,path", ORG_ROUTES)
 def test_flag_off_every_org_route_refuses_even_for_a_mexican_org(db, method, path):
     t = make_org(db)                                            # payroll jurisdiction MX
+    # ZP-PRIV's policy check runs before the Mexico guard. A principal it
+    # admits meets the dormancy refusal; one it does not (a payroll admin on an
+    # org-admin route) is refused by the policy itself; an employee route
+    # naming an employee who does not exist is answered 404 by the policy.
+    # Every case is a refusal and nothing is written.
     for role in ("org_admin", "payroll_admin"):
         with http(db, principal(t.org.id, role=role)) as c:
             r = _call(c, method, path)
-        assert r.status_code == 403 and "not open for onboarding" in r.json()["message"], (role, r.text)
+        body = r.json()
+        dormant = r.status_code == 403 and "not open for onboarding" in body["message"]
+        by_policy = (r.status_code == 403 and body.get("error") == "ACCESS_DENIED") or                     (r.status_code == 404 and "/employees/1" in path)
+        assert dormant or by_policy, (role, r.text)
+        if role == "org_admin" and "/employees/1" not in path:
+            assert dormant, r.text
 
 
 def test_flag_off_writes_nothing(db):

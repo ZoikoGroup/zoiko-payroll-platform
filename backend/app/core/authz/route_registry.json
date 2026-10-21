@@ -7755,6 +7755,7 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_terminations",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -8031,7 +8032,8 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_imss_movements",
-    "payroll_mx_sbc_history"
+    "payroll_mx_sbc_history",
+    "payroll_mx_terminations"
    ],
    "overridden": false
   },
@@ -8650,6 +8652,46 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/terminations",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "terminations",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_terminations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/employees/{employee_id}/terminations",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "terminations",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_terminations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/employees/{employee_id}/vacation",
    "data_class": "worker",
    "action": "read",
@@ -9031,6 +9073,7 @@
     "payroll_employees",
     "payroll_mx_cfdi_documents",
     "payroll_mx_run_corrections",
+    "payroll_mx_terminations",
     "payroll_mx_vacation_records",
     "payslip_allowance_items",
     "payslip_items"
@@ -9055,6 +9098,7 @@
     "payroll_employees",
     "payroll_mx_cfdi_documents",
     "payroll_mx_run_corrections",
+    "payroll_mx_terminations",
     "payroll_mx_vacation_records",
     "payslip_allowance_items",
     "payslip_items"
@@ -9109,6 +9153,7 @@
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
     "payroll_mx_run_corrections",
+    "payroll_mx_terminations",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -9178,6 +9223,7 @@
     "payroll_mx_run_corrections",
     "payroll_mx_sbc_history",
     "payroll_mx_sua_differences",
+    "payroll_mx_terminations",
     "payroll_mx_vacation_records",
     "payroll_mx_variable_accumulators",
     "payslip_items"
@@ -9209,8 +9255,109 @@
     "payroll_mx_isn_liabilities",
     "payroll_mx_run_corrections",
     "payroll_mx_sbc_history",
+    "payroll_mx_terminations",
     "payroll_mx_vacation_records",
     "payroll_mx_variable_accumulators",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/termination-reasons",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "termination-reasons",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/terminations/{termination_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_hk_termination_results",
+    "payroll_mx_imss_movements",
+    "payroll_mx_sbc_history",
+    "payroll_mx_terminations",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/terminations/{termination_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_imss_movements",
+    "payroll_mx_terminations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/terminations/{termination_id}/finiquito-run",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "finiquito-run",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "organization_ytd_accumulators",
+    "payroll_attendance_records",
+    "payroll_ch_absence_benefit_events",
+    "payroll_ch_family_allowance_entitlements",
+    "payroll_court_ordered_deductions",
+    "payroll_employee_benefit_valuations",
+    "payroll_employee_establishments",
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_fr_pas_rates",
+    "payroll_hk_work_hours",
+    "payroll_ie_myfuturefund_statuses",
+    "payroll_ie_rpn_snapshots",
+    "payroll_leave_requests",
+    "payroll_mx_terminations",
+    "payroll_ni_relief_facts",
+    "payroll_pr_withholding_certificates",
+    "payroll_salary_tds_claims",
+    "payroll_salary_tds_declarations",
+    "payroll_super_guarantee_liabilities",
+    "payroll_ytd_accumulators",
     "payslip_allowance_items",
     "payslip_items"
    ],
@@ -10611,6 +10758,7 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_terminations",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -10774,6 +10922,7 @@
     "payroll_employees",
     "payroll_mx_cfdi_documents",
     "payroll_mx_run_corrections",
+    "payroll_mx_terminations",
     "payroll_mx_vacation_records",
     "payroll_personal_data_access_events",
     "payslip_allowance_items",
@@ -10890,6 +11039,7 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_terminations",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -17000,9 +17150,7 @@
    "field_classes": [],
    "retired_reason": null,
    "note": "reviewed: organization id + name of tenants with Mexico payroll (registry metadata)",
-   "scan_worker_tables": [
-    "payroll_employees"
-   ],
+   "scan_worker_tables": [],
    "overridden": true
   },
   {

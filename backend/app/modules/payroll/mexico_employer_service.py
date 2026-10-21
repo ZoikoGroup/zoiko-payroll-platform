@@ -1203,7 +1203,7 @@ def _catalog_has(db: Session, catalog: str, code: str) -> Optional[bool]:
                                  E.code == code).first() is not None
 
 
-def employer_readiness(db: Session, org_id: int, root_id: int, on: date) -> dict:
+def employer_readiness(db: Session, org_id: int, root_id: int, on: date, *, platform_view: bool = False) -> dict:
     from app.modules.payroll.models import (
         PayrollMxCredentialRef as C, PayrollMxEstablishment as E, PayrollMxImssRegistration as R,
         PayrollMxIsnRegistration as I, PayrollMxLaborPolicy as L, PayrollMxRiskPremium as RP,
@@ -1337,6 +1337,23 @@ def employer_readiness(db: Session, org_id: int, root_id: int, on: date) -> dict
     # Phase 4b: employees of this employer with a Mexico profile in force and
     # an unresolved identifier exception (a summary line — each employee's own
     # readiness carries the gate mapping).
+    # ZP-PRIV: a platform principal (Super Admin) never reads worker rows, so
+    # its view does not evaluate this line — not PASS, so never live-eligible.
+    if platform_view:
+        items.append(_item("employee_exceptions", "H", "Employees with blocking exceptions", NOT_STARTED,
+                           "not shown to platform users (employee-level data); the organisation's own "
+                           "readiness view evaluates it", []))
+    else:
+        _employee_exceptions_item(db, org_id, on, estabs, regs, items)
+    # Bank + parallel payroll
+    items.append(_credential_item(active_cred("BANK"), "bank_credential", "H", "Payroll bank credential reference",
+                                  ["G6", "G7"], on))
+    items.append(_item("bank_workflow", "H", "Payroll bank workflow", BLOCKED, "Phase 10", ["G6"]))
+    items.append(_item("parallel_payroll", "H", "Parallel payroll", BLOCKED, "Phase 10", ["G8"]))
+    return _summarise(db, root_id, on, profile, items)
+
+
+def _employee_exceptions_item(db: Session, org_id: int, on: date, estabs, regs, items: list) -> None:
     from app.modules.payroll.models import EmployeeStatutoryProfile as SP
 
     profiles = [p for p in db.query(SP).filter(SP.organization_id == org_id, SP.country_code == MX).all()
@@ -1347,12 +1364,6 @@ def employer_readiness(db: Session, org_id: int, root_id: int, on: date) -> dict
                        NOT_STARTED if not profiles else (BLOCKED if exceptions else PASS),
                        "no Mexican employee assigned to this employer" if not profiles
                        else f"{len(exceptions)} of {len(profiles)} employee(s) with identifier exceptions", []))
-    # Bank + parallel payroll
-    items.append(_credential_item(active_cred("BANK"), "bank_credential", "H", "Payroll bank credential reference",
-                                  ["G6", "G7"], on))
-    items.append(_item("bank_workflow", "H", "Payroll bank workflow", BLOCKED, "Phase 10", ["G6"]))
-    items.append(_item("parallel_payroll", "H", "Parallel payroll", BLOCKED, "Phase 10", ["G8"]))
-    return _summarise(db, root_id, on, profile, items)
 
 
 def _summarise(db: Session, root_id: int, on: date, profile, items: list) -> dict:
@@ -1381,7 +1392,7 @@ def organisation_readiness(db: Session, org_id: int, on: date, *, masked: bool =
     roots = db.query(P).filter(P.organization_id == org_id, P.previous_version_id.is_(None)).order_by(P.id).all()
     employers = []
     for root in roots:
-        r = employer_readiness(db, org_id, root.id, on)
+        r = employer_readiness(db, org_id, root.id, on, platform_view=masked)
         r["rfc"] = _mask(root.rfc) if masked else root.rfc
         employers.append(r)
     return {"on": on.isoformat(), "employers": employers, "gates": _mx.gate_states(db)}
@@ -1396,7 +1407,7 @@ def readiness_summary(db: Session, on: date) -> dict:
     per_gate = {g: {"employers": 0, "allPassing": 0} for g, _ in _content.GATES}
     employers = []
     for org_id, root_id in rows:
-        r = employer_readiness(db, org_id, root_id, on)
+        r = employer_readiness(db, org_id, root_id, on, platform_view=True)
         first_block = next((i for i in r["items"] if i["status"] != PASS), None)
         employers.append({"organizationId": org_id, "employerId": root_id, "liveEligible": r["liveEligible"],
                           "firstBlockingItem": None if first_block is None else

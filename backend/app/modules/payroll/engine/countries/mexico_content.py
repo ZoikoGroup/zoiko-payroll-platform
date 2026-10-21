@@ -361,9 +361,20 @@ MX_AUTHORITY_RETRY_CONFIG: dict = {}  # channel -> {"min_wait_seconds": int, "mi
 # special_pay.py defines the interfaces). EMPTY: every special payment BLOCKS
 # (MX_SPECIAL_PAY_RULE_MISSING / MX_AGUINALDO_RULE_MISSING /
 # MX_ISN_SPECIAL_PAY_RULE_MISSING); none falls back to the ordinary tariff (MX-009).
-MX_SPECIAL_PAY_RULES: dict = {}       # concept (AGUINALDO / VACATION_PREMIUM / PTU / SEPARATION) -> SpecialPayRule (S24 / S25)
+MX_SPECIAL_PAY_RULES: dict = {}       # concept (AGUINALDO / VACATION_PREMIUM / VACATION_PAYOUT / PTU / SEPARATION) -> SpecialPayRule (S24 / S25)
 MX_AGUINALDO_RULE = None              # AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
 MX_SPECIAL_PAY_ISN_INCLUSION: dict = {}   # (state, concept) -> (included: bool, source, source_ref) — state ISN content
+
+# Phase 9c (D5): termination. The reason CATALOG — code -> TerminationReason
+# rule object (label, the separation components the reason triggers: indemnity,
+# seniority premium, ... — LFT Arts. 47–53, 162, S26) — and the FINIQUITO rule
+# (vacation days owed at termination, LFT Arts. 76–81, and the withholding of a
+# finiquito paid on its own, LISR / RLISR — S24 / S25). Interfaces in
+# engine/jurisdictions/mexico/termination.py. EMPTY: no termination can be
+# recorded (MX_TERMINATION_RULE_MISSING) and no finiquito calculated
+# (MX_FINIQUITO_RULE_MISSING); an operator never chooses a tax treatment (MX-057).
+MX_TERMINATION_REASONS: dict = {}     # reason code -> TerminationReason (S26)
+MX_FINIQUITO_RULE = None              # FiniquitoRule (S26 + S24 / S25)
 
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the

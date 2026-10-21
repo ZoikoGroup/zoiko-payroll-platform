@@ -44,7 +44,7 @@ SPEC = _content.SPEC
 GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
-BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO")   # 9a corrections, 9b aguinaldo; PTU / FINIQUITO: 9c–9d
+BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO")   # 9a, 9b, 9c; PTU: 9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
@@ -441,6 +441,8 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     run_type = (run.mx_run_type or "ORDINARY") if run is not None else "ORDINARY"
     if run_type == "AGUINALDO":
         return _aguinaldo_inputs(db, run, employee, pack, pay_rates, pay_slabs)
+    if run_type == "FINIQUITO":
+        return _finiquito_inputs(db, run, employee, pack, pay_rates, pay_slabs)
 
     prof = _profile(db, employee, on)
     reg = _registration(db, prof, on)
@@ -449,6 +451,24 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     if policy_row is not None and policy_row.floor_check_status != "PASS":
         raise MXBlock("MX_LABOR_POLICY_FLOOR_NOT_PASS", "the employer labour policy has not passed its floor check")
     tariff = payment_period(prof, start, end)
+    # Phase 9c: an approved termination ends the employment — the final period
+    # pays to the termination date; a later period pays nothing.
+    from app.modules.payroll import mexico_termination_service
+
+    ended = mexico_termination_service.settling(db, employee.id)
+    final_period = None
+    if ended is not None and ended.termination_date < end:
+        if ended.termination_date < start:
+            raise MXBlock("MX_EMPLOYEE_TERMINATED",
+                          f"the employment ended on {ended.termination_date.isoformat()}, before this period",
+                          employee.organization_id)
+        if tariff in _FIXED_SALARY_DAYS and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR":
+            raise MXBlock("MX_SALARY_DAYS_PARTIAL_PERIOD",
+                          f"the employment ends on {ended.termination_date.isoformat()}, inside this {tariff} period, "
+                          f"and the labour policy pays fixed salary days — no proration of fixed days is transcribed",
+                          employee.organization_id)
+        final_period = {"terminationId": ended.id, "periodEnd": end, "endsOn": ended.termination_date}
+        end = ended.termination_date
     days_paid = salary_days(tariff, start, end, policy_row.salary_days_convention if policy_row else None)
     counts = _attendance_counts(db, employee.organization_id, employee.id, start, end, attendance_records)
     segs = segments(db, pack, start, end)
@@ -498,12 +518,15 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         "variableAccumulator": _hash(accumulator), "monthToDate": _hash(mtd), "earnings": _hash(earnings),
         "attendance": _hash(counts), "bankInstruction": _hash(_bank(employee)),
     }
+    if final_period is not None:
+        components["termination"] = _hash(final_period)
     return {
         "mx_payroll_date": on, "mx_payment_period": tariff, "mx_profile": prof,
         "mx_registration": registration, "mx_risk_premium": risk, "mx_labor_policy": policy,
         "mx_classifications": classifications, "mx_infonavit_notices": notices, "mx_isn_state_pack": isn_pack,
         "mx_earnings": earnings, "mx_hours": hours, "mx_min_wage_zone": zone,
         "mx_period": {"start": start, "end": end, "days_paid": days_paid, **counts,
+                      **({"final_period": _plain(final_period)} if final_period is not None else {}),
                       "segments": [{"start": s["start"], "end": s["end"], "days": s["days"], "rate_map": s["rate_map"],
                                     "slabs": s["slabs"]} for s in segs]},
         "mx_variable_accumulator": {"total": accumulator["total"], "days": accumulator["days"]},
@@ -573,6 +596,76 @@ def _aguinaldo_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
         "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
         "mx_input_components": components, "mx_run_type": "AGUINALDO", "mx_special_detail": _plain(special_detail),
     }
+
+
+def _finiquito_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
+    """Phase 9c: the inputs of one FINIQUITO payslip — proportional aguinaldo,
+    the vacation still owed paid out with its premium, and the separation
+    components the termination's reason triggers (all from transcribed rules,
+    mexico_termination_service.finiquito_lines). Profile, registration and
+    labour policy are those in force on the last day employed; the content is
+    the pay date's (MX-004). No ordinary period: the engine's special-run path."""
+    from app.modules.payroll import mexico_employer_service, mexico_termination_service
+    from app.modules.payroll.engine.jurisdictions.mexico import rounding
+    from app.modules.payroll.engine.jurisdictions.mexico.content import Content
+
+    on = run.pay_date
+    row = mexico_termination_service.for_run(db, run)
+    if row.employee_id != employee.id:
+        raise MXBlock("MX_FINIQUITO_TERMINATION_MISSING", f"run {run.id} settles another employee's termination",
+                      employee.organization_id)
+    last_day = row.termination_date
+    prof = _profile(db, employee, last_day)
+    reg = _registration(db, prof, last_day)
+    policy_row = _labor_policy(db, reg, last_day)
+    if policy_row is None:
+        raise MXBlock("MX_LABOR_POLICY_MISSING", "no employer labour policy was in force on the termination date",
+                      employee.organization_id)
+    if policy_row.floor_check_status != "PASS":
+        raise MXBlock("MX_LABOR_POLICY_FLOOR_NOT_PASS", "the employer labour policy has not passed its floor check")
+    content = Content(pay_rates, pay_slabs)
+    rounder = rounding.rounder(content)
+    zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
+    policy = {"id": policy_row.id, "version": policy_row.version, "aguinaldo_days": policy_row.aguinaldo_days,
+              "vacation_policy": policy_row.vacation_policy, "vacation_premium_pct": policy_row.vacation_premium_pct}
+    facts = {"termination_date": last_day, "pay_date": on, "daily_salary": _dec(prof.mx_daily_salary),
+             "seniority_date": prof.mx_seniority_date, "date_of_joining": employee.date_of_joining,
+             "work_state": prof.mx_work_state, "zone": zone, "content": content}
+    earnings, detail = mexico_termination_service.finiquito_lines(db, row, employee, prof, policy, content, rounder,
+                                                                  facts)
+    isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
+    registration = None if reg is None else {"id": reg.id, "status": reg.status,
+                                             "employer_profile_id": reg.employer_profile_id}
+    profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
+                                                    "mx_seniority_date", "mx_imss_registration_id")}
+    termination = {"id": row.id, "date": last_day, "reason": row.reason_code, "status": row.status}
+    components = {
+        "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs]}),
+        "isnPack": _hash(isn_pack), "registration": _hash(registration), "laborPolicy": _hash(policy),
+        "profile": _hash(profile_facts), "termination": _hash(termination),
+        "vacationRecords": _hash(_vacation_facts(db, employee.id)), "earnings": _hash(earnings),
+    }
+    return {
+        "mx_payroll_date": on, "mx_payment_period": None, "mx_profile": prof, "mx_registration": registration,
+        "mx_risk_premium": None, "mx_labor_policy": policy, "mx_classifications": {}, "mx_infonavit_notices": [],
+        "mx_isn_state_pack": isn_pack, "mx_earnings": earnings, "mx_hours": None, "mx_min_wage_zone": zone,
+        "mx_period": {"start": run.period_start, "end": run.period_end, "days_paid": _ZERO, "segments": []},
+        "mx_variable_accumulator": {"total": _ZERO, "days": _ZERO},
+        "mx_month_to_date": {"taxable": _ZERO, "subsidy_applied": _ZERO},
+        "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
+        "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
+        "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
+        "mx_input_components": components, "mx_run_type": "FINIQUITO", "mx_special_detail": _plain(detail),
+    }
+
+
+def _vacation_facts(db: Session, employee_id: int) -> list:
+    """The vacation records a finiquito reads (approval drift: a change after
+    the calculation is seen as stale)."""
+    from app.modules.payroll.models import PayrollMxVacationRecord as V
+
+    return [{"id": r.id, "year": r.service_year, "kind": r.kind, "days": r.days, "status": r.status}
+            for r in db.query(V).filter(V.employee_id == employee_id).order_by(V.id)]
 
 
 def payslip_split(inputs: dict) -> dict:
@@ -825,6 +918,9 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
     from app.modules.payroll import mexico_benefits_service
 
     counts["vacationPremiumsPaid"] = mexico_benefits_service.on_commit(db, run)
+    from app.modules.payroll import mexico_termination_service
+
+    counts["vacationPaidOut"] = mexico_termination_service.on_commit(db, run)
     db.flush()
     return {"committed": True, **counts}
 
@@ -926,6 +1022,9 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     from app.modules.payroll import mexico_benefits_service
 
     removed["vacationPremiumsReopened"] = mexico_benefits_service.on_reset(db, run)
+    from app.modules.payroll import mexico_termination_service
+
+    removed["vacationPaidOutRemoved"] = mexico_termination_service.on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)

@@ -10134,7 +10134,7 @@ class PayrollMxImssMovement(Base):
     registration_id        = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=False, index=True)
     employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
     payroll_run_id         = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=True, index=True)
-    source_kind            = Column(String(20), nullable=False)       # FIRST_RUN / SBC_CHANGE / END_OF_EMPLOYMENT
+    source_kind            = Column(String(20), nullable=False)       # FIRST_RUN / SBC_CHANGE / TERMINATION (9c; END_OF_EMPLOYMENT before)
     source_key             = Column(String(120), nullable=False)
     movement_type          = Column(String(14), nullable=False)       # ALTA / BAJA / MODIFICACION
     event_date             = Column(Date, nullable=False)
@@ -10425,6 +10425,44 @@ class PayrollMxVacationRecord(Base):
         sa.CheckConstraint("kind IN ('TAKEN', 'OPENING', 'PAID_OUT')", name="ck_mx_vacation_record_kind"),
         sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'PAID', 'WITHDRAWN')", name="ck_mx_vacation_record_status"),
         sa.CheckConstraint("days > 0", name="ck_mx_vacation_record_days"),
+    )
+
+
+class PayrollMxTermination(Base):
+    """One end of employment (MX-057 / MX-058, Phase 9 plan B6, D5 / D6): the
+    date, a reason from the transcribed catalog (S26) and an evidence
+    reference, recorded by one person and approved by another. Approval sets
+    the employee's date of leaving and is the ONLY source of the IMSS BAJA
+    (Phase 8). A FINIQUITO run settles it (COMMITTED); it can be cancelled
+    only before that run exists."""
+    __tablename__ = "payroll_mx_terminations"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    termination_date          = Column(Date, nullable=False)                    # the last day employed
+    reason_code               = Column(String(40), nullable=False)
+    reason_source             = Column(String(200), nullable=True)              # the catalog entry's source at recording
+    evidence_ref              = Column(String(300), nullable=False)
+    note                      = Column(String(300), nullable=True)
+    status                    = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / APPROVED / COMMITTED / CANCELLED
+    recorded_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at               = Column(DateTime(timezone=True), nullable=True)
+    previous_date_of_leaving  = Column(Date, nullable=True)                    # restored on cancel
+    baja_movement_ids         = Column(JSON, nullable=True)                    # the Phase 8 BAJA movements it generated
+    finiquito_run_id          = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    cancelled_reason          = Column(String(300), nullable=True)
+    cancelled_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'COMMITTED', 'CANCELLED')",
+                           name="ck_mx_termination_status"),
+        # One live termination per employee.
+        sa.Index("uq_mx_termination_live_employee", "employee_id", unique=True,
+                 sqlite_where=sa.text("status <> 'CANCELLED'"), postgresql_where=sa.text("status <> 'CANCELLED'")),
     )
 
 

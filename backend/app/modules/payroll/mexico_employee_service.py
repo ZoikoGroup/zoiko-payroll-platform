@@ -169,10 +169,10 @@ def profile_values(db: Session, employee, data, previous) -> dict:
 # ── INFONAVIT credit notices (MX-031 / MX-032) ───────────────────────────
 
 def _mx_employee(db: Session, org_id: int, employee_id: int):
+    from app.core.authz.scopes import organization_scoped
     from app.modules.payroll.models import PayrollEmployee
 
-    emp = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id,
-                                           PayrollEmployee.organization_id == org_id).first()
+    emp = organization_scoped(db, PayrollEmployee, org_id).filter(PayrollEmployee.id == employee_id).first()
     if emp is None:
         raise NotFoundException("PayrollEmployee", employee_id)
     if (emp.country_code or "").upper() != MX:

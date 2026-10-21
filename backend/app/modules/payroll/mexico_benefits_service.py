@@ -314,7 +314,9 @@ def on_commit(db: Session, run) -> int:
 def on_reset(db: Session, run) -> int:
     m = _m()
     n = 0
-    for row in db.query(m.PayrollMxVacationRecord).filter(m.PayrollMxVacationRecord.premium_run_id == run.id):
+    V = m.PayrollMxVacationRecord
+    # PAID_OUT records (a finiquito, 9c) are removed by the termination's own reset.
+    for row in db.query(V).filter(V.premium_run_id == run.id, V.kind != "PAID_OUT"):
         row.status, row.premium_run_id, row.premium_item_id = "APPROVED", None, None
         n += 1
     return n

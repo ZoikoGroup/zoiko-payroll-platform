@@ -776,3 +776,54 @@ def open_aguinaldo_run(body: Dict[str, Any] = Body(...), current_user=Depends(ge
         raise BadRequestException("year is required")
     return _benefits().create_aguinaldo_run(db, _org_id(current_user), year, _opt_date(body.get("payDate"), "payDate"),
                                             body.get("employeeIds"), _actor(current_user))
+
+
+# ── Termination and finiquito (Phase 9c) ─────────────────────────────────────
+
+def _terminations():
+    from app.modules.payroll import mexico_termination_service
+
+    return mexico_termination_service
+
+
+@router.get("/termination-reasons", summary="The transcribed termination-reason catalog (empty until S26)")
+def termination_reasons(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _terminations().reasons(db, _org_id(current_user))
+
+
+@router.get("/employees/{employee_id}/terminations", summary="The employee's termination records")
+def employee_terminations(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                          db: Session = Depends(get_db)):
+    return _terminations().list_terminations(db, _org_id(current_user), employee_id)
+
+
+@router.post("/employees/{employee_id}/terminations",
+             summary="Record a termination: date, catalog reason, evidence (needs approval)")
+def record_employee_termination(employee_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"termination_date": _opt_date(body.get("terminationDate"), "terminationDate"),
+            "reason_code": body.get("reasonCode"), "evidence_ref": body.get("evidenceRef"), "note": body.get("note")}
+    return _terminations().record_termination(db, _org_id(current_user), employee_id, data, _actor(current_user))
+
+
+@router.post("/terminations/{termination_id}/approve",
+             summary="Approve a termination (a different person) — sets the date of leaving, generates the BAJA")
+def approve_employee_termination(termination_id: int, current_user=Depends(get_current_org_admin),
+                                 db: Session = Depends(get_db)):
+    return _terminations().approve_termination(db, _org_id(current_user), termination_id, _actor(current_user))
+
+
+@router.post("/terminations/{termination_id}/cancel",
+             summary="Cancel a termination before its finiquito run exists (withdraws an unsent BAJA)")
+def cancel_employee_termination(termination_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _terminations().cancel_termination(db, _org_id(current_user), termination_id,
+                                              str(body.get("reason") or ""), _actor(current_user))
+
+
+@router.post("/terminations/{termination_id}/finiquito-run",
+             summary="Open the FINIQUITO run of an approved termination (blocks until S24 / S25 / S26 rules)")
+def open_finiquito_run(termination_id: int, body: Dict[str, Any] = Body(...),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _terminations().create_finiquito_run(db, _org_id(current_user), termination_id,
+                                                _opt_date(body.get("payDate"), "payDate"), _actor(current_user))

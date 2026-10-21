@@ -218,7 +218,7 @@ def test_other_phase9_run_types_are_still_refused(db, monkeypatch):
     from app.modules.payroll.engine.countries.mexico import MXBlock
 
     w = ah.committed_world(db, monkeypatch, code="MXT9")
-    for kind in ("PTU", "FINIQUITO"):                   # AGUINALDO is built in 9b
+    for kind in ("PTU",):                               # AGUINALDO is built in 9b, FINIQUITO in 9c
         w.run.mx_run_type = kind
         with pytest.raises(MXBlock) as exc:
             mexico_run_service.guard(db, w.employee, w.run)

@@ -23,7 +23,8 @@ def test_org_authority_flow_through_the_api(db, monkeypatch):
         assert "12345678901" not in str(a.get(f"{ORG_BASE}/authorities/movements").json())
         exp = a.post(f"{ORG_BASE}/authorities/movements/export", json={})
         assert exp.status_code == 200 and exp.headers["content-type"].startswith("text/csv")
-        assert exp.headers["cache-control"] == "no-store" and "attachment" in exp.headers["content-disposition"]
+        assert exp.headers["cache-control"].split(",")[0].strip() == "no-store"   # ZP-PRIV appends ", private"
+        assert "attachment" in exp.headers["content-disposition"]
         assert "NOT AN IMSS / IDSE FILE" in exp.text and "12345678901" in exp.text
         # UNKNOWN through the API: no retry before a status check, then the same key.
         assert a.post(f"{ORG_BASE}/authorities/movements/{mv['id']}/unknown", json={"note": "no acuse"}).status_code == 200

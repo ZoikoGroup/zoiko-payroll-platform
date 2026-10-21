@@ -2635,6 +2635,12 @@ export const recordMxVacation = (employeeId, payload) => api.post(`${MX}/employe
 export const approveMxVacation = (recordId) => api.post(`${MX}/vacation/${recordId}/approve`, {});
 export const withdrawMxVacation = (recordId, reason) => api.post(`${MX}/vacation/${recordId}/withdraw`, { reason });
 export const openMxAguinaldoRun = (year, payDate) => api.post(`${MX}/aguinaldo-runs`, { year, payDate });
+export const getMxTerminationReasons = () => api.get(`${MX}/termination-reasons`);
+export const listMxTerminations = (employeeId) => api.get(`${MX}/employees/${employeeId}/terminations`);
+export const recordMxTermination = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/terminations`, payload);
+export const approveMxTermination = (terminationId) => api.post(`${MX}/terminations/${terminationId}/approve`, {});
+export const cancelMxTermination = (terminationId, reason) => api.post(`${MX}/terminations/${terminationId}/cancel`, { reason });
+export const openMxFiniquitoRun = (terminationId, payDate) => api.post(`${MX}/terminations/${terminationId}/finiquito-run`, { payDate });
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>

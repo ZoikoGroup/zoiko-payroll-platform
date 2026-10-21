@@ -51,10 +51,12 @@ def test_every_route_is_super_admin_only(db, path):
         assert c.get(f"{BASE}{path}").status_code == 403
 
 
-def test_employees_need_an_explicit_existing_organisation(db):
+def test_super_admin_never_lists_mexican_employees(db):
+    # ZP-PRIV: worker-level data needs a live JIT support grant; the route is
+    # retired for platform principals in the route registry.
     with _http(db, SA_A) as c:
-        assert c.get(f"{BASE}/employees").status_code == 422
-        assert c.get(f"{BASE}/employees", params={"org_id": 99999}).status_code == 404
+        assert c.get(f"{BASE}/employees").status_code == 403
+        assert c.get(f"{BASE}/employees", params={"org_id": 99999}).status_code == 403
 
 
 def test_content_defaults_to_the_pack_effective_from_never_today(db, seeded):
