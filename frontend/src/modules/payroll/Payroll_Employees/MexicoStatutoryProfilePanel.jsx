@@ -11,6 +11,7 @@ import MXInfonavitNoticePanel from "./MXInfonavitNoticePanel";
 import MXVacationPanel from "./MXVacationPanel";
 import MXTerminationPanel from "./MXTerminationPanel";
 import MXPtuPanel from "./MXPtuPanel";
+import MXAnnualAdjustmentView from "./MXAnnualAdjustmentView";
 
 // Mexico employee record (ZP-MX-ENG-001 §12 — the spec's "People → Employee →
 // Payroll → Mexico"). FACTS only: no tax rate, no subsidy amount, no SBC is
@@ -186,6 +187,7 @@ export default function MexicoStatutoryProfilePanel({ employee, onClose }) {
               <MXVacationPanel employeeId={employee.id} />
               <MXTerminationPanel employeeId={employee.id} />
               <MXPtuPanel employeeId={employee.id} />
+              <MXAnnualAdjustmentView employeeId={employee.id} />
               <Section title="Readiness">
                 <ReadinessDateBar on={on} onChange={setOn} />
                 <Messages error={readinessError} />

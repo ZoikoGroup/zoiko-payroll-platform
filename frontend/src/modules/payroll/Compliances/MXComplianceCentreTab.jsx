@@ -10,6 +10,7 @@ import useMexicoOrgData from "../../../components/jurisdiction/mexico/employer/u
 import MXReadinessPanel from "./MXReadinessPanel";
 import MXAguinaldoRunPanel from "./MXAguinaldoRunPanel";
 import MXPtuCyclePanel from "./MXPtuCyclePanel";
+import MXAnnualAdjustmentPanel from "./MXAnnualAdjustmentPanel";
 
 // Mexico Compliance Centre (ZP-MX-ENG-001 §11) — the spec's "Settings →
 // Countries → Mexico → Employer & Registrations", mounted where every country's
@@ -73,6 +74,7 @@ export default function MXComplianceCentreTab() {
       <MXReadinessPanel on={on} setOn={setOn} readiness={data.readiness} employerId={employerId} />
       <MXAguinaldoRunPanel />
       <MXPtuCyclePanel />
+      <MXAnnualAdjustmentPanel />
     </div>
   );
 }

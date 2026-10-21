@@ -2652,6 +2652,14 @@ export const approveMxPtuAllocation = (cycleId) => api.post(`${MX}/ptu/cycles/${
 export const openMxPtuRun = (cycleId, payDate) => api.post(`${MX}/ptu/cycles/${cycleId}/ptu-run`, { payDate });
 export const cancelMxPtuCycle = (cycleId, reason) => api.post(`${MX}/ptu/cycles/${cycleId}/cancel`, { reason });
 export const getMxEmployeePtu = (employeeId) => api.get(`${MX}/employees/${employeeId}/ptu`);
+export const getMxAnnualExclusionReasons = () => api.get(`${MX}/annual-adjustments/exclusion-reasons`);
+export const listMxAnnualAdjustments = () => api.get(`${MX}/annual-adjustments`);
+export const computeMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjustments/compute`, payload);
+export const approveMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjustments/approve`, payload);
+export const applyMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjustments/apply`, payload);
+export const recordMxAnnualExclusion = (rowId, payload) => api.post(`${MX}/annual-adjustments/${rowId}/exclusion`, payload);
+export const approveMxAnnualExclusion = (rowId) => api.post(`${MX}/annual-adjustments/${rowId}/exclusion/approve`, {});
+export const getMxEmployeeAnnualAdjustments = (employeeId) => api.get(`${MX}/employees/${employeeId}/annual-adjustments`);
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>

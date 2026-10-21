@@ -29,6 +29,7 @@ from decimal import Decimal
 
 from ..jurisdictions.mexico import (ceav, classification, entitlements, imss, infonavit, isn, isr, labor, preflight,
                                     sbc, special_pay, subsidy, termination, trace)
+from ..jurisdictions.mexico import annual_adjustment
 from ..jurisdictions.mexico.errors import MexicoCalculationBlockedError, MXBlock  # noqa: F401  (re-exported)
 
 __all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoCalculationBlockedError", "MXBlock", "calculate"]
@@ -156,6 +157,20 @@ def _calculate(ctx) -> dict:
     imss_er = sum((r["amount"] for r in imss_rows if r["side"] == "employer"), _ZERO)
     employee_total = imss_ee + credit_ee
     withholding = net_isr["withholding"]
+    # Phase 9e: an approved annual ISR adjustment of an ended fiscal year,
+    # applied by the transcribed rule as its own section (MX-010 — the year's
+    # payslips are never edited).
+    annual = None
+    adjustment = getattr(ctx, "mx_annual_adjustment", None)
+    if adjustment:
+        difference = Decimal(str(adjustment["difference"]))
+        applied = annual_adjustment.apply_in_run(withholding, difference, {"pay_date": on, "content": content,
+                                                                           "fiscal_year": adjustment["fiscal_year"]})
+        annual = {"adjustment_id": adjustment["id"], "fiscal_year": adjustment["fiscal_year"],
+                  "difference": difference, "period_withheld": withholding, "withheld": applied["withheld"],
+                  "change": applied["change"], "carry_forward": applied["carry_forward"],
+                  "rule_source": applied["rule_source"]}
+        withholding = applied["withheld"]
 
     result = {
         "engine_version": ENGINE_VERSION, "pay_date": on, "tariff_period": period.tariff,
@@ -178,4 +193,6 @@ def _calculate(ctx) -> dict:
                                            state_tax["content"]),
         "pack": getattr(ctx, "mx_pack", None),
     }
+    if annual is not None:
+        result["annual_adjustment"] = annual
     return {"tds": withholding, "mx_employee_total": employee_total, "mx_result": trace.build(**result)}

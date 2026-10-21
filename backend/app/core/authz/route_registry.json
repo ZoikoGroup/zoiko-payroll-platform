@@ -7769,6 +7769,142 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/mexico/annual-adjustments",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "annual-adjustments",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_annual_isr_adjustments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/annual-adjustments/apply",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "apply",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_annual_isr_adjustments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/annual-adjustments/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_run_corrections",
+    "payslip_items",
+    "support_grant_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/annual-adjustments/compute",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "compute",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_run_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/annual-adjustments/exclusion-reasons",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "exclusion-reasons",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/annual-adjustments/{row_id}/exclusion",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "exclusion",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_ptu_allocations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/annual-adjustments/{row_id}/exclusion/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_ptu_allocations"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/mexico/authorities/accrue",
    "data_class": "worker",
@@ -8562,6 +8698,27 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/annual-adjustments",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "annual-adjustments",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_annual_isr_adjustments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/employees/{employee_id}/hours",
    "data_class": "tenant_config",
    "action": "read",
@@ -9192,6 +9349,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_ptu_allocations"
    ],
    "overridden": false
@@ -9210,6 +9368,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_ptu_allocations"
    ],
    "overridden": false
@@ -9322,6 +9481,7 @@
    "scan_worker_tables": [
     "payroll_attendance_records",
     "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_cfdi_documents",
     "payroll_mx_ptu_allocations",
     "payroll_mx_run_corrections",
@@ -9348,6 +9508,7 @@
    "scan_worker_tables": [
     "payroll_attendance_records",
     "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_cfdi_documents",
     "payroll_mx_ptu_allocations",
     "payroll_mx_run_corrections",
@@ -9468,6 +9629,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_authority_liability_sources",
     "payroll_mx_benefit_accruals",
     "payroll_mx_cfdi_documents",
@@ -9502,6 +9664,7 @@
    "scan_worker_tables": [
     "payroll_attendance_records",
     "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_authority_liability_sources",
     "payroll_mx_benefit_accruals",
     "payroll_mx_cfdi_documents",
@@ -11178,6 +11341,7 @@
    "scan_worker_tables": [
     "payroll_attendance_records",
     "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
     "payroll_mx_cfdi_documents",
     "payroll_mx_ptu_allocations",
     "payroll_mx_run_corrections",

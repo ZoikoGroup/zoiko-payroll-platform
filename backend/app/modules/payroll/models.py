@@ -10540,6 +10540,48 @@ class PayrollMxPtuAllocation(Base):
     )
 
 
+class PayrollMxAnnualIsrAdjustment(Base):
+    """One worker's annual ISR adjustment for a legal employer's ended fiscal
+    year (MX-010, Phase 9e plan D1–D10): the inputs from committed runs (by run
+    type), eligibility or the exclusion with its reason, the annual ISR and the
+    difference from the transcribed rule — then APPLIED as its own section of a
+    later ordinary payslip (never by editing the year's payslips)."""
+    __tablename__ = "payroll_mx_annual_isr_adjustments"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id       = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="RESTRICT"), nullable=False, index=True)
+    fiscal_year               = Column(Integer, nullable=False)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status                    = Column(String(10), nullable=False, default="COMPUTED")   # COMPUTED / APPROVED / APPLIED / WAIVED
+    eligible                  = Column(sa.Boolean, nullable=False, default=False)
+    exclusion_reason          = Column(String(60), nullable=True)
+    exclusion_evidence_ref    = Column(String(300), nullable=True)
+    exclusion_recorded_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    exclusion_approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    income_by_run_type        = Column(JSON, nullable=True)
+    annual_taxable            = Column(Numeric(16, 2), nullable=False)
+    withheld_total            = Column(Numeric(16, 2), nullable=False)
+    subsidy_applied_total     = Column(Numeric(16, 2), nullable=False)
+    annual_isr                = Column(Numeric(16, 2), nullable=True)
+    difference                = Column(Numeric(16, 2), nullable=True)
+    inputs_fingerprint        = Column(String(64), nullable=True)
+    rule_source               = Column(String(200), nullable=True)
+    computed_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    applied_run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    applied_item_id           = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=True, index=True)
+    applied_withheld_change   = Column(Numeric(16, 2), nullable=True)
+    carry_forward             = Column(Numeric(16, 2), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.UniqueConstraint("employer_profile_id", "fiscal_year", "employee_id", name="uq_mx_annual_adjustment_worker"),
+        sa.CheckConstraint("status IN ('COMPUTED', 'APPROVED', 'APPLIED', 'WAIVED')", name="ck_mx_annual_adjustment_status"),
+    )
+
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

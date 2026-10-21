@@ -10,7 +10,7 @@ Spec ZP-MX-ENG-001 v1.0:
 
 **Base.** `main` = `422d4d2` (PR #110, Phase 8 `8ee13dd`); single Alembic head `e3b9c2d7f4a1`. PR #110's deploy run `39214061815` was green at every step (tests, single-head, SSH deploy with `deploy_migrate.sh` and head verification, schema drift) and frontend build `39214061602` was green, so production should be at `e3b9c2d7f4a1` (confirm with `alembic current`).
 
-**Status.** Approved 2026-10-19 as recommended (D1–D12). **9a (correction runs) merged** (PR #111). **9b (aguinaldo + vacation) merged** (PR #112; not yet deployed — the ZP-PRIV integration). **9c (termination / finiquito) built and committed on `nikhil`** — `MEXICO_PHASE_9C_IMPLEMENTATION_REPORT.md`. **9d (PTU) built and committed on `nikhil`** — `MEXICO_PHASE_9D_IMPLEMENTATION_REPORT.md`. 9e not started.
+**Status.** Approved 2026-10-19 as recommended (D1–D12). **9a (correction runs) merged** (PR #111). **9b (aguinaldo + vacation) merged** (PR #112; not yet deployed — the ZP-PRIV integration). **9c (termination / finiquito) built and committed on `nikhil`** — `MEXICO_PHASE_9C_IMPLEMENTATION_REPORT.md`. **9d (PTU) built and committed on `nikhil`** — `MEXICO_PHASE_9D_IMPLEMENTATION_REPORT.md`. **9e (annual ISR adjustment) built and committed on `nikhil`** — `MEXICO_PHASE_9E_IMPLEMENTATION_REPORT.md`. **Phase 9 is complete in mechanics.**
 
 **Ground rules (unchanged):**
 - source wins and fail closed;

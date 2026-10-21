@@ -522,6 +522,12 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     }
     if final_period is not None:
         components["termination"] = _hash(final_period)
+    # Phase 9e: an approved annual ISR adjustment of an ended year, applied here.
+    from app.modules.payroll import mexico_annual_service
+
+    annual = mexico_annual_service.for_payslip(db, run, employee.id)
+    if annual is not None:
+        components["annualAdjustment"] = _hash(annual)
     return {
         "mx_payroll_date": on, "mx_payment_period": tariff, "mx_profile": prof,
         "mx_registration": registration, "mx_risk_premium": risk, "mx_labor_policy": policy,
@@ -536,7 +542,7 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
         "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
         "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
-        "mx_input_components": components, "mx_run_type": run_type,
+        "mx_input_components": components, "mx_run_type": run_type, "mx_annual_adjustment": annual,
     }
 
 
@@ -978,6 +984,9 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
     from app.modules.payroll import mexico_ptu_service
 
     counts["ptuAllocationsPaid"] = mexico_ptu_service.on_commit(db, run)
+    from app.modules.payroll import mexico_annual_service
+
+    counts["annualAdjustmentsApplied"] = mexico_annual_service.on_commit(db, run)
     db.flush()
     return {"committed": True, **counts}
 
@@ -1085,6 +1094,9 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     from app.modules.payroll import mexico_ptu_service
 
     removed["ptuAllocationsReopened"] = mexico_ptu_service.on_reset(db, run)
+    from app.modules.payroll import mexico_annual_service
+
+    removed["annualAdjustmentsReopened"] = mexico_annual_service.on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)

@@ -1,5 +1,5 @@
 """The production upgrade path from Rugvedh's ZP-PRIV head e1a3c5e7f9b2 through
-a6d2f9c4b8e1 (Mexico M8) → c3e5a7b9d1f4 (merge) → b4d8f2c6a9e3 → c6e1a9d4f2b7,
+a6d2f9c4b8e1 (Mexico M8) → c3e5a7b9d1f4 (merge) → b4d8f2c6a9e3 → c6e1a9d4f2b7 → e7a2c4f9b1d6,
 against a database shaped like production (every existing tenant / worker table
 already under row-level security) with the live app holding an open read
 transaction on "users".
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 BACKEND = Path(__file__).resolve().parents[1]
 PG_URL = os.getenv("MX_PG6_TEST_URL")
 pg = pytest.mark.skipif(not PG_URL, reason="MX_PG6_TEST_URL not set (throwaway PostgreSQL only)")
-AFTER_E1A3 = ("payroll_mx_ptu_allocations", "payroll_mx_ptu_cycles", "payroll_mx_terminations",
-              "payroll_mx_vacation_records")
+AFTER_E1A3 = ("payroll_mx_annual_isr_adjustments", "payroll_mx_ptu_allocations", "payroll_mx_ptu_cycles",
+              "payroll_mx_terminations", "payroll_mx_vacation_records")
 
 
 def _rls():

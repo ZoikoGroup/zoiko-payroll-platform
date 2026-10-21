@@ -75,6 +75,17 @@ export default function MXRunCalculationTrace({ snapshot }) {
           ["ISR withheld", r.isr_withheld],
         ]} />
       </Section>
+      {r.annual_adjustment && (
+        <Section title={`Annual ISR adjustment ${r.annual_adjustment.fiscal_year} (MX-010 — the year's payslips are not edited)`}>
+          <Rows rows={[
+            ["Difference (annual ISR − withheld)", r.annual_adjustment.difference],
+            ["Period ISR withheld before the adjustment", r.annual_adjustment.period_withheld],
+            ["Applied in this payslip", r.annual_adjustment.change],
+            ["Carried forward", r.annual_adjustment.carry_forward],
+            ["Rule", r.annual_adjustment.rule_source],
+          ]} />
+        </Section>
+      )}
       <Section title="SBC (contribution base — shown apart from pay, MX-037)">
         <Rows rows={[
           ["Daily salary", comp.daily_salary], ["Integration factor", comp.factor],

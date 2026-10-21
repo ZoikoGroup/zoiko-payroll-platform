@@ -911,3 +911,64 @@ def cancel_ptu_cycle(cycle_id: int, body: Dict[str, Any] = Body(...), current_us
 @router.get("/employees/{employee_id}/ptu", summary="The employee's PTU allocations by fiscal year")
 def employee_ptu(employee_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     return _ptu().employee_ptu(db, _org_id(current_user), employee_id)
+
+
+# ── Annual ISR adjustment (Phase 9e) ─────────────────────────────────────────
+
+def _annual():
+    from app.modules.payroll import mexico_annual_service
+
+    return mexico_annual_service
+
+
+@router.get("/annual-adjustments/exclusion-reasons", summary="The transcribed annual-adjustment exclusion catalog")
+def annual_adjustment_exclusion_reasons(current_user=Depends(get_current_payroll_operator),
+                                        db: Session = Depends(get_db)):
+    return _annual().exclusion_reasons(db, _org_id(current_user))
+
+
+@router.get("/annual-adjustments", summary="Annual ISR adjustments by legal employer and fiscal year")
+def annual_adjustments(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _annual().list_adjustments(db, _org_id(current_user))
+
+
+@router.post("/annual-adjustments/compute",
+             summary="Compute an employer's ended fiscal year from committed runs (blocks until S24)")
+def compute_annual_adjustment(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear")}
+    return _annual().compute(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/approve", summary="Approve an employer-year (a different person; refused if stale)")
+def approve_annual_adjustment(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear")}
+    return _annual().approve(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/apply", summary="Apply an approved employer-year in a later open ordinary run")
+def apply_annual_adjustment(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear"),
+            "run_id": body.get("runId")}
+    return _annual().apply_to_run(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/{row_id}/exclusion", summary="Record an operator exclusion (catalog reason + evidence)")
+def record_annual_adjustment_exclusion(row_id: int, body: Dict[str, Any] = Body(...),
+                                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"reason_code": body.get("reasonCode"), "evidence_ref": body.get("evidenceRef")}
+    return _annual().record_exclusion(db, _org_id(current_user), row_id, data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/{row_id}/exclusion/approve", summary="Approve an exclusion (a different person)")
+def approve_annual_adjustment_exclusion(row_id: int, current_user=Depends(get_current_org_admin),
+                                        db: Session = Depends(get_db)):
+    return _annual().approve_exclusion(db, _org_id(current_user), row_id, _actor(current_user))
+
+
+@router.get("/employees/{employee_id}/annual-adjustments", summary="The employee's annual ISR adjustments")
+def employee_annual_adjustments(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                                db: Session = Depends(get_db)):
+    return _annual().employee_adjustments(db, _org_id(current_user), employee_id)
