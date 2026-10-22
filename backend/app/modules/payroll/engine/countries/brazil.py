@@ -93,7 +93,6 @@ from app.modules.payroll.engine.countries.brazil_content import (
     STANDARD_CPP_RATE,
     FINANCIAL_SECTOR_CPP_ADDON,
     CPRB_2026_CPP_RATE,
-    VALE_TRANSPORTE_MAX_DEDUCTION_PCT,
     STANDARD_SYSTEM_RUBRICS,
 )
 from app.modules.payroll.engine.jurisdictions.brazil.bases import resolve_bases
@@ -478,14 +477,15 @@ def _calculate_salario_familia(
 def _calculate_vale_transporte_deduction(
     base_salary: Decimal,
     vt_benefit_amount: Decimal,
-    max_pct: Decimal = VALE_TRANSPORTE_MAX_DEDUCTION_PCT,
+    max_pct: Decimal,
 ) -> Decimal:
     """
     Calculate the Vale-Transporte employee deduction (BR-029).
 
-    The employee pays up to 6% of the CONTRACTED base salary; the employer funds
-    the rest. Returns the lesser of 6% of base or the actual VT benefit. Zero
-    when no VT benefit is payable.
+    The employee pays up to max_pct (the dated BR_VT_RATE MAX_DEDUCTION row,
+    6% in 2026) of the CONTRACTED base salary; the employer funds the rest.
+    Returns the lesser of that share or the actual VT benefit. Zero when no VT
+    benefit is payable.
     """
     if vt_benefit_amount <= ZERO:
         return ZERO
@@ -569,6 +569,7 @@ def calculate(ctx: PayrollContext) -> Dict[str, Any]:
         fgts_ordinary, fgts_apprentice = content.fgts_rates(competence)
         cpp_standard, cpp_addon, cpp_cprb = content.cpp_rates(competence)
         min_wage_monthly = content.minimum_wage(competence, "MONTHLY")
+        vt_max_pct = content.vale_transporte_max_deduction_pct(competence)
     except content.BrazilContentMissing as exc:
         raise BRBlock("BR_CONTENT_YEAR_UNAVAILABLE", str(exc), org)
 
@@ -617,7 +618,7 @@ def calculate(ctx: PayrollContext) -> Dict[str, Any]:
     br_salario_familia = sf["salario_familia"]
 
     # ── 4. Vale-Transporte (BR-029) — on the CONTRACTED salary ────────────────
-    br_vt_deduction = _calculate_vale_transporte_deduction(contract_salary, vt_benefit)
+    br_vt_deduction = _calculate_vale_transporte_deduction(contract_salary, vt_benefit, vt_max_pct)
 
     # ── 5. Employer contributions (BR-017/BR-018/BR-020) — covered payroll ────
     employer = _calculate_employer_charges(
@@ -684,7 +685,7 @@ def calculate(ctx: PayrollContext) -> Dict[str, Any]:
             "benefit_amount": str(_r2(vt_benefit)),
             "base_salary": str(_r2(contract_salary)),
             "employee_deduction": str(br_vt_deduction),
-            "max_pct": str(VALE_TRANSPORTE_MAX_DEDUCTION_PCT * HUNDRED) + "%",
+            "max_pct": str(vt_max_pct * HUNDRED) + "%",
         },
         "alimony_deduction": str(_r2(alimony)),
         "fgts": fgts,

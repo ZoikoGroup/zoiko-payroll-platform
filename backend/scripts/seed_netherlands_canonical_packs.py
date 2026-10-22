@@ -142,9 +142,13 @@ def _add_slab(db, pack, sort_order, *, rule_type, rate_label, tax_formula, rate_
 
 def _rewrite_pack_rows(db, pack):
     """A Draft pack's canonical rows are replaced wholesale from the content,
-    so an unchanged re-run produces the same rows."""
-    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
-    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
+    so an unchanged re-run produces the same rows. Org-scoped rows
+    (organization_id IS NOT NULL) are an organisation's overrides and are
+    never deleted."""
+    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                      ContributionRate.organization_id.is_(None)).delete()
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None)).delete()
 
 
 def _seed_main_pack(db) -> JurisdictionPack:

@@ -33058,6 +33058,9 @@ def _get_currency_code(country: str) -> str:
         "MX": "MXN",
         # Brazil (ZP-BR-ENG-001): Brazilian real.
         "BR": "BRL",
+        # Switzerland (ZP-CH-ENG-001) and Saudi Arabia (ZP-SA-ENG-001): without
+        # these rows a CH / SA bank transfer file fell through to "USD" below.
+        "CH": "CHF", "SA": "SAR",
     }.get(country, "USD")
 
 

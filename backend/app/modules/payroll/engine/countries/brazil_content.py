@@ -286,7 +286,8 @@ FGTS_APPRENTICE_RATE = _pct(row_in_force(BR_FGTS_RATE_RULE, "APPRENTICE", _AS_OF
 CPRB_2026_SERVICE_RETENTION = D("0.035")         # UNSOURCED
 FGTS_TERMINATION_FINE_RATE = D("0.40")           # UNSOURCED (Phase 7)
 FGTS_MUTUAL_TERMINATION_FINE_RATE = D("0.20")    # UNSOURCED (Phase 7)
-VALE_TRANSPORTE_MAX_DEDUCTION_PCT = D("0.06")    # UNSOURCED (Phase 5, Lei 7.418)
+# The VT 6% cap is the sourced BR_VT_RATE MAX_DEDUCTION row (A5, Lei 7.418),
+# read through vale_transporte_max_deduction_pct(as_of) — no pinned constant.
 
 
 # ── Date-driven accessors (Phase 5 — BR-001 fail-closed) ──────────────────────

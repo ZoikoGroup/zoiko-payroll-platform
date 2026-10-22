@@ -630,7 +630,7 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
 
 class DEEmployeeValidation(EmployeeValidationStrategy):
     country_code = "DE"
-    SENSITIVE_FIELDS = ('steuer_id', 'rv_nummer')   # IBAN is also DE's bank routing value — bank details are out of this scope
+    SENSITIVE_FIELDS = ('steuer_id', 'rv_nummer')   # IBAN is masked platform-wide (PLATFORM_SENSITIVE_COMPLIANCE_FIELDS)
     FIELD_SPECS = {
         "steuer_id": {
             "required": True, "strip_chars": " ",
@@ -1830,10 +1830,17 @@ def _mask_field(key, value):
     return _FIELD_MASKERS.get(key, mask_identifier)(value)
 
 
+# A personal bank account is masked in every API response whatever the
+# country, as the top-level bank_account column is (SENSITIVE_EMPLOYEE_COLUMNS):
+# compliance_fields "iban" is DE / FR / IE / NL / CH / SA bank routing data.
+# Stated here rather than relying on one strategy (SA) listing it.
+PLATFORM_SENSITIVE_COMPLIANCE_FIELDS = ("iban",)
+
 # Dormant strategies' fields are masked too (whether or not their flag is on),
 # so a Mexican identifier is never returned in clear by any shared path.
-SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in (*_STRATEGIES.values(), *_DORMANT_STRATEGIES.values())
-                                        for f in cls.SENSITIVE_FIELDS)
+SENSITIVE_COMPLIANCE_FIELDS = frozenset(
+    (*PLATFORM_SENSITIVE_COMPLIANCE_FIELDS,
+     *(f for cls in (*_STRATEGIES.values(), *_DORMANT_STRATEGIES.values()) for f in cls.SENSITIVE_FIELDS)))
 
 
 def mask_compliance_fields(compliance_fields):

@@ -476,18 +476,18 @@ class TestValeTransporte:
     def test_T8_capped_at_6pct(self):
         """T8: VT benefit exceeds 6% of base → deduction capped at 6%."""
         # base salary = 5000, 6% = 300; VT benefit = 500
-        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("500.00"))
+        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("500.00"), D("0.06"))
         assert deduction == D("300.00")
 
     def test_below_6pct_deducts_actual(self):
         """VT benefit below 6% of base → deduct actual benefit amount."""
         # base = 5000, 6% = 300; VT benefit = 200 < 300
-        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("200.00"))
+        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("200.00"), D("0.06"))
         assert deduction == D("200.00")
 
     def test_zero_vt_benefit(self):
         """No VT benefit → zero deduction."""
-        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("0.00"))
+        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("0.00"), D("0.06"))
         assert deduction == D("0.00")
 
 

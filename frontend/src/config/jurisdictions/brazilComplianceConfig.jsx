@@ -37,7 +37,13 @@ export function brazilExtraTabs(orgId) {
     tab("br-cpp", "CPP", Layers, "br-fgts", () => (
       <BRStatutorySectionTab ruleType="BR_CPP_RATE" title="CPP — employer social contribution (patronal)" />
     )),
-    tab("br-rubrics", "Rubric catalogue", FileText, "br-cpp", () => <BRRubricCatalogueTab orgId={orgId} />),
+    tab("br-vt", "Vale-transporte", Banknote, "br-cpp", () => (
+      <BRStatutorySectionTab ruleType="BR_VT_RATE" title="Vale-transporte — maximum employee deduction" />
+    )),
+    tab("br-labor", "Labour premiums", Calculator, "br-vt", () => (
+      <BRStatutorySectionTab ruleType="BR_LABOR" title="Overtime, night premium and DSR (CLT)" />
+    )),
+    tab("br-rubrics", "Rubric catalogue", FileText, "br-labor", () => <BRRubricCatalogueTab orgId={orgId} />),
     tab("br-fpas", "FPAS / Tabela 04", ClipboardCheck, "br-rubrics", () => <BRFpasTableTab />),
     tab("br-employer", "Employer (read-only)", Building2, "br-fpas", () => <BREmployerProfileTab orgId={orgId} />),
     tab("br-readiness", "Readiness G1–G8", ShieldCheck, "br-employer", () => <BRReadinessGatesTab />),

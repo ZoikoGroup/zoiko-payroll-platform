@@ -2179,6 +2179,19 @@ def statutory_summary(db: Session) -> dict:
 
 
 def nl_activation_evidence_refusal(db: Session, pack) -> Optional[str]:
+    """An NL pack with no canonical rows is never activated: the empty
+    change-watch pack NL-PAYROLL-2026-07 overlaps NL-PAYROLL-2026 from July, so
+    activating it would make every later NL calculation block on missing
+    content."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    has_rows = (db.query(ContributionRate.id).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                     ContributionRate.organization_id.is_(None)).first()
+                or db.query(TaxSlab.id).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                               TaxSlab.organization_id.is_(None)).first())
+    if not has_rows:
+        return (f"NL pack {pack.pack_id} has no statutory rows — an empty pack "
+                "(such as the 2026-07 change-watch pack) cannot be activated")
     return None
 
 

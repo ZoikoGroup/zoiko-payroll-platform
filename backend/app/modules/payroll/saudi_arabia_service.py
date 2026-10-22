@@ -402,8 +402,29 @@ def retention_settings() -> "retention_service.RetentionJurisdiction":
 # ══════════════════════════════════════════════════════════════════════════
 
 def sa_activation_evidence_refusal(db: Session, pack) -> Optional[str]:
-    """Saudi statutory content carries no beyond-the-generic-gate evidence
-    requirement at this phase — the shared pack activation gates apply."""
+    """A Saudi pack cannot go Active while any canonical row is still unsigned
+    (spec §18 G1): the seed marks those rows with a " [PENDING G1]" label and
+    the rate-selection basis with the text value PENDING_G1. The shared pack
+    activation gates apply on top."""
+    from sqlalchemy import or_
+
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    marker = "%[PENDING G1]%"
+    pending_rates = (db.query(ContributionRate)
+                     .filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                             ContributionRate.organization_id.is_(None),
+                             or_(ContributionRate.label.like(marker),
+                                 ContributionRate.text_value == "PENDING_G1"))
+                     .count())
+    pending_slabs = (db.query(TaxSlab)
+                     .filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None),
+                             TaxSlab.rate_label.like(marker))
+                     .count())
+    if pending_rates or pending_slabs:
+        return (f"{pending_rates + pending_slabs} Saudi pack row(s) are still PENDING G1 — "
+                "they must be signed at gate G1 before the pack can be activated")
     return None
 
 
@@ -1965,8 +1986,12 @@ def seed_saudi_arabia_pack(db: Session, *, effective_from: date = date(2026, 1, 
     pack.status = "Draft"
     pack.effective_to = window_to
     pack.source_document_id = sources["S1"]
-    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
-    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
+    # Canonical rows only: org-scoped rows (organization_id IS NOT NULL) are an
+    # organisation's overrides and are never deleted by a re-seed.
+    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                      ContributionRate.organization_id.is_(None)).delete()
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None)).delete()
 
     def dec(value):
         return Decimal(str(value)) if value is not None else None

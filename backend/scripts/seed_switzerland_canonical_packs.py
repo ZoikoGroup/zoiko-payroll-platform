@@ -149,9 +149,11 @@ def _add_rate(db, pack, sort_order, key, label, *, employer_rate_pct=None, emplo
 def _rewrite_pack_rows(db, pack):
     """Italy's non-destructive idempotency: a Draft pack's canonical rows are
     replaced wholesale from the content, so an unchanged re-run produces the
-    same rows.
+    same rows. Org-scoped rows (organization_id IS NOT NULL) are an
+    organisation's overrides and are never deleted.
     """
-    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
+    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                      ContributionRate.organization_id.is_(None)).delete()
 
 
 def _seed_federal_pack(db):
@@ -196,7 +198,9 @@ def _seed_canton_packs(db):
         )
         _rewrite_pack_rows(db, pack)
         for order, key in enumerate(CH_CANTON_PARAMETER_KEYS, start=1):
-            label = f"{CH_CANTON_PARAMETER_LABELS[key]} — {canton_code} [unfilled scaffold]"
+            # No "[unfilled scaffold]" suffix: it stayed in the label after real
+            # values were entered. A NULL value already marks an unfilled row.
+            label = f"{CH_CANTON_PARAMETER_LABELS[key]} — {canton_code}"
             _add_rate(db, pack, order, key, label)
         packs.append(pack)
     return packs

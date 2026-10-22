@@ -2779,7 +2779,9 @@ class TaxSlab(Base):
     # to 2 (1.10%, 1.22%, 1.47%) by the old Numeric(5,2) column — the
     # API accepted the PUT with no error, so this went unnoticed until
     # the response was read back and compared against the source values.
-    rate_pct             = Column(Numeric(6, 4), nullable=False)   # e.g. 5.0000 for 5%
+    # Widened again to Numeric(7,4) (migration 135dbbeb9818): Brazil's 100%
+    # overtime premium (BR_LABOR OVERTIME_100) overflowed the ~99.9999 ceiling.
+    rate_pct             = Column(Numeric(7, 4), nullable=False)   # e.g. 5.0000 for 5%
     # Was String(20) — sized for short values like "5%"/"Nil". Widened for
     # NI_BAND rows, whose label is a real descriptive name (e.g. "Main Rate
     # Band (PT to UEL)") rather than a short percentage — see migration
@@ -11017,7 +11019,7 @@ class PayrollBrValeTransporteElection(Base):
     """Vale-transporte election (VT): whether the employee elected the benefit
     and the declared daily cost, with evidence. Effective-dated; one ACTIVE open
     election per employee. The 6% cap and the actual deduction are Phase 5
-    (brazil_content.VALE_TRANSPORTE_MAX_DEDUCTION_PCT)."""
+    (brazil_content.vale_transporte_max_deduction_pct)."""
     __tablename__ = "payroll_br_vale_transporte_elections"
 
     id                = Column(Integer, primary_key=True, index=True)
