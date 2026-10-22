@@ -14,6 +14,7 @@ import MXAnnualAdjustmentPanel from "./MXAnnualAdjustmentPanel";
 import MXPaymentsPanel from "./MXPaymentsPanel";
 import MXJournalPanel from "./MXJournalPanel";
 import MXPilotBanner from "./MXPilotBanner";
+import MXMasterTransferPanel from "./MXMasterTransferPanel";
 
 // Mexico Compliance Centre (ZP-MX-ENG-001 §11) — the spec's "Settings →
 // Countries → Mexico → Employer & Registrations", mounted where every country's
@@ -81,6 +82,7 @@ export default function MXComplianceCentreTab() {
       <MXAnnualAdjustmentPanel />
       <MXPaymentsPanel />
       <MXJournalPanel />
+      <MXMasterTransferPanel />
     </div>
   );
 }

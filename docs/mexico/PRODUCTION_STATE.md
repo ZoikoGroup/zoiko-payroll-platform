@@ -39,6 +39,8 @@ Prepared 2026-10-16 from repository state and the public GitHub Actions API (rea
 | #117 (2026-10-21 10:24Z) | 78bc913 | **39584366118** — test ✅ (40 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅; frontend build 39584366020 ✅ | **Phase 9e** `6415eae`: annual ISR adjustment, migration **`e7a2c4f9b1d6`** (mx_annual_adjustment_m11: one new empty table + its RLS policy). Dormant. Production should be at **`e7a2c4f9b1d6`** — confirm with `alembic current`. |
 | #118 (2026-10-21 13:03Z) | 20a28cf | **39604729698** — deploy ✅ | Venu: NL expat four-eyes, migration **`f84626be0cb1`** (child of `e7a2c4f9b1d6`). Production at `f84626be0cb1`. |
 | #119 (2026-10-22 06:37Z) | 2473ed6 | **39735153458** — test ✅ (40 min, 06:37:59–07:17:59Z) · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification, 07:18:02–07:19:48Z); frontend build 39735153283 ✅ | **Phase 10a–10d** + merge of #118 (`9978db2`). 10a `a1d5e8c2f7b4` was re-parented onto `f84626be0cb1` (never applied before), so `alembic upgrade head` ran `f84626be0cb1` → `a1d5e8c2f7b4` (payment batches + items) → `b3f7c1e9d5a2` (journal mappings + exports): four new empty tables with RLS. Production should be at **`b3f7c1e9d5a2`** — confirm with `alembic current`. Mexico dormant. 10c changes `app/core/redaction.py` (ZP-PRIV) — Rugvedh's review is post-merge. |
+| #120 (2026-10-22 08:20Z) | ddea1d5 | **39747026477** — deploy ✅ | Venu: NL report templates (Draft). No migration. |
+| #122 (2026-10-22 09:30Z) | 5fa61c6 | **39755905874** — test ✅ (09:30:11–10:10:40Z) · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification, 10:10:42–10:12:19Z); frontend build 39755905692 ✅ | **Phase 10e** `7982778` (two-level activation; master-copy Super Admin routes retired): migration **`d2a7c9e4f1b8`** (pilot grants + master copies: two new empty tables with RLS). Production should be at **`d2a7c9e4f1b8`** — confirm with `alembic current`. Flag off: Mexico stays dormant; turning the flag on alone would open nothing. |
 
 Everything committed on `nikhil` up to `14bf883` (Phase 9a) is on `main` (`4adac17`) and deployed (run 39224575881); production database head expected **`f5c1a8d3e9b2`** — confirm with `alembic current`.
 
@@ -167,3 +169,12 @@ Merging to `main` deploys to production and runs Alembic migrations. Every phase
    SELECT organization_id, count(*) FROM payroll_mx_employer_profiles GROUP BY organization_id;
    SELECT count(*) FROM payroll_mx_credential_refs;   -- references only, never secrets
    ```
+
+## 7. Before the `/health/version` and `/health/ready` routes are committed
+
+The routes `GET /health/version`, `GET /api/health/version`, `GET /health/ready` and `GET /api/health/ready` exist only as **uncommitted** changes in the working-tree `backend/app/main.py` (the owner's own work, never staged by the Mexico phases). They have **no entry in the ZP-PRIV route registry** (`app/core/authz/route_registry.json`, `docs/privacy/route_policy_inventory.csv`), so:
+
+- the policy check **denies them at runtime** (an unregistered route fails closed), and
+- `tests/privacy/test_route_registry.py` fails three tests locally (`test_every_route_is_registered`, `test_registry_matches_fresh_generation`, `test_public_routes_are_exactly_known`) — the known local-only failures in every Mexico suite report.
+
+**Before they are ever committed:** regenerate the registry with them (`python -m app.core.authz.generate`), review that they come out `public` with no principals (health probes), add them to the known public set in `tests/privacy/test_route_registry.py` (`KNOWN_PUBLIC`), diff the inventory CSV so nothing else changes, and commit the routes and the registry together. Otherwise CI fails (registry stale) or the probes return 403 in production.
