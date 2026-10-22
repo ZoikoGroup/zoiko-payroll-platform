@@ -10582,6 +10582,66 @@ class PayrollMxAnnualIsrAdjustment(Base):
     )
 
 
+class PayrollMxPaymentBatch(Base):
+    """A salary payment batch of one committed Mexican run (Phase 10a, D2–D5):
+    built by one person, released by another; in WORKLIST mode (no bank layout
+    saved) its file is a Zoiko worklist keyed into online banking — never a bank
+    file — built on request, with the full CLABE read only then. A RELEASED
+    batch refuses the run's reset."""
+    __tablename__ = "payroll_mx_payment_batches"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id      = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    reissue_of_batch_id = Column(Integer, ForeignKey("payroll_mx_payment_batches.id", ondelete="RESTRICT"), nullable=True)
+    file_mode           = Column(String(12), nullable=False, default="WORKLIST")
+    status              = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / RELEASED / CLOSED / CANCELLED
+    item_count          = Column(Integer, nullable=False, default=0)
+    total_amount        = Column(Numeric(16, 2), nullable=False, default=0)
+    maker_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    checker_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    released_at         = Column(DateTime(timezone=True), nullable=True)
+    last_export_sha256  = Column(String(64), nullable=True)                    # hash of the last worklist built (never the file)
+    exports             = Column(Integer, nullable=False, default=0)
+    idempotency_key     = Column(String(80), nullable=False, unique=True)
+    cancelled_reason    = Column(String(300), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'RELEASED', 'CLOSED', 'CANCELLED')", name="ck_mx_payment_batch_status"),
+        sa.CheckConstraint("file_mode IN ('WORKLIST')", name="ck_mx_payment_batch_mode"),
+    )
+
+
+class PayrollMxPaymentItem(Base):
+    """One worker's net pay in a batch: CLABE last 4 only (MX-061), the
+    amount, the outcome the operator records (with a reference), and the link to
+    the item that re-issues a FAILED / RETURNED payment."""
+    __tablename__ = "payroll_mx_payment_items"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id             = Column(Integer, ForeignKey("payroll_mx_payment_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payslip_item_id      = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    clabe_last4          = Column(String(4), nullable=False)
+    amount               = Column(Numeric(16, 2), nullable=False)
+    status               = Column(String(10), nullable=False, default="PENDING")   # PENDING / SETTLED / FAILED / RETURNED / UNKNOWN
+    outcome_reference    = Column(String(120), nullable=True)
+    return_reason        = Column(String(300), nullable=True)
+    reissue_of_item_id   = Column(Integer, ForeignKey("payroll_mx_payment_items.id", ondelete="RESTRICT"), nullable=True)
+    reissued_by_item_id  = Column(Integer, ForeignKey("payroll_mx_payment_items.id", ondelete="SET NULL"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'SETTLED', 'FAILED', 'RETURNED', 'UNKNOWN')",
+                           name="ck_mx_payment_item_status"),
+        sa.CheckConstraint("amount > 0", name="ck_mx_payment_item_amount"),
+    )
+
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

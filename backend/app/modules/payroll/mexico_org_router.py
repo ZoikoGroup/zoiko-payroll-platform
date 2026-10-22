@@ -533,7 +533,7 @@ def authorities_movements_export(body: Dict[str, Any] = Body(default={}), curren
 
     out = _imss().export_worklist(db, _org_id(current_user), _actor(current_user), body.get("movementIds"))
     disposition = "attachment; filename=" + '"' + out["filename"] + '"'
-    return Response(content=out["content"], media_type="text/csv",
+    return Response(content=out["content"].encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": disposition, "X-Zoiko-Batch": out["batchRef"],
                              "Cache-Control": "no-store"})
 
@@ -972,3 +972,62 @@ def approve_annual_adjustment_exclusion(row_id: int, current_user=Depends(get_cu
 def employee_annual_adjustments(employee_id: int, current_user=Depends(get_current_payroll_operator),
                                 db: Session = Depends(get_db)):
     return _annual().employee_adjustments(db, _org_id(current_user), employee_id)
+
+
+# ── Salary payments (Phase 10a) ──────────────────────────────────────────────
+
+def _payments():
+    from app.modules.payroll import mexico_payment_service
+
+    return mexico_payment_service
+
+
+@router.get("/payments/batches", summary="Salary payment batches (optionally of one run)")
+def payment_batches(run_id: Optional[int] = Query(None), current_user=Depends(get_current_payroll_operator),
+                    db: Session = Depends(get_db)):
+    return _payments().list_batches(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/payment-batch", summary="Build the salary payment batch of a committed run")
+def create_payment_batch(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _payments().create_batch(db, _org_id(current_user), run_id, _actor(current_user))
+
+
+@router.get("/payments/batches/{batch_id}", summary="One payment batch with its items (CLABE last 4 only)")
+def payment_batch(batch_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _payments().get_batch(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payments/batches/{batch_id}/release", summary="Release a batch (a different person)")
+def release_payment_batch(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _payments().release_batch(db, _org_id(current_user), batch_id, _actor(current_user))
+
+
+@router.post("/payments/batches/{batch_id}/cancel", summary="Cancel a DRAFT batch")
+def cancel_payment_batch(batch_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    return _payments().cancel_batch(db, _org_id(current_user), batch_id, str(body.get("reason") or ""),
+                                    _actor(current_user))
+
+
+@router.post("/payments/batches/{batch_id}/worklist",
+             summary="Build the payment worklist of a released batch (NOT a bank file; full CLABE, not stored)")
+def payment_worklist(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    out = _payments().export_worklist(db, _org_id(current_user), batch_id, _actor(current_user))
+    return Response(content=out["content"].encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{out["filename"]}"',
+                             "Cache-Control": "no-store", "X-Zoiko-Worklist-Sha256": out["sha256"]})
+
+
+@router.post("/payments/items/{item_id}/outcome", summary="Record a payment's outcome (with the bank reference)")
+def record_payment_outcome(item_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    data = {"outcome": body.get("outcome"), "reference": body.get("reference"), "reason": body.get("reason")}
+    return _payments().record_item_outcome(db, _org_id(current_user), item_id, data, _actor(current_user))
+
+
+@router.post("/payments/batches/{batch_id}/reissue", summary="Re-issue the failed / returned payments in a new batch")
+def reissue_payments(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _payments().reissue(db, _org_id(current_user), batch_id, _actor(current_user))
