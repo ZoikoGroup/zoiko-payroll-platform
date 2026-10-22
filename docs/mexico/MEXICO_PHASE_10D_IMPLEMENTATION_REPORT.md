@@ -113,4 +113,4 @@ The 4 failures:
 
 ## 7. Phase 10 is complete
 
-10a payments · 10b journal · 10c privacy and retention · 10d release gates. What is left is evidence and decisions, not code: the sources, the content, the PAC, the bank file specification, the legal decisions, the parallel payroll and the signatures.
+10a payments · 10b journal · 10c privacy and retention · 10d release gates. Mexico's **buildable scope is complete**; it is **not code-complete**. The integration code still to write once its inputs arrive (content transcription and golden vectors, the CFDI builder and XSD, the PAC adapter, the SPEI generator, the IDSE / SUA layouts) is listed in `PRODUCTION_STATE.md` §0.

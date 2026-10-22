@@ -2,9 +2,22 @@
 
 **For:** the two Super Admins and the release owner who will switch Mexican payroll on in production, and the engineer who changes the deployment.
 
-**Today.** Mexico is built through Phase 10 and **dormant** in production: every Mexico route and screen refuses, no organisation can become Mexican, and every Mexican calculation is blocked because no statutory content is transcribed. Nothing in this runbook has been done.
+**Today.** Mexico's buildable scope is complete through Phase 10 and **dormant** in production: every Mexico route and screen refuses, no organisation can become Mexican, and every Mexican calculation is blocked because no statutory content is transcribed. Nothing in this runbook has been done.
 
 Follow the steps **in order**. Each one has a check; do not continue until it passes.
+
+## 0. Buildable scope complete, not code-complete
+
+
+| Integration code still to write | Waits for | Today |
+|---|---|---|
+| Statutory content transcription into the packs, plus golden vectors for every gate | The sources (S1–S33; S22 is the wrong version) | Every Mexican calculation is BLOCKED (empty content). |
+| CFDI 4.0 + Nómina 1.2 XML builder and XSD validation; CSD signer | S28 (Nómina 1.2 catalogs + `nomina12.xsd`), S30 (CFDI 4.0 Anexo 20), S4; Secret Manager for the CSD | `mexico_cfdi_builder.py` refuses (`MX_CFDI_BUILDER_BLOCKED`, `MX_CSD_SIGNING_BLOCKED`). |
+| PAC adapter (one class behind `PacAdapter`), plus its retry thresholds | The chosen PAC and its API documentation | `mexico_pac._ADAPTERS` is empty (`MX_PAC_NOT_CONFIGURED`). |
+| SPEI bulk payment file generator | The employer bank's SPEI file specification | Payments are a Zoiko worklist, not a bank file (Phase 10a). |
+| IDSE / SUA / SIPARE file layouts | S12, S13, S16 layouts | IMSS movements and payments are Zoiko worklists (Phase 8). |
+
+Each item above is built, tested and reviewed like any other phase before the step that needs it.
 
 ## 1. Sources and content
 

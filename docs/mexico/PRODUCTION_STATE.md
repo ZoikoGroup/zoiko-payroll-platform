@@ -2,6 +2,18 @@
 
 Prepared 2026-10-16 from repository state and the public GitHub Actions API (read-only; nothing triggered, re-run or changed). **Merging to `main` deploys to production and runs Alembic migrations** (`.github/workflows/backend-deploy.yml`: test → single-head check → SSH → `git pull` → `pip install` → `scripts/deploy_migrate.sh` → head verification → restart → schema-drift check).
 
+## 0. Status
+
+**Buildable scope complete (2026-10-22, PR #119).** Everything that can be built **without** the missing inputs is built and deployed, dormant. Mexico is **not** code-complete: the following integration code is still to write, each once its input arrives:
+
+| Integration code still to write | Waits for | Today |
+|---|---|---|
+| Statutory content transcription into the packs, plus golden vectors for every gate | The sources (S1–S33; S22 is the wrong version) | Every Mexican calculation is BLOCKED (empty content). |
+| CFDI 4.0 + Nómina 1.2 XML builder and XSD validation; CSD signer | S28 (Nómina 1.2 catalogs + `nomina12.xsd`), S30 (CFDI 4.0 Anexo 20), S4; Secret Manager for the CSD | `mexico_cfdi_builder.py` refuses (`MX_CFDI_BUILDER_BLOCKED`, `MX_CSD_SIGNING_BLOCKED`). |
+| PAC adapter (one class behind `PacAdapter`), plus its retry thresholds | The chosen PAC and its API documentation | `mexico_pac._ADAPTERS` is empty (`MX_PAC_NOT_CONFIGURED`). |
+| SPEI bulk payment file generator | The employer bank's SPEI file specification | Payments are a Zoiko worklist, not a bank file (Phase 10a). |
+| IDSE / SUA / SIPARE file layouts | S12, S13, S16 layouts | IMSS movements and payments are Zoiko worklists (Phase 8). |
+
 ## 1. What reached production, and when
 
 | PR merge to `main` | Commit | Deploy run | Mexico content it carried |
@@ -25,6 +37,8 @@ Prepared 2026-10-16 from repository state and the public GitHub Actions API (rea
 | #115 (2026-10-21 07:19Z) | e00b66b | **39561229230** — test ✅ (33 min) · single-head ✅ · **deploy ❌ (SSH step: `alembic upgrade head` LockNotAvailable on `ALTER TABLE "users" ENABLE ROW LEVEL SECURITY`)** · drift skipped; frontend build 39561229234 ✅ **deployed** | ZP-PRIV + Mexico 9b–9d. The migration transaction rolled back: production DB still at `e1a3c5e7f9b2`, unchanged; backend not restarted. Cause: Rugvedh's merge revision `c3e5a7b9d1f4` re-ran `apply_rls()` over every table (ACCESS EXCLUSIVE on each) and timed out on `users` (lock_timeout 5 s, set by `a6d2f9c4b8e1` for the transaction). **Fix:** `c3e5a7b9d1f4` corrected (never applied anywhere) to protect only the merged-in table; proved on PostgreSQL 17 with a live reader on `users` (`tests/test_privacy_mexico_merge_migration.py`). **The new frontend is live against the old backend until the next deploy succeeds.** |
 | #116 (2026-10-21 08:18Z) | 46d26fa | **39568307882** — test ✅ (38 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification, 08:58:22–08:59:01Z) · drift ✅ | The corrected merge revision `c3e5a7b9d1f4` (`45c7b85`). `alembic upgrade head` ran `e1a3c5e7f9b2` → `a6d2f9c4b8e1` (9b) → `c3e5a7b9d1f4` → `b4d8f2c6a9e3` (9c) → `c6e1a9d4f2b7` (9d); the backend restarted on ZP-PRIV + Mexico 9b–9d, matching the frontend deployed by #115. Production should be at **`c6e1a9d4f2b7`** (the SSH step's head check fails otherwise) — confirm with `alembic current`. Mexico stays dormant (flag off). Post-deploy privacy smoke skipped (its secrets are not configured, HP-10). |
 | #117 (2026-10-21 10:24Z) | 78bc913 | **39584366118** — test ✅ (40 min) · single-head ✅ · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification) · drift ✅; frontend build 39584366020 ✅ | **Phase 9e** `6415eae`: annual ISR adjustment, migration **`e7a2c4f9b1d6`** (mx_annual_adjustment_m11: one new empty table + its RLS policy). Dormant. Production should be at **`e7a2c4f9b1d6`** — confirm with `alembic current`. |
+| #118 (2026-10-21 13:03Z) | 20a28cf | **39604729698** — deploy ✅ | Venu: NL expat four-eyes, migration **`f84626be0cb1`** (child of `e7a2c4f9b1d6`). Production at `f84626be0cb1`. |
+| #119 (2026-10-22 06:37Z) | 2473ed6 | **39735153458** — test ✅ (40 min, 06:37:59–07:17:59Z) · deploy ✅ (SSH incl. `deploy_migrate.sh` + head verification, 07:18:02–07:19:48Z); frontend build 39735153283 ✅ | **Phase 10a–10d** + merge of #118 (`9978db2`). 10a `a1d5e8c2f7b4` was re-parented onto `f84626be0cb1` (never applied before), so `alembic upgrade head` ran `f84626be0cb1` → `a1d5e8c2f7b4` (payment batches + items) → `b3f7c1e9d5a2` (journal mappings + exports): four new empty tables with RLS. Production should be at **`b3f7c1e9d5a2`** — confirm with `alembic current`. Mexico dormant. 10c changes `app/core/redaction.py` (ZP-PRIV) — Rugvedh's review is post-merge. |
 
 Everything committed on `nikhil` up to `14bf883` (Phase 9a) is on `main` (`4adac17`) and deployed (run 39224575881); production database head expected **`f5c1a8d3e9b2`** — confirm with `alembic current`.
 
@@ -40,7 +54,7 @@ objects the pending migrations create (`backend/scripts/drift_pending_filter.py`
 columns the models do not know — still refuses. **Open:** who applied `e1a3c5e7f9b2`, and what did it change? If it
 added columns to existing tables, the next deploy will refuse again (correctly) and that change must be reconciled first.
 
-**Resolved (2026-10-21):** the orphan `e1a3c5e7f9b2` (Rugvedh's ZP-PRIV chain, applied to production on 2026-10-19 with `scripts/migrate_privacy_rollout.py`) is now on `main`; PR #115 + #116 deployed 9b–9d through Rugvedh's merge revision. **Still to raise with Rugvedh:** `backend-deploy.yml` runs the production deploy on any push to the `rugvedh` branch, not only `main`.
+**Closure note:** `INCIDENT_2026-10-19_ORPHAN_REVISION.md`. **Resolved (2026-10-21):** the orphan `e1a3c5e7f9b2` (Rugvedh's ZP-PRIV chain, applied to production on 2026-10-19 with `scripts/migrate_privacy_rollout.py`) is now on `main`; PR #115 + #116 deployed 9b–9d through Rugvedh's merge revision. **Still to raise with Rugvedh:** `backend-deploy.yml` runs the production deploy on any push to the `rugvedh` branch, not only `main`.
 
 **Migration result (inferred, see §6 to confirm).** The SSH step runs `alembic current --check-heads` and a script that exits non-zero unless the database heads equal the repository head; that step succeeded for run 38860348647, so production should be at **`6e4a1d9c3f27`**. The job logs themselves need repository admin rights (`403 Must have admin rights`), so the exact migration lines were not read.
 
