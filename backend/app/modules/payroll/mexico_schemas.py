@@ -17,15 +17,40 @@ class MXGateState(BaseModel):
     gate: str
     label: str
     state: str  # OPEN / SUBMITTED / SIGNED
+    evidenceTag: Optional[str] = None
+    artifactId: Optional[int] = None
+    definition: Optional[str] = None
+    checklist: Optional[str] = None
+
+
+class MXOwnerDecision(BaseModel):
+    key: str
+    label: str
+    evidenceTag: str
+    state: str  # OPEN / SUBMITTED / RECORDED
+    artifactId: Optional[int] = None
+
+
+class MXRetentionCategory(BaseModel):
+    category: str
+    label: str
+    state: str
+    blocker: Optional[str] = None
 
 
 class MXReadinessResponse(BaseModel):
     jurisdiction: str
     spec: str
     available: bool
+    registry: Optional[str] = None          # PLANNED / AVAILABLE
+    onboardingEnabled: bool = False
     engineVersion: str
     phase: int
     gates: List[MXGateState]
+    signedGates: int = 0
+    decisions: List[MXOwnerDecision] = []
+    retention: List[MXRetentionCategory] = []
+    documents: Dict[str, str] = {}
     note: str
 
 

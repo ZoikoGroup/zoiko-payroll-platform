@@ -21,8 +21,11 @@ import sqlalchemy as sa
 BACKEND = Path(__file__).resolve().parents[1]
 PG_URL = os.getenv("MX_PG6_TEST_URL")
 pg = pytest.mark.skipif(not PG_URL, reason="MX_PG6_TEST_URL not set (throwaway PostgreSQL only)")
-AFTER_E1A3 = ("payroll_mx_annual_isr_adjustments", "payroll_mx_ptu_allocations", "payroll_mx_ptu_cycles",
+AFTER_E1A3 = ("payroll_mx_journal_exports", "payroll_mx_journal_mappings",
+              "payroll_mx_payment_items", "payroll_mx_payment_batches",
+              "payroll_mx_annual_isr_adjustments", "payroll_mx_ptu_allocations", "payroll_mx_ptu_cycles",
               "payroll_mx_terminations", "payroll_mx_vacation_records")
+AFTER_E1A3_COLUMNS = (("payroll_nl_expat_decisions", "recorded_by"),)   # NL f84626be0cb1 (PR #118)
 
 
 def _rls():
@@ -49,6 +52,8 @@ def production_shaped():
     with eng.begin() as c:
         for table in AFTER_E1A3:                                    # not in production yet
             c.execute(sa.text(f'DROP TABLE "{table}" CASCADE'))
+        for table, column in AFTER_E1A3_COLUMNS:                    # columns added after e1a3c5e7f9b2
+            c.execute(sa.text(f'ALTER TABLE "{table}" DROP COLUMN "{column}"'))
         _rls().apply_rls(c, unset_mode="system")                    # as scripts/migrate_privacy_rollout.py did
         c.execute(sa.text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
         c.execute(sa.text("DELETE FROM alembic_version"))

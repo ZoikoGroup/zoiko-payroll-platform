@@ -671,7 +671,7 @@ def create_nl_expat_decision(
             granted_from=date.fromisoformat(payload["granted_from"]),
             granted_to=date.fromisoformat(payload["granted_to"]) if payload.get("granted_to") else None,
             method=payload["method"], threshold_category=payload["threshold_category"],
-            allowance_pct=Decimal(str(payload["allowance_pct"])),
+            allowance_pct=Decimal(str(payload["allowance_pct"])), actor_id=current_user.id,
             evidence_artifact_id=payload.get("evidence_artifact_id") or None)
     except (KeyError, ValueError) as exc:
         raise BadRequestException(f"invalid expat decision: {exc}")

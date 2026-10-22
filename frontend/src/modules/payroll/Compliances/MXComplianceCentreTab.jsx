@@ -11,6 +11,8 @@ import MXReadinessPanel from "./MXReadinessPanel";
 import MXAguinaldoRunPanel from "./MXAguinaldoRunPanel";
 import MXPtuCyclePanel from "./MXPtuCyclePanel";
 import MXAnnualAdjustmentPanel from "./MXAnnualAdjustmentPanel";
+import MXPaymentsPanel from "./MXPaymentsPanel";
+import MXJournalPanel from "./MXJournalPanel";
 
 // Mexico Compliance Centre (ZP-MX-ENG-001 §11) — the spec's "Settings →
 // Countries → Mexico → Employer & Registrations", mounted where every country's
@@ -75,6 +77,8 @@ export default function MXComplianceCentreTab() {
       <MXAguinaldoRunPanel />
       <MXPtuCyclePanel />
       <MXAnnualAdjustmentPanel />
+      <MXPaymentsPanel />
+      <MXJournalPanel />
     </div>
   );
 }

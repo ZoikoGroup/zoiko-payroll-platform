@@ -1060,11 +1060,15 @@ def run_downstream_actions(db: Session, run) -> list:
     filed / UNKNOWN, any liability past ACCRUED (or ever sent), any SUA
     period RECONCILED onward and any ISN return past DRAFT that includes it
     (Phase 8 plan §6). Phase 9a: any live correction of one of its payslips.
-    Phase 10 MUST add: any RELEASED bank instruction for it. Each with a test."""
-    from app.modules.payroll import mexico_cfdi_service, mexico_correction_service, mexico_filing_service
+    Phase 10a: any RELEASED (or CLOSED) payment batch for it. Phase 10b: any
+    CURRENT journal export of it. Each with a test."""
+    from app.modules.payroll import (mexico_cfdi_service, mexico_correction_service, mexico_filing_service,
+                                     mexico_journal_service, mexico_payment_service)
 
     return (mexico_cfdi_service.downstream_reasons(db, run) + mexico_filing_service.downstream_reasons(db, run)
-            + mexico_correction_service.downstream_reasons(db, run))
+            + mexico_correction_service.downstream_reasons(db, run)
+            + mexico_payment_service.downstream_reasons(db, run)
+            + mexico_journal_service.downstream_reasons(db, run))
 
 
 def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
@@ -1097,6 +1101,9 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     from app.modules.payroll import mexico_annual_service
 
     removed["annualAdjustmentsReopened"] = mexico_annual_service.on_reset(db, run)
+    from app.modules.payroll import mexico_payment_service
+
+    removed["paymentBatchesCancelled"] = mexico_payment_service.withdraw_on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)

@@ -85,7 +85,7 @@ def _seed_old_employer(engine):
 
 def test_revision_links():
     mod = _module(REVISION)
-    assert (mod.revision, mod.down_revision) == (REVISION, "e7a2c4f9b1d6")
+    assert (mod.revision, mod.down_revision) == (REVISION, "b3f7c1e9d5a2")
     assert _module("64424fd61652").down_revision == REVISION
 
 

@@ -83,13 +83,50 @@ export default function MXReadinessGatesTab() {
         <>
           <div className={card}>
             <p className="text-[12px] text-foreground-muted">{data.note}</p>
-            <p className="mt-1 text-[12px] text-foreground">Engine {data.engineVersion} · Available: {data.available ? "Yes" : "No"}</p>
+            <p className="mt-1 text-[12px] text-foreground">
+              Engine {data.engineVersion} · Gates signed: {data.signedGates}/8 · Service registry: {data.registry || "not seeded"} ·
+              Onboarding flag: {data.onboardingEnabled ? "on" : "off"} · Available: {data.available ? "Yes" : "No"}
+            </p>
           </div>
-          <div className={card}>
-            <h3 className="mb-2 text-[14px] font-semibold text-foreground">Release gates</h3>
+          <div className={card} data-testid="mx-release-gates">
+            <h3 className="mb-1 text-[14px] font-semibold text-foreground">Release gates</h3>
+            <p className="mb-2 text-[12px] text-foreground-muted">
+              A gate is signed only by its evidence: on the Sources tab, add a source with Form/Publication # = its evidence tag,
+              upload the signed evidence pack, and a different Super Admin marks it reviewed. Checklists: {data.documents?.releaseGates}.
+            </p>
             <Table rows={data.gates} rowKey={(g) => g.gate} columns={[
-              { key: "gate", label: "Gate" }, { key: "label", label: "Area" }, { key: "state", label: "State" },
+              { key: "gate", label: "Gate" }, { key: "label", label: "Area" },
+              { key: "definition", label: "§22 definition", render: (g) => g.definition || "—" },
+              { key: "evidenceTag", label: "Evidence tag", render: (g) => <span className="font-mono">{g.evidenceTag}</span> },
+              { key: "state", label: "State", render: (g) => (g.artifactId ? `${g.state} (source #${g.artifactId})` : g.state) },
             ]} />
+          </div>
+          <div className={card} data-testid="mx-owner-decisions">
+            <h3 className="mb-2 text-[14px] font-semibold text-foreground">Legal decisions</h3>
+            <Table rows={data.decisions || []} rowKey={(d) => d.key} columns={[
+              { key: "label", label: "Decision" },
+              { key: "evidenceTag", label: "Evidence tag", render: (d) => <span className="font-mono">{d.evidenceTag}</span> },
+              { key: "state", label: "State" },
+            ]} />
+          </div>
+          <div className={card} data-testid="mx-retention">
+            <h3 className="mb-1 text-[14px] font-semibold text-foreground">Record retention</h3>
+            <p className="mb-2 text-[12px] text-foreground-muted">
+              No retention period is chosen by the platform. Until one is approved for a category, nothing in it can be purged; legal holds always prevail.
+            </p>
+            <Table rows={data.retention || []} rowKey={(r) => r.category} columns={[
+              { key: "label", label: "Records" }, { key: "state", label: "State" },
+              { key: "blocker", label: "Why", render: (r) => r.blocker || "—" },
+            ]} />
+          </div>
+          <div className={card} data-testid="mx-release-documents">
+            <h3 className="mb-2 text-[14px] font-semibold text-foreground">Release documents</h3>
+            <ul className="flex flex-col gap-1 text-[12px] text-foreground">
+              <li>Evidence register and gate checklists: <span className="font-mono">{data.documents?.releaseGates}</span></li>
+              <li>Production activation runbook: <span className="font-mono">{data.documents?.activationRunbook}</span></li>
+              <li>Release checklist: <span className="font-mono">{data.documents?.releaseChecklist}</span></li>
+              <li>UNKNOWN-state recovery runbook: <span className="font-mono">{data.documents?.unknownRunbook}</span></li>
+            </ul>
           </div>
         </>
       )}

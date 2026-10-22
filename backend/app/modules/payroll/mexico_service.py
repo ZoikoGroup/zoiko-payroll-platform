@@ -50,18 +50,79 @@ def _employee(db: Session, employee_id: int, organization_id: int) -> PayrollEmp
 
 # ---- Readiness (spec §22) ----
 
+# Phase 10d (plan D10): a gate, or an owner (legal) decision, is SIGNED /
+# RECORDED only by evidence — a source artifact tagged MX-GATE-Gn /
+# MX-DECISION-…, not superseded, with an UPLOADED document, reviewed by a
+# Super Admin other than its creator (mark_source_artifact_reviewed refuses
+# the creator). Created / uploaded but not reviewed is SUBMITTED. Signing is a
+# human act on real evidence; the build signs nothing.
+RELEASE_GATES_DOC = "docs/mexico/release-gates/README.md"
+ACTIVATION_RUNBOOK_DOC = "docs/mexico/MEXICO_PRODUCTION_ACTIVATION_RUNBOOK.md"
+RELEASE_CHECKLIST_DOC = "docs/mexico/MEXICO_RELEASE_CHECKLIST.md"
+UNKNOWN_RUNBOOK_DOC = "docs/mexico/MEXICO_UNKNOWN_STATE_RUNBOOK.md"
+OWNER_DECISIONS = (
+    ("MX-D-RETENTION-PERIOD", "Retention period per record category", "MX-DECISION-RETENTION-PERIOD"),
+    ("MX-D-RETENTION-END", "Deletion vs anonymisation at end of retention", "MX-DECISION-RETENTION-END"),
+    ("MX-D-HOSTING", "Hosting and cross-border transfers (2025 privacy law)", "MX-DECISION-HOSTING"),
+)
+
+
+def _mx_evidence(db: Session, tag: str):
+    """(the accepted artifact or None, whether any live artifact exists)."""
+    from app.modules.payroll.models import SourceArtifact
+
+    rows = (db.query(SourceArtifact).filter(SourceArtifact.form_number == tag, SourceArtifact.superseded_by_id.is_(None))
+            .order_by(SourceArtifact.id.desc()).all())
+    accepted = next((r for r in rows if r.reviewer_id and r.file_path is not None and r.created_by_id is not None
+                     and r.reviewer_id != r.created_by_id), None)
+    return accepted, bool(rows)
+
+
 def gate_states(db: Session) -> list:
-    """G1–G8. Nothing is evidenced at Phase 0, so every gate is OPEN; gate
-    evidence review arrives with Phase 10."""
-    return [{"gate": key, "label": label, "state": "OPEN"} for key, label in GATES]
+    """G1–G8 from their evidence (OPEN / SUBMITTED / SIGNED)."""
+    from app.modules.payroll.mexico_employer_service import GATE_DEFINITIONS
+
+    out = []
+    for key, label in GATES:
+        accepted, submitted = _mx_evidence(db, f"MX-GATE-{key}")
+        out.append({"gate": key, "label": label, "state": "SIGNED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
+                    "evidenceTag": f"MX-GATE-{key}", "artifactId": accepted.id if accepted else None,
+                    "definition": GATE_DEFINITIONS[key], "checklist": f"docs/mexico/release-gates/{key}/CHECKLIST.md"})
+    return out
+
+
+def owner_decisions(db: Session) -> list:
+    out = []
+    for key, label, tag in OWNER_DECISIONS:
+        accepted, submitted = _mx_evidence(db, tag)
+        out.append({"key": key, "label": label, "evidenceTag": tag,
+                    "state": "RECORDED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
+                    "artifactId": accepted.id if accepted else None})
+    return out
 
 
 def statutory_summary(db: Session) -> dict:
-    return {"jurisdiction": MX, "spec": SPEC, "available": False, "engineVersion": ENGINE_VERSION,
-            "phase": 6, "gates": gate_states(db),
-            "note": "Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22); "
-                    "Mexican payroll runs are wired (Phase 6) but refused while Mexico onboarding is disabled, and "
-                    "the content is not transcribed, so every Mexican calculation is BLOCKED."}
+    gates = gate_states(db)
+    signed = sum(g["state"] == "SIGNED" for g in gates)
+    retention = retention_service.retention_policies(db, MX)
+    from app.modules.payroll import mexico_dormancy
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == MX).first()
+    registry = row.availability if row is not None else None
+    return {"jurisdiction": MX, "spec": SPEC,
+            "available": registry == service.SERVICE_REGISTRY_OPEN and mexico_dormancy.onboarding_enabled(),
+            "registry": registry, "onboardingEnabled": mexico_dormancy.onboarding_enabled(),
+            "engineVersion": ENGINE_VERSION, "phase": 10, "gates": gates, "signedGates": signed,
+            "decisions": owner_decisions(db),
+            "retention": [{"category": c["category"], "label": c["label"], "state": c["state"],
+                           "blocker": c["blocker"]} for c in retention["categories"]],
+            "documents": {"releaseGates": RELEASE_GATES_DOC, "activationRunbook": ACTIVATION_RUNBOOK_DOC,
+                          "releaseChecklist": RELEASE_CHECKLIST_DOC, "unknownRunbook": UNKNOWN_RUNBOOK_DOC},
+            "note": f"Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22) — {signed}/8 signed. "
+                    "A gate is signed only by uploaded evidence reviewed by a second Super Admin; even then Mexico "
+                    "stays off until the activation runbook is followed. Every Mexican calculation is BLOCKED until "
+                    "its content is transcribed."}
 
 
 # ---- Governance hooks ----
@@ -180,15 +241,44 @@ def _mx_payslip_hold_view(item: PayslipItem) -> Optional[dict]:
 
 # ---- Records governance (retention_service) ----
 # retention_service._report_country asks EVERY jurisdiction module for its
-# settings on each report download, so this must answer (never raise). No
-# record category and no owner decision exist yet: retention stays
-# BLOCKED_UNDECIDED for Mexico, and only Mexico's own reports match.
+# settings on each report download, so this must answer (never raise).
+# Phase 10c (plan D8): the Mexican record categories are declared, but the
+# retention periods and the hosting / cross-border stance are legal decisions
+# not taken yet — the owner decision stays OPEN, so every category is
+# BLOCKED_UNDECIDED and NOTHING is purged. Legal holds work now (shared
+# service). A CFDI (stamped XML and its events) is never deleted at all.
+MX_RETENTION_CATEGORIES = (
+    ("PAYROLL_RECORDS", "Payroll runs, payslips and Mexican calculation snapshots (incl. corrections)"),
+    ("CFDI", "CFDI de nómina XML, stamps, cancellations and their events — never deleted"),
+    ("IMSS_INFONAVIT", "IMSS movements, SUA periods, branch ledgers and INFONAVIT notices"),
+    ("AUTHORITY_FILINGS", "SAT ISR, IMSS, INFONAVIT and ISN liabilities, returns and payment evidence"),
+    ("PAYMENTS_AND_JOURNAL", "Salary payment batches and outcomes; payroll journal exports"),
+    ("TERMINATIONS", "Terminations, finiquito / liquidación evidence"),
+    ("PTU_AND_ANNUAL", "PTU allocations and annual ISR adjustments"),
+    ("EMPLOYEE_IDENTITY", "RFC, CURP, NSS, CLABE and the Mexican statutory profile"),
+)
+
 
 def _decision_state(db: Session, key: str) -> str:
-    return "OPEN"
+    """RECORDED only by reviewed evidence (Phase 10d); OPEN until then."""
+    return next((d["state"] for d in owner_decisions(db) if d["key"] == key), "OPEN")
 
 
 def _retained_record_label(db: Session, organization_id: int, employee_id: int) -> Optional[str]:
+    """A statutory record of the employee that must be kept (so the employee is
+    deactivated, never deleted) — the first found, by label."""
+    from app.modules.payroll import models as m
+
+    for model, label in ((m.PayrollMxCfdiDocument, "CFDI documents"),
+                         (m.PayrollMxImssMovement, "IMSS movements"),
+                         (m.PayrollMxTermination, "terminations"),
+                         (m.PayrollMxPtuAllocation, "PTU allocations"),
+                         (m.PayrollMxAnnualIsrAdjustment, "annual ISR adjustments"),
+                         (m.PayrollMxPaymentItem, "salary payments"),
+                         (m.PayrollMxVacationRecord, "vacation records")):
+        if db.query(model.id).filter(model.organization_id == organization_id,
+                                     model.employee_id == employee_id).first():
+            return label
     return None
 
 
@@ -204,7 +294,7 @@ def is_mx_report(report) -> bool:
 
 def retention_settings() -> "retention_service.RetentionJurisdiction":
     return retention_service.RetentionJurisdiction(
-        country=MX, label="Mexico", categories=(),
+        country=MX, label="Mexico", categories=MX_RETENTION_CATEGORIES,
         period_decision="MX-D-RETENTION-PERIOD", end_decision="MX-D-RETENTION-END",
         decision_reference="MX-DECISION-RETENTION", decision_state=_decision_state,
         validate_employee=lambda db, employee_id, organization_id: _employee(db, employee_id, organization_id),

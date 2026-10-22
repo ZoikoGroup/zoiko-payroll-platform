@@ -89,11 +89,13 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         brazil_tables = {"payroll_br_risk_assignments", "payroll_br_cprb_options", "payroll_br_credential_refs",
                          "payroll_br_concurrent_inss_declarations", "payroll_br_alimony_orders",
                          "payroll_br_vale_transporte_elections"}
-        tables, _ = pending_objects("c6e1a9d4f2b7")
-        assert tables == {"payroll_mx_annual_isr_adjustments"} | brazil_tables
-        # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c): every table AND every
-        # column on an existing table must be explained, or a self-heal refuses.
-        tables, columns = pending_objects("e7a2c4f9b1d6")
+        tables, _ = pending_objects("f84626be0cb1")              # production since PR #118
+        assert tables == {"payroll_mx_payment_batches", "payroll_mx_payment_items", "payroll_mx_journal_mappings",
+                          "payroll_mx_journal_exports"} | brazil_tables
+        # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c, on top of production
+        # b3f7c1e9d5a2): every table AND every column on an existing table must
+        # be explained, or a self-heal refuses.
+        tables, columns = pending_objects("b3f7c1e9d5a2")
         assert tables == brazil_tables
         assert columns["payroll_runs"] == {"br_approval_fingerprint"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 10

@@ -8527,7 +8527,8 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
-    "payroll_mx_imss_movements"
+    "payroll_mx_imss_movements",
+    "payroll_mx_payment_items"
    ],
    "overridden": false
   },
@@ -9530,6 +9531,87 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/journal/exports/{export_id}/void",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "void",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/journal/mappings",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "mappings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/journal/mappings",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "mappings",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/journal/mappings/{mapping_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/journal/mappings/{mapping_id}/withdraw",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "PUT",
    "path": "/api/payroll/mexico/labor-policies/{policy_id}/activate",
    "data_class": "tenant_config",
@@ -9576,6 +9658,137 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/payments/batches",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "batches",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/payments/batches/{batch_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "batches",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/payments/batches/{batch_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/payments/batches/{batch_id}/reissue",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reissue",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/payments/batches/{batch_id}/release",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "release",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/payments/batches/{batch_id}/worklist",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "worklist",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_imss_movements",
+    "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/payments/items/{item_id}/outcome",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "outcome",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_payment_items"
+   ],
    "overridden": false
   },
   {
@@ -9960,6 +10173,65 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/runs/{run_id}/journal",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "journal",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_run_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/journal/export",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "export",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_run_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/payment-batch",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "payment-batch",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/runs/{run_id}/preflight",
    "data_class": "worker",
    "action": "read",
@@ -10014,6 +10286,7 @@
     "payroll_mx_imss_branch_lines",
     "payroll_mx_imss_movements",
     "payroll_mx_isn_liabilities",
+    "payroll_mx_payment_items",
     "payroll_mx_ptu_allocations",
     "payroll_mx_run_corrections",
     "payroll_mx_sbc_history",
