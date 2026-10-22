@@ -92,6 +92,29 @@ def _reset_rollout_switches():
         current.update(original)
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _cheap_bcrypt_rounds():
+    """Hash test passwords with bcrypt's minimum cost (4 rounds) instead of
+    the production default (12). Every user a test creates, and every login
+    it makes, otherwise spends ~0.25s per hash on purpose-built slowness that
+    proves nothing a cheaper real bcrypt hash doesn't. Production hashing in
+    app/core/security.py is untouched; verify() reads the cost from the hash
+    itself, so these hashes still verify normally.
+
+    Imported here, at first-test setup, not at module scope: importing
+    app.core.security pulls in app.config, which must not load before
+    test_assist.py sets its own PAYROLL_DATABASE_URL during collection (see
+    the `db` fixture's docstring)."""
+    from passlib.context import CryptContext
+
+    from app.core import security
+
+    original = security.pwd_context
+    security.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4)
+    yield
+    security.pwd_context = original
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
