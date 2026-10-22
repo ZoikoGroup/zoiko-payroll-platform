@@ -74,6 +74,15 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("POST", "/annual-adjustments/compute"), ("POST", "/annual-adjustments/approve"),
     ("POST", "/annual-adjustments/apply"), ("POST", "/annual-adjustments/1/exclusion"),
     ("POST", "/annual-adjustments/1/exclusion/approve"), ("GET", "/employees/1/annual-adjustments"),
+    # Phase 10a — salary payments
+    ("GET", "/payments/batches"), ("POST", "/runs/1/payment-batch"), ("GET", "/payments/batches/1"),
+    ("POST", "/payments/batches/1/release"), ("POST", "/payments/batches/1/cancel"),
+    ("POST", "/payments/batches/1/worklist"), ("POST", "/payments/items/1/outcome"),
+    ("POST", "/payments/batches/1/reissue"),
+    # Phase 10b — payroll journal
+    ("GET", "/journal/mappings"), ("POST", "/journal/mappings"), ("POST", "/journal/mappings/1/approve"),
+    ("POST", "/journal/mappings/1/withdraw"), ("GET", "/runs/1/journal"), ("POST", "/runs/1/journal/export"),
+    ("POST", "/journal/exports/1/void"),
 ]
 
 

@@ -2660,6 +2660,72 @@ export const applyMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjus
 export const recordMxAnnualExclusion = (rowId, payload) => api.post(`${MX}/annual-adjustments/${rowId}/exclusion`, payload);
 export const approveMxAnnualExclusion = (rowId) => api.post(`${MX}/annual-adjustments/${rowId}/exclusion/approve`, {});
 export const getMxEmployeeAnnualAdjustments = (employeeId) => api.get(`${MX}/employees/${employeeId}/annual-adjustments`);
+export const listMxPaymentBatches = (runId) => api.get(`${MX}/payments/batches`, { params: runId ? { run_id: runId } : {} });
+export const createMxPaymentBatch = (runId) => api.post(`${MX}/runs/${runId}/payment-batch`, {});
+export const releaseMxPaymentBatch = (batchId) => api.post(`${MX}/payments/batches/${batchId}/release`, {});
+export const cancelMxPaymentBatch = (batchId, reason) => api.post(`${MX}/payments/batches/${batchId}/cancel`, { reason });
+export const recordMxPaymentOutcome = (itemId, payload) => api.post(`${MX}/payments/items/${itemId}/outcome`, payload);
+export const reissueMxPayments = (batchId) => api.post(`${MX}/payments/batches/${batchId}/reissue`, {});
+
+// The payment worklist (Phase 10a D2): built on request and handed straight to
+// the browser — never stored by Zoiko. It is NOT a bank file (no layout saved).
+export async function exportMxPaymentWorklist(batchId) {
+  const res = await fetch(`${API_BASE_URL}${MX}/payments/batches/${batchId}/worklist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAccessToken()}` },
+    body: "{}",
+  });
+  if (!res.ok) {
+    let message = "The worklist export was refused.";
+    try { const j = await res.json(); message = j.message || j.detail || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `zoiko-mx-payment-worklist-batch-${batchId}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return batchId;
+}
+
+// Mexico payroll journal (Phase 10b, D6): the employer's account mapping
+// (versioned, four-eyes) and the journal of a committed run. The export is a
+// CSV handed to the browser — nothing is posted to any ledger.
+export const listMxJournalMappings = () => api.get(`${MX}/journal/mappings`);
+export const createMxJournalMapping = (payload) => api.post(`${MX}/journal/mappings`, payload);
+export const approveMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/approve`, {});
+export const withdrawMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/withdraw`, {});
+export const getMxRunJournal = (runId) => api.get(`${MX}/runs/${runId}/journal`);
+export const voidMxJournalExport = (id, reason) => api.post(`${MX}/journal/exports/${id}/void`, { reason });
+
+export async function exportMxRunJournal(runId) {
+  const res = await fetch(`${API_BASE_URL}${MX}/runs/${runId}/journal/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAccessToken()}` },
+    body: "{}",
+  });
+  if (!res.ok) {
+    let message = "The journal export was refused.";
+    try { const j = await res.json(); message = j.message || j.detail || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const name = (disposition.match(/filename="([^"]+)"/) || [])[1] || `zoiko-mx-journal-run-${runId}.csv`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return runId;
+}
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>

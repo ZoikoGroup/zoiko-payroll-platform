@@ -259,7 +259,7 @@ def test_retention_settings_never_break_other_countries_reports(db):
     from app.modules.payroll import retention_service
 
     cfg = retention_service.settings("MX")
-    assert cfg.country == "MX" and cfg.categories == ()
+    assert cfg.country == "MX" and [c for c, _ in cfg.categories][:2] == ["PAYROLL_RECORDS", "CFDI"]   # Phase 10c
     assert retention_service._report_country(SimpleNamespace(jurisdiction_country="US", report_type="US_W2")) is None
     assert retention_service._report_country(SimpleNamespace(jurisdiction_country="MX", report_type="X")) == "MX"
     assert retention_service._report_country(SimpleNamespace(jurisdiction_country="NL", report_type="NL_X")) == "NL"
@@ -277,7 +277,7 @@ def test_readiness_route_reports_every_gate_open(db):
         r = c.get(f"{BASE}/readiness")
     assert r.status_code == 200
     body = r.json()
-    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 6
+    assert body["jurisdiction"] == "MX" and body["available"] is False and body["phase"] == 10   # Phase 10d
     assert [g["gate"] for g in body["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in body["gates"]} == {"OPEN"}
 
