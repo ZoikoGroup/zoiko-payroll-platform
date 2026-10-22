@@ -33,11 +33,20 @@ _SENSITIVE_KEY = re.compile(
     r"bank|iban|account[_-]?(no|num|number)|routing|ifsc|swift|bic|sort[_-]?code|"
     r"\bpan\b|pan_?number|uan|nino|\bni[_-]?number|ssn|sin\b|bsn|tfn|tax[_-]?(code|id|number)|national[_-]?id|"
     r"hkid|nric|iqama|aadhaar|passport|"
+    r"rfc|curp|(?<![a-z])nss|clabe|csd|cfdi_?xml|xml_?body|"          # Mexico (MX-061)
     r"salary|ctc|\bbasic\b|hra|wage|gross|net[_-]?pay|\bnet\b|earning|deduction|bonus|"
     r"date[_-]?of[_-]?birth|\bdob\b|birth|address|postcode|zip|email|phone|mobile)",
     re.IGNORECASE,
 )
 _VALUE_PATTERNS = (
+    # Mexico (MX-061): a CFDI document is masked whole — it carries the RFCs,
+    # CURP, NSS, names and pay of the receipt — including a truncated one;
+    # then CURP before RFC (an RFC is a CURP's first 10 characters + homoclave).
+    # NSS (11 digits) and CLABE (18 digits) are long digit runs: [NUMBER] below.
+    (re.compile(r"(?:<\?xml[^>]*\?>\s*)?<cfdi:Comprobante\b[\s\S]*?(?:</cfdi:Comprobante>|$)"), "[CFDI XML]"),
+    (re.compile(r"<nomina12:Nomina\b[\s\S]*?(?:</nomina12:Nomina>|$)"), "[CFDI XML]"),
+    (re.compile(r"(?i)\b[A-Z]{4}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d\b"), "[CURP]"),
+    (re.compile(r"(?i)\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\b"), "[RFC]"),
     (re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "[JWT]"),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}"), "Bearer [REDACTED]"),
     (re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b"), "[IBAN]"),

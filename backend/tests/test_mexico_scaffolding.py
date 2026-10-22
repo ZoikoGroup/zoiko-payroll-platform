@@ -259,7 +259,7 @@ def test_retention_settings_never_break_other_countries_reports(db):
     from app.modules.payroll import retention_service
 
     cfg = retention_service.settings("MX")
-    assert cfg.country == "MX" and cfg.categories == ()
+    assert cfg.country == "MX" and [c for c, _ in cfg.categories][:2] == ["PAYROLL_RECORDS", "CFDI"]   # Phase 10c
     assert retention_service._report_country(SimpleNamespace(jurisdiction_country="US", report_type="US_W2")) is None
     assert retention_service._report_country(SimpleNamespace(jurisdiction_country="MX", report_type="X")) == "MX"
     assert retention_service._report_country(SimpleNamespace(jurisdiction_country="NL", report_type="NL_X")) == "NL"
