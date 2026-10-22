@@ -39,4 +39,5 @@
 - [ ] `MX_IDENTITY_TOKEN_KEY` in Secret Manager
 - [ ] Production database at the release's single alembic head; `alembic current` confirmed on the server
 - [ ] The flaky test `test_deactivate_organization_response_precedes_email_send` fixed or quarantined, so CI is reliable
-- [ ] Decision: should onboarding also require the service registry to be AVAILABLE, not only the flag? (Today the flag alone opens Mexico.)
+- [ ] Phase 10e built and deployed: the flag alone never opens Mexico. General availability needs the registry AVAILABLE (G1–G8 SIGNED, Q9 RECORDED, `MX_IDENTITY_TOKEN_KEY` configured); a non-binding pilot for named organisations runs the G8 cycles (decided 2026-10-22; plan `MEXICO_PHASE_10E_PLAN.md`, awaiting approval)
+- [ ] Q9 (identifiers at rest) recorded by the security lead (`MX-DECISION-Q9`)
