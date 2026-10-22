@@ -29,7 +29,7 @@ import json
 import hashlib
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from calendar import month_name
 
@@ -9657,6 +9657,44 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"] = {
     "se_calculation_snapshot.employer_total": ("Total Employer Statutory Cost", "currency", True),
 }
 
+# Netherlands (ZP-NL-ENG-001 §16) — read from the frozen nl_calculation_snapshot.
+# The NL engine stores amounts as decimal STRINGS ("137.00"); the resolver
+# converts them for currency fields (see _report_json_number). Employer
+# premiums (AWf / Aof / Wko / Whk / employer Zvw / employer pension) are
+# EMPLOYER cost and must never be placed in a deduction component (NL-048).
+# The BSN is deliberately not offered (NL-051).
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["NL"] = {
+    "nl_calculation_snapshot.totals.gross": ("Gross Wage", "currency", True),
+    "nl_calculation_snapshot.totals.wageTax": ("Loonheffing (wage tax + national insurance)", "currency", True),
+    "nl_calculation_snapshot.totals.pensionEmployee": ("Pension (Employee)", "currency", True),
+    "nl_calculation_snapshot.totals.zvwEmployee": ("Zvw Contribution (Employee)", "currency", True),
+    "nl_calculation_snapshot.totals.whkEmployee": ("WGA Premium Recovered (Employee)", "currency", True),
+    "nl_calculation_snapshot.totals.employeeDeductions": ("Total Employee Deductions", "currency", True),
+    "nl_calculation_snapshot.totals.netPay": ("Net Pay", "currency", True),
+    "nl_calculation_snapshot.employeeInsurance.awf": ("AWf Premium (Employer)", "currency", True),
+    "nl_calculation_snapshot.employeeInsurance.awfClass": ("AWf Class (LOW / HIGH)", "text", False),
+    "nl_calculation_snapshot.employeeInsurance.aof": ("Aof Premium (Employer)", "currency", True),
+    "nl_calculation_snapshot.employeeInsurance.wko": ("Wko Surcharge (Employer)", "currency", True),
+    "nl_calculation_snapshot.employeeInsurance.whk": ("Whk Premium (Employer)", "currency", True),
+    "nl_calculation_snapshot.zvw.employerLevy": ("Zvw Employer Levy", "currency", True),
+    "nl_calculation_snapshot.zvw.path": ("Zvw Path", "text", False),
+    "nl_calculation_snapshot.totals.employerPremiums": ("Total Employer Premiums", "currency", True),
+    "nl_calculation_snapshot.totals.pensionEmployer": ("Pension (Employer)", "currency", True),
+    "nl_calculation_snapshot.totals.employerCost": ("Total Employer Statutory Cost", "currency", True),
+    "nl_calculation_snapshot.wageTax.withTaxCredit": ("Payroll-Tax Credit Applied", "text", False),
+    "nl_calculation_snapshot.minimumWage.requiredHourly": ("Applicable Minimum Wage (hourly)", "currency", False),
+    "nl_calculation_snapshot.minimumWage.actualHourly": ("Actual Hourly Wage", "currency", False),
+    "nl_calculation_snapshot.minimumWage.hours": ("Working Hours (period)", "text", False),
+    "nl_calculation_snapshot.minimumWage.ageCohort": ("Minimum-Wage Age Cohort", "text", False),
+    "nl_calculation_snapshot.inputs.contract.contract_term": ("Contract Term", "text", False),
+    "nl_calculation_snapshot.inputs.contract.on_call": ("On-Call Contract", "text", False),
+    "nl_calculation_snapshot.vacationAllowance.accrual": ("Holiday Allowance Accrued", "currency", True),
+    "nl_calculation_snapshot.vacationAllowance.payout": ("Holiday Allowance Paid", "currency", True),
+    "nl_calculation_snapshot.expat.allowance": ("30% Facility — Tax-Free Allowance", "currency", True),
+    "nl_calculation_snapshot.expat.taxableWage": ("Taxable Wage After 30% Facility", "currency", True),
+    "nl_calculation_snapshot.periodCode": ("Payroll Period", "text", False),
+}
+
 _PAYROLL_RUN_FIELD_CATALOG = {
     "run_code": ("Run Code", "text", False),
     "period_label": ("Period", "text", False),
@@ -10573,6 +10611,19 @@ _REPORT_COMPONENTS_BY_TYPE = {
     ],
     "MX_EMPLOYER_COST": [("employer_info", "Employer"), ("employer_contributions", "Employer Cost")],
     "MX_JOURNAL": [("employer_info", "Employer"), ("totals", "Run Totals")],
+    # Netherlands (ZP-NL-ENG-001 §16). Employer premiums live in their own
+    # component and never under deductions (NL-048 / NL-035). The statutory
+    # loonaangifte and jaaropgaaf are produced by the NL filing and annual
+    # services, not by a template — NL_LOONAANGIFTE_SUMMARY is a run-level
+    # reconciliation aid only.
+    "NL_PAYROLL_REGISTER": [("employer_info", "Employer"), ("employee_info", "Employee"),
+                            ("earnings", "Gross Wage"), ("deductions", "Deductions and Net Pay")],
+    "NL_LOONSTROOK": [("employer_info", "Employer"), ("employee_info", "Employee"), ("earnings", "Gross Wage"),
+                      ("deductions", "Deductions and Net Pay"), ("labour", "Hours, Minimum Wage and Contract"),
+                      ("employer_cost", "Employer Cost (not deducted from pay)")],
+    "NL_EMPLOYER_COST": [("employer_info", "Employer"), ("employer_contributions", "Employer Cost")],
+    "NL_LOONAANGIFTE_SUMMARY": [("employer_info", "Employer"), ("totals", "Run Totals for the Return")],
+    "NL_JOURNAL": [("employer_info", "Employer"), ("totals", "Run Totals")],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -11788,9 +11839,9 @@ def _resolve_field_value(
             # than raising. Summing text is never what a totals row wants.
             total = Decimal("0")
             for row in ((run.payslip_items if run else None) or []):
-                cell = _json_path_value(row)
-                if isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool):
-                    total += Decimal(str(cell))
+                cell = _report_json_number(_json_path_value(row), field.field_type)
+                if cell is not None:
+                    total += cell
             value = float(total)
         elif field.aggregation == "SUM_YTD" and target_employee_id is not None and period_end is not None:
             year_start = _report_ytd_period_start(period_end, jurisdiction_country)
@@ -11807,12 +11858,17 @@ def _resolve_field_value(
                 ytd_query = ytd_query.filter(PayrollRun.period_end >= year_start)
             total = Decimal("0")
             for row in ytd_query.all():
-                cell = _json_path_value(row)
-                if isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool):
-                    total += Decimal(str(cell))
+                cell = _report_json_number(_json_path_value(row), field.field_type)
+                if cell is not None:
+                    total += cell
             value = float(total)
         else:
             value = _json_path_value(item) if item is not None else None
+            if field.field_type == "currency" and isinstance(value, str):
+                # Snapshots that store amounts as decimal strings (Netherlands)
+                # render as numbers; a non-numeric string is left as it is.
+                number = _report_json_number(value, field.field_type)
+                value = number if number is not None else value
     else:
         value = None
     if isinstance(value, Decimal):
@@ -11820,6 +11876,23 @@ def _resolve_field_value(
     if isinstance(value, (date, datetime)):
         value = value.isoformat()
     return value
+
+
+def _report_json_number(cell, field_type) -> Optional[Decimal]:
+    """A numeric snapshot value as Decimal, or None. Booleans are never
+    numbers. A decimal STRING (the Netherlands engine stores "137.00") counts
+    only for a currency field, so a text field that happens to look numeric
+    (an RPN number, a sub-class) is never summed."""
+    if isinstance(cell, bool) or cell is None:
+        return None
+    if isinstance(cell, (int, float, Decimal)):
+        return Decimal(str(cell))
+    if isinstance(cell, str) and field_type == "currency":
+        try:
+            return Decimal(cell.strip())
+        except (InvalidOperation, ValueError):
+            return None
+    return None
 
 
 def _compute_report_reconciliation(run: PayrollRun, rendered_data: dict, tolerance: Optional[float]) -> dict:
