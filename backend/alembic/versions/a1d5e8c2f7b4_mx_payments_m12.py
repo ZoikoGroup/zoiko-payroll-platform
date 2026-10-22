@@ -1,7 +1,8 @@
 """mx_payments_m12: Mexico salary payment batches and items (Phase 10a)
 
 Revision ID: a1d5e8c2f7b4
-Revises: e7a2c4f9b1d6
+Revises: f84626be0cb1 (re-parented from e7a2c4f9b1d6 onto the NL revision that reached
+         production first, 2026-10-22; this revision was never applied anywhere)
 Create Date: 2026-10-21
 
 ZP-MX-ENG-001 Phase 10a (docs/mexico/MEXICO_PHASE_10_PLAN.md §3): TWO new tables —
@@ -31,7 +32,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a1d5e8c2f7b4"
-down_revision: Union[str, Sequence[str], None] = "e7a2c4f9b1d6"
+down_revision: Union[str, Sequence[str], None] = "f84626be0cb1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

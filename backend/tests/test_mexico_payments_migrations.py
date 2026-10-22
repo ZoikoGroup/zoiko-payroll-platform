@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-REVISION, PARENT = "a1d5e8c2f7b4", "e7a2c4f9b1d6"
+REVISION, PARENT = "a1d5e8c2f7b4", "f84626be0cb1"
 BACKEND = Path(__file__).resolve().parents[1]
 NEW_TABLES = ("payroll_mx_payment_batches", "payroll_mx_payment_items")
 

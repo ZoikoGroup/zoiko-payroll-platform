@@ -9069,6 +9069,7 @@ class PayrollNlExpatDecision(Base):
     threshold_category   = Column(String(30), nullable=False)  # STANDARD / UNDER30_MASTER / RESEARCH_MEDICAL
     allowance_pct        = Column(Numeric(5, 2), nullable=False)
     evidence_artifact_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
+    recorded_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # four-eyes: verifier != recorder
     status               = Column(String(20), nullable=False, default="PENDING")  # PENDING / VERIFIED / REVOKED / EXPIRED
     verified_by          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     verified_at          = Column(DateTime(timezone=True), nullable=True)
