@@ -10642,6 +10642,59 @@ class PayrollMxPaymentItem(Base):
     )
 
 
+class PayrollMxJournalMapping(Base):
+    """The employer's own chart-of-accounts mapping for the Mexican payroll
+    journal (Phase 10b, D6): one account per line type (WAGES_EXPENSE may be
+    overridden per earning kind), versioned, approved by someone other than
+    its maker; approving a version supersedes the previous one."""
+    __tablename__ = "payroll_mx_journal_mappings"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    version         = Column(Integer, nullable=False)
+    status          = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / APPROVED / SUPERSEDED / WITHDRAWN
+    accounts        = Column(JSON, nullable=False)
+    note            = Column(String(300), nullable=True)
+    maker_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "version", name="uq_mx_journal_mapping_version"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED', 'WITHDRAWN')",
+                           name="ck_mx_journal_mapping_status"),
+    )
+
+
+class PayrollMxJournalExport(Base):
+    """One journal CSV built for a committed run under a mapping version (the
+    file itself is not kept: its hash and totals are). A CURRENT export
+    refuses the run's reset until it is voided with a reason."""
+    __tablename__ = "payroll_mx_journal_exports"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    mapping_id      = Column(Integer, ForeignKey("payroll_mx_journal_mappings.id", ondelete="RESTRICT"), nullable=False)
+    status          = Column(String(10), nullable=False, default="CURRENT")   # CURRENT / VOIDED
+    line_count      = Column(Integer, nullable=False)
+    debit_total     = Column(Numeric(16, 2), nullable=False)
+    credit_total    = Column(Numeric(16, 2), nullable=False)
+    file_sha256     = Column(String(64), nullable=False)
+    created_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    voided_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    voided_reason   = Column(String(300), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('CURRENT', 'VOIDED')", name="ck_mx_journal_export_status"),
+        sa.CheckConstraint("debit_total = credit_total", name="ck_mx_journal_export_balanced"),
+    )
+
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

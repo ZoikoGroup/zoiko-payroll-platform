@@ -1060,13 +1060,15 @@ def run_downstream_actions(db: Session, run) -> list:
     filed / UNKNOWN, any liability past ACCRUED (or ever sent), any SUA
     period RECONCILED onward and any ISN return past DRAFT that includes it
     (Phase 8 plan §6). Phase 9a: any live correction of one of its payslips.
-    Phase 10a: any RELEASED (or CLOSED) payment batch for it. Each with a test."""
+    Phase 10a: any RELEASED (or CLOSED) payment batch for it. Phase 10b: any
+    CURRENT journal export of it. Each with a test."""
     from app.modules.payroll import (mexico_cfdi_service, mexico_correction_service, mexico_filing_service,
-                                     mexico_payment_service)
+                                     mexico_journal_service, mexico_payment_service)
 
     return (mexico_cfdi_service.downstream_reasons(db, run) + mexico_filing_service.downstream_reasons(db, run)
             + mexico_correction_service.downstream_reasons(db, run)
-            + mexico_payment_service.downstream_reasons(db, run))
+            + mexico_payment_service.downstream_reasons(db, run)
+            + mexico_journal_service.downstream_reasons(db, run))
 
 
 def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:

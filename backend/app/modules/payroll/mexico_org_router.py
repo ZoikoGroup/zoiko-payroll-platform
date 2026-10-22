@@ -1031,3 +1031,56 @@ def record_payment_outcome(item_id: int, body: Dict[str, Any] = Body(...), curre
 @router.post("/payments/batches/{batch_id}/reissue", summary="Re-issue the failed / returned payments in a new batch")
 def reissue_payments(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
     return _payments().reissue(db, _org_id(current_user), batch_id, _actor(current_user))
+
+
+# ── Payroll journal (Phase 10b) ──────────────────────────────────────────────
+
+def _journal():
+    from app.modules.payroll import mexico_journal_service
+
+    return mexico_journal_service
+
+
+@router.get("/journal/mappings", summary="Journal account mappings (versions) and the line types")
+def journal_mappings(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return {"lineTypes": _journal().line_types(), "mappings": _journal().list_mappings(db, _org_id(current_user))}
+
+
+@router.post("/journal/mappings", summary="Propose a journal account mapping (a new DRAFT version)")
+def create_journal_mapping(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    return _journal().create_mapping(db, _org_id(current_user), body, _actor(current_user))
+
+
+@router.post("/journal/mappings/{mapping_id}/approve", summary="Approve a DRAFT mapping (a different person)")
+def approve_journal_mapping(mapping_id: int, current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    return _journal().approve_mapping(db, _org_id(current_user), mapping_id, _actor(current_user))
+
+
+@router.post("/journal/mappings/{mapping_id}/withdraw", summary="Withdraw a DRAFT mapping")
+def withdraw_journal_mapping(mapping_id: int, current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    return _journal().withdraw_mapping(db, _org_id(current_user), mapping_id, _actor(current_user))
+
+
+@router.get("/runs/{run_id}/journal", summary="The journal of a committed run (preview, with its exports)")
+def run_journal(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _journal().run_journal(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/journal/export", summary="Export the journal CSV of a committed run (nothing is posted)")
+def export_run_journal(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    out = _journal().export_journal(db, _org_id(current_user), run_id, _actor(current_user))
+    return Response(content=out["content"].encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{out["filename"]}"',
+                             "Cache-Control": "no-store", "X-Zoiko-Journal-Sha256": out["sha256"]})
+
+
+@router.post("/journal/exports/{export_id}/void", summary="Void a journal export (reversed or never posted)")
+def void_journal_export(export_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                        db: Session = Depends(get_db)):
+    return _journal().void_export(db, _org_id(current_user), export_id, str(body.get("reason") or ""),
+                                  _actor(current_user))
