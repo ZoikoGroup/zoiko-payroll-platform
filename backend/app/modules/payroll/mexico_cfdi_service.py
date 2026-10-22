@@ -117,7 +117,7 @@ def _aware(dt):
 def run_guard(db: Session, run) -> None:
     from app.modules.payroll import mexico_dormancy, service
 
-    if not mexico_dormancy.onboarding_enabled():
+    if not mexico_dormancy.onboarding_enabled(db, run.organization_id):
         raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, run.organization_id)
     if not mexico_dormancy.is_mexico(service._resolve_org_country(db, run.organization_id)):
         raise MXBlock("MX_ORG_NOT_MEXICAN", "the organisation's payroll jurisdiction is not Mexico", run.organization_id)
@@ -181,8 +181,12 @@ def _live_doc(db: Session, item_id: int):
 def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
     from app.core import object_storage
 
+    from app.modules.payroll import mexico_dormancy, mexico_pilot_service
+
     m = _models()
     version, _root, _cred = _employer_for(db, item, run.pay_date)
+    mexico_pilot_service.refuse_non_sandbox_pac(db, run.organization_id, version.pac_environment)   # Phase 10e
+    pilot = mexico_dormancy.is_pilot_organization(db, run.organization_id)
     refusal = object_storage.durable_storage_refusal("Mexico CFDI XML storage")
     if refusal:
         raise MXBlock("MX_CFDI_STORAGE_NOT_DURABLE", refusal, run.organization_id)
@@ -210,7 +214,8 @@ def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
         created_by_id=actor_id)
     db.add(doc)
     db.flush()
-    _event(db, doc, "GENERATED", actor_id, {"folio": folio, "schemaReleaseId": release.id}, None, "GENERATED")
+    _event(db, doc, "GENERATED", actor_id, {"folio": folio, "schemaReleaseId": release.id, "pilot": pilot}, None,
+           "GENERATED")
     _transition(db, doc, "SIGNED", "SIGNED", actor_id, {"certificateNumber": cert_no})
     db.add(m.PayrollMxCfdiOutboxItem(document_id=doc.id, action="STAMP", attempt_no=1, payload_hash=payload_hash,
                                      idempotency_key=key, status="PENDING"))
@@ -447,6 +452,9 @@ def process_outbox(db: Session, organization_id: int, actor_id: Optional[int], l
             done.append({"outboxItemId": item.id, "skipped": "document is UNKNOWN — query its status first (MX-062)"})
             continue
         try:
+            from app.modules.payroll import mexico_pilot_service
+
+            mexico_pilot_service.refuse_non_sandbox_pac(db, doc.organization_id, doc.pac_environment)   # Phase 10e
             adapter = _pac.get_adapter(doc.pac_provider, doc.pac_environment)
         except MXBlock as exc:
             item.last_error = f"{exc.key}: {exc.reason}"[:500]

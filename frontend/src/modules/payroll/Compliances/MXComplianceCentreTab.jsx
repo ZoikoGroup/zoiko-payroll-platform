@@ -13,6 +13,7 @@ import MXPtuCyclePanel from "./MXPtuCyclePanel";
 import MXAnnualAdjustmentPanel from "./MXAnnualAdjustmentPanel";
 import MXPaymentsPanel from "./MXPaymentsPanel";
 import MXJournalPanel from "./MXJournalPanel";
+import MXPilotBanner from "./MXPilotBanner";
 
 // Mexico Compliance Centre (ZP-MX-ENG-001 §11) — the spec's "Settings →
 // Countries → Mexico → Employer & Registrations", mounted where every country's
@@ -28,6 +29,7 @@ export default function MXComplianceCentreTab() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="mx-compliance-centre">
+      <MXPilotBanner />
       <div>
         <h2 className="text-[16px] font-semibold text-foreground">Employer & Registrations</h2>
         <p className="text-[12px] text-foreground-muted">

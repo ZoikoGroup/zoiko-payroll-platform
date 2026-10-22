@@ -172,6 +172,16 @@ const MX_SA = "/api/super-admin/compliance/mexico";
 const mxOn = (on, packId) => ({ params: { ...(on ? { on } : {}), ...(packId ? { pack_id: packId } : {}) } });
 
 export const getMxReadiness = () => apiFetch(`${MX_SA}/readiness`);
+// Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
+// list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
+export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);
+export const proposeMxPilotGrant = (payload) => apiFetch(`${MX_SA}/pilot-grants`, { method: "POST", body: payload });
+export const approveMxPilotGrant = (id) => apiFetch(`${MX_SA}/pilot-grants/${id}/approve`, { method: "POST", body: {} });
+export const withdrawMxPilotGrant = (id, reason) =>
+  apiFetch(`${MX_SA}/pilot-grants/${id}/withdraw`, { method: "POST", body: { reason } });
+export const revokeMxPilotGrant = (id, reason) =>
+  apiFetch(`${MX_SA}/pilot-grants/${id}/revoke`, { method: "POST", body: { reason } });
+export const listMxMasterCopies = () => apiFetch(`${MX_SA}/master-copies`);
 export const listMxOrganizations = () => apiFetch(`${MX_SA}/organizations`);
 export const listMxEmployees = (orgId) => apiFetch(`${MX_SA}/employees`, { params: { org_id: orgId } });
 export const listMxPacks = () => apiFetch(`${MX_SA}/packs`);

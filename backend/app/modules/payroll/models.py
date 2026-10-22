@@ -10696,6 +10696,64 @@ class PayrollMxJournalExport(Base):
     )
 
 
+class PayrollMxPilotGrant(Base):
+    """A non-binding Mexico pilot for ONE named organisation (Phase 10e):
+    proposed by a Super Admin, approved by a different one, revocable at any
+    time, with an expiry (≤ 120 days). While it is APPROVED and unexpired the
+    organisation is open with pilot rules (PAC sandbox only, no payments, no
+    authority filings, watermarked payslips); an organisation that ever had an
+    approved grant is a pilot organisation for good (D5)."""
+    __tablename__ = "payroll_mx_pilot_grants"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    status          = Column(String(10), nullable=False, default="PROPOSED")   # PROPOSED / APPROVED / REVOKED / WITHDRAWN
+    reason          = Column(String(300), nullable=False)
+    scope_note      = Column(String(300), nullable=True)
+    expires_at      = Column(DateTime(timezone=True), nullable=False)
+    proposed_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    revoked_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revoked_at      = Column(DateTime(timezone=True), nullable=True)
+    revoke_reason   = Column(String(300), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'REVOKED', 'WITHDRAWN')", name="ck_mx_pilot_grant_status"),
+    )
+
+
+class PayrollMxMasterCopy(Base):
+    """A governed copy of a pilot organisation's Mexican MASTER data (employer,
+    registrations, establishments, labour policies, employees and their
+    statutory profiles — never payroll results) into a new live organisation
+    (Phase 10e D5): proposed by one Super Admin, approved by another, executed
+    in one transaction, with the plan hash and a diff report kept."""
+    __tablename__ = "payroll_mx_master_copies"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    source_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)  # target
+    status                 = Column(String(10), nullable=False, default="PROPOSED")   # PROPOSED / EXECUTED / CANCELLED
+    reason                 = Column(String(300), nullable=False)
+    plan                   = Column(JSON, nullable=False)             # counts per category, and what is not copied
+    plan_sha256            = Column(String(64), nullable=False)       # of the source rows at proposal
+    report                 = Column(JSON, nullable=True)              # the diff report after execution
+    proposed_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    executed_at            = Column(DateTime(timezone=True), nullable=True)
+    cancelled_reason       = Column(String(300), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'EXECUTED', 'CANCELLED')", name="ck_mx_master_copy_status"),
+        sa.CheckConstraint("source_organization_id <> organization_id", name="ck_mx_master_copy_distinct"),
+    )
+
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

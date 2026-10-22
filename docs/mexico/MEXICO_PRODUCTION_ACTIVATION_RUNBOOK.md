@@ -46,17 +46,30 @@ Each item above is built, tested and reviewed like any other phase before the st
 | 3.3 Obtain the employer bank's SPEI bulk-file specification, if a bank file is wanted. Until then, payments use the worklist. | Decided and recorded. |
 | 3.4 Rugvedh (ZP-PRIV owner) has reviewed the Phase 10c redaction rules and the retention purge item. | Recorded in the release checklist. |
 
-## 4. Switching on
+## 4. Switching on (two levels, Phase 10e)
 
 | Step | Check |
 |---|---|
-| 4.1 A Super Admin moves the Mexico service registry **PLANNED → AVAILABLE**, with a reason. The platform refuses this unless every gate is SIGNED. | Registry AVAILABLE. |
-| 4.2 The engineer sets `MX_TENANT_ONBOARDING_ENABLED=true` in the production environment and redeploys. This is a deployment change, reviewed like any other. | `/api/payroll/mexico/...` no longer answers with the dormancy refusal. |
-| 4.3 Onboard the **first** organisation as an EVALUATION workspace and run the parallel payroll (G8) there before any live run. | G8 evidence. |
-| 4.4 Then move that organisation to a live workspace. | First live run approved by two people. |
+| 4.1 The engineer sets `MX_TENANT_ONBOARDING_ENABLED=true` in the production environment and redeploys. It is a **kill switch only**: with nothing else, every Mexico route still refuses. | Mexico routes still refuse. |
+| 4.2 **Pilot.** With G1, G2, G4, G5 and G7 SIGNED, Q9 and the hosting decision RECORDED and the identity key configured, a Super Admin proposes a pilot grant for one named EVALUATION organisation (reason, scope, expiry of at most 120 days); **a different Super Admin approves it**. | Only that organisation opens, with the PILOT banner. |
+| 4.3 Run the parallel payroll in the pilot organisation. Its output is **non-binding**: CFDI only through the PAC sandbox, no payments, no authority filings, every payslip watermarked. Produce the G3, G6 and G8 evidence and sign those gates. | G3, G6, G8 SIGNED. |
+| 4.4 **General availability.** A Super Admin moves the registry **PLANNED → AVAILABLE**. The platform refuses unless all eight gates are SIGNED, Q9 is RECORDED and the identity key is configured. | Registry AVAILABLE. |
+| 4.5 Create the **live** organisation, then copy the pilot's master data into it with the governed copy: one Super Admin proposes, a different one approves; read its diff report. Payroll results are never copied. | Diff report shows no difference. |
+| 4.6 Run the go-live checks (§6) on the live organisation's first cycle. | All §6 checks done. |
 
 ## 5. Rollback
 
 - Unset `MX_TENANT_ONBOARDING_ENABLED` and redeploy. Every Mexico route refuses again at once, and no data is deleted.
 - Move the registry back to PLANNED, with a reason.
 - Anything already transmitted (CFDI, filings, payments) is resolved with `MEXICO_UNKNOWN_STATE_RUNBOOK.md`. Nothing is reversed automatically.
+
+## 6. Go-live checks (real filings and payments)
+
+These are possible only after general availability, because the pilot never files or pays. They are checked here, not as gate evidence. Each one is resolved to a final outcome with `MEXICO_UNKNOWN_STATE_RUNBOOK.md`.
+
+- [ ] The first real IDSE filing (alta) accepted (G2)
+- [ ] The first INFONAVIT liability filed and paid through SUA / SIPARE (G3)
+- [ ] The first ISN return filed and accepted, per enabled state (G4)
+- [ ] The first SAT ISR declaration and payment recorded (G1, G6)
+- [ ] The first salary payment batch released by a second person and every item resolved (G6)
+- [ ] The first production CFDI stamped by the production PAC (G1)

@@ -2696,6 +2696,8 @@ export async function exportMxPaymentWorklist(batchId) {
 // (versioned, four-eyes) and the journal of a committed run. The export is a
 // CSV handed to the browser — nothing is posted to any ledger.
 export const listMxJournalMappings = () => api.get(`${MX}/journal/mappings`);
+// Phase 10e: is this organisation a non-binding Mexico pilot? (its banner)
+export const getMxPilotStatus = () => api.get(`${MX}/pilot-status`);
 export const createMxJournalMapping = (payload) => api.post(`${MX}/journal/mappings`, payload);
 export const approveMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/approve`, {});
 export const withdrawMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/withdraw`, {});

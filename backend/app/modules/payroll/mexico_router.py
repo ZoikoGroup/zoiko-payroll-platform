@@ -19,9 +19,9 @@ Employer-profile routes arrive with their table in Phase 3.
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_super_admin
@@ -250,3 +250,71 @@ def sa_authorities(organization_id: Optional[int] = Query(None), current_user=De
     if organization_id is not None:
         _mx()._org(db, organization_id)
     return mexico_imss_service.overview(db, organization_id)
+
+
+# ── Phase 10e: pilot grants and the master-data copy (Super Admin, four-eyes) ──
+
+def _pilot():
+    from app.modules.payroll import mexico_pilot_service
+
+    return mexico_pilot_service
+
+
+@router.get("/pilot-grants", summary="Mexico pilot grants (named organisations, non-binding)")
+def list_pilot_grants(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return {"grants": _pilot().list_grants(db), "preconditions": _pilot().pilot_preconditions(db)}
+
+
+@router.post("/pilot-grants", summary="Propose a pilot grant for one EVALUATION organisation")
+def propose_pilot_grant(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    org_id = body.get("organizationId")
+    if not isinstance(org_id, int):
+        from app.core.exceptions import BadRequestException
+
+        raise BadRequestException("organizationId is required")
+    return _pilot().propose_grant(db, org_id, body, _actor(current_user))
+
+
+@router.post("/pilot-grants/{grant_id}/approve", summary="Approve a pilot grant (a different Super Admin)")
+def approve_pilot_grant(grant_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _pilot().approve_grant(db, grant_id, _actor(current_user))
+
+
+@router.post("/pilot-grants/{grant_id}/withdraw", summary="Withdraw a proposed pilot grant")
+def withdraw_pilot_grant(grant_id: int, body: Dict[str, Any] = Body(default={}),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _pilot().withdraw_grant(db, grant_id, str(body.get("reason") or ""), _actor(current_user))
+
+
+@router.post("/pilot-grants/{grant_id}/revoke", summary="Revoke an approved pilot grant (takes effect at once)")
+def revoke_pilot_grant(grant_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_super_admin),
+                       db: Session = Depends(get_db)):
+    return _pilot().revoke_grant(db, grant_id, str(body.get("reason") or ""), _actor(current_user))
+
+
+@router.get("/master-copies", summary="Governed copies of a pilot's master data into a live organisation")
+def list_master_copies(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _pilot().list_copies(db)
+
+
+@router.post("/master-copies", summary="Propose copying a pilot's master data into a new live organisation")
+def propose_master_copy(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    source, target = body.get("sourceOrganizationId"), body.get("targetOrganizationId")
+    if not isinstance(source, int) or not isinstance(target, int):
+        from app.core.exceptions import BadRequestException
+
+        raise BadRequestException("sourceOrganizationId and targetOrganizationId are required")
+    return _pilot().propose_copy(db, source, target, str(body.get("reason") or ""), _actor(current_user))
+
+
+@router.post("/master-copies/{copy_id}/approve", summary="Approve and execute a master-data copy (a different Super Admin)")
+def approve_master_copy(copy_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _pilot().approve_copy(db, copy_id, _actor(current_user))
+
+
+@router.post("/master-copies/{copy_id}/cancel", summary="Cancel a proposed master-data copy")
+def cancel_master_copy(copy_id: int, body: Dict[str, Any] = Body(default={}),
+                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _pilot().cancel_copy(db, copy_id, str(body.get("reason") or ""), _actor(current_user))

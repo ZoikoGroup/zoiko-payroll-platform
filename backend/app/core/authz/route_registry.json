@@ -9415,6 +9415,23 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/pilot-status",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "pilot-status",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/ptu/cycles",
    "data_class": "worker",
    "action": "read",
@@ -17834,6 +17851,73 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/master-copies",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "master-copies",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/master-copies",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "master-copies",
+   "principals": [],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": "statutory action is tenant-run (ZP-PRIV decision 3)",
+   "note": "Phase 10e D5 master-data copy between tenants (reads worker rows) - awaits the ZP-PRIV owner's decision",
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_mx_infonavit_notices"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/master-copies/{copy_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": "statutory action is tenant-run (ZP-PRIV decision 3)",
+   "note": "Phase 10e D5 master-data copy between tenants (writes worker rows) - awaits the ZP-PRIV owner's decision",
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/master-copies/{copy_id}/cancel",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/organizations",
    "data_class": "aggregate",
    "action": "read",
@@ -17870,6 +17954,86 @@
    "data_class": "platform",
    "action": "read",
    "resource": "activation-readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/pilot-grants",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "pilot-grants",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/pilot-grants",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "pilot-grants",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/pilot-grants/{grant_id}/approve",
+   "data_class": "platform",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/pilot-grants/{grant_id}/revoke",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "revoke",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/pilot-grants/{grant_id}/withdraw",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "withdraw",
    "principals": [
     "super_admin"
    ],

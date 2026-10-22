@@ -4,6 +4,8 @@
 
 **Evidence tag.** `MX-GATE-G2`. Upload the signed evidence pack as a source artifact with this form number; a **different** Super Admin reviews it. Only then does the gate show SIGNED in the Super Admin readiness view.
 
+**When the evidence is produced: PRE-PILOT.** Signed **before** a pilot grant (D2). The SUA cases are synthetic workers computed in the SUA program; the real first IDSE filing is a go-live check, not gate evidence (the pilot never files).
+
 **State today.** OPEN. Nothing is signed.
 
 ## Sources it needs
@@ -18,10 +20,13 @@
 
 ## Evidence checklist
 
-- [ ] Every IMSS branch rate, ceiling and the 2026 CEAV band transcribed, in an Approved pack
-- [ ] Signed cases: SBC (fixed, variable, mixed) and each branch per worker reconcile to the employer's SUA with zero difference (Phase 8 SUA reconciliation)
-- [ ] An approved work-risk premium with its validity window from S29
-- [ ] IDSE movements (alta, baja, modificación) exported, filed and accepted for a test registration
+Each item is tagged: **PRE-PILOT** (produced before any real Mexican data, from sources, synthetic cases or a test environment), **PILOT-GENERATED** (produced by the non-binding pilot, Phase 10e), or **GO-LIVE CHECK** (a real filing or payment, possible only after general availability; checked in the activation runbook, not gate evidence).
+
+- [ ] **[PRE-PILOT]** Every IMSS branch rate, ceiling and the 2026 CEAV band transcribed, in an Approved pack
+- [ ] **[PRE-PILOT]** Signed cases with synthetic workers: SBC (fixed, variable, mixed) and each branch per worker reconcile to the same cases computed in the SUA program, with zero difference (Phase 8 SUA reconciliation)
+- [ ] **[PRE-PILOT]** An approved work-risk premium with its validity window from S29, from the employer's own IMSS determination
+- [ ] **[PRE-PILOT]** IDSE movements (alta, baja, modificación) for synthetic workers: the worklist matches IDSE's capture fields
+- [ ] **[GO-LIVE CHECK]** The first real IDSE filing, accepted (activation runbook §6; not gate evidence)
 
 ## What Zoiko already provides
 

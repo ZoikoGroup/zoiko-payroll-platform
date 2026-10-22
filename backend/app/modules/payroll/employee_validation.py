@@ -1696,7 +1696,10 @@ def _dormant_strategy(code: str):
         return None
     from app.modules.payroll import mexico_dormancy
 
-    return strategy if mexico_dormancy.onboarding_enabled() else None
+    # Phase 10e: the kill switch only — no session here. A Mexican employee
+    # matters only inside a Mexican organisation, which the organisation-level
+    # gate (registry AVAILABLE or a pilot grant) decides.
+    return strategy if mexico_dormancy.flag_enabled() else None
 
 
 def is_supported_employee_country(country_code: str) -> bool:

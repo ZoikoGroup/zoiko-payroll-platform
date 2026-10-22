@@ -146,7 +146,7 @@ def update_my_organization(
     if "country" in fields:
         from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
 
-        block_reason = get_jurisdiction_change_block_reason(db, org.country, fields["country"])
+        block_reason = get_jurisdiction_change_block_reason(db, org.country, fields["country"], org.id)
         if block_reason:
             raise BadRequestException(block_reason)
     for field, value in fields.items():
@@ -497,7 +497,7 @@ def update_organization(
     if "country" in updates:
         from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
 
-        block_reason = get_jurisdiction_change_block_reason(db, org.country, updates["country"])
+        block_reason = get_jurisdiction_change_block_reason(db, org.country, updates["country"], org.id)
         if block_reason:
             raise BadRequestException(block_reason)
 
