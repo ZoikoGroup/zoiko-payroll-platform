@@ -73,3 +73,20 @@ These are possible only after general availability, because the pilot never file
 - [ ] The first SAT ISR declaration and payment recorded (G1, G6)
 - [ ] The first salary payment batch released by a second person and every item resolved (G6)
 - [ ] The first production CFDI stamped by the production PAC (G1)
+
+### When a go-live check fails
+
+A go-live check fails when a real filing or payment is rejected, stays UNKNOWN past its runbook window, or produces a figure the authority, the bank or the PAC disagrees with.
+
+| Step | Who | What |
+|---|---|---|
+| 1. Contain | The operator who saw it | Resolve the object with `MEXICO_UNKNOWN_STATE_RUNBOOK.md`. Never retry automatically, never send a second filing or payment, never edit the payslip. Record the object id, the reference and the authority's message in the incident log. |
+| 2. Decide | **The release owner, with the two Super Admins who signed the gate the check belongs to** | Is it this employer's data (fix the data) or Zoiko's content or code (a defect)? If Zoiko's, the gate's signature is reopened: its evidence artifact is superseded until the fix is proven again. |
+| 3. Pause new organisations | A Super Admin, on the release owner's decision | **What exists today is all-or-nothing.** Moving the registry **AVAILABLE → PLANNED** (with a reason) stops new organisations becoming Mexican (the country-change gate refuses) **and** closes every live Mexican organisation, the affected one included (the registry gates every Mexico route). The kill switch (`MX_TENANT_ONBOARDING_ENABLED`) does the same, by deployment. **There is no switch that stops only new organisations while existing employers keep running.** Until one is built (follow-up below), the release owner chooses: pause everyone (registry → PLANNED), or keep the registry AVAILABLE and stop onboarding manually (no new organisation's payroll jurisdiction is set to Mexico) while the fix is made. |
+| 4. Support the affected employer | The release owner and the employer's payroll owner | Agree, in writing, what the employer files or pays **outside Zoiko** to meet the statutory deadline (the authority's portal, the bank, the PAC). Zoiko records those references afterwards as the resolved outcome. Communicate the cause, the workaround and the expected fix date. |
+| 5. Fix and prove | Engineering, then two Super Admins | Fix through a normal PR (tests, PostgreSQL, browser). Re-run the failed check, re-sign the reopened gate with new evidence, and only then move the registry back to AVAILABLE (step 4.4). |
+| 6. Close | The release owner | Record the closure in the incident log and in `PRODUCTION_STATE.md`. |
+
+Nothing is reversed automatically, and no data is deleted. While paused, every Mexico route returns the same coded refusal an employer sees when Mexico is closed.
+
+**Follow-up (not built):** a "no new Mexican organisations" switch separate from the registry, so a failed go-live check can stop onboarding without closing employers that are already live.

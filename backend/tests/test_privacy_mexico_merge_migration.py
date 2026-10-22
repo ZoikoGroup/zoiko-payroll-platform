@@ -21,7 +21,7 @@ import sqlalchemy as sa
 BACKEND = Path(__file__).resolve().parents[1]
 PG_URL = os.getenv("MX_PG6_TEST_URL")
 pg = pytest.mark.skipif(not PG_URL, reason="MX_PG6_TEST_URL not set (throwaway PostgreSQL only)")
-AFTER_E1A3 = ("payroll_mx_master_copies", "payroll_mx_pilot_grants",
+AFTER_E1A3 = ("payroll_mx_master_releases", "payroll_mx_master_copies", "payroll_mx_pilot_grants",
               "payroll_mx_journal_exports", "payroll_mx_journal_mappings",
               "payroll_mx_payment_items", "payroll_mx_payment_batches",
               "payroll_mx_annual_isr_adjustments", "payroll_mx_ptu_allocations", "payroll_mx_ptu_cycles",

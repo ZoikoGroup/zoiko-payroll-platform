@@ -7729,6 +7729,154 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/mexico-transfer/imports/{copy_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_mx_infonavit_notices"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico-transfer/imports/{copy_id}/cancel",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico-transfer/releases",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "releases",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_mx_infonavit_notices"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico-transfer/releases/{release_id}/import",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "import",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_mx_infonavit_notices"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico-transfer/releases/{release_id}/preview",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preview",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_mx_infonavit_notices"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico-transfer/releases/{release_id}/release",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "release",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_mx_infonavit_notices"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico-transfer/releases/{release_id}/revoke",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "revoke",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico-transfer/status",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "status",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/mexico/aguinaldo-runs",
    "data_class": "worker",
    "action": "create",

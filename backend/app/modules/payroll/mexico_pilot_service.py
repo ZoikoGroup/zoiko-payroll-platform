@@ -331,9 +331,59 @@ def _mx_copy_value(value):
     return str(value)
 
 
-def _mx_copy_fingerprint(cats: dict) -> str:
-    data = {k: [{c: _mx_copy_value(getattr(r, c)) for c in _mx_copy_columns(r, k)} for r in rows] for k, rows in cats.items()}
+def _mx_copy_snapshot(cats: dict) -> dict:
+    """{category: [(model, source id, {column: value})]} — every value read ONCE,
+    as plain data, while the caller holds the source's tenant context (10f)."""
+    return {k: [(type(r), r.id, {c.name: getattr(r, c.name) for c in r.__table__.columns}) for r in rows]
+            for k, rows in cats.items()}
+
+
+def _mx_copy_fingerprint(snap: dict) -> str:
+    data = {k: [{c: _mx_copy_value(vals[c]) for c in _mx_copy_columns(model, k)} for model, _, vals in rows]
+            for k, rows in snap.items()}
     return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _mx_execute_copy(db: Session, snap: dict, target_id: int, actor_id: Optional[int], not_copied=None,
+                     profile_map: Optional[dict] = None) -> dict:
+    """Create the target's rows from the snapshot, remapping every reference to
+    the copies; with `profile_map` (10f, same-RFC employer) the target's OWN
+    employer profiles stand in for the source's and none is created. Returns
+    the diff report (every copied row compared column by column with its source)."""
+    ids = {k: {} for k in _ORDER}
+    if profile_map is not None:
+        ids["employerProfiles"] = dict(profile_map)
+    pairs = []
+    for category in _ORDER:
+        if category == "employerProfiles" and profile_map is not None:
+            continue
+        for model, src_id, vals in snap[category]:
+            values = {c: vals[c] for c in _mx_copy_columns(model, category)}
+            values.update(_RESET.get(category, {}))
+            for col, ref in _REMAP.get(category, {}).items():
+                old = vals[col]
+                values[col] = ids[ref].get(old) if old is not None else None
+                if old is not None and values[col] is None:
+                    raise MXBlock("MX_COPY_REFERENCE", f"{category} row {src_id}: {col} {old} was not copied", target_id)
+            values["organization_id"] = target_id
+            if "created_by_id" in model.__table__.columns:
+                values["created_by_id"] = actor_id
+            copy = model(**values)
+            db.add(copy)
+            db.flush()
+            ids[category][src_id] = copy.id
+            pairs.append((category, model, src_id, vals, copy))
+    differences = [{"category": category, "sourceId": src_id, "targetId": dst.id, "column": col}
+                   for category, model, src_id, vals, dst in pairs for col in _mx_copy_columns(model, category)
+                   if _mx_copy_value(vals[col]) != _mx_copy_value(getattr(dst, col))]
+    copied = {k: 0 for k in _ORDER}
+    for category, *_ in pairs:
+        copied[category] += 1
+    report = {"copied": copied, "differences": differences, "reset": {k: sorted(v) for k, v in _RESET.items()},
+              "notCopied": not_copied or {}}
+    if profile_map is not None:
+        report["employerProfilesMatchedByRfc"] = len(profile_map)
+    return report
 
 
 def _mx_not_copied(db: Session, org_id: int) -> dict:
@@ -397,7 +447,7 @@ def propose_copy(db: Session, source_id: int, target_id: int, reason: str, actor
     if db.query(C).filter(C.organization_id == target_id, C.status == "PROPOSED").first() is not None:
         raise BadRequestException("a copy into this organisation is already proposed")
     row = C(source_organization_id=source_id, organization_id=target_id, status="PROPOSED", reason=text[:300],
-            plan=plan, plan_sha256=_mx_copy_fingerprint(cats), proposed_by_id=actor_id)
+            plan=plan, plan_sha256=_mx_copy_fingerprint(_mx_copy_snapshot(cats)), proposed_by_id=actor_id)
     db.add(row)
     db.flush()
     _pilot_audit(db, actor_id=actor_id, action="propose_mx_master_copy", entity_type="mx_master_copy", entity_id=row.id,
@@ -425,32 +475,13 @@ def approve_copy(db: Session, copy_id: int, actor_id: Optional[int]) -> dict:
     refusal = _copy_target_refusal(db, row.source_organization_id, row.organization_id)
     if refusal:
         raise MXBlock("MX_COPY_REFUSED", refusal, row.organization_id)
-    cats = _copy_categories(db, row.source_organization_id)
-    if _mx_copy_fingerprint(cats) != row.plan_sha256:
+    snap = _mx_copy_snapshot(_copy_categories(db, row.source_organization_id))
+    if _mx_copy_fingerprint(snap) != row.plan_sha256:
         raise MXBlock("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after the copy was proposed — cancel "
                                                 "and propose again", row.organization_id)
-    ids = {k: {} for k in _ORDER}
-    pairs = {k: [] for k in _ORDER}
     try:
-        for category in _ORDER:
-            for src in cats[category]:
-                values = {c: getattr(src, c) for c in _mx_copy_columns(src, category)}
-                values.update(_RESET.get(category, {}))
-                for col, ref in _REMAP.get(category, {}).items():
-                    old = getattr(src, col)
-                    values[col] = ids[ref].get(old) if old is not None else None
-                    if old is not None and values[col] is None:
-                        raise MXBlock("MX_COPY_REFERENCE", f"{category} row {src.id}: {col} {old} was not copied",
-                                      row.organization_id)
-                values["organization_id"] = row.organization_id
-                if "created_by_id" in src.__table__.columns:
-                    values["created_by_id"] = actor_id
-                copy = type(src)(**values)
-                db.add(copy)
-                db.flush()
-                ids[category][src.id] = copy.id
-                pairs[category].append((src, copy))
-        report = _mx_copy_diff(pairs, row.plan.get("notCopied") if isinstance(row.plan, dict) else None)
+        report = _mx_execute_copy(db, snap, row.organization_id, actor_id,
+                                  row.plan.get("notCopied") if isinstance(row.plan, dict) else None)
         row.status, row.approved_by_id, row.executed_at, row.report = "EXECUTED", actor_id, _pilot_now(), report
         _pilot_audit(db, actor_id=actor_id, action="execute_mx_master_copy", entity_type="mx_master_copy",
                      entity_id=row.id, new={"source": row.source_organization_id, "target": row.organization_id,
@@ -460,20 +491,6 @@ def approve_copy(db: Session, copy_id: int, actor_id: Optional[int]) -> dict:
         db.rollback()
         raise
     return master_copy_view(row)
-
-
-def _mx_copy_diff(pairs: dict, not_copied) -> dict:
-    """Every copied row compared column by column with its source (ids,
-    remapped references and reset columns excepted)."""
-    differences = []
-    for category, rows in pairs.items():
-        for src, dst in rows:
-            for col in _mx_copy_columns(src, category):
-                a, b = _mx_copy_value(getattr(src, col)), _mx_copy_value(getattr(dst, col))
-                if a != b:
-                    differences.append({"category": category, "sourceId": src.id, "targetId": dst.id, "column": col})
-    return {"copied": {k: len(v) for k, v in pairs.items()}, "differences": differences,
-            "reset": {k: sorted(v) for k, v in _RESET.items()}, "notCopied": not_copied or {}}
 
 
 def cancel_copy(db: Session, copy_id: int, reason: str, actor_id: Optional[int]) -> dict:

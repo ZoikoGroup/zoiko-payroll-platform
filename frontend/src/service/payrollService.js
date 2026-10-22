@@ -2698,6 +2698,16 @@ export async function exportMxPaymentWorklist(batchId) {
 export const listMxJournalMappings = () => api.get(`${MX}/journal/mappings`);
 // Phase 10e: is this organisation a non-binding Mexico pilot? (its banner)
 export const getMxPilotStatus = () => api.get(`${MX}/pilot-status`);
+// Phase 10f (option B): the tenant-run master-data transfer pilot -> live organisation.
+const MXT = "/api/payroll/mexico-transfer";
+export const getMxTransferStatus = () => api.get(`${MXT}/status`);
+export const proposeMxRelease = (payload) => api.post(`${MXT}/releases`, payload);
+export const releaseMxRelease = (id) => api.post(`${MXT}/releases/${id}/release`, {});
+export const revokeMxRelease = (id, reason) => api.post(`${MXT}/releases/${id}/revoke`, { reason });
+export const previewMxImport = (releaseId) => api.get(`${MXT}/releases/${releaseId}/preview`);
+export const proposeMxImport = (releaseId, payload) => api.post(`${MXT}/releases/${releaseId}/import`, payload);
+export const approveMxImport = (id) => api.post(`${MXT}/imports/${id}/approve`, {});
+export const cancelMxImport = (id, reason) => api.post(`${MXT}/imports/${id}/cancel`, { reason });
 export const createMxJournalMapping = (payload) => api.post(`${MX}/journal/mappings`, payload);
 export const approveMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/approve`, {});
 export const withdrawMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/withdraw`, {});
