@@ -27,7 +27,7 @@ def test_today_every_gate_is_open_and_every_decision_open(db):
     out = _S().statutory_summary(db)
     assert [g["gate"] for g in out["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in out["gates"]} == {"OPEN"} and out["signedGates"] == 0
-    assert {d["state"] for d in out["decisions"]} == {"OPEN"} and len(out["decisions"]) == 3
+    assert {d["state"] for d in out["decisions"]} == {"OPEN"} and len(out["decisions"]) == 4   # Phase 10e: + Q9
     assert out["available"] is False and out["phase"] == 10
     assert all(g["checklist"] == f"docs/mexico/release-gates/{g['gate']}/CHECKLIST.md" for g in out["gates"])
     assert {r["state"] for r in out["retention"]} == {"BLOCKED_UNDECIDED"} and len(out["retention"]) == 8
@@ -62,7 +62,8 @@ def test_a_recorded_decision_unblocks_only_the_proposal_never_a_purge(db):
     _evidence(db, "MX-DECISION-RETENTION-PERIOD", created_by=801, reviewer=802)
     _evidence(db, "MX-DECISION-RETENTION-END", created_by=801, reviewer=802)
     decisions = {d["key"]: d["state"] for d in _S().owner_decisions(db)}
-    assert decisions == {"MX-D-RETENTION-PERIOD": "RECORDED", "MX-D-RETENTION-END": "RECORDED", "MX-D-HOSTING": "OPEN"}
+    assert decisions == {"MX-D-RETENTION-PERIOD": "RECORDED", "MX-D-RETENTION-END": "RECORDED", "MX-D-HOSTING": "OPEN",
+                         "MX-D-Q9": "OPEN"}
     row = retention_service.propose_retention_policy(db, "MX", {
         "recordCategory": "PAYROLL_RECORDS", "retentionYears": 5, "endOfRetention": "ANONYMISE",
         "legalBasis": "SYNTHETIC", "reason": "SYNTHETIC"}, 801)
@@ -71,6 +72,8 @@ def test_a_recorded_decision_unblocks_only_the_proposal_never_a_purge(db):
 
 
 def test_all_gates_signed_opens_the_registry_but_not_mexico(db, monkeypatch):
+    from app.config import settings
+    from app.core.exceptions import BadRequestException
     from app.modules.billing.models import JurisdictionServiceRegistry
     from app.modules.payroll import jurisdiction_hooks, mexico_dormancy
 
@@ -80,6 +83,12 @@ def test_all_gates_signed_opens_the_registry_but_not_mexico(db, monkeypatch):
         _evidence(db, f"MX-GATE-G{i}", created_by=801, reviewer=802)
     db.commit()
     assert _S().statutory_summary(db)["signedGates"] == 8
+    # Phase 10e: eight signed gates are not enough — Q9 and the identity key too.
+    with pytest.raises(BadRequestException, match="MX-DECISION-Q9 is OPEN"):
+        jurisdiction_hooks.call("MX", "service_registry_transition", db, "AVAILABLE", "SYNTHETIC", actor_id=802)
+    _evidence(db, "MX-DECISION-Q9", created_by=801, reviewer=802)
+    monkeypatch.setattr(settings, "MX_IDENTITY_TOKEN_KEY", "SYNTHETIC-test-key")
+    db.commit()
     jurisdiction_hooks.call("MX", "service_registry_transition", db, "AVAILABLE", "SYNTHETIC: all gates", actor_id=802)
     out = _S().statutory_summary(db)
     assert out["registry"] == "AVAILABLE"

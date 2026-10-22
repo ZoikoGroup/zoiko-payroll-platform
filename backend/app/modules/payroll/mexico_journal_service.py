@@ -350,7 +350,9 @@ def export_journal(db: Session, org_id: int, run_id: int, actor_id: Optional[int
         raise MXBlock("MX_JOURNAL_UNBALANCED", f"debits {debit} ≠ credits {credit}", org_id)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow([JOURNAL_BANNER])
+    from app.modules.payroll import mexico_pilot_service
+
+    w.writerow([mexico_pilot_service.PILOT_JOURNAL_BANNER if mexico_pilot_service.run_is_pilot(run) else JOURNAL_BANNER])
     w.writerow([f"run {run.id}", run.mx_run_type or "ORDINARY", run.period_label or "",
                 run.pay_date.isoformat() if run.pay_date else "", f"mapping v{mapping.version}", "MXN"])
     w.writerow(["line_type", "dimension", "account", "debit", "credit"])

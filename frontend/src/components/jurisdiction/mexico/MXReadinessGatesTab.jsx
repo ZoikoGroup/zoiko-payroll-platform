@@ -6,6 +6,7 @@ import {
 import { Messages, Table, card, useLoad } from "./mxShared";
 import { ReadinessDateBar } from "./employer/employerShared";
 import { localToday } from "./employer/employerUtils";
+import MXPilotGrantsPanel from "./MXPilotGrantsPanel";
 
 // Go-live gates G1–G8 (spec §22) and, per pack, every activation condition
 // with its reason — the answer to "why can't I activate this pack?".
@@ -84,8 +85,8 @@ export default function MXReadinessGatesTab() {
           <div className={card}>
             <p className="text-[12px] text-foreground-muted">{data.note}</p>
             <p className="mt-1 text-[12px] text-foreground">
-              Engine {data.engineVersion} · Gates signed: {data.signedGates}/8 · Service registry: {data.registry || "not seeded"} ·
-              Onboarding flag: {data.onboardingEnabled ? "on" : "off"} · Available: {data.available ? "Yes" : "No"}
+              Engine {data.engineVersion} · Level: {data.level} · Gates signed: {data.signedGates}/8 · Service registry: {data.registry || "not seeded"} ·
+              Onboarding flag (kill switch): {data.onboardingEnabled ? "on" : "off"} · Available: {data.available ? "Yes" : "No"}
             </p>
           </div>
           <div className={card} data-testid="mx-release-gates">
@@ -101,6 +102,7 @@ export default function MXReadinessGatesTab() {
               { key: "state", label: "State", render: (g) => (g.artifactId ? `${g.state} (source #${g.artifactId})` : g.state) },
             ]} />
           </div>
+          <MXPilotGrantsPanel level={data.level} />
           <div className={card} data-testid="mx-owner-decisions">
             <h3 className="mb-2 text-[14px] font-semibold text-foreground">Legal decisions</h3>
             <Table rows={data.decisions || []} rowKey={(d) => d.key} columns={[

@@ -4,6 +4,8 @@
 
 **Evidence tag.** `MX-GATE-G4`. Upload the signed evidence pack as a source artifact with this form number; a **different** Super Admin reviews it. Only then does the gate show SIGNED in the Super Admin readiness view.
 
+**When the evidence is produced: PRE-PILOT.** Signed **before** a pilot grant (D2). Returns are drafted and reconciled with synthetic data; the real first filing is a go-live check.
+
 **State today.** OPEN. Nothing is signed.
 
 ## Sources it needs
@@ -13,9 +15,12 @@
 
 ## Evidence checklist
 
-- [ ] For each state to be enabled: base, rate, exemptions and return rules transcribed from that state's saved code, in an Approved state pack
-- [ ] A test ISN return per enabled state drafted, filed and reconciled employee → return → ledger
-- [ ] Proof that a worker in any state without an Approved pack is blocked
+Each item is tagged: **PRE-PILOT** (produced before any real Mexican data, from sources, synthetic cases or a test environment), **PILOT-GENERATED** (produced by the non-binding pilot, Phase 10e), or **GO-LIVE CHECK** (a real filing or payment, possible only after general availability; checked in the activation runbook, not gate evidence).
+
+- [ ] **[PRE-PILOT]** For each state to be enabled: base, rate, exemptions and return rules transcribed from that state's saved code, in an Approved state pack
+- [ ] **[PRE-PILOT]** A synthetic ISN return per enabled state drafted and reconciled employee → return → ledger
+- [ ] **[PRE-PILOT]** Proof that a worker in any state without an Approved pack is blocked
+- [ ] **[GO-LIVE CHECK]** The first real ISN return filed and accepted, per enabled state (activation runbook §6)
 
 ## What Zoiko already provides
 

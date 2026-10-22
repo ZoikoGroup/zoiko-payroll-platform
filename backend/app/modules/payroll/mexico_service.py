@@ -64,6 +64,7 @@ OWNER_DECISIONS = (
     ("MX-D-RETENTION-PERIOD", "Retention period per record category", "MX-DECISION-RETENTION-PERIOD"),
     ("MX-D-RETENTION-END", "Deletion vs anonymisation at end of retention", "MX-DECISION-RETENTION-END"),
     ("MX-D-HOSTING", "Hosting and cross-border transfers (2025 privacy law)", "MX-DECISION-HOSTING"),
+    ("MX-D-Q9", "Q9 — Mexican identifiers (RFC, CURP, NSS, CLABE) at rest", "MX-DECISION-Q9"),     # Phase 10e
 )
 
 
@@ -105,14 +106,21 @@ def statutory_summary(db: Session) -> dict:
     gates = gate_states(db)
     signed = sum(g["state"] == "SIGNED" for g in gates)
     retention = retention_service.retention_policies(db, MX)
-    from app.modules.payroll import mexico_dormancy
+    from app.modules.payroll import mexico_dormancy, mexico_pilot_service
     from app.modules.billing.models import JurisdictionServiceRegistry
 
     row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == MX).first()
     registry = row.availability if row is not None else None
-    return {"jurisdiction": MX, "spec": SPEC,
-            "available": registry == service.SERVICE_REGISTRY_OPEN and mexico_dormancy.onboarding_enabled(),
-            "registry": registry, "onboardingEnabled": mexico_dormancy.onboarding_enabled(),
+    flag = mexico_dormancy.flag_enabled()
+    available = flag and registry == service.SERVICE_REGISTRY_OPEN
+    grants = mexico_pilot_service.list_grants(db)
+    active = [g for g in grants if g["state"] == "ACTIVE"]
+    level = "AVAILABLE" if available else (f"PILOT ({len(active)} organisation{'s' if len(active) != 1 else ''})"
+                                           if flag and active else "DORMANT")
+    return {"jurisdiction": MX, "spec": SPEC, "available": available, "level": level,
+            "registry": registry, "onboardingEnabled": flag,
+            "pilotGrants": grants, "pilotPreconditions": mexico_pilot_service.pilot_preconditions(db),
+            "gaPreconditions": mexico_pilot_service.ga_preconditions(db),
             "engineVersion": ENGINE_VERSION, "phase": 10, "gates": gates, "signedGates": signed,
             "decisions": owner_decisions(db),
             "retention": [{"category": c["category"], "label": c["label"], "state": c["state"],
@@ -120,9 +128,10 @@ def statutory_summary(db: Session) -> dict:
             "documents": {"releaseGates": RELEASE_GATES_DOC, "activationRunbook": ACTIVATION_RUNBOOK_DOC,
                           "releaseChecklist": RELEASE_CHECKLIST_DOC, "unknownRunbook": UNKNOWN_RUNBOOK_DOC},
             "note": f"Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22) — {signed}/8 signed. "
-                    "A gate is signed only by uploaded evidence reviewed by a second Super Admin; even then Mexico "
-                    "stays off until the activation runbook is followed. Every Mexican calculation is BLOCKED until "
-                    "its content is transcribed."}
+                    "A gate is signed only by uploaded evidence reviewed by a second Super Admin. The onboarding flag "
+                    "is a kill switch only: Mexico opens for everyone only when the registry is AVAILABLE (all eight "
+                    "gates, Q9, the identity key), or for one named organisation under an approved, non-binding "
+                    "pilot grant. Every Mexican calculation is BLOCKED until its content is transcribed."}
 
 
 # ---- Governance hooks ----
@@ -132,9 +141,10 @@ def transition_mx_service_registry(db: Session, target: str, reason: str, actor_
     """PLANNED <-> AVAILABLE. AVAILABLE is refused until every gate G1–G8 is
     signed (spec §22: approval of the build is not approval of live payroll)."""
     def readiness():
-        unmet = [{"key": f"mx_gate_{g['gate'].lower()}", "label": f"Gate {g['gate']} — {g['label']}",
-                  "detail": f"gate {g['gate']} is {g['state']}", "met": False}
-                 for g in gate_states(db) if g["state"] != "SIGNED"]
+        # Phase 10e: every gate SIGNED, Q9 RECORDED and the identity key configured.
+        from app.modules.payroll import mexico_pilot_service
+
+        unmet = [c for c in mexico_pilot_service.ga_preconditions(db) if not c["met"]]
         return unmet, {u["key"]: u["detail"] for u in unmet}
 
     return service.transition_service_registry(

@@ -23,10 +23,16 @@ SUPER_ADMIN = SimpleNamespace(id=990, organization_id=None, role="super_admin", 
 
 
 def enable_mx_onboarding(monkeypatch):
-    """Phase 4a: the Mexico organisation API is dormant unless the flag is on."""
+    """Phase 4a: the Mexico organisation API is dormant unless the flag is on.
+    Phase 10e: the flag is only a kill switch — this simulates GENERAL
+    AVAILABILITY too (the registry AVAILABLE), so Mexico's domain tests run
+    open. The two-level gate itself is tested in test_mexico_pilot.py with
+    the real registry and real grants."""
     from app.config import settings
+    from app.modules.payroll import mexico_dormancy
 
     monkeypatch.setattr(settings, "MX_TENANT_ONBOARDING_ENABLED", True)
+    monkeypatch.setattr(mexico_dormancy, "registry_available", lambda db: True)
 
 
 @contextmanager

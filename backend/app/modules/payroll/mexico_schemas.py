@@ -42,7 +42,11 @@ class MXReadinessResponse(BaseModel):
     jurisdiction: str
     spec: str
     available: bool
+    level: str = "DORMANT"                 # DORMANT / PILOT (n organisations) / AVAILABLE
     registry: Optional[str] = None          # PLANNED / AVAILABLE
+    pilotGrants: List[dict] = []
+    pilotPreconditions: List[dict] = []
+    gaPreconditions: List[dict] = []
     onboardingEnabled: bool = False
     engineVersion: str
     phase: int

@@ -86,9 +86,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
     here = os.getcwd()
     os.chdir(Path(__file__).resolve().parents[1])
     try:
-        tables, _ = pending_objects("f84626be0cb1")              # production since PR #118
-        assert tables == {"payroll_mx_payment_batches", "payroll_mx_payment_items", "payroll_mx_journal_mappings",
-                          "payroll_mx_journal_exports"}
+        tables, _ = pending_objects("b3f7c1e9d5a2")              # production since PR #119
+        assert tables == {"payroll_mx_pilot_grants", "payroll_mx_master_copies"}   # production is at b3f7c1e9d5a2
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

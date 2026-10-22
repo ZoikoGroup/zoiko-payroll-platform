@@ -59,10 +59,18 @@ def _s(value) -> Optional[str]:
 def guard(db: Session, org_id: int) -> None:
     from app.modules.payroll import mexico_dormancy, service
 
-    if not mexico_dormancy.onboarding_enabled():
+    if not mexico_dormancy.onboarding_enabled(db, org_id):
         raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
     if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
         raise MXBlock("MX_ORG_NOT_MEXICAN", "the organisation's payroll jurisdiction is not Mexico", org_id)
+
+
+def _filing_pilot_refusal(db: Session, org_id: int) -> None:
+    """Phase 10e: a pilot organisation never files with or pays an authority
+    (MX_PILOT_NO_FILINGS); reconciliation stays available."""
+    from app.modules.payroll import mexico_pilot_service
+
+    mexico_pilot_service.refuse_filings(db, org_id)
 
 
 def committed_runs(db: Session, org_id: int) -> list:
@@ -234,6 +242,7 @@ def file_liability(db: Session, org_id: int, liability_id: int, reference: str, 
     """Record the declaration (ISR monthly remittance, IMSS / INFONAVIT via
     SUA, ISN via its return) as filed, with the authority's reference."""
     guard(db, org_id)
+    _filing_pilot_refusal(db, org_id)
     liab = _liability(db, org_id, liability_id)
     if liab.authority == "ISN":
         raise BadRequestException("An ISN liability is filed through its state return (ISN returns)")
@@ -254,6 +263,7 @@ def file_liability(db: Session, org_id: int, liability_id: int, reference: str, 
 def pay_liability(db: Session, org_id: int, liability_id: int, reference: str, actor_id, evidence_ref=None) -> dict:
     """Record a payment made OUTSIDE Zoiko (no money moves here — Phase 10)."""
     guard(db, org_id)
+    _filing_pilot_refusal(db, org_id)
     liab = _liability(db, org_id, liability_id)
     if liab.status != "FILED":
         raise BadRequestException(f"Only a FILED liability can be recorded as paid (this one is {liab.status})")
@@ -483,6 +493,7 @@ def record_sua_payment(db: Session, org_id: int, period_id: int, reference: str,
                        actor_id, evidence_ref=None) -> dict:
     """SIPARE payment made OUTSIDE Zoiko (layout X1, bank Phase 10)."""
     guard(db, org_id)
+    _filing_pilot_refusal(db, org_id)
     period = _sua(db, org_id, period_id)
     if period.status != "RECONCILED":
         raise BadRequestException(f"Only a RECONCILED SUA period can be recorded as paid (this one is {period.status})")
@@ -622,6 +633,7 @@ def _return(db: Session, org_id: int, return_id: int):
 
 def file_isn_return(db: Session, org_id: int, return_id: int, reference: str, actor_id, evidence_ref=None) -> dict:
     guard(db, org_id)
+    _filing_pilot_refusal(db, org_id)
     ret = _return(db, org_id, return_id)
     if ret.status != "DRAFT":
         raise BadRequestException(f"Only a DRAFT return can be filed (this one is {ret.status})")
@@ -654,6 +666,7 @@ def _file_isn_liabilities(db: Session, org_id: int, ret, ref: str, actor_id) -> 
 
 def record_isn_outcome(db: Session, org_id: int, return_id: int, outcome: str, actor_id) -> dict:
     guard(db, org_id)
+    _filing_pilot_refusal(db, org_id)
     ret = _return(db, org_id, return_id)
     outcome = (outcome or "").upper()
     if outcome not in ("ACCEPTED", "REJECTED"):

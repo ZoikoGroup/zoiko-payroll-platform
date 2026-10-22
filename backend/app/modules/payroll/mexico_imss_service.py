@@ -185,11 +185,19 @@ def _movement(db: Session, org_id: int, movement_id: int):
     return L.load(db, "MOVEMENT", org_id, movement_id)
 
 
+def _imss_pilot_refusal(db: Session, org_id: int) -> None:
+    """Phase 10e: a pilot organisation never files with IMSS (MX_PILOT_NO_FILINGS)."""
+    from app.modules.payroll import mexico_pilot_service
+
+    mexico_pilot_service.refuse_filings(db, org_id)
+
+
 def export_worklist(db: Session, org_id: int, actor_id, movement_ids: Optional[list] = None) -> dict:
     """The operator's worklist for keying into IDSE (D1 / D12): built on
     request, returned once, never stored; marks the movements EXPORTED and
     freezes their payload (a retry re-exports exactly the same facts)."""
     F.guard(db, org_id)
+    _imss_pilot_refusal(db, org_id)
     m = L.models()
     M = m.PayrollMxImssMovement
     q = db.query(M).filter(M.organization_id == org_id, M.status == "PENDING")
@@ -236,6 +244,7 @@ def export_worklist(db: Session, org_id: int, actor_id, movement_ids: Optional[l
 def record_outcome(db: Session, org_id: int, movement_id: int, outcome: str, actor_id, reference: Optional[str] = None,
                    evidence_ref: Optional[str] = None, reason: Optional[str] = None) -> dict:
     F.guard(db, org_id)
+    _imss_pilot_refusal(db, org_id)
     mv = _movement(db, org_id, movement_id)
     outcome = (outcome or "").upper()
     if outcome == "FILED":
