@@ -30,6 +30,7 @@ always be replayed against the exact rows it used (lookup_qst_rate).
 """
 
 import hashlib
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Dict, List, Optional, Tuple
@@ -1138,6 +1139,84 @@ def _block(blocked: list, key: str, reason: str) -> None:
 
 def _valid_canton(value) -> bool:
     return value in CH_CANTON_CODES
+
+
+# ── Worker CH profile write path (CH-004 / CH-E1) ────────────────────────────
+# The ch_* facts resolve_ch_calc_inputs reads. Without a write path every real
+# Swiss employee blocked on ch_work_canton / ch_qst_subject / ch_uvg_policy.
+# The AHV number is not among them: it lives once, in compliance_fields.
+CH_PROFILE_FIELDS = (
+    "ch_work_canton", "ch_residence_canton", "ch_qst_canton", "ch_residence_country", "ch_nationality",
+    "ch_permit_type", "ch_cross_border", "ch_ahv_status", "ch_alv_subject", "ch_weekly_hours",
+    "ch_multiple_employment", "ch_other_employment_pct", "ch_qst_subject", "ch_qst_tariff_code",
+    "ch_marital_status", "ch_spouse_employed", "ch_children_count", "ch_church_tax",
+    "ch_bvg_plan_scheme_id", "ch_uvg_policy_scheme_id", "ch_ktg_policy_scheme_id", "ch_uvg_risk_class",
+    "ch_contract_end", "ch_wage_floor_agreement_id", "ch_occupation", "ch_grade", "ch_experience_years",
+    "ch_evidence_document_id",
+)
+_CH_PROFILE_SCHEMES = {"ch_bvg_plan_scheme_id": "BVG_PLAN", "ch_uvg_policy_scheme_id": "UVG_POLICY",
+                       "ch_ktg_policy_scheme_id": "KTG_POLICY"}
+_UPPER = ("ch_work_canton", "ch_residence_canton", "ch_qst_canton", "ch_residence_country", "ch_nationality",
+          "ch_qst_subject", "ch_qst_tariff_code", "ch_marital_status", "ch_permit_type", "ch_uvg_risk_class")
+
+
+def ch_statutory_profile_errors(data) -> list:
+    """Shape errors for the ch_* facts SENT in this request (the resolver's own
+    vocabularies, so the two can never drift). Completeness is the resolver's
+    job at calculation time — a draft profile may be filled in over time."""
+    sent = getattr(data, "model_fields_set", set())
+    get = lambda k: getattr(data, k, None) if k in sent else None  # noqa: E731
+    errors = []
+    for key in ("ch_work_canton", "ch_residence_canton", "ch_qst_canton"):
+        value = get(key)
+        if value is not None and not _valid_canton(str(value).upper()):
+            errors.append(f"{key} must be a CH-XX canton code (got {value!r}).")
+    for key in ("ch_residence_country", "ch_nationality"):
+        value = get(key)
+        if value is not None and not re.fullmatch(r"[A-Za-z]{2}", str(value)):
+            errors.append(f"{key} must be a 2-letter ISO country code (got {value!r}).")
+    subject = get("ch_qst_subject")
+    if subject is not None and str(subject).upper() not in CH_QST_SUBJECT_VALUES:
+        errors.append(f"ch_qst_subject must be one of {list(CH_QST_SUBJECT_VALUES)} (got {subject!r}).")
+    hours = get("ch_weekly_hours")
+    if hours is not None and not (Decimal("0") < Decimal(str(hours)) <= Decimal("168")):
+        errors.append("ch_weekly_hours must be more than 0 and at most 168.")
+    pct = get("ch_other_employment_pct")
+    if pct is not None and not (Decimal("0") <= Decimal(str(pct)) <= Decimal("100")):
+        errors.append("ch_other_employment_pct must be between 0 and 100.")
+    for key in ("ch_children_count", "ch_experience_years"):
+        value = get(key)
+        if value is not None and Decimal(str(value)) < 0:
+            errors.append(f"{key} cannot be negative.")
+    end = get("ch_contract_end")
+    if end is not None and getattr(data, "effective_from", None) and end < data.effective_from:
+        errors.append("ch_contract_end cannot be before the profile's effective date.")
+    return errors
+
+
+def ch_statutory_profile_values(db: Session, employee, data, latest) -> dict:
+    """The ch_* column values of a new CH profile version: each field sent in
+    this request, else carried forward from the previous version. Scheme ids
+    must name a scheme of the right type that belongs to the employee's
+    organisation (or is platform-wide)."""
+    from app.modules.payroll.models import ChSchemeProfile
+
+    sent = getattr(data, "model_fields_set", set())
+    values = {}
+    for key in CH_PROFILE_FIELDS:
+        if key in sent:
+            value = getattr(data, key, None)
+            values[key] = str(value).upper() if (value is not None and key in _UPPER) else value
+        else:
+            values[key] = getattr(latest, key, None) if latest is not None else None
+    for key, scheme_type in _CH_PROFILE_SCHEMES.items():
+        if key not in sent or values[key] is None:
+            continue
+        scheme = db.get(ChSchemeProfile, values[key])
+        if (scheme is None or scheme.scheme_type != scheme_type
+                or scheme.organization_id not in (None, getattr(employee, "organization_id", None))):
+            raise BadRequestException(f"{key} {values[key]} is not a {scheme_type} scheme of this organisation.")
+    return values
 
 
 def resolve_ch_calc_inputs(db: Session, organization_id: int, employee, payroll_date: date,

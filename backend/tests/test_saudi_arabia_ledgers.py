@@ -414,3 +414,26 @@ def test_correction_preview_returns_json_deltas(db, organization):
     preview = svc.sa_replay(frozen, baseline_totals=item.sa_calculation_snapshot["totalsAll"])
     json.dumps(preview)
     assert Decimal(preview["deltas"]["employee_pension"]) == Decimal("-475.00")
+
+
+# ── SA-E1: preflight / readiness see the GOSI branches of the real pack ──────
+def test_gosi_branches_of_the_seeded_pack_are_found():
+    from types import SimpleNamespace
+
+    from app.modules.payroll.engine.countries import saudi_arabia_content as content
+
+    slabs = [SimpleNamespace(rule_type="SA_GOSI_BRANCH", tax_regime=branch)
+             for (_cls, branch, *_rest) in content.SA_GOSI_BRANCHES]
+    assert svc._missing_gosi_branches(slabs) == []
+    assert svc._missing_gosi_branches([s for s in slabs if s.tax_regime != "SANED"]) == ["SANED"]
+
+
+def test_run_preflight_no_longer_blocks_on_gosi_branches(db, organization):
+    pack = svc.seed_saudi_arabia_pack(db)
+    pack.status = "Active"
+    db.flush()
+    run = _run(db, organization)
+    _payslip(db, organization, run, _employee(db, organization))
+    keys = {b.get("key") for b in svc.sa_run_preflight(db, run)}
+    assert "SA_PACK_NOT_ACTIVE" not in keys                            # the pack WAS found, so the check ran
+    assert "SA_GOSI_BRANCHES_MISSING" not in keys                      # was raised for every pack

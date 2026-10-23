@@ -410,6 +410,40 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     mx_annual_adjustment_exclusion: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusion")
     mx_annual_adjustment_exclusion_evidence_ref: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusionEvidenceRef")
 
+    # ch_* block (ZP-CH-ENG-001 §13, CH-004) — the worker facts the Swiss resolver
+    # reads (cantons, QST, BVG/UVG/KTG schemes, ...). Validated by
+    # switzerland_service.ch_statutory_profile_errors / _values; fields not sent
+    # carry forward. The AHV number is NOT here: it lives once, in the validated
+    # compliance_fields["ahv_number"] (no second writable copy).
+    ch_work_canton: Optional[str] = Field(None, validation_alias="chWorkCanton")
+    ch_residence_canton: Optional[str] = Field(None, validation_alias="chResidenceCanton")
+    ch_qst_canton: Optional[str] = Field(None, validation_alias="chQstCanton")
+    ch_residence_country: Optional[str] = Field(None, validation_alias="chResidenceCountry")
+    ch_nationality: Optional[str] = Field(None, validation_alias="chNationality")
+    ch_permit_type: Optional[str] = Field(None, validation_alias="chPermitType")
+    ch_cross_border: Optional[bool] = Field(None, validation_alias="chCrossBorder")
+    ch_ahv_status: Optional[str] = Field(None, validation_alias="chAhvStatus")
+    ch_alv_subject: Optional[bool] = Field(None, validation_alias="chAlvSubject")
+    ch_weekly_hours: Optional[Decimal] = Field(None, validation_alias="chWeeklyHours")
+    ch_multiple_employment: Optional[bool] = Field(None, validation_alias="chMultipleEmployment")
+    ch_other_employment_pct: Optional[Decimal] = Field(None, validation_alias="chOtherEmploymentPct")
+    ch_qst_subject: Optional[str] = Field(None, validation_alias="chQstSubject")
+    ch_qst_tariff_code: Optional[str] = Field(None, validation_alias="chQstTariffCode")
+    ch_marital_status: Optional[str] = Field(None, validation_alias="chMaritalStatus")
+    ch_spouse_employed: Optional[bool] = Field(None, validation_alias="chSpouseEmployed")
+    ch_children_count: Optional[int] = Field(None, validation_alias="chChildrenCount")
+    ch_church_tax: Optional[bool] = Field(None, validation_alias="chChurchTax")
+    ch_bvg_plan_scheme_id: Optional[int] = Field(None, validation_alias="chBvgPlanSchemeId")
+    ch_uvg_policy_scheme_id: Optional[int] = Field(None, validation_alias="chUvgPolicySchemeId")
+    ch_ktg_policy_scheme_id: Optional[int] = Field(None, validation_alias="chKtgPolicySchemeId")
+    ch_uvg_risk_class: Optional[str] = Field(None, validation_alias="chUvgRiskClass")
+    ch_contract_end: Optional[date] = Field(None, validation_alias="chContractEnd")
+    ch_wage_floor_agreement_id: Optional[int] = Field(None, validation_alias="chWageFloorAgreementId")
+    ch_occupation: Optional[str] = Field(None, validation_alias="chOccupation")
+    ch_grade: Optional[str] = Field(None, validation_alias="chGrade")
+    ch_experience_years: Optional[Decimal] = Field(None, validation_alias="chExperienceYears")
+    ch_evidence_document_id: Optional[int] = Field(None, validation_alias="chEvidenceDocumentId")
+
     # br_* block (ZP-BR-ENG-001 §7, Phase 4b) — the CLT employee statutory facts.
     # Validated by brazil_employee_service (statutory_profile_errors / _values);
     # fields not sent carry forward; br_establishment_id must be the org's own
@@ -645,6 +679,36 @@ class EmployeeStatutoryProfileResponse(BaseModel):
         serialization_alias="mainSecondaryConsistencyWarning",
     )
 
+    # ── Switzerland (ZP-CH-ENG-001 §13) — the ch_* worker facts (AHV lives in
+    # compliance_fields, not here) ──
+    chWorkCanton: Optional[str] = Field(None, validation_alias="ch_work_canton", serialization_alias="chWorkCanton")
+    chResidenceCanton: Optional[str] = Field(None, validation_alias="ch_residence_canton", serialization_alias="chResidenceCanton")
+    chQstCanton: Optional[str] = Field(None, validation_alias="ch_qst_canton", serialization_alias="chQstCanton")
+    chResidenceCountry: Optional[str] = Field(None, validation_alias="ch_residence_country", serialization_alias="chResidenceCountry")
+    chNationality: Optional[str] = Field(None, validation_alias="ch_nationality", serialization_alias="chNationality")
+    chPermitType: Optional[str] = Field(None, validation_alias="ch_permit_type", serialization_alias="chPermitType")
+    chCrossBorder: Optional[bool] = Field(None, validation_alias="ch_cross_border", serialization_alias="chCrossBorder")
+    chAhvStatus: Optional[str] = Field(None, validation_alias="ch_ahv_status", serialization_alias="chAhvStatus")
+    chAlvSubject: Optional[bool] = Field(None, validation_alias="ch_alv_subject", serialization_alias="chAlvSubject")
+    chWeeklyHours: Optional[Decimal] = Field(None, validation_alias="ch_weekly_hours", serialization_alias="chWeeklyHours")
+    chMultipleEmployment: Optional[bool] = Field(None, validation_alias="ch_multiple_employment", serialization_alias="chMultipleEmployment")
+    chOtherEmploymentPct: Optional[Decimal] = Field(None, validation_alias="ch_other_employment_pct", serialization_alias="chOtherEmploymentPct")
+    chQstSubject: Optional[str] = Field(None, validation_alias="ch_qst_subject", serialization_alias="chQstSubject")
+    chQstTariffCode: Optional[str] = Field(None, validation_alias="ch_qst_tariff_code", serialization_alias="chQstTariffCode")
+    chMaritalStatus: Optional[str] = Field(None, validation_alias="ch_marital_status", serialization_alias="chMaritalStatus")
+    chSpouseEmployed: Optional[bool] = Field(None, validation_alias="ch_spouse_employed", serialization_alias="chSpouseEmployed")
+    chChildrenCount: Optional[int] = Field(None, validation_alias="ch_children_count", serialization_alias="chChildrenCount")
+    chChurchTax: Optional[bool] = Field(None, validation_alias="ch_church_tax", serialization_alias="chChurchTax")
+    chBvgPlanSchemeId: Optional[int] = Field(None, validation_alias="ch_bvg_plan_scheme_id", serialization_alias="chBvgPlanSchemeId")
+    chUvgPolicySchemeId: Optional[int] = Field(None, validation_alias="ch_uvg_policy_scheme_id", serialization_alias="chUvgPolicySchemeId")
+    chKtgPolicySchemeId: Optional[int] = Field(None, validation_alias="ch_ktg_policy_scheme_id", serialization_alias="chKtgPolicySchemeId")
+    chUvgRiskClass: Optional[str] = Field(None, validation_alias="ch_uvg_risk_class", serialization_alias="chUvgRiskClass")
+    chContractEnd: Optional[date] = Field(None, validation_alias="ch_contract_end", serialization_alias="chContractEnd")
+    chWageFloorAgreementId: Optional[int] = Field(None, validation_alias="ch_wage_floor_agreement_id", serialization_alias="chWageFloorAgreementId")
+    chOccupation: Optional[str] = Field(None, validation_alias="ch_occupation", serialization_alias="chOccupation")
+    chGrade: Optional[str] = Field(None, validation_alias="ch_grade", serialization_alias="chGrade")
+    chExperienceYears: Optional[Decimal] = Field(None, validation_alias="ch_experience_years", serialization_alias="chExperienceYears")
+    chEvidenceDocumentId: Optional[int] = Field(None, validation_alias="ch_evidence_document_id", serialization_alias="chEvidenceDocumentId")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 

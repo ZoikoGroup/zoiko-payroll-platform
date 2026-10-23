@@ -20161,7 +20161,10 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
         brazil_inputs = (
             jurisdiction_hooks.call("BR", "calc_inputs", db, None, emp, None,
-                                    as_of=period_end or date.today())
+                                    as_of=period_end or date.today(),
+                                    monthly={"basic": basic, "hra": hra, "special": special,
+                                             "allowances": allowance_total, "overtime": overtime,
+                                             "additional": additional_compensation})
             if emp_country == "BR" else None
         )
         # Switzerland (CH spec): every resolver check, read-only; a blocked
@@ -25314,7 +25317,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
     # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
     brazil_inputs = (
-        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, resolved_pack)
+        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, resolved_pack,
+                                monthly={"basic": basic, "hra": hra, "special": special,
+                                         "allowances": allowance_total, "overtime": overtime,
+                                         "additional": additional_compensation})
         if country == "BR" else None
     )
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
@@ -27555,6 +27561,8 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         errors.extend(_se_profile_field_errors(data))
     if country_code == "IT":
         errors.extend(_it_profile_field_errors(data))
+    if country_code == "CH":
+        errors.extend(_switzerland_service.ch_statutory_profile_errors(data))
 
     if errors:
         raise BadRequestException("; ".join(errors))
@@ -27832,6 +27840,16 @@ def create_employee_statutory_profile_version(
                                                       EmployeeStatutoryProfile.effective_from < data.effective_from)
             .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
         for col, value in jurisdiction_hooks.call(country_code, "statutory_profile_values", db, employee, data, latest).items():
+            setattr(row, col, value)
+    if country_code == "CH":
+        # Switzerland is not a jurisdiction_hooks module (its other hooks do not
+        # exist), so its profile facts are wired here, like SE / IT above.
+        latest_ch = previous_open or (
+            db.query(EmployeeStatutoryProfile).filter(EmployeeStatutoryProfile.employee_id == employee_id,
+                                                      EmployeeStatutoryProfile.country_code == "CH",
+                                                      EmployeeStatutoryProfile.effective_from < data.effective_from)
+            .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
+        for col, value in _switzerland_service.ch_statutory_profile_values(db, employee, data, latest_ch).items():
             setattr(row, col, value)
     db.add(row)
     db.commit()
@@ -32103,7 +32121,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
     # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
     brazil_inputs = (
-        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, None)
+        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, None,
+                                monthly={"basic": data.basic_salary, "hra": data.hra,
+                                         "special": data.special_allowance, "overtime": data.overtime})
         if country == "BR" else None
     )
     # Netherlands: refuses (409) once the run's NL ledgers are committed.

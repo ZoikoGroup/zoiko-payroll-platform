@@ -508,6 +508,18 @@ def _sa_pack_rows(db: Session, pack):
     return rates, slabs
 
 
+SA_GOSI_BRANCH_REGIMES = ("PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS")
+
+
+def _missing_gosi_branches(slabs) -> list:
+    """GOSI branch regimes with no SA_GOSI_BRANCH row. The branch is the row's
+    tax_regime; its rule_type is always "SA_GOSI_BRANCH" (checking branch
+    names against rule_type made every readiness check and run preflight
+    BLOCK)."""
+    present = {s.tax_regime for s in slabs if getattr(s, "rule_type", None) == "SA_GOSI_BRANCH"}
+    return [r for r in SA_GOSI_BRANCH_REGIMES if r not in present]
+
+
 def get_sa_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
     """Super Admin release gates for one Saudi tax pack — read-only.
     Gates that depend on work outside this platform (specialist review,
@@ -546,9 +558,7 @@ def get_sa_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
     add("parameters", "Scalar parameters configured (thresholds, caps, floors, ceilings)", not missing,
         "Missing: " + ", ".join(missing) if missing else f"All {len(required)} required parameters configured.")
 
-    branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-    gosi_branches = {s.tax_regime for s in slabs if getattr(s, "rule_type", None) == "SA_GOSI_BRANCH"}
-    absent_branches = [r for r in branch_regimes if r not in gosi_branches]
+    absent_branches = _missing_gosi_branches(slabs)
     add("gosi_branches", "GOSI branch rows for every worker class (PENSION_NEW/LEGACY, SANED, OCCUPATIONAL_HAZARDS)",
         not absent_branches, "Missing branch regimes: " + ", ".join(absent_branches) if absent_branches
         else "All four GOSI branch regimes present.")
@@ -809,8 +819,7 @@ def sa_employer_readiness(db: Session, organization_id: int, today: Optional[dat
         if missing:
             checks.append({"severity": "BLOCK", "message": "Missing scalar parameters: " + ", ".join(missing),
                            "source": "tax_resolver", "action": "Configure the missing parameters in the SA pack"})
-        branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-        absent_branches = [r for r in branch_regimes if r not in rule_types]
+        absent_branches = _missing_gosi_branches(slabs)
         if absent_branches:
             checks.append({"severity": "BLOCK", "message": "Missing GOSI branch regimes: " + ", ".join(absent_branches),
                            "source": "tax_resolver", "action": "Add the missing GOSI branch rows to the SA pack"})
@@ -927,8 +936,7 @@ def sa_run_preflight(db: Session, run) -> list:
                            "action": "Configure the missing parameters in the SA pack"})
 
         # 3. GOSI branch completeness
-        branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-        absent_branches = [r for r in branch_regimes if r not in rule_types]
+        absent_branches = _missing_gosi_branches(slabs)
         if absent_branches:
             blocks.append({"employeeId": None, "key": "SA_GOSI_BRANCHES_MISSING",
                            "reason": "Missing GOSI branch regimes: " + ", ".join(absent_branches),

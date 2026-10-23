@@ -101,14 +101,41 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
 
 # ---- Calculation and run hooks (Phase 6) ----
 
+_MONTHLY_KEYS = ("basic", "hra", "special", "allowances", "overtime", "additional")
+
+
+def _br_earnings(monthly: Optional[dict], org_id) -> tuple:
+    """(contract_salary, earnings) from the payslip's MONTHLY pay components.
+
+    The base salary is the BR_SALARIO_BASE rubric. Any other non-zero component
+    has no eSocial rubric mapping yet (13th / vacation / overtime / allowance
+    rubrics are Phase 7+), so it BLOCKS — its INSS / IRRF / FGTS incidence is
+    never guessed."""
+    if monthly is None:
+        raise BRBlock("BR_MISSING_INPUT", "the payslip's monthly pay components were not supplied", org_id)
+    amounts = {k: Decimal(str(monthly.get(k) or 0)) for k in _MONTHLY_KEYS}
+    unmapped = sorted(k for k in _MONTHLY_KEYS[1:] if amounts[k] != 0)
+    if unmapped:
+        raise BRBlock("BR_UNMAPPED_EARNING",
+                      "no eSocial rubric mapping yet for " + ", ".join(f"{k} {amounts[k]}" for k in unmapped)
+                      + " — Brazil pays the base salary only until the earning rubrics are mapped (Phase 7)", org_id)
+    if amounts["basic"] <= 0:
+        raise BRBlock("BR_MISSING_INPUT", "monthly base salary must be positive", org_id)
+    return amounts["basic"], [{"rubricCode": "BR_SALARIO_BASE", "amount": str(amounts["basic"])}]
+
+
 def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmployee,
-                resolved_pack=None, as_of: Optional[date] = None) -> dict:
+                resolved_pack=None, as_of: Optional[date] = None, monthly: Optional[dict] = None) -> dict:
     """
     Resolve all Brazil-specific calc inputs for one employee's payslip.
 
-    Returns a dict shaped for PayrollContext.brazil_inputs. Called at all three
-    calculation sites: preview, _compute_payslip_values, add_payslip_item.
-    Never writes; read-only. Validates org consistency of profile/establishment/employer.
+    Returns PayrollContext FIELDS ({"brazil_inputs": {...}, "brazil_organization_id": id})
+    — the resolver splats them into the context; the engine reads every input
+    from ctx.brazil_inputs. (It used to return the inner dict flat, so every
+    in-app calculation raised TypeError.) `monthly` is the payslip's MONTHLY
+    split {basic, hra, special, allowances, overtime, additional} — the
+    contract salary is the monthly basic, never employee.basic (an ANNUAL
+    figure). Called at all three calculation sites. Never writes.
     """
     org_id = employee.organization_id
     pay_date = as_of or getattr(run, "pay_date", None) or date.today()
@@ -155,8 +182,8 @@ def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmploye
                       f"no active RAT/FAP assignment for establishment {est.id} in {competence_month.year}",
                       org_id)
 
-    # 5. Contract salary from employee's basic pay or profile
-    contract_salary = Decimal(str(employee.basic or employee.gross or "0"))
+    # 5. Contract salary and earnings from the MONTHLY pay components
+    contract_salary, earnings = _br_earnings(monthly, org_id)
 
     # 6. Concurrent INSS declaration for this competence month (if any)
     conc = db.query(PayrollBrConcurrentInssDeclaration).filter(
@@ -199,12 +226,7 @@ def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmploye
     # 11. Labor rates for the competence month
     ot_50, ot_100, night_pct, night_min, dsr_flag = labor_rates(competence_month)
 
-    # Build earnings from base + variable components (Phase 6: simplified — real run
-    # will derive from attendance/allowances; here we return the contract salary as base earning)
-    # The caller (service.py) will assemble earnings from PayslipItem components
-    earnings = []  # Populated by _resolve_payslip_generation_inputs from allowance components
-
-    return {
+    inputs = {
         "competence_month": competence_month.isoformat(),
         "esocial_category": profile.br_esocial_category or "101",
         "contract_salary": str(contract_salary),
@@ -220,10 +242,8 @@ def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmploye
         "concurrent_inss_base": Decimal(str(conc.base_external)) if conc else None,
         "concurrent_inss_deducted": Decimal(str(conc.deducted_external)) if conc else None,
         "earnings": earnings,
-        # Engine metadata (not passed to calculate())
-        "_engine_version": ENGINE_VERSION,
-        "_content_hash": None,  # filled by engine result
     }
+    return {"brazil_inputs": inputs, "brazil_organization_id": org_id}
 
 
 def _resolve_alimony_amount(alimony: PayrollBrAlimonyOrder, contract_salary: Decimal) -> Decimal:
