@@ -11031,6 +11031,80 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/bank-result",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "bank-result",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nl_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/file",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "file",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/reconcile",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nl_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/submit",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "submit",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nl_payment_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/netherlands/pension-schemes",
    "data_class": "tenant_config",
@@ -11192,6 +11266,26 @@
     "payroll_employees",
     "payroll_nl_payment_items",
     "payroll_nl_vcr_snapshots",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/netherlands/runs/{run_id}/salary-batch/preview",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preview",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
     "payslip_items"
    ],
    "overridden": false
