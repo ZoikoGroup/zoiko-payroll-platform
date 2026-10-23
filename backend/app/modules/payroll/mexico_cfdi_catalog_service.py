@@ -34,7 +34,10 @@ SYSTEM_CONCEPTS = {
     "AGUINALDO": "Special payment: aguinaldo (special-pay kind AGUINALDO)",
     "VACATION_PREMIUM": "Special payment: vacation premium (special-pay kind VACATION_PREMIUM)",
     "PTU": "Special payment: profit sharing (special-pay kind PTU)",
-    "SEPARATION": "Special payment: separation (special-pay kind SEPARATION)",
+    "VACATION_PAYOUT": "Finiquito: vacation days paid out (special-pay kind VACATION_PAYOUT)",
+    "SEPARATION_SENIORITY_PREMIUM": "Separation: seniority premium (kind SEPARATION_SENIORITY_PREMIUM)",
+    "SEPARATION_PAYMENT": "Separation: separation payment (kind SEPARATION_PAYMENT)",
+    "SEPARATION_INDEMNITY": "Separation: indemnity (kind SEPARATION_INDEMNITY)",
     "ANNUAL_ADJUSTMENT_REFUND": "Annual ISR adjustment in the employee's favour (result.annual_adjustment)",
     "ANNUAL_ADJUSTMENT_CHARGE": "Annual ISR adjustment charged to the employee (result.annual_adjustment)",
 }

@@ -98,7 +98,8 @@ def test_no_salary_line_blocks():
     assert "MX_SALARY_LINE_MISSING" in codes
 
 
-@pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION"])
+@pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION_SENIORITY_PREMIUM",
+                                  "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"])
 def test_special_pays_block_without_their_transcribed_rule(kind):
     """Phase 9b: a special payment is routed to its own rule (never the
     ordinary tariff, MX-009); with no rule transcribed it blocks."""

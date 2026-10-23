@@ -49,6 +49,10 @@
     "tdCFDI.xsd": "b3b81fe4017b95d5477f23a32f47e8b0571683cfddfff1330508c75e02b504cd"
   },
   "generator": "scripts/mx_build_cfdi_schema_set.py",
+  "schemaLocations": {
+    "http://www.sat.gob.mx/cfd/4": "http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd",
+    "http://www.sat.gob.mx/nomina12": "http://www.sat.gob.mx/sitio_internet/cfd/nomina/nomina12.xsd"
+  },
   "setId": "sat_2026_08",
   "sources": {
     "S28_SAT_catNomina.xls": {

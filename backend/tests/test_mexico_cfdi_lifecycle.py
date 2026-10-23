@@ -40,11 +40,19 @@ def test_production_seams_refuse_and_nothing_is_created(db, monkeypatch, tmp_pat
     S = _S()
     from app.modules.payroll import mexico_cfdi_builder as B
 
+    from app.modules.payroll import mexico_cfdi_schema
+
     w = ch.committed_world(db, monkeypatch, tmp_path)
     monkeypatch.setattr(B, "_BUILDER", B.SatBuilder())
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(Exception) as exc:                 # Phase 11b: the builder runs, but only on a release
+        S.generate(db, w.run, w.users[0].id)              # loaded from a verified pinned set (this one is synthetic)
+    assert exc.value.key == "MX_CFDI_SCHEMA_SET_UNUSABLE"
+    db.rollback()
+    monkeypatch.setattr(mexico_cfdi_schema, "ROOT", tmp_path / "no-pinned-sets")
+    with pytest.raises(Exception) as exc:                 # no verified pinned set installed at all
         S.generate(db, w.run, w.users[0].id)
-    assert exc.value.key == "MX_CFDI_BUILDER_BLOCKED"
+    assert exc.value.key in ("MX_CFDI_BUILDER_BLOCKED", "MX_CFDI_SCHEMA_SET_UNUSABLE")
+    assert B.SatBuilder().blocked().key == "MX_CFDI_BUILDER_BLOCKED"
     db.rollback()
     monkeypatch.setattr(B, "_BUILDER", ch.SyntheticBuilder())
     monkeypatch.setattr(B, "_SIGNER", B.GcpSmSigner())

@@ -47,8 +47,9 @@ def test_super_admin_overview_is_read_only_and_names_the_blocks(db, monkeypatch,
     with http(db, SUPER_ADMIN) as c:
         out = c.get(f"/api/super-admin/compliance/mexico/cfdi?organization_id={w.org.id}").json()
     assert out["total"] == 0 and out["schemaRelease"]["cfdiVersion"] == "4.0"
-    assert {b["code"] for b in out["blocked"]} == {"MX_CFDI_BUILDER_BLOCKED", "MX_CSD_SIGNING_BLOCKED",
-                                                   "MX_PAC_NOT_CONFIGURED"}
+    # Phase 11b: with the verified pinned SAT set installed the builder is no
+    # longer blocked; signing (X4) and the PAC (X3) still are.
+    assert {b["code"] for b in out["blocked"]} == {"MX_CSD_SIGNING_BLOCKED", "MX_PAC_NOT_CONFIGURED"}
 
 
 def test_super_admin_overview_probes_the_seams_without_calling_them(db, monkeypatch, tmp_path):
