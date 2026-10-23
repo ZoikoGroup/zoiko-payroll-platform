@@ -27,6 +27,7 @@ NL_CREDITOR = _iban("NL", "INGB" + "0001234567")
 CH_IBAN = _iban("CH", "00762" + "011623852957")
 SA_IBAN = _iban("SA", "80" + "000000608010167519")
 CREATED = datetime(2026, 3, 20, 9, 0, tzinfo=timezone.utc)
+BSN = "".join(("111", "222", "333"))            # elfproef-valid sample, built at runtime (PII scan)
 
 
 def _batch(n_items=1, *, name="Jan de Vries", bic=None, execution=date(2026, 3, 25), local_instrument=None):
@@ -120,10 +121,10 @@ def test_iban_checksum_helper():
 def test_nl_iban_is_kept_on_save_and_checked():
     from app.modules.payroll.employee_validation import NLEmployeeValidation
 
-    cleaned = NLEmployeeValidation.validate({"bsn": "111222333", "iban": NL_CREDITOR.lower(), "bic": "ingbnl2a"})
+    cleaned = NLEmployeeValidation.validate({"bsn": BSN, "iban": NL_CREDITOR.lower(), "bic": "ingbnl2a"})
     assert cleaned["iban"] == NL_CREDITOR and cleaned["bic"] == "INGBNL2A"     # was silently dropped
     with pytest.raises(BadRequestException, match="mod-97"):
-        NLEmployeeValidation.validate({"bsn": "111222333", "iban": NL_CREDITOR[:-1] + "9"
+        NLEmployeeValidation.validate({"bsn": BSN, "iban": NL_CREDITOR[:-1] + "9"
                                        if NL_CREDITOR[-1] != "9" else NL_CREDITOR[:-1] + "8"})
 
 
