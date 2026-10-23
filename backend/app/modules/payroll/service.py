@@ -20156,6 +20156,17 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             overtime = _mx_split["overtime"]
             additional_compensation = _mx_split["extras"]
             gross = _mx_split["gross"]
+        # Brazil (ZP-BR-ENG-001 Phase 6): read-only input resolution — a preview
+        # never commits anything; just resolves the statutory profile, establishment,
+        # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
+        brazil_inputs = (
+            jurisdiction_hooks.call("BR", "calc_inputs", db, None, emp, None,
+                                    as_of=period_end or date.today(),
+                                    monthly={"basic": basic, "hra": hra, "special": special,
+                                             "allowances": allowance_total, "overtime": overtime,
+                                             "additional": additional_compensation})
+            if emp_country == "BR" else None
+        )
         # Switzerland (CH spec): every resolver check, read-only; a blocked
         # worker raises SwitzerlandCalculationBlockedError (same surfacing as
         # Italy's blocks). Applied to ctx after it is built.
@@ -20303,6 +20314,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             saudi_inputs=saudi_inputs,
             netherlands_inputs=netherlands_inputs,
             mexico_inputs=mexico_inputs,
+            brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -25302,6 +25314,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         overtime = _mx_split["overtime"]
         additional_compensation = _mx_split["extras"]
         gross = _mx_split["gross"]
+    # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
+    # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
+    brazil_inputs = (
+        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, resolved_pack,
+                                monthly={"basic": basic, "hra": hra, "special": special,
+                                         "allowances": allowance_total, "overtime": overtime,
+                                         "additional": additional_compensation})
+        if country == "BR" else None
+    )
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
     # raises SwitzerlandCalculationBlockedError, same surfacing as Italy.
     switzerland_attrs = (
@@ -25402,6 +25423,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         saudi_inputs=saudi_inputs,
         netherlands_inputs=netherlands_inputs,
         mexico_inputs=mexico_inputs,
+        brazil_inputs=brazil_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -25422,6 +25444,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
         # the complete context a CH correction replays (Step 13)
         switzerland_frozen = _switzerland_service.ch_freeze_context(ctx, switzerland_attrs, calculation_mode)
+    # the complete Saudi context a SA correction replays (SA-043)
+    saudi_frozen = None
+    if saudi_inputs is not None:
+        from app.modules.payroll import saudi_arabia_service as _sa_service
+        saudi_frozen = _sa_service.sa_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25541,6 +25568,19 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "au_calculation_trace": result.au_calculation_trace,
         "sgp_calculation_trace": _sg_trace_with_pwm_classification(result.sgp_calculation_trace, employee),
         "hk_calculation_trace": result.hk_calculation_trace,
+        # Brazil (ZP-BR-ENG-001 Phase 6): flat BR statutory fields on PayslipItem
+        "br_base_inss": result.br_base_inss,
+        "br_inss_employee": result.br_inss_employee,
+        "br_base_irrf": result.br_base_irrf,
+        "br_irrf": result.br_irrf,
+        "br_irrf_reduction": result.br_irrf_reduction,
+        "br_salario_familia": result.br_salario_familia,
+        "br_vale_transporte_deduction": result.br_vale_transporte_deduction,
+        "br_base_fgts": result.br_base_fgts,
+        "br_fgts_deposit": result.br_fgts_deposit,
+        "br_cpp_employer": result.br_cpp_employer,
+        "br_rat_adjusted": result.br_rat_adjusted,
+        "br_third_parties": result.br_third_parties,
         # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
         # same splat-then-pop contract as "_org_levy_result" above. Only
         # ever non-empty when a real order actually contributed a
@@ -25575,7 +25615,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Saudi Arabia (ZP-SA-ENG-001): the frozen GOSI picture (worker class,
         # cohort, rate basis, per-branch amounts + trace) — JSON-safe, replayed
         # from the payslip exactly as computed (never reconstructed).
-        "sa_calculation_snapshot": result.sa_result,
+        "sa_calculation_snapshot": (_sa_service.sa_payslip_snapshot(result, frozen=saudi_frozen)
+                                    if saudi_frozen is not None else result.sa_result),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -25583,6 +25624,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "nl_calculation_snapshot": result.nl_result,
         "mx_calculation_snapshot": (_mx_run.payslip_snapshot(result.mx_result, mexico_inputs)
                                     if mexico_inputs is not None else None),
+        # Brazil (ZP-BR-ENG-001 Phase 6): the frozen BR inputs + br_result (content
+        # hash, trace, bases, employer charges) — replayed exactly as computed.
+        "br_calculation_snapshot": result.br_result,
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -27517,6 +27561,8 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         errors.extend(_se_profile_field_errors(data))
     if country_code == "IT":
         errors.extend(_it_profile_field_errors(data))
+    if country_code == "CH":
+        errors.extend(_switzerland_service.ch_statutory_profile_errors(data))
 
     if errors:
         raise BadRequestException("; ".join(errors))
@@ -27794,6 +27840,16 @@ def create_employee_statutory_profile_version(
                                                       EmployeeStatutoryProfile.effective_from < data.effective_from)
             .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
         for col, value in jurisdiction_hooks.call(country_code, "statutory_profile_values", db, employee, data, latest).items():
+            setattr(row, col, value)
+    if country_code == "CH":
+        # Switzerland is not a jurisdiction_hooks module (its other hooks do not
+        # exist), so its profile facts are wired here, like SE / IT above.
+        latest_ch = previous_open or (
+            db.query(EmployeeStatutoryProfile).filter(EmployeeStatutoryProfile.employee_id == employee_id,
+                                                      EmployeeStatutoryProfile.country_code == "CH",
+                                                      EmployeeStatutoryProfile.effective_from < data.effective_from)
+            .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
+        for col, value in _switzerland_service.ch_statutory_profile_values(db, employee, data, latest_ch).items():
             setattr(row, col, value)
     db.add(row)
     db.commit()
@@ -32062,6 +32118,14 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, None)
         if country == "SA" else None
     )
+    # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
+    # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
+    brazil_inputs = (
+        jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, None,
+                                monthly={"basic": data.basic_salary, "hra": data.hra,
+                                         "special": data.special_allowance, "overtime": data.overtime})
+        if country == "BR" else None
+    )
     # Netherlands: refuses (409) once the run's NL ledgers are committed.
     netherlands_inputs = (
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, None)
@@ -32211,6 +32275,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         saudi_inputs=saudi_inputs,
         netherlands_inputs=netherlands_inputs,
         mexico_inputs=mexico_inputs,
+        brazil_inputs=brazil_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -32220,6 +32285,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if switzerland_attrs is not None:
         _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
         switzerland_frozen = _switzerland_service.ch_freeze_context(ctx, switzerland_attrs, calculation_mode)
+    # the complete Saudi context a SA correction replays (SA-043)
+    saudi_frozen = None
+    if saudi_inputs is not None:
+        from app.modules.payroll import saudi_arabia_service as _sa_service
+        saudi_frozen = _sa_service.sa_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -32260,6 +32330,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         compliance_fields=dict(getattr(employee, "compliance_fields", None) or {}),
         ch_calculation_snapshot=_switzerland_service.ch_payslip_snapshot(calc, frozen=switzerland_frozen),
         nl_calculation_snapshot=calc.nl_result if country == "NL" else None,
+        sa_calculation_snapshot=(_sa_service.sa_payslip_snapshot(calc, frozen=saudi_frozen)
+                                 if saudi_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -32631,7 +32703,7 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
             employee_name=item.employee_name,
             employee_id=str(item.employee_id),
             bank_name=item.bank_name or "",
-            account_number=item.bank_account or "",
+            account_number=bank_routing.btf_account_value(item),
             ifsc=item.ifsc or "",
             branch=None,   # not captured anywhere upstream — left blank rather than fabricated
             amount=amount,
@@ -32666,6 +32738,15 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
     org_currency = org_row.currency if org_row else None
 
     export_format = format_override or policy.bank_export_format
+    # Phase 4.2: one payment channel per run — a run already paid through a
+    # SEPA batch never also gets a bank transfer file (no double payment).
+    from app.modules.payroll.netherlands_payment_service import (
+        CHANNEL_GENERIC, PaymentServiceError, claim_payment_channel)
+    try:
+        claim_payment_channel(run, CHANNEL_GENERIC)
+    except PaymentServiceError as exc:
+        raise BadRequestException(str(exc.detail if hasattr(exc, "detail") else exc))
+    db.flush()
     rows = _build_bank_export_rows(db, run, items, organization_id, org_currency=org_currency)
     try:
         exporter = get_exporter(export_format)
@@ -33019,6 +33100,9 @@ def _get_currency_code(country: str) -> str:
         "MX": "MXN",
         # Brazil (ZP-BR-ENG-001): Brazilian real.
         "BR": "BRL",
+        # Switzerland (ZP-CH-ENG-001) and Saudi Arabia (ZP-SA-ENG-001): without
+        # these rows a CH / SA bank transfer file fell through to "USD" below.
+        "CH": "CHF", "SA": "SAR",
     }.get(country, "USD")
 
 
@@ -36139,6 +36223,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
             if code and entering_mexico_refusal(row.jurisdiction_country, code, db, row.organization_id):
                 code = None
+            # Brazil (Phase 3 dormancy): the same rule — never back-fill INTO Brazil.
+            from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
+            if code and entering_brazil_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -36229,6 +36317,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     mx_refusal = entering_mexico_refusal(row.jurisdiction_country, incoming_country, db, row.organization_id)
     if mx_refusal:
         raise BadRequestException(mx_refusal)
+    # Brazil (ZP-BR-ENG-001 Phase 3): choosing Brazil is refused the same way
+    # while Brazil onboarding is disabled.
+    from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
+    br_refusal = entering_brazil_refusal(row.jurisdiction_country, incoming_country)
+    if br_refusal:
+        raise BadRequestException(br_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",

@@ -64,6 +64,7 @@ def _ctx_base(**overrides) -> PayrollContext:
         "nl_table_color": "WHITE",
         "nl_with_tax_credit": True,
         "nl_residence_variant": "NL",
+        "nl_aow_age_years": Decimal("67"),
     }
     formal.update({k: v for k, v in overrides.items() if k in formal})
     dynamic.update({k: v for k, v in overrides.items() if k in dynamic})

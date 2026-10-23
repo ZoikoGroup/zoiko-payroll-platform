@@ -258,6 +258,14 @@ export const getBrFpasTable = () => apiFetch(`${BR_SA}/fpas-table`);
 
 export const getBrReadiness = () => apiFetch(`${BR_SA}/readiness`);
 export const getBrGates = () => apiFetch(`${BR_SA}/gates`);
+// Phase 3 — READ ONLY: the tenant owns its employer facts (identifiers masked).
+export const listBrSaEmployers = (orgId) => apiFetch(`${BR_SA}/employers`, { params: { organization_id: orgId } });
+export const getBrSaEmployerReadiness = (orgId, on) =>
+  apiFetch(`${BR_SA}/employer-readiness`, { params: { organization_id: orgId, on } });
+export const getBrSaEmployerReadinessSummary = (on) => apiFetch(`${BR_SA}/employer-readiness/summary`, { params: { on } });
+// Phase 4 — READ ONLY: one employee's Brazilian record (identifiers masked).
+export const getBrSaEmployee = (employeeId, orgId, on) =>
+  apiFetch(`${BR_SA}/employees/${employeeId}`, { params: { organization_id: orgId, ...(on ? { on } : {}) } });
 
 export const runBrGoldenCheck = (payload) =>
   apiFetch(`${BR_SA}/golden-check`, { method: "POST", body: payload });

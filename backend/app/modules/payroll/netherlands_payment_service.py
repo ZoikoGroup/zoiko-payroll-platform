@@ -1,122 +1,163 @@
 """
 payroll/netherlands_payment_service.py
 ----------------------------------------
-SEPA payment batch (pain.001) creation for NL payroll.
+SEPA (pain.001.001.09) payment batches for NL payroll.
 
-Builds credit-transfer batches from committed payslips. Supports:
-  - Net pay payments to employees
-  - Authority payments (tax, social security) via separate batches
-  - Reconciliation with bank statements
+  - Salary batch: net pay of a COMMITTED run, one credit transfer per employee.
+  - Authority batch: tax / social-security payments (still LOCKED at the API
+    until gate G3 — the service is ready, the route is not open).
+
+Phase 4.2 (2026-10-23):
+  - the exact file bytes are stored (pain001_xml) and downloadable; a rebuild
+    of the same batch repeats them (stored CreDtTm, deterministic ids);
+  - every employee who cannot be paid (no / invalid IBAN, no positive net) is
+    an explicit exception that blocks the build — never silently skipped —
+    unless the caller excludes them with a reason;
+  - items are linked to employees by id (EndToEndId PAY-<run>-<employee>),
+    never by name;
+  - lifecycle DRAFT -> SUBMITTED -> ACCEPTED | REJECTED | UNKNOWN -> SETTLED;
+    an UNKNOWN batch must be resolved before any new batch for the run (NL-052);
+  - one run is paid through ONE channel (payroll_runs.payment_channel): a run
+    whose bank transfer file was generated cannot get a SEPA batch, and the
+    reverse is refused in service.generate_bank_transfer_file.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import netherlands_service as nl
 from app.modules.payroll.bank_export.sepa_pain001 import (
     Pain001Builder,
     SepaBatch,
     SepaParty,
     SepaPaymentItem,
-    validate_batch,
     SepaValidationError,
+    mask_iban,
+    normalise_iban,
+    validate_bic,
+    validate_iban,
 )
 from app.modules.payroll.models import (
     PayrollEmployee,
     PayrollNlAuthorityPayment,
+    PayrollNlEmployerProfile,
     PayrollNlPaymentBatch,
     PayrollNlPaymentItem,
-    PayrollNlEmployerProfile,
     PayrollRun,
     PayslipItem,
 )
-from app.core.exceptions import BadRequestException, NotFoundException
-
 
 NL = "NL"
+CHANNEL_SEPA = "SEPA"
+CHANNEL_GENERIC = "GENERIC_FILE"
+_LIVE_STATUSES = ("DRAFT", "SUBMITTED", "ACCEPTED", "UNKNOWN", "SETTLED")
+_TRANSITIONS = {
+    "submit": ({"DRAFT"}, "SUBMITTED"),
+    "ACCEPTED": ({"SUBMITTED", "UNKNOWN"}, "ACCEPTED"),
+    "REJECTED": ({"SUBMITTED", "UNKNOWN"}, "REJECTED"),
+    "UNKNOWN": ({"SUBMITTED"}, "UNKNOWN"),
+    "settle": ({"ACCEPTED"}, "SETTLED"),
+}
 
 
 class PaymentServiceError(BadRequestException):
     pass
 
 
-def _get_employee_iban_token(db: Session, employee_id: int) -> Optional[str]:
-    """Get the employee's IBAN token (tokenized, not raw IBAN)."""
-    emp = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).one_or_none()
-    if emp and emp.compliance_fields:
-        return emp.compliance_fields.get("iban_token") or emp.compliance_fields.get("iban")
-    return None
+# ── payment channel (no double payment) ─────────────────────────────────
+
+def claim_payment_channel(run: PayrollRun, channel: str) -> None:
+    """Record the run's payment channel; refuse a second, different channel."""
+    current = getattr(run, "payment_channel", None)
+    if current and current != channel:
+        raise PaymentServiceError(
+            f"Run {run.id} is already being paid through {current}; paying it through {channel} as well "
+            "would pay the employees twice.")
+    run.payment_channel = channel
 
 
-def _get_employer_party(db: Session, organization_id: int) -> SepaParty:
-    """Get employer as SEPA party."""
-    profile = db.query(PayrollNlEmployerProfile).filter(
-        PayrollNlEmployerProfile.organization_id == organization_id,
-    ).order_by(PayrollNlEmployerProfile.effective_from.desc()).first()
+# ── parties and items ────────────────────────────────────────────────────
 
+def _get_employer_party(db: Session, organization_id: int) -> Tuple[SepaParty, Optional[PayrollNlEmployerProfile]]:
+    profile = (db.query(PayrollNlEmployerProfile)
+               .filter(PayrollNlEmployerProfile.organization_id == organization_id)
+               .order_by(PayrollNlEmployerProfile.effective_from.desc()).first())
     if not profile:
-        raise PaymentServiceError("No employer profile found")
-
-    return SepaParty(
+        raise PaymentServiceError("No NL employer profile found")
+    address = profile.address or {}
+    party = SepaParty(
         name=profile.legal_name,
-        iban=profile.bank_iban_token or "",
+        iban=normalise_iban(profile.bank_iban_token),
         bic=profile.bank_bic,
-        address_line1=profile.address.get("street") if profile.address else None,
-        address_line2=profile.address.get("house_number") if profile.address else None,
-        city=profile.address.get("city") if profile.address else None,
-        postal_code=profile.address.get("postal_code") if profile.address else None,
-        country=profile.address.get("country") if profile.address else "NL",
+        address_line1=" ".join(x for x in (address.get("street"), address.get("house_number")) if x) or None,
+        city=address.get("city"),
+        postal_code=address.get("postal_code"),
+        country=address.get("country") or "NL",
         organisation_id=profile.loonheffingennummer,
     )
+    return party, profile
 
 
-def _build_net_pay_items(db: Session, run: PayrollRun) -> List[SepaPaymentItem]:
-    """Build SEPA payment items for net pay from committed payslips."""
-    items = (
-        db.query(PayslipItem)
-        .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == NL)
-        .all()
-    )
+def _employee_account(emp: Optional[PayrollEmployee]) -> Tuple[str, Optional[str]]:
+    fields = dict(getattr(emp, "compliance_fields", None) or {})
+    return normalise_iban(fields.get("iban")), (fields.get("bic") or None)
 
-    sepa_items = []
-    for item in items:
-        iban_token = _get_employee_iban_token(db, item.employee_id)
-        if not iban_token:
-            continue  # Skip employees without IBAN
 
-        snap = item.nl_calculation_snapshot or {}
-        pos = snap.get("totals", {})
-        net_pay = Decimal(pos.get("netPay", "0"))
-        if net_pay <= 0:
-            continue
+def _end_to_end_id(run_id: int, employee_id: int) -> str:
+    return f"PAY-{run_id}-{employee_id}"
 
-        emp = db.query(PayrollEmployee).filter(PayrollEmployee.id == item.employee_id).one()
-        end_to_end_id = f"PAY-{run.id}-{item.employee_id}-{uuid.uuid4().hex[:8]}"
 
-        sepa_items.append(SepaPaymentItem(
-            end_to_end_id=end_to_end_id,
-            amount=net_pay,
-            currency="EUR",
-            creditor=SepaParty(
-                name=emp.name,
-                iban=iban_token,
-            ),
-            creditor_account_iban=iban_token,
-            remittance_info=f"Loon {run.period_label} {emp.employee_code}",
-            purpose_code="SALA",
-            category_purpose="SALA",
-        ))
+def salary_payment_preview(db: Session, run: PayrollRun) -> Dict[str, Any]:
+    """The payable items and the exceptions of a run's salary batch, without
+    building anything. exceptions: [{employeeId, name, reason}]."""
+    payslips = (db.query(PayslipItem)
+                .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == NL)
+                .order_by(PayslipItem.employee_id).all())
+    payable, exceptions = [], []
+    for slip in payslips:
+        emp = db.get(PayrollEmployee, slip.employee_id)
+        name = (emp.name if emp else None) or slip.employee_name or f"Employee {slip.employee_id}"
+        net = Decimal(str(((slip.nl_calculation_snapshot or {}).get("totals") or {}).get("netPay", "0")))
+        iban, bic = _employee_account(emp)
+        if net <= 0:
+            exceptions.append({"employeeId": slip.employee_id, "name": name, "reason": f"no positive net pay ({net})"})
+        elif not iban:
+            exceptions.append({"employeeId": slip.employee_id, "name": name, "reason": "no IBAN on file"})
+        elif not validate_iban(iban):
+            exceptions.append({"employeeId": slip.employee_id, "name": name,
+                               "reason": f"IBAN {mask_iban(iban)} fails the check digits"})
+        elif bic and not validate_bic(bic):
+            exceptions.append({"employeeId": slip.employee_id, "name": name, "reason": "BIC is not 8 or 11 characters"})
+        else:
+            payable.append({"employeeId": slip.employee_id, "name": name, "iban": iban, "bic": bic,
+                            "employeeCode": getattr(emp, "employee_code", None), "amount": net})
+    return {"payable": payable, "exceptions": exceptions}
 
-    return sepa_items
 
+def _execution_date(run: PayrollRun, profile, requested: Optional[date], today: date) -> date:
+    if requested is not None:
+        execution = requested
+    else:
+        lead = int(getattr(profile, "bank_lead_days", None) or 0)
+        execution = run.pay_date - timedelta(days=lead)
+    if execution < today:
+        raise PaymentServiceError(f"Requested execution date {execution} is in the past — pass a current date.")
+    return execution
+
+
+def _build_file(batch_row: PayrollNlPaymentBatch, sepa: SepaBatch) -> str:
+    return Pain001Builder(created_at=batch_row.created_at_utc).add_batch(sepa).build()
+
+
+# ── salary batch ─────────────────────────────────────────────────────────
 
 def create_salary_payment_batch(
     db: Session,
@@ -124,92 +165,84 @@ def create_salary_payment_batch(
     actor_id: int,
     requested_execution_date: Optional[date] = None,
     idempotency_key: Optional[str] = None,
+    exclusions: Optional[Dict[int, str]] = None,
+    today: Optional[date] = None,
 ) -> PayrollNlPaymentBatch:
-    """Create a SEPA salary payment batch from an APPROVED/COMMITTED payroll run."""
+    """DRAFT SEPA salary batch of a committed run. Every employee who cannot
+    be paid blocks the build unless excluded with a reason (exclusions =
+    {employee_id: reason}). A retried request returns the same batch."""
     run = db.query(PayrollRun).filter(PayrollRun.id == run_id).one_or_none()
     if not run:
         raise NotFoundException("PayrollRun", run_id)
-
-    if str(run.status) not in ("Approved", "Authorized", "Paid", "Closed"):
+    if str(getattr(run.status, "value", run.status)) not in ("Approved", "Authorized", "Paid", "Closed"):
         raise PaymentServiceError(f"Run must be approved/committed (status={run.status})")
-
     if not nl.run_committed(db, run):
         raise PaymentServiceError("Run must be committed before payment batch creation")
 
+    previous = (db.query(PayrollNlPaymentBatch)
+                .filter(PayrollNlPaymentBatch.payroll_run_id == run.id,
+                        or_(PayrollNlPaymentBatch.batch_kind == "SALARY", PayrollNlPaymentBatch.batch_kind.is_(None)))
+                .order_by(PayrollNlPaymentBatch.id).all())
+    live = [b for b in previous if b.status in _LIVE_STATUSES]
     if idempotency_key is None:
-        # One salary batch per run unless the caller deliberately supplies a new
-        # key: a retried request must return the same batch, never pay twice
-        # (spec T8 duplicate payment). The key never depends on time or actor.
-        idempotency_key = hashlib.sha256(f"nl-salary-batch-run-{run_id}".encode()).hexdigest()[:100]
-
-    existing = db.query(PayrollNlPaymentBatch).filter(
-        PayrollNlPaymentBatch.idempotency_key == idempotency_key
-    ).first()
+        sequence = len(previous) + (0 if live else 1)
+        idempotency_key = hashlib.sha256(f"nl-salary-batch-run-{run_id}-{max(sequence, 1)}".encode()).hexdigest()[:100]
+    existing = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.idempotency_key == idempotency_key).first()
     if existing:
         return existing
+    if live:
+        state = live[-1].status
+        raise PaymentServiceError(
+            f"Run {run.id} already has salary batch {live[-1].id} ({state})"
+            + (" — resolve the UNKNOWN bank outcome first (NL-052)." if state == "UNKNOWN" else "."))
 
-    employer = _get_employer_party(db, run.organization_id)
+    employer, profile = _get_employer_party(db, run.organization_id)
     if not employer.iban:
         raise PaymentServiceError("Employer IBAN not configured")
 
-    items = _build_net_pay_items(db, run)
-    if not items:
-        raise PaymentServiceError("No valid payment items (employees with IBAN and positive net pay)")
+    preview = salary_payment_preview(db, run)
+    excluded = {int(k): str(v).strip() for k, v in (exclusions or {}).items() if str(v or "").strip()}
+    blocking = [e for e in preview["exceptions"] if e["employeeId"] not in excluded]
+    if blocking:
+        raise PaymentServiceError("Employees who cannot be paid — fix or exclude each with a reason: "
+                                  + "; ".join(f"{e['name']} ({e['employeeId']}): {e['reason']}" for e in blocking))
+    payable = [p for p in preview["payable"] if p["employeeId"] not in excluded]
+    if not payable:
+        raise PaymentServiceError("No employee to pay in this run.")
 
-    batch = SepaBatch(
-        message_id=f"SALARY-{run.id}-{uuid.uuid4().hex[:12].upper()}",
-        initiating_party=employer,
-        debtor=employer,
-        debtor_account_iban=employer.iban,
-        debtor_agent_bic=employer.bic,
-        requested_execution_date=requested_execution_date or run.pay_date,
-        items=items,
-    )
-
-    errors = validate_batch(batch)
-    if errors:
-        raise SepaValidationError(f"SEPA validation failed: {errors}")
-
-    xml = Pain001Builder().add_batch(batch).build()
-    xml_sha256 = hashlib.sha256(xml.encode("utf-8")).hexdigest()
-
-    payment_batch = PayrollNlPaymentBatch(
-        organization_id=run.organization_id,
-        payroll_run_id=run.id,
-        pain001_sha256=xml_sha256,
-        message_id=batch.message_id,
-        status="SUBMITTED",
-        idempotency_key=idempotency_key,
-    )
-    db.add(payment_batch)
+    claim_payment_channel(run, CHANNEL_SEPA)
+    execution = _execution_date(run, profile, requested_execution_date, today or date.today())
+    row = PayrollNlPaymentBatch(
+        organization_id=run.organization_id, payroll_run_id=run.id, batch_kind="SALARY",
+        message_id=f"SAL-R{run.id}-{len(previous) + 1}", status="DRAFT", idempotency_key=idempotency_key,
+        created_at_utc=datetime.now(timezone.utc).replace(microsecond=0), pain001_sha256="pending")
+    sepa = SepaBatch(
+        message_id=row.message_id, initiating_party=employer, debtor=employer,
+        debtor_account_iban=employer.iban, debtor_agent_bic=employer.bic,
+        requested_execution_date=execution, category_purpose="SALA",
+        items=[SepaPaymentItem(
+            end_to_end_id=_end_to_end_id(run.id, p["employeeId"]), amount=p["amount"],
+            creditor=SepaParty(name=p["name"], iban=p["iban"], bic=p["bic"]),
+            creditor_account_iban=p["iban"], creditor_agent_bic=p["bic"], purpose_code="SALA",
+            remittance_info=f"Loon {run.period_label} {p['employeeCode'] or ''}".strip())
+            for p in payable])
+    try:
+        xml = _build_file(row, sepa)
+    except SepaValidationError as exc:
+        raise PaymentServiceError(str(exc))
+    row.pain001_xml = xml
+    row.pain001_sha256 = hashlib.sha256(xml.encode("utf-8")).hexdigest()
+    db.add(row)
     db.flush()
-
-    for item in items:
-        emp = db.query(PayrollEmployee).filter(
-            PayrollEmployee.employee_code == item.creditor.name
-        ).first()
-        if not emp:
-            # Fallback: find by matching amount/remittance
-            pass
-        # Find the employee by name match
-        emp = db.query(PayrollEmployee).filter(
-            PayrollEmployee.organization_id == run.organization_id,
-            PayrollEmployee.name == item.creditor.name,
-        ).first()
-        if emp:
-            payment_item = PayrollNlPaymentItem(
-                batch_id=payment_batch.id,
-                employee_id=emp.id,
-                iban_token=item.creditor_account_iban or "",
-                amount=item.amount,
-                end_to_end_id=item.end_to_end_id,
-                status="PENDING",
-            )
-            db.add(payment_item)
-
+    for p in payable:
+        db.add(PayrollNlPaymentItem(batch_id=row.id, employee_id=p["employeeId"], iban_token=p["iban"],
+                                    amount=p["amount"], end_to_end_id=_end_to_end_id(run.id, p["employeeId"]),
+                                    status="PENDING"))
     db.flush()
-    return payment_batch
+    return row
 
+
+# ── authority batch (route LOCKED until G3) ──────────────────────────────
 
 def create_authority_payment_batch(
     db: Session,
@@ -218,164 +251,143 @@ def create_authority_payment_batch(
     actor_id: int,
     requested_execution_date: Optional[date] = None,
     idempotency_key: Optional[str] = None,
+    authority_payment_id: Optional[int] = None,
 ) -> PayrollNlPaymentBatch:
-    """Create a SEPA batch for authority payments (tax, social security).
-
-    authority_payments: list of dicts with keys:
-      - payment_reference (e.g. "LOONHEFFING-202603")
-      - amount (Decimal)
-      - creditor_name (e.g. "Belastingdienst")
-      - creditor_iban
-      - creditor_bic (optional)
-      - end_to_end_id (optional)
-      - remittance_info (optional)
-    """
+    """DRAFT batch of payments to authorities (e.g. Belastingdienst). Each
+    payment: payment_reference, amount, creditor_name, creditor_iban,
+    creditor_bic?, structured_reference? (the betalingskenmerk) and
+    end_to_end_id?. The authority IBAN is the caller's (never a constant)."""
     if not authority_payments:
         raise PaymentServiceError("No authority payments provided")
-
-    employer = _get_employer_party(db, organization_id)
-
-    items = []
-    for p in authority_payments:
-        end_to_end_id = p.get("end_to_end_id") or f"AUTH-{uuid.uuid4().hex[:12].upper()}"
-        items.append(SepaPaymentItem(
-            end_to_end_id=end_to_end_id,
-            amount=Decimal(str(p["amount"])),
-            currency="EUR",
-            creditor=SepaParty(
-                name=p["creditor_name"],
-                iban=p["creditor_iban"],
-                bic=p.get("creditor_bic"),
-            ),
-            creditor_account_iban=p["creditor_iban"],
-            creditor_agent_bic=p.get("creditor_bic"),
-            remittance_info=p.get("remittance_info", p["payment_reference"]),
-            purpose_code="TAXS",
-            category_purpose="TAXS",
-        ))
-
-    batch = SepaBatch(
-        message_id=f"AUTH-{organization_id}-{uuid.uuid4().hex[:12].upper()}",
-        initiating_party=employer,
-        debtor=employer,
-        debtor_account_iban=employer.iban,
-        debtor_agent_bic=employer.bic,
-        requested_execution_date=requested_execution_date or date.today(),
-        items=items,
-    )
-
-    errors = validate_batch(batch)
-    if errors:
-        raise SepaValidationError(f"SEPA validation failed: {errors}")
-
-    xml = Pain001Builder().add_batch(batch).build()
-    xml_sha256 = hashlib.sha256(xml.encode("utf-8")).hexdigest()
-
+    if authority_payment_id is not None and db.get(PayrollNlAuthorityPayment, authority_payment_id) is None:
+        raise NotFoundException("PayrollNlAuthorityPayment", authority_payment_id)
+    canonical = json.dumps(sorted(authority_payments, key=lambda p: json.dumps(p, sort_keys=True, default=str)),
+                           sort_keys=True, default=str)
+    digest = hashlib.sha256(f"nl-authority-batch-{organization_id}-{canonical}".encode()).hexdigest()
     if idempotency_key is None:
-        # Same payments to the same authorities = the same batch (never paid twice).
-        canonical = json.dumps(sorted(authority_payments, key=lambda p: json.dumps(p, sort_keys=True, default=str)),
-                               sort_keys=True, default=str)
-        idempotency_key = hashlib.sha256(f"nl-authority-batch-{organization_id}-{canonical}".encode()).hexdigest()[:100]
-
-    existing = db.query(PayrollNlPaymentBatch).filter(
-        PayrollNlPaymentBatch.idempotency_key == idempotency_key
-    ).first()
+        idempotency_key = digest[:100]
+    existing = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.idempotency_key == idempotency_key).first()
     if existing:
         return existing
 
-    payment_batch = PayrollNlPaymentBatch(
-        organization_id=organization_id,
-        pain001_sha256=xml_sha256,
-        message_id=batch.message_id,
-        status="SUBMITTED",
-        idempotency_key=idempotency_key,
-    )
-    db.add(payment_batch)
+    employer, _profile = _get_employer_party(db, organization_id)
+    items = []
+    for index, p in enumerate(authority_payments, start=1):
+        items.append(SepaPaymentItem(
+            end_to_end_id=(p.get("end_to_end_id") or f"AUTH-{digest[:12].upper()}-{index}")[:35],
+            amount=Decimal(str(p["amount"])),
+            creditor=SepaParty(name=p["creditor_name"], iban=p["creditor_iban"], bic=p.get("creditor_bic")),
+            creditor_account_iban=p["creditor_iban"], creditor_agent_bic=p.get("creditor_bic"),
+            structured_reference=p.get("structured_reference"),
+            remittance_info=p.get("remittance_info") or p["payment_reference"], purpose_code="TAXS"))
+    row = PayrollNlPaymentBatch(
+        organization_id=organization_id, batch_kind="AUTHORITY", authority_payment_id=authority_payment_id,
+        message_id=f"AUTH-{digest[:24].upper()}", status="DRAFT", idempotency_key=idempotency_key,
+        created_at_utc=datetime.now(timezone.utc).replace(microsecond=0), pain001_sha256="pending")
+    sepa = SepaBatch(message_id=row.message_id, initiating_party=employer, debtor=employer,
+                     debtor_account_iban=employer.iban, debtor_agent_bic=employer.bic,
+                     requested_execution_date=requested_execution_date or date.today(),
+                     category_purpose="TAXS", items=items)
+    try:
+        xml = _build_file(row, sepa)
+    except SepaValidationError as exc:
+        raise PaymentServiceError(str(exc))
+    row.pain001_xml = xml
+    row.pain001_sha256 = hashlib.sha256(xml.encode("utf-8")).hexdigest()
+    db.add(row)
     db.flush()
-
     for item in items:
-        # Authority payments don't link to employees directly
-        payment_item = PayrollNlPaymentItem(
-            batch_id=payment_batch.id,
-            employee_id=0,  # 0 = authority
-            iban_token=item.creditor_account_iban,
-            amount=item.amount,
-            end_to_end_id=item.end_to_end_id,
-            status="PENDING",
-        )
-        db.add(payment_item)
-
+        db.add(PayrollNlPaymentItem(batch_id=row.id, employee_id=None, iban_token=normalise_iban(item.creditor_account_iban),
+                                    amount=item.amount, end_to_end_id=item.end_to_end_id, status="PENDING"))
     db.flush()
-    return payment_batch
+    return row
+
+
+# ── lifecycle ────────────────────────────────────────────────────────────
+
+def _batch(db: Session, batch_id: int) -> PayrollNlPaymentBatch:
+    batch = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.id == batch_id).one_or_none()
+    if not batch:
+        raise NotFoundException("PayrollNlPaymentBatch", batch_id)
+    return batch
+
+
+def _move(batch: PayrollNlPaymentBatch, action: str) -> None:
+    allowed, target = _TRANSITIONS[action]
+    if batch.status not in allowed:
+        raise PaymentServiceError(f"Batch {batch.id} is {batch.status}; {action} needs one of {sorted(allowed)}.")
+    batch.status = target
 
 
 def submit_payment_batch(db: Session, batch_id: int, actor_id: int) -> PayrollNlPaymentBatch:
-    """Mark batch as submitted to bank (after XML delivery)."""
-    batch = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.id == batch_id).one_or_none()
-    if not batch:
-        raise NotFoundException("PayrollNlPaymentBatch", batch_id)
-    if batch.status != "SUBMITTED":
-        raise PaymentServiceError(f"Batch must be SUBMITTED (status={batch.status})")
-
-    batch.submitted_at = datetime.utcnow()
+    """The file was handed to the bank: DRAFT -> SUBMITTED."""
+    batch = _batch(db, batch_id)
+    _move(batch, "submit")
+    batch.submitted_at = datetime.now(timezone.utc)
+    db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id,
+                                          PayrollNlPaymentItem.status == "PENDING").update({"status": "SENT"})
     db.flush()
     return batch
 
 
-def reconcile_payment_batch(
-    db: Session,
-    batch_id: int,
-    bank_reference: Optional[str] = None,
-) -> PayrollNlPaymentBatch:
-    """Reconcile batch after bank settlement (CAMT.054/MT940)."""
-    batch = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.id == batch_id).one_or_none()
-    if not batch:
-        raise NotFoundException("PayrollNlPaymentBatch", batch_id)
-    if batch.status not in ("SUBMITTED", "ACCEPTED"):
-        raise PaymentServiceError(f"Cannot reconcile batch with status {batch.status}")
-
-    batch.status = "SETTLED"
-    batch.reconciled_at = datetime.utcnow()
+def record_bank_result(db: Session, batch_id: int, outcome: str) -> PayrollNlPaymentBatch:
+    """The bank's answer (pain.002 or portal): ACCEPTED, REJECTED or UNKNOWN
+    (no answer / timeout). UNKNOWN must later become ACCEPTED or REJECTED —
+    never a blind resend (NL-052)."""
+    outcome = (outcome or "").upper()
+    if outcome not in ("ACCEPTED", "REJECTED", "UNKNOWN"):
+        raise PaymentServiceError("outcome must be ACCEPTED, REJECTED or UNKNOWN.")
+    batch = _batch(db, batch_id)
+    _move(batch, outcome)
+    if outcome == "REJECTED":
+        db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id).update({"status": "REJECTED"})
     db.flush()
     return batch
 
 
-def handle_payment_return(
-    db: Session,
-    batch_id: int,
-    end_to_end_id: str,
-    return_reason: str,
-) -> PayrollNlPaymentItem:
-    """Handle a returned payment (R-transaction from bank)."""
-    item = db.query(PayrollNlPaymentItem).filter(
-        PayrollNlPaymentItem.batch_id == batch_id,
-        PayrollNlPaymentItem.end_to_end_id == end_to_end_id,
-    ).one_or_none()
+def reconcile_payment_batch(db: Session, batch_id: int, bank_reference: Optional[str] = None) -> PayrollNlPaymentBatch:
+    """Settlement evidenced by the bank statement (camt.054 / MT940):
+    ACCEPTED -> SETTLED. A bank reference is required."""
+    if not (bank_reference or "").strip():
+        raise PaymentServiceError("A settlement needs the bank statement reference.")
+    batch = _batch(db, batch_id)
+    _move(batch, "settle")
+    batch.reconciled_at = datetime.now(timezone.utc)
+    db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id,
+                                          PayrollNlPaymentItem.status == "SENT").update({"status": "SETTLED"})
+    db.flush()
+    return batch
+
+
+def handle_payment_return(db: Session, batch_id: int, end_to_end_id: str, return_reason: str) -> PayrollNlPaymentItem:
+    """A returned payment (R-transaction) for one item."""
+    item = (db.query(PayrollNlPaymentItem)
+            .filter(PayrollNlPaymentItem.batch_id == batch_id, PayrollNlPaymentItem.end_to_end_id == end_to_end_id)
+            .one_or_none())
     if not item:
         raise NotFoundException("PayrollNlPaymentItem", f"{batch_id}/{end_to_end_id}")
-
     item.status = "RETURNED"
     item.return_reason = return_reason
     db.flush()
     return item
 
 
+def get_batch_file(db: Session, batch_id: int) -> Tuple[str, str]:
+    """(filename, xml) — exactly the stored bytes."""
+    batch = _batch(db, batch_id)
+    if not batch.pain001_xml:
+        raise PaymentServiceError(f"Batch {batch.id} predates file storage — rebuild it as a new batch.")
+    return f"pain001_{batch.message_id}.xml", batch.pain001_xml
+
+
 def get_batch_with_items(db: Session, batch_id: int) -> tuple[PayrollNlPaymentBatch, List[PayrollNlPaymentItem]]:
-    batch = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.id == batch_id).one_or_none()
-    if not batch:
-        raise NotFoundException("PayrollNlPaymentBatch", batch_id)
+    batch = _batch(db, batch_id)
     items = db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch_id).all()
     return batch, items
 
 
-def list_payment_batches(
-    db: Session,
-    organization_id: int,
-    status: Optional[str] = None,
-) -> List[PayrollNlPaymentBatch]:
-    q = db.query(PayrollNlPaymentBatch).filter(
-        PayrollNlPaymentBatch.organization_id == organization_id
-    )
+def list_payment_batches(db: Session, organization_id: int, status: Optional[str] = None) -> List[PayrollNlPaymentBatch]:
+    q = db.query(PayrollNlPaymentBatch).filter(PayrollNlPaymentBatch.organization_id == organization_id)
     if status:
         q = q.filter(PayrollNlPaymentBatch.status == status)
     return q.order_by(PayrollNlPaymentBatch.created_at.desc()).all()

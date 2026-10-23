@@ -30,6 +30,7 @@ always be replayed against the exact rows it used (lookup_qst_rate).
 """
 
 import hashlib
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Dict, List, Optional, Tuple
@@ -1138,6 +1139,84 @@ def _block(blocked: list, key: str, reason: str) -> None:
 
 def _valid_canton(value) -> bool:
     return value in CH_CANTON_CODES
+
+
+# ── Worker CH profile write path (CH-004 / CH-E1) ────────────────────────────
+# The ch_* facts resolve_ch_calc_inputs reads. Without a write path every real
+# Swiss employee blocked on ch_work_canton / ch_qst_subject / ch_uvg_policy.
+# The AHV number is not among them: it lives once, in compliance_fields.
+CH_PROFILE_FIELDS = (
+    "ch_work_canton", "ch_residence_canton", "ch_qst_canton", "ch_residence_country", "ch_nationality",
+    "ch_permit_type", "ch_cross_border", "ch_ahv_status", "ch_alv_subject", "ch_weekly_hours",
+    "ch_multiple_employment", "ch_other_employment_pct", "ch_qst_subject", "ch_qst_tariff_code",
+    "ch_marital_status", "ch_spouse_employed", "ch_children_count", "ch_church_tax",
+    "ch_bvg_plan_scheme_id", "ch_uvg_policy_scheme_id", "ch_ktg_policy_scheme_id", "ch_uvg_risk_class",
+    "ch_contract_end", "ch_wage_floor_agreement_id", "ch_occupation", "ch_grade", "ch_experience_years",
+    "ch_evidence_document_id",
+)
+_CH_PROFILE_SCHEMES = {"ch_bvg_plan_scheme_id": "BVG_PLAN", "ch_uvg_policy_scheme_id": "UVG_POLICY",
+                       "ch_ktg_policy_scheme_id": "KTG_POLICY"}
+_UPPER = ("ch_work_canton", "ch_residence_canton", "ch_qst_canton", "ch_residence_country", "ch_nationality",
+          "ch_qst_subject", "ch_qst_tariff_code", "ch_marital_status", "ch_permit_type", "ch_uvg_risk_class")
+
+
+def ch_statutory_profile_errors(data) -> list:
+    """Shape errors for the ch_* facts SENT in this request (the resolver's own
+    vocabularies, so the two can never drift). Completeness is the resolver's
+    job at calculation time — a draft profile may be filled in over time."""
+    sent = getattr(data, "model_fields_set", set())
+    get = lambda k: getattr(data, k, None) if k in sent else None  # noqa: E731
+    errors = []
+    for key in ("ch_work_canton", "ch_residence_canton", "ch_qst_canton"):
+        value = get(key)
+        if value is not None and not _valid_canton(str(value).upper()):
+            errors.append(f"{key} must be a CH-XX canton code (got {value!r}).")
+    for key in ("ch_residence_country", "ch_nationality"):
+        value = get(key)
+        if value is not None and not re.fullmatch(r"[A-Za-z]{2}", str(value)):
+            errors.append(f"{key} must be a 2-letter ISO country code (got {value!r}).")
+    subject = get("ch_qst_subject")
+    if subject is not None and str(subject).upper() not in CH_QST_SUBJECT_VALUES:
+        errors.append(f"ch_qst_subject must be one of {list(CH_QST_SUBJECT_VALUES)} (got {subject!r}).")
+    hours = get("ch_weekly_hours")
+    if hours is not None and not (Decimal("0") < Decimal(str(hours)) <= Decimal("168")):
+        errors.append("ch_weekly_hours must be more than 0 and at most 168.")
+    pct = get("ch_other_employment_pct")
+    if pct is not None and not (Decimal("0") <= Decimal(str(pct)) <= Decimal("100")):
+        errors.append("ch_other_employment_pct must be between 0 and 100.")
+    for key in ("ch_children_count", "ch_experience_years"):
+        value = get(key)
+        if value is not None and Decimal(str(value)) < 0:
+            errors.append(f"{key} cannot be negative.")
+    end = get("ch_contract_end")
+    if end is not None and getattr(data, "effective_from", None) and end < data.effective_from:
+        errors.append("ch_contract_end cannot be before the profile's effective date.")
+    return errors
+
+
+def ch_statutory_profile_values(db: Session, employee, data, latest) -> dict:
+    """The ch_* column values of a new CH profile version: each field sent in
+    this request, else carried forward from the previous version. Scheme ids
+    must name a scheme of the right type that belongs to the employee's
+    organisation (or is platform-wide)."""
+    from app.modules.payroll.models import ChSchemeProfile
+
+    sent = getattr(data, "model_fields_set", set())
+    values = {}
+    for key in CH_PROFILE_FIELDS:
+        if key in sent:
+            value = getattr(data, key, None)
+            values[key] = str(value).upper() if (value is not None and key in _UPPER) else value
+        else:
+            values[key] = getattr(latest, key, None) if latest is not None else None
+    for key, scheme_type in _CH_PROFILE_SCHEMES.items():
+        if key not in sent or values[key] is None:
+            continue
+        scheme = db.get(ChSchemeProfile, values[key])
+        if (scheme is None or scheme.scheme_type != scheme_type
+                or scheme.organization_id not in (None, getattr(employee, "organization_id", None))):
+            raise BadRequestException(f"{key} {values[key]} is not a {scheme_type} scheme of this organisation.")
+    return values
 
 
 def resolve_ch_calc_inputs(db: Session, organization_id: int, employee, payroll_date: date,
@@ -2612,21 +2691,49 @@ CH_ELM_DOMAIN_KEYS = {
     "BFS": (),
 }
 
-# Obligation totals always surfaced as declared Lohnausweis boxes when nonzero.
+# Official Lohnausweis / certificat de salaire (Form 11, 2026) — the employee
+# side only; employer contributions are NOT on the form (CH-R1):
+#   Ziffer 1-7  income (salary, fringe benefits 2.1-2.3, irregular, capital,
+#               equity, board fees, other) — from the CH_LA earning rules
+#   Ziffer 8    gross total = sum of 1-7                       (computed)
+#   Ziffer 9    employee AHV/IV/EO/ALV/NBUV contributions
+#   Ziffer 10.1 employee BVG ordinary contributions (10.2 buy-ins: not paid via payroll)
+#   Ziffer 11   net salary = 8 - 9 - 10                         (computed)
+#   Ziffer 12   source tax (Quellensteuer) deducted
+#   Ziffer 13-15 expenses / other fringe benefits / remarks — from the CH_LA rules
+# Keys are the engine's totalsAll keys (ch_uvg_employee is the NBU employee share).
 CH_LA_CONTRIBUTION_BOXES = (
-    ("ch_ahv_employee", "BOX_EE_AHV_IV_EO_ALV", "Employee AHV/IV/EO/ALV contributions"),
-    ("ch_ahv_employer", "BOX_ER_AHV_IV_EO_ALV", "Employer AHV/IV/EO/ALV contributions"),
-    ("ch_uvg_employee", "BOX_EE_UVG", "Employee UVG contributions"),
-    ("ch_uvg_employer", "BOX_ER_UVG", "Employer UVG contributions"),
-    ("ch_bvg_employee", "BOX_EE_BVG", "Employee BVG contributions"),
-    ("ch_bvg_employer", "BOX_ER_BVG", "Employer BVG contributions"),
-    ("ch_fak_employee", "BOX_EE_FAK", "Employee FAK contributions"),
-    ("ch_fak_employer", "BOX_ER_FAK", "Employer FAK contributions"),
-    ("ch_ktg_employee", "BOX_EE_KTG", "Employee KTG contributions"),
-    ("ch_ktg_employer", "BOX_ER_KTG", "Employer KTG contributions"),
-    ("ch_qst_total", "BOX_QST_WITHHELD", "Source tax (Quellensteuer) withheld"),
+    ("ch_ahv_employee", "BOX_9", "Employee AHV contribution"),
+    ("ch_iv_employee", "BOX_9", "Employee IV contribution"),
+    ("ch_eo_employee", "BOX_9", "Employee EO contribution"),
+    ("ch_alv_employee", "BOX_9", "Employee ALV contribution"),
+    ("ch_uvg_employee", "BOX_9", "Employee NBU (non-occupational accident) contribution"),
+    ("ch_bvg_employee", "BOX_10_1", "Employee BVG ordinary contribution"),
+    ("ch_qst_total", "BOX_12", "Source tax (Quellensteuer) deducted"),
 )
-CH_LA_BOX_LABELS = {box: label for _, box, label in CH_LA_CONTRIBUTION_BOXES}
+CH_LA_INCOME_BOXES = ("BOX_1", "BOX_2_1", "BOX_2_2", "BOX_2_3", "BOX_3", "BOX_4", "BOX_5", "BOX_6", "BOX_7")
+CH_LA_BOX_LABELS = {
+    "BOX_1": "Ziffer 1 — Lohn / Salaire",
+    "BOX_2_1": "Ziffer 2.1 — Verpflegung, Unterkunft / Pension, logement",
+    "BOX_2_2": "Ziffer 2.2 — Privatanteil Geschäftsfahrzeug / Part privée voiture de service",
+    "BOX_2_3": "Ziffer 2.3 — Andere Gehaltsnebenleistungen / Autres prestations",
+    "BOX_3": "Ziffer 3 — Unregelmässige Leistungen / Prestations non périodiques",
+    "BOX_4": "Ziffer 4 — Kapitalleistungen / Prestations en capital",
+    "BOX_5": "Ziffer 5 — Beteiligungsrechte / Droits de participation",
+    "BOX_6": "Ziffer 6 — Verwaltungsratsentschädigungen / Indemnités des membres de l'administration",
+    "BOX_7": "Ziffer 7 — Andere Leistungen / Autres prestations",
+    "BOX_8": "Ziffer 8 — Bruttolohn total / Salaire brut total",
+    "BOX_9": "Ziffer 9 — Beiträge AHV/IV/EO/ALV/NBUV / Cotisations AVS/AI/APG/AC/AANP",
+    "BOX_10_1": "Ziffer 10.1 — Berufliche Vorsorge, ordentliche Beiträge / Prévoyance professionnelle",
+    "BOX_10_2": "Ziffer 10.2 — Berufliche Vorsorge, Einkauf / Rachat",
+    "BOX_11": "Ziffer 11 — Nettolohn / Salaire net",
+    "BOX_12": "Ziffer 12 — Quellensteuerabzug / Retenue de l'impôt à la source",
+    "BOX_13_1": "Ziffer 13.1 — Effektive Spesen / Frais effectifs",
+    "BOX_13_2": "Ziffer 13.2 — Pauschalspesen / Frais forfaitaires",
+    "BOX_13_3": "Ziffer 13.3 — Beiträge an Weiterbildung / Contributions au perfectionnement",
+    "BOX_14": "Ziffer 14 — Weitere Gehaltsnebenleistungen / Autres prestations salariales accessoires",
+    "BOX_15": "Ziffer 15 — Bemerkungen / Observations",
+}
 
 _ELM_MAX_XML_BYTES = 20 * 1024 * 1024        # resource guard, same discipline as HK
 _ELM_AGENCY = "CH-ELM"
@@ -2779,6 +2886,13 @@ def generate_ch_lohnausweis(db: Session, organization_id: int, template_id: Opti
             value = total.get(key, ZERO_CHF)
             if value:
                 contribution_totals[box] = contribution_totals.get(box, ZERO_CHF) + value
+    # Ziffer 8 = gross total (income boxes 1-7); Ziffer 11 = net = 8 - 9 - 10.
+    gross_total = sum((earning_totals.get(b, ZERO_CHF) for b in CH_LA_INCOME_BOXES), ZERO_CHF)
+    if gross_total:
+        contribution_totals["BOX_8"] = gross_total
+        contribution_totals["BOX_11"] = (gross_total - contribution_totals.get("BOX_9", ZERO_CHF)
+                                         - contribution_totals.get("BOX_10_1", ZERO_CHF)
+                                         - earning_totals.get("BOX_10_2", ZERO_CHF))
     all_boxes: dict = dict(earning_totals)
     for box, value in contribution_totals.items():
         all_boxes[box] = all_boxes.get(box, ZERO_CHF) + value
@@ -2803,7 +2917,10 @@ def generate_ch_lohnausweis(db: Session, organization_id: int, template_id: Opti
         "id": employee_id,
         "name": effective[0]["item"].employee_name or employee.name,
         "canton": canton,
-        "registrationNumber": (employee.ch_ahv_number if hasattr(employee, "ch_ahv_number") else None),
+        # Box C: the AHV number — on the statutory profile, else the validated
+        # compliance field (PayrollEmployee has no ch_ahv_number column).
+        "registrationNumber": (getattr(worker_profile, "ch_ahv_number", None)
+                               or (employee.compliance_fields or {}).get("ahv_number")),
     }
     scope_key = CH_LA_SCOPE_KEY.format(employee_id, year)
     superseded = supersede_live_reports(db, organization_id, CH_LOHNAUSWEIS_REPORT_TYPE, scope_key=scope_key,
@@ -3126,7 +3243,11 @@ def _ch_elm_receiver(db: Session, organization_id: int, entity_profile, worker_p
 
     if domain == "QST":
         canton = (getattr(worker_profile or object(), "ch_qst_canton", None)
-                  or getattr(worker_profile or object(), "ch_residence_canton", None) or "UNKNOWN")
+                  or getattr(worker_profile or object(), "ch_residence_canton", None))
+        if not canton:
+            raise BadRequestException(
+                f"Employee {getattr(worker_profile, 'employee_id', '?')}: no QST or residence canton on the "
+                "worker profile — a source-tax declaration cannot be addressed to an unknown canton.")
         return f"CANTON:{canton.upper()}"
     if domain == "AHV":
         scheme_id = entity_profile.compensation_office_scheme_id if entity_profile else None
@@ -3165,24 +3286,31 @@ def _ch_elm_groups(db: Session, organization_id: int, profile, effective: list, 
         worker_profile = _ch_worker_profile(db, e["employeeId"], organization_id, e["run"].pay_date)
         receiver = _ch_elm_receiver(db, organization_id, profile, worker_profile, domain)
         group = groups.setdefault(receiver, {"employees": {}, "totals": {}, "headcount": 0, "canton": None})
-        if e["employeeId"] in group["employees"]:
-            continue
-        canton = (getattr(worker_profile or object(), "ch_residence_canton", None)
-                  or getattr(worker_profile or object(), "ch_qst_canton", None) or None)
-        row_emp = {"employeeId": e["item"].employee_id, "name": e["item"].employee_name or emp.name,
-                   "canton": canton, "amounts": {}}
+        # QST is declared to the QST canton (the receiver's own key); other
+        # domains carry the residence canton.
+        first, second = (("ch_qst_canton", "ch_residence_canton") if domain == "QST"
+                         else ("ch_residence_canton", "ch_qst_canton"))
+        canton = (getattr(worker_profile or object(), first, None)
+                  or getattr(worker_profile or object(), second, None) or None)
+        # An annual build (month=None) sees one row per period: every period of
+        # the employee is summed, the employee counted once.
+        row_emp = group["employees"].get(e["employeeId"])
+        if row_emp is None:
+            row_emp = {"employeeId": e["item"].employee_id, "name": e["item"].employee_name or emp.name,
+                       "canton": canton, "amounts": {}}
+            group["employees"][e["employeeId"]] = row_emp
+            group["headcount"] += 1
         totals = _ch_snapshot_totals(e["snapshot"])
         if domain == "BFS":
-            group["totals"]["wages"] = group["totals"].get("wages", ZERO_CHF) + totals.get("ch_employee_total",
-                                                                                           ZERO_CHF)
+            # BFS wage statistics are WAGES (gross), never employee deductions.
+            gross = Decimal(str(e["item"].gross_pay or 0))
+            group["totals"]["wages"] = group["totals"].get("wages", ZERO_CHF) + gross
         else:
             for key in CH_ELM_DOMAIN_KEYS[domain]:
                 value = totals.get(key, ZERO_CHF)
                 if value:
-                    row_emp["amounts"][key] = value
+                    row_emp["amounts"][key] = row_emp["amounts"].get(key, ZERO_CHF) + value
                     group["totals"][key] = group["totals"].get(key, ZERO_CHF) + value
-        group["employees"][e["employeeId"]] = row_emp
-        group["headcount"] += 1
         if group["canton"] is None:
             group["canton"] = canton
     return groups
@@ -3401,11 +3529,12 @@ def transition_ch_elm_submission(db: Session, organization_id: int, submission_i
         duplicate = (db.query(ChElmSubmission)
                      .filter(ChElmSubmission.organization_id == organization_id,
                              ChElmSubmission.domain == sub.domain, ChElmSubmission.period_key == sub.period_key,
+                             ChElmSubmission.receiver_id == sub.receiver_id,
                              ChElmSubmission.id != sub.id, ChElmSubmission.authority_ack_status == "RECEIVED")
                      .first())
         if duplicate is not None:
             raise BadRequestException(f"No duplicate settlement: domain {sub.domain} period {sub.period_key} "
-                                      f"is already RECEIVED (submission {duplicate.id}).")
+                                      f"receiver {sub.receiver_id} is already RECEIVED (submission {duplicate.id}).")
         sub.authority_ack_status, sub.settlement_status = "RECEIVED", "DUE"
         sub.receipt_reference = (receipt_reference or "").strip() or None
         _ch_elm_update_filing(db, sub, incoming="RECEIVED", receipt=sub.receipt_reference)

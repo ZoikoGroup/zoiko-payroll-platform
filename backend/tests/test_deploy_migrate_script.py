@@ -86,8 +86,25 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
     here = os.getcwd()
     os.chdir(Path(__file__).resolve().parents[1])
     try:
+        brazil_tables = {"payroll_br_risk_assignments", "payroll_br_cprb_options", "payroll_br_credential_refs",
+                         "payroll_br_concurrent_inss_declarations", "payroll_br_alimony_orders",
+                         "payroll_br_vale_transporte_elections"}
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
-        assert tables == {"payroll_mx_cfdi_system_concepts"}
+        assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables
+        # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2
+        # (135dbbeb9818, 8f90dde5f7b5), on top of production a8e4c1f7d3b5: every
+        # table AND every column on an existing table must be explained, or a
+        # self-heal refuses.
+        tables, columns = pending_objects("a8e4c1f7d3b5")
+        assert tables == brazil_tables
+        assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel"}
+        assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
+                                                         "authority_payment_id"}
+        assert len(columns["payroll_employee_statutory_profiles"]) == 10
+        assert {"version", "previous_version_id", "effective_from", "effective_to",
+                "created_by_id"} == columns["payroll_br_employer_profiles"]
+        assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
+                "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

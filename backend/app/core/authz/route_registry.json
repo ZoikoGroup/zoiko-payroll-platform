@@ -3015,6 +3015,384 @@
    "overridden": false
   },
   {
+   "method": "PUT",
+   "path": "/api/payroll/brazil/alimony-orders/{order_id}/close",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "close",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/credentials/{credential_id}/certificate",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "certificate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/brazil/credentials/{credential_id}/revoke",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "revoke",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/employees/{employee_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employees",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employees/{employee_id}/alimony-orders",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "alimony-orders",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/employees/{employee_id}/concurrent-inss-declarations",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "concurrent-inss-declarations",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employees/{employee_id}/concurrent-inss-declarations",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "concurrent-inss-declarations",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/employees/{employee_id}/readiness",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "readiness",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employees/{employee_id}/vale-transporte-elections",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "vale-transporte-elections",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/employers",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employers",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "employers",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/employers/{employer_id}",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employers/{employer_id}/cprb-options",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "cprb-options",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employers/{employer_id}/credentials",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "credentials",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employers/{employer_id}/establishments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "establishments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/employers/{employer_id}/versions",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "versions",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/brazil/establishments/{establishment_id}/deactivate",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "deactivate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/brazil/establishments/{establishment_id}/risk-assignments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "risk-assignments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/readiness",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "readiness",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/brazil/risk-assignments/{risk_id}/activate",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "activate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/runs/{run_id}/fingerprint",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "fingerprint",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/brazil/runs/{run_id}/preflight",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preflight",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/canada/reports/pd7a",
    "data_class": "worker",
@@ -10818,6 +11196,80 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/bank-result",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "bank-result",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nl_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/file",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "file",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/reconcile",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nl_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/netherlands/payment-batches/{batch_id}/submit",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "submit",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nl_payment_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/netherlands/pension-schemes",
    "data_class": "tenant_config",
@@ -10979,6 +11431,26 @@
     "payroll_employees",
     "payroll_nl_payment_items",
     "payroll_nl_vcr_snapshots",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/netherlands/runs/{run_id}/salary-batch/preview",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preview",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
     "payslip_items"
    ],
    "overridden": false
@@ -12225,8 +12697,6 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "organization_ytd_accumulators",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": false
@@ -14975,6 +15445,70 @@
     "payroll_employees"
    ],
    "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/employees/{employee_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employees",
+   "principals": [],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
+   "note": "one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/employer-readiness",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "employer-readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/employer-readiness/summary",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "summary",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/brazil/employers",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "employers",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
   },
   {
    "method": "GET",
@@ -19440,8 +19974,6 @@
    "retired_reason": "statutory action is tenant-run (ZP-PRIV decision 3)",
    "note": "payslip correction moves to the tenant (decision 3)",
    "scan_worker_tables": [
-    "organization_ytd_accumulators",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true

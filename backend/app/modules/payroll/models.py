@@ -1181,6 +1181,25 @@ class EmployeeStatutoryProfile(Base):
     mx_annual_adjustment_exclusion = Column(String(40), nullable=True)     # the employee's DECLARED exclusion code
     mx_annual_adjustment_exclusion_evidence_ref = Column(String(200), nullable=True)
 
+    # ── Brazil (ZP-BR-ENG-001 §7, Phase 4b) — CLT employee statutory facts ──
+    # All nullable/additive, no default (the Mexico pattern). Every jurisdiction
+    # keeps its employee statutory facts as country-prefixed columns here
+    # (written through the statutory_profile_values hook), so this block
+    # REPLACES the dedicated payroll_br_statutory_profiles table dropped in the
+    # same migration. The raw PIX key and bank account live in compliance_fields
+    # (masked); concurrent INSS, alimony and vale-transporte live in their own
+    # child tables (PayrollBr*Employee* below).
+    br_establishment_id                    = Column(Integer, ForeignKey("payroll_br_establishments.id", ondelete="SET NULL"), nullable=True)
+    br_esocial_category                    = Column(String(3), nullable=True)                 # 101 CLT ordinary / 103 apprentice
+    br_cbo_code                            = Column(String(6), nullable=True)
+    br_contract_type                       = Column(String(20), nullable=True)                # INDEFINITE / DETERMINED / INTERMITTENT
+    br_weekly_hours                        = Column(Numeric(4, 2), nullable=True)
+    br_simplified_irrf_opt_out             = Column(Boolean, nullable=True)
+    br_irrf_dependents_count               = Column(SmallInteger, nullable=True)
+    br_irrf_dependents_evidence_ref        = Column(String(300), nullable=True)
+    br_salario_familia_dependents_count    = Column(SmallInteger, nullable=True)
+    br_salario_familia_dependents_evidence_ref = Column(String(300), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1508,6 +1527,14 @@ class PayrollRun(Base):
     # (only ORDINARY in Phase 6). NULL = ORDINARY; no default, no CHECK
     # (metadata-only ALTER on a live table) — values enforced in code.
     mx_run_type = Column(String(16), nullable=True)
+    # Brazil (ZP-BR-ENG-001): approval fingerprint binding run to frozen BR
+    # calculation snapshots + engine version + content hash. Written at
+    # approval; checked at correction to ensure basis hasn't drifted.
+    br_approval_fingerprint = Column(JSON, nullable=True)
+    # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
+    # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
+    # so one run is never paid twice. Migration 8f90dde5f7b5.
+    payment_channel = Column(String(20), nullable=True)
 
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -2756,7 +2783,9 @@ class TaxSlab(Base):
     # to 2 (1.10%, 1.22%, 1.47%) by the old Numeric(5,2) column — the
     # API accepted the PUT with no error, so this went unnoticed until
     # the response was read back and compared against the source values.
-    rate_pct             = Column(Numeric(6, 4), nullable=False)   # e.g. 5.0000 for 5%
+    # Widened again to Numeric(7,4) (migration 135dbbeb9818): Brazil's 100%
+    # overtime premium (BR_LABOR OVERTIME_100) overflowed the ~99.9999 ceiling.
+    rate_pct             = Column(Numeric(7, 4), nullable=False)   # e.g. 5.0000 for 5%
     # Was String(20) — sized for short values like "5%"/"Nil". Widened for
     # NI_BAND rows, whose label is a real descriptive name (e.g. "Main Rate
     # Band (PT to UEL)") rather than a short percentage — see migration
@@ -9414,14 +9443,21 @@ class PayrollNlPaymentBatch(Base):
     payroll_run_id          = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     pain001_sha256          = Column(String(64), nullable=False, unique=True, index=True)
     message_id              = Column(String(100), nullable=False, index=True)
-    status                  = Column(String(20), nullable=False, default="SUBMITTED")  # SUBMITTED / ACCEPTED / SETTLED / REJECTED / RETURNED / UNKNOWN
+    # DRAFT -> SUBMITTED -> ACCEPTED / REJECTED / UNKNOWN -> SETTLED (RETURNED per item)
+    status                  = Column(String(20), nullable=False, default="DRAFT")
+    # The exact pain.001 bytes (the download) and their CreDtTm — migration 8f90dde5f7b5.
+    pain001_xml             = Column(Text, nullable=True)
+    created_at_utc          = Column(DateTime(timezone=True), nullable=True)
+    batch_kind              = Column(String(20), nullable=True)   # SALARY | AUTHORITY
+    authority_payment_id    = Column(Integer, ForeignKey("payroll_nl_authority_payments.id", ondelete="SET NULL"),
+                                     nullable=True)
     submitted_at            = Column(DateTime(timezone=True), nullable=True)
     reconciled_at           = Column(DateTime(timezone=True), nullable=True)
     created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     idempotency_key         = Column(String(100), nullable=False, unique=True, index=True)
 
     __table_args__ = (
-        sa.CheckConstraint("status IN ('SUBMITTED', 'ACCEPTED', 'SETTLED', 'REJECTED', 'RETURNED', 'UNKNOWN')", name="ck_nl_payment_batch_status"),
+        sa.CheckConstraint("status IN ('DRAFT', 'SUBMITTED', 'ACCEPTED', 'SETTLED', 'REJECTED', 'RETURNED', 'UNKNOWN')", name="ck_nl_payment_batch_status"),
         Index("ix_nl_payment_batch_org_run", "organization_id", "payroll_run_id"),
     )
 
@@ -9435,7 +9471,8 @@ class PayrollNlPaymentItem(Base):
 
     id                      = Column(Integer, primary_key=True, index=True)
     batch_id                = Column(Integer, ForeignKey("payroll_nl_payment_batches.id", ondelete="CASCADE"), nullable=False, index=True)
-    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NULL for an authority payment (Belastingdienst) — there is no employee.
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
     iban_token              = Column(String(200), nullable=False)
     amount                  = Column(Numeric(14, 2), nullable=False)
     end_to_end_id           = Column(String(100), nullable=False)
@@ -10852,49 +10889,73 @@ class PayrollMxOnboardingPause(Base):
 
 
 
-# ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────
+# ── Brazil (CLT - ZP-BR-ENG-001) Models ─────────────────────────────────────
+
+def _br_stamps():
+    """created_by_id / created_at / updated_at, as the Mexico Phase 3 tables.
+    created_by_id is SET NULL on user delete: delete_organization removes the
+    org's users before the org, and the audit trail keeps the row."""
+    return (Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+            Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
+            Column(DateTime(timezone=True), onupdate=func.now()))
+
 
 class PayrollBrEmployerProfile(Base):
-    """Brazilian legal employer profile and eSocial master data (Event S-1000)."""
+    """Brazilian legal employer (eSocial S-1000 facts), versioned and
+    effective-dated: a change is a new version from its effective date (the
+    open version is closed the day before), so history is never rewritten.
+    Every child record hangs off the chain ROOT (previous_version_id IS NULL),
+    so a new version never orphans establishments, options or credentials.
+    The CNPJ root never changes inside a chain."""
     __tablename__ = "payroll_br_employer_profiles"
 
     id                    = Column(Integer, primary_key=True, index=True)
     organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    cnpj_root             = Column(String(8), nullable=False)  # Alphanumeric-aware for post-2026 format (Rule BR-038)
+    version               = Column(Integer, nullable=False, default=1)
+    previous_version_id   = Column(Integer, ForeignKey("payroll_br_employer_profiles.id", ondelete="SET NULL"),
+                                   nullable=True)
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    cnpj_root             = Column(String(8), nullable=False)  # first 8 characters of the CNPJ (alphanumeric-aware)
     legal_name            = Column(String(255), nullable=False)
     trade_name            = Column(String(255), nullable=True)
-    tax_classification    = Column(String(2), nullable=False)  # eSocial Table 08 (e.g. '01', '99')
+    tax_classification    = Column(String(2), nullable=False)  # eSocial Tabela 08 code — format only until it is saved
     cnae_preponderant     = Column(String(7), nullable=False)
-    cprb_opted            = Column(Boolean, nullable=False, default=False)
-    cprb_rate_pct         = Column(Numeric(5, 2), nullable=True)
     esocial_environment   = Column(String(25), nullable=False, default="RESTRICTED_PRODUCTION")
     esocial_active_version= Column(String(10), nullable=False, default="S-1.3")
-    esocial_cert_alias    = Column(String(255), nullable=True)
     contact_name          = Column(String(120), nullable=False)
     contact_cpf           = Column(String(11), nullable=False)
     contact_email         = Column(String(120), nullable=False)
     contact_phone         = Column(String(20), nullable=True)
-    status                = Column(String(20), nullable=False, default="DRAFT")
-    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+    status                = Column(String(20), nullable=False, default="ACTIVE")
+    created_by_id, created_at, updated_at = _br_stamps()
 
-    establishments        = relationship("PayrollBrEstablishment", back_populates="employer_profile", cascade="all, delete-orphan")
+    establishments        = relationship("PayrollBrEstablishment", back_populates="employer_profile",
+                                         cascade="all, delete-orphan")
 
     __table_args__ = (
-        UniqueConstraint("organization_id", name="uq_br_employer_org"),  # one legal employer per organisation
+        UniqueConstraint("organization_id", "cnpj_root", "version", name="uq_br_employer_org_root_version"),
+        # One OPEN version per (organisation, CNPJ root): NULL != NULL in a plain UNIQUE.
+        Index("uq_br_employer_open_version", "organization_id", "cnpj_root", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
         sa.CheckConstraint("esocial_environment IN ('PRODUCTION', 'RESTRICTED_PRODUCTION')", name="ck_br_employer_env"),
-        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUSPENDED')", name="ck_br_employer_status"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'SUSPENDED')", name="ck_br_employer_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_br_employer_dates"),
     )
 
     def __repr__(self):
-        return f"<PayrollBrEmployerProfile org={self.organization_id} cnpj_root={self.cnpj_root} status={self.status}>"
+        return f"<PayrollBrEmployerProfile org={self.organization_id} cnpj_root={self.cnpj_root} v{self.version}>"
 
 
 class PayrollBrEstablishment(Base):
-    """Brazilian establishment (filial/obra) and tax lotação (Events S-1005 / S-1020)."""
+    """Brazilian establishment (filial/obra) and tax lotação (S-1005 / S-1020),
+    owned by the employer chain ROOT. RAT/FAP live in PayrollBrRiskAssignment
+    (they change every year). FPAS/third-party are DECLARED by the employer
+    until checked against eSocial Tabela 04, then VERIFIED."""
     __tablename__ = "payroll_br_establishments"
 
     id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     employer_profile_id   = Column(Integer, ForeignKey("payroll_br_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     # Unique per employer, not platform-wide: a global unique constraint would
     # tell one tenant that another tenant already uses a CNPJ.
@@ -10902,11 +10963,11 @@ class PayrollBrEstablishment(Base):
     establishment_name    = Column(String(255), nullable=False)
     is_headquarters       = Column(Boolean, nullable=False, default=False)
     cnae                  = Column(String(7), nullable=False)
-    rat_pct               = Column(Numeric(4, 2), nullable=False)  # 1.00, 2.00, 3.00
-    fap_factor            = Column(Numeric(5, 4), nullable=False, default=1.0000)  # 0.5000 to 2.0000
-    fpas_code             = Column(String(3), nullable=False)  # eSocial Table 04
+    fpas_code             = Column(String(3), nullable=False)  # eSocial Tabela 04
     third_party_code      = Column(String(4), nullable=False)  # Outras Entidades
     third_party_pct       = Column(Numeric(5, 2), nullable=False)
+    fpas_status           = Column(String(12), nullable=False, default="DECLARED")
+    fpas_evidence_ref     = Column(String(300), nullable=False)
     lotacao_code          = Column(String(30), nullable=False)
     postal_code           = Column(String(8), nullable=False)
     street_address        = Column(String(255), nullable=False)
@@ -10914,19 +10975,106 @@ class PayrollBrEstablishment(Base):
     city_ibge_code        = Column(String(7), nullable=False)
     state_uf              = Column(String(2), nullable=False)
     judicial_process_id   = Column(String(50), nullable=True)
-    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    active_from           = Column(Date, nullable=False)
+    active_to             = Column(Date, nullable=True)
+    created_by_id, created_at, updated_at = _br_stamps()
 
     employer_profile      = relationship("PayrollBrEmployerProfile", back_populates="establishments")
-    statutory_profiles    = relationship("PayrollBrStatutoryProfile", back_populates="establishment")
 
     __table_args__ = (
         UniqueConstraint("employer_profile_id", "cnpj", name="uq_br_establishment_employer_cnpj"),
-        sa.CheckConstraint("rat_pct IN (1.00, 2.00, 3.00)", name="ck_br_establishment_rat"),
-        sa.CheckConstraint("fap_factor >= 0.5000 AND fap_factor <= 2.0000", name="ck_br_establishment_fap"),
+        # At most one ACTIVE headquarters per employer.
+        Index("uq_br_establishment_active_hq", "employer_profile_id", unique=True,
+              postgresql_where=text("is_headquarters AND active_to IS NULL"),
+              sqlite_where=text("is_headquarters AND active_to IS NULL")),
+        sa.CheckConstraint("fpas_status IN ('DECLARED', 'VERIFIED')", name="ck_br_establishment_fpas_status"),
+        sa.CheckConstraint("third_party_pct >= 0 AND third_party_pct <= 100", name="ck_br_establishment_third_pct"),
+        sa.CheckConstraint("active_to IS NULL OR active_to >= active_from", name="ck_br_establishment_dates"),
     )
 
     def __repr__(self):
-        return f"<PayrollBrEstablishment id={self.id} cnpj={self.cnpj} rat={self.rat_pct} fap={self.fap_factor}>"
+        return f"<PayrollBrEstablishment id={self.id} cnpj={self.cnpj} hq={self.is_headquarters}>"
+
+
+class PayrollBrRiskAssignment(Base):
+    """RAT (1/2/3 %) and FAP (0.5000–2.0000) for one establishment and one
+    calendar year, with the evidence it was read from (the FAP is published
+    every year). One ACTIVE row per (establishment, year)."""
+    __tablename__ = "payroll_br_risk_assignments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    establishment_id      = Column(Integer, ForeignKey("payroll_br_establishments.id", ondelete="CASCADE"), nullable=False, index=True)
+    calendar_year         = Column(SmallInteger, nullable=False)
+    rat_pct               = Column(Numeric(4, 2), nullable=False)
+    fap_factor            = Column(Numeric(5, 4), nullable=False)
+    evidence_ref          = Column(String(300), nullable=False)
+    status                = Column(String(12), nullable=False, default="DRAFT")
+    created_by_id, created_at, updated_at = _br_stamps()
+
+    __table_args__ = (
+        Index("uq_br_risk_active_year", "establishment_id", "calendar_year", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+        sa.CheckConstraint("rat_pct IN (1.00, 2.00, 3.00)", name="ck_br_risk_rat"),
+        sa.CheckConstraint("fap_factor >= 0.5000 AND fap_factor <= 2.0000", name="ck_br_risk_fap"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_br_risk_status"),
+        sa.CheckConstraint("calendar_year >= 2026 AND calendar_year <= 2100", name="ck_br_risk_year"),
+    )
+
+
+class PayrollBrCprbOption(Base):
+    """The employer's CPRB option for one calendar year (Lei 14.973/2024
+    transition). Sector eligibility is not sourced yet, so readiness shows a
+    WARNING on any opted year. One ACTIVE row per (employer, year)."""
+    __tablename__ = "payroll_br_cprb_options"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_br_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    calendar_year         = Column(SmallInteger, nullable=False)
+    opted                 = Column(Boolean, nullable=False)
+    sector_reference      = Column(String(200), nullable=True)
+    cprb_rate_pct         = Column(Numeric(5, 2), nullable=True)
+    evidence_ref          = Column(String(300), nullable=False)
+    status                = Column(String(12), nullable=False, default="ACTIVE")
+    created_by_id, created_at, updated_at = _br_stamps()
+
+    __table_args__ = (
+        Index("uq_br_cprb_active_year", "employer_profile_id", "calendar_year", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+        sa.CheckConstraint("status IN ('ACTIVE', 'SUPERSEDED')", name="ck_br_cprb_status"),
+        sa.CheckConstraint("calendar_year >= 2026 AND calendar_year <= 2100", name="ck_br_cprb_year"),
+        sa.CheckConstraint("cprb_rate_pct IS NULL OR (cprb_rate_pct > 0 AND cprb_rate_pct <= 100)",
+                           name="ck_br_cprb_rate"),
+    )
+
+
+class PayrollBrCredentialRef(Base):
+    """A REFERENCE to a secret (eSocial A1 certificate, bank) in GCP Secret
+    Manager, plus public certificate metadata — never the secret, never the
+    PKCS#12 bundle (it contains the private key). One ACTIVE per (employer, kind)."""
+    __tablename__ = "payroll_br_credential_refs"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_profile_id   = Column(Integer, ForeignKey("payroll_br_employer_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind                  = Column(String(12), nullable=False)
+    secret_ref            = Column(String(300), nullable=False)
+    certificate_serial    = Column(String(80), nullable=True)
+    fingerprint_sha256    = Column(String(64), nullable=True)
+    subject_summary       = Column(String(500), nullable=True)
+    valid_from            = Column(DateTime(timezone=True), nullable=True)
+    valid_to              = Column(DateTime(timezone=True), nullable=True)
+    status                = Column(String(10), nullable=False, default="ACTIVE")
+    rotated_from_id       = Column(Integer, ForeignKey("payroll_br_credential_refs.id", ondelete="SET NULL"), nullable=True)
+    created_by_id, created_at, updated_at = _br_stamps()
+
+    __table_args__ = (
+        Index("uq_br_credential_active_kind", "employer_profile_id", "kind", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+        sa.CheckConstraint("kind IN ('ESOCIAL_A1', 'BANK')", name="ck_br_credential_kind"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'ROTATED', 'REVOKED')", name="ck_br_credential_status"),
+    )
 
 
 class PayrollBrRubric(Base):
@@ -10958,43 +11106,109 @@ class PayrollBrRubric(Base):
         return f"<PayrollBrRubric org={self.organization_id} code={self.rubric_code} nature={self.nature_code}>"
 
 
-class PayrollBrStatutoryProfile(Base):
-    """Effective-dated employee contract, eSocial category, and withholding configuration."""
-    __tablename__ = "payroll_br_statutory_profiles"
+class PayrollBrConcurrentInssDeclaration(Base):
+    """Concurrent-employment INSS declaration (BR-009): one declared external
+    base / already-deducted amount per competência (month). The employee's own
+    payroll is one employment; this records what ANOTHER employer already paid
+    so Phase 6 preflight can enforce the global INSS ceiling. Effective per
+    month, not a free-form history; a re-declaration supersedes the prior one."""
+    __tablename__ = "payroll_br_concurrent_inss_declarations"
 
-    id                                = Column(Integer, primary_key=True, index=True)
-    employee_id                       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
-    establishment_id                  = Column(Integer, ForeignKey("payroll_br_establishments.id", ondelete="RESTRICT"), nullable=False, index=True)
-    effective_from                    = Column(Date, nullable=False)
-    effective_to                      = Column(Date, nullable=True)
-    esocial_category                  = Column(String(3), nullable=False, default="101")  # 101 CLT Ordinary, 103 Apprentice
-    cbo_code                          = Column(String(6), nullable=False)
-    contract_type                     = Column(String(20), nullable=False, default="INDEFINITE")  # INDEFINITE / DETERMINED / INTERMITTENT
-    weekly_hours                      = Column(Numeric(4, 2), nullable=False, default=44.00)
-    concurrent_inss_flag              = Column(Boolean, nullable=False, default=False)
-    concurrent_inss_base_external     = Column(Numeric(12, 2), nullable=False, default=0.00)
-    concurrent_inss_deducted_external = Column(Numeric(12, 2), nullable=False, default=0.00)
-    irrf_dependents_count             = Column(SmallInteger, nullable=False, default=0)
-    salario_familia_dependents_count  = Column(SmallInteger, nullable=False, default=0)
-    simplified_irrf_opt_out           = Column(Boolean, nullable=False, default=False)
-    alimony_deduction_fixed           = Column(Numeric(12, 2), nullable=False, default=0.00)
-    alimony_deduction_pct             = Column(Numeric(5, 2), nullable=False, default=0.00)
-    vale_transporte_elected           = Column(Boolean, nullable=False, default=False)
-    vale_transporte_daily_cost        = Column(Numeric(8, 2), nullable=False, default=0.00)
-    status                            = Column(String(20), nullable=False, default="ACTIVE")
-    created_at                        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    establishment                     = relationship("PayrollBrEstablishment", back_populates="statutory_profiles")
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    competence_month   = Column(Date, nullable=False)                 # first day of the competência month
+    base_external      = Column(Numeric(12, 2), nullable=False, default=0.00)
+    deducted_external  = Column(Numeric(12, 2), nullable=False, default=0.00)
+    evidence_ref       = Column(String(300), nullable=True)
+    status             = Column(String(12), nullable=False, default="RECORDED")   # RECORDED / SUPERSEDED
+    created_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        sa.CheckConstraint("contract_type IN ('INDEFINITE', 'DETERMINED', 'INTERMITTENT')", name="ck_br_contract_type"),
-        # Launch wedge (spec §1): ordinary CLT employee (101) and apprentice (103) only.
-        sa.CheckConstraint("esocial_category IN ('101', '103')", name="ck_br_stat_profile_category"),
-        sa.CheckConstraint("weekly_hours > 0 AND weekly_hours <= 44", name="ck_br_stat_profile_weekly_hours"),
-        sa.CheckConstraint("status IN ('ACTIVE', 'ON_LEAVE', 'TERMINATED')", name="ck_br_stat_profile_status"),
-        Index("ix_br_stat_profile_emp_dates", "employee_id", "effective_from", "effective_to"),
+        sa.CheckConstraint("status IN ('RECORDED', 'SUPERSEDED')", name="ck_br_conc_inss_status"),
+        sa.CheckConstraint("base_external >= 0", name="ck_br_concurrent_base"),
+        sa.CheckConstraint("deducted_external >= 0", name="ck_br_concurrent_deducted"),
+        # One live RECORDED declaration per competência; superseding keeps the
+        # prior month's row as SUPERSEDED history (the alimony/VT pattern).
+        Index("uq_br_concurrent_employee_month_open", "employee_id", "competence_month", unique=True,
+              postgresql_where=text("status = 'RECORDED'"), sqlite_where=text("status = 'RECORDED'")),
     )
 
     def __repr__(self):
-        return f"<PayrollBrStatutoryProfile id={self.id} emp={self.employee_id} cat={self.esocial_category} status={self.status}>"
+        return f"<PayrollBrConcurrentInssDeclaration id={self.id} emp={self.employee_id} month={self.competence_month} status={self.status}>"
 
+
+class PayrollBrAlimonyOrder(Base):
+    """Court-ordered alimony (pensão alimentícia): either a fixed monthly amount
+    or a percentage of a defined base (GROSS / NET / BASE_INSS / BASE_IRRF).
+    Phase 4 only RECORDS the order with its evidence; Phase 5 deducts it from
+    the IRRF base and net pay. One ACTIVE open order per (employee, process no.)."""
+    __tablename__ = "payroll_br_alimony_orders"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_reference   = Column(String(100), nullable=False)                 # court / process number
+    method            = Column(String(12), nullable=False)                  # FIXED_AMOUNT / PERCENTAGE
+    fixed_amount      = Column(Numeric(12, 2), nullable=True)
+    percentage        = Column(Numeric(5, 2), nullable=True)
+    base              = Column(String(12), nullable=True)                   # GROSS / NET / BASE_INSS / BASE_IRRF
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    evidence_ref      = Column(String(300), nullable=True)
+    status            = Column(String(12), nullable=False, default="ACTIVE")  # ACTIVE / SUPERSEDED / CLOSED
+    created_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("method IN ('FIXED_AMOUNT', 'PERCENTAGE')", name="ck_br_alimony_method"),
+        sa.CheckConstraint(
+            "(method = 'FIXED_AMOUNT' AND fixed_amount IS NOT NULL AND percentage IS NULL AND base IS NULL) OR "
+            "(method = 'PERCENTAGE' AND percentage IS NOT NULL AND base IS NOT NULL AND fixed_amount IS NULL)",
+            name="ck_br_alimony_shape"),
+        sa.CheckConstraint("percentage IS NULL OR (percentage > 0 AND percentage <= 100)", name="ck_br_alimony_pct"),
+        sa.CheckConstraint("fixed_amount IS NULL OR fixed_amount > 0", name="ck_br_alimony_fixed"),
+        sa.CheckConstraint("base IS NULL OR base IN ('GROSS', 'NET', 'BASE_INSS', 'BASE_IRRF')", name="ck_br_alimony_base"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'SUPERSEDED', 'CLOSED')", name="ck_br_alimony_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_br_alimony_window"),
+        Index("uq_br_alimony_employee_order_open", "employee_id", "order_reference", unique=True,
+              postgresql_where=text("effective_to IS NULL AND status = 'ACTIVE'"),
+              sqlite_where=text("effective_to IS NULL AND status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrAlimonyOrder id={self.id} emp={self.employee_id} ref={self.order_reference} status={self.status}>"
+
+
+class PayrollBrValeTransporteElection(Base):
+    """Vale-transporte election (VT): whether the employee elected the benefit
+    and the declared daily cost, with evidence. Effective-dated; one ACTIVE open
+    election per employee. The 6% cap and the actual deduction are Phase 5
+    (brazil_content.vale_transporte_max_deduction_pct)."""
+    __tablename__ = "payroll_br_vale_transporte_elections"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    elected           = Column(Boolean, nullable=False, default=False)
+    daily_cost        = Column(Numeric(8, 2), nullable=True)
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    evidence_ref      = Column(String(300), nullable=True)
+    status            = Column(String(12), nullable=False, default="ACTIVE")  # ACTIVE / SUPERSEDED
+    created_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("elected = false OR daily_cost IS NOT NULL", name="ck_br_vt_elected_cost"),
+        sa.CheckConstraint("daily_cost IS NULL OR daily_cost >= 0", name="ck_br_vt_daily_cost"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'SUPERSEDED')", name="ck_br_vt_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_br_vt_window"),
+        Index("uq_br_vt_employee_open", "employee_id", unique=True,
+              postgresql_where=text("effective_to IS NULL AND status = 'ACTIVE'"),
+              sqlite_where=text("effective_to IS NULL AND status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBrValeTransporteElection id={self.id} emp={self.employee_id} elected={self.elected} status={self.status}>"

@@ -50,7 +50,9 @@ export default function NLJaaropgaafPanel() {
             { key: "status", label: "Status" },
             { key: "fiscal_wage", label: "Fiscal wage", render: (r) => money(r.fiscal_wage) },
             { key: "wage_tax_withheld", label: "Loonheffing withheld", render: (r) => money(r.wage_tax_withheld) },
-            { key: "applied_employment_credit", label: "Arbeidskorting applied", render: (r) => money(r.applied_employment_credit) },
+            // Not derived yet: the engine applies the credit inside the official
+            // table and reports no amount (needs the AK/AHK split, gate G1).
+            { key: "applied_employment_credit", label: "Arbeidskorting applied", render: () => "Not derived yet" },
             { key: "zvw_contribution", label: "Zvw contribution", render: (r) => money(r.zvw_contribution) },
             { key: "delivered_at", label: "Delivered" },
             {

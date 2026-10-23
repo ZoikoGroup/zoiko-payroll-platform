@@ -6,7 +6,7 @@ Phase 2 golden-fixture and boundary tests for the Brazil CLT payroll engine
 
 Golden Fixtures (spec §22):
   F1  — R$5,000 salary → progressive INSS R$501.51 (D1: rounded once)
-  F2  — Salary above ceiling R$8,475.55 → INSS capped at R$951.62
+  F2  — Salary above ceiling R$8,475.55 → INSS capped at R$988.09
   F3  — Taxable base ≤ R$5,000 → IRRF zero (2026 reduction zeroes it)
   F4  — Salary R$6,000 → IRRF phase-out reduction, deduction competition
   F5  — Salary within R$1,980.38, 1 dependent → Salário-Família R$67.54
@@ -24,13 +24,12 @@ Additional boundary tests:
   T9  — Concurrent employment: INSS bracket offset
   T10 — Standard engine dispatch routes BR employees correctly
 
-Phase 0 status: the production dispatch (_COUNTRY_CALC["BR"] -> brazil.calculate)
-BLOCKS every Brazilian calculation — see tests/test_brazil_scaffolding.py. This
-file exercises the DRAFT calculation (_calculate_draft) and its helpers, which
-no payroll path can reach. Phase 1 fixed BR-K1 (INSS maximum), BR-K10 (rounding
-once) and BR-K2 (IRRF reduction on gross) — their former strict-xfail tests now
-pass as ordinary tests. The IRRF reduction-basis tests reproduce the official
-Receita Federal worked examples (docs/brazil/sources/S3).
+Phase 5 status: the production dispatch (_COUNTRY_CALC["BR"] -> brazil.calculate)
+now runs the real, fail-closed engine. The integration tests below drive it
+through StandardStrategy with a complete brazil_inputs payload. Phase 1 fixed
+BR-K1 (INSS maximum), BR-K10 (rounding once) and BR-K2 (IRRF reduction on gross).
+The IRRF reduction-basis tests reproduce the official Receita Federal worked
+examples (docs/brazil/sources/S3).
 """
 
 import sys
@@ -48,11 +47,10 @@ from app.modules.payroll.engine.countries.brazil import (
     _calculate_fgts,
     _calculate_salario_familia,
     _calculate_vale_transporte_deduction,
-    _calculate_draft,
+    calculate,
     BrazilCalculationBlockedError,
 )
-from app.modules.payroll.engine import standard as _standard
-from app.modules.payroll.engine.base import PayrollContext, PayrollResult
+from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.standard import StandardStrategy
 from app.modules.payroll.engine.resolver import calculate_payroll
 
@@ -478,18 +476,18 @@ class TestValeTransporte:
     def test_T8_capped_at_6pct(self):
         """T8: VT benefit exceeds 6% of base → deduction capped at 6%."""
         # base salary = 5000, 6% = 300; VT benefit = 500
-        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("500.00"))
+        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("500.00"), D("0.06"))
         assert deduction == D("300.00")
 
     def test_below_6pct_deducts_actual(self):
         """VT benefit below 6% of base → deduct actual benefit amount."""
         # base = 5000, 6% = 300; VT benefit = 200 < 300
-        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("200.00"))
+        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("200.00"), D("0.06"))
         assert deduction == D("200.00")
 
     def test_zero_vt_benefit(self):
         """No VT benefit → zero deduction."""
-        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("0.00"))
+        deduction = _calculate_vale_transporte_deduction(D("5000.00"), D("0.00"), D("0.06"))
         assert deduction == D("0.00")
 
 
@@ -498,100 +496,103 @@ class TestValeTransporte:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestBrazilEngineIntegration:
+    """Phase 5: the production dispatch now runs the real engine. These tests
+    exercise how StandardStrategy sums the result (VT + alimony deductions,
+    Salário-Família net addition, employer liabilities kept out of net)."""
 
-    @pytest.fixture(autouse=True)
-    def _route_br_to_draft(self, monkeypatch):
-        """Production dispatch BLOCKS Brazil (Phase 0). These tests exercise how
-        StandardStrategy sums the DRAFT result (VT deduction, Salário-Família
-        net addition, employer liabilities kept out of net), so they route BR
-        to _calculate_draft for the duration of each test only."""
-        monkeypatch.setitem(_standard._COUNTRY_CALC, "BR", _calculate_draft)
-
-    def test_T10_standard_strategy_routes_br(self):
-        """T10: StandardStrategy dispatches BR to brazil.calculate correctly."""
-        ctx = make_ctx("5000.00", basic="5000.00", brazil_inputs={
+    @staticmethod
+    def _inputs(**over):
+        base = {
+            "competence_month": "2026-01-01",
+            "esocial_category": "101",
+            "contract_salary": "5000.00",
             "rat_pct": "2",
             "fap_factor": "1.0",
             "third_party_pct": "5.8",
-        })
-        strategy = StandardStrategy()
-        result = strategy.calculate(ctx)
+            "cprb_opted": False,
+            "financial_sector": False,
+            "earnings": [{"rubricCode": "BR_SALARIO_BASE", "amount": "5000.00"}],
+        }
+        base.update(over)
+        return base
 
-        # Employee INSS flows into employee_pf (the amount itself is pinned by
-        # TestINSS.test_F1_salary_5000; this test checks routing only)
-        assert result.employee_pf == result.br_inss_employee > D("0"), (
-            f"INSS via employee_pf: expected {result.br_inss_employee}, got {result.employee_pf}"
-        )
-        # IRRF = 0 (reduction zeroes it for R$5,000)
-        assert result.tds == D("0.00"), (
-            f"IRRF via tds: expected 0.00, got {result.tds}"
-        )
-        # FGTS is employer only, does NOT reduce net pay
-        assert result.br_fgts_deposit == D("400.00")  # 5000 × 8%
-        # CPP employer liability
-        assert result.br_cpp_employer == D("1000.00")  # 5000 × 20%
-        # br_result trace present
+    def test_T1_dispatch_and_summing(self):
+        """StandardStrategy routes BR to brazil.calculate() and sums the result."""
+        ctx = make_ctx("5000.00", basic="5000.00", brazil_inputs=self._inputs())
+        result = StandardStrategy().calculate(ctx)
+
+        # INSS employee reuses the generic employee_pf slot (amount pinned by
+        # TestINSS.test_F1_salary_5000; this checks routing + summing).
+        assert result.employee_pf == result.br_inss_employee == D("501.51")
+        # IRRF = 0 (the 2026 reduction zeroes it for R$5,000).
+        assert result.tds == D("0.00")
+        # FGTS is employer only — it does NOT reduce net pay.
+        assert result.br_fgts_deposit == D("400.00")
+        # CPP employer liability (20% of the CP base), RAT × FAP, third parties.
+        assert result.br_cpp_employer == D("1000.00")
+        assert result.br_rat_adjusted == D("100.00")
+        assert result.br_third_parties == D("290.00")
+        # br_result trace present.
         assert result.br_result is not None
         assert result.br_result["spec"] == "ZP-BR-ENG-001 v1.0"
+        # Net pay = gross − INSS − IRRF (no FGTS, no employer charges).
+        assert result.net_pay == D("4498.49")
 
-    def test_F6_apprentice_net_pay_unaffected(self):
-        """F6: Apprentice FGTS 2% — net pay should NOT include FGTS as a deduction."""
-        ctx = make_ctx("1621.00", basic="1621.00", brazil_is_apprentice=True)
-        strategy = StandardStrategy()
-        result = strategy.calculate(ctx)
+    def test_apprentice_category_103_fgts_2pct(self):
+        """Category 103 → FGTS 2% (BR-045); FGTS never reduces net pay."""
+        ctx = make_ctx("1621.00", basic="1621.00", brazil_inputs=self._inputs(
+            esocial_category="103", contract_salary="1621.00",
+            earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "1621.00"}],
+        ))
+        result = StandardStrategy().calculate(ctx)
 
-        # FGTS deposit exists as employer liability
         assert result.br_fgts_deposit == D("32.42")  # 1621 × 2%
-        # FGTS does NOT appear in total_deductions
-        # Net pay: gross - INSS - IRRF (no FGTS in net calc)
-        assert result.net_pay > D("0")
-        # Verify FGTS is NOT reducing net
-        inss = result.employee_pf
-        irrf = result.tds
-        expected_net = D("1621.00") - inss - irrf
-        assert result.net_pay == expected_net, (
-            f"F6 net pay check: expected {expected_net}, got {result.net_pay}"
-        )
+        assert result.net_pay == D("1621.00") - result.employee_pf - result.tds
 
     def test_F5_salario_familia_adds_to_net(self):
-        """F5: Salário-Família adds to net pay (not a deduction)."""
-        ctx = make_ctx("1621.00", basic="1621.00", brazil_inputs={"dependents": 1})
-        strategy = StandardStrategy()
-        result = strategy.calculate(ctx)
+        """F5: Salário-Família (R$67.54) is added to net pay, not deducted."""
+        ctx = make_ctx("1621.00", basic="1621.00", brazil_inputs=self._inputs(
+            contract_salary="1621.00", dependents=1,
+            earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "1621.00"}],
+        ))
+        result = StandardStrategy().calculate(ctx)
 
         assert result.br_salario_familia == D("67.54")
-        # Net pay is increased by Salário-Família
-        inss = result.employee_pf
-        irrf = result.tds
-        net_without_sf = D("1621.00") - inss - irrf
-        assert result.net_pay == net_without_sf + D("67.54"), (
-            f"F5 net pay with SF: expected {net_without_sf + D('67.54')}, got {result.net_pay}"
-        )
-    def test_F2_ceiling_integration(self):
-        """F2: High salary → INSS stops at the 2026 ceiling contribution via integration."""
-        ctx = make_ctx("20000.00", basic="20000.00")
-        strategy = StandardStrategy()
-        result = strategy.calculate(ctx)
+        net_without_sf = D("1621.00") - result.employee_pf - result.tds
+        assert result.net_pay == net_without_sf + D("67.54")
 
-        assert result.br_inss_employee in TestINSS._CORRECT_INSS_MAX
+    def test_F2_ceiling_integration(self):
+        """F2: High salary → INSS stops at the 2026 ceiling contribution."""
+        ctx = make_ctx("20000.00", basic="20000.00", brazil_inputs=self._inputs(
+            contract_salary="20000.00",
+            earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "20000.00"}],
+        ))
+        result = StandardStrategy().calculate(ctx)
+
+        assert result.br_inss_employee == D("988.09")
         assert result.employee_pf == result.br_inss_employee
+
+    def test_alimony_reduces_net_pay(self):
+        """BR-032: court-ordered alimony is a lawful deduction from net pay."""
+        ctx = make_ctx("5000.00", basic="5000.00", brazil_inputs=self._inputs(alimony="500.00"))
+        result = StandardStrategy().calculate(ctx)
+
+        assert result.br_alimony_deduction == D("500.00")
+        assert result.net_pay == D("5000.00") - result.employee_pf - result.tds - D("500.00")
 
     def test_cprb_transition_integration(self):
         """CPRB transition: CPP employer at 10%, verified via br_cpp_employer."""
-        ctx = make_ctx("10000.00", basic="10000.00", brazil_inputs={
-            "rat_pct": "2",
-            "fap_factor": "1.0",
-            "third_party_pct": "5.8",
-            "cprb_opted": True,
-        })
-        strategy = StandardStrategy()
-        result = strategy.calculate(ctx)
+        ctx = make_ctx("10000.00", basic="10000.00", brazil_inputs=self._inputs(
+            contract_salary="10000.00", cprb_opted=True,
+            earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "10000.00"}],
+        ))
+        result = StandardStrategy().calculate(ctx)
 
         assert result.br_cpp_employer == D("1000.00")  # 10000 × 10%
 
     def test_T5_simple_mode_blocked(self):
         """T5: BR simple mode must raise the handled blocked error (clean 4xx)."""
-        ctx = make_ctx("5000.00")
+        ctx = make_ctx("5000.00", basic="5000.00", brazil_inputs=self._inputs())
         with pytest.raises(BrazilCalculationBlockedError) as exc_info:
             calculate_payroll(ctx, calculation_mode="simple")
         assert exc_info.value.key == "BR_SIMPLE_MODE_UNSUPPORTED"
@@ -603,11 +604,11 @@ class TestBrazilEngineIntegration:
             basic=D("5000.00"),
             country="IN",
         )
-        strategy = StandardStrategy()
-        result = strategy.calculate(ctx)
+        result = StandardStrategy().calculate(ctx)
 
         assert result.br_result is None
         assert result.br_inss_employee == D("0")
         assert result.br_irrf == D("0")
         assert result.br_fgts_deposit == D("0")
         assert result.br_cpp_employer == D("0")
+        assert result.br_alimony_deduction == D("0")

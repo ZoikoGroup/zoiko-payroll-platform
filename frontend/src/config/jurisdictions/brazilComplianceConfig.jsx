@@ -1,9 +1,10 @@
-import { Banknote, Calculator, ClipboardCheck, FileSpreadsheet, FileText, Landmark, Layers, ListChecks, ShieldCheck, Sparkles } from "lucide-react";
+import { Banknote, Building2, Calculator, ClipboardCheck, FileSpreadsheet, FileText, Landmark, Layers, ListChecks, ShieldCheck, Sparkles } from "lucide-react";
 import BRStatutorySectionTab from "../../components/jurisdiction/brazil/BRStatutorySectionTab";
 import BRRubricCatalogueTab from "../../components/jurisdiction/brazil/BRRubricCatalogueTab";
 import BRFpasTableTab from "../../components/jurisdiction/brazil/BRFpasTableTab";
 import BRReadinessGatesTab from "../../components/jurisdiction/brazil/BRReadinessGatesTab";
 import BRGoldenVectorsTab from "../../components/jurisdiction/brazil/BRGoldenVectorsTab";
+import BREmployerProfileTab from "../../components/jurisdiction/brazil/BREmployerProfileTab";
 
 // Brazil (CLT), ZP-BR-ENG-001 — Super Admin workspace, mirroring the
 // Netherlands netherlandsComplianceConfig.jsx. The selected organisation comes
@@ -36,9 +37,19 @@ export function brazilExtraTabs(orgId) {
     tab("br-cpp", "CPP", Layers, "br-fgts", () => (
       <BRStatutorySectionTab ruleType="BR_CPP_RATE" title="CPP — employer social contribution (patronal)" />
     )),
-    tab("br-rubrics", "Rubric catalogue", FileText, "br-cpp", () => <BRRubricCatalogueTab orgId={orgId} />),
+    tab("br-rat-fap", "RAT / FAP", ShieldCheck, "br-cpp", () => (
+      <BRStatutorySectionTab ruleType="BR_RAT_FAP" title="RAT grades and the FAP range (accident-risk contribution)" />
+    )),
+    tab("br-vt", "Vale-transporte", Banknote, "br-rat-fap", () => (
+      <BRStatutorySectionTab ruleType="BR_VT_RATE" title="Vale-transporte — maximum employee deduction" />
+    )),
+    tab("br-labor", "Labour premiums", Calculator, "br-vt", () => (
+      <BRStatutorySectionTab ruleType="BR_LABOR" title="Overtime, night premium and DSR (CLT)" />
+    )),
+    tab("br-rubrics", "Rubric catalogue", FileText, "br-labor", () => <BRRubricCatalogueTab orgId={orgId} />),
     tab("br-fpas", "FPAS / Tabela 04", ClipboardCheck, "br-rubrics", () => <BRFpasTableTab />),
-    tab("br-readiness", "Readiness G1–G8", ShieldCheck, "br-fpas", () => <BRReadinessGatesTab />),
+    tab("br-employer", "Employer (read-only)", Building2, "br-fpas", () => <BREmployerProfileTab orgId={orgId} />),
+    tab("br-readiness", "Readiness G1–G8", ShieldCheck, "br-employer", () => <BRReadinessGatesTab />),
     tab("br-golden", "Golden vectors", Sparkles, "br-readiness", () => <BRGoldenVectorsTab />),
   ];
 }
