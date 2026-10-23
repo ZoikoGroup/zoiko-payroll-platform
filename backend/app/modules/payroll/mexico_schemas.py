@@ -118,6 +118,22 @@ class MXCatalogEntryCreate(BaseModel):
                 "valid_from": self.validFrom, "valid_to": self.validTo}
 
 
+class MXPinnedSetLoad(BaseModel):
+    setId: str
+
+
+class MXSystemConceptCreate(BaseModel):
+    releaseId: int
+    conceptKey: str
+    nodeType: str
+    satCode: str
+    sourceRef: str
+
+    def to_service(self) -> dict:
+        return {"release_id": self.releaseId, "concept_key": self.conceptKey, "node_type": self.nodeType,
+                "sat_code": self.satCode, "source_ref": self.sourceRef}
+
+
 # ── Phase 3 — employer onboarding (organisation API, /api/payroll/mexico) ────
 # extra="forbid": a field the API does not define (a password, a private key,
 # a typed statutory value) is refused instead of silently dropped. No

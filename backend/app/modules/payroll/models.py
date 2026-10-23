@@ -9571,6 +9571,40 @@ class PayrollMxCfdiCatalogEntry(Base):
     )
 
 
+class PayrollMxCfdiSystemConcept(Base):
+    """Phase 11a (MEXICO_PHASE_11_PLAN.md §4.3, D4): the SAT code for an amount
+    the engine produces itself — no earning classification carries it (ISR
+    withheld, IMSS employee quotas, INFONAVIT credit, the applied subsidy, the
+    special payments, the annual adjustment). Per schema release; the code must
+    exist in that release's catalog for the node type, and every row cites its
+    S28 / S4 location. Maker-checker: PROPOSED -> APPROVED by a different Super
+    Admin; a newer approval SUPERSEDES the old one. Platform configuration (no
+    organisation), so no row-level-security policy."""
+    __tablename__ = "payroll_mx_cfdi_system_concepts"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    schema_release_id  = Column(Integer, ForeignKey("payroll_mx_cfdi_schema_releases.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    concept_key        = Column(String(40), nullable=False)
+    node_type          = Column(String(12), nullable=False)          # PERCEPCION / DEDUCCION / OTRO_PAGO
+    sat_code           = Column(String(10), nullable=False)
+    source_ref         = Column(String(300), nullable=False)         # e.g. "S28 c_TipoDeduccion row 002; S4 p. 52"
+    status             = Column(String(12), nullable=False, default="PROPOSED")
+    proposed_by_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
+    approved_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at        = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at         = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("node_type IN ('PERCEPCION', 'DEDUCCION', 'OTRO_PAGO')", name="ck_mx_cfdi_sysc_node"),
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'WITHDRAWN', 'SUPERSEDED')",
+                           name="ck_mx_cfdi_sysc_status"),
+        Index("uq_mx_cfdi_sysc_approved", "schema_release_id", "concept_key", unique=True,
+              postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
+    )
+
+
 # ── Mexico (ZP-MX-ENG-001) — Phase 3 employer onboarding (migration mx_employer_m2) ──
 # Spec §11 panels A–H. An organisation (tenant) may hold several legal
 # employers (RFCs), each with establishments, several IMSS registrations and
