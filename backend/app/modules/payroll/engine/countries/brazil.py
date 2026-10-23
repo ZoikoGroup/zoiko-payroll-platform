@@ -548,7 +548,10 @@ def calculate(ctx: PayrollContext) -> Dict[str, Any]:
     contract_salary = _dec(require("contract_salary"))
 
     # ── Optional employee facts ───────────────────────────────────────────────
-    dependents = int(inputs.get("dependents", 0) or 0)
+    dependents = int(inputs.get("dependents", 0) or 0)                       # IRRF dependants
+    # Salário-família has its OWN dependant count (children under 14 / disabled,
+    # BR-041/056) — never the IRRF count. Absent = 0 (no quota), never borrowed.
+    sf_dependents = int(inputs.get("salario_familia_dependents", 0) or 0)
     alimony = _dec(inputs.get("alimony", "0") or "0")
     vt_benefit = _dec(inputs.get("vt_benefit", "0") or "0")
     opt_out_simplified = _as_bool(inputs.get("opt_out_simplified_irrf", False))
@@ -589,6 +592,10 @@ def calculate(ctx: PayrollContext) -> Dict[str, Any]:
         raise BRBlock("BR_ENGINE_RUBRIC_UNKNOWN",
                       f"earnings reference rubrics with no statutory incidence in the catalogue: "
                       f"{', '.join(bases['unmapped'])}", org)
+    if bases["unsupported"]:
+        raise BRBlock("BR_ENGINE_INCIDENCE_UNSUPPORTED",
+                      "earnings carry incidences the monthly engine does not calculate (13th salary, "
+                      f"vacation, ... need their own engines): {', '.join(bases['unsupported'])}", org)
     base_cp = bases["base_cp"]
     base_irrf = bases["base_irrf"]
     base_fgts = bases["base_fgts"]
@@ -612,7 +619,7 @@ def calculate(ctx: PayrollContext) -> Dict[str, Any]:
 
     # ── 3. Salário-Família (BR-025) ───────────────────────────────────────────
     sf = _calculate_salario_familia(
-        base_cp, dependents=dependents, concurrent_base=concurrent_sf_base,
+        base_cp, dependents=sf_dependents, concurrent_base=concurrent_sf_base,
         ceiling=sf_ceiling, quota=sf_quota,
     )
     br_salario_familia = sf["salario_familia"]

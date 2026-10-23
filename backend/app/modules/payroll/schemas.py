@@ -1444,6 +1444,12 @@ class PayslipItemResponse(BaseModel):
     # totals with net pay vs employer cost, exceptions, trace). Emitted for NL
     # only; declared here so response_model does not strip it.
     nlCalculationSnapshot: Optional[dict] = None
+    # Saudi Arabia (ZP-SA-ENG-001) and Brazil (ZP-BR-ENG-001): emitted by
+    # _serialize_payslip for SA / BR only. Declared so response_model does not
+    # strip them (SA's was emitted but stripped; BR's was never emitted, so the
+    # BRPayslipBreakdown panel never rendered — BR-E5).
+    saCalculationSnapshot: Optional[dict] = None
+    brCalculationSnapshot: Optional[dict] = None
     # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
     # input / content hashes, or the blocked reasons). Emitted for MX only;
     # declared here so response_model does not strip it.

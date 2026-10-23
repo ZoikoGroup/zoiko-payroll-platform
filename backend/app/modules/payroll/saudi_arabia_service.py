@@ -976,56 +976,44 @@ def _digest(value) -> str:
 
 
 def sa_approval_fingerprint(db: Session, run, store: bool = False) -> dict:
-    """What a SA approval is bound to: the resolved inputs (deduction orders,
-    overtime, hours excluded — they legitimately move when a LATER period
-    posts; this run's own before/after figures are inside its payslip
-    snapshots), the engine rule hashes, the pack version, and the payslip
-    values.
+    """What a SA approval is bound to (SA-026): per payslip, the frozen
+    calculation context (inputs + the exact pack rows used), the per-obligation
+    totals and the money columns; per employee, the statutory facts and
+    authorised deductions resolved NOW — so a cohort / wage / deduction change
+    after the calculation is drift. If `store=True`, persist it on
+    PayrollRun.sa_approval_fingerprint (the one place sa_stored_approval reads).
 
-    If `store=True`, also persist the fingerprint on the run's
-    `sa_approval_fingerprint` column (for approval gating)."""
-    from app.modules.payroll.models import PayslipItem, PayrollEmployee, JurisdictionPack, PayrollRun
+    SA-E2: the earlier version read resolve_sa_calc_inputs()["blocked"/"inputs"]
+    and trace input_hash / rule_hash, none of which exist (KeyError), and stored
+    the result on the run but read it back from an audit row nothing wrote."""
+    from app.modules.payroll.models import PayrollEmployee, PayrollRun
 
-    inputs, rule_hashes, payslips = [], [], []
-    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id,
-                                         PayslipItem.country_code == SA).all()
+    payslips, current = [], []
+    items = (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == SA)
+             .order_by(PayslipItem.id).all())
     for item in items:
+        snap = item.sa_calculation_snapshot or {}
+        payslips.append([item.id, item.employee_id, str(item.gross_pay), str(item.net_pay),
+                         str(item.total_deductions), snap.get("frozenContext"),
+                         snap.get("totalsAll") or sa_totals_all(snap)])
         employee = db.get(PayrollEmployee, item.employee_id)
-        out = resolve_sa_calc_inputs(db, run.organization_id, employee, run.pay_date)
-        # YTD-ish excluded; the rest is the approval basis
-        inputs.append([item.employee_id, out["blocked"],
-                       {k: v for k, v in out["inputs"].items() if k not in ("ytd",)}])
-        trace = (item.sa_calculation_snapshot or {}).get("trace") or {}
-        rule_hashes.append([item.id, trace.get("input_hash"), trace.get("rule_hash")])
-        payslips.append([item.id, item.employee_id, item.gross_pay, item.net_pay, item.total_deductions,
-                         item.sa_calculation_snapshot])
-    # pack version(s) in force for this run
-    pack = db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == SA,
-                                             JurisdictionPack.pack_type == "tax",
-                                             JurisdictionPack.effective_from <= run.pay_date,
-                                             (JurisdictionPack.effective_to.is_(None) |
-                                              JurisdictionPack.effective_to >= run.pay_date)).first()
-    pack_versions = [[pack.id, pack.version] if pack else None]
-    components = {"inputs": _digest(inputs), "ruleHashes": _digest(rule_hashes),
-                  "packVersions": _digest(pack_versions), "payslips": _digest(payslips)}
+        resolved = resolve_sa_calc_inputs(db, run.organization_id, employee, run.pay_date) if employee else {}
+        current.append([item.employee_id, _sa_profile_facts(resolved.get("sa_statutory_profile")),
+                        resolved.get("sa_deduction_orders")])
+    components = {"payslips": _digest(_json_safe(payslips)), "currentInputs": _digest(_json_safe(current))}
     result = {"fingerprint": _digest(components), "components": components}
 
     if store:
         run_obj = db.query(PayrollRun).filter(PayrollRun.id == run.id).first()
-        if run_obj:
+        if run_obj is not None:
             run_obj.sa_approval_fingerprint = result
             db.flush()
-
     return result
 
 
 def sa_stored_approval(db: Session, run) -> Optional[dict]:
-    from app.modules.payroll.models import TaxConfigurationAudit
-    row = (db.query(TaxConfigurationAudit)
-           .filter(TaxConfigurationAudit.entity_type == "SA_RUN_APPROVAL",
-                   TaxConfigurationAudit.entity_id == run.id)
-           .order_by(TaxConfigurationAudit.id.desc()).first())
-    return None if row is None or row.action != "create" else row.new_value
+    """The fingerprint stored at the last approval (PayrollRun column)."""
+    return getattr(run, "sa_approval_fingerprint", None) or None
 
 
 def _sa_correction_chain(db: Session, original: PayslipItem) -> list:
@@ -1318,7 +1306,9 @@ def approve_sa_employer_profile(db: Session, organization_id: int, profile_id: i
             raise NotFoundException("SaEmployerProfile", profile_id)
         if row.status != "DRAFT":
             raise BadRequestException(f"Employer profile {row.id} is {row.status}; only a DRAFT can be approved.")
-        if row.approved_by_id is not None and row.approved_by_id == actor_id:
+        # Four-eyes (SA-E3): the approver must differ from the CREATOR. The old
+        # check compared approved_by_id, which is still empty on a DRAFT.
+        if actor_id is None or row.created_by_id == actor_id:
             raise BadRequestException("The same operator cannot approve their own draft (four-eyes).")
         row.status = "APPROVED"
         row.approved_by_id = actor_id
@@ -1403,7 +1393,9 @@ def approve_sa_contract_version(db: Session, organization_id: int, employee_id: 
             raise NotFoundException("SaContractVersion", contract_id)
         if row.status != "DRAFT":
             raise BadRequestException(f"Contract {row.id} is {row.status}; only a DRAFT can be approved.")
-        if row.approved_by_id is not None and row.approved_by_id == actor_id:
+        # Four-eyes (SA-E3): the approver must differ from the CREATOR. The old
+        # check compared approved_by_id, which is still empty on a DRAFT.
+        if actor_id is None or row.created_by_id == actor_id:
             raise BadRequestException("The same operator cannot approve their own draft (four-eyes).")
         row.status = "APPROVED"
         row.approved_by_id = actor_id
@@ -1824,7 +1816,7 @@ def approve_sa_final_settlement(db: Session, organization_id: int, settlement_id
             raise NotFoundException("SaFinalSettlement", settlement_id)
         if row.status != "DRAFT":
             raise BadRequestException(f"Final settlement {row.id} is {row.status}; only a DRAFT can be approved.")
-        if row.approved_by_id == actor_id:
+        if actor_id is None or row.created_by_id == actor_id:      # four-eyes against the creator (SA-E3)
             raise BadRequestException("A final settlement must be approved by a different user (four-eyes).")
         row.status = "APPROVED"
         row.approved_by_id = actor_id

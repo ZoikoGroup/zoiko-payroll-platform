@@ -32,6 +32,12 @@ ZERO = Decimal("0.00")
 
 # eSocial Tabela 03 incidence code that marks an earning as part of a base.
 INCIDENCE_BASE = "11"
+# Codes that explicitly keep an earning OUT of a base (00 not a base, 01 not a
+# base / non-taxable). Every other code (12 13th salary, 13 vacation, ...) needs
+# its own calculation the monthly engine does not have — it is reported in
+# `unsupported` and the engine BLOCKS (BR-E4: it used to be silently dropped
+# from every base, so 13th / vacation pay escaped INSS, IRRF and FGTS).
+INCIDENCE_EXCLUDED = ("00", "01")
 
 
 def _r2(value: Decimal) -> Decimal:
@@ -57,11 +63,14 @@ def resolve_bases(
         lines      — per-earning incidence trace
         unmapped   — rubric codes with no catalogue row (the engine BLOCKS on a
                      non-empty list)
+        unsupported — "<rubric>:<cp|irrf|fgts>=<code>" for incidence codes the
+                     monthly engine does not calculate (the engine BLOCKS)
     """
     by_code = catalogue_by_code(catalogue)
     base_cp = base_irrf = base_fgts = ZERO
     lines: List[Dict[str, Any]] = []
     unmapped: List[str] = []
+    unsupported: List[str] = []
 
     for item in earnings:
         code = item.get("rubricCode")
@@ -72,6 +81,10 @@ def resolve_bases(
         if row is None:
             unmapped.append(str(code))
             continue
+        for base, key in (("cp", "cod_inc_cp"), ("irrf", "cod_inc_irrf"), ("fgts", "cod_inc_fgts")):
+            incidence = row.get(key)
+            if incidence != INCIDENCE_BASE and incidence not in INCIDENCE_EXCLUDED:
+                unsupported.append(f"{code}:{base}={incidence}")
         in_cp = row.get("cod_inc_cp") == INCIDENCE_BASE
         in_irrf = row.get("cod_inc_irrf") == INCIDENCE_BASE
         in_fgts = row.get("cod_inc_fgts") == INCIDENCE_BASE
@@ -98,4 +111,5 @@ def resolve_bases(
         "base_fgts": _r2(base_fgts),
         "lines": lines,
         "unmapped": unmapped,
+        "unsupported": unsupported,
     }

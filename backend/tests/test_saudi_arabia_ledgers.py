@@ -437,3 +437,45 @@ def test_run_preflight_no_longer_blocks_on_gosi_branches(db, organization):
     keys = {b.get("key") for b in svc.sa_run_preflight(db, run)}
     assert "SA_PACK_NOT_ACTIVE" not in keys                            # the pack WAS found, so the check ran
     assert "SA_GOSI_BRANCHES_MISSING" not in keys                      # was raised for every pack
+
+
+# ── SA-E3: four-eyes compares the approver with the CREATOR ──────────────────
+def test_creator_cannot_approve_their_own_employer_profile_or_contract(db, organization):
+    profile = svc.create_sa_employer_profile(db, organization.id, {
+        "effectiveFrom": "2026-01-01", "gosiEmployerCode": "GOSI-1"}, actor_id=7)
+    with pytest.raises(Exception, match="four-eyes"):
+        svc.approve_sa_employer_profile(db, organization.id, profile.id, actor_id=7)
+    assert svc.approve_sa_employer_profile(db, organization.id, profile.id, actor_id=8).status == "APPROVED"
+
+    emp = _employee(db, organization)
+    contract = svc.create_sa_contract_version(db, organization.id, emp.id, {
+        "effectiveFrom": "2026-01-01", "contractType": "LIMITED", "basicWage": "9000"}, actor_id=7)
+    with pytest.raises(Exception, match="four-eyes"):
+        svc.approve_sa_contract_version(db, organization.id, emp.id, contract.id, actor_id=7)
+    with pytest.raises(Exception, match="four-eyes"):
+        svc.approve_sa_contract_version(db, organization.id, emp.id, contract.id, actor_id=None)
+
+
+# ── SA-E2: the approval fingerprint binds payslips AND current master data ───
+def test_approval_fingerprint_is_stable_stored_and_detects_drift(db, organization):
+    from app.modules.payroll.models import EmployeeStatutoryProfile
+
+    run, item, _result = _f2_payslip(db, organization)
+    first = svc.sa_approval_fingerprint(db, run)                      # raised KeyError before
+    assert first == svc.sa_approval_fingerprint(db, run)               # deterministic
+    svc.sa_approval_fingerprint(db, run, store=True)
+    assert svc.sa_stored_approval(db, run)["fingerprint"] == first["fingerprint"]   # read where written
+
+    # master data changed after the calculation -> drift
+    db.add(EmployeeStatutoryProfile(employee_id=item.employee_id, organization_id=organization.id, country_code="SA",
+                                    effective_from=date(2026, 1, 1), sa_worker_class="SAUDI", sa_cohort="LEGACY"))
+    db.flush()
+    assert svc.sa_approval_fingerprint(db, run)["fingerprint"] != first["fingerprint"]
+
+
+def test_approval_fingerprint_changes_with_the_payslip(db, organization):
+    run, item, _result = _f2_payslip(db, organization)
+    first = svc.sa_approval_fingerprint(db, run)["fingerprint"]
+    item.net_pay = item.net_pay + 1
+    db.flush()
+    assert svc.sa_approval_fingerprint(db, run)["fingerprint"] != first
