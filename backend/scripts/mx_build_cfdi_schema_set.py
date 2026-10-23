@@ -91,6 +91,12 @@ def enumerations(xsd: bytes) -> dict:
     return out
 
 
+def _target_namespace(path: Path) -> str:
+    from lxml import etree
+
+    return etree.parse(str(path)).getroot().get("targetNamespace")
+
+
 def _cell(value):
     if isinstance(value, float) and value == int(value):
         return int(value)
@@ -212,9 +218,9 @@ def build(set_id: str, catalog_release: str) -> Path:
 
     recorded = source_hashes()
     out = OUT_ROOT / set_id
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.iterdir():                      # empty it (the folder itself may be open in a shell)
+        shutil.rmtree(old) if old.is_dir() else old.unlink()
     files, enums = {}, {}
     for pinned, source in XSD_FILES.items():
         data = verified_source(source, recorded)
@@ -247,6 +253,10 @@ def build(set_id: str, catalog_release: str) -> Path:
                            "status": recorded[name]["status"]}
                     for name in sorted(list(XSD_FILES.values()) + list(WORKBOOKS))},
         "generator": "scripts/mx_build_cfdi_schema_set.py",
+        # Phase 11b: xsi:schemaLocation pairs — the namespace read from each main
+        # schema, the location from its official URL in SOURCES_MANIFEST.csv.
+        "schemaLocations": {_target_namespace(out / main): recorded[XSD_FILES[main]]["url"]
+                            for main in ("cfdv40.xsd", "nomina12.xsd")},
         "caseNormalised": sorted(NORMALISED),
     }
     # The two versions are read from the schemas themselves, never assumed.

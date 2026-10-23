@@ -190,16 +190,19 @@ def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
     refusal = object_storage.durable_storage_refusal("Mexico CFDI XML storage")
     if refusal:
         raise MXBlock("MX_CFDI_STORAGE_NOT_DURABLE", refusal, run.organization_id)
-    document_input = {"payslipItemId": item.id, "employeeId": item.employee_id, "runId": run.id,
-                      "payDate": run.pay_date.isoformat(), "periodStart": run.period_start.isoformat(),
-                      "periodEnd": run.period_end.isoformat(), "result": (item.mx_calculation_snapshot or {}).get("result"),
-                      "schemaRelease": {"id": release.id, "cfdi": release.cfdi_version, "nomina": release.complement_version},
-                      "replacesUuid": getattr(replaces, "uuid", None)}
-    payload = _builder.active_builder().build(document_input)
+    folio = _next_folio(db, run.organization_id)        # Phase 11b: the receipt carries its Folio
+    base = {"payslipItemId": item.id, "employeeId": item.employee_id, "runId": run.id,
+            "payDate": run.pay_date.isoformat(), "periodStart": run.period_start.isoformat(),
+            "periodEnd": run.period_end.isoformat(), "result": (item.mx_calculation_snapshot or {}).get("result"),
+            "schemaRelease": {"id": release.id, "cfdi": release.cfdi_version, "nomina": release.complement_version},
+            "replacesUuid": getattr(replaces, "uuid", None), "folio": folio, "issuedAtUtc": _now()}
+    builder = _builder.active_builder()
+    document_input = builder.prepare(db, run, item, release, base)
+    payload = builder.build(document_input)
+    del document_input                                  # MX-061: identifiers never outlive the build
     signed, cert_no = _builder.active_signer().sign(payload, _pac.CredentialHandle(getattr(_cred, "id", None), "CSD",
                                                                                    getattr(_cred, "fingerprint_sha256", None)))
     payload_hash = _sha(signed)
-    folio = _next_folio(db, run.organization_id)
     # One key per DOCUMENT (folio is unique per organisation): every retry of
     # this document reuses it; a new document (e.g. after a rejection) gets its own.
     key = "mxcfdi-" + _sha(f"{run.organization_id}:{item.id}:{folio}:{payload_hash}".encode())[:56]

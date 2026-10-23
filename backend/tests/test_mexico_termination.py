@@ -15,13 +15,17 @@ TERM_DATE = date(2026, 6, 20)
 class SynReason:
     source, source_ref = "S26", "SYNTHETIC"
 
-    def __init__(self, label, days_of_salary=None):
-        self.label, self.days = label, days_of_salary
+    def __init__(self, label, days_of_salary=None, components=None):
+        self.label, self.days, self.components = label, days_of_salary, components
 
     def separation_components(self, facts):
+        if self.components is not None:                    # [(code, kind, days)]
+            return [{"code": c, "label": f"Synthetic {c}", "kind": k, "amount": facts["daily_salary"] * d}
+                    for c, k, d in self.components]
         if self.days is None:
             return []
-        return [{"code": "INDEMNITY", "label": "Synthetic indemnity", "amount": facts["daily_salary"] * self.days}]
+        return [{"code": "INDEMNITY", "label": "Synthetic indemnity", "kind": "SEPARATION_INDEMNITY",
+                 "amount": facts["daily_salary"] * self.days}]
 
 
 class SynFiniquitoRule:
@@ -63,7 +67,8 @@ class SynSpecialPayRule:
         return (taxable * D("0.10")).quantize(D("0.01"), ROUND_HALF_UP)
 
 
-CONCEPTS = ("AGUINALDO", "VACATION_PAYOUT", "VACATION_PREMIUM", "SEPARATION")
+CONCEPTS = ("AGUINALDO", "VACATION_PAYOUT", "VACATION_PREMIUM", "SEPARATION_SENIORITY_PREMIUM", "SEPARATION_PAYMENT",
+            "SEPARATION_INDEMNITY")
 
 
 def _catalog(monkeypatch):
@@ -259,9 +264,9 @@ def test_the_finiquito_pays_the_reason_components_never_the_ordinary_tariff(db, 
     (item,) = ah.rh.mx_items(db, run)
     res = item.mx_calculation_snapshot["result"]
     by_kind = {c["kind"]: D(c["gross"]) for c in res["concepts"]}
-    assert set(by_kind) == set(CONCEPTS)
+    assert set(by_kind) == {"AGUINALDO", "VACATION_PAYOUT", "VACATION_PREMIUM", "SEPARATION_INDEMNITY"}
     daily = D("600")
-    assert by_kind["SEPARATION"] == daily * 90                              # the reason's component
+    assert by_kind["SEPARATION_INDEMNITY"] == daily * 90                    # the reason's component, its own kind
     year = D((TERM_DATE - date(2026, 1, 1)).days + 1) / D(365)
     assert by_kind["AGUINALDO"] == (D("15") * daily * year).quantize(D("0.01"), ROUND_HALF_UP)
     detail = res["special"]["detail"]
@@ -281,7 +286,8 @@ def test_a_reason_without_components_pays_no_separation(db, monkeypatch):
     run = _finiquito(db, w, _approved(db, w, reason="SYN_RESIGNATION")["id"])
     (item,) = ah.rh.mx_items(db, run)
     kinds = {c["kind"] for c in item.mx_calculation_snapshot["result"]["concepts"]}
-    assert "SEPARATION" not in kinds and "AGUINALDO" in kinds
+    assert not (kinds & {"SEPARATION_SENIORITY_PREMIUM", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"})
+    assert "AGUINALDO" in kinds
 
 
 def test_a_later_termination_owes_more_vacation_directional(db, monkeypatch):
@@ -346,3 +352,51 @@ def test_termination_routes(db, monkeypatch):
         assert fin.status_code == 200, fin.text
         listed = c.get(f"{ORG_BASE}/employees/{w.employee.id}/terminations").json()
         assert listed[0]["finiquitoRun"]["id"] == fin.json()["runId"]
+
+
+# ── Phase 11b: separation is three kinds (S28 c_TipoPercepcion 022 / 023 / 025) ──
+
+def test_each_separation_component_is_emitted_as_its_own_kind(db, monkeypatch):
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    _rules(monkeypatch)
+    monkeypatch.setitem(c.MX_TERMINATION_REASONS, "SYN_ALL", SynReason("All three", components=[
+        ("SENIORITY", "SEPARATION_SENIORITY_PREMIUM", 12), ("SEPARATION", "SEPARATION_PAYMENT", 20),
+        ("INDEMNITY", "SEPARATION_INDEMNITY", 90)]))
+    w = ah.committed_world(db, monkeypatch, code="MXTRM11")
+    run = _finiquito(db, w, _approved(db, w, reason="SYN_ALL")["id"])
+    assert _codes(db, run) == set()
+    (item,) = ah.rh.mx_items(db, run)
+    res = item.mx_calculation_snapshot["result"]
+    by_kind = {c["kind"]: D(c["gross"]) for c in res["concepts"]}
+    daily = D("600")
+    assert (by_kind["SEPARATION_SENIORITY_PREMIUM"], by_kind["SEPARATION_PAYMENT"], by_kind["SEPARATION_INDEMNITY"])         == (daily * 12, daily * 20, daily * 90)
+    assert [d["kind"] for d in res["special"]["detail"]["separation"]] == [
+        "SEPARATION_SENIORITY_PREMIUM", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"]
+
+
+def test_a_separation_component_without_its_kind_blocks(db, monkeypatch):
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    class NoKind(SynReason):
+        def separation_components(self, facts):
+            return [{"code": "INDEMNITY", "label": "x", "amount": facts["daily_salary"] * 90}]
+
+    _rules(monkeypatch)
+    monkeypatch.setitem(c.MX_TERMINATION_REASONS, "SYN_NOKIND", NoKind("No kind"))
+    w = ah.committed_world(db, monkeypatch, code="MXTRM12")
+    run = _finiquito(db, w, _approved(db, w, reason="SYN_NOKIND")["id"])
+    assert "MX_TERMINATION_RULE_INVALID" in _codes(db, run)
+
+
+def test_each_separation_kind_needs_its_own_transcribed_tax_rule(db, monkeypatch):
+    """Content decides the tax treatment per kind; one missing rule blocks the run."""
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    _rules(monkeypatch)
+    rules = dict(c.MX_SPECIAL_PAY_RULES)
+    del rules["SEPARATION_INDEMNITY"]
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", rules)
+    w = ah.committed_world(db, monkeypatch, code="MXTRM13")
+    run = _finiquito(db, w, _approved(db, w)["id"])
+    assert "MX_SPECIAL_PAY_RULE_MISSING" in _codes(db, run)

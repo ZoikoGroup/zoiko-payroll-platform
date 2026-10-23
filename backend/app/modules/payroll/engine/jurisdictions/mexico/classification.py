@@ -24,6 +24,7 @@ import datetime as _dt
 from decimal import Decimal, InvalidOperation
 
 from .errors import MXBlock
+from .termination import SEPARATION_KINDS   # Phase 11b: three separation kinds (S28 022 / 023 / 025)
 
 # Earning-line kinds the run integration supplies (Phase 6). The salary line
 # is the one the SBC fixed part and the minimum-wage check are built from.
@@ -31,7 +32,7 @@ ORDINARY_SALARY = "ORDINARY_SALARY"
 OVERTIME = "OVERTIME"
 SUNDAY_PREMIUM = "SUNDAY_PREMIUM"
 OTHER = "OTHER"
-SPECIAL_PAY_KINDS = ("AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION")
+SPECIAL_PAY_KINDS = ("AGUINALDO", "VACATION_PREMIUM", "PTU") + SEPARATION_KINDS
 LINE_KINDS = (ORDINARY_SALARY, OVERTIME, SUNDAY_PREMIUM, OTHER) + SPECIAL_PAY_KINDS
 
 _IN_FORCE_STATUSES = ("ACTIVE", "SUPERSEDED")

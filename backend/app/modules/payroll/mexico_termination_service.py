@@ -394,8 +394,9 @@ def finiquito_lines(db: Session, row, employee, prof, policy: dict, content, rou
     # Separation components the reason triggers.
     sep = attempt(lambda: termination.separation_lines(row.reason_code, facts))
     if sep is not None:
-        detail["separation"] = [{"code": l["code"], "label": l["label"], "amount": rounder(l["amount"])} for l in sep]
-        lines += [{"code": l["code"], "kind": "SEPARATION", "amount": rounder(l["amount"])} for l in sep]
+        detail["separation"] = [{"code": l["code"], "label": l["label"], "kind": l["kind"],
+                                 "amount": rounder(l["amount"])} for l in sep]
+        lines += [{"code": l["code"], "kind": l["kind"], "amount": rounder(l["amount"])} for l in sep]
     finiquito = attempt(termination.rule_source)
     detail["ruleSource"] = finiquito
     if problems:
