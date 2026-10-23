@@ -25438,6 +25438,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
         # the complete context a CH correction replays (Step 13)
         switzerland_frozen = _switzerland_service.ch_freeze_context(ctx, switzerland_attrs, calculation_mode)
+    # the complete Saudi context a SA correction replays (SA-043)
+    saudi_frozen = None
+    if saudi_inputs is not None:
+        from app.modules.payroll import saudi_arabia_service as _sa_service
+        saudi_frozen = _sa_service.sa_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25604,7 +25609,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Saudi Arabia (ZP-SA-ENG-001): the frozen GOSI picture (worker class,
         # cohort, rate basis, per-branch amounts + trace) — JSON-safe, replayed
         # from the payslip exactly as computed (never reconstructed).
-        "sa_calculation_snapshot": result.sa_result,
+        "sa_calculation_snapshot": (_sa_service.sa_payslip_snapshot(result, frozen=saudi_frozen)
+                                    if saudi_frozen is not None else result.sa_result),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32259,6 +32265,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if switzerland_attrs is not None:
         _switzerland_service.apply_ch_context(ctx, switzerland_attrs)
         switzerland_frozen = _switzerland_service.ch_freeze_context(ctx, switzerland_attrs, calculation_mode)
+    # the complete Saudi context a SA correction replays (SA-043)
+    saudi_frozen = None
+    if saudi_inputs is not None:
+        from app.modules.payroll import saudi_arabia_service as _sa_service
+        saudi_frozen = _sa_service.sa_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -32299,6 +32310,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         compliance_fields=dict(getattr(employee, "compliance_fields", None) or {}),
         ch_calculation_snapshot=_switzerland_service.ch_payslip_snapshot(calc, frozen=switzerland_frozen),
         nl_calculation_snapshot=calc.nl_result if country == "NL" else None,
+        sa_calculation_snapshot=(_sa_service.sa_payslip_snapshot(calc, frozen=saudi_frozen)
+                                 if saudi_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,

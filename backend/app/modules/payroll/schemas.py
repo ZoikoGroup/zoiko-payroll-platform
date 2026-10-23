@@ -5570,6 +5570,8 @@ class SaGosiLiabilityResponse(BaseModel):
     sanedEmployer: Decimal = Field(alias="saned_employer")
     occupationalHazardEmployer: Decimal = Field(alias="occupational_hazard_employer")
     totalDue: Decimal = Field(alias="total_due")
+    # Derived from the pack's sa_gosi_due_day (SA-022); None when not configured.
+    dueDate: Optional[date] = Field(default=None, alias="due_date")
     status: str
     paidAt: Optional[datetime] = Field(default=None, alias="paid_at")
     paymentReference: Optional[str] = Field(default=None, alias="payment_reference")

@@ -145,6 +145,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     [labels.employerSocialSecurity, item.employerSs],
     ["Employer Medicare", item.employerMedicare],
     [labels.employerPension, item.employerPension],
+    [labels.employerOccupationalHazard, item.employerOccupationalHazard],
     ["Employer National Insurance", item.employerNi],
     // UK: Apprenticeship Levy — computed since the 2026-09-08 commit but
     // silently discarded before ever reaching a persisted PayslipItem;

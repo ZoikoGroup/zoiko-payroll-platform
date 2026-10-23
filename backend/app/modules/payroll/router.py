@@ -3916,20 +3916,16 @@ def preview_sa_correction(
         from fastapi import HTTPException, status as http_status
         raise HTTPException(status_code=http_status.HTTP_409_CONFLICT,
                             detail="Payslip has no frozen context — cannot preview correction")
-    effective = (snapshot.get("correction") or {}).get("totalsAll", {}) or snapshot.get("totalsAll", {})
-    # Merge the preview's corrected_inputs into the frozen context
+    # Restate on the latest basis of the correction chain (earlier corrections stay applied).
+    chain = saudi_arabia_service._sa_correction_chain(db, item)
+    last = (chain[-1].sa_calculation_snapshot or {}) if chain else snapshot
+    baseline = ((last.get("correction") or {}).get("totalsAll") if chain
+                else snapshot.get("totalsAll") or saudi_arabia_service.sa_totals_all(snapshot))
     corrected = data.dict(exclude_unset=True, exclude={"organizationId", "jurisdictionPackId"})
-    # Only correctable inputs allowed
-    allowed = {"workerClass", "cohort", "cohortEvidenceRef", "contributoryWage",
-               "deductionOrders", "overtimeHours", "ramadan", "workHoursRecords"}
-    corrected = {k: v for k, v in corrected.items() if k in allowed}
-    if corrected:
-        new_frozen = saudi_arabia_service._apply_sa_corrected_inputs(db, frozen, corrected, current_user.organization_id)
-    else:
-        new_frozen = frozen
-    baseline = effective.get("totalsAll") or effective
-    preview = saudi_arabia_service.sa_replay(new_frozen, baseline_totals=baseline)
-    return preview
+    corrected = {k: v for k, v in corrected.items() if k in saudi_arabia_service.SA_CORRECTABLE_INPUTS}
+    new_frozen = saudi_arabia_service._apply_sa_corrected_inputs(
+        db, last.get("frozenContext") or frozen, corrected, current_user.organization_id)
+    return saudi_arabia_service.sa_replay(new_frozen, baseline_totals=baseline)
 
 
 @payroll_router.post(
