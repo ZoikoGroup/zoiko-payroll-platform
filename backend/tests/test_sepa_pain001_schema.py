@@ -60,8 +60,10 @@ def test_files_validate_against_the_official_xsd(n_items, name):
 def test_the_bundled_xsd_is_the_official_one():
     import hashlib
 
-    digest = hashlib.sha256(sepa.XSD_PATH.read_bytes()).hexdigest()
-    assert digest == "de038b373e47b0077b1832ddd81f4b2f1eb25d35721f62da1e38b7f5a09fda24"
+    # Line endings normalised: git stores the file with LF; the download had CRLF
+    # (sha256 de038b37... as retrieved). The content is the same either way.
+    digest = hashlib.sha256(sepa.XSD_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    assert digest == "05440a7e84f695e7dbc6677082f43623cd7393881b76a5e8d648ae21d7d728e3"
 
 
 def test_a_tampered_file_fails_the_xsd():

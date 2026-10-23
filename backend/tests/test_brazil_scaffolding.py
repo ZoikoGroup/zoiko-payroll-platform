@@ -297,7 +297,7 @@ def test_profile_hooks_serve_brazilian_profiles(db):
     assert jurisdiction_hooks.call("BR", "pack_holidays", db, 2026) == []
     # Phase 6: payment_treatment returns PIX config (Phase 11 will expand)
     pt = jurisdiction_hooks.call("BR", "payment_treatment", db, 1, None, [])
-    assert pt["br_payment_method"] == "PIX" and pt["br_payment_hold"] is False
+    assert pt == {}          # the hook contract is {payslip_id: hold}; Brazil holds none (Phase 4.1)
 
 
 def test_registry_cannot_open_before_gates(db):

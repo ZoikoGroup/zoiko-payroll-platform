@@ -135,9 +135,10 @@ def test_sensitive_field_set_only_gains_mexican_keys():
 def test_bank_routing_other_countries_unchanged():
     from app.modules.payroll import bank_routing as br
 
-    # Brazil (ZP-BR-ENG-001) follows Mexico at the end, merged from venu.
-    assert br.ROUTING_COUNTRIES[:-2] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
-                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-2:] == ("MX", "BR")
+    # Brazil (ZP-BR-ENG-001) follows Mexico, merged from venu; Switzerland and
+    # Saudi Arabia (Phase 4.1, IBAN routing) follow Brazil.
+    assert br.ROUTING_COUNTRIES[:-4] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
+                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-4:] == ("MX", "BR", "CH", "SA")
     assert br.ROUTING_FIELDS["MX"] == [{"key": "clabe", "label": "CLABE"}]
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing

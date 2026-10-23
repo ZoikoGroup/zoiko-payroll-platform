@@ -320,8 +320,9 @@ def test_brazil_bank_routing():
                              "bank_account": "12345678"}
 
     routing = resolve_routing(MockEmployee())
-    assert [r["key"] for r in routing] == ["pix_key", "bank_compe", "bank_agency", "bank_account"]
-    assert [r["value"] for r in routing] == ["12345678909", "341", "0987", "12345678"]
+    # Phase 4.1 adds the ISPB (full TED / CNAB routing).
+    assert [r["key"] for r in routing] == ["pix_key", "bank_compe", "bank_agency", "bank_account", "bank_ispb"]
+    assert [r["value"] for r in routing] == ["12345678909", "341", "0987", "12345678", ""]   # no ISPB on file
 
 
 # ── 5. 2026 Statutory Constants & Rubric Seeding ──────────────────────────────
