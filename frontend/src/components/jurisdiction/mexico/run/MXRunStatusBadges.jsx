@@ -46,7 +46,15 @@ export default function MXRunStatusBadges({ runId, refreshKey }) {
   const p = data.payroll || {};
   return (
     <div className="mb-4" data-testid="mx-run-status">
+      {p.pilot && (
+        <p className="mb-2 rounded-lg border border-warning bg-warning/10 p-2 text-[12px] font-semibold text-foreground"
+          data-testid="mx-run-pilot" role="status">
+          PILOT run — parallel run for the G8 evidence. Nothing in it is binding: no payment, no filing, CFDI only
+          through the PAC sandbox, every payslip watermarked.
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
+        {p.pilot && <Badge testId="mx-badge-pilot" label="Mode" status="PILOT" detail="non-binding parallel run" />}
         <Badge testId="mx-badge-payroll" label="Payroll" status={p.status} detail={p.committedAt ? `committed ${p.committedAt}` : ""} />
         <Badge testId="mx-badge-cfdi" label="CFDI" status={data.cfdi?.status} detail={data.cfdi?.detail} />
         <Badge testId="mx-badge-authorities" label="Authorities" status={data.authorities?.status} detail={data.authorities?.detail} />

@@ -21,10 +21,16 @@ import sqlalchemy as sa
 BACKEND = Path(__file__).resolve().parents[1]
 PG_URL = os.getenv("MX_PG6_TEST_URL")
 pg = pytest.mark.skipif(not PG_URL, reason="MX_PG6_TEST_URL not set (throwaway PostgreSQL only)")
-AFTER_E1A3 = ("payroll_mx_journal_exports", "payroll_mx_journal_mappings",
+AFTER_E1A3 = ("payroll_mx_cfdi_system_concepts", "payroll_mx_onboarding_pauses", "payroll_mx_master_releases",
+              "payroll_mx_master_copies",
+              "payroll_mx_pilot_grants",
+              "payroll_mx_journal_exports", "payroll_mx_journal_mappings",
               "payroll_mx_payment_items", "payroll_mx_payment_batches",
               "payroll_mx_annual_isr_adjustments", "payroll_mx_ptu_allocations", "payroll_mx_ptu_cycles",
               "payroll_mx_terminations", "payroll_mx_vacation_records")
+# Platform configuration (no organization_id): no RLS policy, like every platform table.
+PLATFORM_TABLES = {"payroll_mx_onboarding_pauses",                    # Phase 10g
+                   "payroll_mx_cfdi_system_concepts"}                 # Phase 11a
 AFTER_E1A3_COLUMNS = (("payroll_nl_expat_decisions", "recorded_by"),)   # NL f84626be0cb1 (PR #118)
 
 
@@ -112,7 +118,7 @@ def test_upgrade_from_production_head_succeeds_with_a_live_reader_on_users(produ
     (head,) = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()
     with eng.connect() as c:
         assert c.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == head
-        for table in AFTER_E1A3:                                    # every new table protected
+        for table in set(AFTER_E1A3) - PLATFORM_TABLES:             # every new tenant/worker table protected
             flags = c.execute(sa.text("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = :t"),
                               {"t": table}).one()
             policies = c.execute(sa.text("SELECT policyname FROM pg_policies WHERE tablename = :t"),

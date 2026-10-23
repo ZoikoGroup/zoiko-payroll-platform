@@ -98,7 +98,7 @@ def guard(db: Session, employee, run=None) -> None:
     from app.modules.payroll import service
 
     org_id = getattr(employee, "organization_id", None)
-    if not mexico_dormancy.onboarding_enabled():
+    if not mexico_dormancy.onboarding_enabled(db, org_id):
         raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
     if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
         raise MXBlock("MX_ORG_NOT_MEXICAN", "the employee's organisation payroll jurisdiction is not Mexico", org_id)
@@ -773,10 +773,23 @@ def input_hash(components: dict) -> str:
     return _hash(components)
 
 
+def _snapshot_is_pilot(inputs: dict) -> bool:
+    """Phase 10f: was this payslip generated in a pilot organisation? Read from
+    the employee's Mexican statutory profile (its organisation and session) —
+    nothing is added to the calculation context or the input hash."""
+    from sqlalchemy.orm import object_session
+
+    prof = inputs.get("mx_profile")
+    db = object_session(prof) if prof is not None else None
+    return bool(db is not None and mexico_dormancy.is_pilot_organization(db, getattr(prof, "organization_id", None)))
+
+
 def payslip_snapshot(mx_result: dict, inputs: dict) -> dict:
     comps = inputs.get("mx_input_components") or {}
     return {"result": mx_result, "inputHash": input_hash(comps), "components": comps,
-            "pack": _plain(inputs.get("mx_pack")), "engineVersion": (mx_result or {}).get("engine_version")}
+            "pack": _plain(inputs.get("mx_pack")), "engineVersion": (mx_result or {}).get("engine_version"),
+            # Phase 10f: generated in a pilot organisation — non-binding (not part of the input hash)
+            "pilot": _snapshot_is_pilot(inputs)}
 
 
 def preview_block(exc, employee) -> MXBlock:
@@ -1045,8 +1058,12 @@ def before_run_transition(db: Session, run, next_status, approver_id) -> None:
                       "regenerate before approval", run.organization_id)
     result = commit_run(db, run, approver_id)          # before committedAt is stamped (its idempotency key)
     now = datetime.utcnow().isoformat()
+    from app.modules.payroll import mexico_dormancy
+
     run.mx_approval_fingerprint = {**fp, "approvedBy": approver_id, "approvedAt": now, "committedAt": now,
-                                   "spec": SPEC}
+                                   "spec": SPEC,
+                                   # Phase 10e: non-binding pilot output, recorded on the run for good
+                                   "pilot": mexico_dormancy.is_pilot_organization(db, run.organization_id)}
     _audit(db, actor_id=approver_id, action="approve", entity_type="mx_run_approval", entity_id=run.id,
            new={"fingerprint": fp["fingerprint"], "ledgers": result})
 
@@ -1154,7 +1171,9 @@ def run_status(db: Session, run) -> dict:
     drift = approval_drift(db, run) if stored.get("committedAt") else []
     return {"runId": run.id, "runType": run.mx_run_type or "ORDINARY",
             "payroll": {"status": run.status, "committedAt": stored.get("committedAt"),
-                        "approvalInvalidated": bool(drift), "drift": drift},
+                        "approvalInvalidated": bool(drift), "drift": drift,
+                        # Phase 10f: a committed pilot run, or a run of a pilot organisation
+                        "pilot": bool(stored.get("pilot")) or mexico_dormancy.is_pilot_organization(db, run.organization_id)},
             "cfdi": _cfdi_lane(db, run),
             "authorities": _authorities_lane(db, run),
             "bank": {"status": "HELD", "detail": "bank settlement is built in Phase 10; every Mexican payment is held"},

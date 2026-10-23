@@ -369,6 +369,17 @@ _retire("GET", f"{_MX}/employees/{{employee_id}}", R_JIT, "one Mexican employee'
 _retire("GET", f"{_BR}/employees", R_JIT, "lists Brazilian employees (names, codes) of one organization")
 _retire("GET", f"{_BR}/employees/{{employee_id}}", R_JIT,
        "one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)")
+# Mexico Phase 10e D5: the governed copy of a pilot's master data (employees and
+# their statutory profiles) into a new live organisation moves worker rows
+# between two tenants. Built and tested in mexico_pilot_service; its Super
+# Admin routes stay RETIRED until the ZP-PRIV owner decides how a cross-tenant
+# copy is authorised (a reviewed tenant_lifecycle override, or a tenant-run
+# handshake between the two organisations' admins). The routes never return
+# worker values (ids, counts and column names only - tested).
+_retire("POST", f"{_MX}/master-copies", R_TENANT,
+        "Phase 10e D5 master-data copy between tenants (reads worker rows) - awaits the ZP-PRIV owner's decision")
+_retire("POST", f"{_MX}/master-copies/{{copy_id}}/approve", R_TENANT,
+        "Phase 10e D5 master-data copy between tenants (writes worker rows) - awaits the ZP-PRIV owner's decision")
 # Registry and counts only - no identity, pay or per-person row.
 _set("GET", f"{_MX}/organizations", data_class="aggregate",
      note="reviewed: organization id + name of tenants with Mexico payroll (registry metadata)")

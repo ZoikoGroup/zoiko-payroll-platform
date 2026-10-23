@@ -9608,6 +9608,40 @@ class PayrollMxCfdiCatalogEntry(Base):
     )
 
 
+class PayrollMxCfdiSystemConcept(Base):
+    """Phase 11a (MEXICO_PHASE_11_PLAN.md §4.3, D4): the SAT code for an amount
+    the engine produces itself — no earning classification carries it (ISR
+    withheld, IMSS employee quotas, INFONAVIT credit, the applied subsidy, the
+    special payments, the annual adjustment). Per schema release; the code must
+    exist in that release's catalog for the node type, and every row cites its
+    S28 / S4 location. Maker-checker: PROPOSED -> APPROVED by a different Super
+    Admin; a newer approval SUPERSEDES the old one. Platform configuration (no
+    organisation), so no row-level-security policy."""
+    __tablename__ = "payroll_mx_cfdi_system_concepts"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    schema_release_id  = Column(Integer, ForeignKey("payroll_mx_cfdi_schema_releases.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    concept_key        = Column(String(40), nullable=False)
+    node_type          = Column(String(12), nullable=False)          # PERCEPCION / DEDUCCION / OTRO_PAGO
+    sat_code           = Column(String(10), nullable=False)
+    source_ref         = Column(String(300), nullable=False)         # e.g. "S28 c_TipoDeduccion row 002; S4 p. 52"
+    status             = Column(String(12), nullable=False, default="PROPOSED")
+    proposed_by_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
+    approved_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at        = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at         = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("node_type IN ('PERCEPCION', 'DEDUCCION', 'OTRO_PAGO')", name="ck_mx_cfdi_sysc_node"),
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'WITHDRAWN', 'SUPERSEDED')",
+                           name="ck_mx_cfdi_sysc_status"),
+        Index("uq_mx_cfdi_sysc_approved", "schema_release_id", "concept_key", unique=True,
+              postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
+    )
+
+
 # ── Mexico (ZP-MX-ENG-001) — Phase 3 employer onboarding (migration mx_employer_m2) ──
 # Spec §11 panels A–H. An organisation (tenant) may hold several legal
 # employers (RFCs), each with establishments, several IMSS registrations and
@@ -10730,6 +10764,126 @@ class PayrollMxJournalExport(Base):
     __table_args__ = (
         sa.CheckConstraint("status IN ('CURRENT', 'VOIDED')", name="ck_mx_journal_export_status"),
         sa.CheckConstraint("debit_total = credit_total", name="ck_mx_journal_export_balanced"),
+    )
+
+
+class PayrollMxPilotGrant(Base):
+    """A non-binding Mexico pilot for ONE named organisation (Phase 10e):
+    proposed by a Super Admin, approved by a different one, revocable at any
+    time, with an expiry (≤ 120 days). While it is APPROVED and unexpired the
+    organisation is open with pilot rules (PAC sandbox only, no payments, no
+    authority filings, watermarked payslips); an organisation that ever had an
+    approved grant is a pilot organisation for good (D5)."""
+    __tablename__ = "payroll_mx_pilot_grants"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    status          = Column(String(10), nullable=False, default="PROPOSED")   # PROPOSED / APPROVED / REVOKED / WITHDRAWN
+    reason          = Column(String(300), nullable=False)
+    scope_note      = Column(String(300), nullable=True)
+    expires_at      = Column(DateTime(timezone=True), nullable=False)
+    proposed_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    revoked_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revoked_at      = Column(DateTime(timezone=True), nullable=True)
+    revoke_reason   = Column(String(300), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'REVOKED', 'WITHDRAWN')", name="ck_mx_pilot_grant_status"),
+    )
+
+
+class PayrollMxMasterCopy(Base):
+    """A governed copy of a pilot organisation's Mexican MASTER data (employer,
+    registrations, establishments, labour policies, employees and their
+    statutory profiles — never payroll results) into a new live organisation
+    (Phase 10e D5): proposed by one Super Admin, approved by another, executed
+    in one transaction, with the plan hash and a diff report kept."""
+    __tablename__ = "payroll_mx_master_copies"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    source_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)  # target
+    status                 = Column(String(10), nullable=False, default="PROPOSED")   # PROPOSED / EXECUTED / CANCELLED
+    reason                 = Column(String(300), nullable=False)
+    plan                   = Column(JSON, nullable=False)             # counts per category, and what is not copied
+    plan_sha256            = Column(String(64), nullable=False)       # of the source rows at proposal
+    report                 = Column(JSON, nullable=True)              # the diff report after execution
+    # Phase 10f (option B): the pilot's one-time release this tenant-run import used
+    release_id             = Column(Integer, ForeignKey("payroll_mx_master_releases.id", ondelete="RESTRICT",
+                                                    name="fk_mx_master_copy_release"), nullable=True, index=True)
+    proposed_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    executed_at            = Column(DateTime(timezone=True), nullable=True)
+    cancelled_reason       = Column(String(300), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'EXECUTED', 'CANCELLED')", name="ck_mx_master_copy_status"),
+        sa.CheckConstraint("source_organization_id <> organization_id", name="ck_mx_master_copy_distinct"),
+    )
+
+
+class PayrollMxMasterRelease(Base):
+    """Phase 10f (option B): the pilot organisation's ONE-TIME release of its
+    Mexican master data to ONE named live organisation of the SAME employer
+    (same RFC). Proposed by one pilot-org admin, released by a different one;
+    it expires 7 days after release and can be revoked until it is used. Owned
+    by the pilot organisation; its RLS policy also admits the named target, so
+    the live organisation's admins can see what was released to them (counts,
+    masked RFCs and a hash — never a worker value)."""
+    __tablename__ = "payroll_mx_master_releases"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)   # source (pilot)
+    target_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status                 = Column(String(10), nullable=False, default="PROPOSED")   # PROPOSED / RELEASED / USED / REVOKED
+    reason                 = Column(String(300), nullable=False)
+    plan                   = Column(JSON, nullable=False)              # counts, masked RFCs, what is never copied
+    plan_sha256            = Column(String(64), nullable=False)        # of the source rows when released
+    proposed_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    released_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    released_at            = Column(DateTime(timezone=True), nullable=True)
+    expires_at             = Column(DateTime(timezone=True), nullable=True)
+    used_at                = Column(DateTime(timezone=True), nullable=True)
+    revoked_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revoked_at             = Column(DateTime(timezone=True), nullable=True)
+    revoke_reason          = Column(String(300), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'RELEASED', 'USED', 'REVOKED')", name="ck_mx_master_release_status"),
+        sa.CheckConstraint("organization_id <> target_organization_id", name="ck_mx_master_release_distinct"),
+    )
+
+
+class PayrollMxOnboardingPause(Base):
+    """Phase 10g: the platform's "no new Mexican organisations" switch. Each row
+    is one proposed change (PAUSE or RESUME), proposed by a Super Admin and
+    approved by a different one; the latest APPROVED row is the switch's state.
+    While paused no organisation can BECOME Mexican and no pilot grant can be
+    approved; organisations that are already Mexican keep running (runbook §6).
+    Platform configuration: no organisation, no worker data."""
+    __tablename__ = "payroll_mx_onboarding_pauses"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    action          = Column(String(8), nullable=False)                     # PAUSE / RESUME
+    status          = Column(String(10), nullable=False, default="PROPOSED")  # PROPOSED / APPROVED / WITHDRAWN
+    reason          = Column(String(300), nullable=False)
+    proposed_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('PAUSE', 'RESUME')", name="ck_mx_onboarding_pause_action"),
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'WITHDRAWN')", name="ck_mx_onboarding_pause_status"),
     )
 
 

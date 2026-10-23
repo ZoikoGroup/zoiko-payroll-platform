@@ -42,8 +42,13 @@ class MXReadinessResponse(BaseModel):
     jurisdiction: str
     spec: str
     available: bool
+    level: str = "DORMANT"                 # DORMANT / PILOT (n organisations) / AVAILABLE
     registry: Optional[str] = None          # PLANNED / AVAILABLE
+    pilotGrants: List[dict] = []
+    pilotPreconditions: List[dict] = []
+    gaPreconditions: List[dict] = []
     onboardingEnabled: bool = False
+    onboardingPaused: bool = False          # Phase 10g: no NEW Mexican organisations
     engineVersion: str
     phase: int
     gates: List[MXGateState]
@@ -111,6 +116,22 @@ class MXCatalogEntryCreate(BaseModel):
     def to_service(self) -> dict:
         return {"catalog_name": self.catalogName, "code": self.code, "description": self.description,
                 "valid_from": self.validFrom, "valid_to": self.validTo}
+
+
+class MXPinnedSetLoad(BaseModel):
+    setId: str
+
+
+class MXSystemConceptCreate(BaseModel):
+    releaseId: int
+    conceptKey: str
+    nodeType: str
+    satCode: str
+    sourceRef: str
+
+    def to_service(self) -> dict:
+        return {"release_id": self.releaseId, "concept_key": self.conceptKey, "node_type": self.nodeType,
+                "sat_code": self.satCode, "source_ref": self.sourceRef}
 
 
 # ── Phase 3 — employer onboarding (organisation API, /api/payroll/mexico) ────

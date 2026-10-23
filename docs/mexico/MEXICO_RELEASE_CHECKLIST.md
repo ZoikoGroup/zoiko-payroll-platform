@@ -39,5 +39,10 @@
 - [ ] `MX_IDENTITY_TOKEN_KEY` in Secret Manager
 - [ ] Production database at the release's single alembic head; `alembic current` confirmed on the server
 - [ ] The flaky test `test_deactivate_organization_response_precedes_email_send` fixed or quarantined, so CI is reliable
-- [ ] Phase 10e built and deployed: the flag alone never opens Mexico. General availability needs the registry AVAILABLE (G1–G8 SIGNED, Q9 RECORDED, `MX_IDENTITY_TOKEN_KEY` configured); a non-binding pilot for named organisations runs the G8 cycles (decided 2026-10-22; plan `MEXICO_PHASE_10E_PLAN.md`, awaiting approval)
+- [ ] Phase 10e deployed (approved 2026-10-22): the flag is a kill switch only; general availability needs the registry AVAILABLE (G1–G8 SIGNED, Q9 RECORDED, `MX_IDENTITY_TOKEN_KEY` configured); the pilot needs G1, G2, G4, G5, G7, Q9 and the hosting decision
+- [ ] Pilot completed: G3, G6 and G8 signed from pilot evidence
+- [ ] Pilot master data copied into the live organisation (governed copy, diff report clean)
+- [ ] Go-live checks done (activation runbook §6)
+- [ ] The "no new Mexican organisations" switch exercised once on staging (PAUSE then RESUME, two Super Admins each) before general availability
+- [ ] ZP-PRIV owner (Rugvedh) has reviewed Phase 10f (cross-tenant transfer, two-party RLS) and 10g (named RLS exceptions); any change he asks for is merged **before any pilot grant is approved**
 - [ ] Q9 (identifiers at rest) recorded by the security lead (`MX-DECISION-Q9`)

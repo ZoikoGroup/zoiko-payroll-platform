@@ -1800,21 +1800,21 @@ _DORMANT_STRATEGIES = {
 }
 
 
-def _dormancy_module(code: str):
-    if code == "BR":
-        from app.modules.payroll import brazil_dormancy
-
-        return brazil_dormancy
-    from app.modules.payroll import mexico_dormancy
-
-    return mexico_dormancy
-
-
 def _dormant_strategy(code: str):
     strategy = _DORMANT_STRATEGIES.get(code)
     if strategy is None:
         return None
-    return strategy if _dormancy_module(code).onboarding_enabled() else None
+    if code == "BR":
+        from app.modules.payroll import brazil_dormancy
+
+        return strategy if brazil_dormancy.onboarding_enabled() else None
+    from app.modules.payroll import mexico_dormancy
+
+    # Phase 10e: the kill switch only — no session here. A Mexican employee
+    # matters only inside a Mexican organisation, which the organisation-level
+    # gate (registry AVAILABLE or a pilot grant) decides. (mexico_dormancy.
+    # onboarding_enabled now needs a db session and is False without one.)
+    return strategy if mexico_dormancy.flag_enabled() else None
 
 
 def is_supported_employee_country(country_code: str) -> bool:

@@ -83,6 +83,8 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/journal/mappings"), ("POST", "/journal/mappings"), ("POST", "/journal/mappings/1/approve"),
     ("POST", "/journal/mappings/1/withdraw"), ("GET", "/runs/1/journal"), ("POST", "/runs/1/journal/export"),
     ("POST", "/journal/exports/1/void"),
+    # Phase 10e — pilot banner
+    ("GET", "/pilot-status"),
 ]
 
 
@@ -334,7 +336,7 @@ def test_jurisdiction_change_gate_is_identical_for_every_non_mexican_pair(db, mo
     countries = [c for c in REGISTRATION_COUNTRIES if get_jurisdiction_code(c) != "MX"]
     values = [None, ""] + countries + [get_jurisdiction_code(c) for c in countries if get_jurisdiction_code(c)]
     with_branch = {(o, n): get_jurisdiction_change_block_reason(db, o, n) for o in values for n in values}
-    monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal", lambda old, new: None)
+    monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal", lambda old, new, *a: None)
     without_branch = {(o, n): get_jurisdiction_change_block_reason(db, o, n) for o in values for n in values}
     assert with_branch == without_branch
     assert len(with_branch) > 100
@@ -347,7 +349,7 @@ def test_the_mexico_branch_only_fires_for_a_change_into_mexico(db, monkeypatch):
     calls = []
     real = mexico_dormancy.entering_mexico_refusal
     monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal",
-                        lambda old, new: calls.append((old, new)) or real(old, new))
+                        lambda old, new, *a: calls.append((old, new)) or real(old, new, *a))
     assert get_jurisdiction_change_block_reason(db, "India", "Germany") is None
     assert get_jurisdiction_change_block_reason(db, "India", "Mexico") == mexico_dormancy.DORMANT_MESSAGE
     assert calls == [("India", "Germany"), ("India", "Mexico")]

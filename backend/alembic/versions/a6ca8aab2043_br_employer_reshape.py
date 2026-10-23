@@ -1,7 +1,7 @@
 """br_employer_reshape: Brazil employer + establishment tables to the Phase 3 shape
 
 Revision ID: a6ca8aab2043
-Revises: b3f7c1e9d5a2
+Revises: a8e4c1f7d3b5
 Create Date: 2026-10-19
 
 ZP-BR-ENG-001 Phase 3 (docs/brazil/BRAZIL_PHASE_3_PLAN.md). b7a1c9e3d5f2 is
@@ -39,7 +39,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a6ca8aab2043"
-down_revision: Union[str, Sequence[str], None] = "b3f7c1e9d5a2"
+down_revision: Union[str, Sequence[str], None] = "a8e4c1f7d3b5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

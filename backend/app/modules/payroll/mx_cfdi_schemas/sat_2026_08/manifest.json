@@ -1,0 +1,91 @@
+{
+  "caseNormalised": [
+    [
+      "c_ClaveUnidad",
+      "Dx",
+      "DX"
+    ]
+  ],
+  "catalogCounts": {
+    "c_Banco": 106,
+    "c_ClaveProdServ": 52513,
+    "c_ClaveUnidad": 2418,
+    "c_CodigoPostal": 95748,
+    "c_Estado": 95,
+    "c_Exportacion": 4,
+    "c_FormaPago": 22,
+    "c_Meses": 18,
+    "c_MetodoPago": 2,
+    "c_Moneda": 183,
+    "c_ObjetoImp": 8,
+    "c_OrigenRecurso": 3,
+    "c_Pais": 250,
+    "c_Periodicidad": 5,
+    "c_PeriodicidadPago": 11,
+    "c_RegimenFiscal": 19,
+    "c_RiesgoPuesto": 6,
+    "c_TipoContrato": 11,
+    "c_TipoDeComprobante": 5,
+    "c_TipoDeduccion": 107,
+    "c_TipoHoras": 3,
+    "c_TipoIncapacidad": 4,
+    "c_TipoJornada": 9,
+    "c_TipoNomina": 2,
+    "c_TipoOtroPago": 10,
+    "c_TipoPercepcion": 44,
+    "c_TipoRegimen": 13,
+    "c_TipoRelacion": 7,
+    "c_UsoCFDI": 24
+  },
+  "catalogRelease": "catCFDI_V_4_20260731 + catNomina (2022-08 capture)",
+  "catalogsSha256": "dd8151e6554af8e9c5e715d971798726dcaf1e19860011a95d0f6259ff31d386",
+  "cfdiVersion": "4.0",
+  "complementVersion": "1.2",
+  "files": {
+    "catCFDI.xsd": "6c58936cb77576f839a4d7915953ceaf252b9eb9319f9458fe5bb67ae2bb0bb1",
+    "catNomina.xsd": "ee060521477a7e9435c47866243f55814b370efc63b66805c9b51c1c80faaf95",
+    "cfdv40.xsd": "2489b5b535f5cbc6a6c2db6132620de1833f85372512d01deea62880e700e276",
+    "nomina12.xsd": "ac5db22ceee35c2224aad8745a3ab968c9c3d04d36adb50d056c83c4c1a29083",
+    "tdCFDI.xsd": "b3b81fe4017b95d5477f23a32f47e8b0571683cfddfff1330508c75e02b504cd"
+  },
+  "generator": "scripts/mx_build_cfdi_schema_set.py",
+  "setId": "sat_2026_08",
+  "sources": {
+    "S28_SAT_catNomina.xls": {
+      "code": "S28",
+      "sha256": "6e61a49d7b966dbcf730ef46a5fde1cb3b505114b69b4ecbf8fa2ba5d882a3c3",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    },
+    "S28_SAT_catNomina.xsd": {
+      "code": "S28",
+      "sha256": "ee060521477a7e9435c47866243f55814b370efc63b66805c9b51c1c80faaf95",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    },
+    "S28_SAT_nomina12.xsd": {
+      "code": "S28",
+      "sha256": "ac5db22ceee35c2224aad8745a3ab968c9c3d04d36adb50d056c83c4c1a29083",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    },
+    "S30_SAT_catCFDI.xls": {
+      "code": "S30",
+      "sha256": "5a2e95fb98f657e52552d2772154c4b1e0dbdfee2cefd6696ac003eba7326bcb",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    },
+    "S30_SAT_catCFDI.xsd": {
+      "code": "S30",
+      "sha256": "6c58936cb77576f839a4d7915953ceaf252b9eb9319f9458fe5bb67ae2bb0bb1",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    },
+    "S30_SAT_cfdv40.xsd": {
+      "code": "S30",
+      "sha256": "2489b5b535f5cbc6a6c2db6132620de1833f85372512d01deea62880e700e276",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    },
+    "S30_SAT_tdCFDI.xsd": {
+      "code": "S30",
+      "sha256": "b3b81fe4017b95d5477f23a32f47e8b0571683cfddfff1330508c75e02b504cd",
+      "status": "ARCHIVE_COPY_VERIFIED"
+    }
+  },
+  "xsdChecksum": "539181d319f67b4a0856cd6fd2265d499150d931473d6d53ce69aefe4f6cf6f5"
+}

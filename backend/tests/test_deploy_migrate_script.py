@@ -89,17 +89,17 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         brazil_tables = {"payroll_br_risk_assignments", "payroll_br_cprb_options", "payroll_br_credential_refs",
                          "payroll_br_concurrent_inss_declarations", "payroll_br_alimony_orders",
                          "payroll_br_vale_transporte_elections"}
-        tables, _ = pending_objects("f84626be0cb1")              # production since PR #118
-        assert tables == {"payroll_mx_payment_batches", "payroll_mx_payment_items", "payroll_mx_journal_mappings",
-                          "payroll_mx_journal_exports"} | brazil_tables
-        # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c, on top of production
-        # b3f7c1e9d5a2): every table AND every column on an existing table must
-        # be explained, or a self-heal refuses.
-        tables, columns = pending_objects("b3f7c1e9d5a2")
+        tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
+        assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables
+        # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2
+        # (135dbbeb9818, 8f90dde5f7b5), on top of production a8e4c1f7d3b5: every
+        # table AND every column on an existing table must be explained, or a
+        # self-heal refuses.
+        tables, columns = pending_objects("a8e4c1f7d3b5")
         assert tables == brazil_tables
-        # + Phase 4.2 (8f90dde5f7b5): the run payment channel and the stored SEPA file.
         assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel"}
-        assert {"pain001_xml", "created_at_utc", "batch_kind", "authority_payment_id"} ==             columns["payroll_nl_payment_batches"]
+        assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
+                                                         "authority_payment_id"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 10
         assert {"version", "previous_version_id", "effective_from", "effective_to",
                 "created_by_id"} == columns["payroll_br_employer_profiles"]

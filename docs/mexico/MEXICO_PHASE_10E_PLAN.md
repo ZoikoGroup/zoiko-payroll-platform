@@ -4,7 +4,7 @@ Spec ZP-MX-ENG-001 v1.0 §22 · requested in the PR #119 review (2026-10-22) · 
 
 **Base.** `main` = `2473ed6` (PR #119), deployed; production is at `b3f7c1e9d5a2`. `nikhil` is that plus the doc commits from the review.
 
-**Status.** Plan only. **Waiting for approval.** Nothing is built.
+**Status.** **Approved 2026-10-22** with the changes in §9 (D2 adjusted; D5 extended). Built: see `MEXICO_PHASE_10E_IMPLEMENTATION_REPORT.md`.
 
 ## 1. The problem
 
@@ -41,7 +41,7 @@ With the flag off, nothing is open, even with the registry AVAILABLE. With the f
 - Either Super Admin can **revoke** it at any time, with a reason. Revocation takes effect on the next request.
 - Every step is audited, and the grant history is append-only.
 
-**Preconditions to approve a grant** (D2): an **EVALUATION** workspace; the flag on; and the gates needed for content to be real.
+**Preconditions to approve a grant** (D2): an **EVALUATION** workspace; the flag on; G1, G2, G4, G5 and G7 SIGNED; Q9 and the hosting decision RECORDED; the identity key configured.
 
 **Pilot output is non-binding.** Each rule is enforced in code with a named refusal:
 
@@ -83,13 +83,13 @@ With the flag off, nothing is open, even with the registry AVAILABLE. With the f
 - The existing registry check becomes stricter (adds Q9 and the key).
 - No other country is affected.
 
-## 9. Decisions needed (recommendation first)
+## 9. Decisions (approved 2026-10-22)
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | The env flag's role | **Kill switch**: required at both levels and sufficient for neither. |
-| D2 | Gates required before a pilot grant can be approved | **G1–G5 and G7 SIGNED, plus Q9 RECORDED and the key configured.** Content must be real (G1–G5), and real identifiers need the privacy controls (G7, Q9). G6 (external operations) can be evidenced *during* the pilot against the PAC sandbox, and G8 is the pilot itself. |
-| D3 | Pilot expiry | **Required, at most 120 days**; renewal is a new grant with the same four-eyes approval. |
-| D4 | Losing a condition after AVAILABLE | **No automatic withdrawal.** Show it in the readiness view; a Super Admin closes the registry deliberately. Closing automatically mid-payroll could strand a run. |
-| D5 | Pilot data at go-live | **A new live organisation.** The pilot organisation stays EVALUATION and read-only for evidence. |
-| D6 | Journal in a pilot | **Allowed, with the PILOT banner.** It is needed to compare against the current provider's postings. |
+| D1 | The env flag's role | **Approved:** kill switch only — required at both levels and sufficient for neither. |
+| D2 | What a pilot grant requires | **Approved, adjusted:** **G1, G2, G4, G5 and G7 SIGNED** (G3 moved to *during* the pilot: its credit reconciliation needs INFONAVIT's own figures for real workers), **Q9 RECORDED**, **the hosting / cross-border decision RECORDED** (real Mexican employee data enters for the first time; `organizations.data_region` defaults to EU), and `MX_IDENTITY_TOKEN_KEY` configured. Every gate checklist now tags its evidence PRE-PILOT, PILOT-GENERATED or GO-LIVE CHECK. |
+| D3 | Pilot expiry | **Approved:** required, at most 120 days; renewal is a new grant with the same four-eyes approval. |
+| D4 | Losing a condition after AVAILABLE | **Approved:** no automatic withdrawal; the readiness view shows it and a Super Admin closes the registry deliberately. |
+| D5 | Pilot data at go-live | **Approved, extended:** a new live organisation, plus a **governed copy of the pilot's master data** (employer, registrations, establishments, employees, labour policy — never payroll results) into it: proposed by one Super Admin, approved by another, audited, with a diff report, so the live organisation matches what G8 proved. |
+| D6 | Journal in a pilot | **Approved:** allowed, with the PILOT banner. |

@@ -64,6 +64,7 @@ OWNER_DECISIONS = (
     ("MX-D-RETENTION-PERIOD", "Retention period per record category", "MX-DECISION-RETENTION-PERIOD"),
     ("MX-D-RETENTION-END", "Deletion vs anonymisation at end of retention", "MX-DECISION-RETENTION-END"),
     ("MX-D-HOSTING", "Hosting and cross-border transfers (2025 privacy law)", "MX-DECISION-HOSTING"),
+    ("MX-D-Q9", "Q9 — Mexican identifiers (RFC, CURP, NSS, CLABE) at rest", "MX-DECISION-Q9"),     # Phase 10e
 )
 
 
@@ -105,14 +106,22 @@ def statutory_summary(db: Session) -> dict:
     gates = gate_states(db)
     signed = sum(g["state"] == "SIGNED" for g in gates)
     retention = retention_service.retention_policies(db, MX)
-    from app.modules.payroll import mexico_dormancy
+    from app.modules.payroll import mexico_dormancy, mexico_pilot_service
     from app.modules.billing.models import JurisdictionServiceRegistry
 
     row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == MX).first()
     registry = row.availability if row is not None else None
-    return {"jurisdiction": MX, "spec": SPEC,
-            "available": registry == service.SERVICE_REGISTRY_OPEN and mexico_dormancy.onboarding_enabled(),
-            "registry": registry, "onboardingEnabled": mexico_dormancy.onboarding_enabled(),
+    flag = mexico_dormancy.flag_enabled()
+    available = flag and registry == service.SERVICE_REGISTRY_OPEN
+    grants = mexico_pilot_service.list_grants(db)
+    active = [g for g in grants if g["state"] == "ACTIVE"]
+    level = "AVAILABLE" if available else (f"PILOT ({len(active)} organisation{'s' if len(active) != 1 else ''})"
+                                           if flag and active else "DORMANT")
+    return {"jurisdiction": MX, "spec": SPEC, "available": available, "level": level,
+            "registry": registry, "onboardingEnabled": flag,
+            "pilotGrants": grants, "pilotPreconditions": mexico_pilot_service.pilot_preconditions(db),
+            "onboardingPaused": mexico_dormancy.onboarding_paused(db),                  # Phase 10g
+            "gaPreconditions": mexico_pilot_service.ga_preconditions(db),
             "engineVersion": ENGINE_VERSION, "phase": 10, "gates": gates, "signedGates": signed,
             "decisions": owner_decisions(db),
             "retention": [{"category": c["category"], "label": c["label"], "state": c["state"],
@@ -120,9 +129,10 @@ def statutory_summary(db: Session) -> dict:
             "documents": {"releaseGates": RELEASE_GATES_DOC, "activationRunbook": ACTIVATION_RUNBOOK_DOC,
                           "releaseChecklist": RELEASE_CHECKLIST_DOC, "unknownRunbook": UNKNOWN_RUNBOOK_DOC},
             "note": f"Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22) — {signed}/8 signed. "
-                    "A gate is signed only by uploaded evidence reviewed by a second Super Admin; even then Mexico "
-                    "stays off until the activation runbook is followed. Every Mexican calculation is BLOCKED until "
-                    "its content is transcribed."}
+                    "A gate is signed only by uploaded evidence reviewed by a second Super Admin. The onboarding flag "
+                    "is a kill switch only: Mexico opens for everyone only when the registry is AVAILABLE (all eight "
+                    "gates, Q9, the identity key), or for one named organisation under an approved, non-binding "
+                    "pilot grant. Every Mexican calculation is BLOCKED until its content is transcribed."}
 
 
 # ---- Governance hooks ----
@@ -132,9 +142,10 @@ def transition_mx_service_registry(db: Session, target: str, reason: str, actor_
     """PLANNED <-> AVAILABLE. AVAILABLE is refused until every gate G1–G8 is
     signed (spec §22: approval of the build is not approval of live payroll)."""
     def readiness():
-        unmet = [{"key": f"mx_gate_{g['gate'].lower()}", "label": f"Gate {g['gate']} — {g['label']}",
-                  "detail": f"gate {g['gate']} is {g['state']}", "met": False}
-                 for g in gate_states(db) if g["state"] != "SIGNED"]
+        # Phase 10e: every gate SIGNED, Q9 RECORDED and the identity key configured.
+        from app.modules.payroll import mexico_pilot_service
+
+        unmet = [c for c in mexico_pilot_service.ga_preconditions(db) if not c["met"]]
         return unmet, {u["key"]: u["detail"] for u in unmet}
 
     return service.transition_service_registry(
@@ -758,13 +769,20 @@ def create_classification(db: Session, data: dict, actor_id: Optional[int]) -> d
     return classification_view(row)
 
 
-def _catalog_has_code(db: Session, code: str) -> bool:
-    from app.modules.payroll.models import PayrollMxCfdiCatalogEntry, PayrollMxCfdiSchemaRelease
+# The SAT catalog holding the concept codes of each CFDI node type (S28). A
+# separation payment is a perception (Nómina 1.2 SeparacionIndemnizacion).
+_NODE_CODE_CATALOG = {"PERCEPCION": "c_TipoPercepcion", "SEPARACION": "c_TipoPercepcion",
+                      "DEDUCCION": "c_TipoDeduccion", "OTRO_PAGO": "c_TipoOtroPago"}
 
-    return db.query(PayrollMxCfdiCatalogEntry.id).join(
-        PayrollMxCfdiSchemaRelease, PayrollMxCfdiCatalogEntry.schema_release_id == PayrollMxCfdiSchemaRelease.id
-    ).filter(PayrollMxCfdiSchemaRelease.status.in_(("Approved", "Active")),
-             PayrollMxCfdiCatalogEntry.code == code).first() is not None
+
+def _catalog_has_code(db: Session, node_type: str, code: str) -> bool:
+    """Phase 11a: the code must be in the catalog of the row's OWN node type —
+    before, any catalog of any approved release matched (a deduction could pass
+    with a perception code)."""
+    from app.modules.payroll import mexico_cfdi_catalog_service
+
+    catalog = _NODE_CODE_CATALOG.get(node_type)
+    return bool(catalog) and mexico_cfdi_catalog_service.catalog_has_code(db, catalog, code)
 
 
 def approve_classification(db: Session, classification_id: int, actor_id: Optional[int]) -> dict:
@@ -786,7 +804,8 @@ def approve_classification(db: Session, classification_id: int, actor_id: Option
     if row.created_by_id == actor_id:
         _refuse(db, et, row.id, "approve", actor_id,
                 "You created this classification — a different Super Admin must approve it (maker-checker).")
-    if row.organization_id is None and not (row.cfdi_concept_code and _catalog_has_code(db, row.cfdi_concept_code)):
+    if row.organization_id is None and not (row.cfdi_concept_code
+                                            and _catalog_has_code(db, row.cfdi_node_type, row.cfdi_concept_code)):
         _refuse(db, et, row.id, "approve", actor_id,
                 "A canonical classification needs its SAT concept code in an approved CFDI catalog release — the "
                 "SAT Nómina 1.2 catalog (S28) is not VERIFIED yet, so no canonical row can go live.")

@@ -172,6 +172,21 @@ const MX_SA = "/api/super-admin/compliance/mexico";
 const mxOn = (on, packId) => ({ params: { ...(on ? { on } : {}), ...(packId ? { pack_id: packId } : {}) } });
 
 export const getMxReadiness = () => apiFetch(`${MX_SA}/readiness`);
+// Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
+// list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
+export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);
+export const proposeMxPilotGrant = (payload) => apiFetch(`${MX_SA}/pilot-grants`, { method: "POST", body: payload });
+export const approveMxPilotGrant = (id) => apiFetch(`${MX_SA}/pilot-grants/${id}/approve`, { method: "POST", body: {} });
+export const withdrawMxPilotGrant = (id, reason) =>
+  apiFetch(`${MX_SA}/pilot-grants/${id}/withdraw`, { method: "POST", body: { reason } });
+export const revokeMxPilotGrant = (id, reason) =>
+  apiFetch(`${MX_SA}/pilot-grants/${id}/revoke`, { method: "POST", body: { reason } });
+export const listMxMasterCopies = () => apiFetch(`${MX_SA}/master-copies`);
+// Phase 10g: the "no new Mexican organisations" switch (four-eyes).
+export const getMxOnboardingPause = () => apiFetch(`${MX_SA}/onboarding-pause`);
+export const proposeMxOnboardingChange = (payload) => apiFetch(`${MX_SA}/onboarding-pause`, { method: "POST", body: payload });
+export const approveMxOnboardingChange = (id) => apiFetch(`${MX_SA}/onboarding-pause/${id}/approve`, { method: "POST", body: {} });
+export const withdrawMxOnboardingChange = (id) => apiFetch(`${MX_SA}/onboarding-pause/${id}/withdraw`, { method: "POST", body: {} });
 export const listMxOrganizations = () => apiFetch(`${MX_SA}/organizations`);
 export const listMxEmployees = (orgId) => apiFetch(`${MX_SA}/employees`, { params: { org_id: orgId } });
 export const listMxPacks = () => apiFetch(`${MX_SA}/packs`);
@@ -193,7 +208,18 @@ export const archiveMxEarningClassification = (id, reason) =>
   apiFetch(`${MX_SA}/earning-classifications/${id}/archive`, { method: "POST", body: { reason } });
 export const listMxCfdiReleases = () => apiFetch(`${MX_SA}/cfdi-catalogs`);
 export const createMxCfdiRelease = (payload) => apiFetch(`${MX_SA}/cfdi-catalogs`, { method: "POST", body: payload });
-export const listMxCfdiEntries = (releaseId) => apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`);
+// Phase 11a: entries are filtered and capped ({ total, limit, counts, entries }).
+export const listMxCfdiEntries = (releaseId, params = {}) =>
+  apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`, { params });
+export const listMxPinnedSets = () => apiFetch(`${MX_SA}/cfdi-catalogs/pinned-sets`);
+export const loadMxPinnedSet = (releaseId, setId) =>
+  apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/load-pinned`, { method: "POST", body: { setId } });
+export const listMxSystemConcepts = (releaseId) =>
+  apiFetch(`${MX_SA}/cfdi-system-concepts`, { params: releaseId ? { releaseId } : {} });
+export const proposeMxSystemConcept = (payload) =>
+  apiFetch(`${MX_SA}/cfdi-system-concepts`, { method: "POST", body: payload });
+export const approveMxSystemConcept = (id) => apiFetch(`${MX_SA}/cfdi-system-concepts/${id}/approve`, { method: "POST" });
+export const withdrawMxSystemConcept = (id) => apiFetch(`${MX_SA}/cfdi-system-concepts/${id}/withdraw`, { method: "POST" });
 export const addMxCfdiEntry = (releaseId, payload) =>
   apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`, { method: "POST", body: payload });
 export const transitionMxCfdiRelease = (releaseId, action) =>

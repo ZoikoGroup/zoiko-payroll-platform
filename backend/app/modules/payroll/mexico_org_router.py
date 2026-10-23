@@ -46,9 +46,11 @@ def require_mexico_tenant(current_user=Depends(get_current_payroll_operator), db
     each route (reads: payroll operator; writes: org admin)."""
     from app.modules.payroll import mexico_dormancy, service
 
-    if not mexico_dormancy.onboarding_enabled():
-        raise ForbiddenException(mexico_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
+    # Phase 10e: open only with the kill switch on AND general availability or
+    # this organisation's active pilot grant.
+    if not mexico_dormancy.onboarding_enabled(db, org_id):
+        raise ForbiddenException(mexico_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return                                   # each route's _org_id answers Super Admin with its own 403
     if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
@@ -1084,3 +1086,12 @@ def void_journal_export(export_id: int, body: Dict[str, Any] = Body(...), curren
                         db: Session = Depends(get_db)):
     return _journal().void_export(db, _org_id(current_user), export_id, str(body.get("reason") or ""),
                                   _actor(current_user))
+
+
+# ── Pilot status (Phase 10e) — the banner on a pilot organisation's screens ──
+
+@router.get("/pilot-status", summary="Whether this organisation is a non-binding Mexico pilot")
+def pilot_status(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_pilot_service
+
+    return mexico_pilot_service.pilot_status(db, _org_id(current_user))

@@ -68,6 +68,14 @@ def _payment_guard(db: Session, org_id: int) -> None:
     mexico_filing_service.guard(db, org_id)
 
 
+def _payment_write_guard(db: Session, org_id: int) -> None:
+    """Phase 10e: a pilot organisation never pays through Zoiko (MX_PILOT_NO_PAYMENTS)."""
+    from app.modules.payroll import mexico_pilot_service
+
+    _payment_guard(db, org_id)
+    mexico_pilot_service.refuse_payments(db, org_id)
+
+
 def _clabe_of(employee) -> Optional[str]:
     raw = ((getattr(employee, "compliance_fields", None) or {}).get("clabe") or "")
     clabe = re.sub(r"[\s-]", "", str(raw))
@@ -109,7 +117,7 @@ def create_batch(db: Session, org_id: int, run_id: int, actor_id: Optional[int])
     """The salary batch of a committed run: every payslip with net pay > 0."""
     from app.modules.payroll import mexico_run_service
 
-    _payment_guard(db, org_id)
+    _payment_write_guard(db, org_id)
     m = _payment_models()
     run = db.get(m.PayrollRun, run_id)
     if run is None or run.organization_id != org_id:
@@ -153,7 +161,7 @@ def create_batch(db: Session, org_id: int, run_id: int, actor_id: Optional[int])
 
 
 def release_batch(db: Session, org_id: int, batch_id: int, actor_id: Optional[int]) -> dict:
-    _payment_guard(db, org_id)
+    _payment_write_guard(db, org_id)
     batch = _payment_batch(db, org_id, batch_id)
     if batch.status != "DRAFT":
         raise BadRequestException(f"Only a DRAFT batch can be released (this one is {batch.status})")
@@ -168,7 +176,7 @@ def release_batch(db: Session, org_id: int, batch_id: int, actor_id: Optional[in
 
 
 def cancel_batch(db: Session, org_id: int, batch_id: int, reason: str, actor_id: Optional[int]) -> dict:
-    _payment_guard(db, org_id)
+    _payment_write_guard(db, org_id)
     batch = _payment_batch(db, org_id, batch_id)
     text = (reason or "").strip()
     if not text:
@@ -197,7 +205,7 @@ def _unlink_reissues(db: Session, batch) -> None:
 def export_worklist(db: Session, org_id: int, batch_id: int, actor_id: Optional[int]) -> dict:
     """The worklist of a RELEASED batch (D2), built on request: the full CLABE
     is read only now and never stored; the export is audited without it."""
-    _payment_guard(db, org_id)
+    _payment_write_guard(db, org_id)
     m = _payment_models()
     batch = _payment_batch(db, org_id, batch_id)
     if batch.status not in ("RELEASED", "CLOSED"):
@@ -234,7 +242,7 @@ def export_worklist(db: Session, org_id: int, batch_id: int, actor_id: Optional[
 # ── outcomes and re-issue ───────────────────────────────────────────────────
 
 def record_item_outcome(db: Session, org_id: int, item_id: int, data: dict, actor_id: Optional[int]) -> dict:
-    _payment_guard(db, org_id)
+    _payment_write_guard(db, org_id)
     m = _payment_models()
     it = _payment_item(db, org_id, item_id)
     batch = db.get(m.PayrollMxPaymentBatch, it.batch_id)
@@ -265,7 +273,7 @@ def record_item_outcome(db: Session, org_id: int, item_id: int, data: dict, acto
 def reissue(db: Session, org_id: int, batch_id: int, actor_id: Optional[int]) -> dict:
     """A new DRAFT batch for the FAILED / RETURNED items not re-issued yet,
     with the worker's CURRENT CLABE (the reason to re-issue is often a wrong one)."""
-    _payment_guard(db, org_id)
+    _payment_write_guard(db, org_id)
     m = _payment_models()
     batch = _payment_batch(db, org_id, batch_id)
     todo = [it for it in _batch_items(db, batch.id) if it.status in ("FAILED", "RETURNED") and not it.reissued_by_item_id]

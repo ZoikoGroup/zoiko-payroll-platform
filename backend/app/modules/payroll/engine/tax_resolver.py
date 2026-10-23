@@ -318,7 +318,8 @@ def find_active_tax_pack(
 _REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL")
 
 
-def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str]) -> Optional[str]:
+def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str],
+                                         organization_id: Optional[int] = None) -> Optional[str]:
     """Phase 6.10: moving an EXISTING organization into a registry-gated
     country (_REGISTRY_ROW_REQUIRED_COUNTRIES) is onboarding into it, so it
     passes the same gate as registration. Before this, PUT /organizations/me
@@ -330,7 +331,7 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
 
     # Mexico (ZP-MX-ENG-001 Phase 4a): entering Mexico is refused while
     # onboarding is disabled. Only a change INTO Mexico reaches this branch.
-    mx_refusal = entering_mexico_refusal(old_country, new_country)
+    mx_refusal = entering_mexico_refusal(old_country, new_country, db, organization_id)
     if mx_refusal:
         return mx_refusal
     # Brazil (ZP-BR-ENG-001 Phase 3): same dormancy rule as Mexico.

@@ -33251,7 +33251,8 @@ def _is_evaluation_workspace(db: Session, organization_id: int = None) -> bool:
     return bool(org) and org.workspace_type == "EVALUATION"
 
 
-def _draw_evaluation_watermark(c, width: float, height: float, font_name: str = "Helvetica-Bold") -> None:
+def _draw_evaluation_watermark(c, width: float, height: float, font_name: str = "Helvetica-Bold",
+                               text: str = "PREVIEW — EVALUATION ONLY") -> None:
     """Overlays a centred, rotated 'PREVIEW — EVALUATION ONLY' watermark on
     the current reportlab page. Call once AFTER all page content has been
     drawn and BEFORE c.showPage()/c.save(), and (for multi-page documents)
@@ -33261,8 +33262,7 @@ def _draw_evaluation_watermark(c, width: float, height: float, font_name: str = 
     from reportlab.lib import colors
     from reportlab.pdfbase.pdfmetrics import stringWidth
 
-    text = "PREVIEW — EVALUATION ONLY"
-    size = 38
+    size = 38 if len(text) <= 26 else 30
     c.saveState()
     c.setFillColor(colors.HexColor("#1E3A8A"))
     c.setStrokeColor(colors.HexColor("#1E3A8A"))
@@ -33858,6 +33858,12 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
 
     if evaluation:
         _draw_evaluation_watermark(c, width, height, F)
+    # Mexico Phase 10e: a pilot run's payslip is non-binding — watermarked from
+    # the run's own record, so converting the workspace never removes it.
+    if (getattr(run, "mx_approval_fingerprint", None) or {}).get("pilot"):
+        from app.modules.payroll.mexico_pilot_service import PILOT_WATERMARK
+
+        _draw_evaluation_watermark(c, width, height, F, text=PILOT_WATERMARK)
 
     c.showPage()
     c.save()
@@ -36195,7 +36201,7 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             # onboarding is disabled — Organization.country alone must not
             # make an organisation Mexican.
             from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
-            if code and entering_mexico_refusal(row.jurisdiction_country, code):
+            if code and entering_mexico_refusal(row.jurisdiction_country, code, db, row.organization_id):
                 code = None
             # Brazil (Phase 3 dormancy): the same rule — never back-fill INTO Brazil.
             from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
@@ -36288,7 +36294,7 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     # jurisdiction is refused while Mexico onboarding is disabled. Only a
     # change INTO Mexico reaches this; every other value is untouched.
     from app.modules.payroll.mexico_dormancy import entering_mexico_refusal
-    mx_refusal = entering_mexico_refusal(row.jurisdiction_country, incoming_country)
+    mx_refusal = entering_mexico_refusal(row.jurisdiction_country, incoming_country, db, row.organization_id)
     if mx_refusal:
         raise BadRequestException(mx_refusal)
     # Brazil (ZP-BR-ENG-001 Phase 3): choosing Brazil is refused the same way
