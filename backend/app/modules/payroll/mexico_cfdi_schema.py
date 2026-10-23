@@ -132,6 +132,35 @@ def schema(set_id: str, main: str):
     return _compiled(set_id, main, m["xsdChecksum"])
 
 
+def schema_locations(set_id: str) -> dict:
+    """{namespace: official location} of the two main schemas (Phase 11b; from
+    the manifest, which read them from the XSDs and SOURCES_MANIFEST.csv)."""
+    found = verify(set_id).get("schemaLocations") or {}
+    if len(found) != len(MAIN_SCHEMAS):
+        raise SchemaSetError(f"schema set {set_id!r} has no schema locations — rebuild it")
+    return dict(found)
+
+
+@functools.lru_cache(maxsize=8)
+def _combined(set_id: str, xsd_checksum: str):
+    from lxml import etree
+
+    imports = "".join(f'<xs:import namespace="{ns}" schemaLocation="zoiko-pinned:{set_id}/{loc.rsplit("/", 1)[-1]}"/>'
+                      for ns, loc in sorted(schema_locations(set_id).items()))
+    wrapper = f'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">{imports}</xs:schema>'.encode()
+    parser = etree.XMLParser(no_network=True, resolve_entities=False)
+    parser.resolvers.add(_resolver_for(_dir(set_id)))
+    return etree.XMLSchema(etree.fromstring(wrapper, parser, base_url=f"zoiko-pinned:{set_id}/combined.xsd"))
+
+
+def combined_schema(set_id: str):
+    """One XMLSchema knowing both CFDI 4.0 and Nómina 1.2: the Complemento
+    element of cfdv40.xsd validates its content strictly (xs:any), so a payroll
+    CFDI validates only against both."""
+    m = verify(set_id)
+    return _combined(set_id, m["xsdChecksum"])
+
+
 def catalogs(set_id: str) -> dict:
     """{catalog: {"meta": {...}, "entries": [[code, description, valid_from, valid_to, attributes], ...]}}"""
     verify(set_id)

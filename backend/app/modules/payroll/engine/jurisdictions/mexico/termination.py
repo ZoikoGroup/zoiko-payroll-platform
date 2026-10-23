@@ -10,9 +10,10 @@ chooses a tax treatment or a component: the reason decides (MX-057).
 The engine fixes only the INTERFACE a transcribed rule must provide:
 
   TerminationReason  source, source_ref, label
-                     separation_components(facts) -> [{code, label, amount}]
+                     separation_components(facts) -> [{code, label, kind, amount}]
                          the indemnity / seniority premium / ... this reason
-                         triggers (LFT Arts. 47–53, 162 — S26); [] for none
+                         triggers (LFT Arts. 47–53, 162 — S26); [] for none;
+                         `kind` is one of SEPARATION_KINDS (Phase 11b)
   FiniquitoRule      source, source_ref
                      vacation_days_owed(years, termination_date)
                          -> {service_year: days} still owed (LFT Arts. 76–81);
@@ -36,6 +37,12 @@ from .errors import MXBlock
 
 _ZERO = Decimal("0")
 SEPARATION_PREFIX = "MX_SEPARATION:"
+# Phase 11b: a separation component is one of three kinds, matching the three
+# separation perceptions of the SAT Nómina 1.2 catalog (S28 c_TipoPercepcion
+# 022 seniority premium, 023 separation payment, 025 indemnity). Each kind has
+# its own transcribed tax rule; the SAT code itself comes from the approved
+# system-concept mapping, never from here.
+SEPARATION_KINDS = ("SEPARATION_SENIORITY_PREMIUM", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY")
 
 
 def _dec(value, what: str, code: str) -> Decimal:
@@ -74,18 +81,24 @@ def finiquito_rule():
 
 
 def separation_lines(code: str, facts: dict) -> list:
-    """The reason's separation components as SEPARATION earning lines."""
+    """The reason's separation components as earning lines of their own
+    separation kind (a component without one BLOCKS — Phase 11b)."""
     r = reason(code)
     out = []
     for comp in r.separation_components(facts) or []:
         key = str(comp.get("code") or "").strip()
         if not key:
             raise MXBlock("MX_TERMINATION_RULE_INVALID", f"the '{code}' reason returned a component without a code")
+        kind = str(comp.get("kind") or "").strip().upper()
+        if kind not in SEPARATION_KINDS:
+            raise MXBlock("MX_TERMINATION_RULE_INVALID",
+                          f"the '{code}' reason's component {key} has no separation kind — one of "
+                          f"{', '.join(SEPARATION_KINDS)} (S28 c_TipoPercepcion 022 / 023 / 025)")
         amount = _dec(comp.get("amount"), f"{key} amount", "MX_TERMINATION_RULE_INVALID")
         if amount < _ZERO:
             raise MXBlock("MX_TERMINATION_RULE_INVALID", f"the '{code}' reason returned a negative {key}")
         if amount:
-            out.append({"code": f"{SEPARATION_PREFIX}{key}", "kind": "SEPARATION", "amount": amount,
+            out.append({"code": f"{SEPARATION_PREFIX}{key}", "kind": kind, "amount": amount,
                         "label": str(comp.get("label") or key)})
     return out
 
