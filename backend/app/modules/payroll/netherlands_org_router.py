@@ -28,6 +28,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -601,7 +602,8 @@ def issue_annual_statement(statement_id: int, current_user=Depends(get_current_p
 
 # ── SEPA salary payment batches ──────────────────────────────────────────────
 
-_BATCH_EXCLUDE = ("idempotency_key",)
+# The file itself (raw IBANs) is only ever returned by the download route.
+_BATCH_EXCLUDE = ("idempotency_key", "pain001_xml")
 
 
 @router.get("/payment-batches", summary="SEPA payment batches")
@@ -634,11 +636,74 @@ def create_salary_batch(run_id: int, payload: Optional[Dict[str, Any]] = Body(No
     from app.modules.payroll import netherlands_payment_service as payments
 
     run = _run(db, _org_id(current_user), run_id)
+    exclusions = {int(k): v for k, v in ((payload or {}).get("exclusions") or {}).items()}
     batch = payments.create_salary_payment_batch(
         db, run.id, _actor(current_user),
-        requested_execution_date=_date(payload or {}, "requested_execution_date", required=False))
+        requested_execution_date=_date(payload or {}, "requested_execution_date", required=False),
+        exclusions=exclusions)
     db.commit()
     db.refresh(batch)
+    return _cols(batch, _BATCH_EXCLUDE)
+
+
+@router.get("/runs/{run_id}/salary-batch/preview", summary="Who a salary batch would pay, and who cannot be paid")
+def preview_salary_batch(run_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import netherlands_payment_service as payments
+    from app.modules.payroll.bank_export.sepa_pain001 import mask_iban
+
+    run = _run(db, _org_id(current_user), run_id)
+    preview = payments.salary_payment_preview(db, run)
+    return {"payable": [{**{k: v for k, v in p.items() if k != "iban"}, "iban": mask_iban(p["iban"]),
+                         "amount": str(p["amount"])} for p in preview["payable"]],
+            "exceptions": preview["exceptions"]}
+
+
+@router.get("/payment-batches/{batch_id}/file", summary="Download the stored pain.001 file (exact bytes)")
+def download_payment_batch_file(batch_id: int, current_user=Depends(get_current_payroll_operator),
+                                db: Session = Depends(get_db)):
+    from app.modules.payroll import netherlands_payment_service as payments
+    from app.modules.payroll.models import PayrollNlPaymentBatch
+
+    _owned(db, PayrollNlPaymentBatch, batch_id, _org_id(current_user))
+    filename, xml = payments.get_batch_file(db, batch_id)
+    return Response(content=xml.encode("utf-8"), media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/payment-batches/{batch_id}/submit", summary="The file was handed to the bank (DRAFT -> SUBMITTED)")
+def submit_payment_batch(batch_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import netherlands_payment_service as payments
+    from app.modules.payroll.models import PayrollNlPaymentBatch
+
+    _owned(db, PayrollNlPaymentBatch, batch_id, _org_id(current_user))
+    batch = payments.submit_payment_batch(db, batch_id, _actor(current_user))
+    db.commit()
+    return _cols(batch, _BATCH_EXCLUDE)
+
+
+@router.post("/payment-batches/{batch_id}/bank-result", summary="Record the bank's ACCEPTED / REJECTED / UNKNOWN answer")
+def record_payment_bank_result(batch_id: int, payload: Dict[str, Any] = Body(...),
+                               current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import netherlands_payment_service as payments
+    from app.modules.payroll.models import PayrollNlPaymentBatch
+
+    _owned(db, PayrollNlPaymentBatch, batch_id, _org_id(current_user))
+    batch = payments.record_bank_result(db, batch_id, payload.get("outcome"))
+    db.commit()
+    return _cols(batch, _BATCH_EXCLUDE)
+
+
+@router.post("/payment-batches/{batch_id}/reconcile", summary="Settlement evidenced by the bank statement (ACCEPTED -> SETTLED)")
+def reconcile_payment_batch(batch_id: int, payload: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import netherlands_payment_service as payments
+    from app.modules.payroll.models import PayrollNlPaymentBatch
+
+    _owned(db, PayrollNlPaymentBatch, batch_id, _org_id(current_user))
+    batch = payments.reconcile_payment_batch(db, batch_id, payload.get("bank_reference"))
+    db.commit()
     return _cols(batch, _BATCH_EXCLUDE)
 
 

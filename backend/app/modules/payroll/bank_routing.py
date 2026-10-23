@@ -49,7 +49,9 @@ from typing import List, Optional
 # Mexico (ZP-MX-ENG-001 Phase 4b): the 18-digit CLABE on the SPEI rail —
 # inert until a Mexican employee can exist (MX_TENANT_ONBOARDING_ENABLED);
 # no Mexican payment file exists before Phase 10.
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR")
+# Switzerland and Saudi Arabia (Phase 4.1, 2026-10-23) route by IBAN (+ BIC).
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR",
+                     "CH", "SA")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -95,11 +97,19 @@ ROUTING_FIELDS = {
         {"key": "bic", "label": "BIC"},
     ],
     "MX": [{"key": "clabe", "label": "CLABE"}],
+    "CH": [
+        {"key": "iban", "label": "IBAN"},
+        {"key": "bic", "label": "BIC"},
+    ],
+    "SA": [
+        {"key": "iban", "label": "IBAN"},
+    ],
     "BR": [
         {"key": "pix_key", "label": "PIX Key"},
         {"key": "bank_compe", "label": "Bank COMPE"},
         {"key": "bank_agency", "label": "Agency"},
         {"key": "bank_account", "label": "Account"},
+        {"key": "bank_ispb", "label": "ISPB"},
     ],
 }
 
@@ -127,6 +137,8 @@ BTF_ROUTING_LABEL = {
     "BS": "ACH Routing #",
     "PR": "ACH Routing #",
     "BR": "PIX Key / COMPE",
+    "CH": "IBAN",
+    "SA": "IBAN",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -150,6 +162,8 @@ PAYMENT_MODE_LABEL = {
     "BS": "ACH",
     "PR": "ACH",
     "BR": "PIX / TED",
+    "CH": "SIC / ISO 20022",
+    "SA": "SARIE",
 }
 
 
@@ -233,16 +247,37 @@ def btf_routing_value(obj, country: Optional[str] = None) -> str:
         bank = _field_value(obj, "bank_code")
         branch = _field_value(obj, "branch_code")
         return f"{bank}-{branch}" if bank and branch else (bank or branch)
-    if effective in ("DE", "NL"):
+    if effective in ("DE", "NL", "CH"):
         iban = _field_value(obj, "iban")
         bic = _field_value(obj, "bic")
         if iban and bic:
             return f"{iban} {bic}"
         return iban or bic
+    if effective == "BR":
+        # TED routing "COMPE/agency-digit/account-digit", else the PIX key —
+        # the old first-field rule exported only the PIX key, dropping a
+        # TED-only employee's bank details entirely.
+        compe, agency, account = (_field_value(obj, k) for k in ("bank_compe", "bank_agency", "bank_account"))
+        if compe and agency and account:
+            agency_digit, account_digit = _field_value(obj, "bank_agency_digit"), _field_value(obj, "bank_account_digit")
+            return (f"{compe}/{agency}{'-' + agency_digit if agency_digit else ''}"
+                    f"/{account}{'-' + account_digit if account_digit else ''}")
+        return _field_value(obj, "pix_key")
     fields = ROUTING_FIELDS.get(effective, [])
     if not fields:
         return ""
     return _field_value(obj, fields[0]["key"])
+
+
+def btf_account_value(obj) -> str:
+    """The BTF account-number column: the top-level bank_account column, else
+    the per-country account stored in compliance_fields (Brazil bank_account,
+    Saudi Arabia account_number). IBAN countries carry the account in the
+    routing column instead."""
+    top = getattr(obj, "bank_account", None)
+    if top:
+        return str(top)
+    return _field_value(obj, "bank_account") or _field_value(obj, "account_number")
 
 
 def btf_routing_label(country: Optional[str] = None) -> str:

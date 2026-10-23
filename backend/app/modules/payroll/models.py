@@ -1531,6 +1531,10 @@ class PayrollRun(Base):
     # calculation snapshots + engine version + content hash. Written at
     # approval; checked at correction to ensure basis hasn't drifted.
     br_approval_fingerprint = Column(JSON, nullable=True)
+    # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
+    # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
+    # so one run is never paid twice. Migration 8f90dde5f7b5.
+    payment_channel = Column(String(20), nullable=True)
 
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -9439,14 +9443,21 @@ class PayrollNlPaymentBatch(Base):
     payroll_run_id          = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     pain001_sha256          = Column(String(64), nullable=False, unique=True, index=True)
     message_id              = Column(String(100), nullable=False, index=True)
-    status                  = Column(String(20), nullable=False, default="SUBMITTED")  # SUBMITTED / ACCEPTED / SETTLED / REJECTED / RETURNED / UNKNOWN
+    # DRAFT -> SUBMITTED -> ACCEPTED / REJECTED / UNKNOWN -> SETTLED (RETURNED per item)
+    status                  = Column(String(20), nullable=False, default="DRAFT")
+    # The exact pain.001 bytes (the download) and their CreDtTm — migration 8f90dde5f7b5.
+    pain001_xml             = Column(Text, nullable=True)
+    created_at_utc          = Column(DateTime(timezone=True), nullable=True)
+    batch_kind              = Column(String(20), nullable=True)   # SALARY | AUTHORITY
+    authority_payment_id    = Column(Integer, ForeignKey("payroll_nl_authority_payments.id", ondelete="SET NULL"),
+                                     nullable=True)
     submitted_at            = Column(DateTime(timezone=True), nullable=True)
     reconciled_at           = Column(DateTime(timezone=True), nullable=True)
     created_at              = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     idempotency_key         = Column(String(100), nullable=False, unique=True, index=True)
 
     __table_args__ = (
-        sa.CheckConstraint("status IN ('SUBMITTED', 'ACCEPTED', 'SETTLED', 'REJECTED', 'RETURNED', 'UNKNOWN')", name="ck_nl_payment_batch_status"),
+        sa.CheckConstraint("status IN ('DRAFT', 'SUBMITTED', 'ACCEPTED', 'SETTLED', 'REJECTED', 'RETURNED', 'UNKNOWN')", name="ck_nl_payment_batch_status"),
         Index("ix_nl_payment_batch_org_run", "organization_id", "payroll_run_id"),
     )
 
@@ -9460,7 +9471,8 @@ class PayrollNlPaymentItem(Base):
 
     id                      = Column(Integer, primary_key=True, index=True)
     batch_id                = Column(Integer, ForeignKey("payroll_nl_payment_batches.id", ondelete="CASCADE"), nullable=False, index=True)
-    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NULL for an authority payment (Belastingdienst) — there is no employee.
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
     iban_token              = Column(String(200), nullable=False)
     amount                  = Column(Numeric(14, 2), nullable=False)
     end_to_end_id           = Column(String(100), nullable=False)

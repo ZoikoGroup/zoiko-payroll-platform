@@ -669,7 +669,11 @@ export const downloadBankTransferFile = async (runId, format) => {
   const res = await fetch(requestUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new Error("Failed to generate bank transfer file");
+  if (!res.ok) {
+    // Show the server's reason (e.g. "already paid through SEPA") — not a generic failure.
+    const detail = await res.json().then((b) => b?.detail).catch(() => null);
+    throw new Error(typeof detail === "string" ? detail : "Failed to generate bank transfer file");
+  }
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
@@ -2545,6 +2549,34 @@ export const issueNlAnnualStatement = (statementId) => api.put(`${NL}/annual-sta
 export const listNlPaymentBatches = () => nlList(api.get(`${NL}/payment-batches`));
 export const getNlPaymentBatch = (batchId) => api.get(`${NL}/payment-batches/${batchId}`);
 export const createNlSalaryBatch = (runId, payload = {}) => api.post(`${NL}/runs/${runId}/salary-batch`, payload);
+export const previewNlSalaryBatch = (runId) => api.get(`${NL}/runs/${runId}/salary-batch/preview`);
+export const downloadNlPaymentBatchFile = async (batchId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${NL}/payment-batches/${batchId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((b) => b?.detail).catch(() => null);
+    throw new Error(typeof detail === "string" ? detail : "Could not download the payment file.");
+  }
+  const blob = await res.blob();
+  const match = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `pain001_${batchId}.xml`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return { filename, size: blob.size };
+};
+export const submitNlPaymentBatch = (batchId) => api.post(`${NL}/payment-batches/${batchId}/submit`, {});
+export const recordNlPaymentBankResult = (batchId, outcome) =>
+  api.post(`${NL}/payment-batches/${batchId}/bank-result`, { outcome });
+export const reconcileNlPaymentBatch = (batchId, bankReference) =>
+  api.post(`${NL}/payment-batches/${batchId}/reconcile`, { bank_reference: bankReference });
 export const getNlWkr = (taxYear) => api.get(`${NL}/wkr`, { params: { tax_year: taxYear } });
 
 // ── Mexico (ZP-MX-ENG-001) — organisation API (/api/payroll/mexico), Phase 3 ──

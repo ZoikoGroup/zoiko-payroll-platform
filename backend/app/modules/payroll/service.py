@@ -32683,7 +32683,7 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
             employee_name=item.employee_name,
             employee_id=str(item.employee_id),
             bank_name=item.bank_name or "",
-            account_number=item.bank_account or "",
+            account_number=bank_routing.btf_account_value(item),
             ifsc=item.ifsc or "",
             branch=None,   # not captured anywhere upstream — left blank rather than fabricated
             amount=amount,
@@ -32718,6 +32718,15 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
     org_currency = org_row.currency if org_row else None
 
     export_format = format_override or policy.bank_export_format
+    # Phase 4.2: one payment channel per run — a run already paid through a
+    # SEPA batch never also gets a bank transfer file (no double payment).
+    from app.modules.payroll.netherlands_payment_service import (
+        CHANNEL_GENERIC, PaymentServiceError, claim_payment_channel)
+    try:
+        claim_payment_channel(run, CHANNEL_GENERIC)
+    except PaymentServiceError as exc:
+        raise BadRequestException(str(exc.detail if hasattr(exc, "detail") else exc))
+    db.flush()
     rows = _build_bank_export_rows(db, run, items, organization_id, org_currency=org_currency)
     try:
         exporter = get_exporter(export_format)

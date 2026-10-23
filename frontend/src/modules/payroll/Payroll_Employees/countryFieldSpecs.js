@@ -61,6 +61,18 @@ export const COUNTRIES = [
   { code: "BR", name: "Brazil" },
 ];
 
+// ISO 13616 IBAN check digits (mirrors employee_validation.py's
+// iban_checksum_ok): move the first 4 characters to the end, letters -> 10..35,
+// the number mod 97 must be 1. Done in chunks — the number exceeds 2^53.
+function ibanPassesMod97(value) {
+  const raw = String(value || "").replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(raw)) return false;
+  const digits = (raw.slice(4) + raw.slice(0, 4)).split("").map((ch) => parseInt(ch, 36)).join("");
+  let remainder = 0;
+  for (let i = 0; i < digits.length; i += 7) remainder = Number(String(remainder) + digits.slice(i, i + 7)) % 97;
+  return remainder === 1;
+}
+
 // Dutch BSN eleven-test (mirrors employee_validation.py's bsn_is_valid):
 // sum(digit × weight) with weights 9..2 and -1 must be divisible by 11.
 function bsnPassesElfproef(value) {
@@ -369,12 +381,22 @@ export const COUNTRY_FIELD_SPECS = {
       pattern: /^756\d{10}$/,
       error: "AHV number must be the 13-digit AHV/AVS number 756.XXXX.XXXX.XX from the AHV insurance card.",
     },
+    // Salary account (backend bank_routing.py ROUTING_FIELDS.CH).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "CH + 19 characters", upper: true, strip: " ", pattern: /^CH\d{2}\d{5}[A-Z0-9]{12}$/, check: ibanPassesMod97, error: "Swiss IBAN must be CH, 2 check digits, a 5-digit bank clearing number and 12 characters, with valid check digits." },
+    { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
+  ],
+  // Saudi Arabia — mirrors backend SAEmployeeValidation: National ID (starts
+  // with 1) or Iqama (starts with 2), both 10 digits; IBAN SA + 22.
+  SA: [
+    { key: "identity_type", label: "Identity type", type: "select", required: true, choices: ["NATIONAL_ID", "IQAMA"] },
+    { key: "national_id_iqama", label: "National ID / Iqama", type: "text", placeholder: "10 digits", required: true, strip: " -", pattern: /^[12]\d{9}$/, error: "National ID (starts with 1) or Iqama (starts with 2) must be 10 digits." },
+    { key: "iban", label: "IBAN", type: "text", placeholder: "SA + 22 characters", upper: true, strip: " ", pattern: /^SA\d{4}[A-Z0-9]{18}$/, check: ibanPassesMod97, error: "Saudi IBAN must be SA, 2 check digits, a 2-digit bank code and 18 characters, with valid check digits." },
   ],
   // Netherlands — the server also runs the BSN eleven-test (elfproef); the
   // same check runs here so a typo is caught at entry.
   NL: [
     { key: "bsn", label: "BSN (Burgerservicenummer)", type: "text", placeholder: "9 digits", required: true, strip: ". -", pattern: /^\d{9}$/, check: bsnPassesElfproef, error: "BSN must be the 9-digit Burgerservicenummer and pass the eleven-test — check it against the identity document." },
-    { key: "iban", label: "IBAN", type: "text", placeholder: "NL + 16 characters", upper: true, strip: " ", pattern: /^NL\d{2}[A-Z]{4}\d{10}$/, error: "Dutch IBAN must be NL, 2 check digits, a 4-letter bank code and 10 digits." },
+    { key: "iban", label: "IBAN", type: "text", placeholder: "NL + 16 characters", upper: true, strip: " ", pattern: /^NL\d{2}[A-Z]{4}\d{10}$/, check: ibanPassesMod97, error: "Dutch IBAN must be NL, 2 check digits, a 4-letter bank code and 10 digits, with valid check digits." },
     { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
   ],
   // Mexico — mirrors backend MXEmployeeValidation (ZP-MX-ENG-001 §12). Format only:
@@ -405,6 +427,9 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "bank_agency", label: "Bank agency", type: "text", placeholder: "up to 5 digits", strip: " -", pattern: /^\d{1,5}$/, error: "Bank agency must be up to 5 digits." },
     { key: "bank_account", label: "Bank account", type: "text", placeholder: "up to 12 digits", strip: " -", pattern: /^\d{1,12}$/, error: "Bank account must be up to 12 digits." },
     { key: "bank_account_type", label: "Bank account type", type: "select", choices: ["CORRENTE", "POUPANCA"] },
+    { key: "bank_ispb", label: "Bank ISPB", type: "text", placeholder: "8 digits", strip: " ", pattern: /^\d{8}$/, error: "ISPB must be exactly 8 digits." },
+    { key: "bank_agency_digit", label: "Agency check digit", type: "text", upper: true, strip: " ", pattern: /^[0-9X]$/, error: "Agency check digit must be one digit or X." },
+    { key: "bank_account_digit", label: "Account check digit", type: "text", upper: true, strip: " ", pattern: /^[0-9X]$/, error: "Account check digit must be one digit or X." },
   ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).

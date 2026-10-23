@@ -393,8 +393,11 @@ def _br_before_run_transition(db: Session, run: PayrollRun, next_status, actor_i
 
 
 def payment_treatment(db: Session, organization_id: int, run: PayrollRun, items: list) -> dict:
-    """PIX / CNAB payment treatment — Phase 11. Return hold instructions if any."""
-    return {"br_payment_hold": False, "br_payment_method": "PIX", "br_pix_keys": []}
+    """PIX / CNAB payment treatment — Phase 11. The hook contract is a
+    {payslip_id: hold} map of payslips to leave out of the bank file; Brazil
+    holds none yet. (It used to return a settings dict whose string keys never
+    matched a payslip and only forced a needless commit.)"""
+    return {}
 
 
 def _br_pack_holidays(db: Session, year: int) -> list:

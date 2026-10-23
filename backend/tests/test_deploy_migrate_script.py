@@ -97,7 +97,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # be explained, or a self-heal refuses.
         tables, columns = pending_objects("b3f7c1e9d5a2")
         assert tables == brazil_tables
-        assert columns["payroll_runs"] == {"br_approval_fingerprint"}
+        # + Phase 4.2 (8f90dde5f7b5): the run payment channel and the stored SEPA file.
+        assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel"}
+        assert {"pain001_xml", "created_at_utc", "batch_kind", "authority_payment_id"} ==             columns["payroll_nl_payment_batches"]
         assert len(columns["payroll_employee_statutory_profiles"]) == 10
         assert {"version", "previous_version_id", "effective_from", "effective_to",
                 "created_by_id"} == columns["payroll_br_employer_profiles"]
