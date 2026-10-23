@@ -120,6 +120,7 @@ def statutory_summary(db: Session) -> dict:
     return {"jurisdiction": MX, "spec": SPEC, "available": available, "level": level,
             "registry": registry, "onboardingEnabled": flag,
             "pilotGrants": grants, "pilotPreconditions": mexico_pilot_service.pilot_preconditions(db),
+            "onboardingPaused": mexico_dormancy.onboarding_paused(db),                  # Phase 10g
             "gaPreconditions": mexico_pilot_service.ga_preconditions(db),
             "engineVersion": ENGINE_VERSION, "phase": 10, "gates": gates, "signedGates": signed,
             "decisions": owner_decisions(db),

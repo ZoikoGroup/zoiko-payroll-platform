@@ -972,6 +972,10 @@ GET,/api/super-admin/compliance/mexico/master-copies,platform,read,master-copies
 POST,/api/super-admin/compliance/mexico/master-copies,worker,create,master-copies,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),payroll_employee_statutory_profiles|payroll_employees|payroll_mx_infonavit_notices,yes,Phase 10e D5 master-data copy between tenants (reads worker rows) - awaits the ZP-PRIV owner's decision
 POST,/api/super-admin/compliance/mexico/master-copies/{copy_id}/approve,worker,approve,approve,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),payroll_employee_statutory_profiles|payroll_employees,yes,Phase 10e D5 master-data copy between tenants (writes worker rows) - awaits the ZP-PRIV owner's decision
 POST,/api/super-admin/compliance/mexico/master-copies/{copy_id}/cancel,platform,create,cancel,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/mexico/onboarding-pause,platform,read,onboarding-pause,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/mexico/onboarding-pause,platform,create,onboarding-pause,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/mexico/onboarding-pause/{pause_id}/approve,platform,approve,approve,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/mexico/onboarding-pause/{pause_id}/withdraw,platform,create,withdraw,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/organizations,aggregate,read,organizations,super_admin,platform,,,,yes,reviewed: organization id + name of tenants with Mexico payroll (registry metadata)
 GET,/api/super-admin/compliance/mexico/packs,platform,read,packs,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/packs/{pack_row_id}/activation-readiness,platform,read,activation-readiness,super_admin,platform,,,,no,

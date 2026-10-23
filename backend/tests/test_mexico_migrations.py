@@ -33,6 +33,7 @@ MX_M12_TABLES = {"payroll_mx_payment_batches", "payroll_mx_payment_items"}   # P
 MX_M13_TABLES = {"payroll_mx_journal_mappings", "payroll_mx_journal_exports"}   # Phase 10b
 MX_M14_TABLES = {"payroll_mx_pilot_grants", "payroll_mx_master_copies"}         # Phase 10e
 MX_M15_TABLES = {"payroll_mx_master_releases"}                                  # Phase 10f
+MX_M16_TABLES = {"payroll_mx_onboarding_pauses"}                                # Phase 10g
 
 
 def _path(rev):
@@ -71,7 +72,7 @@ def test_models_and_migration_define_the_same_mexico_tables():
     import app.modules.payroll.models  # noqa: F401
 
     model_tables = {t for t in Base.metadata.tables if t.startswith("payroll_mx_")}
-    assert model_tables == MX_TABLES | MX_M2_TABLES | MX_M3_TABLES | MX_M4_TABLES | MX_M5_TABLES | MX_M6_TABLES | MX_M7_TABLES | MX_M8_TABLES | MX_M9_TABLES | MX_M10_TABLES | MX_M11_TABLES | MX_M12_TABLES | MX_M13_TABLES | MX_M14_TABLES | MX_M15_TABLES
+    assert model_tables == MX_TABLES | MX_M2_TABLES | MX_M3_TABLES | MX_M4_TABLES | MX_M5_TABLES | MX_M6_TABLES | MX_M7_TABLES | MX_M8_TABLES | MX_M9_TABLES | MX_M10_TABLES | MX_M11_TABLES | MX_M12_TABLES | MX_M13_TABLES | MX_M14_TABLES | MX_M15_TABLES | MX_M16_TABLES
 
 
 @pytest.fixture()

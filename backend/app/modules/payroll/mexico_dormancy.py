@@ -45,6 +45,8 @@ from typing import Optional
 MX = "MX"
 DORMANT_MESSAGE = ("Mexico is not open for onboarding on this platform yet — Mexican payroll stays disabled "
                    "until its release gates (G1–G8) are signed.")
+PAUSED_MESSAGE = ("New Mexican organisations are paused on this platform (runbook §6) — organisations that are "
+                  "already Mexican keep running; a new one can be onboarded once the pause is lifted.")
 
 
 def flag_enabled() -> bool:
@@ -115,6 +117,18 @@ def onboarding_enabled(db=None, org_id: Optional[int] = None) -> bool:
     return registry_available(db) or any_active_pilot(db)
 
 
+def onboarding_paused(db) -> bool:
+    """Phase 10g: the "no new Mexican organisations" switch — the latest
+    APPROVED change is a PAUSE. Closed (paused) without a session."""
+    if db is None:
+        return True
+    from app.modules.payroll.models import PayrollMxOnboardingPause as P
+
+    latest = (db.query(P).filter(P.status == "APPROVED")
+              .order_by(P.approved_at.desc(), P.id.desc()).first())
+    return latest is not None and latest.action == "PAUSE"
+
+
 def pilot_active(db, org_id: Optional[int]) -> bool:
     """Open AND under pilot rules (non-binding output)."""
     return flag_enabled() and db is not None and active_pilot_grant(db, org_id) is not None
@@ -137,6 +151,9 @@ def entering_mexico_refusal(old_country: Optional[str], new_country: Optional[st
     Mexico while Mexico is not open for it; None otherwise (including any
     change that does not involve Mexico, and an org that is already Mexican).
     Without a session the change is refused (fail closed)."""
-    if is_mexico(new_country) and not is_mexico(old_country) and not onboarding_enabled(db, org_id):
-        return DORMANT_MESSAGE
+    if is_mexico(new_country) and not is_mexico(old_country):
+        if not onboarding_enabled(db, org_id):
+            return DORMANT_MESSAGE
+        if onboarding_paused(db):                     # Phase 10g: no NEW Mexican organisations
+            return PAUSED_MESSAGE
     return None

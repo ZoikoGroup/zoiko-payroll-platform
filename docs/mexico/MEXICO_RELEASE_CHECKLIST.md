@@ -43,4 +43,6 @@
 - [ ] Pilot completed: G3, G6 and G8 signed from pilot evidence
 - [ ] Pilot master data copied into the live organisation (governed copy, diff report clean)
 - [ ] Go-live checks done (activation runbook §6)
+- [ ] The "no new Mexican organisations" switch exercised once on staging (PAUSE then RESUME, two Super Admins each) before general availability
+- [ ] ZP-PRIV owner (Rugvedh) has reviewed Phase 10f (cross-tenant transfer, two-party RLS) and 10g (named RLS exceptions); any change he asks for is merged **before any pilot grant is approved**
 - [ ] Q9 (identifiers at rest) recorded by the security lead (`MX-DECISION-Q9`)

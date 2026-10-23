@@ -7,6 +7,7 @@ import { Messages, Table, card, useLoad } from "./mxShared";
 import { ReadinessDateBar } from "./employer/employerShared";
 import { localToday } from "./employer/employerUtils";
 import MXPilotGrantsPanel from "./MXPilotGrantsPanel";
+import MXOnboardingPausePanel from "./MXOnboardingPausePanel";
 
 // Go-live gates G1–G8 (spec §22) and, per pack, every activation condition
 // with its reason — the answer to "why can't I activate this pack?".
@@ -103,6 +104,7 @@ export default function MXReadinessGatesTab() {
             ]} />
           </div>
           <MXPilotGrantsPanel level={data.level} />
+          <MXOnboardingPausePanel />
           <div className={card} data-testid="mx-owner-decisions">
             <h3 className="mb-2 text-[14px] font-semibold text-foreground">Legal decisions</h3>
             <Table rows={data.decisions || []} rowKey={(d) => d.key} columns={[

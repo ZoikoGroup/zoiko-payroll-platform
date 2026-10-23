@@ -10791,6 +10791,31 @@ class PayrollMxMasterRelease(Base):
     )
 
 
+class PayrollMxOnboardingPause(Base):
+    """Phase 10g: the platform's "no new Mexican organisations" switch. Each row
+    is one proposed change (PAUSE or RESUME), proposed by a Super Admin and
+    approved by a different one; the latest APPROVED row is the switch's state.
+    While paused no organisation can BECOME Mexican and no pilot grant can be
+    approved; organisations that are already Mexican keep running (runbook §6).
+    Platform configuration: no organisation, no worker data."""
+    __tablename__ = "payroll_mx_onboarding_pauses"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    action          = Column(String(8), nullable=False)                     # PAUSE / RESUME
+    status          = Column(String(10), nullable=False, default="PROPOSED")  # PROPOSED / APPROVED / WITHDRAWN
+    reason          = Column(String(300), nullable=False)
+    proposed_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('PAUSE', 'RESUME')", name="ck_mx_onboarding_pause_action"),
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'WITHDRAWN')", name="ck_mx_onboarding_pause_status"),
+    )
+
+
 
 
 # ── Brazil (CLT - ZP-BR-ENG-001) Phase 1 Models ─────────────────────────────

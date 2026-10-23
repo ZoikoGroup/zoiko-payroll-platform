@@ -318,3 +318,28 @@ def approve_master_copy(copy_id: int, current_user=Depends(get_current_super_adm
 def cancel_master_copy(copy_id: int, body: Dict[str, Any] = Body(default={}),
                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
     return _pilot().cancel_copy(db, copy_id, str(body.get("reason") or ""), _actor(current_user))
+
+
+# ── Phase 10g: the "no new Mexican organisations" switch (Super Admin, four-eyes) ──
+
+@router.get("/onboarding-pause", summary="Whether new Mexican organisations are paused, with every change")
+def onboarding_pause_state(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _pilot().onboarding_pause_state(db)
+
+
+@router.post("/onboarding-pause", summary="Propose PAUSE or RESUME of new Mexican organisations")
+def propose_onboarding_change(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_super_admin),
+                              db: Session = Depends(get_db)):
+    return _pilot().propose_onboarding_change(db, body, _actor(current_user))
+
+
+@router.post("/onboarding-pause/{pause_id}/approve", summary="Approve a pause / resume (a different Super Admin)")
+def approve_onboarding_change(pause_id: int, current_user=Depends(get_current_super_admin),
+                              db: Session = Depends(get_db)):
+    return _pilot().approve_onboarding_change(db, pause_id, _actor(current_user))
+
+
+@router.post("/onboarding-pause/{pause_id}/withdraw", summary="Withdraw a proposed pause / resume")
+def withdraw_onboarding_change(pause_id: int, current_user=Depends(get_current_super_admin),
+                               db: Session = Depends(get_db)):
+    return _pilot().withdraw_onboarding_change(db, pause_id, _actor(current_user))
