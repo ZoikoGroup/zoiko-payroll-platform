@@ -646,7 +646,7 @@ POST,/api/payroll/saudi-arabia/final-settlements/{settlement_id}/approve,worker,
 POST,/api/payroll/saudi-arabia/final-settlements/{settlement_id}/pay,worker,approve,pay,org_admin|payroll_admin,tenant,,,payroll_sa_final_settlements,no,
 GET,/api/payroll/saudi-arabia/gosi-liabilities,tenant_config,read,gosi-liabilities,org_admin|payroll_admin,tenant,,,,no,
 POST,/api/payroll/saudi-arabia/gosi-liabilities/{liability_id}/paid,tenant_config,create,paid,org_admin|payroll_admin,tenant,,,,no,
-POST,/api/payroll/saudi-arabia/payslips/{payslip_id}/correction,worker,create,correction,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_ytd_accumulators|payslip_items,no,
+POST,/api/payroll/saudi-arabia/payslips/{payslip_id}/correction,worker,create,correction,org_admin|payroll_admin,tenant,,,payslip_items,no,
 POST,/api/payroll/saudi-arabia/payslips/{payslip_id}/correction-preview,worker,create,correction-preview,org_admin|payroll_admin,tenant,,,payslip_items,no,
 GET,/api/payroll/saudi-arabia/payslips/{payslip_id}/corrections,worker,read,corrections,org_admin|payroll_admin,tenant,,,payslip_items,no,
 GET,/api/payroll/saudi-arabia/readiness,worker,read,readiness,org_admin|payroll_admin,tenant,,,payroll_employee_statutory_profiles|payroll_employees,no,
@@ -1056,7 +1056,7 @@ POST,/api/super-admin/compliance/saudi-arabia/final-settlements/{settlement_id}/
 GET,/api/super-admin/compliance/saudi-arabia/gosi-liabilities,worker,read,gosi-liabilities,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),,yes,monthly GOSI liabilities are one tenant's wages; tenant route exists
 POST,/api/super-admin/compliance/saudi-arabia/gosi-liabilities/{liability_id}/paid,worker,create,paid,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),,yes,liability payment is a tenant action; tenant route exists
 GET,/api/super-admin/compliance/saudi-arabia/packs/{pack_row_id}/golden-check,platform,read,golden-check,super_admin,platform,,,,yes,verified synthetic: same golden-vector harness as HK; pass/fail counts only
-POST,/api/super-admin/compliance/saudi-arabia/payslips/{payslip_id}/correction,worker,create,correction,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),organization_ytd_accumulators|payroll_ytd_accumulators|payslip_items,yes,payslip correction moves to the tenant (decision 3)
+POST,/api/super-admin/compliance/saudi-arabia/payslips/{payslip_id}/correction,worker,create,correction,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),payslip_items,yes,payslip correction moves to the tenant (decision 3)
 GET,/api/super-admin/compliance/saudi-arabia/payslips/{payslip_id}/corrections,worker,read,corrections,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),payslip_items,yes,payslip corrections are tenant-run statutory data
 GET,/api/super-admin/compliance/saudi-arabia/readiness,platform,read,readiness,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/saudi-arabia/runs/{run_id}/eos-accrual,worker,create,eos-accrual,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),payroll_employees|payroll_sa_contract_versions|payroll_sa_eos_ledger_entries|payslip_items,yes,EOS accrual moves to the tenant (decision 3)

@@ -12438,8 +12438,6 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "organization_ytd_accumulators",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": false
@@ -19410,8 +19408,6 @@
    "retired_reason": "statutory action is tenant-run (ZP-PRIV decision 3)",
    "note": "payslip correction moves to the tenant (decision 3)",
    "scan_worker_tables": [
-    "organization_ytd_accumulators",
-    "payroll_ytd_accumulators",
     "payslip_items"
    ],
    "overridden": true
