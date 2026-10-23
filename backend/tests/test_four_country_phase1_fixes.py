@@ -204,3 +204,55 @@ def test_ch_fak_employee_pct_is_labelled_employee_share():
     from app.modules.payroll.engine.countries.switzerland_content import CH_CANTON_PARAMETER_LABELS
 
     assert "employee share" in CH_CANTON_PARAMETER_LABELS["ch_fak_employee_pct"]
+
+
+# ── Phase 2a: content moved out of code into the packs ───────────────────────
+
+def test_brazil_rat_fap_bounds_are_sourced_pack_rows():
+    from app.modules.payroll.engine.countries import brazil_content as c
+
+    rats, fap_min, fap_max = c.rat_fap_bounds(date(2026, 6, 1))
+    assert rats == (Decimal("1"), Decimal("2"), Decimal("3"))
+    assert (fap_min, fap_max) == (Decimal("0.5000"), Decimal("2.0000"))
+    # Dated like every Brazil row (2026 only): a later year fails closed until
+    # its content is added and signed.
+    with pytest.raises(c.BrazilContentMissing):
+        c.rat_fap_bounds(date(2027, 1, 1))
+    rows = [r for r in c.BR_CONTENT_ROWS if r.rule_type == c.BR_RAT_FAP_RULE]
+    assert {r.source for r in rows} == {"A2", "S11"}
+
+
+def test_brazil_rat_fap_rows_are_seeded(db):
+    from scripts.seed_brazil_canonical_packs import seed_brazil
+
+    seed_brazil(db)
+    keys = {s.filing_status for s in db.query(TaxSlab).filter_by(rule_type="BR_RAT_FAP").all()}
+    assert keys == {"RAT_LEVE", "RAT_MEDIO", "RAT_GRAVE", "FAP_MIN", "FAP_MAX"}
+
+
+def test_ch_max_coordinated_salary_is_derived_not_duplicated():
+    """Spec: max coordinated CHF 64,260 = upper salary 90,720 - coordination
+    deduction 26,460. It is derived from those two rows, never a third row
+    that could drift from them."""
+    from app.modules.payroll.engine.countries.switzerland_content import CH_FEDERAL_SEED_2026
+
+    seeded = {row[0]: Decimal(row[4]) for row in CH_FEDERAL_SEED_2026 if row[4] is not None}
+    assert seeded["ch_bvg_upper_salary"] - seeded["ch_bvg_coordination_deduction"] == Decimal("64260")
+    assert not any("max_coordinated" in key for key in seeded)
+
+
+def test_nl_aow_age_is_pack_content_and_missing_blocks():
+    from types import SimpleNamespace
+
+    from app.modules.payroll.engine.countries.netherlands_content import NL_PARAMETER_KEYS, NL_SCALAR_CONTENT
+    from app.modules.payroll.engine.jurisdictions.netherlands import wage_tax
+
+    assert "nl_aow_age_years" in NL_PARAMETER_KEYS
+    assert {r[0]: r[4] for r in NL_SCALAR_CONTENT}["nl_aow_age_years"] == "67"
+    assert not hasattr(wage_tax, "AOW_AGE_YEARS")
+    ctx = SimpleNamespace(pay_date=date(2026, 3, 15), payroll_period_code="MONTHLY", employee_date_of_birth=date(1958, 1, 1),
+                          nl_table_color="WHITE", nl_with_tax_credit=True, nl_residence_variant="NL")
+    with pytest.raises(wage_tax.NLBlock, match="nl_aow_age_years"):
+        wage_tax.select_table_key(ctx)
+    ctx.nl_aow_age_years = Decimal("67")
+    assert wage_tax.select_table_key(ctx).aow_cohort == wage_tax.AowCohort.AOW_AGE

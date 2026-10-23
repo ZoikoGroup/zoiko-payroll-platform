@@ -110,8 +110,10 @@ BR_FGTS_RATE_RULE = "BR_FGTS_RATE"
 BR_CPP_RATE_RULE = "BR_CPP_RATE"
 BR_VT_RATE_RULE = "BR_VT_RATE"
 BR_LABOR_RULE = "BR_LABOR"
+BR_RAT_FAP_RULE = "BR_RAT_FAP"
 BR_SLAB_RULES = (BR_INSS_BAND_RULE, BR_IRRF_TABLE_RULE, BR_IRRF_REDUCTION_RULE, BR_MIN_WAGE_RULE,
-                 BR_SAL_FAMILIA_RULE, BR_FGTS_RATE_RULE, BR_CPP_RATE_RULE, BR_VT_RATE_RULE, BR_LABOR_RULE)
+                 BR_SAL_FAMILIA_RULE, BR_FGTS_RATE_RULE, BR_CPP_RATE_RULE, BR_VT_RATE_RULE, BR_LABOR_RULE,
+                 BR_RAT_FAP_RULE)
 
 
 class ContentRow(NamedTuple):
@@ -189,6 +191,13 @@ BR_CONTENT_ROWS: Tuple[ContentRow, ...] = (
     _row(BR_LABOR_RULE, "NIGHT_PREMIUM", "Adicional noturno 20% (CLT art. 73)", "A6", rate="20"),
     _row(BR_LABOR_RULE, "NIGHT_HOUR_MINUTES", "Hora noturna legal 52m30s (CLT art. 73)", "A6", flat="52.5"),
     _row(BR_LABOR_RULE, "DSR", "DSR sobre variáveis (Lei 605/1949 art. 7)", "A7", flat="1"),
+    # ── 10. RAT grades (A2, Lei 8.212 art. 22 II a-c) and the FAP range (S11,
+    # eSocial S-1.3 S-1020 field fap: >= 0,5000 and <= 2,0000) ────────────────
+    _row(BR_RAT_FAP_RULE, "RAT_LEVE", "RAT 1% — risco leve (Lei 8.212 art. 22 II a)", "A2", rate="1"),
+    _row(BR_RAT_FAP_RULE, "RAT_MEDIO", "RAT 2% — risco médio (Lei 8.212 art. 22 II b)", "A2", rate="2"),
+    _row(BR_RAT_FAP_RULE, "RAT_GRAVE", "RAT 3% — risco grave (Lei 8.212 art. 22 II c)", "A2", rate="3"),
+    _row(BR_RAT_FAP_RULE, "FAP_MIN", "FAP mínimo 0,5000 (eSocial S-1.3, S-1020 fap)", "S11", flat="0.5000"),
+    _row(BR_RAT_FAP_RULE, "FAP_MAX", "FAP máximo 2,0000 (eSocial S-1.3, S-1020 fap)", "S11", flat="2.0000"),
 )
 
 
@@ -382,6 +391,15 @@ def labor_rates(as_of: date) -> Tuple[Decimal, Decimal, Decimal, Decimal, bool]:
     night_min = row_in_force(BR_LABOR_RULE, "NIGHT_HOUR_MINUTES", as_of).flat_amount
     dsr = bool(row_in_force(BR_LABOR_RULE, "DSR", as_of).flat_amount)
     return (ot_50, ot_100, night, night_min, dsr)
+
+
+def rat_fap_bounds(as_of: date) -> Tuple[Tuple[Decimal, ...], Decimal, Decimal]:
+    """(valid RAT percents, FAP minimum, FAP maximum) in force on `as_of` —
+    RAT as PERCENTS (1, 2, 3), the FAP as the multiplier itself."""
+    rats = tuple(sorted(row_in_force(BR_RAT_FAP_RULE, key, as_of).rate_pct
+                        for key in ("RAT_LEVE", "RAT_MEDIO", "RAT_GRAVE")))
+    return (rats, row_in_force(BR_RAT_FAP_RULE, "FAP_MIN", as_of).flat_amount,
+            row_in_force(BR_RAT_FAP_RULE, "FAP_MAX", as_of).flat_amount)
 
 
 # ── 6. Mandatory System Rubric Matrix (eSocial Table 03 - Rule BR-005) ────────

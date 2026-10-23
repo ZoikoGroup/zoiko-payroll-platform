@@ -75,8 +75,8 @@ _EMAIL = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _UFS = ("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI",
         "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO")
 _ENVIRONMENTS = ("RESTRICTED_PRODUCTION", "PRODUCTION")
-_RAT_VALUES = (Decimal("1"), Decimal("2"), Decimal("3"))
-_FAP_MIN, _FAP_MAX = Decimal("0.5000"), Decimal("2.0000")
+# The valid RAT grades and FAP range are statutory content (BR_RAT_FAP rows,
+# brazil_content.rat_fap_bounds), not constants here.
 _KINDS = ("ESOCIAL_A1", "BANK")
 _CERTIFICATE_KINDS = ("ESOCIAL_A1",)
 MAX_CERTIFICATE_BYTES = 16 * 1024
@@ -400,12 +400,19 @@ def create_risk_assignment(db: Session, org_id: int, establishment_id: int, data
 
     est = _owned(db, E, establishment_id, org_id, "establishment")
     year = _year(data.get("calendar_year"))
+    from app.modules.payroll.engine.countries import brazil_content
+
+    try:
+        rat_values, fap_min, fap_max = brazil_content.rat_fap_bounds(date(year, 1, 1))
+    except brazil_content.BrazilContentMissing as exc:
+        raise BadRequestException(f"No Brazil RAT / FAP content for {year}: {exc}")
     rat = _dec(data.get("rat_pct"), "ratPct")
-    if rat not in _RAT_VALUES:
-        raise BadRequestException("ratPct must be 1, 2 or 3 (percent)")
+    if rat not in rat_values:
+        allowed = [f"{v.normalize():f}" for v in rat_values]
+        raise BadRequestException(f"ratPct must be {', '.join(allowed[:-1])} or {allowed[-1]} (percent)")
     fap = _dec(data.get("fap_factor"), "fapFactor")
-    if not _FAP_MIN <= fap <= _FAP_MAX or fap != fap.quantize(Decimal("0.0001")):
-        raise BadRequestException("fapFactor must be between 0.5000 and 2.0000 (at most 4 decimals)")
+    if not fap_min <= fap <= fap_max or fap != fap.quantize(Decimal("0.0001")):
+        raise BadRequestException(f"fapFactor must be between {fap_min:.4f} and {fap_max:.4f} (at most 4 decimals)")
     row = R(organization_id=org_id, establishment_id=est.id, calendar_year=year, rat_pct=rat, fap_factor=fap,
             evidence_ref=_required(data, "evidence_ref", "evidenceRef")[:300], status="DRAFT", created_by_id=actor_id)
     db.add(row)

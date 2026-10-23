@@ -67,10 +67,9 @@ class AowCohort(str, Enum):
     AOW_AGE = "AOW_AGE"
 
 
-# Statutory AOW (state pension) age by calendar year. 2026 = 67 years
-# (Belastingdienst / SVB). Any other year is absent on purpose: the cohort
-# selection BLOCKS rather than guessing — add the year with its source at G1.
-AOW_AGE_YEARS = {2026: 67}
+# The statutory AOW (state pension) age is pack content (nl_aow_age_years,
+# ContributionRate, source S1), mirrored onto ctx by the engine — never a
+# constant here. A pack without it BLOCKS the cohort selection.
 
 
 @dataclass(frozen=True)
@@ -141,10 +140,11 @@ def is_table_loaded(table_key: NlTableKey) -> bool:
     return _cache_key(table_key) in _TABLE_CACHE
 
 
-def _aow_cohort_from_dob(dob: date, pay_date: date) -> AowCohort:
-    aow_age = AOW_AGE_YEARS.get(pay_date.year)
+def _aow_cohort_from_dob(dob: date, pay_date: date, aow_age) -> AowCohort:
     if aow_age is None:
-        raise NLBlock(f"statutory AOW age for {pay_date.year} is not recorded — cannot select the table cohort")
+        raise NLBlock(f"statutory AOW age (nl_aow_age_years) for {pay_date.year} is not in the Active NL pack "
+                      "— cannot select the table cohort")
+    aow_age = int(aow_age)
     age = pay_date.year - dob.year - ((pay_date.month, pay_date.day) < (dob.month, dob.day))
     return AowCohort.AOW_AGE if age >= aow_age else AowCohort.BELOW_AOW
 
@@ -172,7 +172,7 @@ def select_table_key(ctx: Any, *, special_remuneration: bool = False) -> NlTable
         table_kind=TableKind.SPECIAL_REMUNERATION if special_remuneration else TableKind.PERIOD,
         period=None if special_remuneration else PeriodCode(str(period_code).upper()),
         residence_variant=getattr(ctx, "nl_residence_variant", None) or "NL",
-        aow_cohort=_aow_cohort_from_dob(dob, ctx.pay_date),
+        aow_cohort=_aow_cohort_from_dob(dob, ctx.pay_date, getattr(ctx, "nl_aow_age_years", None)),
         with_tax_credit=bool(getattr(ctx, "nl_with_tax_credit", False)),
     )
 

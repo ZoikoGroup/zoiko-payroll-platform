@@ -37,7 +37,10 @@ export function brazilExtraTabs(orgId) {
     tab("br-cpp", "CPP", Layers, "br-fgts", () => (
       <BRStatutorySectionTab ruleType="BR_CPP_RATE" title="CPP — employer social contribution (patronal)" />
     )),
-    tab("br-vt", "Vale-transporte", Banknote, "br-cpp", () => (
+    tab("br-rat-fap", "RAT / FAP", ShieldCheck, "br-cpp", () => (
+      <BRStatutorySectionTab ruleType="BR_RAT_FAP" title="RAT grades and the FAP range (accident-risk contribution)" />
+    )),
+    tab("br-vt", "Vale-transporte", Banknote, "br-rat-fap", () => (
       <BRStatutorySectionTab ruleType="BR_VT_RATE" title="Vale-transporte — maximum employee deduction" />
     )),
     tab("br-labor", "Labour premiums", Calculator, "br-vt", () => (

@@ -121,7 +121,7 @@ def list_br_employees(org_id: int = Query(...), current_user=Depends(get_current
 
 _ALLOWED_BR_RULE_TYPES = {
     "BR_INSS_BAND", "BR_IRRF_TABLE", "BR_IRRF_REDUCTION", "BR_MIN_WAGE",
-    "BR_SAL_FAMILIA", "BR_FGTS_RATE", "BR_CPP_RATE", "BR_VT_RATE", "BR_LABOR",
+    "BR_SAL_FAMILIA", "BR_FGTS_RATE", "BR_CPP_RATE", "BR_VT_RATE", "BR_LABOR", "BR_RAT_FAP",
 }
 
 
