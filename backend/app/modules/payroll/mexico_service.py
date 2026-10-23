@@ -769,13 +769,20 @@ def create_classification(db: Session, data: dict, actor_id: Optional[int]) -> d
     return classification_view(row)
 
 
-def _catalog_has_code(db: Session, code: str) -> bool:
-    from app.modules.payroll.models import PayrollMxCfdiCatalogEntry, PayrollMxCfdiSchemaRelease
+# The SAT catalog holding the concept codes of each CFDI node type (S28). A
+# separation payment is a perception (Nómina 1.2 SeparacionIndemnizacion).
+_NODE_CODE_CATALOG = {"PERCEPCION": "c_TipoPercepcion", "SEPARACION": "c_TipoPercepcion",
+                      "DEDUCCION": "c_TipoDeduccion", "OTRO_PAGO": "c_TipoOtroPago"}
 
-    return db.query(PayrollMxCfdiCatalogEntry.id).join(
-        PayrollMxCfdiSchemaRelease, PayrollMxCfdiCatalogEntry.schema_release_id == PayrollMxCfdiSchemaRelease.id
-    ).filter(PayrollMxCfdiSchemaRelease.status.in_(("Approved", "Active")),
-             PayrollMxCfdiCatalogEntry.code == code).first() is not None
+
+def _catalog_has_code(db: Session, node_type: str, code: str) -> bool:
+    """Phase 11a: the code must be in the catalog of the row's OWN node type —
+    before, any catalog of any approved release matched (a deduction could pass
+    with a perception code)."""
+    from app.modules.payroll import mexico_cfdi_catalog_service
+
+    catalog = _NODE_CODE_CATALOG.get(node_type)
+    return bool(catalog) and mexico_cfdi_catalog_service.catalog_has_code(db, catalog, code)
 
 
 def approve_classification(db: Session, classification_id: int, actor_id: Optional[int]) -> dict:
@@ -797,7 +804,8 @@ def approve_classification(db: Session, classification_id: int, actor_id: Option
     if row.created_by_id == actor_id:
         _refuse(db, et, row.id, "approve", actor_id,
                 "You created this classification — a different Super Admin must approve it (maker-checker).")
-    if row.organization_id is None and not (row.cfdi_concept_code and _catalog_has_code(db, row.cfdi_concept_code)):
+    if row.organization_id is None and not (row.cfdi_concept_code
+                                            and _catalog_has_code(db, row.cfdi_node_type, row.cfdi_concept_code)):
         _refuse(db, et, row.id, "approve", actor_id,
                 "A canonical classification needs its SAT concept code in an approved CFDI catalog release — the "
                 "SAT Nómina 1.2 catalog (S28) is not VERIFIED yet, so no canonical row can go live.")

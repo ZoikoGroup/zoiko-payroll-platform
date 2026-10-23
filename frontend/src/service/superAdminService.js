@@ -208,7 +208,18 @@ export const archiveMxEarningClassification = (id, reason) =>
   apiFetch(`${MX_SA}/earning-classifications/${id}/archive`, { method: "POST", body: { reason } });
 export const listMxCfdiReleases = () => apiFetch(`${MX_SA}/cfdi-catalogs`);
 export const createMxCfdiRelease = (payload) => apiFetch(`${MX_SA}/cfdi-catalogs`, { method: "POST", body: payload });
-export const listMxCfdiEntries = (releaseId) => apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`);
+// Phase 11a: entries are filtered and capped ({ total, limit, counts, entries }).
+export const listMxCfdiEntries = (releaseId, params = {}) =>
+  apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`, { params });
+export const listMxPinnedSets = () => apiFetch(`${MX_SA}/cfdi-catalogs/pinned-sets`);
+export const loadMxPinnedSet = (releaseId, setId) =>
+  apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/load-pinned`, { method: "POST", body: { setId } });
+export const listMxSystemConcepts = (releaseId) =>
+  apiFetch(`${MX_SA}/cfdi-system-concepts`, { params: releaseId ? { releaseId } : {} });
+export const proposeMxSystemConcept = (payload) =>
+  apiFetch(`${MX_SA}/cfdi-system-concepts`, { method: "POST", body: payload });
+export const approveMxSystemConcept = (id) => apiFetch(`${MX_SA}/cfdi-system-concepts/${id}/approve`, { method: "POST" });
+export const withdrawMxSystemConcept = (id) => apiFetch(`${MX_SA}/cfdi-system-concepts/${id}/withdraw`, { method: "POST" });
 export const addMxCfdiEntry = (releaseId, payload) =>
   apiFetch(`${MX_SA}/cfdi-catalogs/${releaseId}/entries`, { method: "POST", body: payload });
 export const transitionMxCfdiRelease = (releaseId, action) =>

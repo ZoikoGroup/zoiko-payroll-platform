@@ -17727,6 +17727,22 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/pinned-sets",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "pinned-sets",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/{release_id}/entries",
    "data_class": "platform",
    "action": "read",
@@ -17758,11 +17774,91 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/{release_id}/load-pinned",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "load-pinned",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "PUT",
    "path": "/api/super-admin/compliance/mexico/cfdi-catalogs/{release_id}/{action}",
    "data_class": "platform",
    "action": "update",
    "resource": "cfdi-catalogs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/cfdi-system-concepts",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "cfdi-system-concepts",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/cfdi-system-concepts",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "cfdi-system-concepts",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/cfdi-system-concepts/{concept_id}/approve",
+   "data_class": "platform",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/cfdi-system-concepts/{concept_id}/withdraw",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "withdraw",
    "principals": [
     "super_admin"
    ],

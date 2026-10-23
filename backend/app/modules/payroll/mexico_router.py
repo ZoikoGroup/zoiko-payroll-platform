@@ -27,7 +27,8 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_super_admin
 from app.database import get_db
 from app.modules.payroll.mexico_schemas import (
-    MXCatalogEntryCreate, MXClassificationArchive, MXClassificationCreate, MXReadinessResponse, MXReleaseCreate,
+    MXCatalogEntryCreate, MXClassificationArchive, MXClassificationCreate, MXPinnedSetLoad, MXReadinessResponse,
+    MXReleaseCreate, MXSystemConceptCreate,
 )
 
 router = APIRouter(prefix="/super-admin/compliance/mexico", tags=["Mexico (Super Admin)"])
@@ -163,9 +164,28 @@ def create_release(body: MXReleaseCreate, current_user=Depends(get_current_super
     return _mx().create_release(db, body.to_service(), _actor(current_user))
 
 
-@router.get("/cfdi-catalogs/{release_id}/entries", summary="Catalog entries of one release")
-def list_entries(release_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    return _mx().list_catalog_entries(db, release_id)
+def _cfdi_catalogs():
+    from app.modules.payroll import mexico_cfdi_catalog_service
+
+    return mexico_cfdi_catalog_service
+
+
+@router.get("/cfdi-catalogs/pinned-sets", summary="Pinned SAT schema sets (Phase 11a) and their verification")
+def list_pinned_sets(current_user=Depends(get_current_super_admin)):
+    return _cfdi_catalogs().pinned_sets()
+
+
+@router.get("/cfdi-catalogs/{release_id}/entries", summary="Catalog entries of one release (filtered, capped)")
+def list_entries(release_id: int, catalog: Optional[str] = Query(None), q: Optional[str] = Query(None),
+                 limit: int = Query(200, ge=1, le=1000), current_user=Depends(get_current_super_admin),
+                 db: Session = Depends(get_db)):
+    return _cfdi_catalogs().list_entries(db, release_id, catalog=catalog, q=q, limit=limit)
+
+
+@router.post("/cfdi-catalogs/{release_id}/load-pinned", summary="Load a pinned SAT set into an empty Draft release")
+def load_pinned_set(release_id: int, body: MXPinnedSetLoad, current_user=Depends(get_current_super_admin),
+                    db: Session = Depends(get_db)):
+    return _cfdi_catalogs().load_pinned_set(db, release_id, body.setId, _actor(current_user))
 
 
 @router.post("/cfdi-catalogs/{release_id}/entries", summary="Add a catalog entry to a Draft release")
@@ -179,6 +199,32 @@ def add_entry(release_id: int, body: MXCatalogEntryCreate, current_user=Depends(
 def transition_release(release_id: int, action: str, current_user=Depends(get_current_super_admin),
                        db: Session = Depends(get_db)):
     return _mx().transition_release(db, release_id, action, _actor(current_user))
+
+
+# ── Phase 11a — SAT codes for engine-produced amounts (maker-checker, D4) ──────
+
+@router.get("/cfdi-system-concepts", summary="System-concept SAT code mappings (per schema release)")
+def list_system_concepts(release_id: Optional[int] = Query(None, alias="releaseId"),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _cfdi_catalogs().list_system_concepts(db, release_id)
+
+
+@router.post("/cfdi-system-concepts", summary="Propose the SAT code of an engine-produced amount")
+def propose_system_concept(body: MXSystemConceptCreate, current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    return _cfdi_catalogs().propose_system_concept(db, body.to_service(), _actor(current_user))
+
+
+@router.post("/cfdi-system-concepts/{concept_id}/approve", summary="Approve a proposed mapping (a different Super Admin)")
+def approve_system_concept(concept_id: int, current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    return _cfdi_catalogs().approve_system_concept(db, concept_id, _actor(current_user))
+
+
+@router.post("/cfdi-system-concepts/{concept_id}/withdraw", summary="Withdraw a proposed mapping")
+def withdraw_system_concept(concept_id: int, current_user=Depends(get_current_super_admin),
+                            db: Session = Depends(get_db)):
+    return _cfdi_catalogs().withdraw_system_concept(db, concept_id, _actor(current_user))
 
 
 # ── Phase 3 — employers, read-only (tenant facts are authored by the org; Q5) ──
