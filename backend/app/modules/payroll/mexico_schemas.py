@@ -48,6 +48,7 @@ class MXReadinessResponse(BaseModel):
     pilotPreconditions: List[dict] = []
     gaPreconditions: List[dict] = []
     onboardingEnabled: bool = False
+    onboardingPaused: bool = False          # Phase 10g: no NEW Mexican organisations
     engineVersion: str
     phase: int
     gates: List[MXGateState]

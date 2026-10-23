@@ -182,6 +182,11 @@ export const withdrawMxPilotGrant = (id, reason) =>
 export const revokeMxPilotGrant = (id, reason) =>
   apiFetch(`${MX_SA}/pilot-grants/${id}/revoke`, { method: "POST", body: { reason } });
 export const listMxMasterCopies = () => apiFetch(`${MX_SA}/master-copies`);
+// Phase 10g: the "no new Mexican organisations" switch (four-eyes).
+export const getMxOnboardingPause = () => apiFetch(`${MX_SA}/onboarding-pause`);
+export const proposeMxOnboardingChange = (payload) => apiFetch(`${MX_SA}/onboarding-pause`, { method: "POST", body: payload });
+export const approveMxOnboardingChange = (id) => apiFetch(`${MX_SA}/onboarding-pause/${id}/approve`, { method: "POST", body: {} });
+export const withdrawMxOnboardingChange = (id) => apiFetch(`${MX_SA}/onboarding-pause/${id}/withdraw`, { method: "POST", body: {} });
 export const listMxOrganizations = () => apiFetch(`${MX_SA}/organizations`);
 export const listMxEmployees = (orgId) => apiFetch(`${MX_SA}/employees`, { params: { org_id: orgId } });
 export const listMxPacks = () => apiFetch(`${MX_SA}/packs`);

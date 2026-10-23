@@ -85,6 +85,12 @@ def _gate_checks(db: Session, gates) -> list:
                    f"gate {g} is {states[g]['state']}") for g in gates]
 
 
+def _pause_check(db: Session) -> dict:
+    paused = mexico_dormancy.onboarding_paused(db)
+    return _pilot_check("mx_onboarding_not_paused", "New Mexican organisations not paused (runbook §6)", not paused,
+                        "paused" if paused else "not paused")
+
+
 def _key_check() -> dict:
     return _pilot_check("mx_identity_key", "MX_IDENTITY_TOKEN_KEY configured", _identity_key_configured(),
                   "configured" if _identity_key_configured() else "not configured (Secret Manager)")
@@ -92,14 +98,16 @@ def _key_check() -> dict:
 
 def ga_preconditions(db: Session) -> list:
     """General availability: every gate, Q9, the identity key."""
-    return (_gate_checks(db, [f"G{i}" for i in range(1, 9)]) + _decision_checks(db, ["MX-D-Q9"]) + [_key_check()])
+    return (_gate_checks(db, [f"G{i}" for i in range(1, 9)]) + _decision_checks(db, ["MX-D-Q9"]) + [_key_check()]
+            + [_pause_check(db)])                                                    # Phase 10g
 
 
 def pilot_preconditions(db: Session) -> list:
     """A pilot grant (D2): the kill switch, G1 G2 G4 G5 G7, Q9, hosting, the key."""
     return ([_pilot_check("mx_flag", "MX_TENANT_ONBOARDING_ENABLED (kill switch) on", mexico_dormancy.flag_enabled(),
                     "on" if mexico_dormancy.flag_enabled() else "off")]
-            + _gate_checks(db, PILOT_GATES) + _decision_checks(db, ["MX-D-Q9", "MX-D-HOSTING"]) + [_key_check()])
+            + _gate_checks(db, PILOT_GATES) + _decision_checks(db, ["MX-D-Q9", "MX-D-HOSTING"]) + [_key_check()]
+            + [_pause_check(db)])                                                    # Phase 10g: a pilot is a new org
 
 
 # ── pilot grants ────────────────────────────────────────────────────────────
@@ -258,6 +266,77 @@ def refuse_non_sandbox_pac(db: Session, org_id: int, environment: Optional[str])
 
 def run_is_pilot(run) -> bool:
     return bool((getattr(run, "mx_approval_fingerprint", None) or {}).get("pilot"))
+
+
+# ── Phase 10g: the "no new Mexican organisations" switch (four-eyes) ───────────
+
+def _onboarding_pause_row(db: Session, pause_id: int):
+    row = db.get(_pilot_models().PayrollMxOnboardingPause, pause_id)
+    if row is None:
+        raise NotFoundException(f"Onboarding pause change {pause_id} not found")
+    return row
+
+
+def propose_onboarding_change(db: Session, data: dict, actor_id: Optional[int]) -> dict:
+    """PAUSE or RESUME new Mexican organisations; a different Super Admin approves."""
+    P = _pilot_models().PayrollMxOnboardingPause
+    action = str((data or {}).get("action") or "").upper()
+    if action not in ("PAUSE", "RESUME"):
+        raise BadRequestException("action must be PAUSE or RESUME")
+    reason = ((data or {}).get("reason") or "").strip()
+    if not reason:
+        raise BadRequestException("Pausing or resuming new Mexican organisations needs a reason")
+    paused = mexico_dormancy.onboarding_paused(db)
+    if (action == "PAUSE") == paused:
+        raise BadRequestException(f"new Mexican organisations are already {'paused' if paused else 'not paused'}")
+    if db.query(P).filter(P.status == "PROPOSED").first() is not None:
+        raise BadRequestException("a pause / resume change is already proposed — approve or withdraw it first")
+    row = P(action=action, status="PROPOSED", reason=reason[:300], proposed_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    _pilot_audit(db, actor_id=actor_id, action="propose_mx_onboarding_change", entity_type="mx_onboarding_pause",
+                 entity_id=row.id, new={"action": action}, reason=reason[:300])
+    db.commit()
+    return onboarding_pause_view(row)
+
+
+def approve_onboarding_change(db: Session, pause_id: int, actor_id: Optional[int]) -> dict:
+    row = _onboarding_pause_row(db, pause_id)
+    if row.status != "PROPOSED":
+        raise BadRequestException(f"Only a PROPOSED change can be approved (this one is {row.status})")
+    if actor_id is not None and actor_id == row.proposed_by_id:
+        raise MXBlock("MX_FOUR_EYES_REQUIRED", "pausing or resuming new Mexican organisations needs a Super Admin "
+                                               "other than its proposer")
+    if (row.action == "PAUSE") == mexico_dormancy.onboarding_paused(db):
+        raise BadRequestException("the switch is already in that state — withdraw this change")
+    row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, _pilot_now()
+    _pilot_audit(db, actor_id=actor_id, action="approve_mx_onboarding_change", entity_type="mx_onboarding_pause",
+                 entity_id=row.id, new={"action": row.action, "paused": row.action == "PAUSE"})
+    db.commit()
+    return onboarding_pause_view(row)
+
+
+def withdraw_onboarding_change(db: Session, pause_id: int, actor_id: Optional[int]) -> dict:
+    row = _onboarding_pause_row(db, pause_id)
+    if row.status != "PROPOSED":
+        raise BadRequestException(f"Only a PROPOSED change can be withdrawn (this one is {row.status})")
+    row.status = "WITHDRAWN"
+    _pilot_audit(db, actor_id=actor_id, action="withdraw_mx_onboarding_change", entity_type="mx_onboarding_pause",
+                 entity_id=row.id, new={"action": row.action})
+    db.commit()
+    return onboarding_pause_view(row)
+
+
+def onboarding_pause_view(row) -> dict:
+    return {"id": row.id, "action": row.action, "status": row.status, "reason": row.reason,
+            "proposedById": row.proposed_by_id, "approvedById": row.approved_by_id,
+            "approvedAt": row.approved_at.isoformat() if row.approved_at else None}
+
+
+def onboarding_pause_state(db: Session) -> dict:
+    P = _pilot_models().PayrollMxOnboardingPause
+    return {"paused": mexico_dormancy.onboarding_paused(db),
+            "changes": [onboarding_pause_view(r) for r in db.query(P).order_by(P.id.desc())]}
 
 
 # ── master-data copy (D5) ───────────────────────────────────────────────────
