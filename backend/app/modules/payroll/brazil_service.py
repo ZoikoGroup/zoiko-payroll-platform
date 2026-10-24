@@ -11,7 +11,7 @@ approval fingerprint, payment_treatment, payslip_hold_view.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -102,6 +102,11 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
 # ---- Calculation and run hooks (Phase 6) ----
 
 _MONTHLY_KEYS = ("basic", "hra", "special", "allowances", "overtime", "additional")
+
+
+def _weekdays(start: date, end: date) -> int:
+    """Mon-Fri days from start to end inclusive (the VT working days)."""
+    return sum(1 for n in range((end - start).days + 1) if (start + timedelta(days=n)).weekday() < 5)
 
 
 def _br_earnings(monthly: Optional[dict], org_id) -> tuple:
@@ -216,12 +221,20 @@ def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmploye
     financial_sector = str(employer.cnae_preponderant).startswith("64") or \
                        str(est.cnae).startswith("64")
 
-    # 10. VT benefit daily cost (for 6% cap calculation)
+    # 10. VT benefit for the MONTH (BR-E3): the election's daily cost x the
+    # working days of the pay period (Mon-Fri, minus recorded unpaid leave).
+    # The engine caps the employee share at 6% of the contract salary; it was
+    # handed the DAILY cost, so the deduction was capped at one day's cost.
     vt_benefit = None
     if vt and vt.elected and vt.daily_cost is not None:
-        # In a real run, days worked would come from attendance; here we pass daily_cost
-        # The engine will multiply by days_worked from context
-        vt_benefit = Decimal(str(vt.daily_cost))
+        if run is not None and run.period_start and run.period_end:
+            period_start, period_end = run.period_start, run.period_end
+        else:
+            period_start = competence_month
+            period_end = (competence_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        unpaid = int(Decimal(str((monthly or {}).get("unpaid_leave_days") or 0)))
+        days = max(_weekdays(period_start, period_end) - unpaid, 0)
+        vt_benefit = (Decimal(str(vt.daily_cost)) * days).quantize(Decimal("0.01"))
 
     # 11. Labor rates for the competence month
     ot_50, ot_100, night_pct, night_min, dsr_flag = labor_rates(competence_month)
@@ -236,6 +249,7 @@ def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmploye
         "cprb_opted": False,  # TODO: CPRB opt-in from employer profile
         "financial_sector": financial_sector,
         "dependents": profile.br_irrf_dependents_count or 0,
+        "salario_familia_dependents": profile.br_salario_familia_dependents_count or 0,
         "alimony": _resolve_alimony_amount(alimony, contract_salary) if alimony else Decimal("0"),
         "vt_benefit": vt_benefit,
         "opt_out_simplified_irrf": bool(profile.br_simplified_irrf_opt_out),

@@ -552,7 +552,8 @@ class TestBrazilEngineIntegration:
     def test_F5_salario_familia_adds_to_net(self):
         """F5: Salário-Família (R$67.54) is added to net pay, not deducted."""
         ctx = make_ctx("1621.00", basic="1621.00", brazil_inputs=self._inputs(
-            contract_salary="1621.00", dependents=1,
+            # BR-E2: salário-família has its own dependant count (not the IRRF one).
+            contract_salary="1621.00", dependents=0, salario_familia_dependents=1,
             earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "1621.00"}],
         ))
         result = StandardStrategy().calculate(ctx)
@@ -612,3 +613,32 @@ class TestBrazilEngineIntegration:
         assert result.br_fgts_deposit == D("0")
         assert result.br_cpp_employer == D("0")
         assert result.br_alimony_deduction == D("0")
+
+
+def test_salario_familia_never_borrows_the_irrf_dependants():
+    """BR-E2: IRRF dependants alone give no salário-família quota."""
+    ctx = make_ctx("1621.00", basic="1621.00", brazil_inputs=TestBrazilEngineIntegration._inputs(
+        contract_salary="1621.00", dependents=2,
+        earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "1621.00"}]))
+    assert StandardStrategy().calculate(ctx).br_salario_familia == D("0")
+
+
+@pytest.mark.parametrize("rubric", ["BR_13_FINAL", "BR_13_ADIANT", "BR_FERIAS_GOZO", "BR_FERIAS_TERCO"])
+def test_13th_and_vacation_rubrics_block_instead_of_escaping_tax(rubric):
+    """BR-E4: incidence 12 / 13 used to be dropped from every base silently."""
+    from app.modules.payroll.engine.countries.brazil import BrazilCalculationBlockedError
+
+    ctx = make_ctx("6000.00", basic="5000.00", brazil_inputs=TestBrazilEngineIntegration._inputs(
+        earnings=[{"rubricCode": "BR_SALARIO_BASE", "amount": "5000.00"}, {"rubricCode": rubric, "amount": "1000.00"}]))
+    with pytest.raises(BrazilCalculationBlockedError) as exc:
+        StandardStrategy().calculate(ctx)
+    assert exc.value.key == "BR_ENGINE_INCIDENCE_UNSUPPORTED" and rubric in str(exc.value)
+
+
+def test_exempt_rubric_is_still_accepted():
+    """BR-E4: an explicitly exempt incidence (00) stays out of the bases without blocking."""
+    from app.modules.payroll.engine.jurisdictions.brazil.bases import resolve_bases
+    from app.modules.payroll.engine.countries.brazil_content import STANDARD_SYSTEM_RUBRICS
+
+    out = resolve_bases([{"rubricCode": "BR_SAL_FAMILIA", "amount": "67.54"}], STANDARD_SYSTEM_RUBRICS)
+    assert out["unsupported"] == [] and out["base_cp"] == D("0.00")

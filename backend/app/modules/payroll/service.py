@@ -20164,7 +20164,8 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     as_of=period_end or date.today(),
                                     monthly={"basic": basic, "hra": hra, "special": special,
                                              "allowances": allowance_total, "overtime": overtime,
-                                             "additional": additional_compensation})
+                                             "additional": additional_compensation,
+                                             "unpaid_leave_days": unpaid_leave_days})
             if emp_country == "BR" else None
         )
         # Switzerland (CH spec): every resolver check, read-only; a blocked
@@ -25320,7 +25321,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("BR", "calc_inputs", db, run, employee, resolved_pack,
                                 monthly={"basic": basic, "hra": hra, "special": special,
                                          "allowances": allowance_total, "overtime": overtime,
-                                         "additional": additional_compensation})
+                                         "additional": additional_compensation,
+                                         "unpaid_leave_days": unpaid_leave_days})
         if country == "BR" else None
     )
     # Switzerland (CH spec): resolver + QST tariff lookup; a blocked worker
@@ -32989,6 +32991,9 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # cost kept apart, NL-035). Gated to NL — never Canada's NL province.
         "nlCalculationSnapshot": item.nl_calculation_snapshot if (item.country_code or country) == "NL" else None,
         "mxCalculationSnapshot": item.mx_calculation_snapshot if (item.country_code or country) == "MX" else None,
+        # Brazil (ZP-BR-ENG-001, BR-E5): the frozen br_result (flat br_* amounts +
+        # trace) the payslip breakdown panel renders. Gated to BR.
+        "brCalculationSnapshot": item.br_calculation_snapshot if (item.country_code or country) == "BR" else None,
     }
 
 

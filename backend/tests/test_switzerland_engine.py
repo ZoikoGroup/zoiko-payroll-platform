@@ -1104,3 +1104,14 @@ def test_bvg_coordinated_salary_is_bvg_art_8(annual, coordinated):
                      "ch_bvg_upper_salary": _amount_row("90720"),
                      "ch_bvg_min_coordinated": _amount_row("3780")}, None)
     assert sw._calculate_coordinated_salary(Decimal(annual), pack) == Decimal(coordinated)
+
+
+def test_ahv_iv_eo_ytd_withheld_accumulates():
+    """CH-E2: the AHV / IV / EO accumulators' withheld total grows by the
+    employee + employer contribution of the period (it stayed 0 before: the
+    lookup built "ch_ahv_ee", which never exists)."""
+    out = calculate(_bvg_ctx(annual_salary="100000", bands=_STD_BANDS, scheme_id=5))
+    after = out["ch_calculation_trace"]["accumulators_after"]
+    # IV / EO carry no accumulator of their own (CH_YTD_COMPONENTS); AHV does.
+    assert CH_AHV in CH_YTD_COMPONENTS and CH_IV not in CH_YTD_COMPONENTS
+    assert Decimal(after[CH_AHV]["withheld"]) == out["ch_ahv_employee"] + out["ch_ahv_employer"] > 0
