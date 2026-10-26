@@ -405,3 +405,38 @@ Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch 
 | 4 | 1,621 passed, 3 skipped |
 
 **Total: 7,505 passed, 120 skipped, 2 xfailed.** No other jurisdiction's behaviour changed.
+
+---
+
+## W4-1 — Phase 12a: snapshot-bound report templates (gap register A1–A5)
+
+**ZP-PRIV:** not required. No authz, redaction, RLS or migration change. No report gains an identifier: the Mexico field picker offers no RFC, CURP, NSS or bank column, and the snapshot paths hold only figures.
+
+**Shared code (additive), `payroll/service.py`**
+- **E1** `_PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"]`: every `mx_calculation_snapshot.result.*` path the templates use (taxes, subsidy, IMSS / INFONAVIT / ISN totals, SBC parts, special-pay detail, annual adjustment), plus the keyed paths.
+- **E2** keyed list selector. A path segment `name[key=value,…]` selects the matching list items and sums them when several match; no match gives None, and text is never summed (`_report_json_walk` / `_report_json_path_value`). **Only a path containing `[` takes the new route**, and no IE / SE / NL path contains one (tested).
+- **E3** `_PAYSLIP_FIELDS_BY_COUNTRY["MX"]`: scalar columns only.
+- **E4** `_REPORT_COMPONENTS_BY_TYPE` entries for the eight MX template-engine report types.
+
+**Templates (`seed_statutory_report_templates.py`)**
+- **MX-PAYROLL-REGISTER (fixed):** gross, days paid, ISR withheld, **IMSS employee**, **INFONAVIT credit**, total deductions, net pay, **subsidy applied**.
+- **MX-EMPLOYER-COST (fixed):** IMSS, INFONAVIT and ISN employer amounts and the employer total, all summed over the run, read from the engine result. **The two shared columns that were always 0 are removed.**
+- **New:** MX-SUBSIDY, MX-IMSS-BRANCH (14 branch / side amounts via the selector), MX-INFONAVIT, MX-AGUINALDO, MX-FINIQUITO (every concept's gross, exempt and taxable parts via the selector), MX-ANNUAL-ISR-ADJ (the per-run part).
+- MX-IMSS-BRANCH and MX-INFONAVIT say on their face **"NOT AN OFFICIAL FILE"**: the SUA / SIPARE layout sources are not saved (C8).
+- The other 9 shells wait for W4-2's dedicated generators.
+
+**Proof (tests)**
+- every Mexico path is in the MX catalog;
+- the selector picks, sums and misses;
+- **every path resolves on a real committed snapshot of its run type** (ordinary, aguinaldo, finiquito, annual adjustment; at least 20 keyed paths resolve);
+- generating MX-EMPLOYER-COST and MX-PAYROLL-REGISTER on a committed run returns the engine's own figures, and the employer total is no longer 0.
+- Mexico report tests: 12 passed. With the shared, Dutch and German report-template tests and all Mexico tests: **1,090 passed, 0 failed**.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Report engine | Additive. Existing paths resolve exactly as before (no `[`) |
+| Mexico templates | A manual template seed fills 6 shells and fixes 2. Templates stay Draft; Mexico activation is still refused until W4-3's gate |
+| Other jurisdictions | None (pinned by their report-template tests) |

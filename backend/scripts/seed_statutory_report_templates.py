@@ -2110,46 +2110,141 @@ _MX_EMPLOYEE = ("employee_info", "Employee", [
 ])
 
 
+_MX_SNAP = "mx_calculation_snapshot.result."
+
+
+def _mx(field_key, label, path, field_type="currency", aggregation=None):
+    """A field bound to the frozen Mexico result (PAYSLIP_ITEM_JSON; W4-1)."""
+    return (field_key, label, field_type, "PAYSLIP_ITEM_JSON", _MX_SNAP + path, aggregation)
+
+
+def _mx_concept(prefix, label, kind):
+    return [_mx(f"{prefix}_gross", f"{label} — Gross", f"concepts[kind={kind}].gross"),
+            _mx(f"{prefix}_exempt", f"{label} — ISR Exempt", f"concepts[kind={kind}].isr_exempt"),
+            _mx(f"{prefix}_taxable", f"{label} — ISR Taxable", f"concepts[kind={kind}].isr_taxable")]
+
+
+_MX_IMSS_FIELDS = [
+    _mx(f"{b.lower()}_{s}", label, f"imss[branch={b},side={s}].amount")
+    for b, s, label in (
+        ("EM_FIXED_QUOTA", "employer", "E&M Fixed Quota (Employer)"), ("EM_EXCESS", "employer", "E&M Excess (Employer)"),
+        ("EM_EXCESS", "employee", "E&M Excess (Employee)"), ("EM_CASH", "employer", "E&M Cash Benefits (Employer)"),
+        ("EM_CASH", "employee", "E&M Cash Benefits (Employee)"),
+        ("EM_PENSIONER", "employer", "E&M Pensioner Medical (Employer)"),
+        ("EM_PENSIONER", "employee", "E&M Pensioner Medical (Employee)"), ("IV", "employer", "Invalidez y Vida (Employer)"),
+        ("IV", "employee", "Invalidez y Vida (Employee)"), ("GUARDERIAS", "employer", "Guarderías (Employer)"),
+        ("RETIRO", "employer", "Retiro (Employer)"), ("CEAV", "employer", "Cesantía y Vejez (Employer)"),
+        ("CEAV", "employee", "Cesantía y Vejez (Employee)"), ("RIESGOS_TRABAJO", "employer", "Riesgos de Trabajo (Employer)"))]
+_NOT_OFFICIAL = " NOT AN OFFICIAL FILE: the official layout's source is not saved (gap register C8), so this is a register."
+
+
 def _mx_templates():
     later = {
         "MX-CFDI-NOMINA-RECEIPT": ("CFDI 4.0 + Nómina 1.2 payroll receipt", "CFDI_RECEIPT", "PER_EMPLOYEE", 7),
         "MX-CFDI-STATUS": ("CFDI stamping / cancellation status", "CFDI_STATUS", "AGGREGATE", 7),
         "MX-ISR-MONTHLY": ("ISR salary-withholding monthly remittance", "ISR_WITHHOLDING", "AGGREGATE", 8),
-        "MX-SUBSIDY": ("Employment subsidy (subsidio para el empleo) applied", "SUBSIDY", "AGGREGATE", 6),
-        "MX-IMSS-BRANCH": ("IMSS contributions by branch", "IMSS", "AGGREGATE", 6),
         "MX-IDSE-MOVEMENTS": ("IDSE affiliation movements", "IDSE", "AGGREGATE", 8),
         "MX-SUA-RECON": ("SUA reconciliation", "SUA", "AGGREGATE", 8),
         "MX-SIPARE": ("SIPARE payment line", "SIPARE", "AGGREGATE", 8),
-        "MX-INFONAVIT": ("INFONAVIT contributions and credit withholding", "INFONAVIT", "AGGREGATE", 8),
-        "MX-AGUINALDO": ("Aguinaldo statement", "AGUINALDO", "PER_EMPLOYEE", 9),
         "MX-VACATION-ACCRUAL": ("Vacation and vacation-premium accrual", "VACATION", "AGGREGATE", 9),
         "MX-PTU-DISTRIBUTION": ("PTU distribution", "PTU", "AGGREGATE", 9),
-        "MX-FINIQUITO": ("Finiquito / severance statement", "FINIQUITO", "PER_EMPLOYEE", 9),
-        "MX-ANNUAL-ISR-ADJ": ("Annual ISR adjustment", "ANNUAL_ISR", "AGGREGATE", 9),
     }
     out = {key: dict(name=name, report_type=f"MX_{rtype}", scope=scope, components=[],
                      description=f"Draft shell — filled in Phase {phase} of ZP-MX-ENG-001, when this output exists.")
            for key, (name, rtype, scope, phase) in later.items()}
+    employer = (_MX_EMPLOYER[0], _MX_EMPLOYER[1], _MX_EMPLOYER[2] + _MX_PERIOD)
+    # W4-1 (Phase 12a): every figure is read from the frozen engine result — never recomputed.
     out["MX-PAYROLL-REGISTER"] = dict(
         name="Mexico payroll register", report_type="MX_REGISTER", scope="AGGREGATE",
-        description="Per-employee payroll register for one run.",
-        components=[(_MX_EMPLOYER[0], _MX_EMPLOYER[1], _MX_EMPLOYER[2] + _MX_PERIOD), _MX_EMPLOYEE,
-                    ("earnings", "Perceptions", [
-                        ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None)]),
+        description="Per-employee payroll register for one run, from the frozen Mexico calculation.",
+        components=[employer, _MX_EMPLOYEE,
+                    ("earnings", "Perceptions", [_mx("gross", "Gross Pay", "gross"),
+                                                 _mx("days_paid", "Days Paid", "days_paid", "text")]),
                     ("deductions", "Deductions and Net Pay", [
-                        ("isr", "ISR Withheld", "currency", "PAYSLIP_ITEM", "tds", None),
+                        _mx("isr", "ISR Withheld", "isr_withheld"),
+                        _mx("imss_employee", "IMSS (Employee)", "imss_employee"),
+                        _mx("infonavit_credit", "INFONAVIT Credit Discount", "infonavit_credit"),
                         ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", None),
-                        ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", None)])])
+                        ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", None)]),
+                    ("other_payments", "Other Payments", [
+                        _mx("subsidy_applied", "Employment Subsidy Applied", "subsidy.applied")])])
     out["MX-EMPLOYER-COST"] = dict(
         name="Mexico employer cost", report_type="MX_EMPLOYER_COST", scope="AGGREGATE",
-        description="Employer-side statutory cost of one run (IMSS / RCV / INFONAVIT / ISN detail from Phase 6).",
-        components=[(_MX_EMPLOYER[0], _MX_EMPLOYER[1], _MX_EMPLOYER[2] + _MX_PERIOD),
+        description="Employer-side statutory cost of one run: IMSS (incl. RCV), INFONAVIT and state ISN, from the "
+                    "frozen Mexico calculation.",
+        components=[employer,
                     ("employer_contributions", "Employer Cost", [
-                        ("gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
-                        ("employer_social_security", "Employer Social Security", "currency", "PAYSLIP_ITEM",
-                         "employer_social_security", "SUM_RUN"),
-                        ("employer_pension", "Employer Retirement", "currency", "PAYSLIP_ITEM", "employer_pension",
-                         "SUM_RUN")])])
+                        _mx("gross_pay", "Total Gross Pay", "gross", aggregation="SUM_RUN"),
+                        _mx("imss_employer", "IMSS (Employer)", "imss_employer", aggregation="SUM_RUN"),
+                        _mx("infonavit_employer", "INFONAVIT (Employer)", "infonavit_employer", aggregation="SUM_RUN"),
+                        _mx("isn", "State Payroll Tax (ISN)", "isn.amount", aggregation="SUM_RUN"),
+                        _mx("employer_total", "Employer Statutory Cost", "employer_total", aggregation="SUM_RUN")])])
+    out["MX-SUBSIDY"] = dict(
+        name="Employment subsidy (subsidio para el empleo)", report_type="MX_SUBSIDY", scope="AGGREGATE",
+        description="Per-employee employment subsidy for one run: due, applied against ISR, and not payable.",
+        components=[employer, _MX_EMPLOYEE,
+                    ("subsidy", "Employment Subsidy", [
+                        _mx("isr_before", "ISR Before Subsidy", "isr"),
+                        _mx("subsidy_amount", "Subsidy Due", "subsidy.amount"),
+                        _mx("subsidy_applied", "Subsidy Applied", "subsidy.applied"),
+                        _mx("subsidy_remainder", "Subsidy Not Payable", "subsidy.remainder"),
+                        _mx("isr_withheld", "ISR Withheld", "isr_withheld")])])
+    out["MX-IMSS-BRANCH"] = dict(
+        name="IMSS contributions by branch", report_type="MX_IMSS", scope="AGGREGATE",
+        description="Per-employee IMSS contributions by branch and side for one run." + _NOT_OFFICIAL,
+        components=[employer, _MX_EMPLOYEE,
+                    ("sbc", "Salario Base de Cotización", [
+                        _mx("sbc_fixed", "SBC Fixed Part (daily)", "sbc.components.fixed"),
+                        _mx("sbc_variable", "SBC Variable Part (daily)", "sbc.components.variable_daily")]),
+                    ("branches", "IMSS Branches", _MX_IMSS_FIELDS),
+                    ("totals", "IMSS Totals", [_mx("imss_employee", "IMSS (Employee)", "imss_employee"),
+                                               _mx("imss_employer", "IMSS (Employer)", "imss_employer")])])
+    out["MX-INFONAVIT"] = dict(
+        name="INFONAVIT contributions and credit discounts", report_type="MX_INFONAVIT", scope="AGGREGATE",
+        description="Per-employee INFONAVIT employer contribution and credit discount for one run." + _NOT_OFFICIAL,
+        components=[employer, _MX_EMPLOYEE,
+                    ("infonavit", "INFONAVIT", [
+                        _mx("infonavit_employer", "Contribution (Employer, 5%)", "infonavit_employer"),
+                        _mx("infonavit_credit", "Credit Discount (Employee)", "infonavit_credit")])])
+    out["MX-AGUINALDO"] = dict(
+        name="Aguinaldo statement", report_type="MX_AGUINALDO", scope="PER_EMPLOYEE",
+        description="Per-employee aguinaldo of an aguinaldo run: days, proportion, exempt and taxable parts, ISR.",
+        components=[employer, _MX_EMPLOYEE,
+                    ("aguinaldo", "Aguinaldo", [
+                        _mx("days", "Aguinaldo Days", "special.detail.days", "text"),
+                        _mx("fraction", "Fraction of the Year", "special.detail.fraction", "text"),
+                        *_mx_concept("aguinaldo", "Aguinaldo", "AGUINALDO"),
+                        _mx("isr_withheld", "ISR Withheld", "isr_withheld"),
+                        _mx("rule_source", "Rule Source", "special.rule_source", "text")])])
+    out["MX-FINIQUITO"] = dict(
+        name="Finiquito / severance statement", report_type="MX_FINIQUITO", scope="PER_EMPLOYEE",
+        description="Per-employee finiquito: proportional aguinaldo, vacation owed and its premium, separation "
+                    "components with their exempt and taxable parts, ISR and net pay.",
+        components=[employer, _MX_EMPLOYEE,
+                    ("aguinaldo", "Aguinaldo", _mx_concept("aguinaldo", "Aguinaldo", "AGUINALDO")),
+                    ("vacation", "Vacation", [
+                        _mx("vacation_days", "Vacation Days Owed", "special.detail.vacation.days", "text"),
+                        *_mx_concept("vacation_payout", "Vacation Paid Out", "VACATION_PAYOUT"),
+                        *_mx_concept("vacation_premium", "Vacation Premium", "VACATION_PREMIUM")]),
+                    ("separation", "Separation", [
+                        *_mx_concept("seniority_premium", "Seniority Premium", "SEPARATION_SENIORITY_PREMIUM"),
+                        *_mx_concept("separation_payment", "Separation Payment", "SEPARATION_PAYMENT"),
+                        *_mx_concept("indemnity", "Indemnity", "SEPARATION_INDEMNITY")]),
+                    ("totals", "Withholding and Net Pay", [
+                        _mx("isr_withheld", "ISR Withheld", "isr_withheld"),
+                        ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", None)])])
+    out["MX-ANNUAL-ISR-ADJ"] = dict(
+        name="Annual ISR adjustment (applied in this run)", report_type="MX_ANNUAL_ISR", scope="AGGREGATE",
+        description="Per-employee annual ISR adjustment of an ended fiscal year as applied in this run. The "
+                    "employer-year view comes from the annual-adjustment service (W4-2).",
+        components=[employer, _MX_EMPLOYEE,
+                    ("annual_adjustment", "Annual ISR Adjustment", [
+                        _mx("fiscal_year", "Fiscal Year", "annual_adjustment.fiscal_year", "text"),
+                        _mx("difference", "Difference (Owed + / Refund −)", "annual_adjustment.difference"),
+                        _mx("period_withheld", "Period ISR Before", "annual_adjustment.period_withheld"),
+                        _mx("withheld", "ISR Withheld", "annual_adjustment.withheld"),
+                        _mx("change", "Applied This Run", "annual_adjustment.change"),
+                        _mx("carry_forward", "Carried Forward", "annual_adjustment.carry_forward")])])
     out["MX-JOURNAL"] = dict(
         name="Mexico payroll journal", report_type="MX_JOURNAL", scope="AGGREGATE",
         description="Run totals for the accounting journal (separate statutory liabilities from Phase 10).",
