@@ -76,6 +76,7 @@ def test_a_qa_pack_with_empty_content_is_refused_by_gate_1(db, monkeypatch):
     for table in ("MX_SCALAR_CONTENT", "MX_ISR_TARIFFS", "MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE",
                   "MX_WORKWEEK", "MX_VACATION_DAYS"):          # empty content (Batches 1-2 filled the real one)
         monkeypatch.setattr(c, table, ())
+    monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})   # W1-2 filled CDMX
     pack = seed_mexico(db, manifest={})["national"]
     pack.status = "QA"
     db.commit()

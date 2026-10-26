@@ -11,6 +11,8 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-03 | CEAV lowest band: which minimum wage anchors "1.0 SM" | G2 owner | ZLFN employees in band 1 (`MX_CEAV_LOWEST_BAND_PENDING_G2`) | Open |
 | D-04 | Interpretations behind transcribed rows (Batch 2, W1-1) | G1 / G2 / G3 / G5 owners | Nothing today (rows are Draft, `[PENDING G1]`); activation needs them confirmed | Open |
 | D-05 | 48-hour week for January–April 2026 | G5 owner | Nothing today; the January–April row cites a decree in force only from 1 May 2026 | Open |
+| D-06 | CDMX ISN: are vacation paid out at termination, the separation payment and the indemnity in the base? | G4 owner | Any finiquito with those lines for a CDMX worker (`MX_ISN_SPECIAL_PAY_RULE_MISSING`) | Open |
+| D-10 | CDMX ISN 2026 benefit for micro (1%) and small (0.5%) employers | G4 owner | G4 sign-off / CDMX pack activation; until then a micro or small CDMX employer would be computed at the full 4% | Open |
 
 ---
 
@@ -28,6 +30,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 - **Question.** Does a daily pay frequency (S28 c_PeriodicidadPago 01) use the Art. 96 daily tariff (S2 B.I)?
 - **Options.** Map 01 → DAILY; or keep it unmapped (daily-paid employees stay blocked).
 - **Sources.** S2 B.I heading ("en función de la cantidad de trabajo realizado y no de días laborados… calculada en días"); S1 rule 3.12.2 (PDF p. 425). Log TL-PER-1; G1 checklist.
+- **Found in W1-3 reading (2026-10-26):** RLISR Art. 175 (S25, PDF p. 46) lets a payer who pays "en función de cantidad de trabajo realizado y no de días laborados" use "la tarifa del artículo 96 de la Ley calculada en días". This ties B.I to piece-work pay (c_PeriodicidadPago 07 Unidad obra), not to a daily pay frequency. Art. 176 ties the 7-, 10- and 15-day tables to payments covering those periods. Neither names 01 Diario.
 - **Blocks.** Employees paid daily: `MX_PAY_FREQUENCY_MAPPING_MISSING`.
 
 ## D-03 · CEAV lowest band reference (`mx_ceav_lowest_band_min_wage_ref`)
@@ -50,6 +53,7 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 | Overtime ×2 / ×3 | "cien / doscientos por ciento más" read as ×2 / ×3 of the ordinary hourly pay (TL-WW-2) | S18 Arts. 66, 68 | G5 |
 | CEAV band 1 upper bound 1.0 SM | Stored as a closed band so the engine never treats it as open-ended (TL-CEAV-1) | S11 | G2 |
 | Vacation bands years 6–50 | DERIVED from Art. 76's wording; no row beyond 50 years (TL-VAC-1) | S26 Art. 76 | G5 |
+| CDMX ISN on the vacation premium: in the base | Art. 156 III "Premios, primas, bonos…" read as covering the vacation premium (TL-ISN-2) | S22 Art. 156 III | G4 |
 | Subsidy remainder `NOT_PAYABLE` | Art. Segundo ¶2 of the base decree, still in force (TL-SUB-2) | S3 (DOF 01-05-2024) | G1 |
 
 ## D-05 · 48-hour week for January–April 2026
@@ -57,3 +61,16 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** S18 Transitorio Segundo gives 48 hours for 2026 "a partir del 1 de enero", but the decree is in force only from 1 May 2026. Does the January–April row stand?
 - **Sources.** S18 Transitorios Primero, Segundo; S26 (consolidated LFT, PDF p. 454).
 - **Blocks.** Nothing computed today; it is a G5 confirmation (Batch 2 report §5.7).
+
+## D-06 · CDMX ISN on termination payments
+
+- **Question.** Are (a) vacation paid out at termination, (b) the separation payment and (c) the indemnity part of the CDMX payroll-tax base?
+- **Options.** Each one: in the base (as "remuneración al trabajo personal subordinado, independientemente de la designación", Art. 156 ¶1); or out.
+- **Sources.** S22 Art. 156 ¶1 and I–IX (PDF p. 89); Art. 157 I–XV (pp. 90–91), whose fr. IV excludes only "las indemnizaciones por riesgos de trabajo". Log TL-ISN-2.
+- **Blocks.** A CDMX finiquito carrying any of the three lines: `MX_ISN_SPECIAL_PAY_RULE_MISSING`. The seniority premium (Art. 156 VII, in) and PTU (Art. 157 XIII, out) are transcribed.
+
+## D-10 · CDMX ISN 2026 benefit for micro and small employers
+
+- **Question.** How is the 2026 benefit applied, and to whom? (a) Is "equivalente al 1% … respecto de la tasa" one percentage point (4% → 3%) or 1% of the rate? (b) What do the SAF general rules require (application, proof of size, sector)? (c) Where does Zoiko record an employer's size and sector?
+- **Sources.** S22, decree of 19-12-2025, Transitorio TRIGÉSIMO SÉPTIMO (PDF p. 815; quoted in TL-ISN-1). The SAF "reglas de carácter general" it refers to are **not saved** (W2-5 source to find).
+- **Blocks.** G4 sign-off of the CDMX pack. The engine applies the pack's 4% to every CDMX employer; it must not reach a micro or small employer in 2026 until this is decided and modelled.

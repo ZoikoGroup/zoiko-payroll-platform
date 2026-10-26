@@ -49,3 +49,39 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 | Other jurisdictions | None. Mexico-only modules, tests and docs |
 
 **Gap register:** B9 narrowed (percentage basis done; fixed-amount basis BLOCKED-ON-SOURCE). B11 narrowed (SBC floor done; rounding = D-01).
+
+---
+
+## W1-2 — CDMX state ISN (gap register B10)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **`MX-ISN-CDMX-2026` gets its rate:** `mx_isn_rate_pct` = 4, from S22 Art. 158 (TL-ISN-1). S22 is the SAF 2026 edition and **VERIFIED** (logged direct download), so this is the first Mexican content row with a VERIFIED source.
+- **CDMX special-pay inclusion** (TL-ISN-2), from Arts. 156 and 157:
+  - in the base: aguinaldo, vacation premium (reading), seniority premium;
+  - out: PTU.
+- **Still blocking (`MX_ISN_SPECIAL_PAY_RULE_MISSING`):** vacation paid out at termination, the separation payment and the indemnity. Neither article names them: decision **D-06** (G4).
+- **`compare` covers module-direct rules.** Every rule object (ISN inclusion now; special pay, termination, PTU, annual adjustment and calendar as they arrive) must quote the wording it rests on, and each quote must be found in the cited file. A rule that quotes nothing is a miss. Result: 371 checks, 0 misses.
+- **D-02 note.** RLISR Art. 175 ties the daily tariff to piece-work pay, not to 01 Diario.
+
+**Controls**
+- Blind second transcription (separate agent; S22 only): same rate, article, page and wording; same inclusions; "DOES NOT SAY" for the three concepts left blocked. **It also found** the 2026 micro / small-employer ISN benefit (Transitorio TRIGÉSIMO SÉPTIMO, PDF p. 815), which I confirmed in the text. It is not modelled: the SAF rules it depends on are not saved, and the wording is ambiguous. Recorded as **D-10** and as a pre-pilot item in the G4 checklist. Until it is settled, a micro or small CDMX employer would be computed at the full 4% (no CDMX pack is Active).
+- Scratch seed: `MX-ISN-CDMX-2026` has 1 row, 0 missing, 0 extra. **Gate 1b-1 passes for CDMX.** Its activation readiness now shows content, evidence and sources-verified met; the G1 review and the golden vectors are not.
+
+**Tests**
+- New: the CDMX rate and inclusion tests, and the compare rule-quote test.
+- Updated: the synthetic fixtures (seed, approval, activation gates, router) now also empty the ISN table; the benefits fixture empties the inclusion map when a test needs it absent; the real-pack readiness pin now expects CDMX content, evidence and sources met.
+- All `tests/test_mexico_*.py`: **940 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Mexico in production | Dormant. A hand-run seed would write one row into the Draft CDMX pack |
+| Engine | ISN is computed at 4% once a CDMX pack is Active (none is). Aguinaldo, vacation premium and seniority premium count toward the base; PTU does not |
+| Super Admin readiness | The CDMX pack now shows 3 of 5 activation checks met |
+| Other jurisdictions | None |
+
+**Gap register:** B10 done for CDMX, except D-06 and D-10.

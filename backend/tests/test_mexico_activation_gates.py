@@ -44,6 +44,7 @@ def _synthetic_national_content(monkeypatch, *, with_g2=False):
     monkeypatch.setattr(c, "MX_ISR_TARIFFS", tuple(brackets))
     for table in ("MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE", "MX_WORKWEEK", "MX_VACATION_DAYS"):
         monkeypatch.setattr(c, table, ())                       # SYNTHETIC packs carry only the rows above
+    monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})   # W1-2 filled CDMX
 
 
 def _manifest():
@@ -261,9 +262,12 @@ def test_the_real_seeded_packs_are_refused_today(db):
     rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == national.id).count()
     assert (slabs, rates) == (sum(s[0] == "SLAB" for s in expected_rows), sum(s[0] == "RATE" for s in expected_rows))
     assert slabs > 55 and rates > 10                                  # Batch 2 rows are seeded too
+    assert db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == cdmx.id).count() == 1
     expected = {national.id: {"content": False, "evidence": True, "sources_verified": False, "g1_review": False,
                               "golden": False},
-                cdmx.id: {"content": False, "evidence": False, "sources_verified": False, "g1_review": False,
+                # W1-2: the CDMX rate rests on S22, VERIFIED by a logged direct download, so content,
+                # evidence and sources pass; the human G1 review and the golden vectors still refuse it
+                cdmx.id: {"content": True, "evidence": True, "sources_verified": True, "g1_review": False,
                           "golden": False}}
     for pack in (national, cdmx):
         view = mexico_service.activation_readiness(db, pack.id, actor_id=ACTIVATOR)

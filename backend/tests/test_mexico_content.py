@@ -598,3 +598,35 @@ def test_ceilings_read_in_uma_cite_the_de_indexation_decree():
     _need(rows, "SBC ceiling / E&M threshold")
     assert all("S34 Transitorio Tercero" in r.source_ref for r in rows.values())
     assert "S34" in c.ALL_SOURCE_CODES
+
+
+# ── W1-2 (2026-10-26): CDMX state ISN ──
+
+def test_cdmx_isn_rate_cites_the_verified_2026_code():
+    c = _c()
+    rows = c.MX_ISN_CONTENT["CDMX"]
+    _need(rows, "CDMX ISN")
+    assert [(r.key, r.employer_pct, r.employee_pct) for r in rows] == [("mx_isn_rate_pct", "4", None)]
+    assert rows[0].source == "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf" and rows[0].source_ref.startswith("Art. 158")
+    assert c.isn_rows_in_force("CDMX", date(2026, 6, 30))["mx_isn_rate_pct"] is rows[0]
+    # the 2022 text (3%) is WRONG_VERSION and is never cited
+    assert not any("S22_CDMX_Codigo_Fiscal_2026.pdf" in r.source for r in rows)
+
+
+def test_cdmx_special_pay_isn_inclusion_follows_arts_156_and_157():
+    c = _c()
+    inc = {concept: entry[0] for (state, concept), entry in c.MX_SPECIAL_PAY_ISN_INCLUSION.items() if state == "CDMX"}
+    _need(inc, "CDMX special-pay ISN inclusion")
+    assert inc == {"AGUINALDO": True, "VACATION_PREMIUM": True, "SEPARATION_SENIORITY_PREMIUM": True, "PTU": False}
+    from app.modules.payroll.engine.jurisdictions.mexico import special_pay
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    assert set(inc) <= set(special_pay.CONCEPTS)
+    # not named by Art. 156 or 157: they keep blocking (DECISIONS_PENDING D-06)
+    for concept in ("VACATION_PAYOUT", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"):
+        with pytest.raises(MXBlock) as exc:
+            special_pay.isn_included("CDMX", concept)
+        assert exc.value.reasons[0][0] == "MX_ISN_SPECIAL_PAY_RULE_MISSING"
+    for (state, concept), (included, source, ref) in c.MX_SPECIAL_PAY_ISN_INCLUSION.items():
+        assert source == "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf" and ref.startswith(("Art. 156", "Art. 157"))
+        assert included == ref.startswith("Art. 156")      # 156 lists what is taxed, 157 what is not

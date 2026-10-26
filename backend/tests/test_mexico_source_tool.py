@@ -3,6 +3,7 @@ hashing, status rules and the row-by-row number comparison, exercised on
 SYNTHETIC files in a temp directory (never on statutory content)."""
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,6 +107,13 @@ def _empty_content(monkeypatch):
                   "MX_VACATION_DAYS", "MX_ZLFN_MUNICIPALITIES"):
         monkeypatch.setattr(c, table, ())
     monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})
+    for table in ("MX_SPECIAL_PAY_ISN_INCLUSION", "MX_SPECIAL_PAY_RULES", "MX_TERMINATION_REASONS",
+                  "MX_PTU_EXCLUSION_REASONS", "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS", "MX_OFFICIAL_HOLIDAYS"):
+        monkeypatch.setattr(c, table, {})
+    for rule in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",
+                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE"):
+        monkeypatch.setattr(c, rule, None)
+    monkeypatch.setattr(c, "MX_FILING_CALENDAR", ())
     return c
 
 
@@ -160,6 +168,31 @@ def test_compare_checks_the_wording_a_text_rule_quotes(tmp_path, monkeypatch):
     misses = v.cmd_compare(manifest, tmp_path)
     assert len(misses) == 1 and "quote" in misses[0] and "not found" in misses[0]
     assert v._quotes("a 'short' b 'long enough quote here', c") == ["long enough quote here"]
+
+
+def test_compare_requires_every_module_direct_rule_to_quote_its_wording(tmp_path, monkeypatch):
+    """W1-2: an ISN inclusion / special-pay / termination rule has no table row,
+    so its citation must quote the source wording, and the quote must be found."""
+    v = _tool()
+    c = _empty_content(monkeypatch)
+    src = tmp_path / "S22_synthetic.txt"
+    src.write_text("Codigo SINTETICO\n" + "relleno " * 40 + "\nV. Gratificaciones y aguinaldos;\n", encoding="utf-8")
+    manifest = tmp_path / "SOURCES_MANIFEST.csv"
+    v.cmd_hash(tmp_path, manifest)
+    v.cmd_set("S22", ["status=ARCHIVE_COPY_VERIFIED"], manifest)
+    quoted = {("CDMX", "AGUINALDO"): (True, "S22", "Art. X V: 'Gratificaciones y aguinaldos', SYNTHETIC")}
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", quoted)
+    assert v.cmd_compare(manifest, tmp_path) == []
+    unquoted = {("CDMX", "AGUINALDO"): (True, "S22", "Art. X V, SYNTHETIC")}
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", unquoted)
+    misses = v.cmd_compare(manifest, tmp_path)
+    assert len(misses) == 1 and "quotes no wording" in misses[0]
+    rule = SimpleNamespace(source="S22", source_ref="x", citations=(("S22", "Art. Y: 'Gratificaciones y aguinaldos'"),
+                                                                    ("S22", "Art. Z: 'texto que no existe aqui'")))
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {})
+    monkeypatch.setattr(c, "MX_AGUINALDO_RULE", rule)
+    misses = v.cmd_compare(manifest, tmp_path)
+    assert len(misses) == 1 and "texto que no existe" in misses[0]
 
 
 # -- Phase 11d: VERIFIED only through a logged direct download --

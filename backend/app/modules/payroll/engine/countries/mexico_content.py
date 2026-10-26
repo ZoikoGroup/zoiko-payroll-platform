@@ -756,7 +756,17 @@ MX_VACATION_DAYS: tuple = (
     VacationDaysRow(41, 45, "36", None, None, _S26, "Art. 76 (DERIVED: years 41-45)"),
     VacationDaysRow(46, 50, "38", None, None, _S26, "Art. 76 (DERIVED: years 46-50)"),
 )
-MX_ISN_CONTENT: dict = {state: () for state in MX_ISN_STATES_IN_SCOPE}   # state -> tuple[ScalarRow]
+# State ISN — W1-2 (2026-10-26) [PENDING G1]: S22, the SAF consolidated "CODIGO FISCAL 2026" (VERIFIED by a
+# logged direct download; latest reform Gaceta 19-12-2025, which does not touch Arts. 156-158). Log TL-ISN-1.
+_S22 = "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf"
+MX_ISN_CONTENT: dict = {   # state -> tuple[ScalarRow]
+    "CDMX": (
+        ScalarRow("mx_isn_rate_pct", None, "4", None, None, None, None, _S22,
+                  "Art. 158: 'se determinara, aplicando la tasa del 4% sobre el monto total de las erogaciones "
+                  "realizadas por concepto de remuneraciones al trabajo personal subordinado', PDF p. 91"),
+    ),
+}
+assert set(MX_ISN_CONTENT) == set(MX_ISN_STATES_IN_SCOPE)
 
 # Filing-calendar due-date rules (Phase 2). Each is transcribed only from
 # the saved primary-law text (LISR Art. 96 / S24, LSS Arts. 39 and 74 / S10,
@@ -831,7 +841,20 @@ MX_AUTHORITY_RETRY_CONFIG: dict = {}  # channel -> {"min_wait_seconds": int, "mi
 # MX_ISN_SPECIAL_PAY_RULE_MISSING); none falls back to the ordinary tariff (MX-009).
 MX_SPECIAL_PAY_RULES: dict = {}       # concept (AGUINALDO / VACATION_PREMIUM / VACATION_PAYOUT / PTU / SEPARATION_SENIORITY_PREMIUM / SEPARATION_PAYMENT / SEPARATION_INDEMNITY) -> SpecialPayRule (S24 / S25)
 MX_AGUINALDO_RULE = None              # AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
-MX_SPECIAL_PAY_ISN_INCLUSION: dict = {}   # (state, concept) -> (included: bool, source, source_ref) — state ISN content
+MX_SPECIAL_PAY_ISN_INCLUSION: dict = {   # (state, concept) -> (included: bool, source, source_ref) — state ISN content
+    # W1-2 (2026-10-26) [PENDING G1]: S22 Arts. 156 (what counts as remuneration) and 157 (what is not taxed),
+    # PDF pp. 89-91 (log TL-ISN-2). NOT listed, so they block (MX_ISN_SPECIAL_PAY_RULE_MISSING): VACATION_PAYOUT,
+    # SEPARATION_PAYMENT and SEPARATION_INDEMNITY — neither article names them (DECISIONS_PENDING D-06, G4).
+    ("CDMX", "AGUINALDO"): (True, "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
+                            "Art. 156 V: 'Gratificaciones y aguinaldos', PDF p. 89"),
+    ("CDMX", "VACATION_PREMIUM"): (True, "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
+                                   "Art. 156 III: 'Premios, primas, bonos, estimulos e incentivos' (the vacation "
+                                   "premium read as a 'prima', TL-ISN-2), PDF p. 89"),
+    ("CDMX", "SEPARATION_SENIORITY_PREMIUM"): (True, "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
+                                               "Art. 156 VII: 'Primas de antiguedad', PDF p. 89"),
+    ("CDMX", "PTU"): (False, "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
+                      "Art. 157 XIII: 'Las participaciones en las utilidades de la empresa' (not taxed), PDF p. 91"),
+}
 
 # Phase 9c (D5): termination. The reason CATALOG — code -> TerminationReason
 # rule object (label, the separation components the reason triggers: indemnity,

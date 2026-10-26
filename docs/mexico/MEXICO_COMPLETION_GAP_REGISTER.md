@@ -168,3 +168,4 @@
 | 2026-10-26 | **S22** | VERIFIED (SAF "CODIGO FISCAL 2026"; checks 1 and 2 passed; Gaceta 19-12-2025 saved). B10 (ISN) is now transcribable |
 | 2026-10-26 | **B11** (rounding) | Candidate sources reported for the G1 owner; it still blocks every calculation |
 | 2026-10-26 | **B9, B11** (W1-1) | SBC floor `RAISE_TO_ZONE_MIN_WAGE` (LSS Art. 28) and INFONAVIT percentage basis `SBC_TIMES_DAYS` (Ley INFONAVIT Art. 29 III) transcribed. S34 (de-indexation decree) saved. **Fixed-amount INFONAVIT basis: BLOCKED-ON-SOURCE** (INFONAVIT's payment regulation is not in the Diputados compilation). Open decisions moved to `DECISIONS_PENDING.md` |
+| 2026-10-26 | **B10** (W1-2) | CDMX ISN 4% (S22 Art. 158, VERIFIED source) and the special-pay inclusions (Arts. 156, 157) transcribed; gate 1b-1 passes for the CDMX pack. Open: D-06 (separation lines), D-10 (2026 micro / small-employer benefit) |

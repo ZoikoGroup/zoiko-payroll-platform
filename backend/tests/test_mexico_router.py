@@ -34,6 +34,7 @@ def seeded(db, monkeypatch):
     for table in ("MX_ISR_TARIFFS", "MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE", "MX_WORKWEEK",
                   "MX_VACATION_DAYS"):                         # synthetic UMA rows only (Batches 1-2 filled these)
         monkeypatch.setattr(c, table, ())
+    monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})   # W1-2 filled CDMX
     monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (
         c.ScalarRow("mx_uma_daily", None, None, "1", None, date(2026, 1, 1), date(2026, 1, 31), "S6", "SYNTHETIC"),
         c.ScalarRow("mx_uma_daily", None, None, "2", None, date(2026, 2, 1), date(2026, 12, 31), "S6", "SYNTHETIC"),

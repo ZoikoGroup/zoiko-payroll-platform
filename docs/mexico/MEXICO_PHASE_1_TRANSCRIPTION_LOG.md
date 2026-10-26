@@ -303,3 +303,33 @@ What Batch 2 left open: the SBC floor rule, the two INFONAVIT credit bases and t
 
 - **CEAV lowest-band reference:** a G2 decision (DECISIONS_PENDING D-03).
 - **Rounding:** a G1 decision (D-01). On a scratch seed, gate 1b-1 now fails only on `mx_rounding_rule`.
+
+## W1-2 — 2026-10-26 (completion programme)
+
+### TL-ISN-1 · CDMX payroll-tax rate (gap register B10)
+
+| | |
+|---|---|
+| Source | `S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf`, SHA-256 `5d989b7e659206283c61532c150385a17367a16e85d801cec002f8a1250cfc5f` (SAF "CÓDIGO FISCAL 2026"; **VERIFIED** by a logged direct download; latest reform it names: Gaceta 19-12-2025, which does not touch Arts. 156–159) |
+| Row | `MX-ISN-CDMX-2026`: `mx_isn_rate_pct` = 4 (employer). Art. 158 (PDF p. 91): "aplicando la tasa del 4% sobre el monto total de las erogaciones realizadas por concepto de remuneraciones al trabajo personal subordinado" |
+| Spec | §15 says 4%: **same** (the WRONG_VERSION 2022 text said 3% and is not cited) |
+| Machine | `compare`: the 4 and the quoted wording are found |
+| Gate 1b-1 (scratch seed) | `MX-ISN-CDMX-2026`: 1 row, 0 missing, 0 extra, **content check passes**. Activation readiness: content, evidence and sources-verified **met**; G1 review and golden vectors not met |
+| 2026 micro / small-employer benefit | **Found by the blind transcription, confirmed:** the 19-12-2025 decree's Transitorio TRIGÉSIMO SÉPTIMO (S22 PDF p. 815): "Para el ejercicio fiscal 2026, se aplicará un beneficio fiscal respecto al Impuesto sobre Nóminas … de conformidad con las reglas de carácter general que emita la Secretaría de Administración y Finanzas, únicamente a aquellos contribuyentes considerados micro empresas equivalente al 1% y para las pequeñas empresas equivalente al 0.5% respecto de la tasa". Micro: 0–10 workers; small: 11–50 (industry, services) or 11–30 (commerce). **Not modelled:** the SAF general rules are not saved, and "1% respecto de la tasa" may mean one percentage point or 1% of 4%. The pack carries 4%; a micro or small employer would be overcharged. **D-10**, a pre-pilot G4 checklist item. (TRIGÉSIMO SEXTO earmarks revenue only; it does not change the rate) |
+| Blind second transcription | Same rate, article, page and wording; same latest reform (Gaceta 19-12-2025, in force 1 Jan 2026) |
+| Human G4 reviewer (name / date / verdict) | |
+
+### TL-ISN-2 · Which special payments are in the CDMX base (gap register B10, B12)
+
+| Concept | In the base? | Wording (S22, PDF pp. 89–91) |
+|---|---|---|
+| Aguinaldo | **Yes** | Art. 156 V "Gratificaciones y aguinaldos" |
+| Vacation premium | **Yes** (reading) | Art. 156 III "Premios, primas, bonos, estímulos e incentivos": the vacation premium read as a "prima". Blind: "IN only by inference" from 156 III with 156 ¶1. **Interpretation for G4** (D-04) |
+| Seniority premium | **Yes** | Art. 156 VII "Primas de antigüedad" |
+| PTU | **No** | Art. 157 XIII "Las participaciones en las utilidades de la empresa" |
+| Vacation paid out at termination, separation payment, indemnity | **Not transcribed (they block)** | Neither article names them. Art. 156 taxes "erogaciones … por concepto de remuneración al trabajo personal subordinado, independientemente de la designación"; Art. 157 IV excludes only indemnities "por riesgos de trabajo". Whether a severance indemnity is "remuneration" is a **G4 decision (D-06)**. Blind: "DOES NOT SAY" for all three |
+
+Ordinary earnings are not content: each earning classification carries its own ISN flag, per state, approved by a second Super Admin. Art. 157's exclusions (SAR and INFONAVIT contributions, IMSS quotas, travel expenses, social welfare benefits, …) are what a reviewer checks those flags against. The reductions of Arts. 276 ff. (recycling, hiring people with disabilities, …) are employer-specific and are not modelled.
+
+| Human G4 reviewer (name / date / verdict) | |
+|---|---|

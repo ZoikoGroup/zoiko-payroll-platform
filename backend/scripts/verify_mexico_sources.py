@@ -454,7 +454,42 @@ def _content_checks():
             checks.append((v.source, f"vacation year {v.service_year_from}", [v.days], False))
     for m in c.MX_ZLFN_MUNICIPALITIES:
         checks.append((m.source, f"ZLFN {m.state} {m.municipality}", ("NAME", m.municipality), False))
+    # W1-2: module-direct rules (ISN inclusion, special pay, termination, PTU,
+    # annual adjustment, calendar...) carry no table row — each citation must
+    # quote the wording it rests on, and every quote must be in its file.
+    for label, source, ref in _rule_citations(c):
+        quotes = _quotes(ref)
+        if not quotes:
+            checks.append((source, f"{label}: quotes no wording", ("NAME", "\x00no quoted wording\x00"), False))
+        for quote in quotes:
+            checks.append((source, f"{label} quote '{quote[:40]}'", ("NAME", quote), False))
     return checks
+
+
+def _rule_citations(c) -> list:
+    """(label, source, source_ref) for every module-direct rule in mexico_content.
+    A rule object may cite several files through `citations` ((source, ref), …)."""
+    def cites(label, obj):
+        pairs = getattr(obj, "citations", None) or ((obj.source, obj.source_ref),)
+        return [(label, src, ref) for src, ref in pairs]
+
+    out = []
+    for (state, concept), (_inc, src, ref) in sorted(getattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {}).items()):
+        out.append((f"ISN {state} {concept}", src, ref))
+    for name in ("MX_SPECIAL_PAY_RULES", "MX_TERMINATION_REASONS", "MX_PTU_EXCLUSION_REASONS",
+                 "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS"):
+        for key, obj in sorted(getattr(c, name, {}).items()):
+            out += cites(f"{name} {key}", obj)
+    for name in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",
+                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE"):
+        obj = getattr(c, name, None)
+        if obj is not None:
+            out += cites(name, obj)
+    for rule in getattr(c, "MX_FILING_CALENDAR", ()):
+        out += cites(f"filing {rule.report_type} {rule.state or ''}".strip(), rule)
+    for year, (_dates, src, ref) in sorted(getattr(c, "MX_OFFICIAL_HOLIDAYS", {}).items()):
+        out.append((f"holidays {year}", src, ref))
+    return out
 
 
 def cmd_compare(manifest_path: Path = None, sources_dir: Path = None) -> list:

@@ -35,6 +35,7 @@ def _synthetic_content_only(monkeypatch):
     for table in ("MX_SCALAR_CONTENT", "MX_ISR_TARIFFS", "MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE",
                   "MX_WORKWEEK", "MX_VACATION_DAYS"):
         monkeypatch.setattr(c, table, ())
+    monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})   # W1-2 filled CDMX
 
 
 def _content():
