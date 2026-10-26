@@ -73,22 +73,29 @@ def risk_premium_rate(premium, registration, segments) -> Decimal:
     return rate
 
 
+def branch_days(seg, branch: str) -> Decimal:
+    """W3-3: the days a branch contributes in this segment — the segment's days
+    unless absences / incapacity set per-branch days (LSS Art. 31)."""
+    return (seg.get("branch_days") or {}).get(branch, seg["days"])
+
+
 def contributions(sbc_segments, premium_pct: Decimal) -> dict:
     """{lines:[{branch, side, segment, base, days, rate_pct, amount}], employee, employer}."""
     lines = []
     for seg in sbc_segments:
-        c, sbc, uma, days = seg["content"], seg["sbc"], seg["uma_daily"], seg["days"]
+        c, sbc, uma = seg["content"], seg["sbc"], seg["uma_daily"]
         threshold = c.amount("mx_imss_em_excess_threshold_uma") * uma
         excess = max(sbc - threshold, _ZERO)
         bases = {"UMA": uma, "EXCESS": excess, "SBC": sbc}
         for branch, side, key, base in BRANCHES:
-            rate = c.pct(key)
+            rate, d = c.pct(key), branch_days(seg, branch)
             lines.append({"branch": branch, "side": side, "segment": seg["start"].isoformat(), "key": key,
-                          "base": bases[base], "days": days, "rate_pct": rate * _HUNDRED,
-                          "amount": bases[base] * days * rate})
+                          "base": bases[base], "days": d, "rate_pct": rate * _HUNDRED,
+                          "amount": bases[base] * d * rate})
+        d = branch_days(seg, "RIESGOS_TRABAJO")
         lines.append({"branch": "RIESGOS_TRABAJO", "side": "employer", "segment": seg["start"].isoformat(),
-                      "key": "registration premium", "base": sbc, "days": days, "rate_pct": premium_pct,
-                      "amount": sbc * days * premium_pct / _HUNDRED})
+                      "key": "registration premium", "base": sbc, "days": d, "rate_pct": premium_pct,
+                      "amount": sbc * d * premium_pct / _HUNDRED})
     return {"lines": lines,
             "employee": sum((l["amount"] for l in lines if l["side"] == "employee"), _ZERO),
             "employer": sum((l["amount"] for l in lines if l["side"] == "employer"), _ZERO)}

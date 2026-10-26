@@ -40,9 +40,10 @@ def employer(sbc_segments) -> dict:
     lines = []
     for seg in sbc_segments:
         rate = seg["content"].pct("mx_infonavit_er_pct")
+        days = (seg.get("branch_days") or {}).get("INFONAVIT", seg["days"])     # W3-3 (Ley INFONAVIT Art. 29)
         lines.append({"branch": "INFONAVIT", "side": "employer", "segment": seg["start"].isoformat(),
-                      "base": seg["sbc"], "days": seg["days"], "rate_pct": rate * _HUNDRED,
-                      "amount": seg["sbc"] * seg["days"] * rate})
+                      "base": seg["sbc"], "days": days, "rate_pct": rate * _HUNDRED,
+                      "amount": seg["sbc"] * days * rate})
     return {"lines": lines, "employer": sum((l["amount"] for l in lines), _ZERO)}
 
 

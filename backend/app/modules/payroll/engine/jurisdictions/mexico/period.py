@@ -72,8 +72,11 @@ class Segment:
 
 
 class Period:
-    def __init__(self, start, end, days_paid, segments, tariff):
+    def __init__(self, start, end, days_paid, segments, tariff, absence_days=Decimal("0"),
+                 incapacity_days=Decimal("0")):
         self.start, self.end, self.days_paid, self.segments, self.tariff = start, end, days_paid, segments, tariff
+        # W3-3: unpaid absences / incapacity in the period (LSS Art. 31), applied per branch
+        self.absence_days, self.incapacity_days = absence_days, incapacity_days
 
     @property
     def contribution_days(self) -> Decimal:
@@ -91,11 +94,13 @@ def resolve(ctx, pay_content: Content) -> Period:
     days_paid = _days(facts.get("days_paid"), "days paid")
     if days_paid <= 0:
         raise MXBlock("MX_PERIOD_INVALID", "days paid must be more than zero")
-    for name in ("absence_days", "incapacity_days"):
-        if _days(facts.get(name) or 0, name) > 0:
-            raise MXBlock("MX_ABSENCE_RULES_MISSING",
-                          f"{name.replace('_', ' ')} in the period — the IMSS contribution-day rules for absences and "
-                          f"incapacity are not transcribed yet (Q6)")
+    absence = _days(facts.get("absence_days") or 0, "absence_days")
+    incapacity = _days(facts.get("incapacity_days") or 0, "incapacity_days")
+    if (absence > 0 or incapacity > 0) and _c.MX_CONTRIBUTION_DAYS_RULE is None:
+        name = "absence days" if absence > 0 else "incapacity days"
+        raise MXBlock("MX_ABSENCE_RULES_MISSING",
+                      f"{name} in the period — the IMSS contribution-day rules for absences and "
+                      f"incapacity are not transcribed yet (Q6)")
     raw = facts.get("segments")
     if not raw:
         segments = [Segment(start, end, days_paid, pay_content)]
@@ -115,4 +120,6 @@ def resolve(ctx, pay_content: Content) -> Period:
             content = (Content(seg["rate_map"], seg.get("slabs") or pay_content.slabs, f"segment {s_start.isoformat()}")
                        if seg.get("rate_map") else pay_content)
             segments.append(Segment(s_start, s_end, _days(seg.get("days"), f"segment {i + 1} days"), content))
-    return Period(start, end, days_paid, segments, tariff)
+    if absence > 0 or incapacity > 0:
+        _c.MX_CONTRIBUTION_DAYS_RULE.check(absence, incapacity, len(segments))     # W3-3
+    return Period(start, end, days_paid, segments, tariff, absence, incapacity)

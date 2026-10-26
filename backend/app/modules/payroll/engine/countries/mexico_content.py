@@ -978,6 +978,11 @@ MX_PTU_EXCLUSION_REASONS: dict = dict(_rules.PTU_EXCLUSION_REASONS)   # W1-4; re
 MX_ANNUAL_ADJUSTMENT_RULE = _rules.ANNUAL_ADJUSTMENT_RULE   # W1-4; AnnualAdjustmentRule (S24)
 MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = dict(_rules.ANNUAL_ADJUSTMENT_EXCLUSION_REASONS)   # W1-4; reason code -> exclusion reason (label, source, source_ref)
 
+# W3-3: contribution days per branch with absences / incapacity (LSS Art. 31; Ley INFONAVIT Art. 29).
+# None = absence or incapacity days BLOCK (MX_ABSENCE_RULES_MISSING). Interface: check(absence, incapacity,
+# segment_count); branch_days(branch, days, absence, incapacity) -> Decimal.
+MX_CONTRIBUTION_DAYS_RULE = _rules.CONTRIBUTION_DAYS_RULE
+
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
 # "CDMX" code its ISN pack already uses). Geography, not statutory content.

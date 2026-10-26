@@ -85,8 +85,10 @@ def test_pay_frequency_mismatch_and_unmapped_code_block(db, monkeypatch):
 
 def test_absence_blocks(db, monkeypatch):
     from app.modules.payroll import mexico_run_service
+    from app.modules.payroll.engine.countries import mexico_content as c
     from app.modules.payroll.models import PayrollAttendanceRecord
 
+    monkeypatch.setattr(c, "MX_CONTRIBUTION_DAYS_RULE", None)            # W3-3 transcribed the real rule
     w = rh.world(db, monkeypatch)
     db.add(PayrollAttendanceRecord(organization_id=w.org.id, employee_id=w.employee.id, date=date(2026, 6, 3),
                                    status="absent"))

@@ -385,3 +385,34 @@ def test_annual_difference_owed_in_full_refund_against_withholdings():
     assert rule.apply_in_run(Decimal("500"), Decimal("300"), {}) == {"withheld": Decimal("800"), "carry_forward": 0}
     assert rule.apply_in_run(Decimal("500"), Decimal("-200"), {}) == {"withheld": Decimal("300"), "carry_forward": 0}
     assert rule.apply_in_run(Decimal("500"), Decimal("-800"), {}) == {"withheld": 0, "carry_forward": Decimal("-300")}
+
+
+
+# ── W3-3: contribution days with absences and incapacity (LSS Art. 31; Ley INFONAVIT Art. 29) ──
+
+def test_lss_31_branch_days():
+    r = _r().CONTRIBUTION_DAYS_RULE
+    days = {b: r.branch_days(b, Decimal("15"), Decimal("3"), Decimal("2"))
+            for b in ("EM_FIXED_QUOTA", "EM_EXCESS", "EM_CASH", "EM_PENSIONER", "IV", "GUARDERIAS", "RETIRO", "CEAV",
+                      "RIESGOS_TRABAJO", "INFONAVIT")}
+    # sickness & maternity keep absence days, lose incapacity days
+    assert all(days[b] == 13 for b in ("EM_FIXED_QUOTA", "EM_EXCESS", "EM_CASH", "EM_PENSIONER"))
+    # retiro (and INFONAVIT) keep incapacity days, lose absence days
+    assert days["RETIRO"] == days["INFONAVIT"] == 12
+    # every other branch loses both
+    assert all(days[b] == 10 for b in ("IV", "GUARDERIAS", "CEAV", "RIESGOS_TRABAJO"))
+    assert r.branch_days("IV", Decimal("5"), Decimal("4"), Decimal("4")) == 0           # never negative
+
+
+def test_lss_31_limits_block():
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    r = _r().CONTRIBUTION_DAYS_RULE
+    r.check(Decimal("7"), Decimal("10"), 1)                                             # fewer than 8: fine
+    for args, code in (((Decimal("8"), Decimal("0"), 1), "MX_ABSENCE_ART37_NOT_MODELLED"),
+                       ((Decimal("1"), Decimal("0"), 2), "MX_ABSENCE_SEGMENT_UNKNOWN"),
+                       ((Decimal("0"), Decimal("1"), 2), "MX_ABSENCE_SEGMENT_UNKNOWN")):
+        with pytest.raises(MXBlock) as exc:
+            r.check(*args)
+        assert _codes(exc) == [code]
+    r.check(Decimal("0"), Decimal("0"), 2)                                              # nothing to place

@@ -31,6 +31,7 @@ from decimal import Decimal
 from ..jurisdictions.mexico import (ceav, classification, entitlements, imss, infonavit, isn, isr, labor, preflight,
                                     sbc, special_pay, subsidy, termination, trace)
 from ..jurisdictions.mexico import annual_adjustment
+from . import mexico_content as _content        # W3-3: the contribution-days rule
 from ..jurisdictions.mexico.errors import MexicoCalculationBlockedError, MXBlock  # noqa: F401  (re-exported)
 
 __all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoCalculationBlockedError", "MXBlock", "calculate"]
@@ -135,6 +136,12 @@ def _calculate(ctx) -> dict:
     base = sbc.compute(daily_salary=daily_salary, policy=policy, seniority_date=preflight.fact(profile, "mx_seniority_date"),
                        on=on, lines=lines, accumulator=ctx.mx_variable_accumulator, segments=period.segments, zone=zone)
     segs = base["segments"]
+    if period.absence_days > 0 or period.incapacity_days > 0:                 # W3-3: LSS Art. 31 per branch
+        rule = _content.MX_CONTRIBUTION_DAYS_RULE
+        for seg in segs:
+            seg["branch_days"] = {b: rule.branch_days(b, seg["days"], period.absence_days, period.incapacity_days)
+                                  for b in ("EM_FIXED_QUOTA", "EM_EXCESS", "EM_CASH", "EM_PENSIONER", "IV",
+                                            "GUARDERIAS", "RETIRO", "CEAV", "RIESGOS_TRABAJO", "INFONAVIT")}
     premium = imss.risk_premium_rate(ctx.mx_risk_premium, ctx.mx_registration, segs)
     social = imss.contributions(segs, premium)
     ceav_er = ceav.employer(segs, zone)

@@ -760,3 +760,57 @@ class Lisr97AnnualAdjustmentRule:
 
 PTU_RULE = LftPtuRule()
 ANNUAL_ADJUSTMENT_RULE = Lisr97AnnualAdjustmentRule()
+
+
+# ═══ W3-3: IMSS / INFONAVIT contribution days with absences and incapacity ═══
+_S10 = "S10/S10_IMSS_LSS.pdf"
+_S27 = "S27/S27_DIP_LIFNVT.pdf"
+_C_31 = (_S10, "Art. 31 I: 'Si las ausencias del trabajador son por periodos menores de ocho dias consecutivos o "
+               "interrumpidos, se cotizara y pagara por dichos periodos unicamente en el seguro de enfermedades y "
+               "maternidad'; 'Si las ausencias del trabajador son por periodos de ocho dias consecutivos o mayores, el "
+               "patron quedara liberado del pago de las cuotas obrero patronales, siempre y cuando proceda en los "
+               "terminos del articulo 37'; IV: 'Tratandose de ausencias amparadas por incapacidades medicas expedidas "
+               "por el Instituto no sera obligatorio cubrir las cuotas obrero patronales, excepto por lo que se refiere "
+               "al ramo de retiro', PDF p. 12")
+_C_29_LAST = (_S27, "Art. 29, last paragraph: 'se suspendera cuando no se paguen salarios por ausencias en los terminos "
+                    "de la Ley del Seguro Social'; 'Tratandose de incapacidades expedidas por el Instituto Mexicano del "
+                    "Seguro Social, subsistira la obligacion del pago de aportaciones', PDF p. 17")
+
+EM_BRANCHES = ("EM_FIXED_QUOTA", "EM_EXCESS", "EM_CASH", "EM_PENSIONER")    # seguro de enfermedades y maternidad
+ABSENCE_MIN_RELEASE_DAYS = Decimal("8")                                       # Art. 31 I "ocho días"
+
+
+class Lss31ContributionDays:
+    """Days each branch contributes in a period with unpaid absences and
+    IMSS-certified incapacity (LSS Art. 31; Ley INFONAVIT Art. 29).
+
+      absences (fewer than 8):  only sickness-and-maternity keeps those days;
+      incapacity:               only retiro (and INFONAVIT) keep those days."""
+
+    citations = (_C_31, _C_29_LAST)
+    source, source_ref = citations[0]
+
+    def check(self, absence_days, incapacity_days, segment_count: int) -> None:
+        absence, incapacity = _d(absence_days, "absence days"), _d(incapacity_days, "incapacity days")
+        if absence >= ABSENCE_MIN_RELEASE_DAYS:
+            raise _blocked("MX_ABSENCE_ART37_NOT_MODELLED",
+                           "eight or more days of absence: LSS Art. 31 I releases the employer only through the Art. 37 "
+                           "procedure, which is not modelled")
+        if (absence > 0 or incapacity > 0) and segment_count > 1:
+            raise _blocked("MX_ABSENCE_SEGMENT_UNKNOWN",
+                           "absences or incapacity in a period with more than one contribution segment — the absence "
+                           "dates are not known, so the segment they fall in cannot be chosen")
+
+    def branch_days(self, branch: str, days, absence_days, incapacity_days) -> Decimal:
+        days, absence, incapacity = (_d(days, "segment days"), _d(absence_days, "absence days"),
+                                     _d(incapacity_days, "incapacity days"))
+        if branch in EM_BRANCHES:
+            out = days - incapacity
+        elif branch in ("RETIRO", "INFONAVIT"):
+            out = days - absence
+        else:                                   # IV, GUARDERIAS, CEAV, RIESGOS_TRABAJO
+            out = days - absence - incapacity
+        return max(out, _ZERO)
+
+
+CONTRIBUTION_DAYS_RULE = Lss31ContributionDays()

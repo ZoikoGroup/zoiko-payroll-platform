@@ -603,3 +603,23 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
 - **Interface:** the per-case amount `mx_rest_day_work_multiplier`; a `REST_DAY_WORK` line from approved hours (`rest_days_worked`), with earning code `MX_REST_DAY_WORK`, classified by the employer like overtime. Absent, the engine still blocks with `MX_REST_DAY_CONTENT_MISSING`. A supplied `REST_DAY_WORK` line is refused (approved hours only).
 - **Transcribed:** **2**, i.e. two daily salaries per rest day worked, on top of the rest day's own salary, which ordinary pay already includes. A reading (D-04): "salario doble" is read as two salaries in addition, not double in total.
 - **Blind second transcription:** pending (all W3 rows together).
+
+### TL-IMSS-4 · Contribution days with absences and incapacity (gap register A15, B17)
+
+- **Sources:**
+  - `S10/S10_IMSS_LSS.pdf` Art. 31 (PDF p. 12). I: "Si las ausencias del trabajador son por períodos menores de ocho días consecutivos o interrumpidos, se cotizará y pagará por dichos períodos únicamente en el seguro de enfermedades y maternidad"; ausencias of eight days or more release the employer only "en los términos del artículo 37". IV: incapacity certified by the IMSS: no quotas "excepto por lo que se refiere al ramo de retiro".
+  - `S27/S27_DIP_LIFNVT.pdf` Art. 29, last paragraph (PDF p. 17): INFONAVIT contributions are suspended "cuando no se paguen salarios por ausencias en los términos de la Ley del Seguro Social"; during IMSS incapacity "subsistirá la obligación del pago de aportaciones".
+- **Interface:** `MX_CONTRIBUTION_DAYS_RULE` with `check(absence, incapacity, segment_count)` and `branch_days(branch, days, absence, incapacity)`. Absent, absences and incapacity still block (`MX_ABSENCE_RULES_MISSING`).
+- **Transcribed rule (per contribution segment):**
+
+  | Branch | Days |
+  |---|---|
+  | Sickness and maternity (E&M fixed quota, excess, cash benefits, pensioner medical) | days − incapacity |
+  | Retiro; INFONAVIT employer | days − absences |
+  | Invalidez y Vida, Guarderías, CEAV (both sides), work risk | days − absences − incapacity |
+
+  It **blocks** (`MX_ABSENCE_ART37_NOT_MODELLED`) for 8 or more absence days, and (`MX_ABSENCE_SEGMENT_UNKNOWN`) when the period has more than one contribution segment (the attendance rows give counts, not dates).
+- **Readings (D-04):**
+  - "fewer than eight days … consecutive or interrupted" is counted per period;
+  - an attendance row of sick leave is treated as IMSS-certified incapacity. The attendance rows do not hold the certificate: confirm that sick leave is recorded only with one.
+- **Blind second transcription:** pending (all W3 rows together).

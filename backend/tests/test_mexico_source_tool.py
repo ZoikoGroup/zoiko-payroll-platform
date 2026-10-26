@@ -111,7 +111,7 @@ def _empty_content(monkeypatch):
                   "MX_PTU_EXCLUSION_REASONS", "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS", "MX_OFFICIAL_HOLIDAYS"):
         monkeypatch.setattr(c, table, {})
     for rule in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",
-                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE"):
+                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE", "MX_CONTRIBUTION_DAYS_RULE"):
         monkeypatch.setattr(c, rule, None)
     monkeypatch.setattr(c, "MX_FILING_CALENDAR", ())
     monkeypatch.setattr(c, "MX_ISR_ANNUAL_TARIFFS", {})                  # W1-4

@@ -337,3 +337,19 @@ Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch 
 - **Transcribed** from LFT Arts. 73 and 75: **2** extra daily salaries per rest day worked (TL-LFT-2; a D-04 reading).
 - **Tests:** the engine tests (amount, missing code, none worked) and the content test. All Mexico tests: 982 passed. `compare`: 544 checks, 0 misses.
 - **Production effect:** none reachable. The engine module changes are Mexico-only.
+
+---
+
+## W3-3 — IMSS / INFONAVIT contribution days with absences and incapacity (gap register A15)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `MX_CONTRIBUTION_DAYS_RULE` (a rule object). The period carries the absence and incapacity counts; the orchestrator sets per-branch days on the segment; `imss`, `ceav` and `infonavit` read a branch's days when set and the segment's days otherwise. Absent, the engine blocks exactly as before.
+- **Transcribed** from LSS Art. 31 and Ley INFONAVIT Art. 29 (TL-IMSS-4). Still blocked: 8 or more absence days (the Art. 37 procedure) and absences in a multi-segment period.
+- **`compare`** now includes the rule: 549 checks, 0 misses.
+- **Tests:**
+  - rule tests: branch days, never negative, the three blocks;
+  - period tests: resolves with fewer than 8 days, blocks at 8;
+  - the old "absence blocks" tests now empty the rule themselves.
+  - All Mexico tests: 985 passed.
+- **Production effect:** none reachable. Mexico engine modules only.

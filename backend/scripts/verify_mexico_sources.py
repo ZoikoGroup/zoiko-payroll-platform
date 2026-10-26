@@ -482,7 +482,7 @@ def _rule_citations(c) -> list:
         for key, obj in sorted(getattr(c, name, {}).items()):
             out += cites(f"{name} {key}", obj)
     for name in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",
-                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE"):
+                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE", "MX_CONTRIBUTION_DAYS_RULE"):
         obj = getattr(c, name, None)
         if obj is not None:
             out += cites(name, obj)
