@@ -389,3 +389,19 @@ Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch 
 - **Production effect:** none reachable. Mexico modules only (the run service's input hash gains the workday type).
 
 **W3 summary:** every A15 seam has a content interface; 6 are transcribed or partly transcribed, 4 wait for D-17, D-18, D-19 or a source. A16 is done.
+
+---
+
+## End of W3 — full backend suite
+
+Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 975 passed, 16 skipped, **4 failed**: the 3 known local-only route-registry tests, and `test_communications_dispatch.py::test_deactivate_organization_response_precedes_email_send`. That test is the **intermittent** one recorded in Batch 2: run alone afterwards it passed 3 of 3, and no Mexico change touches communications |
+| 1 | 2,488 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,270 passed, 32 skipped |
+| 3 | 1,151 passed, 67 skipped |
+| 4 | 1,621 passed, 3 skipped |
+
+**Total: 7,505 passed, 120 skipped, 2 xfailed.** No other jurisdiction's behaviour changed.
