@@ -317,7 +317,8 @@ def _hours(db: Session, employee_id: int, start: date, end: date):
     if not rows:
         return None, []
     overtime = sum((_dec(r.overtime_hours) for r in rows), _ZERO)
-    hours = {"weeks": [{"week_start": r.week_start, "overtime_hours": _dec(r.overtime_hours)} for r in rows],
+    hours = {"weeks": [{"week_start": r.week_start, "overtime_hours": _dec(r.overtime_hours),
+                        "overtime_dates": list(r.overtime_dates or [])} for r in rows],
              "sundays_worked": sum(int(r.sundays_worked or 0) for r in rows),
              "holiday_days": sum(int(r.rest_days_worked or 0) for r in rows),
              "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE}
@@ -1186,6 +1187,7 @@ def _hours_view(r) -> dict:
     return {"id": r.id, "employeeId": r.employee_id, "weekStart": r.week_start.isoformat(),
             "ordinaryHours": str(r.ordinary_hours), "overtimeHours": str(r.overtime_hours),
             "sundaysWorked": r.sundays_worked, "restDaysWorked": r.rest_days_worked,
+            "overtimeDates": list(r.overtime_dates or []),
             "evidenceDocumentId": r.evidence_document_id, "status": r.status, "recordedById": r.recorded_by_id,
             "approvedById": r.approved_by_id, "approvedAt": r.approved_at.isoformat() if r.approved_at else None}
 
@@ -1206,10 +1208,23 @@ def record_hours(db: Session, org_id: int, employee_id: int, data: dict, actor_i
         if v < 0:
             raise BadRequestException(f"{key} must be zero or more")
         vals[key] = v
+    # Phase 11c: the dates inside the week on which the overtime was worked
+    # (the CFDI HorasExtra node needs them, S4 p. 51). Optional — without
+    # them the receipt of a payslip with overtime is refused.
+    dates = data.get("overtime_dates") or []
+    if dates:
+        if vals["overtime_hours"] <= 0:
+            raise BadRequestException("overtimeDates are given only with overtime hours")
+        if any(not isinstance(d, date) for d in dates):
+            raise BadRequestException("overtimeDates must be ISO dates")
+        if len(set(dates)) != len(dates):
+            raise BadRequestException("overtimeDates must not repeat a date")
+        if any(not (week <= d <= week + timedelta(days=6)) for d in dates):
+            raise BadRequestException("every overtime date must fall inside the recorded week")
     row = H(organization_id=org_id, employee_id=employee_id, week_start=week, ordinary_hours=vals["ordinary_hours"],
             overtime_hours=vals["overtime_hours"], sundays_worked=int(vals["sundays_worked"]),
             rest_days_worked=int(vals["rest_days_worked"]), evidence_document_id=data["evidence_document_id"],
-            status="DRAFT", recorded_by_id=actor_id)
+            overtime_dates=sorted(d.isoformat() for d in dates) or None, status="DRAFT", recorded_by_id=actor_id)
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="create", entity_type="mx_approved_hours", entity_id=row.id,

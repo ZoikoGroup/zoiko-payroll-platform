@@ -105,6 +105,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                 "created_by_id"} == columns["payroll_br_employer_profiles"]
         assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
                 "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
+        tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
+        assert tables == set() and columns == {"payroll_mx_approved_hours": {"overtime_dates"}}   # Mexico m18
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

@@ -112,6 +112,7 @@ def _iso(book, value):
 
 
 NORMALISED = []               # (catalog, workbook spelling, XSD spelling) — recorded in the manifest
+DUPLICATE_HEADERS = []        # (sheet, header, occurrence) — a header SAT repeats; recorded in the manifest
 
 
 def _canonical(code, enum: list, catalog: str):
@@ -166,12 +167,20 @@ def _columns(sheet, header: int) -> tuple:
     top = [str(v).strip() for v in sheet.row_values(header)]
     sub = [str(v).strip() for v in sheet.row_values(header + 1)] if header + 1 < sheet.nrows else []
     has_sub = bool(sub) and not sub[0] and any(sub)
-    names, last = [], ""
+    names, last, seen = [], "", {}
     for j in range(max(len(top), len(sub))):
         t = top[j] if j < len(top) else ""
         last = t or last
         s = sub[j] if has_sub and j < len(sub) else ""
-        names.append(f"{last}/{s}" if s else t)
+        name = f"{last}/{s}" if s else t
+        if name:
+            # A header SAT repeats keeps every column: the repeat gets a
+            # positional suffix ("#2") instead of overwriting the first.
+            seen[name] = seen.get(name, 0) + 1
+            if seen[name] > 1:
+                DUPLICATE_HEADERS.append([sheet.name, name, seen[name]])
+                name = f"{name} #{seen[name]}"
+        names.append(name)
     return names, (header + 2 if has_sub else header + 1)
 
 
@@ -258,6 +267,7 @@ def build(set_id: str, catalog_release: str) -> Path:
         "schemaLocations": {_target_namespace(out / main): recorded[XSD_FILES[main]]["url"]
                             for main in ("cfdv40.xsd", "nomina12.xsd")},
         "caseNormalised": sorted(NORMALISED),
+        "duplicateHeaders": sorted(DUPLICATE_HEADERS),
     }
     # The two versions are read from the schemas themselves, never assumed.
     import re

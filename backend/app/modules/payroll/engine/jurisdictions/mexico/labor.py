@@ -85,7 +85,9 @@ def hour_lines(content, hours, policy: dict, daily_salary: Decimal) -> dict:
             first = min(h, tier_max)
             amount = rate * (first * double + (h - first) * triple)
             weeks.append({"week": i + 1, "hours": h, "first_tier_hours": first, "second_tier_hours": h - first,
-                          "amount": amount})
+                          "first_tier_amount": rate * first * double, "amount": amount,
+                          # Phase 11c: the approved dates the overtime was worked on (CFDI HorasExtra)
+                          "dates": list((hours.get("weeks") or [])[i].get("overtime_dates") or [])})
             total += amount
         out.append({"code": code, "kind": OVERTIME, "amount": total})
     sunday = None

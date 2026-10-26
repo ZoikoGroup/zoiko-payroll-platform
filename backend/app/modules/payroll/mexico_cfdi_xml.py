@@ -59,9 +59,9 @@ FIXED = {
 SEPARATION_PERCEPTIONS = ("022", "023", "025")          # S4 pp. 43–44: TotalSeparacionIndemnizacion
 RETIREMENT_PERCEPTIONS = ("039", "044")                 # S4 pp. 44–45: TotalJubilacionPensionRetiro
 # Perceptions that need a detail node the engine cannot fill yet (S4 pp. 47–48).
-PERCEPTION_DETAIL = {"019": "HorasExtra — the days on which overtime was worked (S4 pp. 48, 51); the engine "
-                            "records overtime hours per week only",
-                     "014": "Incapacidades (S4 p. 48)", "039": "JubilacionPensionRetiro (S4 pp. 47–48)",
+OVERTIME_PERCEPTION = "019"                             # S4 pp. 48, 51–53: needs the HorasExtra node
+OVERTIME_TYPE_DOUBLE = "Dobles"                         # S28 c_TipoHoras description of double-rate hours (S4 p. 52)
+PERCEPTION_DETAIL = {"014": "Incapacidades (S4 p. 48)", "039": "JubilacionPensionRetiro (S4 pp. 47–48)",
                      "044": "JubilacionPensionRetiro (S4 pp. 47–48)", "045": "AccionesOTitulos (S4 p. 48)"}
 ISR_DEDUCTION = "002"                                   # S4 p. 60: TotalImpuestosRetenidos
 OTHER_PAYMENT_DETAIL = {"002": "SubsidioAlEmpleo (S4 pp. 67, 70)", "004": "CompensacionSaldosAFavor (S4 p. 67)"}
@@ -192,6 +192,15 @@ def build(doc: dict) -> bytes:
         code_in("c_TipoPercepcion", code, f"perception {line.get('key')}")
         if code in PERCEPTION_DETAIL:
             p.add("R-DETAIL-NODE", f"perception {code} needs {PERCEPTION_DETAIL[code]}")
+        if code == OVERTIME_PERCEPTION:
+            for node in line.get("overtime") or []:
+                code_in("c_TipoHoras", node.get("type"), "TipoHoras")
+                if int(node.get("days") or 0) < 1 or int(node.get("hours") or 0) < 1:
+                    p.add("R-DETAIL-NODE", "HorasExtra needs at least one day and one hour")
+            if not line.get("overtime"):
+                p.add("R-DETAIL-NODE", f"perception {code} needs HorasExtra — "
+                      + (line.get("overtimeRefusal") or "the dates on which the overtime was worked are not "
+                                                         "recorded on the approved hours"))
         if code in SEPARATION_PERCEPTIONS:
             p.add("R-SEPARATION", "a separation perception needs TipoRegimen 13 and the SeparacionIndemnizacion node "
                                   "(last ordinary monthly salary, accumulable / non-accumulable income — not provided by "
@@ -364,9 +373,13 @@ def build(doc: dict) -> bytes:
                     ("TotalJubilacionPensionRetiro", fmt(retirement) if retirement else None),
                     ("TotalGravado", fmt(taxed_total)), ("TotalExento", fmt(exempt_total))])
         for code, line, taxed, exempt in perceptions:
-            attrs(etree.SubElement(pe, N("Percepcion")),
-                  [("TipoPercepcion", code), ("Clave", line["key"]), ("Concepto", line["concept"]),
-                   ("ImporteGravado", fmt(taxed)), ("ImporteExento", fmt(exempt))])
+            per = attrs(etree.SubElement(pe, N("Percepcion")),
+                        [("TipoPercepcion", code), ("Clave", line["key"]), ("Concepto", line["concept"]),
+                         ("ImporteGravado", fmt(taxed)), ("ImporteExento", fmt(exempt))])
+            for node in line.get("overtime") or []:                       # S4 pp. 51–53
+                attrs(etree.SubElement(per, N("HorasExtra")),
+                      [("Dias", int(node["days"])), ("TipoHoras", node["type"]), ("HorasExtra", int(node["hours"])),
+                       ("ImportePagado", fmt(money(node["amount"], "overtime amount")))])
     if deductions:
         de = attrs(etree.SubElement(nomina, N("Deducciones")),
                    [("TotalOtrasDeducciones", fmt(other_deductions) if other_deductions else None),

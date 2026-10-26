@@ -143,6 +143,7 @@ def test_every_fixed_value_cites_s4_and_is_a_valid_code_of_its_catalog():
     assert all("Jubilaciones" in descriptions["c_TipoPercepcion"][c] for c in X.RETIREMENT_PERCEPTIONS)
     assert descriptions["c_TipoDeduccion"][X.ISR_DEDUCTION] == "ISR"
     assert set(X.PERCEPTION_DETAIL) <= set(descriptions["c_TipoPercepcion"])
+    assert descriptions["c_TipoPercepcion"][X.OVERTIME_PERCEPTION] == "Horas extra"
     assert set(X.OTHER_PAYMENT_DETAIL) <= set(descriptions["c_TipoOtroPago"])
     assert set(X.CONTRACT_WITH_EMPLOYMENT) | {"09"} <= set(descriptions["c_TipoContrato"])
     assert set(X.REGIMES_WITH_EMPLOYMENT) <= set(descriptions["c_TipoRegimen"])
@@ -153,7 +154,8 @@ def test_no_sat_literal_outside_the_cited_tables():
     """Every code-shaped string in the builder and the input assembly sits in
     one of the tables that cite S4 (or is not a SAT value at all)."""
     tables = {"FIXED", "SEPARATION_PERCEPTIONS", "RETIREMENT_PERCEPTIONS", "PERCEPTION_DETAIL", "ISR_DEDUCTION",
-              "OTHER_PAYMENT_DETAIL", "CONTRACT_WITH_EMPLOYMENT", "REGIMES_WITH_EMPLOYMENT", "_SOURCES"}
+              "OTHER_PAYMENT_DETAIL", "CONTRACT_WITH_EMPLOYMENT", "REGIMES_WITH_EMPLOYMENT", "_SOURCES",
+              "OVERTIME_PERCEPTION", "OVERTIME_TYPE_DOUBLE"}
     code_like = __import__("re").compile(r"^(\d{2,8}|[A-Z]{1,4}\d{0,2}|CN01|PUE|MXN|ACT)$")
     allowed = {"MX", "O", "E", "N", "I", "Sí", "No", "X", "ISR", "IMSS", "MEX", "PTU", "SAT", "CSD", "UUID", "RFC",
                "CURP", "NSS", "SDI", "SBC", "DB", "PAC"}
@@ -362,18 +364,48 @@ def test_unmapped_amounts_and_missing_sources_refuse_by_name(db, monkeypatch, tm
     assert exc.value.key == "MX_CFDI_INPUT_MISSING" and "G1 decision" in str(exc.value)
 
 
-def test_a_seasonal_place_of_issue_is_refused():
+# 2026: the 2nd Sunday of March is the 8th, the 1st Sunday of November the 1st.
+@pytest.mark.parametrize("postal, utc, local", [
+    # Tiempo del Noroeste (BCN 21000): winter -8, summer -7 — S30 "Marzo / Segundo domingo / 02:00", "Noviembre / Primer domingo / 02:00"
+    ("21000", datetime(2026, 3, 8, 9, 59, 59), datetime(2026, 3, 8, 1, 59, 59)),     # last second of winter time
+    ("21000", datetime(2026, 3, 8, 10, 0, 0), datetime(2026, 3, 8, 3, 0, 0)),        # 02:00 standard -> 03:00 summer
+    ("21000", datetime(2026, 11, 1, 8, 59, 59), datetime(2026, 11, 1, 1, 59, 59)),   # last second of summer time
+    ("21000", datetime(2026, 11, 1, 9, 0, 0), datetime(2026, 11, 1, 1, 0, 0)),       # 02:00 summer -> 01:00 winter
+    # Tiempo del Centro en Frontera (COA 26000): winter -6, summer -5
+    ("26000", datetime(2026, 3, 8, 7, 59, 59), datetime(2026, 3, 8, 1, 59, 59)),
+    ("26000", datetime(2026, 3, 8, 8, 0, 0), datetime(2026, 3, 8, 3, 0, 0)),
+    ("26000", datetime(2026, 11, 1, 6, 59, 59), datetime(2026, 11, 1, 1, 59, 59)),
+    ("26000", datetime(2026, 11, 1, 7, 0, 0), datetime(2026, 11, 1, 1, 0, 0)),
+    ("26000", datetime(2026, 7, 1, 12, 0, 0), datetime(2026, 7, 1, 7, 0, 0)),        # mid-summer
+    ("26000", datetime(2026, 1, 15, 12, 0, 0), datetime(2026, 1, 15, 6, 0, 0)),      # mid-winter
+    # Tiempo del Centro (CMX 06600): -6 all year
+    ("06600", datetime(2026, 7, 1, 12, 0, 0), datetime(2026, 7, 1, 6, 0, 0)),
+])
+def test_fecha_follows_the_postal_codes_own_daylight_saving_rule(postal, utc, local):
+    from app.modules.payroll import mexico_cfdi_input as I
+
+    assert I.local_issue_time(SET, postal, utc.replace(tzinfo=timezone.utc)) == local
+
+
+def test_the_catalog_carries_the_rule_and_an_inconsistent_row_is_refused():
+    """S30's header repeats 'Día_Inicio_Horario_…' for the hour column; the set
+    keeps it as '… #2' (manifest duplicateHeaders). The CHH 'Centro en Frontera'
+    rows give summer -7 / winter -6 — summer behind winter — and are refused."""
     from app.modules.payroll import mexico_cfdi_input as I
     from app.modules.payroll import mexico_cfdi_schema as S
     from app.modules.payroll.engine.countries.mexico import MXBlock
 
-    tz = "Referencias del Huso Horario/Diferencia_Horaria_"
-    seasonal = next(e[0] for e in S.catalogs(SET)["c_CodigoPostal"]["entries"]
-                    if (e[4] or {}).get(tz + "Invierno") != (e[4] or {}).get(tz + "Verano"))
+    tz = "Referencias del Huso Horario/"
+    rows = {e[0]: e[4] for e in S.catalogs(SET)["c_CodigoPostal"]["entries"]}
+    assert rows["21000"][tz + "Día_Inicio_Horario_Verano"] == "Segundo domingo"
+    assert rows["21000"][tz + "Día_Inicio_Horario_Verano #2"] == "02:00"
+    assert ["c_CodigoPostal_Parte_1", tz + "Día_Inicio_Horario_Verano", 2] in S.manifest(SET)["duplicateHeaders"]
+    inconsistent = [code for code, a in rows.items() if a.get(tz + "Mes_Inicio_Horario_Verano")
+                    and a[tz + "Diferencia_Horaria_Verano"] != a[tz + "Diferencia_Horaria_Invierno"] + 1]
+    assert len(inconsistent) == 830 and {rows[c]["c_Estado"] for c in inconsistent} == {"CHH"}
     with pytest.raises(MXBlock) as exc:
-        I.local_issue_time(SET, seasonal, datetime(2026, 7, 1, 12, tzinfo=timezone.utc))
-    assert exc.value.key == "MX_CFDI_TIMEZONE_UNSUPPORTED"
-    assert I.local_issue_time(SET, "06600", datetime(2026, 7, 1, 12, tzinfo=timezone.utc)) == datetime(2026, 7, 1, 6)
+        I.local_issue_time(SET, inconsistent[0], datetime(2026, 7, 1, 12, tzinfo=timezone.utc))
+    assert exc.value.key == "MX_CFDI_TIMEZONE_RULE_INVALID"
 
 
 def test_an_invalid_curp_appears_nowhere(db, monkeypatch, tmp_path, caplog, capsys):

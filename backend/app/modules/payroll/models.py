@@ -10080,6 +10080,10 @@ class PayrollMxApprovedHours(Base):
     overtime_hours       = Column(Numeric(6, 2), nullable=False, default=0)
     sundays_worked       = Column(Integer, nullable=False, default=0)
     rest_days_worked     = Column(Integer, nullable=False, default=0)
+    # Phase 11c (migration mx_overtime_dates_m18): the ISO dates inside the week
+    # on which the overtime was worked — the CFDI HorasExtra "Dias" (S4 p. 51).
+    # NULL on rows recorded before; a receipt with overtime then stays refused.
+    overtime_dates       = Column(JSON, nullable=True)
     evidence_document_id = Column(Integer, ForeignKey("payroll_compliance_documents.id", ondelete="SET NULL"), nullable=True)
     status               = Column(String(12), nullable=False, default="DRAFT")   # DRAFT / APPROVED / SUPERSEDED
     recorded_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
