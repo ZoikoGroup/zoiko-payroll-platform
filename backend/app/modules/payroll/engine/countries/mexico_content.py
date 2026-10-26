@@ -866,8 +866,8 @@ MX_SPECIAL_PAY_ISN_INCLUSION: dict = {   # (state, concept) -> (included: bool, 
 # engine/jurisdictions/mexico/termination.py. EMPTY: no termination can be
 # recorded (MX_TERMINATION_RULE_MISSING) and no finiquito calculated
 # (MX_FINIQUITO_RULE_MISSING); an operator never chooses a tax treatment (MX-057).
-MX_TERMINATION_REASONS: dict = {}     # reason code -> TerminationReason (S26)
-MX_FINIQUITO_RULE = None              # FiniquitoRule (S26 + S24 / S25)
+MX_TERMINATION_REASONS: dict = dict(_rules.TERMINATION_REASONS)   # W1-3b; reason code -> TerminationReason (S26)
+MX_FINIQUITO_RULE = _rules.FINIQUITO_RULE   # W1-3b; FiniquitoRule (S26 + S24 / S25)
 
 # Phase 9d (plan 9d D2-D8): PTU. The employer enters the distributable amount
 # (never derived, MX-054); the RULE OBJECT decides the split, which days and

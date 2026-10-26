@@ -134,3 +134,44 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 
 **Gap register:** B12 narrowed (special-pay rules transcribed; D-07, D-08, D-09 open). New A16.
 
+
+---
+
+## W1-3b — Termination reasons and the finiquito rule (gap register B14)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **Termination-reason catalog (7 LFT reasons) and the finiquito rule** in `mexico_rules.py`, wired into `MX_TERMINATION_REASONS` and `MX_FINIQUITO_RULE` (log TL-TER-1, TL-TER-2):
+  - Arts. 47, 48, 49–50, 51–52, 53 III, 54 and 162 III;
+  - Art. 50 I / II by contract type (c_TipoContrato 01 / 03);
+  - the seniority premium bounded by Arts. 485–486;
+  - vacation owed (Art. 79);
+  - the separation withholding rate (LISR Art. 96 ¶7, RLISR Art. 172).
+- **New decisions, each one switch that blocks with its own code:**
+  - **D-12** indemnity salary (Art. 89; the same question as C4);
+  - **D-13** part years of service;
+  - **D-07b** the Art. 486 cap unit;
+  - **D-11** reasons left out of the catalog (mutual consent, death, Art. 434).
+- **New gap A17:** special runs carry no month-to-date income, so vacation paid out at termination blocks.
+- **Finiquito facts:** they now carry the contract type and the labour policy, and the contract type is bound into the input hash.
+- **`compare`:** 501 checks, 0 misses.
+
+**Controls**
+- Blind second transcription (separate agent; S26, with S24 and S25): agreement on every amount, condition and page. Its NOT FOUND answers match D-13 and the two readings. It added four details (Art. 89 ¶2 variable pay, the Art. 486 several-areas average, the Art. 50 IV platform workers, the Art. 47 notice), all recorded.
+
+**Tests**
+- `test_mexico_rules.py`: 9 more tests (23 in all). They cover each switch, both service-year counts, the Art. 485–486 bounds under both units, every reason's components, Art. 50 I both branches, unsupported contract types, the 15-year voluntary rule, vacation owed, the separation rate and the below-salary tariff, and the vacation-payout block.
+- Termination tests: the empty-catalog tests empty the map themselves, and the real catalog is pinned.
+- All `tests/test_mexico_*.py`: **969 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Mexico in production | Dormant. Organisations would now see the 7 LFT reasons when recording a termination (Mexico organisations are behind the dormancy flag) |
+| Engine | A finiquito's components and withholding now come from the LFT / LISR. Each amount blocks until D-12, D-13, D-07b and D-09 are decided, and rounding (D-01) still blocks every amount |
+| Other jurisdictions | None |
+
+**Gap register:** B14 narrowed (catalog and rule transcribed; D-11, D-12, D-13, D-07b open). New A17.

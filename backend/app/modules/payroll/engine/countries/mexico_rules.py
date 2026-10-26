@@ -284,3 +284,264 @@ SPECIAL_PAY_RULES = {
     **{k: Art93SpecialPayRule(k, _XIII, combine_with_ordinary=False) for k in SEPARATION_CONCEPTS},
 }
 AGUINALDO_RULE = Lft87AguinaldoRule()
+
+
+# ═══ W1-3b: termination reasons and the finiquito rule (LFT; LISR Arts. 95–96) ═══
+# Further points the sources leave open (DECISIONS_PENDING), None = BLOCK:
+#   D-12  MX_INDEMNITY_SALARY_BASIS — LFT Art. 89: indemnities on the daily
+#         rate "y la parte proporcional de las prestaciones mencionadas en el
+#         artículo 84". "POLICY_INTEGRATED" = daily salary × the labour policy's
+#         integration factor (aguinaldo + vacation premium) — the same question
+#         as gap C4 (the SDI source).
+#   D-13  MX_SERVICE_YEARS_COUNT — "por cada año de servicios" (Arts. 50, 54,
+#         162): "PROPORTIONAL" (a part year counts pro rata) or "COMPLETED"
+#         (whole years only).
+#   D-07b MX_SENIORITY_PREMIUM_WAGE_REFERENCE — Arts. 485–486 bound the
+#         seniority-premium salary by the minimum wage and twice "el salario
+#         mínimo del área geográfica de aplicación": "ZONE_MIN_WAGE" or "UMA".
+MX_INDEMNITY_SALARY_BASIS = None             # D-12: "POLICY_INTEGRATED"
+MX_SERVICE_YEARS_COUNT = None                # D-13: "PROPORTIONAL" | "COMPLETED"
+MX_SENIORITY_PREMIUM_WAGE_REFERENCE = None   # D-07b: "ZONE_MIN_WAGE" | "UMA"
+INDEMNITY_SALARY_BASES = ("POLICY_INTEGRATED",)
+SERVICE_YEARS_COUNTS = ("PROPORTIONAL", "COMPLETED")
+
+# SAT c_TipoContrato (S28 / pinned set sat_2026_08): 01 "tiempo indeterminado", 03 "tiempo determinado".
+CONTRACT_INDEFINITE, CONTRACT_FIXED_TERM = "01", "03"
+SENIORITY_PREMIUM_DAYS_PER_YEAR = Decimal("12")         # LFT Art. 162 I; Art. 54
+INDEMNITY_DAYS_PER_YEAR = Decimal("20")                 # LFT Art. 50 I, II
+THREE_MONTHS_DAYS = Decimal("90")                       # Arts. 48 / 50 III "tres meses de salario" (TL-TER-1)
+ONE_MONTH_DAYS = Decimal("30")                          # Art. 54 "un mes de salario"; Art. 89 ¶3 ÷ 30
+SIX_MONTHS_DAYS = Decimal("180")                        # Art. 50 I "seis meses por el primer año"
+VOLUNTARY_MIN_YEARS = 15                                # Art. 162 III
+
+_C_47 = (_S26, "Art. 47: 'Son causas de rescision de la relacion de trabajo, sin responsabilidad para el patron', "
+               "PDF p. 15")
+_C_48 = (_S26, "Art. 48: 'que se le indemnice con el importe de tres meses de salario, a razon del que corresponda a la "
+               "fecha en que se realice el pago', PDF p. 16")
+_C_49 = (_S26, "Art. 49: 'quedara eximida de la obligacion de reinstalar a la persona trabajadora, mediante el pago de "
+               "las indemnizaciones que se determinan en el articulo 50', PDF p. 18")
+_C_50 = (_S26, "Art. 50: 'Si la relacion de trabajo fuere por tiempo determinado menor de un ano, en una cantidad igual "
+               "al importe de los salarios de la mitad del tiempo de servicios prestados'; 'seis meses por el primer ano "
+               "y de veinte dias por cada uno de los anos siguientes'; 'la indemnizacion consistira en veinte dias de "
+               "salario por cada uno de los anos de servicios prestados'; 'en el importe de tres meses de salario', "
+               "PDF p. 19")
+_C_51_52 = (_S26, "Art. 52: 'tendra derecho a que el patron lo indemnice en los terminos del articulo 50', PDF p. 20")
+_C_53 = (_S26, "Art. 53: 'La terminacion de la obra o vencimiento del termino o inversion del capital', PDF p. 20")
+_C_54 = (_S26, "Art. 54: 'tendra derecho a que se le pague un mes de salario y doce dias por cada ano de servicios, de "
+               "conformidad con lo dispuesto en el articulo 162', PDF p. 21")
+_C_162 = (_S26, "Art. 162: 'Los trabajadores de planta tienen derecho a una prima de antiguedad'; 'consistira en el "
+                "importe de doce dias de salario, por cada ano de servicios'; 'se pagara a los trabajadores que se "
+                "separen voluntariamente de su empleo, siempre que hayan cumplido quince anos de servicios, por lo "
+                "menos'; 'a los que se separen por causa justificada y a los que sean separados de su empleo, "
+                "independientemente de la justificacion o injustificacion del despido', PDF p. 52")
+_C_485 = (_S26, "Arts. 485-486: 'no podra ser inferior al salario minimo'; 'excede del doble del salario minimo del "
+                "area geografica de aplicacion a que corresponda el lugar de prestacion del trabajo, se considerara "
+                "esa cantidad como salario maximo', PDF p. 142")
+_C_89 = (_S26, "Art. 89: 'se tomara como base el salario correspondiente al dia en que nazca el derecho a la "
+               "indemnizacion, incluyendo en el la cuota diaria y la parte proporcional de las prestaciones mencionadas "
+               "en el articulo 84', PDF p. 25")
+_C_79 = (_S26, "Art. 79: 'Si la relacion de trabajo termina antes de que se cumpla el ano de servicios, el trabajador "
+               "tendra derecho a una remuneracion proporcionada al tiempo de servicios prestados', PDF p. 24")
+_C_76 = (_S26, "Art. 76: 'disfrutaran de un periodo anual de vacaciones pagadas', PDF p. 24")
+_C_96_SEP = (_S24, "Art. 96: 'una tasa que se calculara dividiendo el impuesto correspondiente al ultimo sueldo mensual "
+                   "ordinario, entre dicho sueldo'; 'Cuando los pagos por estos conceptos sean inferiores al ultimo "
+                   "sueldo mensual ordinario, la retencion se calculara aplicandoles la tarifa establecida en este "
+                   "articulo', PDF p. 131")
+_C_172 = (_S25, "Art. 172: 'disminuida por la cantidad que resulte de aplicar lo dispuesto en el articulo 93, fraccion "
+                "XIII de la Ley', PDF p. 45")
+
+
+def _whole_years(start: _dt.date, end: _dt.date) -> int:
+    return end.year - start.year - ((end.month, end.day) < (start.month, start.day))
+
+
+def service_years(seniority_date, termination_date) -> Decimal:
+    """Years of service under D-13: whole years, plus the part year pro rata
+    (days since the last anniversary ÷ days to the next one) when PROPORTIONAL."""
+    mode = MX_SERVICE_YEARS_COUNT
+    if mode is None:
+        raise _blocked("MX_SERVICE_YEARS_COUNT_UNDECIDED",
+                       "whether 'por cada año de servicios' (LFT Arts. 50, 54, 162) counts a part year is a decision "
+                       "(DECISIONS_PENDING D-13)")
+    if mode not in SERVICE_YEARS_COUNTS:
+        raise _blocked("MX_RULE_UNRECOGNISED", f"service-years count {mode!r} is not one of {SERVICE_YEARS_COUNTS}")
+    start, end = _date(seniority_date, "the seniority date"), _date(termination_date, "the termination date")
+    if end < start:
+        raise _blocked("MX_TERMINATION_FACT_MISSING", "the termination date is before the seniority date")
+    whole = _whole_years(start, end)
+    if mode == "COMPLETED":
+        return Decimal(whole)
+    last, nxt = _add_years(start, whole), _add_years(start, whole + 1)
+    return Decimal(whole) + Decimal((end - last).days) / Decimal((nxt - last).days)
+
+
+def indemnity_daily_salary(facts: dict) -> Decimal:
+    """LFT Art. 89 (D-12): the daily salary indemnities are counted in."""
+    basis = MX_INDEMNITY_SALARY_BASIS
+    if basis is None:
+        raise _blocked("MX_INDEMNITY_SALARY_UNDECIDED",
+                       "LFT Art. 89 counts indemnities on the daily rate plus the proportional Art. 84 benefits; how "
+                       "that integrated salary is built is a decision (DECISIONS_PENDING D-12, gap C4)")
+    if basis not in INDEMNITY_SALARY_BASES:
+        raise _blocked("MX_RULE_UNRECOGNISED", f"indemnity salary basis {basis!r} is not one of {INDEMNITY_SALARY_BASES}")
+    from ..jurisdictions.mexico import sbc
+
+    policy = facts.get("labor_policy")
+    if not policy:
+        raise _blocked("MX_LABOR_POLICY_MISSING", "no employer labour policy is in force on the termination date")
+    year = sbc.service_year(_date(facts.get("seniority_date"), "the seniority date"),
+                            _date(facts.get("termination_date"), "the termination date"))
+    return _d(facts.get("daily_salary"), "the daily salary") * sbc.integration_factor(policy, year)["factor"]
+
+
+def seniority_premium_daily_salary(facts: dict) -> Decimal:
+    """LFT Art. 162 II → Arts. 485–486: the daily salary, no lower than the
+    zone minimum wage, no higher than twice the reference wage (D-07b)."""
+    ref = MX_SENIORITY_PREMIUM_WAGE_REFERENCE
+    if ref is None:
+        raise _blocked("MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED",
+                       "LFT Art. 486 caps the seniority-premium salary at twice the area minimum wage; whether that "
+                       "reads as the zone minimum wage or the UMA is a decision (DECISIONS_PENDING D-07)")
+    if ref not in WAGE_REFERENCES:
+        raise _blocked("MX_RULE_UNRECOGNISED", f"seniority-premium wage reference {ref!r} is not one of {WAGE_REFERENCES}")
+    content, zone = facts.get("content"), facts.get("zone")
+    if content is None or zone not in ("GENERAL", "ZLFN"):
+        raise _blocked("MX_MIN_WAGE_ZONE_UNRESOLVED", "the worker's minimum-wage zone is not resolved")
+    floor = content.min_wage(zone)
+    cap = Decimal("2") * (content.amount("mx_uma_daily") if ref == "UMA" else floor)
+    return min(max(_d(facts.get("daily_salary"), "the daily salary"), floor), cap)
+
+
+def _contract(facts: dict) -> str:
+    code = str(facts.get("contract_type_code") or "").strip()
+    if code not in (CONTRACT_INDEFINITE, CONTRACT_FIXED_TERM):
+        raise _blocked("MX_TERMINATION_CONTRACT_UNSUPPORTED",
+                       f"contract type {code or '(none)'}: only 01 (tiempo indeterminado) and 03 (tiempo determinado) "
+                       f"have a transcribed LFT Art. 50 indemnity")
+    return code
+
+
+def _seniority_premium(facts: dict):
+    """Art. 162 I: 12 days of the Art. 485–486 salary per year of service, for
+    a worker 'de planta' — read as an indefinite contract (TL-TER-1)."""
+    if _contract(facts) != CONTRACT_INDEFINITE:
+        return None
+    years = service_years(facts.get("seniority_date"), facts.get("termination_date"))
+    return {"code": "SENIORITY_PREMIUM", "label": "Prima de antigüedad (LFT Art. 162)",
+            "kind": "SEPARATION_SENIORITY_PREMIUM",
+            "amount": SENIORITY_PREMIUM_DAYS_PER_YEAR * years * seniority_premium_daily_salary(facts)}
+
+
+def _art50_indemnity(facts: dict) -> list:
+    """Art. 50 I (fixed term) or II (indefinite), plus III (three months)."""
+    daily = indemnity_daily_salary(facts)
+    if _contract(facts) == CONTRACT_INDEFINITE:
+        years = service_years(facts.get("seniority_date"), facts.get("termination_date"))
+        by_years = INDEMNITY_DAYS_PER_YEAR * years * daily                                      # fr. II
+    else:
+        start = _date(facts.get("seniority_date"), "the seniority date")
+        end = _date(facts.get("termination_date"), "the termination date")
+        if _add_years(start, 1) > end:                                                         # fr. I, under a year
+            by_years = Decimal((end - start).days + 1) / 2 * daily
+        else:                                                                                  # fr. I, over a year
+            later = service_years(_add_years(start, 1), end)
+            by_years = (SIX_MONTHS_DAYS + INDEMNITY_DAYS_PER_YEAR * later) * daily
+    return [{"code": "INDEMNITY_ART50_YEARS", "label": "Indemnización por años de servicio (LFT Art. 50 I-II)",
+             "kind": "SEPARATION_INDEMNITY", "amount": by_years},
+            {"code": "INDEMNITY_3_MONTHS", "label": "Indemnización de tres meses (LFT Art. 50 III)",
+             "kind": "SEPARATION_INDEMNITY", "amount": THREE_MONTHS_DAYS * daily}]
+
+
+def _three_months(facts: dict) -> dict:
+    return {"code": "INDEMNITY_3_MONTHS", "label": "Indemnización de tres meses (LFT Art. 48)",
+            "kind": "SEPARATION_INDEMNITY", "amount": THREE_MONTHS_DAYS * indemnity_daily_salary(facts)}
+
+
+def _one_month(facts: dict) -> dict:
+    return {"code": "ONE_MONTH_ART54", "label": "Un mes de salario (LFT Art. 54)", "kind": "SEPARATION_PAYMENT",
+            "amount": ONE_MONTH_DAYS * indemnity_daily_salary(facts)}
+
+
+def _voluntary(facts: dict) -> list:
+    start = _date(facts.get("seniority_date"), "the seniority date")
+    end = _date(facts.get("termination_date"), "the termination date")
+    return [_seniority_premium(facts)] if _whole_years(start, end) >= VOLUNTARY_MIN_YEARS else []
+
+
+class LftTerminationReason:
+    def __init__(self, code: str, label: str, citations: tuple, components):
+        self.code, self.label, self.citations = code, label, citations
+        self.source, self.source_ref = citations[0]
+        self._components = components
+
+    def separation_components(self, facts) -> list:
+        return [c for c in self._components(facts) if c]
+
+
+TERMINATION_REASONS = {r.code: r for r in (
+    LftTerminationReason("LFT_47_RESCISSION_BY_EMPLOYER", "Rescisión por el patrón con causa (LFT Art. 47)",
+                         (_C_47, _C_162, _C_485), lambda f: [_seniority_premium(f)]),
+    LftTerminationReason("LFT_48_DISMISSAL_INDEMNIFIED", "Despido indemnizado con tres meses (LFT Art. 48)",
+                         (_C_48, _C_89, _C_162, _C_485), lambda f: [_three_months(f), _seniority_premium(f)]),
+    LftTerminationReason("LFT_49_NO_REINSTATEMENT", "Patrón eximido de reinstalar (LFT Arts. 49-50)",
+                         (_C_49, _C_50, _C_89, _C_162, _C_485), lambda f: _art50_indemnity(f) + [_seniority_premium(f)]),
+    LftTerminationReason("LFT_51_RESCISSION_BY_WORKER", "Rescisión por el trabajador (LFT Arts. 51-52)",
+                         (_C_51_52, _C_50, _C_89, _C_162, _C_485),
+                         lambda f: _art50_indemnity(f) + [_seniority_premium(f)]),
+    LftTerminationReason("LFT_53_III_END_OF_TERM", "Terminación de la obra o vencimiento del término (LFT Art. 53 III)",
+                         (_C_53,), lambda f: []),
+    LftTerminationReason("LFT_54_INCAPACITY", "Incapacidad por riesgo no profesional (LFT Arts. 53 IV, 54)",
+                         (_C_54, _C_89, _C_162, _C_485), lambda f: [_one_month(f), _seniority_premium(f)]),
+    LftTerminationReason("LFT_162_VOLUNTARY_SEPARATION", "Separación voluntaria (LFT Art. 162 III)",
+                         (_C_162, _C_485), _voluntary),
+)}
+
+
+class FiniquitoRule:
+    """Vacation owed at termination (LFT Arts. 76, 79) and the finiquito's
+    withholding (LISR Arts. 95–96, RLISR Arts. 172, 174)."""
+
+    citations = (_C_79, _C_76, _C_96_SEP, _C_172, _C_174)
+    source, source_ref = citations[0]
+
+    def vacation_days_owed(self, years, termination_date) -> dict:
+        """Each completed service year: its days not yet taken or paid out
+        (TL-TER-2); the year the termination falls in: its days in proportion
+        to the time served in it (Art. 79 ¶2)."""
+        out = {}
+        for y in years:
+            balance = (_d(y.get("opening") or 0, "opening days") - _d(y.get("taken") or 0, "taken days")
+                       - _d(y.get("paid_out") or 0, "paid-out days"))
+            earned = _d(y.get("policy_days"), "policy vacation days")
+            if not y.get("complete"):
+                start, end = _date(y.get("start"), "the service-year start"), _date(y.get("end"), "its end")
+                earned = earned * Decimal((end - start).days + 1) / Decimal((_add_years(start, 1) - start).days)
+            out[int(y["service_year"])] = max(earned + balance, _ZERO)
+        return out
+
+    def isr(self, taxable_by_concept, facts) -> Decimal:
+        """Separation (LISR Art. 96 ¶7): the rate of the last monthly ordinary
+        salary on the separation's taxable total, or the tariff when the total
+        is below that salary. Aguinaldo / vacation premium: their special-pay
+        rule (D-08). Vacation paid out is ordinary income of the month, which
+        a finiquito run cannot see yet (gap A17): it BLOCKS."""
+        if _d(taxable_by_concept.get("VACATION_PAYOUT", _ZERO), "VACATION_PAYOUT") > 0:
+            raise _blocked("MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED",
+                           "vacation paid out at termination is ordinary income of the month (LISR Art. 96); a "
+                           "finiquito run carries no month-to-date income yet (gap A17)")
+        total = _ZERO
+        separation = sum((_d(v, k) for k, v in taxable_by_concept.items() if k in SEPARATION_CONCEPTS), _ZERO)
+        if separation > 0:
+            monthly = monthly_ordinary_income(facts)
+            if separation < monthly:
+                total += monthly_isr(separation, facts)
+            else:
+                total += separation * (monthly_isr(monthly, facts) / monthly)
+        for concept in ("AGUINALDO", "VACATION_PREMIUM"):
+            taxable = _d(taxable_by_concept.get(concept, _ZERO), concept)
+            if taxable > 0:
+                total += SPECIAL_PAY_RULES[concept].standalone_isr(taxable, facts)
+        return total
+
+
+FINIQUITO_RULE = FiniquitoRule()

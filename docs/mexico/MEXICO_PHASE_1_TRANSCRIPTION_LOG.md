@@ -383,3 +383,66 @@ It also raised three points, all now recorded:
 
 | Human G1 reviewer (name / date / verdict) | |
 |---|---|
+
+## W1-3b — 2026-10-26 (completion programme): termination reasons and the finiquito rule (gap register B14)
+
+Rule objects in `engine/countries/mexico_rules.py`, wired into `MX_TERMINATION_REASONS` and `MX_FINIQUITO_RULE`. Every citation quotes S26 (LFT), S24 or S25, and `compare` finds each quote (501 checks, 0 misses).
+
+### TL-TER-1 · The reason catalog and its separation components (LFT)
+
+| Code | Reason | Components (kind) | Wording (PDF page) |
+|---|---|---|---|
+| `LFT_47_RESCISSION_BY_EMPLOYER` | Employer rescinds with cause | Seniority premium (022) | Art. 47 p. 15; Art. 162 III p. 52: "a los que sean separados de su empleo, independientemente de la justificación o injustificación del despido" |
+| `LFT_48_DISMISSAL_INDEMNIFIED` | Dismissal; the worker takes the indemnity | 3 months of salary (025) + seniority premium | Art. 48 p. 16: "que se le indemnice con el importe de tres meses de salario" |
+| `LFT_49_NO_REINSTATEMENT` | Employer exempt from reinstating | Art. 50 I or II by years (025) + 3 months (025) + seniority premium | Arts. 49 p. 18, 50 p. 19 |
+| `LFT_51_RESCISSION_BY_WORKER` | Worker rescinds for cause | As Art. 50 (Art. 52) + seniority premium | Arts. 51, 52 p. 20 |
+| `LFT_53_III_END_OF_TERM` | End of the work or the term | None | Art. 53 III p. 20 |
+| `LFT_54_INCAPACITY` | Non-occupational incapacity | One month (023) + seniority premium (12 days a year "de conformidad con lo dispuesto en el artículo 162") | Art. 54 p. 21 |
+| `LFT_162_VOLUNTARY_SEPARATION` | Voluntary separation | Seniority premium only from 15 whole years of service | Art. 162 III p. 52 |
+
+**Amounts**
+- **Art. 50 II (indefinite, c_TipoContrato 01):** 20 days per year of service.
+- **Art. 50 I (fixed term, 03):**
+  - under a year: the salary of half the time served;
+  - over a year: six months for the first year plus 20 days for each later year.
+- **Art. 50 III:** three months, read as **90 days**. LFT Art. 89 ¶3 converts a monthly salary to daily by ÷ 30. A reading (D-04).
+- **Any other contract type** (02 obra determinada, 04–99): blocks with `MX_TERMINATION_CONTRACT_UNSUPPORTED`. Art. 50 I names only "tiempo determinado".
+- **Seniority premium (Art. 162 I):** 12 days per year of service. The salary is bounded by Arts. 485–486: no lower than the minimum wage, no higher than twice "el salario mínimo del área geográfica de aplicación".
+  - "Trabajadores de planta" is read as an indefinite contract (01): a reading (D-04).
+  - Art. 162 IV's deferral when more than 10% of the workforce leaves voluntarily in a year is **not modelled**: the premium is paid at separation (IV a).
+
+**Undecided, each blocking with its own code**
+- **D-12, indemnity salary (Art. 89):** the daily rate "y la parte proporcional de las prestaciones mencionadas en el artículo 84". Built as the daily salary × the labour policy's integration factor (aguinaldo, vacation premium); the same question as gap C4. `MX_INDEMNITY_SALARY_UNDECIDED`.
+- **D-13, part years:** do the "por cada año de servicios" counts take a part year pro rata? `MX_SERVICE_YEARS_COUNT_UNDECIDED`.
+- **D-07b, the Art. 486 cap:** the zone minimum wage, or the UMA? `MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`.
+
+**Not in the catalog (D-11)**
+- **Mutual consent (Art. 53 I):** the LFT grants no component, but whether a voluntary-type premium applies is not settled by the text.
+- **Death (Art. 53 II):** the premium goes to the beneficiaries of Art. 501, not the worker; the receipt has a different payee.
+- **Art. 434 (collective) terminations.**
+- **Back pay and interest (salarios vencidos, Art. 48 ¶2–3):** fixed by a tribunal, never by payroll.
+
+### TL-TER-2 · The finiquito rule
+
+- **Vacation owed:**
+  - the year the termination falls in: its days in proportion to the time served in it (Art. 79 ¶2 p. 24, "remuneración proporcionada al tiempo de servicios prestados");
+  - each completed year: its days not taken or paid out. The LFT does not say outright that untaken days of a completed year are paid at termination (Art. 79 ¶1 forbids paying instead of rest). A reading (D-04).
+- **Separation withholding (LISR Art. 96 ¶7 p. 131, RLISR Art. 172 p. 45):** the separation's taxable total × (monthly ISR on the last monthly ordinary salary ÷ that salary). When the total is below that salary, the monthly tariff applies to it. Needs D-09.
+- **Aguinaldo and vacation premium in the finiquito:** their own special-pay rule (RLISR Art. 174; D-08).
+- **Vacation paid out:** ordinary income of the month (Art. 96). The finiquito run carries no month-to-date income, so it **blocks** (`MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED`), new gap item **A17**.
+
+### Blind second transcription (W1-3b)
+
+A separate agent read only S26, plus S24 and S25 for the withholding. It agreed on **every** amount, condition and page in TL-TER-1 and TL-TER-2. Its NOT FOUND answers match the open points:
+- untaken vacation of completed years paid at termination: not stated;
+- how a part year counts (Arts. 50, 162): not stated (D-13);
+- "tres meses" in days: not stated (Art. 89 gives only ÷ 7 and ÷ 30).
+
+It added four details, now recorded:
+1. **Art. 89 ¶2:** for variable pay, the indemnity salary is the average of the last 30 days actually worked (from a raise, if there was one). Part of D-12.
+2. **Art. 486:** work in several areas is capped at twice the *average* of their minimum wages. Not modelled: the engine uses the worker's one zone.
+3. **Art. 50 IV:** digital-platform workers have their own indemnity. Out of scope (no platform-worker contract type is supported).
+4. **Art. 47, last paragraphs:** without the written notice of the cause, the separation is presumed unjustified. An operator recording `LFT_47_RESCISSION_BY_EMPLOYER` must hold that notice as evidence (the termination record already requires evidence). Added to D-11.
+
+| Human G1 / G5 reviewer (name / date / verdict) | |
+|---|---|

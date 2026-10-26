@@ -13,7 +13,10 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-05 | 48-hour week for January–April 2026 | G5 owner | Nothing today; the January–April row cites a decree in force only from 1 May 2026 | Open |
 | D-06 | CDMX ISN: are vacation paid out at termination, the separation payment and the indemnity in the base? | G4 owner | Any finiquito with those lines for a CDMX worker (`MX_ISN_SPECIAL_PAY_RULE_MISSING`) | Open |
 | D-10 | CDMX ISN 2026 benefit for micro (1%) and small (0.5%) employers | G4 owner | G4 sign-off / CDMX pack activation; until then a micro or small CDMX employer would be computed at the full 4% | Open |
-| D-07 | Unit of the LISR Art. 93 exempt limits: UMA or the zone minimum wage | G1 owner | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`) | Open |
+| D-11 | Termination reasons outside the catalog: mutual consent, death, Art. 434 | G5 owner | Recording those terminations (`MX_TERMINATION_REASON_UNKNOWN`) | Open |
+| D-12 | Indemnity salary (LFT Art. 89 integrated salary; same question as gap C4) | G1 / G5 owners | Every indemnity and the Art. 54 month (`MX_INDEMNITY_SALARY_UNDECIDED`) | Open |
+| D-13 | Does "por cada año de servicios" count a part year? | G5 owner | Art. 50, 54 and 162 amounts (`MX_SERVICE_YEARS_COUNT_UNDECIDED`) | Open |
+| D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
 
@@ -60,6 +63,10 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 | Aguinaldo exemption assumes "se otorguen en forma general" holds (the statutory aguinaldo is general by law) | LISR Art. 93 XIV condition (blind transcription) | S24 Art. 93 XIV | G1 |
 | Separation exemption split pro rata across the three CFDI kinds | LISR Art. 93 XIII gives one cap for every separation payment; the split per kind is an engineering allocation (the total exempt is unchanged) (TL-SP-1) | S24 Art. 93 XIII | G1 |
 | Aguinaldo fraction = days employed in the year ÷ days in the year (365 / 366) | "la parte proporcional … conforme al tiempo que hubieren trabajado" (TL-SP-3) | S26 Art. 87 | G5 |
+| "Tres meses de salario" = 90 days; "un mes" = 30 days | LFT Art. 89 ¶3 converts a monthly salary to daily by ÷ 30 (TL-TER-1) | S26 Arts. 48, 50, 54, 89 | G5 |
+| "Trabajadores de planta" = indefinite contract (c_TipoContrato 01) | Art. 162 grants the premium to "trabajadores de planta" (TL-TER-1) | S26 Art. 162; S28 c_TipoContrato | G5 |
+| Untaken vacation of completed years is paid at termination | The LFT does not say so outright; Art. 79 ¶2 covers only the part year (TL-TER-2) | S26 Arts. 76, 79 | G5 |
+| Art. 162 IV deferral (more than 10% leaving voluntarily in a year) not modelled: premium paid at separation | Art. 162 IV a) (TL-TER-1) | S26 Art. 162 IV | G5 |
 | Subsidy remainder `NOT_PAYABLE` | Art. Segundo ¶2 of the base decree, still in force (TL-SUB-2) | S3 (DOF 01-05-2024) | G1 |
 
 ## D-05 · 48-hour week for January–April 2026
@@ -104,3 +111,20 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** LISR Arts. 95 and 96 use the "último sueldo mensual ordinario" (separation withholding), and RLISR Art. 174 II "el ingreso ordinario … que perciba el trabajador en forma regular en el mes". Neither says how to derive it from a daily salary: × 30, × 30.4, or the month's actual ordinary pay?
 - **What weighs on it.** RLISR Art. 174 I (and Art. 163 I, for back pay over several months) uses 30.4 (for the special payment, not for ordinary income). LFT Art. 89 ¶3 divides a monthly salary by 30 (for indemnities, a different law).
 - **Blocks.** RLISR 174 withholding and the separation withholding: `MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`.
+
+## D-11 · Termination reasons outside the catalog
+
+- **Question.** Should the catalog carry (a) mutual consent (LFT Art. 53 I), (b) death (Art. 53 II: the seniority premium is paid to the Art. 501 beneficiaries, a different payee on the receipt), (c) Art. 434 terminations? If so, with which components?
+- **Sources.** S26 Arts. 53, 162 III, V, 434, 501. Log TL-TER-1.
+- **Blocks.** Recording such a termination: `MX_TERMINATION_REASON_UNKNOWN`.
+- **Also for the owner.** LFT Art. 47 presumes a separation unjustified without the written notice of the cause: confirm that the evidence a `LFT_47_RESCISSION_BY_EMPLOYER` record requires must be that notice.
+
+## D-12 · Indemnity salary (LFT Art. 89; gap C4)
+
+- **Question.** Art. 89 counts indemnities on "la cuota diaria y la parte proporcional de las prestaciones mencionadas en el artículo 84" (Art. 84: cash, gratificaciones, habitación, primas, comisiones, prestaciones en especie, …). Is it (a) the daily salary × the labour policy's integration factor (aguinaldo, vacation premium: built), (b) the IMSS SBC, or (c) something an operator enters per worker with evidence? For variable pay, Art. 89 ¶2 uses the average of the last 30 days worked, which the engine does not compute.
+- **Blocks.** Every Art. 48, 50 and 54 amount: `MX_INDEMNITY_SALARY_UNDECIDED`. The same choice settles C4 (the CFDI `SalarioDiarioIntegrado`).
+
+## D-13 · Part years of service
+
+- **Question.** LFT Arts. 50 ("veinte días … por cada uno de los años"), 54 and 162 ("doce días … por cada año de servicios") do not say how a part year counts: pro rata, or whole years only? (LISR Art. 93 XIII does say it: more than six months counts as a year; that rule is for the exemption only.)
+- **Blocks.** Those amounts: `MX_SERVICE_YEARS_COUNT_UNDECIDED`. Both options are built.

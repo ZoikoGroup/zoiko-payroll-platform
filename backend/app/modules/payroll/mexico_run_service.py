@@ -675,14 +675,17 @@ def _finiquito_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
               "vacation_policy": policy_row.vacation_policy, "vacation_premium_pct": policy_row.vacation_premium_pct}
     facts = {"termination_date": last_day, "pay_date": on, "daily_salary": _dec(prof.mx_daily_salary),
              "seniority_date": prof.mx_seniority_date, "date_of_joining": employee.date_of_joining,
-             "work_state": prof.mx_work_state, "zone": zone, "content": content}
+             "work_state": prof.mx_work_state, "zone": zone, "content": content,
+             # W1-3b: what the transcribed termination reasons read (LFT Arts. 50, 89, 162)
+             "contract_type_code": prof.mx_contract_type_code, "labor_policy": policy}
     earnings, detail = mexico_termination_service.finiquito_lines(db, row, employee, prof, policy, content, rounder,
                                                                   facts)
     isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
     registration = None if reg is None else {"id": reg.id, "status": reg.status,
                                              "employer_profile_id": reg.employer_profile_id}
     profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
-                                                    "mx_seniority_date", "mx_imss_registration_id")}
+                                                    "mx_seniority_date", "mx_imss_registration_id",
+                                                    "mx_contract_type_code")}      # W1-3b: the reasons read it
     termination = {"id": row.id, "date": last_day, "reason": row.reason_code, "status": row.status}
     ytd_exempt = _year_to_date_exempt(db, employee.id, run, on)
     components = {

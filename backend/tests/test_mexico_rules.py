@@ -170,3 +170,129 @@ def test_every_rule_quotes_its_wording():
     for rule in list(r.SPECIAL_PAY_RULES.values()) + [r.AGUINALDO_RULE]:
         assert rule.citations and all("'" in ref and "PDF p" in ref for _src, ref in rule.citations)
         assert (rule.source, rule.source_ref) == rule.citations[0]
+
+
+# ── W1-3b: termination reasons and the finiquito rule ──
+
+_POLICY = {"aguinaldo_days": "15", "vacation_premium_pct": "25",
+           "vacation_policy": [{"serviceYearFrom": 1, "serviceYearTo": None, "days": "12"}]}
+_FACTOR = (Decimal("365") + Decimal("15") + Decimal("12") * Decimal("25") / 100) / Decimal("365")
+
+
+def _tfacts(**kw):
+    out = _facts(seniority_date=dt.date(2020, 1, 1), termination_date=dt.date(2026, 1, 1), contract_type_code="01",
+                 labor_policy=_POLICY)
+    out.update(kw)
+    return out
+
+
+@pytest.fixture
+def decided_b(decided, monkeypatch):
+    monkeypatch.setattr(decided, "MX_INDEMNITY_SALARY_BASIS", "POLICY_INTEGRATED")
+    monkeypatch.setattr(decided, "MX_SERVICE_YEARS_COUNT", "PROPORTIONAL")
+    monkeypatch.setattr(decided, "MX_SENIORITY_PREMIUM_WAGE_REFERENCE", "ZONE_MIN_WAGE")
+    return decided
+
+
+def _comps(r, code, facts):
+    return {c["code"]: c["amount"] for c in r.TERMINATION_REASONS[code].separation_components(facts)}
+
+
+def test_w13b_switches_are_undecided_and_block_with_their_own_codes():
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    r = _r()
+    assert (r.MX_INDEMNITY_SALARY_BASIS, r.MX_SERVICE_YEARS_COUNT, r.MX_SENIORITY_PREMIUM_WAGE_REFERENCE) \
+        == (None, None, None)
+    for fn, code in ((lambda: r.indemnity_daily_salary(_tfacts()), "MX_INDEMNITY_SALARY_UNDECIDED"),
+                     (lambda: r.service_years("2020-01-01", "2026-01-01"), "MX_SERVICE_YEARS_COUNT_UNDECIDED"),
+                     (lambda: r.seniority_premium_daily_salary(_tfacts()),
+                      "MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED")):
+        with pytest.raises(MXBlock) as exc:
+            fn()
+        assert _codes(exc) == [code]
+
+
+def test_service_years_proportional_or_completed(decided_b, monkeypatch):
+    r = decided_b
+    assert r.service_years("2020-01-01", "2026-01-01") == Decimal("6")
+    assert r.service_years("2020-01-01", "2026-07-02") == Decimal("6") + Decimal(182) / Decimal(365)
+    monkeypatch.setattr(r, "MX_SERVICE_YEARS_COUNT", "COMPLETED")
+    assert r.service_years("2020-01-01", "2026-07-02") == Decimal("6")
+
+
+def test_seniority_premium_salary_is_bounded_by_arts_485_486(decided_b, monkeypatch):
+    r = decided_b
+    assert r.seniority_premium_daily_salary(_tfacts(daily_salary=Decimal("150"))) == Decimal("200")   # floor
+    assert r.seniority_premium_daily_salary(_tfacts(daily_salary=Decimal("350"))) == Decimal("350")
+    assert r.seniority_premium_daily_salary(_tfacts(daily_salary=Decimal("900"))) == Decimal("400")   # 2 × 200
+    monkeypatch.setattr(r, "MX_SENIORITY_PREMIUM_WAGE_REFERENCE", "UMA")
+    assert r.seniority_premium_daily_salary(_tfacts(daily_salary=Decimal("900"))) == Decimal("200")   # 2 × UMA 100
+
+
+def test_dismissal_and_rescission_reasons_compute_their_lft_components(decided_b):
+    r = decided_b
+    daily = Decimal("500") * _FACTOR                                 # Art. 89 integrated
+    premium = Decimal("12") * 6 * Decimal("400")                     # 12 days × 6 years × capped salary
+    assert _comps(r, "LFT_47_RESCISSION_BY_EMPLOYER", _tfacts()) == {"SENIORITY_PREMIUM": premium}
+    assert _comps(r, "LFT_48_DISMISSAL_INDEMNIFIED", _tfacts()) == {"INDEMNITY_3_MONTHS": 90 * daily,
+                                                                   "SENIORITY_PREMIUM": premium}
+    full = {"INDEMNITY_ART50_YEARS": 20 * 6 * daily, "INDEMNITY_3_MONTHS": 90 * daily, "SENIORITY_PREMIUM": premium}
+    assert _comps(r, "LFT_49_NO_REINSTATEMENT", _tfacts()) == full
+    assert _comps(r, "LFT_51_RESCISSION_BY_WORKER", _tfacts()) == full
+    assert _comps(r, "LFT_53_III_END_OF_TERM", _tfacts()) == {}
+    assert _comps(r, "LFT_54_INCAPACITY", _tfacts()) == {"ONE_MONTH_ART54": 30 * daily, "SENIORITY_PREMIUM": premium}
+
+
+def test_fixed_term_contracts_follow_art_50_i_and_get_no_seniority_premium(decided_b):
+    r = decided_b
+    daily = Decimal("500") * _FACTOR
+    short = _tfacts(contract_type_code="03", seniority_date=dt.date(2026, 1, 1), termination_date=dt.date(2026, 4, 10))
+    assert _comps(r, "LFT_49_NO_REINSTATEMENT", short) == {"INDEMNITY_ART50_YEARS": Decimal(100) / 2 * daily,
+                                                           "INDEMNITY_3_MONTHS": 90 * daily}
+    long = _tfacts(contract_type_code="03", seniority_date=dt.date(2023, 1, 1), termination_date=dt.date(2026, 1, 1))
+    assert _comps(r, "LFT_49_NO_REINSTATEMENT", long)["INDEMNITY_ART50_YEARS"] == (180 + 20 * 2) * daily
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    with pytest.raises(MXBlock) as exc:
+        _comps(r, "LFT_49_NO_REINSTATEMENT", _tfacts(contract_type_code="02"))
+    assert _codes(exc) == ["MX_TERMINATION_CONTRACT_UNSUPPORTED"]
+
+
+def test_voluntary_separation_pays_the_premium_only_from_15_years(decided_b):
+    r = decided_b
+    assert _comps(r, "LFT_162_VOLUNTARY_SEPARATION", _tfacts()) == {}
+    old = _tfacts(seniority_date=dt.date(2010, 1, 1))
+    assert _comps(r, "LFT_162_VOLUNTARY_SEPARATION", old) == {"SENIORITY_PREMIUM": Decimal("12") * 16 * Decimal("400")}
+
+
+def test_finiquito_vacation_owed_completed_and_proportional():
+    rule = _r().FINIQUITO_RULE
+    years = [{"service_year": 1, "start": dt.date(2025, 1, 1), "end": dt.date(2026, 1, 1), "complete": True,
+              "policy_days": Decimal("12"), "opening": Decimal("0"), "taken": Decimal("10"), "paid_out": Decimal("0")},
+             {"service_year": 2, "start": dt.date(2026, 1, 1), "end": dt.date(2026, 7, 1), "complete": False,
+              "policy_days": Decimal("14"), "opening": Decimal("0"), "taken": Decimal("0"), "paid_out": Decimal("0")}]
+    owed = rule.vacation_days_owed(years, dt.date(2026, 7, 1))
+    assert owed == {1: Decimal("2"), 2: Decimal("14") * Decimal(182) / Decimal(365)}
+
+
+def test_finiquito_isr_separation_rate_and_the_below_salary_tariff(decided_b):
+    r = decided_b
+    rule = r.FINIQUITO_RULE
+    facts = _facts(daily_salary=Decimal("400"))                      # monthly ordinary 12,000 (D-09 = 30)
+    t_month = Decimal("1000") + (Decimal("12000") - Decimal("10000.01")) * Decimal("0.20")
+    big = rule.isr({"SEPARATION_INDEMNITY": Decimal("50000")}, facts)
+    assert big == Decimal("50000") * (t_month / Decimal("12000"))
+    small = rule.isr({"SEPARATION_INDEMNITY": Decimal("5000")}, facts)
+    assert small == (Decimal("5000") - Decimal("0.01")) * Decimal("0.10")
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    with pytest.raises(MXBlock) as exc:
+        rule.isr({"VACATION_PAYOUT": Decimal("100")}, facts)
+    assert _codes(exc) == ["MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED"]
+
+
+def test_every_termination_rule_quotes_its_wording():
+    r = _r()
+    for rule in list(r.TERMINATION_REASONS.values()) + [r.FINIQUITO_RULE]:
+        assert rule.citations and all("'" in ref and "PDF p" in ref for _src, ref in rule.citations)
