@@ -101,6 +101,7 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S31", "RENAPO — CURP structure and check-digit rules (instructivo normativo)"),
     ("S32", "IMSS — NSS (Número de Seguridad Social) structure and check digit"),
     ("S33", "Banco de México / ABM — CLABE 18-digit structure and check digit"),
+    ("S34", "DOF 27-01-2016 — constitutional decree on minimum-wage de-indexation (UMA), Transitorio Tercero"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -337,8 +338,8 @@ MX_SCALAR_CONTENT: tuple = (
               "DERIVED: Art. 106 I (13.9% of the daily minimum wage) + 1995 LSS Transitorio DECIMO NOVENO "
               "(+0.65 points each 1 July 1998-2007, 10 steps), PDF pp. 35, 110"),
     ScalarRow("mx_imss_em_excess_threshold_uma", None, None, "3", None, None, None, _S10,
-              "Art. 106 II: SBC above 'tres veces el salario minimo general diario' (minimum wage read as UMA: "
-              "see TL-IMSS-3), PDF p. 35"),
+              "Art. 106 II: SBC above 'tres veces el salario minimo general diario' (minimum wage read as UMA "
+              "under S34 Transitorio Tercero: see TL-IMSS-3), PDF p. 35"),
     ScalarRow("mx_imss_em_excess_er_pct", None, "1.10", None, None, None, None, _S10,
               "DERIVED: Art. 106 II (6% employer) - Transitorio DECIMO NOVENO (0.49 points each 1 July 1998-2007), "
               "PDF pp. 35, 110"),
@@ -364,15 +365,24 @@ MX_SCALAR_CONTENT: tuple = (
     ScalarRow("mx_imss_ceav_ee_pct", "1.125", None, None, None, None, None, _S10,
               "Art. 168 II b): worker 'uno punto ciento veinticinco por ciento' of SBC, PDF p. 51"),
     ScalarRow("mx_sbc_max_uma_multiple", None, None, "25", None, None, None, _S10,
-              "Art. 28: upper limit 'veinticinco veces el salario minimo general' (minimum wage read as UMA: "
-              "see TL-IMSS-3), PDF p. 11"),
+              "Art. 28: upper limit 'veinticinco veces el salario minimo general' (minimum wage read as UMA "
+              "under S34 Transitorio Tercero: see TL-IMSS-3), PDF p. 11"),
+    # ── W1-1 (2026-10-26) [PENDING G1] ── the SBC floor (Q5) and the INFONAVIT PERCENTAGE credit basis (Q7),
+    # each mapped onto the engine vocabulary (sbc.SBC_MIN_RULES, infonavit.BASIS_RULES) — log TL-SBC-1, TL-INF-2.
+    ScalarRow("mx_sbc_min_rule", None, None, None, "RAISE_TO_ZONE_MIN_WAGE", None, None, _S10,
+              "Art. 28: SBC 'como limite inferior el salario minimo general del area geografica respectiva' "
+              "(a lower limit: an SBC below it is raised to the zone minimum wage, TL-SBC-1), PDF p. 11"),
     ScalarRow("mx_risk_premium_min_pct", None, "0.5", None, None, None, None, _S10,
               "Art. 74 para 2: minimum premium 'cero punto cinco por ciento' of SBC, PDF p. 26"),
     ScalarRow("mx_risk_premium_max_pct", None, "15", None, None, None, None, _S10,
               "Art. 74 para 2: maximum premium 'quince por ciento' of SBC, PDF p. 26"),
     # INFONAVIT (spec §10): S27 Ley del INFONAVIT, last reform DOF 21-02-2025
     ScalarRow("mx_infonavit_er_pct", None, "5", None, None, None, None, _S27,
-              "Art. 29 II: employer contribution 'cinco por ciento sobre el salario de los trabajadores', PDF p. 15"),
+              "Art. 29 II: employer contribution 'cinco por ciento sobre el salario de los trabajadores', PDF p. 16"),
+    ScalarRow("mx_infonavit_percentage_basis", None, None, None, "SBC_TIMES_DAYS", None, None, _S27,
+              "Art. 29 III: 'La integracion y calculo de la base salarial para efectos de los descuentos sera la "
+              "contenida en la fraccion II del presente articulo'; fr. II: base per 'la Ley del Seguro Social' "
+              "(the SBC; the percentage applies to SBC x days of the period, TL-INF-2), PDF p. 16"),
     # Benefit floors (spec §17): S26 LFT, consolidated, last reform DOF 14-05-2026
     ScalarRow("mx_aguinaldo_min_days", None, None, "15", None, None, None, _S26,
               "Art. 87: aguinaldo 'equivalente a quince dias de salario, por lo menos', PDF p. 25"),

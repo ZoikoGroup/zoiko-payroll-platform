@@ -175,7 +175,7 @@ def test_identifiers_and_scope_constants():
     assert c.MX_CEAV_SEEDED_YEAR == 2026 and c.MX_CEAV_SCHEDULE_YEARS == tuple(range(2023, 2031))
     assert all(rule.startswith("MX_") for rule in c.MX_SLAB_RULES)
     assert set(c.MX_ISN_CONTENT) == set(c.MX_ISN_STATES_IN_SCOPE) == {"CDMX"}
-    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 34))      # S24–S33: addendum, pending approval
+    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 35))      # S24–S34: addendum, pending approval
 
 
 def test_every_content_row_has_its_declared_shape():
@@ -565,3 +565,36 @@ def test_subsidy_remainder_rule_is_in_the_engine_vocabulary():
 
     assert [r.text_value for r in rows] == ["NOT_PAYABLE"] and "NOT_PAYABLE" in REMAINDER_RULES
     assert rows[0].source == "S3/S3_DOF_Decreto_subsidio_empleo_01052024.html"
+
+
+# ── W1-1 (2026-10-26): SBC floor and INFONAVIT percentage basis ──
+
+def test_sbc_floor_rule_is_in_the_engine_vocabulary_and_cites_lss_art_28():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_sbc_min_rule"]
+    _need(rows, "SBC floor rule")
+    from app.modules.payroll.engine.jurisdictions.mexico.sbc import SBC_MIN_RULES
+
+    assert [r.text_value for r in rows] == ["RAISE_TO_ZONE_MIN_WAGE"] and rows[0].text_value in SBC_MIN_RULES
+    assert rows[0].source == "S10/S10_IMSS_LSS.pdf" and rows[0].source_ref.startswith("Art. 28")
+    assert "limite inferior" in rows[0].source_ref
+
+
+def test_infonavit_bases_percentage_transcribed_fixed_amount_still_blocks():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_infonavit_percentage_basis"]
+    _need(rows, "INFONAVIT percentage basis")
+    from app.modules.payroll.engine.jurisdictions.mexico.infonavit import BASIS_RULES
+
+    assert [r.text_value for r in rows] == ["SBC_TIMES_DAYS"] and rows[0].text_value in BASIS_RULES["PERCENTAGE"][1]
+    assert rows[0].source == "S27/S27_DIP_LIFNVT.pdf" and rows[0].source_ref.startswith("Art. 29 III")
+    # S27 states no per-period rule for a fixed-amount discount: it stays untranscribed and blocks
+    assert not [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_infonavit_fixed_amount_basis"]
+
+
+def test_ceilings_read_in_uma_cite_the_de_indexation_decree():
+    c = _c()
+    rows = {r.key: r for r in c.MX_SCALAR_CONTENT if r.key in ("mx_sbc_max_uma_multiple", "mx_imss_em_excess_threshold_uma")}
+    _need(rows, "SBC ceiling / E&M threshold")
+    assert all("S34 Transitorio Tercero" in r.source_ref for r in rows.values())
+    assert "S34" in c.ALL_SOURCE_CODES

@@ -167,3 +167,4 @@
 | 2026-10-26 | **B4, B5, B6, B7, B8, B9** (Batch 2) | Transcribed, `[PENDING G1]`. Derived rows: the E&M rates, the cash-benefit shares, overtime x2/x3 and the vacation bands. The SM-to-UMA reading needs the DOF 27-01-2016 decree (proposed as S34). The INFONAVIT credit bases and the SBC floor rule are not transcribed |
 | 2026-10-26 | **S22** | VERIFIED (SAF "CODIGO FISCAL 2026"; checks 1 and 2 passed; Gaceta 19-12-2025 saved). B10 (ISN) is now transcribable |
 | 2026-10-26 | **B11** (rounding) | Candidate sources reported for the G1 owner; it still blocks every calculation |
+| 2026-10-26 | **B9, B11** (W1-1) | SBC floor `RAISE_TO_ZONE_MIN_WAGE` (LSS Art. 28) and INFONAVIT percentage basis `SBC_TIMES_DAYS` (Ley INFONAVIT Art. 29 III) transcribed. S34 (de-indexation decree) saved. **Fixed-amount INFONAVIT basis: BLOCKED-ON-SOURCE** (INFONAVIT's payment regulation is not in the Diputados compilation). Open decisions moved to `DECISIONS_PENDING.md` |

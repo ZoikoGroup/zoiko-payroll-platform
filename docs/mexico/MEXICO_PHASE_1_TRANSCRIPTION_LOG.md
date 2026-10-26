@@ -263,3 +263,43 @@ All three are written in words and all were found. Blind and spec agree.
 
 | Human G1 reviewer (name / date / verdict) | |
 |---|---|
+
+## W1-1 — 2026-10-26 (completion programme)
+
+What Batch 2 left open: the SBC floor rule, the two INFONAVIT credit bases and the CEAV lowest-band reference; plus the de-indexation decree proposed as S34. Controls as before: a separate agent read only S10, S27 and S34 (blind), `compare` now also checks every wording a citation quotes, and tests pin each value to the engine vocabulary.
+
+### TL-S34-1 · De-indexation decree saved (closes the source gap in TL-IMSS-3)
+
+| | |
+|---|---|
+| Source | `S34/S34_DIP_CPEUM_ref226_27ene16.pdf`, SHA-256 `16c38e9fa2fdf8185413051f9f3e9573337cfd5705808a5f5718c1fec8d1c76e` (Diputados copy of the DOF decree of 27-01-2016; archive capture 20261015095600, digest OK; `ARCHIVE_COPY_VERIFIED`) |
+| Text | Transitorio Tercero (PDF p. 2): "todas las menciones al salario mínimo como unidad de cuenta, índice, base, medida o referencia para determinar la cuantía de las obligaciones y supuestos previstos en las leyes federales … se entenderán referidas a la Unidad de Medida y Actualización" |
+| Effect | The SBC ceiling (25×) and the E&M threshold (3×) rows now cite S34 for their UMA reading. Values unchanged |
+| Blind | Same article, same wording, same page |
+| Human G1 / G2 reviewer (name / date / verdict) | |
+
+### TL-SBC-1 · SBC floor rule (gap register B11; Q5)
+
+| | |
+|---|---|
+| Source | `S10/S10_IMSS_LSS.pdf`, SHA-256 `875efb2c8e6562f4236a343c27f3199dc04732890e484e95086f69da05aa632c`. Art. 28 (PDF p. 11): "estableciéndose como límite superior el equivalente a veinticinco veces el salario mínimo general que rija en el Distrito Federal y como límite inferior el salario mínimo general del área geográfica respectiva" |
+| Row | `mx_sbc_min_rule` = `RAISE_TO_ZONE_MIN_WAGE` (engine vocabulary `sbc.SBC_MIN_RULES`) |
+| Reading | A lower limit: an SBC below the zone minimum wage is raised to it. Nothing in Art. 28 makes a lower SBC an error, so `BLOCK_BELOW_ZONE_MIN_WAGE` has no support. The floor is the zone minimum wage itself (a wage), so S34 does not turn it into the UMA. **Interpretation for the G2 owner** (DECISIONS_PENDING D-04) |
+| Blind | Same quote and page; chose RAISE, noting that "raise" is a reading of "límite inferior", not an explicit instruction |
+| Machine | The quote is found in S10 (`compare` quote check) |
+| Human G2 reviewer (name / date / verdict) | |
+
+### TL-INF-2 · INFONAVIT credit bases (gap register B9; Q7)
+
+| | |
+|---|---|
+| Source | `S27/S27_DIP_LIFNVT.pdf`, SHA-256 `9ee6e5ef336dee5700726bd3c570d24f91fc458136e298ae2e3806bd12217912`. Art. 29 III (PDF p. 16): "La integración y cálculo de la base salarial para efectos de los descuentos será la contenida en la fracción II del presente artículo". Fr. II (PDF p. 16): "En lo que corresponde a la integración y cálculo de la base y límite superior salarial para el pago de aportaciones, se aplicará lo contenido en la Ley del Seguro Social" |
+| Row | `mx_infonavit_percentage_basis` = `SBC_TIMES_DAYS`: a percentage notice applies to the SBC (capped as the LSS caps it) × the period's days. **Interpretation for the G3 owner** (D-04): the law names the base, not the day count |
+| Not transcribed | `mx_infonavit_fixed_amount_basis`. S27 has no per-period rule for a fixed-amount discount (blind: none found under "cuota fija", "amortiza*"). It sits in INFONAVIT's own payment regulation, which the Diputados compilation does not carry (index `regla.htm`, capture 20261012195540). **BLOCKED-ON-SOURCE**; a FIXED_AMOUNT notice keeps blocking (`MX_INFONAVIT_METHOD_UNSUPPORTED`) |
+| Citation fix | TL-INF-1 and the `mx_infonavit_er_pct` row cited Art. 29 II on PDF p. 15. It is on **PDF p. 16** ("16 de 93"; p. 15 carries the Art. 29 heading). Corrected; the blind agent read p. 16 independently |
+| Human G3 reviewer (name / date / verdict) | |
+
+### Still open after W1-1
+
+- **CEAV lowest-band reference:** a G2 decision (DECISIONS_PENDING D-03).
+- **Rounding:** a G1 decision (D-01). On a scratch seed, gate 1b-1 now fails only on `mx_rounding_rule`.

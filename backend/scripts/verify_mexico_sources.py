@@ -400,6 +400,14 @@ def cmd_check(manifest_path: Path = None, sources_dir: Path = None) -> list:
     return problems
 
 
+_QUOTE_RE = re.compile(r"'([^']{12,})'")
+
+
+def _quotes(source_ref: str) -> list:
+    """The verbatim wordings a citation quotes ('…', 12 characters or more)."""
+    return [q.rstrip(" .,;") for q in _QUOTE_RE.findall(source_ref or "")]
+
+
 def _content_checks():
     """(source code, description, numbers that must be found, same-line?) for
     every transcribed content row."""
@@ -411,6 +419,10 @@ def _content_checks():
         checks.append((b.source, f"ISR {b.period} {b.lower}", nums, True))
     derived = getattr(c, "MX_DERIVED_VALUES", {})
     for r in c.MX_SCALAR_CONTENT + tuple(r for rows in c.MX_ISN_CONTENT.values() for r in rows):
+        # W1-1: a text rule has no number to find, so every wording its citation
+        # quotes must be in the cited file (numeric rows' quotes are checked too).
+        for quote in _quotes(r.source_ref):
+            checks.append((r.source, f"{r.key} quote '{quote[:40]}'", ("NAME", quote), False))
         if r.key in derived:                     # printed nowhere: look for its printed components
             d = derived[r.key]
             parts = [d[k] for k in ("base", "step", "quota", "share", "premium") if k in d]

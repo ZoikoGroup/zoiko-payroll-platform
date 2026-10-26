@@ -140,6 +140,28 @@ def test_compare_finds_isr_rows_on_one_line_and_reports_misses(tmp_path, monkeyp
     assert "no usable" in v.cmd_compare(manifest, tmp_path)[0]
 
 
+def test_compare_checks_the_wording_a_text_rule_quotes(tmp_path, monkeypatch):
+    """W1-1: a text rule has no number, so the wording its citation quotes must
+    be in the cited file — accents and line breaks aside. SYNTHETIC text."""
+    v = _tool()
+    c = _empty_content(monkeypatch)
+    src = tmp_path / "S10_synthetic.txt"
+    src.write_text("Ley SINTETICA\n" + "relleno " * 40 + "\ncomo límite inferior el salario\nmínimo de la zona\n",
+                   encoding="utf-8")
+    manifest = tmp_path / "SOURCES_MANIFEST.csv"
+    v.cmd_hash(tmp_path, manifest)
+    v.cmd_set("S10", ["status=ARCHIVE_COPY_VERIFIED"], manifest)
+    row = c.ScalarRow("mx_sbc_min_rule", None, None, None, "RAISE_TO_ZONE_MIN_WAGE", None, None, "S10",
+                      "Art. X: 'como limite inferior el salario minimo de la zona', SYNTHETIC")
+    monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (row,))
+    assert v.cmd_compare(manifest, tmp_path) == []
+    misquoted = row._replace(source_ref="Art. X: 'como limite superior el salario minimo de la zona'")
+    monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (misquoted,))
+    misses = v.cmd_compare(manifest, tmp_path)
+    assert len(misses) == 1 and "quote" in misses[0] and "not found" in misses[0]
+    assert v._quotes("a 'short' b 'long enough quote here', c") == ["long enough quote here"]
+
+
 # -- Phase 11d: VERIFIED only through a logged direct download --
 
 def _ready(tmp_path, url=None):
