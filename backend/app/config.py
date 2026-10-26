@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # become Brazilian and the Brazil organisation API refuses. Leave UNSET in
     # production until G1–G8 are signed; tests / local harnesses set it.
     BR_TENANT_ONBOARDING_ENABLED: bool = False
+    # South Africa dormancy switch (ZP-ZA-ENG-001 Phase 5). False = no
+    # organisation can become South African and the ZA APIs refuse. Leave
+    # UNSET in production until the ZA release gates are signed.
+    ZA_TENANT_ONBOARDING_ENABLED: bool = False
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.

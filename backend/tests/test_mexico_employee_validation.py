@@ -97,8 +97,9 @@ def test_strategy_map_and_message_unchanged():
 
     assert list(_STRATEGIES) == ["IN", "US", "UK", "AU", "CA", "DE", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR",
                                  "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL"]
-    # Brazil (ZP-BR-ENG-001 Phase 3) is dormant like Mexico, behind its own flag.
-    assert list(_DORMANT_STRATEGIES) == ["MX", "BR"]
+    # Brazil (ZP-BR-ENG-001 Phase 3) and South Africa (ZP-ZA-ENG-001 Phase 5)
+    # are dormant like Mexico, each behind its own flag.
+    assert list(_DORMANT_STRATEGIES) == ["MX", "BR", "ZA"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())
 
 
@@ -127,7 +128,9 @@ def test_sensitive_field_set_only_gains_mexican_keys():
     before = frozenset(f for cls in _STRATEGIES.values() for f in cls.SENSITIVE_FIELDS)
     # + Brazil (ZP-BR-ENG-001 Phases 3–4): its validator is dormant too, so its
     # CPF / PIS / PIX / bank-account keys come only from there.
-    assert SENSITIVE_COMPLIANCE_FIELDS - before == {"rfc", "curp", "nss", "clabe", "cpf", "pis_nis", "pix_key", "bank_account"}
+    assert SENSITIVE_COMPLIANCE_FIELDS - before == {
+        "rfc", "curp", "nss", "clabe", "cpf", "pis_nis", "pix_key", "bank_account",
+        "national_id", "tax_number"}
     for cls in _STRATEGIES.values():                                     # no other country uses these keys
         assert not {"rfc", "curp", "nss", "clabe"} & set(cls.FIELD_SPECS), cls.country_code
 
@@ -137,8 +140,8 @@ def test_bank_routing_other_countries_unchanged():
 
     # Brazil (ZP-BR-ENG-001) follows Mexico, merged from venu; Switzerland and
     # Saudi Arabia (Phase 4.1, IBAN routing) follow Brazil.
-    assert br.ROUTING_COUNTRIES[:-4] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
-                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-4:] == ("MX", "BR", "CH", "SA")
+    assert br.ROUTING_COUNTRIES[:-5] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
+                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-5:] == ("MX", "BR", "CH", "SA", "ZA")
     assert br.ROUTING_FIELDS["MX"] == [{"key": "clabe", "label": "CLABE"}]
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing

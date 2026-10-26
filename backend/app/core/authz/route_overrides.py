@@ -390,3 +390,12 @@ _set("GET", f"{_MX}/cfdi", data_class="aggregate",
 _set("GET", f"{_MX}/authorities", data_class="aggregate",
      note="reviewed: IMSS / SUA / ISN counts by status and platform blocks; no movement rows")
 
+
+# South Africa compliance summary: readiness/status counts only - no worker row.
+_set("GET", "/api/super-admin/compliance/south-africa/summary", data_class="aggregate",
+     note="reviewed: ZA readiness and gate status counts; no per-employee rows")
+
+# Mexico readiness was previously classified platform; the scan now sees worker
+# tables through shared helpers but the route returns org-level status only.
+_set("GET", f"{_MX}/readiness", data_class="platform",
+     note="reviewed: organization-level Mexico readiness status; no per-employee rows")

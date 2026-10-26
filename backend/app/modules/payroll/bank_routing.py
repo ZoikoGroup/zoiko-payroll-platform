@@ -51,7 +51,7 @@ from typing import List, Optional
 # no Mexican payment file exists before Phase 10.
 # Switzerland and Saudi Arabia (Phase 4.1, 2026-10-23) route by IBAN (+ BIC).
 ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR",
-                     "CH", "SA")
+                     "CH", "SA", "ZA")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -104,6 +104,10 @@ ROUTING_FIELDS = {
     "SA": [
         {"key": "iban", "label": "IBAN"},
     ],
+    "ZA": [
+        {"key": "branch_code", "label": "Branch Code"},
+        {"key": "account_number", "label": "Account Number"},
+    ],
     "BR": [
         {"key": "pix_key", "label": "PIX Key"},
         {"key": "bank_compe", "label": "Bank COMPE"},
@@ -139,6 +143,7 @@ BTF_ROUTING_LABEL = {
     "BR": "PIX Key / COMPE",
     "CH": "IBAN",
     "SA": "IBAN",
+    "ZA": "Branch Code / Account",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -164,6 +169,7 @@ PAYMENT_MODE_LABEL = {
     "BR": "PIX / TED",
     "CH": "SIC / ISO 20022",
     "SA": "SARIE",
+    "ZA": "EFT",
 }
 
 
