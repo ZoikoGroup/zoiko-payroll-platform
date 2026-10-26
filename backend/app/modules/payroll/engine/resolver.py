@@ -132,6 +132,17 @@ def calculate_payroll(
             "Brazil CLT payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "ZA" and key == "simple":
+        # South Africa (ZP-ZA-ENG-001): simple mode would silently skip PAYE,
+        # UIF and SDL — unsupported cases are blocked, never approximated
+        # (spec §1). Fail-closed: countries/south_africa.py.
+        from app.modules.payroll.engine.countries.south_africa import ZACalculationBlockedError
+
+        raise ZACalculationBlockedError(
+            "ZA_SIMPLE_MODE_UNSUPPORTED",
+            "South Africa payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -255,6 +266,7 @@ def build_context_from_employee(
     netherlands_inputs: dict | None = None,
     mexico_inputs: dict | None = None,
     brazil_inputs: dict | None = None,
+    south_africa_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -452,4 +464,7 @@ def build_context_from_employee(
         # brazil_is_apprentice, ...) resolved by brazil_service (Phase 6
         # calc_inputs). Keys are PayrollContext field names.
         **(brazil_inputs or {}),
+        # South Africa (ZP-ZA-ENG-001): za_statutory_profile + za_* context
+        # fields resolved by south_africa_service (Phase 5 calc_inputs).
+        **(south_africa_inputs or {}),
     )

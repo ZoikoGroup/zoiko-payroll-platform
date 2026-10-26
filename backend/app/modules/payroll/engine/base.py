@@ -956,6 +956,24 @@ class PayrollContext:
     # pay only with the employee's recorded consent.
     sa_overtime_comp_leave_consented: bool = False
 
+    # ── South Africa (ZP-ZA-ENG-001; "ZA" — "SA" above is Saudi Arabia) ────────
+    # Pre-resolved by the service layer (Phase 5) from the effective-dated
+    # EmployeeStatutoryProfile (za_* columns) and the employer registration.
+    # countries/south_africa.py BLOCKS rather than guesses any that are missing
+    # (ZA-005). date_of_birth / period_end above are reused. All default to
+    # None so every non-ZA caller is unaffected.
+    za_statutory_profile: object = None        # EmployeeStatutoryProfile | None
+    za_organization_id: int = None
+    za_employee_id: int = None
+    za_employer_registration: object = None    # PayrollZaEmployerRegistration in force (sdl_liable, …)
+    za_has_tax_number: bool = None             # an income tax reference is recorded (masked elsewhere)
+    za_components: dict = None                 # {BONUS|COMMISSION|LEAVE_PAYOUT|TRAVEL_FIXED|… : amount}
+    za_retirement_fund_contribution: Decimal = None   # employee contribution this period
+    za_directives: list = None                 # APPROVED directives in force (dicts from the service)
+    za_variable_items: list = None             # section 7B items: {component, amount, earned_from, earned_to}
+    za_eti_paid_hours: Decimal = None          # ETI: hours paid in the claim month
+    za_eti_qualifying_month_no: int = None     # ETI: 1..za_eti_qualifying_months_max
+
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
     # BLOCKS (NetherlandsCalculationBlockedError) rather than guess any that
@@ -1675,6 +1693,12 @@ class PayrollResult:
     # (SANED maps to the generic social-security slots, pension to the
     # employee/employer pension slots). 0 for every non-SA country.
     employer_occupational_hazard: Decimal = Decimal("0")
+
+    # South Africa (ZP-ZA-ENG-001) — the whole dict countries/south_africa.py
+    # returns under 'za_result' (separate PAYE / UIF / SDL bases, the PAYE
+    # trace, totals). PAYE, UIF and SDL also arrive on the generic tds /
+    # employee_esi / employer_esi / employer_payroll_tax fields. None elsewhere.
+    za_result: dict = None
 
     # Netherlands (ZP-NL-ENG-001) — the whole dict countries/netherlands.py
     # returns under 'nl_result' key (wage_tax, employee_insurance, whk, zvw,
