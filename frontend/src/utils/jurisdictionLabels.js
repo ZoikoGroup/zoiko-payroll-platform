@@ -61,10 +61,12 @@ const SOCIAL_SECURITY_LABELS = {
   BS: "NIB", KY: "NIB Pension",
   // Brazil — the employee's INSS (Instituto Nacional do Seguro Social) share.
   BR: "INSS",
+  // Saudi Arabia — GOSI SANED / Unemployment (Employee), from sa_result.social_security
+  SA: "GOSI SANED / Unemployment (Employee)",
 };
-const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution", BR: "CPP (Employer INSS)" };
+const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution", BR: "CPP (Employer INSS)", SA: "GOSI SANED / Unemployment (Employer)" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
-const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)" };
+const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)", SA: "GOSI Pension (Employer)" };
 const CHURCH_TAX_LABELS = { DE: "Kirchensteuer" };
 const SOLIDARITY_SURCHARGE_LABELS = { DE: "Solidaritätszuschlag" };
 // Trinidad reuses the `professionalTax` field for its Health Surcharge (see
@@ -83,6 +85,8 @@ const EMPLOYEE_PENSION_LABELS = {
   // Brazil — FGTS (Fundo de Garantia do Tempo de Serviço), the employer's 8%
   // length-of-service deposit, shown on the payslip's savings line.
   BR: "FGTS",
+  // Saudi Arabia — GOSI Pension (Employee share), from sa_result.employee_pension
+  SA: "GOSI Pension (Employee)",
 };
 const NI_EMPLOYEE_LABELS = { JM: "Education Tax" };
 
@@ -117,7 +121,9 @@ export function getIncomeTaxLines(payslip) {
 export function getPayrollLabels(country) {
   const c = (country || "IN").toUpperCase();
   return {
-    incomeTax: NO_PAYROLL_INCOME_TAX.has(c) ? "Salaries Tax (not withheld)" : (INCOME_TAX_LABELS[c] || "TDS"),
+    incomeTax: NO_PAYROLL_INCOME_TAX.has(c)
+      ? (c === "SA" ? "No income tax withheld (GOSI only)" : "Salaries Tax (not withheld)")
+      : (INCOME_TAX_LABELS[c] || "TDS"),
     noPayrollIncomeTax: NO_PAYROLL_INCOME_TAX.has(c),
     pf: PF_LABELS[c] || "Provident Fund (PF)",
     esi: ESI_LABELS[c] || "Employee State Insurance (ESI)",
@@ -127,6 +133,8 @@ export function getPayrollLabels(country) {
     employerSocialSecurity: EMPLOYER_SOCIAL_SECURITY_LABELS[c] || "Employer Social Security",
     medicare: MEDICARE_LABELS[c] || "Medicare",
     employerPension: EMPLOYER_PENSION_LABELS[c] || "Employer Pension",
+    // Saudi GOSI Occupational Hazards — employer-only (ZP-SA-ENG-001 §4).
+    employerOccupationalHazard: c === "SA" ? "GOSI Occupational Hazards (Employer)" : "Occupational Hazards (Employer)",
     churchTax: CHURCH_TAX_LABELS[c] || null,
     solidaritySurcharge: SOLIDARITY_SURCHARGE_LABELS[c] || null,
     professionalTax: PROFESSIONAL_TAX_LABELS[c] || "Professional Tax",

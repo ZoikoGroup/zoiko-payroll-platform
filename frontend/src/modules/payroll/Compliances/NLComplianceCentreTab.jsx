@@ -6,9 +6,15 @@ import {
   getNlWkr,
   listNlAbsencePayPolicies,
   listNlCaos,
+  createNlSalaryBatch,
+  downloadNlPaymentBatchFile,
   listNlPaymentBatches,
+  previewNlSalaryBatch,
+  reconcileNlPaymentBatch,
+  recordNlPaymentBankResult,
+  submitNlPaymentBatch,
 } from "../../../service/payrollService";
-import { Field, Messages, Table, btnPrimary, card, input, useAction, useLoad } from "../../../components/jurisdiction/netherlands/nlShared";
+import { Field, Messages, Table, btn, btnPrimary, card, input, useAction, useLoad } from "../../../components/jurisdiction/netherlands/nlShared";
 import NLReadinessPanel from "./NLReadinessPanel";
 import NLLoonaangiftePanel from "../Reports/NLLoonaangiftePanel";
 import NLJaaropgaafPanel from "../Reports/NLJaaropgaafPanel";
@@ -172,19 +178,84 @@ function Wkr() {
   );
 }
 
+// SEPA salary batches (Phase 4.2): DRAFT -> SUBMITTED -> ACCEPTED / REJECTED /
+// UNKNOWN -> SETTLED. The file is the exact stored pain.001 (validated against
+// the official XSD). One run is paid through ONE channel — a run whose bank
+// transfer file was downloaded cannot also get a SEPA batch, and vice versa.
 function Payments() {
-  const [rows, error] = useLoad(() => listNlPaymentBatches(), []);
+  const [rows, loadError, , reload] = useLoad(() => listNlPaymentBatches(), []);
+  const { run, error, notice, busy } = useAction(reload);
+  const [runId, setRunId] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [exclusions, setExclusions] = useState({});
+
+  const loadPreview = () => run(async () => {
+    setPreview(await previewNlSalaryBatch(Number(runId)));
+    setExclusions({});
+  });
+  const create = () => run(() => createNlSalaryBatch(Number(runId), { exclusions }), "Salary batch created (DRAFT).");
+  const settle = (id) => {
+    const ref = window.prompt("Bank statement reference for this settlement:");
+    if (ref) run(() => reconcileNlPaymentBatch(id, ref), "Batch settled.");
+  };
+
   return (
     <div className={card}>
       <h3 className="mb-2 text-[14px] font-semibold text-foreground">SEPA salary payments</h3>
       <p className="mb-2 text-[12px] text-foreground-muted">
-        A salary batch (pain.001) is created from an approved, committed payroll run. Payments to the Belastingdienst
-        stay locked until gate G3.
+        A salary batch (pain.001) is created from an approved, committed payroll run. Every employee who cannot be
+        paid must be fixed or excluded with a reason. Payments to the Belastingdienst stay locked until gate G3.
       </p>
-      <Messages error={error} />
+      <Messages error={loadError || error} notice={notice} />
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-[11px] font-semibold text-foreground-muted">
+          Payroll run ID
+          <input className={input} value={runId} onChange={(e) => setRunId(e.target.value.replace(/\D/g, ""))} />
+        </label>
+        <button type="button" className={btn} disabled={busy || !runId} onClick={loadPreview}>Preview</button>
+        <button type="button" className={btnPrimary} disabled={busy || !runId || !preview} onClick={create}>
+          Create salary batch
+        </button>
+      </div>
+      {preview && (
+        <div className="mb-3 text-[12px]">
+          <p className="text-foreground">{preview.payable.length} employee(s) will be paid.</p>
+          {preview.exceptions.map((x) => (
+            <label key={x.employeeId} className="mt-1 flex flex-wrap items-center gap-2 text-error">
+              {x.name}: {x.reason} — exclude with reason:
+              <input className={input} value={exclusions[x.employeeId] || ""}
+                onChange={(e) => setExclusions((m) => ({ ...m, [x.employeeId]: e.target.value }))} />
+            </label>
+          ))}
+        </div>
+      )}
       <Table rows={rows} empty="No payment batches yet." columns={[
-        { key: "payroll_run_id", label: "Run" }, { key: "message_id", label: "Message ID" },
-        { key: "status", label: "Status" }, { key: "submitted_at", label: "Submitted" }, { key: "reconciled_at", label: "Reconciled" },
+        { key: "payroll_run_id", label: "Run" }, { key: "batch_kind", label: "Kind" },
+        { key: "message_id", label: "Message ID" }, { key: "status", label: "Status" },
+        { key: "submitted_at", label: "Submitted" }, { key: "reconciled_at", label: "Settled" },
+        {
+          key: "actions", label: "", render: (r) => (
+            <div className="flex flex-wrap gap-1">
+              <button type="button" className={btn} disabled={busy}
+                onClick={() => run(() => downloadNlPaymentBatchFile(r.id))}>Download file</button>
+              {r.status === "DRAFT" && (
+                <button type="button" className={btn} disabled={busy}
+                  onClick={() => run(() => submitNlPaymentBatch(r.id), "Marked as handed to the bank.")}>Mark submitted</button>
+              )}
+              {["SUBMITTED", "UNKNOWN"].includes(r.status) && ["ACCEPTED", "REJECTED", "UNKNOWN"]
+                .filter((o) => o !== r.status)
+                .map((o) => (
+                  <button key={o} type="button" className={btn} disabled={busy}
+                    onClick={() => run(() => recordNlPaymentBankResult(r.id, o), `Bank result recorded: ${o}.`)}>
+                    Bank: {o.toLowerCase()}
+                  </button>
+                ))}
+              {r.status === "ACCEPTED" && (
+                <button type="button" className={btn} disabled={busy} onClick={() => settle(r.id)}>Settle</button>
+              )}
+            </div>
+          ),
+        },
       ]} />
     </div>
   );

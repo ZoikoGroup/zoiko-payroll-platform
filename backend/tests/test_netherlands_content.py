@@ -36,7 +36,7 @@ from scripts.seed_netherlands_canonical_packs import (
 )
 
 # Two packs are declared; anything indexed off them must stay in sync.
-EXPECTED_SCALAR_ROWS = 34
+EXPECTED_SCALAR_ROWS = 35
 EXPECTED_SLAB_ROWS = 8 + 2 + 3 + 2   # min wage + period maxima + WKR bands + car bands
 
 

@@ -55,14 +55,15 @@ NL = "NL"
 def period_code_for(tax_year: int, period_start: date, return_period: str) -> str:
     """Build the Belastingdienst period code.
     MONTH: YYYYMM (e.g., 202601)
-    FOUR_WEEK: YYYYWNN (e.g., 2026W01)
+    FOUR_WEEK: YYYYWNN where NN is the 4-week period NUMBER 01-13 (period 1
+    starts 1 January, each runs 28 days, period 13 runs to 31 December) —
+    never an ISO week number, so the code round-trips through period_dates_for.
     """
     if return_period == "MONTH":
         return f"{tax_year}{period_start.month:02d}"
     if return_period == "FOUR_WEEK":
-        # ISO week number; 4-week periods approximate
-        week = period_start.isocalendar()[1]
-        return f"{tax_year}W{week:02d}"
+        number = min((period_start - date(tax_year, 1, 1)).days // 28 + 1, 13)
+        return f"{tax_year}W{number:02d}"
     raise BadRequestException(f"unknown return_period {return_period}")
 
 
@@ -77,10 +78,11 @@ def period_dates_for(tax_year: int, period_code: str, return_period: str) -> Tup
             end = date(tax_year, month + 1, 1) - timedelta(days=1)
         return start, end
     if return_period == "FOUR_WEEK":
-        # Approximate: 4-week periods starting from Jan 1
-        week = int(period_code[-2:])
-        start = date(tax_year, 1, 1) + timedelta(weeks=week - 1)
-        end = start + timedelta(days=27)
+        number = int(period_code[-2:])
+        if not 1 <= number <= 13:
+            raise BadRequestException(f"4-week period number must be 01-13, got {period_code}")
+        start = date(tax_year, 1, 1) + timedelta(days=28 * (number - 1))
+        end = date(tax_year, 12, 31) if number == 13 else start + timedelta(days=27)
         return start, end
     raise BadRequestException(f"unknown return_period {return_period}")
 
@@ -92,7 +94,7 @@ def due_dates_for(tax_year: int, period_start: date, return_period: str) -> Tupl
     if return_period == "MONTH":
         _, period_end = period_dates_for(tax_year, f"{tax_year}{period_start.month:02d}", "MONTH")
     elif return_period == "FOUR_WEEK":
-        period_end = period_start + timedelta(days=27)
+        _, period_end = period_dates_for(tax_year, period_code_for(tax_year, period_start, "FOUR_WEEK"), "FOUR_WEEK")
     else:
         raise BadRequestException(f"unknown return_period {return_period}")
     first_of_next = (period_end.replace(day=1) + timedelta(days=32)).replace(day=1)

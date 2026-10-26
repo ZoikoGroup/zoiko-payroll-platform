@@ -17,6 +17,8 @@ import MXRunStatusBadges from "../../../components/jurisdiction/mexico/run/MXRun
 import MXRunCalculationTrace from "../../../components/jurisdiction/mexico/run/MXRunCalculationTrace";
 import MXCfdiStagePanel from "../../../components/jurisdiction/mexico/run/MXCfdiStagePanel";
 import MXCorrectionsPanel from "../../../components/jurisdiction/mexico/run/MXCorrectionsPanel";
+import BRRunPreflightPanel from "./BRRunPreflightPanel";
+import BRPayslipBreakdown from "./BRPayslipBreakdown";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -143,6 +145,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     [labels.employerSocialSecurity, item.employerSs],
     ["Employer Medicare", item.employerMedicare],
     [labels.employerPension, item.employerPension],
+    [labels.employerOccupationalHazard, item.employerOccupationalHazard],
     ["Employer National Insurance", item.employerNi],
     // UK: Apprenticeship Levy — computed since the 2026-09-08 commit but
     // silently discarded before ever reaching a persisted PayslipItem;
@@ -374,6 +377,7 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
             </div>
             {nlSnapshot && <NLPayslipBreakdown snapshot={nlSnapshot} employeeName={item.employee} />}
             {mxSnapshot && <MXRunCalculationTrace snapshot={mxSnapshot} />}
+            {(item.country || item.countryCode) === "BR" && item.brCalculationSnapshot && <BRPayslipBreakdown snapshot={item.brCalculationSnapshot} employeeName={item.employee} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -492,6 +496,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   <MXCorrectionsPanel runId={run.id} items={items} />
                 </>
               )}
+              {items.some((i) => (i.country || i.countryCode) === "BR") && <BRRunPreflightPanel runId={run.id} />}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

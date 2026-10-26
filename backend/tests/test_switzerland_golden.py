@@ -161,7 +161,7 @@ def test_certificate_regeneration_absorbs_the_correction_at_reference_values(db,
     _approve(db, ch, 4)
     first = _generate(db, ch, template.id, creator.id)
     db.commit()
-    qst_box = lambda cert: D({b["boxCode"]: b for b in cert["boxes"]}["BOX_QST_WITHHELD"]["valueExact"])  # noqa: E731
+    qst_box = lambda cert: D({b["boxCode"]: b for b in cert["boxes"]}["BOX_12"]["valueExact"])  # noqa: E731
     march_ref, april_ref = _reference(), _reference(pay_date="2026-04-30")
     assert qst_box(first) == march_ref["ch_qst_total"] + april_ref["ch_qst_total"]                     # 1280
     _tariff_b(db, ch)

@@ -21,7 +21,7 @@
 
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
-export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX"];
+export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR", "CH", "SA"];
 
 // Mirrors backend bank_routing.py's PAYMENT_MODE_LABEL.
 const PAYMENT_MODE_LABEL = {
@@ -35,6 +35,9 @@ const PAYMENT_MODE_LABEL = {
   IE: "SEPA",
   NL: "SEPA",
   MX: "SPEI",
+  BR: "PIX / TED",
+  CH: "SIC / ISO 20022",
+  SA: "SARIE",
   BB: "EFT",
   KY: "EFT",
   DO: "EFT",
@@ -60,6 +63,9 @@ const BTF_ROUTING_LABEL = {
   IE: "IBAN",
   NL: "IBAN",
   MX: "CLABE",
+  BR: "PIX Key / COMPE",
+  CH: "IBAN",
+  SA: "IBAN",
   BB: "Bank/Branch Code",
   KY: "Bank/Branch Code",
   DO: "Bank/Branch Code",
@@ -85,6 +91,9 @@ const BANKING_COMPLIANCE_KEYS = {
   FR: ["iban", "bic"],
   IE: ["iban", "bic"],
   NL: ["iban", "bic"],
+  BR: ["pix_key", "bank_compe", "bank_agency", "bank_agency_digit", "bank_account", "bank_account_digit", "bank_ispb"],
+  CH: ["iban", "bic"],
+  SA: ["iban"],
   BB: ["bank_branch_code"],
   KY: ["bank_branch_code"],
   DO: ["bank_branch_code"],

@@ -304,7 +304,18 @@ def build_context(case_context: dict) -> PayrollContext:
         # normally supplies these directly (or a sa_statutory_profile dict,
         # rebuilt here as a SimpleNamespace like Sweden's). None elsewhere.
         **_saudi_context(case_context),
+        # Brazil (ZP-BR-ENG-001 §18 golden payroll): the brazil_inputs dict
+        # countries/brazil.py is a pure function of. A BR case supplies the
+        # whole dict on the case context; every other country is unaffected.
+        **_brazil_context(case_context),
     )
+
+
+def _brazil_context(case_context: dict) -> dict:
+    if case_context.get("country") != "BR":
+        return {}
+    inputs = dict(case_context.get("brazil_inputs") or {})
+    return {"brazil_inputs": inputs}
 
 
 def _sweden_context(case_context: dict) -> dict:
@@ -398,6 +409,7 @@ def run_golden_case(case: dict) -> None:
     # field from the PayrollResult itself.
     country_result = getattr(result, "ch_result", None) or {}
     sa_result = getattr(result, "sa_result", None) or {}
+    br_result = getattr(result, "br_result", None) or {}
 
     diffs = []
     for field_name, expected_raw in case["expected"].items():
@@ -406,6 +418,8 @@ def run_golden_case(case: dict) -> None:
             actual = country_result[field_name]          # the Swiss engine's own dict (PayrollResult.ch_result)
         elif field_name.startswith("sa_") and field_name in sa_result:
             actual = sa_result[field_name]               # the Saudi engine's own dict (PayrollResult.sa_result)
+        elif field_name.startswith("br_") and field_name in br_result:
+            actual = br_result[field_name]               # the Brazil engine's own dict (PayrollResult.br_result)
         else:
             actual = getattr(result, field_name, None)
         if actual is None:

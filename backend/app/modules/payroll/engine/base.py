@@ -1032,35 +1032,42 @@ class PayrollContext:
     # matching every other country's calculator). None/absent for every non-BR
     # calculation — existing calculations for every other country are unaffected.
     #
-    # brazil_inputs: dict carrying all Brazil-specific scalars:
+    # brazil_inputs: dict carrying all Brazil-specific scalars. Phase 5
+    # (engine/countries/brazil.py) makes the REQUIRED keys fail closed when
+    # absent (BR-001 — the old RAT/FAP/third-party defaults are gone):
     #   {
-    #     "dependents":               int,    # IRRF + Salário-Família eligible dependents
-    #     "alimony":                  str,    # Decimal-string pension alimentícia (IRRF deduction)
-    #     "vt_benefit":               str,    # Decimal-string Vale-Transporte employer provision
-    #     "opt_out_simplified_irrf":  bool,   # True → always use legal deductions (rare)
-    #     "rat_pct":                  str,    # Decimal-string risk class rate e.g. "2" = 2%
-    #     "fap_factor":               str,    # Decimal-string FAP multiplier e.g. "1.0"
-    #     "third_party_pct":          str,    # Decimal-string Outras Entidades / FPAS rate
+    #     "competence_month":         str,    # ISO date of the competence month (INSS/FGTS/SF/CPP; BR-014)
+    #     "esocial_category":         str,    # "101" ordinary CLT, "103" apprentice (BR-045)
+    #     "contract_salary":          str,    # Decimal-string contracted monthly base salary (VT cap + minimum-wage floor)
+    #     "earnings":                 list,   # [{rubricCode, amount}] → CP/IRRF/FGTS bases by incidence (BR-002)
+    #     "rat_pct":                  str,    # Decimal-string risk class rate e.g. "2" = 2% (REQUIRED)
+    #     "fap_factor":               str,    # Decimal-string FAP multiplier e.g. "1.0" (required)
+    #     "third_party_pct":          str,    # Decimal-string Outras Entidades / FPAS rate (required)
     #     "cprb_opted":               bool,   # True → 10% CPRB transition rate
     #     "financial_sector":         bool,   # True → +2.5% CPP add-on
+    #     "dependents":               int,    # IRRF + Salário-Família eligible dependents
+    #     "alimony":                  str,    # Decimal-string pension alimentícia (IRRF + net deduction)
+    #     "vt_benefit":               str,    # Decimal-string Vale-Transporte employer provision
+    #     "opt_out_simplified_irrf":  bool,   # True → always use legal deductions (rare)
     #     "concurrent_inss_base":     str,    # Decimal-string salary already absorbed in concurrent jobs
     #     "concurrent_inss_deducted": str,    # Decimal-string INSS already withheld in concurrent jobs
     #     "concurrent_sf_base":       str,    # Decimal-string remuneration from concurrent employer (SF eligibility)
     #   }
-    # Empty dict for every non-BR employee. Phase 0 (scaffolding): every
-    # Brazilian calculation BLOCKS in countries/brazil.py before these are
-    # read; Phase 5 makes each required key fail closed when absent (BR-001).
+    # Empty dict for every non-BR employee. A missing REQUIRED key makes
+    # countries/brazil.py BLOCK (BR_MISSING_INPUT); it never silently defaults.
     brazil_inputs: dict = field(default_factory=dict)
 
-    # brazil_is_apprentice: True → FGTS 2% (not ordinary 8%), per BR-045.
-    # False for every non-BR employee and for every regular CLT worker.
+    # brazil_is_apprentice: SUPERSEDED in Phase 5 — the engine derives the
+    # apprentice flag from brazil_inputs["esocial_category"] == "103" (BR-045),
+    # never from this raw boolean. Kept on the context for backward
+    # compatibility with the Phase 2 scaffold and existing callers.
     brazil_is_apprentice: bool = False
 
     # brazil_statutory_profile / brazil_establishment / brazil_employer_profile:
     # Pre-resolved ORM row objects for Phase 3+ — eSocial/DCTFWeb/FGTS Digital
     # integration wiring. None for every Phase 2 calculation; engine/countries/
     # brazil.py does not read these yet (Phase 2 scope: calculation engine only).
-    brazil_statutory_profile: object = None    # PayrollBrStatutoryProfile | None (Phase 3)
+    brazil_statutory_profile: object = None    # EmployeeStatutoryProfile | None (Phase 3/4 — br_* block)
     brazil_establishment: object = None        # PayrollBrEstablishment | None (Phase 3)
     brazil_employer_profile: object = None     # PayrollBrEmployerProfile | None (Phase 3)
     brazil_organization_id: int = None         # for blocked-error context only
@@ -1698,6 +1705,7 @@ class PayrollResult:
     br_irrf_reduction: Decimal = Decimal("0")
     br_salario_familia: Decimal = Decimal("0")
     br_vale_transporte_deduction: Decimal = Decimal("0")
+    br_alimony_deduction: Decimal = Decimal("0")   # Court-ordered alimony — reduces net pay (BR-032)
     br_base_fgts: Decimal = Decimal("0")
     br_fgts_deposit: Decimal = Decimal("0")    # Employer liability — never in net pay
     br_cpp_employer: Decimal = Decimal("0")    # Employer liability — never in net pay

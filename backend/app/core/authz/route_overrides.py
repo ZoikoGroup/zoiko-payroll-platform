@@ -367,6 +367,8 @@ _BR = "/api/super-admin/compliance/brazil"
 _retire("GET", f"{_MX}/employees", R_JIT, "lists Mexican employees (names, codes) of one organization")
 _retire("GET", f"{_MX}/employees/{{employee_id}}", R_JIT, "one Mexican employee's record and readiness")
 _retire("GET", f"{_BR}/employees", R_JIT, "lists Brazilian employees (names, codes) of one organization")
+_retire("GET", f"{_BR}/employees/{{employee_id}}", R_JIT,
+       "one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)")
 # Mexico Phase 10e D5: the governed copy of a pilot's master data (employees and
 # their statutory profiles) into a new live organisation moves worker rows
 # between two tenants. Built and tested in mexico_pilot_service; its Super

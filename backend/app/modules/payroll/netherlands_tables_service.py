@@ -232,7 +232,7 @@ def import_table_file(
 
 def validate_table_file(db: Session, file_id: int, actor_id: int) -> PayrollNlTaxTableFile:
     """Validate the parsed rows for consistency (no overlaps, full coverage, etc.).
-    Sets status to VALIDATED.
+    Sets status to VALIDATED only when the report has no errors.
     """
     file_row = db.query(PayrollNlTaxTableFile).filter(PayrollNlTaxTableFile.id == file_id).first()
     if not file_row:
@@ -263,9 +263,12 @@ def validate_table_file(db: Session, file_id: int, actor_id: int) -> PayrollNlTa
                         errors.append(f"Gap/overlap at {prev_to} vs {r.wage_from} for {aow}/{wtc}")
                 prev_to = r.wage_to if r.wage_to is not None else Decimal("Infinity")
 
-    file_row.status = "VALIDATED"
+    # A file with a gap or overlap is never VALIDATED (NL-005): it stays
+    # IMPORTED with its report, so it can only be rejected and re-imported.
     file_row.validation_report = {"errors": errors, "warnings": warnings}
-    file_row.validated_by = actor_id
+    if not errors:
+        file_row.status = "VALIDATED"
+        file_row.validated_by = actor_id
     db.flush()
     return file_row
 
@@ -279,6 +282,8 @@ def approve_table_file(db: Session, file_id: int, actor_id: int) -> PayrollNlTax
         raise NotFoundException("PayrollNlTaxTableFile", file_id)
     if file_row.status != "VALIDATED":
         raise BadRequestException(f"Cannot approve file in status {file_row.status}")
+    if (file_row.validation_report or {}).get("errors"):
+        raise BadRequestException("Cannot approve a table file whose validation report has errors")
     if file_row.imported_by == actor_id:
         raise BadRequestException("Importer cannot also approve (four-eyes rule)")
 

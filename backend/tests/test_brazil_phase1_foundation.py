@@ -29,42 +29,44 @@ def _employer(organization_id=1, **extra):
 
     values = dict(
         organization_id=organization_id,
+        version=1,
+        effective_from=date(2026, 1, 1),
         cnpj_root="12345678",
         legal_name="Zoiko Tecnologia Brasil Ltda",
         trade_name="Zoiko Payroll Brasil",
         tax_classification="99",
         cnae_preponderant="6201501",
-        cprb_opted=False,
         esocial_environment="RESTRICTED_PRODUCTION",
         contact_name="Diretor de Folha",
         contact_cpf="12345678909",
         contact_email="payroll.br@zoiko.com",
-        status="DRAFT",
+        status="ACTIVE",
     )
     values.update(extra)
     return PayrollBrEmployerProfile(**values)
 
 
-def _establishment(employer_profile_id, **extra):
+def _establishment(employer, **extra):
     from app.modules.payroll.models import PayrollBrEstablishment
 
     values = dict(
-        employer_profile_id=employer_profile_id,
+        organization_id=employer.organization_id,
+        employer_profile_id=employer.id,
         cnpj="12345678000195",
         establishment_name="Matriz Sao Paulo",
         is_headquarters=True,
         cnae="6201501",
-        rat_pct=Decimal("2.00"),
-        fap_factor=Decimal("1.0000"),
         fpas_code="507",
         third_party_code="0079",
         third_party_pct=Decimal("5.80"),
+        fpas_evidence_ref="FPAS declaration (test)",
         lotacao_code="LOT_MATRIZ_SP",
         postal_code="01310100",
         street_address="Av Paulista, 1000",
         neighborhood="Bela Vista",
         city_ibge_code="3550308",
         state_uf="SP",
+        active_from=date(2026, 1, 1),
     )
     values.update(extra)
     return PayrollBrEstablishment(**values)
@@ -73,7 +75,7 @@ def _establishment(employer_profile_id, **extra):
 # ── 1. Database & ORM Model Verification ──────────────────────────────────────
 
 def test_brazil_orm_models_instantiation(db):
-    """All four Brazil tables can be created and written; payslip snapshot columns exist."""
+    """The Brazil tables can be created and written; payslip snapshot columns exist."""
     from app.modules.payroll.models import PayrollBrRubric, PayslipItem
 
     profile = _employer()
@@ -81,7 +83,7 @@ def test_brazil_orm_models_instantiation(db):
     db.flush()
     assert profile.id is not None
 
-    establishment = _establishment(profile.id)
+    establishment = _establishment(profile)
     db.add(establishment)
     db.flush()
     assert establishment.id is not None
@@ -109,12 +111,21 @@ def test_brazil_orm_models_instantiation(db):
         assert hasattr(PayslipItem, column), column
 
 
-def test_one_employer_profile_per_organization(db):
+def test_one_open_version_per_employer_chain(db):
+    """Phase 3: an organisation may hold several legal employers (CNPJ roots),
+    but each chain has exactly one OPEN version and unique version numbers."""
     from sqlalchemy.exc import IntegrityError
 
     db.add(_employer(organization_id=7))
+    db.add(_employer(organization_id=7, cnpj_root="87654321"))       # another legal employer: allowed
     db.flush()
-    db.add(_employer(organization_id=7, cnpj_root="87654321"))
+    db.add(_employer(organization_id=7, version=2, effective_from=date(2026, 6, 1)))   # second OPEN version
+    with pytest.raises(IntegrityError):
+        db.flush()
+    db.rollback()
+    db.add(_employer(organization_id=8))
+    db.flush()
+    db.add(_employer(organization_id=8, effective_from=date(2026, 6, 1), effective_to=date(2026, 6, 30)))  # dup v1
     with pytest.raises(IntegrityError):
         db.flush()
 
@@ -127,9 +138,24 @@ def test_establishment_cnpj_unique_per_employer_not_platform_wide(db):
     a, b = _employer(organization_id=11), _employer(organization_id=12)
     db.add_all([a, b])
     db.flush()
-    db.add_all([_establishment(a.id), _establishment(b.id)])
+    db.add_all([_establishment(a), _establishment(b)])
     db.flush()
-    db.add(_establishment(a.id, establishment_name="Duplicate"))
+    db.add(_establishment(a, establishment_name="Duplicate", is_headquarters=False))
+    with pytest.raises(IntegrityError):
+        db.flush()
+
+
+def test_one_active_headquarters_per_employer(db):
+    from sqlalchemy.exc import IntegrityError
+
+    employer = _employer(organization_id=13)
+    db.add(employer)
+    db.flush()
+    db.add(_establishment(employer))
+    db.flush()
+    db.add(_establishment(employer, cnpj="12345678000276", is_headquarters=False))      # a branch: fine
+    db.flush()
+    db.add(_establishment(employer, cnpj="12345678000357", is_headquarters=True))       # a second active HQ
     with pytest.raises(IntegrityError):
         db.flush()
 
@@ -138,41 +164,48 @@ def test_establishment_cnpj_unique_per_employer_not_platform_wide(db):
     {"rat_pct": Decimal("1.50")},
     {"fap_factor": Decimal("0.4999")},
     {"fap_factor": Decimal("2.0001")},
+    {"status": "OPEN"},
+    {"calendar_year": 2025},
 ])
-def test_establishment_risk_checks(db, bad):
+def test_risk_assignment_checks(db, bad):
     from sqlalchemy.exc import IntegrityError
+
+    from app.modules.payroll.models import PayrollBrRiskAssignment
 
     employer = _employer(organization_id=21)
     db.add(employer)
     db.flush()
-    db.add(_establishment(employer.id, **bad))
+    establishment = _establishment(employer)
+    db.add(establishment)
+    db.flush()
+    values = dict(organization_id=21, establishment_id=establishment.id, calendar_year=2026, rat_pct=Decimal("2"),
+                  fap_factor=Decimal("1.0000"), evidence_ref="FAP notice (test)", status="DRAFT")
+    values.update(bad)
+    db.add(PayrollBrRiskAssignment(**values))
     with pytest.raises(IntegrityError):
         db.flush()
 
 
 @pytest.mark.parametrize("bad", [
-    {"esocial_category": "102"},
-    {"weekly_hours": Decimal("45.00")},
-    {"contract_type": "PERMANENT"},
-    {"status": "UNKNOWN"},
+    {"br_esocial_category": "102"},
+    {"br_weekly_hours": Decimal("45.00")},
+    {"br_contract_type": "PERMANENT"},
+    {"br_cbo_code": "12"},
+    {"br_irrf_dependents_count": 2},
 ])
 def test_statutory_profile_checks(db, bad):
-    from sqlalchemy.exc import IntegrityError
+    """Phase 4b: the CLT profile lives on the shared EmployeeStatutoryProfile's
+    br_* block, so the field checks are app-level (brazil_employee_service
+    .statutory_profile_errors) rather than the old dedicated-table constraints."""
+    from types import SimpleNamespace
 
-    from app.modules.payroll.models import PayrollBrStatutoryProfile
+    from app.modules.payroll import brazil_employee_service as emp
 
-    employer = _employer(organization_id=31)
-    db.add(employer)
-    db.flush()
-    establishment = _establishment(employer.id)
-    db.add(establishment)
-    db.flush()
-    values = dict(employee_id=1, establishment_id=establishment.id, effective_from=date(2026, 1, 1),
-                  cbo_code="212405")
+    values = {"br_esocial_category": "101", "br_weekly_hours": Decimal("44.00"),
+              "br_contract_type": "INDEFINITE", "br_cbo_code": "212405",
+              "br_irrf_dependents_count": 0}
     values.update(bad)
-    db.add(PayrollBrStatutoryProfile(**values))
-    with pytest.raises(IntegrityError):
-        db.flush()
+    assert emp.statutory_profile_errors(SimpleNamespace(**values))
 
 
 # ── 2. Algorithmic Identifier Verification ────────────────────────────────────
@@ -215,7 +248,14 @@ def test_br_employee_validation_strategy():
     from app.core.exceptions import BadRequestException
     from app.modules.payroll.employee_validation import BREmployeeValidation, get_employee_validation_strategy
 
-    strategy = get_employee_validation_strategy("BR")
+    from app.config import settings
+
+    original = settings.BR_TENANT_ONBOARDING_ENABLED
+    settings.BR_TENANT_ONBOARDING_ENABLED = True          # Phase 3: the validator is dormant by default
+    try:
+        strategy = get_employee_validation_strategy("BR")
+    finally:
+        settings.BR_TENANT_ONBOARDING_ENABLED = original
     assert strategy is BREmployeeValidation
     assert strategy.country_code == "BR"
     assert strategy.duplicate_field == "cpf"
@@ -245,20 +285,27 @@ def test_br_employee_validation_strategy():
 
 
 def test_sensitive_masking_for_brazil():
-    """CPF and PIS/NIS are masked in compliance fields. (PIX key masking —
-    a PIX key is often the CPF itself — is known gap BR-K6, Phase 4.)"""
+    """CPF, PIS/NIS, PIX key and bank account are masked in compliance fields
+    (BR-K6 closed in Phase 4)."""
     from app.modules.payroll.employee_validation import mask_compliance_fields
 
-    masked = mask_compliance_fields({"cpf": "52998224725", "pis_nis": "12042827116"})
+    masked = mask_compliance_fields({
+        "cpf": "52998224725",
+        "pis_nis": "12042827116",
+        "pix_key": "52998224725",
+        "bank_account": "12345678",
+    })
     assert masked["cpf"] != "52998224725" and masked["cpf"].endswith("4725")
     assert masked["pis_nis"] != "12042827116" and masked["pis_nis"].endswith("7116")
+    assert masked["pix_key"] != "52998224725" and masked["pix_key"].endswith("4725")
+    assert masked["bank_account"] != "12345678" and masked["bank_account"].endswith("5678")
 
 
 # ── 4. Bank Routing Resolution ────────────────────────────────────────────────
 
 def test_brazil_bank_routing():
-    """Bank routing registration and labels for Brazil. (bank_account is
-    missing from the routing fields — known gap BR-K6, Phase 4.)"""
+    """Bank routing registration and labels for Brazil (bank_account added to
+    the routing block in Phase 4 — BR-K6)."""
     from app.modules.payroll.bank_routing import (
         PAYMENT_MODE_LABEL, ROUTING_COUNTRIES, ROUTING_FIELDS, resolve_routing,
     )
@@ -269,11 +316,13 @@ def test_brazil_bank_routing():
 
     class MockEmployee:
         country_code = "BR"
-        compliance_fields = {"pix_key": "12345678909", "bank_compe": "341", "bank_agency": "0987"}
+        compliance_fields = {"pix_key": "12345678909", "bank_compe": "341", "bank_agency": "0987",
+                             "bank_account": "12345678"}
 
     routing = resolve_routing(MockEmployee())
-    assert [r["key"] for r in routing] == ["pix_key", "bank_compe", "bank_agency"]
-    assert [r["value"] for r in routing] == ["12345678909", "341", "0987"]
+    # Phase 4.1 adds the ISPB (full TED / CNAB routing).
+    assert [r["key"] for r in routing] == ["pix_key", "bank_compe", "bank_agency", "bank_account", "bank_ispb"]
+    assert [r["value"] for r in routing] == ["12345678909", "341", "0987", "12345678", ""]   # no ISPB on file
 
 
 # ── 5. 2026 Statutory Constants & Rubric Seeding ──────────────────────────────

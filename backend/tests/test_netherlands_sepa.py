@@ -99,6 +99,7 @@ class TestSepaBatch:
     def test_minimal_batch(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -120,6 +121,7 @@ class TestBatchValidation:
     def test_valid_batch(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -138,6 +140,7 @@ class TestBatchValidation:
     def test_missing_message_id(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="",
             initiating_party=party,
             debtor=party,
@@ -150,6 +153,7 @@ class TestBatchValidation:
     def test_missing_debtor_name(self):
         party = SepaParty(name="", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -162,6 +166,7 @@ class TestBatchValidation:
     def test_invalid_debtor_iban(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164301")  # Bad checksum
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -174,6 +179,7 @@ class TestBatchValidation:
     def test_item_missing_creditor(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -186,6 +192,7 @@ class TestBatchValidation:
     def test_item_negative_amount(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -202,6 +209,7 @@ class TestBatchValidation:
     def test_invalid_creditor_iban(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -220,6 +228,7 @@ class TestPain001Builder:
     def test_single_payment_xml(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -246,6 +255,7 @@ class TestPain001Builder:
     def test_multiple_batches(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch1 = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -259,6 +269,7 @@ class TestPain001Builder:
             ],
         )
         batch2 = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-002",
             initiating_party=party,
             debtor=party,
@@ -280,6 +291,7 @@ class TestPain001Builder:
     def test_sha256_deterministic(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             initiating_party=party,
             debtor=party,
@@ -302,6 +314,7 @@ class TestPain001Builder:
 class TestConvenienceFunctions:
     def test_create_pain001_single(self):
         xml = create_pain001(
+            requested_execution_date=date(2026, 3, 25),
             message_id="MSG-001",
             debtor_name="Employer BV",
             debtor_iban="NL91ABNA0417164300",
@@ -330,6 +343,7 @@ class TestConvenienceFunctions:
             ),
         ]
         xml = create_pain001_batch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="BATCH-001",
             debtor=party,
             debtor_account_iban="NL91ABNA0417164300",
@@ -347,6 +361,7 @@ class TestSepaValidationError:
     def test_raised_on_invalid_batch(self):
         party = SepaParty(name="Employer BV", iban="NL91ABNA0417164300")
         batch = SepaBatch(
+            requested_execution_date=date(2026, 3, 25),
             message_id="",
             initiating_party=party,
             debtor=party,

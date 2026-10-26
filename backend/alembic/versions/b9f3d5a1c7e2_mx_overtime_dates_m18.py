@@ -1,7 +1,7 @@
 """mx_overtime_dates_m18: the dates on which approved overtime was worked (Phase 11c)
 
 Revision ID: b9f3d5a1c7e2
-Revises: a8e4c1f7d3b5
+Revises: 8f90dde5f7b5
 Create Date: 2026-10-23
 
 ZP-MX-ENG-001 Phase 11c (MEXICO_PHASE_11C_IMPLEMENTATION_REPORT.md): ONE new nullable
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b9f3d5a1c7e2"
-down_revision: Union[str, Sequence[str], None] = "a8e4c1f7d3b5"
+down_revision: Union[str, Sequence[str], None] = "8f90dde5f7b5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

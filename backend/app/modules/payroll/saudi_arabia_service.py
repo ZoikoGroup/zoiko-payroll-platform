@@ -402,8 +402,29 @@ def retention_settings() -> "retention_service.RetentionJurisdiction":
 # ══════════════════════════════════════════════════════════════════════════
 
 def sa_activation_evidence_refusal(db: Session, pack) -> Optional[str]:
-    """Saudi statutory content carries no beyond-the-generic-gate evidence
-    requirement at this phase — the shared pack activation gates apply."""
+    """A Saudi pack cannot go Active while any canonical row is still unsigned
+    (spec §18 G1): the seed marks those rows with a " [PENDING G1]" label and
+    the rate-selection basis with the text value PENDING_G1. The shared pack
+    activation gates apply on top."""
+    from sqlalchemy import or_
+
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    marker = "%[PENDING G1]%"
+    pending_rates = (db.query(ContributionRate)
+                     .filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                             ContributionRate.organization_id.is_(None),
+                             or_(ContributionRate.label.like(marker),
+                                 ContributionRate.text_value == "PENDING_G1"))
+                     .count())
+    pending_slabs = (db.query(TaxSlab)
+                     .filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None),
+                             TaxSlab.rate_label.like(marker))
+                     .count())
+    if pending_rates or pending_slabs:
+        return (f"{pending_rates + pending_slabs} Saudi pack row(s) are still PENDING G1 — "
+                "they must be signed at gate G1 before the pack can be activated")
     return None
 
 
@@ -487,6 +508,18 @@ def _sa_pack_rows(db: Session, pack):
     return rates, slabs
 
 
+SA_GOSI_BRANCH_REGIMES = ("PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS")
+
+
+def _missing_gosi_branches(slabs) -> list:
+    """GOSI branch regimes with no SA_GOSI_BRANCH row. The branch is the row's
+    tax_regime; its rule_type is always "SA_GOSI_BRANCH" (checking branch
+    names against rule_type made every readiness check and run preflight
+    BLOCK)."""
+    present = {s.tax_regime for s in slabs if getattr(s, "rule_type", None) == "SA_GOSI_BRANCH"}
+    return [r for r in SA_GOSI_BRANCH_REGIMES if r not in present]
+
+
 def get_sa_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
     """Super Admin release gates for one Saudi tax pack — read-only.
     Gates that depend on work outside this platform (specialist review,
@@ -525,9 +558,7 @@ def get_sa_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
     add("parameters", "Scalar parameters configured (thresholds, caps, floors, ceilings)", not missing,
         "Missing: " + ", ".join(missing) if missing else f"All {len(required)} required parameters configured.")
 
-    branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-    gosi_branches = {s.tax_regime for s in slabs if getattr(s, "rule_type", None) == "SA_GOSI_BRANCH"}
-    absent_branches = [r for r in branch_regimes if r not in gosi_branches]
+    absent_branches = _missing_gosi_branches(slabs)
     add("gosi_branches", "GOSI branch rows for every worker class (PENSION_NEW/LEGACY, SANED, OCCUPATIONAL_HAZARDS)",
         not absent_branches, "Missing branch regimes: " + ", ".join(absent_branches) if absent_branches
         else "All four GOSI branch regimes present.")
@@ -561,33 +592,112 @@ def get_sa_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
             "items": items, "blockers": blockers}
 
 
-def sa_payslip_snapshot(result) -> "dict | None":
-    """PayslipItem.sa_calculation_snapshot for a Saudi result (None for every
-    other country): the GOSI branches, labour reports and the engine trace,
-    JSON-safe."""
-    trace = getattr(result, "sa_calculation_trace", None)
-    if trace is None:
+# ── Frozen calculation context (corrections replay it, SA-043) ─────────────
+# The complete Saudi input of one payslip: amounts, dates, the worker facts,
+# deductions/hours and every pack row the engine read — enough to re-run the
+# production engine later with no database lookup.
+
+_SA_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime")
+_SA_CTX_PLAIN = ("pay_frequency", "sa_organization_id", "sa_employee_id", "sa_ramadan",
+                 "sa_overtime_comp_leave_consented", "sa_deduction_orders", "sa_work_hours_records",
+                 "sa_overtime_hours", "sa_worker_class", "sa_cohort", "sa_cohort_evidence_ref",
+                 "sa_contributory_wage")
+_SA_CTX_DATES = ("pay_date", "period_start", "period_end")
+_SA_RATE_FIELDS = ("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value")
+_SA_SLAB_FIELDS = ("rule_type", "filing_status", "tax_regime", "assessment_basis", "rate_pct",
+                   "employer_rate_pct", "min_amount", "max_amount", "effective_from", "effective_to",
+                   "rate_label")
+_SA_SLAB_DECIMALS = ("rate_pct", "employer_rate_pct", "min_amount", "max_amount")
+
+# Correction API input (camelCase) -> the ctx field it restates. Worker facts
+# set on ctx win over the statutory profile (engine _fact reads ctx first).
+_SA_CORRECTION_CTX_KEYS = {
+    "workerClass": "sa_worker_class", "cohort": "sa_cohort", "cohortEvidenceRef": "sa_cohort_evidence_ref",
+    "contributoryWage": "sa_contributory_wage", "deductionOrders": "sa_deduction_orders",
+    "overtimeHours": "sa_overtime_hours", "ramadan": "sa_ramadan", "workHoursRecords": "sa_work_hours_records",
+}
+
+
+def _sa_profile_facts(profile) -> Optional[dict]:
+    if profile is None:
         return None
+    table = getattr(profile, "__table__", None)
+    names = ([c.name for c in table.columns] if table is not None else list(vars(profile)))
+    return {n: getattr(profile, n, None) for n in names if n.startswith("sa_")}
 
-    def s(name):
-        value = getattr(result, name, None)
-        return None if value is None else str(value)
 
+def sa_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
+    """JSON-safe, COMPLETE calculation context of one Saudi payslip."""
     return _json_safe({
-        "gosi": {
-            "employeePension": s("employee_pension"),
-            "employerPension": s("employer_pension"),
-            "employeeSocialSecurity": s("social_security"),
-            "employerSocialSecurity": s("employer_social_security"),
-            "employerOccupationalHazard": s("employer_occupational_hazard"),
-            "employeeTotal": s("sa_employee_total"),
-            "employerTotal": s("sa_employer_total"),
-            "workerClass": getattr(result, "sa_worker_class", None),
-            "cohort": getattr(result, "sa_cohort", None),
-        },
-        "labour": getattr(result, "sa_result", {}).get("labour", {}),
-        "calculation": trace,
+        "version": 1, "calculationMode": calculation_mode,
+        "ctx": {**{k: getattr(ctx, k, None) for k in _SA_CTX_DECIMALS + _SA_CTX_PLAIN + _SA_CTX_DATES}},
+        "profile": _sa_profile_facts(getattr(ctx, "sa_statutory_profile", None)),
+        "rateMap": {k: {f: getattr(r, f, None) for f in _SA_RATE_FIELDS}
+                    for k, r in (getattr(ctx, "rate_map", None) or {}).items()},
+        "slabs": [{f: getattr(s, f, None) for f in _SA_SLAB_FIELDS} for s in (getattr(ctx, "slabs", None) or [])],
     })
+
+
+def _dec_or_none(value):
+    return Decimal(str(value)) if value not in (None, "") else None
+
+
+def _date_or_none(value):
+    return date.fromisoformat(str(value)[:10]) if value not in (None, "") else None
+
+
+def sa_thaw_context(frozen: dict):
+    """A PayrollContext rebuilt from a frozen context (see sa_freeze_context)."""
+    from types import SimpleNamespace
+
+    from app.modules.payroll.engine.base import PayrollContext
+
+    c = frozen["ctx"]
+    rate_map = {k: SimpleNamespace(employee_rate_pct=_dec_or_none(v.get("employee_rate_pct")),
+                                   employer_rate_pct=_dec_or_none(v.get("employer_rate_pct")),
+                                   flat_amount=_dec_or_none(v.get("flat_amount")), text_value=v.get("text_value"))
+                for k, v in (frozen.get("rateMap") or {}).items()}
+    slabs = []
+    for s in frozen.get("slabs") or []:
+        view = dict(s)
+        for f in _SA_SLAB_DECIMALS:
+            view[f] = _dec_or_none(view.get(f))
+        view["effective_from"], view["effective_to"] = (_date_or_none(view.get("effective_from")),
+                                                        _date_or_none(view.get("effective_to")))
+        slabs.append(SimpleNamespace(**view))
+    ctx = PayrollContext(gross=Decimal(str(c.get("gross") or 0)), basic=Decimal(str(c.get("basic") or 0)),
+                         country=SA, rate_map=rate_map, slabs=slabs,
+                         pay_frequency=c.get("pay_frequency") or "Monthly")
+    for k in _SA_CTX_DECIMALS[2:]:
+        setattr(ctx, k, Decimal(str(c.get(k) or 0)))
+    for k in _SA_CTX_DATES:
+        setattr(ctx, k, _date_or_none(c.get(k)))
+    for k in _SA_CTX_PLAIN:
+        if k != "pay_frequency" and c.get(k) is not None:
+            setattr(ctx, k, c.get(k))
+    profile = frozen.get("profile")
+    ctx.sa_statutory_profile = SimpleNamespace(**profile) if profile is not None else None
+    return ctx
+
+
+def sa_totals_all(result) -> dict:
+    """Every per-obligation amount a correction diffs against."""
+    r = getattr(result, "sa_result", None) if not isinstance(result, dict) else result
+    return {k: str((r or {}).get(k) or "0") for k in sorted(SA_CORRECTION_OBLIGATIONS)}
+
+
+def sa_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]:
+    """PayslipItem.sa_calculation_snapshot for a Saudi result (None for every
+    other country): the engine's flat sa_result unchanged (the GOSI ledger and
+    reports read it), plus totalsAll and the frozen context a correction
+    replays."""
+    r = getattr(result, "sa_result", None)
+    if not r:
+        return None
+    snap = {**r, "totalsAll": sa_totals_all(r)}
+    if frozen is not None:
+        snap["frozenContext"] = frozen
+    return _json_safe(snap)
 
 
 def preview_saudi_arabia_calculation(db: Session, data) -> dict:
@@ -709,8 +819,7 @@ def sa_employer_readiness(db: Session, organization_id: int, today: Optional[dat
         if missing:
             checks.append({"severity": "BLOCK", "message": "Missing scalar parameters: " + ", ".join(missing),
                            "source": "tax_resolver", "action": "Configure the missing parameters in the SA pack"})
-        branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-        absent_branches = [r for r in branch_regimes if r not in rule_types]
+        absent_branches = _missing_gosi_branches(slabs)
         if absent_branches:
             checks.append({"severity": "BLOCK", "message": "Missing GOSI branch regimes: " + ", ".join(absent_branches),
                            "source": "tax_resolver", "action": "Add the missing GOSI branch rows to the SA pack"})
@@ -827,8 +936,7 @@ def sa_run_preflight(db: Session, run) -> list:
                            "action": "Configure the missing parameters in the SA pack"})
 
         # 3. GOSI branch completeness
-        branch_regimes = {"PENSION_NEW", "PENSION_LEGACY", "SANED", "OCCUPATIONAL_HAZARDS"}
-        absent_branches = [r for r in branch_regimes if r not in rule_types]
+        absent_branches = _missing_gosi_branches(slabs)
         if absent_branches:
             blocks.append({"employeeId": None, "key": "SA_GOSI_BRANCHES_MISSING",
                            "reason": "Missing GOSI branch regimes: " + ", ".join(absent_branches),
@@ -868,56 +976,44 @@ def _digest(value) -> str:
 
 
 def sa_approval_fingerprint(db: Session, run, store: bool = False) -> dict:
-    """What a SA approval is bound to: the resolved inputs (deduction orders,
-    overtime, hours excluded — they legitimately move when a LATER period
-    posts; this run's own before/after figures are inside its payslip
-    snapshots), the engine rule hashes, the pack version, and the payslip
-    values.
+    """What a SA approval is bound to (SA-026): per payslip, the frozen
+    calculation context (inputs + the exact pack rows used), the per-obligation
+    totals and the money columns; per employee, the statutory facts and
+    authorised deductions resolved NOW — so a cohort / wage / deduction change
+    after the calculation is drift. If `store=True`, persist it on
+    PayrollRun.sa_approval_fingerprint (the one place sa_stored_approval reads).
 
-    If `store=True`, also persist the fingerprint on the run's
-    `sa_approval_fingerprint` column (for approval gating)."""
-    from app.modules.payroll.models import PayslipItem, PayrollEmployee, JurisdictionPack, PayrollRun
+    SA-E2: the earlier version read resolve_sa_calc_inputs()["blocked"/"inputs"]
+    and trace input_hash / rule_hash, none of which exist (KeyError), and stored
+    the result on the run but read it back from an audit row nothing wrote."""
+    from app.modules.payroll.models import PayrollEmployee, PayrollRun
 
-    inputs, rule_hashes, payslips = [], [], []
-    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id,
-                                         PayslipItem.country_code == SA).all()
+    payslips, current = [], []
+    items = (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == SA)
+             .order_by(PayslipItem.id).all())
     for item in items:
+        snap = item.sa_calculation_snapshot or {}
+        payslips.append([item.id, item.employee_id, str(item.gross_pay), str(item.net_pay),
+                         str(item.total_deductions), snap.get("frozenContext"),
+                         snap.get("totalsAll") or sa_totals_all(snap)])
         employee = db.get(PayrollEmployee, item.employee_id)
-        out = resolve_sa_calc_inputs(db, run.organization_id, employee, run.pay_date)
-        # YTD-ish excluded; the rest is the approval basis
-        inputs.append([item.employee_id, out["blocked"],
-                       {k: v for k, v in out["inputs"].items() if k not in ("ytd",)}])
-        trace = (item.sa_calculation_snapshot or {}).get("trace") or {}
-        rule_hashes.append([item.id, trace.get("input_hash"), trace.get("rule_hash")])
-        payslips.append([item.id, item.employee_id, item.gross_pay, item.net_pay, item.total_deductions,
-                         item.sa_calculation_snapshot])
-    # pack version(s) in force for this run
-    pack = db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == SA,
-                                             JurisdictionPack.pack_type == "tax",
-                                             JurisdictionPack.effective_from <= run.pay_date,
-                                             (JurisdictionPack.effective_to.is_(None) |
-                                              JurisdictionPack.effective_to >= run.pay_date)).first()
-    pack_versions = [[pack.id, pack.version] if pack else None]
-    components = {"inputs": _digest(inputs), "ruleHashes": _digest(rule_hashes),
-                  "packVersions": _digest(pack_versions), "payslips": _digest(payslips)}
+        resolved = resolve_sa_calc_inputs(db, run.organization_id, employee, run.pay_date) if employee else {}
+        current.append([item.employee_id, _sa_profile_facts(resolved.get("sa_statutory_profile")),
+                        resolved.get("sa_deduction_orders")])
+    components = {"payslips": _digest(_json_safe(payslips)), "currentInputs": _digest(_json_safe(current))}
     result = {"fingerprint": _digest(components), "components": components}
 
     if store:
         run_obj = db.query(PayrollRun).filter(PayrollRun.id == run.id).first()
-        if run_obj:
+        if run_obj is not None:
             run_obj.sa_approval_fingerprint = result
             db.flush()
-
     return result
 
 
 def sa_stored_approval(db: Session, run) -> Optional[dict]:
-    from app.modules.payroll.models import TaxConfigurationAudit
-    row = (db.query(TaxConfigurationAudit)
-           .filter(TaxConfigurationAudit.entity_type == "SA_RUN_APPROVAL",
-                   TaxConfigurationAudit.entity_id == run.id)
-           .order_by(TaxConfigurationAudit.id.desc()).first())
-    return None if row is None or row.action != "create" else row.new_value
+    """The fingerprint stored at the last approval (PayrollRun column)."""
+    return getattr(run, "sa_approval_fingerprint", None) or None
 
 
 def _sa_correction_chain(db: Session, original: PayslipItem) -> list:
@@ -934,142 +1030,122 @@ def _apply_sa_corrected_inputs(db: Session, frozen: dict, corrected: dict, organ
     """Restate the frozen calculation context with the corrected inputs."""
     unknown = sorted(set(corrected) - SA_CORRECTABLE_INPUTS)
     if unknown:
-        from app.core.exceptions import BadRequestException
         raise BadRequestException(f"not correctable through a payslip correction: {unknown} "
                                   f"(allowed: {sorted(SA_CORRECTABLE_INPUTS)})")
-    import json
     new = json.loads(json.dumps(frozen))
     for key, value in corrected.items():
-        if key in ("deductionOrders", "overtimeHours", "ramadan", "workHoursRecords"):
-            new["attrs"][key] = value
-        else:
-            new["attrs"][key] = _json_safe(value)
+        new["ctx"][_SA_CORRECTION_CTX_KEYS[key]] = _json_safe(value)
     return new
+
+
+def sa_replay(frozen_context: dict, baseline_totals: dict = None):
+    """Re-run the production engine on a frozen SA context (no DB reads).
+
+    Without `baseline_totals` returns the engine result. With it, returns a
+    JSON-safe delta preview against that baseline (the correction preview)."""
+    from app.modules.payroll.engine.resolver import calculate_payroll
+
+    result = calculate_payroll(sa_thaw_context(frozen_context), frozen_context.get("calculationMode") or "standard")
+    if baseline_totals is None:
+        return result
+    new_totals = sa_totals_all(result)
+    deltas = {k: str(Decimal(new_totals[k]) - Decimal(str(baseline_totals.get(k) or 0)))
+              for k in sorted(SA_CORRECTION_OBLIGATIONS)}
+    return {"deltas": deltas, "totalsAll": new_totals}
 
 
 def create_sa_correction(db: Session, organization_id: int, original_payslip_id: int, reason: str,
                          affected_obligations: list, corrected_inputs: Optional[dict], actor_id: Optional[int],
                          idempotency_key: Optional[str] = None, correlation_id: Optional[str] = None) -> dict:
     """Append-only correction of a finalized SA payslip: replay its frozen
-    context with the restated inputs, book the per-obligation delta as a new
-    payslip in a correction run, post the YTD deltas. Commits on success."""
+    context with the restated inputs and book the per-obligation delta as a
+    new payslip in a correction run. GOSI is a monthly contribution with no
+    annual accumulator, so there is no YTD posting. Commits on success."""
     from app.modules.payroll.models import PayrollRun, PayslipStatus
-    from app.modules.payroll.service import _ytd_capture_state, _ytd_record_postings
 
     try:
         if not (reason or "").strip():
-            from app.core.exceptions import BadRequestException
             raise BadRequestException("A correction needs a reason.")
         obligations = sorted(set(affected_obligations or []))
         if not obligations or set(obligations) - SA_CORRECTION_OBLIGATIONS:
-            from app.core.exceptions import BadRequestException
             raise BadRequestException(f"affectedObligations must name one or more of {sorted(SA_CORRECTION_OBLIGATIONS)}")
         item = db.query(PayslipItem).filter(PayslipItem.id == original_payslip_id,
                                             PayslipItem.organization_id == organization_id).first()
         if item is None:
-            from app.core.exceptions import NotFoundException
             raise NotFoundException("Payslip", original_payslip_id)
         if (item.country_code or "").upper() != SA:
-            from app.core.exceptions import BadRequestException
             raise BadRequestException("SA corrections apply to Saudi payslips only.")
         snapshot = item.sa_calculation_snapshot or {}
         if snapshot.get("correction"):
-            from app.core.exceptions import BadRequestException
             raise BadRequestException("Correct the original payslip, not a correction delta.")
         run = db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).with_for_update().one()
         if str(getattr(run.status, "value", run.status)) not in ("Approved", "Authorized", "Paid", "Closed"):
-            from app.core.exceptions import BadRequestException
             raise BadRequestException("This payslip's run is not finalized — recalculate it in place instead.")
         frozen = snapshot.get("frozenContext")
         if not frozen:
-            from app.core.exceptions import BadRequestException
             raise BadRequestException("This payslip has no frozen calculation context, so it cannot be replayed exactly.")
 
-        # 1. integrity: the frozen context must reproduce the original exactly
-        original_trace = snapshot.get("trace") or {}
-        replay = (sa_replay(frozen).sa_result or {}).get("sa_calculation_trace") or {}
-        if (replay.get("input_hash"), replay.get("rule_hash")) != (original_trace.get("input_hash"),
-                                                                    original_trace.get("rule_hash")):
-            from app.core.exceptions import BadRequestException
+        # 1. integrity: replaying the frozen context must reproduce the original totals
+        original_totals = snapshot.get("totalsAll") or sa_totals_all(snapshot)
+        if sa_totals_all(sa_replay(frozen)) != original_totals:
             raise BadRequestException("Replaying the frozen context does not reproduce the original payslip — refusing "
                                       "to correct on a drifted basis.")
 
         # 2. restate on the LATEST basis of the chain (earlier corrections stay applied)
         chain = _sa_correction_chain(db, item)
-        basis = (chain[-1].sa_calculation_snapshot or {}).get("frozenContext") if chain else frozen
-        new_frozen = _apply_sa_corrected_inputs(db, basis, corrected_inputs or {}, organization_id)
+        last = (chain[-1].sa_calculation_snapshot or {}) if chain else snapshot
+        new_frozen = _apply_sa_corrected_inputs(db, last.get("frozenContext") or frozen, corrected_inputs or {},
+                                                organization_id)
         result = sa_replay(new_frozen)
-        new_r = result.sa_result
-        new_trace = new_r.get("sa_calculation_trace") or {}
+        new_totals = sa_totals_all(result)
 
         # 3. per-obligation delta against the effective position
-        effective = (chain[-1].sa_calculation_snapshot or {}).get("totalsAll") if chain else snapshot.get("totalsAll", {})
-        deltas = {k: Decimal(str(new_r.get(k, 0))) - Decimal(str(effective.get(k, 0)))
-                  for k in SA_CORRECTION_OBLIGATIONS}
+        effective = (last.get("correction") or {}).get("totalsAll") if chain else original_totals
+        deltas = {k: Decimal(new_totals[k]) - Decimal(str(effective.get(k) or 0)) for k in sorted(SA_CORRECTION_OBLIGATIONS)}
+        changed = sorted(k for k, v in deltas.items() if v != 0)
+        if not changed:
+            raise BadRequestException("The corrected inputs produce no change — nothing to correct.")
+        undeclared = sorted(set(changed) - set(obligations))
+        if undeclared:
+            raise BadRequestException(f"The correction also changes {undeclared}, which affectedObligations does not "
+                                      "declare — declare every affected obligation.")
+        employee_delta = deltas["employee_pension"] + deltas["social_security"]
 
-        # 4. create correction run
+        # 4. correction run + delta payslip
         corr_run = PayrollRun(
-            organization_id=organization_id,
-            period_label=run.period_label,
-            period_start=run.period_start,
-            period_end=run.period_end,
-            pay_date=run.pay_date,
-            status=PayrollStatus.PAID,
-            notes=f"{SA_CORRECTION_MARKER} corrects run {run.id} payslip {item.id}: {reason}",
-            created_by=actor_id,
-            calculation_mode="standard",
-        )
+            organization_id=organization_id, period_label=run.period_label, period_start=run.period_start,
+            period_end=run.period_end, pay_date=run.pay_date, status=PayrollStatus.PAID,
+            notes=f"{SA_CORRECTION_MARKER} corrects run {run.id} payslip {item.id}: {reason.strip()}"[:2000],
+            created_by=actor_id, calculation_mode=run.calculation_mode or "standard")
         db.add(corr_run)
         db.flush()
-
-        # 5. new payslip item with delta columns
-        from app.modules.payroll.service import _generate_payslip_number
         new_item = PayslipItem(
-            organization_id=organization_id,
-            payroll_run_id=corr_run.id,
-            employee_id=item.employee_id,
-            payslip_number=_generate_payslip_number(db, organization_id),
-            employee_name=item.employee_name,
-            department=item.department,
-            designation=item.designation,
-            date_of_joining=item.date_of_joining,
-            bank_name=item.bank_name,
-            bank_account=item.bank_account,
-            pan=item.pan,
-            country_code=SA,
-            gross_pay=Decimal("0"),
-            total_deductions=Decimal("0"),
-            net_pay=Decimal("0"),
-            employer_contributions=Decimal("0"),
-            employer_occupational_hazard=Decimal("0"),
-            status=PayslipStatus.PAID,
-            sa_calculation_snapshot={
-                **new_r,
+            organization_id=organization_id, payroll_run_id=corr_run.id, employee_id=item.employee_id,
+            employee_name=item.employee_name, department=item.department, designation=item.designation,
+            date_of_joining=item.date_of_joining, country_code=SA,
+            gross_pay=Decimal("0"), total_deductions=employee_delta, net_pay=-employee_delta,
+            # one column per GOSI obligation, each carrying its delta
+            **{k: deltas[k] for k in sorted(SA_CORRECTION_OBLIGATIONS)},
+            status=PayslipStatus.PAID, notes=f"Correction delta of payslip {item.id}",
+            sa_calculation_snapshot=_json_safe({
+                **(result.sa_result or {}),
+                "totalsAll": new_totals,
                 "correction": {
-                    "originalPayslipId": item.id,
-                    "originalRunId": run.id,
-                    "correctionRunId": corr_run.id,
-                    "deltas": {k: str(v) for k, v in deltas.items()},
-                    "totalsAll": {k: str(Decimal(str(effective.get(k, 0))) + deltas.get(k, Decimal("0")))
-                                  for k in SA_CORRECTION_OBLIGATIONS},
+                    "originalPayslipId": item.id, "originalRunId": run.id, "correctionRunId": corr_run.id,
+                    "sequence": len(chain) + 1, "reason": reason.strip(), "obligations": obligations,
+                    "changedObligations": changed, "correctedInputs": _json_safe(corrected_inputs or {}),
+                    "deltas": {k: str(v) for k, v in deltas.items()}, "totalsAll": new_totals,
+                    "actorId": actor_id, "idempotencyKey": idempotency_key, "correlationId": correlation_id,
                 },
                 "frozenContext": new_frozen,
-            },
+            }),
         )
         db.add(new_item)
         db.flush()
-
-        # 6. YTD deltas for affected obligations
-        before = _ytd_capture_state(db, organization_id, item.employee_id, SA)
-        for k, v in deltas.items():
-            if v != 0:
-                _ytd_record_postings(db, organization_id, item.employee_id, SA, {k: v}, corr_run.pay_date)
-        after = _ytd_capture_state(db, organization_id, item.employee_id, SA)
-
         db.commit()
-        return {"correctionRunId": corr_run.id, "payslipId": new_item.id,
-                "deltas": {k: str(v) for k, v in deltas.items()},
-                "ytdBefore": before, "ytdAfter": after}
+        return {"correctionRunId": corr_run.id, "payslipId": new_item.id, "originalPayslipId": item.id,
+                "sequence": len(chain) + 1, "changedObligations": changed,
+                "deltas": {k: str(v) for k, v in deltas.items()}, "totalsAll": new_totals}
     except Exception:
         db.rollback()
         raise
@@ -1107,53 +1183,6 @@ def list_sa_org_corrections(db: Session, organization_id: int) -> list:
                      "deltas": correction.get("deltas", {}), "totalsAll": correction.get("totalsAll", {}),
                      "createdAt": c.payroll_run.created_at.isoformat() if c.payroll_run and c.payroll_run.created_at else None})
     return rows
-
-
-def sa_replay(frozen_context: dict, baseline_totals: dict = None):
-    """Replay a frozen SA calculation context through the production engine.
-    
-    If `baseline_totals` is provided, returns a delta preview comparing the
-    replayed result against the baseline (used for correction preview)."""
-    from types import SimpleNamespace
-    from app.modules.payroll.engine.base import PayrollContext
-    from app.modules.payroll.engine.countries import saudi_arabia
-    from app.modules.payroll.engine.resolver import calculate_payroll
-
-    attrs = frozen_context.get("attrs", {})
-    ctx = frozen_context.get("ctx", {})
-    profile = SimpleNamespace(**attrs.get("sa_statutory_profile", {}))
-    inputs = {
-        "sa_statutory_profile": profile,
-        "sa_organization_id": ctx.get("sa_organization_id"),
-        "sa_employee_id": ctx.get("sa_employee_id"),
-        "sa_deduction_orders": attrs.get("sa_deduction_orders"),
-        "sa_overtime_hours": attrs.get("sa_overtime_hours"),
-        "sa_ramadan": attrs.get("sa_ramadan"),
-        "sa_work_hours_records": attrs.get("sa_work_hours_records"),
-    }
-    pay_ctx = PayrollContext(
-        gross=ctx.get("gross"), basic=ctx.get("basic"), country=SA,
-        pay_frequency=ctx.get("pay_frequency", "Monthly"),
-        pay_date=ctx.get("pay_date"), rate_map=ctx.get("rate_map"),
-        slabs=ctx.get("slabs"), **inputs,
-    )
-    result = calculate_payroll(pay_ctx, "standard")
-
-    if baseline_totals is not None:
-        # Build delta preview
-        deltas = {}
-        for k in SA_CORRECTION_OBLIGATIONS:
-            new_val = Decimal(str(getattr(result, k, 0) or 0))
-            old_val = Decimal(str(baseline_totals.get(k, 0) or 0))
-            deltas[k] = str(new_val - old_val)
-        return {
-            "result": result,
-            "deltas": deltas,
-            "totalsAll": {k: str(Decimal(str(baseline_totals.get(k, 0))) + Decimal(deltas[k]))
-                          for k in SA_CORRECTION_OBLIGATIONS}
-        }
-
-    return result
 
 
 def _json_safe(value):
@@ -1277,7 +1306,9 @@ def approve_sa_employer_profile(db: Session, organization_id: int, profile_id: i
             raise NotFoundException("SaEmployerProfile", profile_id)
         if row.status != "DRAFT":
             raise BadRequestException(f"Employer profile {row.id} is {row.status}; only a DRAFT can be approved.")
-        if row.approved_by_id is not None and row.approved_by_id == actor_id:
+        # Four-eyes (SA-E3): the approver must differ from the CREATOR. The old
+        # check compared approved_by_id, which is still empty on a DRAFT.
+        if actor_id is None or row.created_by_id == actor_id:
             raise BadRequestException("The same operator cannot approve their own draft (four-eyes).")
         row.status = "APPROVED"
         row.approved_by_id = actor_id
@@ -1362,7 +1393,9 @@ def approve_sa_contract_version(db: Session, organization_id: int, employee_id: 
             raise NotFoundException("SaContractVersion", contract_id)
         if row.status != "DRAFT":
             raise BadRequestException(f"Contract {row.id} is {row.status}; only a DRAFT can be approved.")
-        if row.approved_by_id is not None and row.approved_by_id == actor_id:
+        # Four-eyes (SA-E3): the approver must differ from the CREATOR. The old
+        # check compared approved_by_id, which is still empty on a DRAFT.
+        if actor_id is None or row.created_by_id == actor_id:
             raise BadRequestException("The same operator cannot approve their own draft (four-eyes).")
         row.status = "APPROVED"
         row.approved_by_id = actor_id
@@ -1399,46 +1432,84 @@ def _assert_committed(run: PayrollRun) -> None:
 
 def _gosi_snapshot_totals(snapshot: dict) -> dict:
     """The five GOSI amounts plus the contributory wage from one frozen
-    sa_calculation_snapshot. A snapshot with no branches returns None so the
-    caller can skip (an uncommitted/foreign payslip), never a zero liability."""
-    gosi = (snapshot or {}).get("gosi") or {}
-    if not gosi:
+    sa_calculation_snapshot — the engine's flat sa_result (employee_pension,
+    social_security, employer_occupational_hazard, sa_contributory_wage, ...).
+    A snapshot that is not a Saudi GOSI result returns None so the caller can
+    skip it, never a zero liability."""
+    snap = snapshot or {}
+    if "employee_pension" not in snap or "sa_contributory_wage" not in snap:
         return None
+
     def d(key):
-        value = gosi.get(key)
+        value = snap.get(key)
         return Decimal(str(value)) if value not in (None, "") else Decimal("0")
-    contrib = ((snapshot or {}).get("calculation") or {}).get("contributoryWage")
+
     return {
-        "pension_employee": d("employeePension"),
-        "pension_employer": d("employerPension"),
-        "saned_employee": d("employeeSocialSecurity"),
-        "saned_employer": d("employerSocialSecurity"),
-        "oh_employer": d("employerOccupationalHazard"),
-        "contributory_wage": Decimal(str(contrib)) if contrib not in (None, "") else Decimal("0"),
+        "contribution_month": snap.get("sa_contribution_month"),   # "YYYY-MM"
+        "pension_employee": d("employee_pension"),
+        "pension_employer": d("employer_pension"),
+        "saned_employee": d("social_security"),
+        "saned_employer": d("employer_social_security"),
+        "oh_employer": d("employer_occupational_hazard"),
+        "contributory_wage": d("sa_contributory_wage"),
     }
+
+
+def _run_contribution_month(run: PayrollRun) -> date:
+    """The engine's contribution month (saudi_arabia.contribution_month): the
+    month of the period end, else of the pay date."""
+    anchor = run.period_end or run.pay_date
+    return date(anchor.year, anchor.month, 1)
+
+
+def sa_gosi_due_date(db: Session, contribution_month: date) -> Optional[date]:
+    """GOSI is due by sa_gosi_due_day of the month after the contribution month
+    (SA-022). None when the Saudi pack in force carries no due day — never a
+    guessed date."""
+    import calendar
+
+    pack = latest_sa_tax_pack(db, as_of=contribution_month)
+    day = _sa_amount(_sa_eos_rate_rows(db, pack).get("sa_gosi_due_day")) if pack is not None else None
+    if day is None:
+        return None
+    year, month = ((contribution_month.year + 1, 1) if contribution_month.month == 12
+                   else (contribution_month.year, contribution_month.month + 1))
+    return date(year, month, min(int(day), calendar.monthrange(year, month)[1]))
+
+
+def _with_due_date(db: Session, row: SaGosiLiability) -> SaGosiLiability:
+    row.due_date = sa_gosi_due_date(db, row.contribution_month)   # response-only, not a column
+    return row
 
 
 def build_sa_gosi_liability(db: Session, organization_id: int, run_id: int,
                             actor_id: Optional[int] = None) -> SaGosiLiability:
-    """Aggregate one committed run's Saudi payslips into the org's monthly GOSI
-    liability. Idempotent: rebuilding the same month updates the row in place."""
+    """(Re)build the org's GOSI liability for the contribution month of one
+    committed run, from EVERY committed Saudi payslip of that month — a second
+    run in the month adds to the liability instead of replacing it. Idempotent:
+    rebuilding the month updates the row in place; a PAID month is never
+    rebuilt."""
     try:
         run = _sa_run(db, organization_id, run_id)
         _assert_committed(run)
-        month = date(run.pay_date.year, run.pay_date.month, 1)
+        month = _run_contribution_month(run)
+        month_key = month.strftime("%Y-%m")
+        committed = [st.value for st in PAYROLL_STATUS_ORDER[PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED):]]
+        runs = [r for r in db.query(PayrollRun).filter(PayrollRun.organization_id == organization_id,
+                                                       PayrollRun.status.in_(committed)).all()
+                if _run_contribution_month(r) == month]
 
         totals = dict(total_wages=Decimal("0"), contributory_wages=Decimal("0"),
                       pension_employee=Decimal("0"), pension_employer=Decimal("0"),
                       saned_employee=Decimal("0"), saned_employer=Decimal("0"),
                       occupational_hazard_employer=Decimal("0"))
         items = (db.query(PayslipItem)
-                 .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == SA).all())
-        counted = 0
+                 .filter(PayslipItem.payroll_run_id.in_([r.id for r in runs]),
+                         PayslipItem.country_code == SA).all()) if runs else []
         for item in items:
             snap = _gosi_snapshot_totals(item.sa_calculation_snapshot)
-            if snap is None:
+            if snap is None or (snap["contribution_month"] and snap["contribution_month"] != month_key):
                 continue
-            counted += 1
             totals["total_wages"] += Decimal(str(item.gross_pay or 0))
             totals["contributory_wages"] += snap["contributory_wage"]
             totals["pension_employee"] += snap["pension_employee"]
@@ -1453,6 +1524,8 @@ def build_sa_gosi_liability(db: Session, organization_id: int, run_id: int,
         row = (db.query(SaGosiLiability)
                .filter(SaGosiLiability.organization_id == organization_id,
                        SaGosiLiability.contribution_month == month).first())
+        if row is not None and row.status != "DRAFT":
+            raise BadRequestException(f"GOSI liability for {month_key} is {row.status}; a paid month is not rebuilt.")
         if row is None:
             row = SaGosiLiability(organization_id=organization_id, contribution_month=month,
                                   created_by_id=actor_id, status="DRAFT")
@@ -1462,7 +1535,7 @@ def build_sa_gosi_liability(db: Session, organization_id: int, run_id: int,
         row.source_run_id = run.id
         db.flush()
         db.commit()
-        return row
+        return _with_due_date(db, row)
     except Exception:
         db.rollback()
         raise
@@ -1475,7 +1548,7 @@ def list_sa_gosi_liabilities(db: Session, organization_id: int,
         query = query.filter(SaGosiLiability.contribution_month >= from_month)
     if to_month is not None:
         query = query.filter(SaGosiLiability.contribution_month <= to_month)
-    return query.order_by(SaGosiLiability.contribution_month.desc()).all()
+    return [_with_due_date(db, row) for row in query.order_by(SaGosiLiability.contribution_month.desc()).all()]
 
 
 def mark_sa_gosi_liability_paid(db: Session, organization_id: int, liability_id: int,
@@ -1493,7 +1566,7 @@ def mark_sa_gosi_liability_paid(db: Session, organization_id: int, liability_id:
         row.payment_reference = payment_reference
         db.flush()
         db.commit()
-        return row
+        return _with_due_date(db, row)
     except Exception:
         db.rollback()
         raise
@@ -1743,7 +1816,7 @@ def approve_sa_final_settlement(db: Session, organization_id: int, settlement_id
             raise NotFoundException("SaFinalSettlement", settlement_id)
         if row.status != "DRAFT":
             raise BadRequestException(f"Final settlement {row.id} is {row.status}; only a DRAFT can be approved.")
-        if row.approved_by_id == actor_id:
+        if actor_id is None or row.created_by_id == actor_id:      # four-eyes against the creator (SA-E3)
             raise BadRequestException("A final settlement must be approved by a different user (four-eyes).")
         row.status = "APPROVED"
         row.approved_by_id = actor_id
@@ -1965,8 +2038,12 @@ def seed_saudi_arabia_pack(db: Session, *, effective_from: date = date(2026, 1, 
     pack.status = "Draft"
     pack.effective_to = window_to
     pack.source_document_id = sources["S1"]
-    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
-    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
+    # Canonical rows only: org-scoped rows (organization_id IS NOT NULL) are an
+    # organisation's overrides and are never deleted by a re-seed.
+    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                      ContributionRate.organization_id.is_(None)).delete()
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None)).delete()
 
     def dec(value):
         return Decimal(str(value)) if value is not None else None

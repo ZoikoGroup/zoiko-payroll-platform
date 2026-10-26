@@ -74,6 +74,7 @@ from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.netherlands_org_router import router as netherlands_org_router
 from app.modules.payroll.mexico_org_router import router as mexico_org_router
+from app.modules.payroll.brazil_org_router import router as brazil_org_router
 from app.modules.payroll.mexico_transfer_router import router as mexico_transfer_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
@@ -195,6 +196,8 @@ from app.modules.payroll.tenant_statutory_router import router as tenant_statuto
 payroll_router.include_router(tenant_statutory_router)
 # Mexico employer onboarding (/payroll/mexico/...) — own module, not this file.
 payroll_router.include_router(mexico_org_router)
+# Brazil employer onboarding (/payroll/brazil/...) — own module, not this file.
+payroll_router.include_router(brazil_org_router)
 # Mexico Phase 10f: the tenant-run master-data transfer (its own guards, not /mexico's).
 payroll_router.include_router(mexico_transfer_router)
 
@@ -3916,20 +3919,16 @@ def preview_sa_correction(
         from fastapi import HTTPException, status as http_status
         raise HTTPException(status_code=http_status.HTTP_409_CONFLICT,
                             detail="Payslip has no frozen context — cannot preview correction")
-    effective = (snapshot.get("correction") or {}).get("totalsAll", {}) or snapshot.get("totalsAll", {})
-    # Merge the preview's corrected_inputs into the frozen context
+    # Restate on the latest basis of the correction chain (earlier corrections stay applied).
+    chain = saudi_arabia_service._sa_correction_chain(db, item)
+    last = (chain[-1].sa_calculation_snapshot or {}) if chain else snapshot
+    baseline = ((last.get("correction") or {}).get("totalsAll") if chain
+                else snapshot.get("totalsAll") or saudi_arabia_service.sa_totals_all(snapshot))
     corrected = data.dict(exclude_unset=True, exclude={"organizationId", "jurisdictionPackId"})
-    # Only correctable inputs allowed
-    allowed = {"workerClass", "cohort", "cohortEvidenceRef", "contributoryWage",
-               "deductionOrders", "overtimeHours", "ramadan", "workHoursRecords"}
-    corrected = {k: v for k, v in corrected.items() if k in allowed}
-    if corrected:
-        new_frozen = saudi_arabia_service._apply_sa_corrected_inputs(db, frozen, corrected, current_user.organization_id)
-    else:
-        new_frozen = frozen
-    baseline = effective.get("totalsAll") or effective
-    preview = saudi_arabia_service.sa_replay(new_frozen, baseline_totals=baseline)
-    return preview
+    corrected = {k: v for k, v in corrected.items() if k in saudi_arabia_service.SA_CORRECTABLE_INPUTS}
+    new_frozen = saudi_arabia_service._apply_sa_corrected_inputs(
+        db, last.get("frozenContext") or frozen, corrected, current_user.organization_id)
+    return saudi_arabia_service.sa_replay(new_frozen, baseline_totals=baseline)
 
 
 @payroll_router.post(

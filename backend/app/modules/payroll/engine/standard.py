@@ -326,6 +326,11 @@ class StandardStrategy(PayrollStrategy):
             # IRRF arrives via tds above. VT is its own statutory deduction line.
             # 0 for every non-BR calculation (key absent from all other calculators).
             + deductions.get("br_vale_transporte_deduction", Decimal("0"))
+            # Brazil CLT: court-ordered alimony (pensão alimentícia, BR-032) is
+            # a lawful deduction from net pay — it is PAID to the beneficiary,
+            # not retained. It also reduces the IRRF legal-deduction base inside
+            # countries/brazil.py. 0 for every non-BR calculation.
+            + deductions.get("br_alimony_deduction", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -664,6 +669,7 @@ class StandardStrategy(PayrollStrategy):
             br_irrf_reduction=deductions.get("br_irrf_reduction", Decimal("0")),
             br_salario_familia=deductions.get("br_salario_familia", Decimal("0")),
             br_vale_transporte_deduction=deductions.get("br_vale_transporte_deduction", Decimal("0")),
+            br_alimony_deduction=deductions.get("br_alimony_deduction", Decimal("0")),
             br_base_fgts=deductions.get("br_base_fgts", Decimal("0")),
             br_fgts_deposit=deductions.get("br_fgts_deposit", Decimal("0")),
             br_cpp_employer=deductions.get("br_cpp_employer", Decimal("0")),

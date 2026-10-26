@@ -17,6 +17,7 @@ import SAComplianceCentreTab from "./SAComplianceCentreTab";
 import NLComplianceCentreTab from "./NLComplianceCentreTab";
 import MXComplianceCentreTab from "./MXComplianceCentreTab";
 import MXSocialSecurityCenter from "../../../components/jurisdiction/mexico/authorities/MXSocialSecurityCenter";
+import BRComplianceCentreTab from "./BRComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -133,6 +134,10 @@ export default function CompliancePage() {
   // Mexico Phase 8 (spec §14 "Compliance → Mexico → Social Security"): MX organisations only.
   const MX_SS_TAB = "Mexico Social Security";
   const isMexico = normalizeCountryCode(companyDetails.jurisdictionCountry) === "MX";
+  // Brazil (ZP-BR-ENG-001 Phase 3): employer onboarding lives in the BR
+  // Compliance Centre. No base tab is removed for Brazil (Phase 3 plan §2).
+  const BR_TAB = "Brazil Compliance Centre";
+  const isBrazil = normalizeCountryCode(companyDetails.jurisdictionCountry) === "BR";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
     : isNetherlands || isMexico
@@ -147,6 +152,7 @@ export default function CompliancePage() {
     ...(isSwitzerland ? [CH_EMPLOYER_TAB] : []),
     ...(isNetherlands ? [NL_TAB] : []),
     ...(isMexico ? [MX_TAB, MX_SS_TAB] : []),
+    ...(isBrazil ? [BR_TAB] : []),
   ];
   const currentTab = tabs[activeTab];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
@@ -358,6 +364,7 @@ export default function CompliancePage() {
       {currentTab === NL_TAB && <NLComplianceCentreTab />}
       {currentTab === MX_TAB && <MXComplianceCentreTab />}
       {currentTab === MX_SS_TAB && <MXSocialSecurityCenter />}
+      {currentTab === BR_TAB && <BRComplianceCentreTab />}
 
       {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab

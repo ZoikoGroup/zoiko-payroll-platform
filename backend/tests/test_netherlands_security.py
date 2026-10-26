@@ -26,6 +26,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from datetime import date as _date
+
+EXECUTION_TODAY = _date(2026, 1, 1)          # before the fixture pay dates
+
 from app.modules.payroll import netherlands_annual_service as annual
 from app.modules.payroll import netherlands_digipoort as digi
 from app.modules.payroll import netherlands_filing_service as filings
@@ -61,9 +65,10 @@ def _reconciled_return(db, nlx, month=3):
 class TestNoDuplicates:
     def test_salary_batch_retry_returns_the_same_batch(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
-        first = pay.create_salary_payment_batch(db, run.id, 801)
+        # The fixture's 2026 pay dates are in the past; execution dates may not be (Phase 4.2).
+        first = pay.create_salary_payment_batch(db, run.id, 801, today=EXECUTION_TODAY)
         db.commit()
-        again = pay.create_salary_payment_batch(db, run.id, 802)      # another operator, later
+        again = pay.create_salary_payment_batch(db, run.id, 802, today=EXECUTION_TODAY)   # another operator, later
         db.commit()
         assert again.id == first.id
         assert db.query(PayrollNlPaymentBatch).filter_by(payroll_run_id=run.id).count() == 1
@@ -72,8 +77,9 @@ class TestNoDuplicates:
         run = _run_and_approve(db, nlx, 3)
         principal = SimpleNamespace(id=801, organization_id=nlx.org.id, role="org_admin", is_active=True)
         with _http(db, principal) as c:
-            a = c.post(f"/api/payroll/netherlands/runs/{run.id}/salary-batch", json={})
-            b = c.post(f"/api/payroll/netherlands/runs/{run.id}/salary-batch", json={})
+            body = {"requested_execution_date": (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()}
+            a = c.post(f"/api/payroll/netherlands/runs/{run.id}/salary-batch", json=body)
+            b = c.post(f"/api/payroll/netherlands/runs/{run.id}/salary-batch", json=body)
         assert a.status_code == 200, a.text
         assert a.json()["id"] == b.json()["id"]
 
@@ -183,7 +189,7 @@ def test_no_identity_or_bank_or_certificate_material_in_logs(db, nlx):
         filings.reconcile_return(db, ret.id, 801)
         digi.submit_return(db, ret.id, digi.DigipoortChannel.VALIDATION_SERVICE)
         annual.generate_annual_statement(db, nlx.org.id, nlx.emp.id, 2026, actor_id=801)
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
+        batch = pay.create_salary_payment_batch(db, run.id, 801, today=EXECUTION_TODAY)
         db.commit()
         principal = SimpleNamespace(id=801, organization_id=nlx.org.id, role="org_admin", is_active=True)
         with _http(db, principal) as c:

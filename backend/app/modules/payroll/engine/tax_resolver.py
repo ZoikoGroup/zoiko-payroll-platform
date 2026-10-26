@@ -334,6 +334,12 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     mx_refusal = entering_mexico_refusal(old_country, new_country, db, organization_id)
     if mx_refusal:
         return mx_refusal
+    # Brazil (ZP-BR-ENG-001 Phase 3): same dormancy rule as Mexico.
+    from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
+
+    br_refusal = entering_brazil_refusal(old_country, new_country)
+    if br_refusal:
+        return br_refusal
 
     new_code = get_jurisdiction_code(new_country)
     if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):

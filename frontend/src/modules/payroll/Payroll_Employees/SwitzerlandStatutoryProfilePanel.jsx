@@ -1,14 +1,120 @@
 import { useEffect, useState } from "react";
 import { X, Loader2, Search } from "lucide-react";
-import { getSwissEntityProfile, resolveSwissQst, getSwissRulesEffective } from "../../../service/payrollService";
+import {
+  createEmployeeStatutoryProfile, getEmployeeStatutoryProfile, getSwissEntityProfile, getSwissRulesEffective,
+  listSwissSchemes, resolveSwissQst,
+} from "../../../service/payrollService";
 
-// Switzerland statutory profile (read-only advisory surface). AHV is stored
+const CANTONS = ["AG", "AI", "AR", "BE", "BL", "BS", "FR", "GE", "GL", "GR", "JU", "LU", "NE", "NW", "OW", "SG", "SH",
+  "SO", "SZ", "TG", "TI", "UR", "VD", "VS", "ZG", "ZH"].map((c) => `CH-${c}`);
+// The ch_* worker facts the Swiss resolver reads (CH-004). [camelKey, label, kind, choices]
+const FACTS = [
+  ["chWorkCanton", "Work canton", "select", CANTONS],
+  ["chResidenceCountry", "Residence country (ISO-2)", "text"],
+  ["chResidenceCanton", "Residence canton (CH residents)", "select", CANTONS],
+  ["chQstSubject", "Source tax (QST) liable", "select", ["YES", "NO", "REVIEW_REQUIRED"]],
+  ["chQstCanton", "QST canton", "select", CANTONS],
+  ["chQstTariffCode", "QST tariff code (e.g. A, B, C, H)", "text"],
+  ["chChildrenCount", "Children (QST tariff)", "number"],
+  ["chChurchTax", "Church tax", "bool"],
+  ["chMaritalStatus", "Marital status", "text"],
+  ["chSpouseEmployed", "Spouse employed", "bool"],
+  ["chCrossBorder", "Cross-border worker", "bool"],
+  ["chWeeklyHours", "Weekly hours", "number"],
+  ["chBvgPlanSchemeId", "BVG pension plan", "scheme", "BVG_PLAN"],
+  ["chUvgPolicySchemeId", "UVG accident policy", "scheme", "UVG_POLICY"],
+  ["chUvgRiskClass", "UVG risk class", "text"],
+  ["chKtgPolicySchemeId", "KTG sickness policy", "scheme", "KTG_POLICY"],
+  ["chContractEnd", "Contract end (fixed-term)", "date"],
+];
+const inputCls = "mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px]";
+
+// Worker facts: shown from the version in force, saved as a NEW dated version
+// through the shared statutory-profile endpoint (fields left unchanged carry
+// forward server-side). The server validates every value against the resolver's
+// own vocabularies; scheme ids must be this organisation's schemes.
+function WorkerFacts({ employee, onDate }) {
+  const [current, setCurrent] = useState(null);
+  const [schemes, setSchemes] = useState([]);
+  const [changes, setChanges] = useState({});
+  const [effectiveFrom, setEffectiveFrom] = useState(onDate);
+  const [message, setMessage] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getEmployeeStatutoryProfile(employee.id, onDate).then((p) => { if (live) setCurrent(p || null); }).catch(() => {});
+    listSwissSchemes().then((r) => { if (live) setSchemes(Array.isArray(r) ? r : r?.items || r?.data || []); }).catch(() => {});
+    return () => { live = false; };
+  }, [employee.id, onDate]);
+
+  const value = (k) => (k in changes ? changes[k] : current?.[k] ?? "");
+  const set = (k, kind) => (e) => {
+    const v = kind === "bool" ? e.target.checked : e.target.value;
+    setChanges((c) => ({ ...c, [k]: v === "" ? null : v }));
+  };
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true); setMessage(null);
+    try {
+      await createEmployeeStatutoryProfile(employee.id, { countryCode: "CH", effectiveFrom, ...changes });
+      setMessage({ ok: true, text: `New Swiss profile version recorded, effective ${effectiveFrom}.` });
+      setChanges({});
+      setCurrent(await getEmployeeStatutoryProfile(employee.id, effectiveFrom));
+    } catch (err) {
+      setMessage({ ok: false, text: err?.message || "Could not save the profile." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={save} className="bg-surface-muted/40 border border-border rounded-[14px] p-4 space-y-3"
+      aria-label="Record a new Switzerland statutory profile version">
+      <h3 className="text-[13px] font-bold text-foreground">Worker facts (statutory profile)</h3>
+      {message && <p role={message.ok ? "status" : "alert"} className={`text-[12px] ${message.ok ? "text-success" : "text-error"}`}>{message.text}</p>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {FACTS.map(([k, label, kind, choices]) => (
+          <Field key={k} label={label}>
+            {kind === "select" || kind === "scheme" ? (
+              <select className={inputCls} value={value(k)} onChange={set(k)}>
+                <option value="">—</option>
+                {(kind === "scheme"
+                  ? schemes.filter((s) => (s.schemeType || s.scheme_type) === choices)
+                    .map((s) => ({ v: s.id, t: `${s.schemeCode || s.scheme_code || s.id} ${s.name ? `— ${s.name}` : ""}` }))
+                  : choices.map((c) => ({ v: c, t: c }))
+                ).map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+              </select>
+            ) : kind === "bool" ? (
+              <input type="checkbox" className="mt-2" checked={Boolean(value(k))} onChange={set(k, "bool")} />
+            ) : (
+              <input type={kind === "number" ? "number" : kind === "date" ? "date" : "text"} className={inputCls}
+                value={value(k)} onChange={set(k)} />
+            )}
+          </Field>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Effective from">
+          <input type="date" className={inputCls} value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+        </Field>
+        <button type="submit" disabled={busy || Object.keys(changes).length === 0}
+          className="rounded-lg bg-primary px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-40">
+          {busy ? "Saving…" : "Save new version"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Switzerland statutory profile. AHV is stored
 // on the employee's compliance fields (SENSITIVE, EAN-13 validated). The
 // employer's UID/compensation office/canton registrations live at org level
 // (Swiss Employer Profile). This panel shows the employer's current profile,
 // the QST resolution for this employee (advisory) and the effective rules
 // for the employee's canton as of a chosen date — no payroll-calculated
-// figures are edited here.
+// figures are edited here. The worker's own ch_* facts are edited in the
+// "Worker facts" section below (a new dated version, never an overwrite).
 
 const labelCls = "text-[11px] font-bold uppercase tracking-widest text-foreground-muted";
 const valueCls = "mt-1 text-[13px] text-foreground";
@@ -121,6 +227,8 @@ export default function SwitzerlandStatutoryProfilePanel({ employee, onClose }) 
               </div>
             </div>
           )}
+
+          <WorkerFacts employee={employee} onDate={onDate} />
 
           <div className="bg-surface-muted/40 border border-border rounded-[14px] p-4 space-y-3">
             <div className="flex items-center justify-between">
