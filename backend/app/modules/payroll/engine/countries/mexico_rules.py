@@ -772,7 +772,7 @@ _C_31 = (_S10, "Art. 31 I: 'Si las ausencias del trabajador son por periodos men
                "terminos del articulo 37'; IV: 'Tratandose de ausencias amparadas por incapacidades medicas expedidas "
                "por el Instituto no sera obligatorio cubrir las cuotas obrero patronales, excepto por lo que se refiere "
                "al ramo de retiro', PDF p. 12")
-_C_29_LAST = (_S27, "Art. 29, last paragraph: 'se suspendera cuando no se paguen salarios por ausencias en los terminos "
+_C_29_LAST = (_S27, "Art. 29, penultimate paragraph: 'se suspendera cuando no se paguen salarios por ausencias en los terminos "
                     "de la Ley del Seguro Social'; 'Tratandose de incapacidades expedidas por el Instituto Mexicano del "
                     "Seguro Social, subsistira la obligacion del pago de aportaciones', PDF p. 17")
 
@@ -814,3 +814,53 @@ class Lss31ContributionDays:
 
 
 CONTRIBUTION_DAYS_RULE = Lss31ContributionDays()
+
+
+# ═══ W3-4: LISR Art. 93 exemptions for ORDINARY earnings (overtime, Sunday premium) ═══
+# Looked up by the earning classification's isr_exempt_rule_key (treatment EXEMPT / PARTIAL); a key with
+# no rule here BLOCKS (MX_EXEMPTION_RULE_MISSING). The reference wage is D-07 (reference_wage above).
+OVERTIME_EXEMPT_SHARE = Decimal("0.5")                   # Art. 93 I "el 50% de las remuneraciones"
+OVERTIME_WEEKLY_CAP_WAGES = Decimal("5")                 # "cinco veces el salario mínimo … por cada semana"
+SUNDAY_PREMIUM_CAP_WAGES = Decimal("1")                  # Art. 93 XIV "un salario mínimo … por cada domingo"
+
+_C_93_I_OT = (_S24, "Art. 93 I: 'el 50% de las remuneraciones por concepto de tiempo extraordinario o de la prestacion "
+                    "de servicios que se realice en los dias de descanso sin disfrutar de otros en sustitucion, que no "
+                    "exceda el limite previsto en la legislacion laboral y sin que esta exencion exceda del equivalente "
+                    "de cinco veces el salario minimo general del area geografica del trabajador por cada semana de "
+                    "servicios', PDF p. 121")
+_C_93_XIV_SUN = (_S24, "Art. 93 XIV: 'Tratandose de primas dominicales hasta por el equivalente de un salario minimo "
+                       "general del area geografica del trabajador por cada domingo que se labore', PDF p. 123")
+
+
+class Art93OrdinaryRule:
+    """exempt(kind, amount, facts) -> Decimal in [0, amount] for one ordinary line."""
+
+    def __init__(self, key: str, kind: str, citations: tuple):
+        self.key, self.kind, self.citations = key, kind, citations
+        self.source, self.source_ref = citations[0]
+
+    def exempt(self, kind, amount, facts) -> Decimal:
+        if kind != self.kind:
+            raise _blocked("MX_EXEMPTION_RULE_KIND_MISMATCH", f"exemption rule {self.key} applies to {self.kind} lines, "
+                                                              f"not {kind}")
+        amount = _d(amount, f"the {kind} amount")
+        if amount <= 0:
+            return _ZERO
+        _check_not_minimum_wage_worker(facts)
+        wage = reference_wage(facts)
+        if self.kind == "OVERTIME":
+            weeks = facts.get("overtime_weeks")
+            if weeks is None:
+                raise _blocked("MX_EXEMPTION_FACT_MISSING", "the weekly overtime detail is not supplied (Art. 93 I)")
+            exempt = sum((min(OVERTIME_EXEMPT_SHARE * _d(w.get("first_tier_amount"), "first-tier overtime amount"),
+                              OVERTIME_WEEKLY_CAP_WAGES * wage) for w in weeks), _ZERO)
+        else:                                                      # SUNDAY_PREMIUM
+            sundays = _d(facts.get("sundays_worked") or 0, "Sundays worked")
+            exempt = SUNDAY_PREMIUM_CAP_WAGES * wage * sundays
+        return min(exempt, amount)
+
+
+ORDINARY_EXEMPTION_RULES = {r.key: r for r in (
+    Art93OrdinaryRule("LISR_93_I_OVERTIME", "OVERTIME", (_C_93_I_OT, _C_93_I, _C_167, _C_S34)),
+    Art93OrdinaryRule("LISR_93_XIV_SUNDAY_PREMIUM", "SUNDAY_PREMIUM", (_C_93_XIV_SUN, _C_93_I, _C_167, _C_S34)),
+)}

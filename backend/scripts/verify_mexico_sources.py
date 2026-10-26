@@ -478,7 +478,7 @@ def _rule_citations(c) -> list:
     for (state, concept), (_inc, src, ref) in sorted(getattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {}).items()):
         out.append((f"ISN {state} {concept}", src, ref))
     for name in ("MX_SPECIAL_PAY_RULES", "MX_TERMINATION_REASONS", "MX_PTU_EXCLUSION_REASONS",
-                 "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS"):
+                 "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS", "MX_ORDINARY_EXEMPTION_RULES"):
         for key, obj in sorted(getattr(c, name, {}).items()):
             out += cites(f"{name} {key}", obj)
     for name in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",

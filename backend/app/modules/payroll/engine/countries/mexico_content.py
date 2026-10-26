@@ -983,6 +983,11 @@ MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = dict(_rules.ANNUAL_ADJUSTMENT_EXC
 # segment_count); branch_days(branch, days, absence, incapacity) -> Decimal.
 MX_CONTRIBUTION_DAYS_RULE = _rules.CONTRIBUTION_DAYS_RULE
 
+# W3-4: LISR Art. 93 exemptions for ordinary earnings, keyed by the classification's isr_exempt_rule_key
+# (treatment EXEMPT / PARTIAL). A key missing here BLOCKS (MX_EXEMPTION_RULE_MISSING).
+# Interface: rule.exempt(kind, amount, facts) -> Decimal in [0, amount].
+MX_ORDINARY_EXEMPTION_RULES: dict = dict(_rules.ORDINARY_EXEMPTION_RULES)
+
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the
 # "CDMX" code its ISN pack already uses). Geography, not statutory content.

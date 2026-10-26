@@ -416,3 +416,59 @@ def test_lss_31_limits_block():
             r.check(*args)
         assert _codes(exc) == [code]
     r.check(Decimal("0"), Decimal("0"), 2)                                              # nothing to place
+
+
+# ── W3-4: LISR Art. 93 exemptions for ordinary earnings ──
+
+def test_overtime_exemption_is_half_the_first_tier_capped_at_five_wages_a_week(decided):
+    r = decided
+    rule = r.ORDINARY_EXEMPTION_RULES["LISR_93_I_OVERTIME"]
+    weeks = [{"first_tier_amount": Decimal("600")}, {"first_tier_amount": Decimal("1400")}]
+    # UMA 100 (decided): week 1 50% of 600 = 300; week 2 50% of 1,400 = 700, capped at 5 x 100 = 500
+    assert rule.exempt("OVERTIME", Decimal("2500"), _facts(overtime_weeks=weeks)) == Decimal("800")
+    assert rule.exempt("OVERTIME", Decimal("500"), _facts(overtime_weeks=weeks)) == Decimal("500")   # never above the line
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    with pytest.raises(MXBlock) as exc:
+        rule.exempt("OVERTIME", Decimal("100"), _facts())
+    assert _codes(exc) == ["MX_EXEMPTION_FACT_MISSING"]
+    with pytest.raises(MXBlock) as exc:
+        rule.exempt("SUNDAY_PREMIUM", Decimal("100"), _facts(overtime_weeks=weeks))
+    assert _codes(exc) == ["MX_EXEMPTION_RULE_KIND_MISMATCH"]
+
+
+def test_sunday_premium_exemption_is_one_wage_per_sunday(decided):
+    rule = decided.ORDINARY_EXEMPTION_RULES["LISR_93_XIV_SUNDAY_PREMIUM"]
+    assert rule.exempt("SUNDAY_PREMIUM", Decimal("500"), _facts(sundays_worked=2)) == Decimal("200")
+    assert rule.exempt("SUNDAY_PREMIUM", Decimal("150"), _facts(sundays_worked=2)) == Decimal("150")
+
+
+def test_ordinary_exemptions_wait_for_d07_and_block_minimum_wage_workers():
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    rule = _r().ORDINARY_EXEMPTION_RULES["LISR_93_XIV_SUNDAY_PREMIUM"]
+    with pytest.raises(MXBlock) as exc:
+        rule.exempt("SUNDAY_PREMIUM", Decimal("500"), _facts(sundays_worked=1))
+    assert _codes(exc) == ["MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED"]
+    with pytest.raises(MXBlock) as exc:
+        rule.exempt("SUNDAY_PREMIUM", Decimal("500"), _facts(sundays_worked=1, daily_salary=Decimal("200")))
+    assert _codes(exc) == ["MX_ART93_I_NOT_MODELLED"]
+
+
+def test_classify_applies_the_named_ordinary_exemption(decided):
+    """A PARTIAL classification naming a transcribed key: the rule's exempt part
+    is taken off the ISR base; an unknown key still blocks."""
+    import datetime as _dt
+    from app.modules.payroll.engine.jurisdictions.mexico import classification
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    row = {"id": 1, "version": 1, "status": "ACTIVE", "effective_from": "2026-01-01", "effective_to": None,
+           "cfdi_node_type": "PERCEPCION", "isr_treatment": "PARTIAL", "isr_exempt_rule_key": "LISR_93_XIV_SUNDAY_PREMIUM",
+           "sbc_treatment": "VARIABLE", "infonavit_included": True, "isn_default_included": True}
+    line = [{"code": "PD", "kind": "SUNDAY_PREMIUM", "amount": Decimal("500")}]
+    (out,) = classification.classify(line, {"PD": row}, _dt.date(2026, 6, 30), "CDMX", _facts(sundays_worked=2))
+    assert (out["isr_exempt"], out["isr_taxable"]) == (Decimal("200"), Decimal("300"))
+    with pytest.raises(MXBlock) as exc:
+        classification.classify(line, {"PD": dict(row, isr_exempt_rule_key="SYN_UNKNOWN")}, _dt.date(2026, 6, 30), "CDMX",
+                                _facts(sundays_worked=2))
+    assert exc.value.key == "MX_EXEMPTION_RULE_MISSING"

@@ -125,7 +125,9 @@ def _calculate(ctx) -> dict:
     min_wage = labor.minimum_wage(content, daily_salary, zone, preflight.fact(profile, "mx_professional_min_code"))
     week = labor.workweek(content, policy)
     hours = labor.hour_lines(content, ctx.mx_hours, policy, daily_salary)
-    lines = pre["lines"] + classification.classify(hours["lines"], ctx.mx_classifications, on, work_state)
+    hour_facts = {**(pre.get("facts") or {}), "overtime_weeks": hours["overtime"],          # W3-4: Art. 93 I / XIV
+                  "sundays_worked": (hours["sunday"] or {}).get("sundays", 0)}
+    lines = pre["lines"] + classification.classify(hours["lines"], ctx.mx_classifications, on, work_state, hour_facts)
     gross = sum((l["amount"] for l in lines), _ZERO)
     if ctx.gross is not None and Decimal(str(ctx.gross)) != gross:
         raise MXBlock("MX_GROSS_MISMATCH",

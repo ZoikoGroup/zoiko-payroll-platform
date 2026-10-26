@@ -353,3 +353,17 @@ Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch 
   - the old "absence blocks" tests now empty the rule themselves.
   - All Mexico tests: 985 passed.
 - **Production effect:** none reachable. Mexico engine modules only.
+
+---
+
+## W3-4 — LISR Art. 93 exemptions for ordinary earnings (gap register A15, B17)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `MX_ORDINARY_EXEMPTION_RULES`, keyed by `isr_exempt_rule_key`. `classification.classify` takes optional facts; the orchestrator passes the weekly overtime and Sundays worked for the hour lines.
+- **Transcribed:** the overtime rule (Art. 93 I: 50% within the legal limit, at most 5 reference wages a week) and the Sunday-premium rule (Art. 93 XIV: 1 reference wage per Sunday). Log TL-SP-4. Both wait for D-07.
+- **Not transcribed:** the rest-day share of the Art. 93 I cap (no weekly dating).
+- **`compare`:** 557 checks, 0 misses.
+- **Tests:** 4 rule tests (overtime by week and cap, Sunday premium, the D-07 and Art. 93 I blocks, `classify` applying a named rule versus an unknown key). All Mexico tests: 989 passed.
+- **Blind second transcription (W3-1 to W3-4, one agent):** agreement on every rule. It corrected one citation (Ley INFONAVIT Art. 29: the second-to-last paragraph, not the last) and added the "aviso oportuno" condition to the D-04 reading.
+- **Production effect:** none reachable. Mexico engine modules only.

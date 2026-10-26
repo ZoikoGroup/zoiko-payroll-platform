@@ -70,7 +70,7 @@ def isn_included(row: dict, work_state: str) -> bool:
     return bool(row.get("isn_default_included"))
 
 
-def classify(lines, classifications, on: _dt.date, work_state: str) -> list:
+def classify(lines, classifications, on: _dt.date, work_state: str, facts: dict = None) -> list:
     """[{code, kind, amount, isr_taxable, sbc, infonavit, isn, ptu, cfdi_node,
     classification_id, version}] — or one BLOCK naming every bad line."""
     classifications = classifications or {}
@@ -109,18 +109,33 @@ def classify(lines, classifications, on: _dt.date, work_state: str) -> list:
                              f"earning {code} is classified {node} — ordinary payroll calculates perceptions only"))
             continue
         isr = row.get("isr_treatment")
+        exempt = Decimal("0")
         if isr != "TAXABLE":
-            problems.append(("MX_EXEMPTION_RULE_MISSING",
-                             f"earning {code} is ISR {isr} (rule {row.get('isr_exempt_rule_key') or 'unnamed'}) — "
-                             f"no exemption content is transcribed yet (LISR Art. 93, S24)"))
-            continue
+            # W3-4: the classification names its LISR Art. 93 rule; the content holds it.
+            from ...countries import mexico_content as _content
+
+            rule = _content.MX_ORDINARY_EXEMPTION_RULES.get(row.get("isr_exempt_rule_key") or "")
+            if rule is None:
+                problems.append(("MX_EXEMPTION_RULE_MISSING",
+                                 f"earning {code} is ISR {isr} (rule {row.get('isr_exempt_rule_key') or 'unnamed'}) — "
+                                 f"no exemption content is transcribed yet (LISR Art. 93, S24)"))
+                continue
+            try:
+                exempt = Decimal(str(rule.exempt(kind, amount, facts or {})))
+            except MXBlock as exc:
+                problems.extend(exc.reasons)
+                continue
+            if not exempt.is_finite() or exempt < 0 or exempt > amount:
+                problems.append(("MX_EXEMPTION_RULE_INVALID", f"earning {code}: the exempt part {exempt} is outside "
+                                                              f"0–{amount}"))
+                continue
         sbc = row.get("sbc_treatment")
         if sbc not in ("FIXED", "VARIABLE", "EXCLUDED"):
             problems.append(("MX_CLASSIFICATION_INVALID", f"earning {code} has SBC treatment {sbc!r}"))
             continue
         out.append({
             "code": code, "kind": kind, "amount": amount,
-            "isr_taxable": amount, "isr_exempt": Decimal("0"),
+            "isr_taxable": amount - exempt, "isr_exempt": exempt,
             "sbc": sbc, "infonavit": bool(row.get("infonavit_included")),
             "isn": isn_included(row, work_state), "ptu": bool(row.get("ptu_wage_base_included")),
             "cfdi_node": node, "cfdi_concept_code": row.get("cfdi_concept_code"),

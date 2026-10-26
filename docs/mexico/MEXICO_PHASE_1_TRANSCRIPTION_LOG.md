@@ -593,7 +593,7 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
 - **Source:** `S3/S3_DOF_Decreto_subsidio_empleo_31122025.html`, Art. Segundo ¶4 as reformed: "Cuando los pagos por salarios sean por periodos menores a un mes, la cantidad del subsidio para el empleo que corresponda a la persona trabajadora, no podrá exceder el monto mensual máximo que resulte de multiplicar el valor mensual de la Unidad de Medida y Actualización por 15.02%".
 - **Interface:** the text key `mx_subsidy_monthly_cap_rule` (vocabulary `subsidy.MONTHLY_CAP_RULES`). While it is absent, the engine still blocks with `MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING`.
 - **Transcribed:** `CAP_AT_MONTHLY_AMOUNT`. Once the month's earlier payments reach the monthly amount, a payment gets only what is left (`capped` in the trace). That the cap applies to the month's payments together, not to each payment, is a reading (D-04).
-- **Blind second transcription:** pending; done for all W3 rows together.
+- **Blind second transcription:** done with the other W3 rows (below).
 
 ### TL-LFT-2 · Work on a rest day (gap register A15, B17)
 
@@ -602,13 +602,13 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
   - Art. 73 (p. 23) uses the same words for the weekly rest day.
 - **Interface:** the per-case amount `mx_rest_day_work_multiplier`; a `REST_DAY_WORK` line from approved hours (`rest_days_worked`), with earning code `MX_REST_DAY_WORK`, classified by the employer like overtime. Absent, the engine still blocks with `MX_REST_DAY_CONTENT_MISSING`. A supplied `REST_DAY_WORK` line is refused (approved hours only).
 - **Transcribed:** **2**, i.e. two daily salaries per rest day worked, on top of the rest day's own salary, which ordinary pay already includes. A reading (D-04): "salario doble" is read as two salaries in addition, not double in total.
-- **Blind second transcription:** pending (all W3 rows together).
+- **Blind second transcription:** done with the other W3 rows (below).
 
 ### TL-IMSS-4 · Contribution days with absences and incapacity (gap register A15, B17)
 
 - **Sources:**
   - `S10/S10_IMSS_LSS.pdf` Art. 31 (PDF p. 12). I: "Si las ausencias del trabajador son por períodos menores de ocho días consecutivos o interrumpidos, se cotizará y pagará por dichos períodos únicamente en el seguro de enfermedades y maternidad"; ausencias of eight days or more release the employer only "en los términos del artículo 37". IV: incapacity certified by the IMSS: no quotas "excepto por lo que se refiere al ramo de retiro".
-  - `S27/S27_DIP_LIFNVT.pdf` Art. 29, last paragraph (PDF p. 17): INFONAVIT contributions are suspended "cuando no se paguen salarios por ausencias en los términos de la Ley del Seguro Social"; during IMSS incapacity "subsistirá la obligación del pago de aportaciones".
+  - `S27/S27_DIP_LIFNVT.pdf` Art. 29, second-to-last paragraph (PDF p. 17; corrected after the blind transcription): INFONAVIT contributions are suspended "cuando no se paguen salarios por ausencias en los términos de la Ley del Seguro Social"; during IMSS incapacity "subsistirá la obligación del pago de aportaciones".
 - **Interface:** `MX_CONTRIBUTION_DAYS_RULE` with `check(absence, incapacity, segment_count)` and `branch_days(branch, days, absence, incapacity)`. Absent, absences and incapacity still block (`MX_ABSENCE_RULES_MISSING`).
 - **Transcribed rule (per contribution segment):**
 
@@ -621,5 +621,32 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
   It **blocks** (`MX_ABSENCE_ART37_NOT_MODELLED`) for 8 or more absence days, and (`MX_ABSENCE_SEGMENT_UNKNOWN`) when the period has more than one contribution segment (the attendance rows give counts, not dates).
 - **Readings (D-04):**
   - "fewer than eight days … consecutive or interrupted" is counted per period;
-  - an attendance row of sick leave is treated as IMSS-certified incapacity. The attendance rows do not hold the certificate: confirm that sick leave is recorded only with one.
-- **Blind second transcription:** pending (all W3 rows together).
+  - an attendance row of sick leave is treated as IMSS-certified incapacity. The attendance rows do not hold the certificate: confirm that sick leave is recorded only with one;
+  - the INFONAVIT suspension for absences holds "siempre que se dé aviso oportuno al Instituto": the rule assumes the employer gives that notice.
+- **Blind second transcription:** done with the other W3 rows (below).
+
+### TL-SP-4 · LISR Art. 93 exemptions for ordinary earnings (gap register A15, B17)
+
+- **Interface:** `MX_ORDINARY_EXEMPTION_RULES`, keyed by the classification's `isr_exempt_rule_key` (treatment EXEMPT / PARTIAL); `rule.exempt(kind, amount, facts)`. A key with no rule still blocks (`MX_EXEMPTION_RULE_MISSING`); a rule used on the wrong line kind blocks (`MX_EXEMPTION_RULE_KIND_MISMATCH`). Hour lines now carry their weekly overtime and Sundays-worked facts into classification.
+- **Transcribed (S24):**
+
+  | Key | Rule | Wording |
+  |---|---|---|
+  | `LISR_93_I_OVERTIME` | Per week: 50% of the overtime paid within the legal limit (the first-tier hours, Art. 66), capped at 5 reference wages. Overtime above the legal limit is fully taxable | Art. 93 I, PDF p. 121: "el 50% de las remuneraciones por concepto de tiempo extraordinario … que no exceda el límite previsto en la legislación laboral y sin que esta exención exceda del equivalente de cinco veces el salario mínimo general del área geográfica del trabajador por cada semana de servicios" |
+  | `LISR_93_XIV_SUNDAY_PREMIUM` | 1 reference wage per Sunday worked | Art. 93 XIV, PDF p. 123 |
+
+- **Shared with W1-3a:**
+  - the reference wage is **D-07** (it blocks until decided);
+  - a worker on the area minimum wage blocks (Art. 93 I, full exemption, not modelled).
+- **Not transcribed:**
+  - rest-day work's Art. 93 I exemption. It shares the 5-wage weekly cap with overtime, and the approved hours do not date rest days by week. A rest-day line classified EXEMPT / PARTIAL keeps blocking.
+- **Blind second transcription:** done with the other W3 rows (below).
+
+### Blind second transcription (W3-1 to W3-4)
+
+A separate agent read only S3, S26, S10, S27 and S24. It agreed on every W3 rule:
+- **Subsidy cap (S3 Art. Segundo ¶4):** the text does not say "per payment" or "per month"; reading it as the month's payments together is an inference (already the D-04 reading). January 2026 uses 15.59%.
+- **Rest-day work (LFT Arts. 73, 75):** the double salary is paid **in addition** to the rest day's own salary ("independientemente").
+- **LSS Art. 31:** fewer than 8 days, only sickness and maternity; 8 or more, none, through the Art. 37 procedure; IMSS incapacity, only retiro. Days are counted per contribution period ("período de cuotas"), framed monthly.
+- **Ley INFONAVIT Art. 29:** the paragraph is the **second-to-last** (corrected). The suspension needs "aviso oportuno"; credit discounts never stop.
+- **LISR Art. 93 I / XIV:** same share, limit, cap and period. Rest-day work shares the **single** weekly cap with overtime, which is why its exemption stays untranscribed.
