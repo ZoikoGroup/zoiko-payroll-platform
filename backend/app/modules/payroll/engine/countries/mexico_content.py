@@ -181,6 +181,12 @@ MX_PARAMETER_KEYS = {
     "mx_rounding_rule": ("text", "Monetary rounding — mode and quantum (e.g. MODE:QUANTUM)", "national"),
     "mx_sbc_min_rule": ("text", "SBC floor rule (S10)", "national"),
     "mx_subsidy_remainder_rule": ("text", "Employment subsidy above ISR — remainder handling (S3)", "national"),
+    # W3-5: the hourly rate overtime is paid at (D-17), INFONAVIT notices starting / ending inside a period
+    # (Ley INFONAVIT payment regulation, not saved), and no ISR withholding for a worker on the area
+    # minimum wage only (LISR Art. 96 para 1, gap A16) — each blocks only the case that needs it.
+    "mx_hourly_rate_rule": ("text", "Overtime — how the hourly rate is derived from the daily salary (D-17)", "national"),
+    "mx_infonavit_partial_period_rule": ("text", "INFONAVIT credit — notice in force for part of a period", "national"),
+    "mx_min_wage_no_withholding_rule": ("text", "ISR — none withheld at the area minimum wage", "national"),
     # W3-1: periods shorter than a month — the month's subsidy never exceeds the monthly amount (S3).
     "mx_subsidy_monthly_cap_rule": ("text", "Employment subsidy — monthly cap across a month's payments (S3)",
                                     "national"),
@@ -338,6 +344,11 @@ MX_SCALAR_CONTENT: tuple = (
               "S3/S3_DOF_Decreto_subsidio_empleo_01052024.html",
               "Art. Segundo para 2: 'la diferencia no podra aplicarse contra el impuesto que resulte a su cargo "
               "posteriormente, ni se entregara cantidad alguna por concepto del subsidio para el empleo'"),
+    # W3-5 (2026-10-26) [PENDING G1]: LISR Art. 96 para 1 — gap register A16, log TL-ISR-3.
+    ScalarRow("mx_min_wage_no_withholding_rule", None, None, None, "NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY", None, None,
+              "S24/S24_DIP_LISR.pdf",
+              "Art. 96 para 1: 'No se efectuara retencion a las personas que en el mes unicamente perciban un salario "
+              "minimo general correspondiente al area geografica del contribuyente', PDF p. 130"),
     # W3-2 (2026-10-26) [PENDING G1]: work on a rest day — log TL-LFT-2.
     ScalarRow("mx_rest_day_work_multiplier", None, None, "2", None, None, None, _S26,
               "Art. 75 para 2: 'tendran derecho a que se les pague, independientemente del salario que les corresponda "
@@ -982,6 +993,23 @@ MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = dict(_rules.ANNUAL_ADJUSTMENT_EXC
 # None = absence or incapacity days BLOCK (MX_ABSENCE_RULES_MISSING). Interface: check(absence, incapacity,
 # segment_count); branch_days(branch, days, absence, incapacity) -> Decimal.
 MX_CONTRIBUTION_DAYS_RULE = _rules.CONTRIBUTION_DAYS_RULE
+
+# W3-5: daily working-day hours by SAT c_TipoJornada (S28 / pinned set sat_2026_08) — LFT Art. 61 (S26),
+# log TL-LFT-3 [PENDING G1]. Read only once mx_hourly_rate_rule (D-17) is transcribed; any other workday
+# type has no LFT length and BLOCKS.
+MX_JORNADA_DAILY_HOURS: dict = {
+    "01": ("8", "S26/S26_DIP_LFT.pdf", "Art. 61: 'La duracion de la jornada diaria sera de ocho horas la diurna', PDF p. 22"),
+    "02": ("7", "S26/S26_DIP_LFT.pdf", "Art. 61: 'siete la nocturna', PDF p. 22"),
+    "03": ("7.5", "S26/S26_DIP_LFT.pdf", "Art. 61: 'siete horas y media la mixta', PDF p. 22"),
+}
+# W3-5: an earning classified FIXED for the SBC other than the ordinary salary (LSS Art. 30 I) — how a
+# periodic amount becomes a daily SBC amount is DECISIONS_PENDING D-18. None = such a line BLOCKS
+# (MX_SBC_FIXED_RULE_MISSING). Interface: daily_amount(line, facts) -> Decimal >= 0.
+MX_SBC_FIXED_INTEGRATION_RULE = None
+# W3-5: salary days of a FIXED-days period (e.g. 15 a fortnight) that ends inside the period at termination —
+# DECISIONS_PENDING D-19. None = BLOCK (MX_SALARY_DAYS_PARTIAL_PERIOD). Interface:
+# days_paid(tariff, period_start, period_end, termination_date) -> Decimal > 0.
+MX_FIXED_DAYS_TERMINATION_RULE = None
 
 # W3-4: LISR Art. 93 exemptions for ordinary earnings, keyed by the classification's isr_exempt_rule_key
 # (treatment EXEMPT / PARTIAL). A key missing here BLOCKS (MX_EXEMPTION_RULE_MISSING).

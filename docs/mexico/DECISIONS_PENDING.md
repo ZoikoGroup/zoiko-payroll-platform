@@ -19,6 +19,9 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-14 | PTU cap (LFT Art. 127 VIII): where the excess goes; the three-year average with fewer years | G5 owner | Only an allocation where it changes the result (`MX_PTU_CAP_EXCESS_UNDECIDED`, `MX_PTU_HISTORY_AVERAGE_UNDECIDED`) | Open |
 | D-15 | INFONAVIT and RCV payment periodicity (monthly or bimonthly) | G2 / G3 owners | — | **Resolved by sources (W2-5):** S36 Art. 21 still pays bimonthly, so both stay bimonthly. INFONAVIT transcribed; IMSS waits for gap A18 |
 | D-16 | Which days are not business days for an IMSS deadline (LFT Arts. 74 / 715 or CFF Art. 12) | G2 owner | Every IMSS movement due date (`DUE_DATE_UNSOURCED`) | Open |
+| D-17 | Hourly rate for overtime: daily salary ÷ the LFT Art. 61 working-day length? | G5 owner | Every overtime line (`MX_HOURLY_RATE_RULE_MISSING`) | Open |
+| D-18 | FIXED SBC items (LSS Art. 30 I): how a periodic amount becomes a daily SBC amount | G2 owner | Any FIXED SBC item other than the salary (`MX_SBC_FIXED_RULE_MISSING`) | Open |
+| D-19 | Fixed salary days (e.g. 15 a fortnight) when employment ends inside the period | G5 owner | That final period (`MX_SALARY_DAYS_PARTIAL_PERIOD`) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -77,6 +80,7 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 | Subsidy monthly cap applies to the month's payments together | S3 Art. Segundo ¶4 "no podrá exceder el monto mensual máximo" (TL-SUB-3) | S3 (31-12-2025) | G1 |
 | Rest-day work = 2 daily salaries on top of the rest day's own salary | LFT Arts. 73, 75 "independientemente del salario que les corresponda por el descanso obligatorio, un salario doble" (TL-LFT-2) | S26 Arts. 73, 75 | G5 |
 | LSS Art. 31: fewer than 8 absence days counted per period; a sick-leave attendance row treated as IMSS-certified incapacity; the INFONAVIT "aviso oportuno" assumed given | Art. 31 I, IV; the attendance rows hold no certificate (TL-IMSS-4) | S10 Art. 31; S27 Art. 29 | G2 |
+| LISR Art. 96 ¶1 (no withholding at the minimum wage) tested per payslip, on the actual zone wage | Art. 96 ¶1 "en el mes únicamente perciban un salario mínimo general" (TL-ISR-3) | S24 Art. 96 | G1 |
 | Subsidy remainder `NOT_PAYABLE` | Art. Segundo ¶2 of the base decree, still in force (TL-SUB-2) | S3 (DOF 01-05-2024) | G1 |
 
 ## D-05 · 48-hour week for January–April 2026
@@ -158,3 +162,18 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** LSS Art. 15 I gives "cinco días hábiles" but does not define them. LSS Art. 9 fills gaps with the LFT first, then the CFF. Which list applies: LFT Arts. 74 / 715 (rest days, official holidays, days labour authorities suspend work) or CFF Art. 12 (adds 5 May; excludes the fiscal authorities' general vacations)?
 - **The 2026 dates** are worked out in TL-CAL-3. They differ only on 5 May, plus days no saved source dates (election days, official-calendar holidays, authority vacations).
 - **Blocks.** `MX_OFFICIAL_HOLIDAYS` stays empty, so every movement is `DUE_DATE_UNSOURCED`.
+
+## D-17 · Hourly rate for overtime
+
+- **Question.** LFT Arts. 66–68 pay overtime as a multiple of "las horas ordinarias", and Art. 61 sets the working-day length (8 day, 7 night, 7.5 mixed). Neither says how the hourly rate is derived from the daily salary. Is it the daily salary ÷ that length (built: `DAILY_SALARY_OVER_JORNADA_HOURS`), ÷ the weekly hours ÷ days, or the employer's own figure?
+- **Blocks.** Every overtime line: `MX_HOURLY_RATE_RULE_MISSING`. The Art. 61 lengths are transcribed (TL-LFT-3).
+
+## D-18 · FIXED SBC items
+
+- **Question.** LSS Art. 30 I: fixed periodic payments "de cuantía previamente conocida … se sumarán a dichos elementos fijos". How is a periodic amount (e.g. a monthly bonus) turned into a daily SBC amount: ÷ the period's days, or annualised ÷ 365?
+- **Blocks.** An earning classified FIXED for the SBC other than the salary: `MX_SBC_FIXED_RULE_MISSING`. Interface: `MX_SBC_FIXED_INTEGRATION_RULE.daily_amount(line, facts)`.
+
+## D-19 · Fixed salary days at termination
+
+- **Question.** When the employer's labour policy pays fixed salary days (e.g. 15 a fortnight, 30 a month) and employment ends inside the period, how many days are paid? (The LFT does not say; it is a pay convention.)
+- **Blocks.** That final period: `MX_SALARY_DAYS_PARTIAL_PERIOD`. Interface: `MX_FIXED_DAYS_TERMINATION_RULE.days_paid(tariff, period_start, period_end, termination_date)`.

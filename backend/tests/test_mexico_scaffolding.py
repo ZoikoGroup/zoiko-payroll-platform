@@ -113,7 +113,8 @@ def test_content_skeleton_declares_no_statutory_values():
     assert all(k.startswith("mx_") for k in c.MX_PARAMETER_KEYS)
     missing = {k for k, (_, _, scope) in c.MX_PARAMETER_KEYS.items() if scope == "national"} - {
         r.key for r in c.MX_SCALAR_CONTENT}
-    assert missing == {"mx_rounding_rule", "mx_infonavit_fixed_amount_basis", "mx_ceav_lowest_band_min_wage_ref"}
+    assert missing == {"mx_rounding_rule", "mx_infonavit_fixed_amount_basis", "mx_ceav_lowest_band_min_wage_ref",
+                       "mx_hourly_rate_rule", "mx_infonavit_partial_period_rule"}       # W3-5: D-17; source missing
     assert [r.key for r in c.MX_ISN_CONTENT["CDMX"]] == ["mx_isn_rate_pct"]   # W1-2: S22 (VERIFIED)
     tables = (c.MX_SCALAR_CONTENT + c.MX_ISR_TARIFFS + c.MX_MIN_WAGES + c.MX_CEAV_SCHEDULE + c.MX_WORKWEEK
               + c.MX_VACATION_DAYS)

@@ -367,3 +367,25 @@ Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch 
 - **Tests:** 4 rule tests (overtime by week and cap, Sunday premium, the D-07 and Art. 93 I blocks, `classify` applying a named rule versus an unknown key). All Mexico tests: 989 passed.
 - **Blind second transcription (W3-1 to W3-4, one agent):** agreement on every rule. It corrected one citation (Ley INFONAVIT Art. 29: the second-to-last paragraph, not the last) and added the "aviso oportuno" condition to the D-04 reading.
 - **Production effect:** none reachable. Mexico engine modules only.
+
+---
+
+## W3-5 — Interfaces for the remaining seams, and gap A16
+
+**ZP-PRIV:** not required.
+
+| Seam (gap register A15) | Interface | State |
+|---|---|---|
+| Hourly rate | `mx_hourly_rate_rule` + `MX_JORNADA_DAILY_HOURS`; the engine derives the rate (`labor.hourly_rate`). The run service no longer refuses before the engine and passes the workday type, now bound into the input hash | Working-day lengths **transcribed** (LFT Art. 61); the rule is **D-17**, so overtime still blocks |
+| INFONAVIT notice for part of a period | `mx_infonavit_partial_period_rule` (`PRORATE_BY_DAYS_IN_FORCE`: days in force per segment; overlapping notices block) | **BLOCKED-ON-SOURCE** (INFONAVIT payment regulation) |
+| FIXED SBC items | `MX_SBC_FIXED_INTEGRATION_RULE.daily_amount(line, facts)` | **D-18** |
+| Fixed days at termination | `MX_FIXED_DAYS_TERMINATION_RULE.days_paid(…)` | **D-19** |
+| **A16** no withholding at the minimum wage | `mx_min_wage_no_withholding_rule` | **Transcribed** (LISR Art. 96 ¶1, TL-ISR-3) |
+
+- With each interface empty, the engine blocks exactly as before (each existing block test still passes).
+- **`compare`:** 561 checks, 0 misses.
+- **Tests:** hourly-rate rule (D-17 block, three working-day lengths, unsupported type, supplied rate); INFONAVIT proration (block, 20 of 30 days, overlap); the A16 orchestrator test (no ISR at exactly the minimum wage with the rule; ISR without the rule or one peso above); the content pins.
+- All Mexico tests: 991 passed on the full run; its 2 failures (a parameter label over the length limit, and the hourly-rate block order) were fixed and pass (112 passed in the affected files).
+- **Production effect:** none reachable. Mexico modules only (the run service's input hash gains the workday type).
+
+**W3 summary:** every A15 seam has a content interface; 6 are transcribed or partly transcribed, 4 wait for D-17, D-18, D-19 or a source. A16 is done.

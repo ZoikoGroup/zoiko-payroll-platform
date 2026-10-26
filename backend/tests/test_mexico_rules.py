@@ -472,3 +472,62 @@ def test_classify_applies_the_named_ordinary_exemption(decided):
         classification.classify(line, {"PD": dict(row, isr_exempt_rule_key="SYN_UNKNOWN")}, _dt.date(2026, 6, 30), "CDMX",
                                 _facts(sundays_worked=2))
     assert exc.value.key == "MX_EXEMPTION_RULE_MISSING"
+
+
+# ── W3-5: interfaces for the decision- / source-blocked seams, and A16 ──
+
+def _content_with(**extra):
+    from tests import _mx_engine_helpers as h
+
+    rates = dict(h.SYN_RATES)
+    rates.update({k: h.txt(v) for k, v in extra.items()})
+    return h.content(rates=rates)
+
+
+def test_hourly_rate_waits_for_d17_then_uses_the_lft_61_length():
+    from app.modules.payroll.engine.jurisdictions.mexico import labor
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    with pytest.raises(MXBlock) as exc:
+        labor.hourly_rate(_content_with(), {"workday_type_code": "01"}, Decimal("600"))
+    assert _codes(exc) == ["MX_HOURLY_RATE_RULE_MISSING"]
+    c = _content_with(mx_hourly_rate_rule="DAILY_SALARY_OVER_JORNADA_HOURS")
+    assert labor.hourly_rate(c, {"workday_type_code": "01"}, Decimal("600")) == Decimal("75")       # 600 / 8
+    assert labor.hourly_rate(c, {"workday_type_code": "02"}, Decimal("700")) == Decimal("100")      # 700 / 7
+    assert labor.hourly_rate(c, {"workday_type_code": "03"}, Decimal("750")) == Decimal("100")      # 750 / 7.5
+    with pytest.raises(MXBlock) as exc:
+        labor.hourly_rate(c, {"workday_type_code": "08"}, Decimal("600"))
+    assert _codes(exc) == ["MX_WORKDAY_TYPE_UNSUPPORTED"]
+    assert labor.hourly_rate(c, {"hourly_rate": "90"}, Decimal("600")) == Decimal("90")              # supplied wins
+    from app.modules.payroll.engine.countries import mexico_content as content
+
+    assert {k: v[0] for k, v in content.MX_JORNADA_DAILY_HOURS.items()} == {"01": "8", "02": "7", "03": "7.5"}
+
+
+def test_infonavit_proration_counts_only_the_days_each_notice_is_in_force():
+    import datetime as _dt
+    from app.modules.payroll.engine.jurisdictions.mexico import infonavit
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    seg = [{"start": _dt.date(2026, 6, 1), "end": _dt.date(2026, 6, 30), "days": Decimal("30"), "sbc": Decimal("500")}]
+    notice = {"credit_number": "C1", "notice_type": "RETENCION", "discount_method": "PERCENTAGE", "discount_value": "20",
+              "effective_from": "2026-06-11", "effective_to": None, "id": 1}
+    rules = dict(mx_infonavit_percentage_basis="SBC_TIMES_DAYS")
+    with pytest.raises(MXBlock) as exc:                                                        # no rule: blocks
+        infonavit.credits([notice], _dt.date(2026, 6, 1), _dt.date(2026, 6, 30), seg, _content_with(**rules))
+    assert _codes(exc) == ["MX_INFONAVIT_PARTIAL_PERIOD"]
+    c = _content_with(mx_infonavit_partial_period_rule="PRORATE_BY_DAYS_IN_FORCE", **rules)
+    out = infonavit.credits([notice], _dt.date(2026, 6, 1), _dt.date(2026, 6, 30), seg, c)
+    assert out["employee"] == Decimal("500") * 20 * Decimal("20") / 100                         # 20 days in force
+    overlap = [notice, dict(notice, id=2, effective_from="2026-06-20")]
+    with pytest.raises(MXBlock) as exc:
+        infonavit.credits(overlap, _dt.date(2026, 6, 1), _dt.date(2026, 6, 30), seg, c)
+    assert _codes(exc) == ["MX_INFONAVIT_NOTICE_OVERLAP"]
+
+
+def test_min_wage_no_withholding_rule_is_transcribed_from_lisr_96():
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    (row,) = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_min_wage_no_withholding_rule"]
+    assert row.text_value == "NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY" and row.source == "S24/S24_DIP_LISR.pdf"
+    assert c.MX_SBC_FIXED_INTEGRATION_RULE is None and c.MX_FIXED_DAYS_TERMINATION_RULE is None   # D-18, D-19

@@ -324,10 +324,7 @@ def _hours(db: Session, employee_id: int, start: date, end: date):
              "holiday_days": sum(int(r.rest_days_worked or 0) for r in rows),
              "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE,
              "rest_day_code": REST_DAY_WORK_CODE}
-    if overtime > 0:
-        # No transcribed rule derives an hourly rate from the daily salary.
-        raise MXBlock("MX_HOURLY_RATE_RULE_MISSING",
-                      "approved overtime needs an hourly-rate rule, which is not transcribed yet (S26)")
+    # W3-5: the hourly rate is the engine's (labor.hourly_rate) — it blocks while no rule is transcribed.
     return hours, [{"id": r.id, "week_start": r.week_start, "ordinary": r.ordinary_hours, "overtime": r.overtime_hours,
                     "sundays": r.sundays_worked, "rest_days": r.rest_days_worked} for r in rows]
 
@@ -499,7 +496,9 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
             raise MXBlock("MX_EMPLOYEE_TERMINATED",
                           f"the employment ended on {ended.termination_date.isoformat()}, before this period",
                           employee.organization_id)
-        if tariff in _FIXED_SALARY_DAYS and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR":
+        fixed_rule = _content.MX_FIXED_DAYS_TERMINATION_RULE                      # W3-5 (D-19)
+        if tariff in _FIXED_SALARY_DAYS and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR" \
+                and fixed_rule is None:
             raise MXBlock("MX_SALARY_DAYS_PARTIAL_PERIOD",
                           f"the employment ends on {ended.termination_date.isoformat()}, inside this {tariff} period, "
                           f"and the labour policy pays fixed salary days — no proration of fixed days is transcribed",
@@ -507,9 +506,15 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         final_period = {"terminationId": ended.id, "periodEnd": end, "endsOn": ended.termination_date}
         end = ended.termination_date
     days_paid = salary_days(tariff, start, end, policy_row.salary_days_convention if policy_row else None)
+    if final_period is not None and tariff in _FIXED_SALARY_DAYS \
+            and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR":
+        days_paid = _dec(_content.MX_FIXED_DAYS_TERMINATION_RULE.days_paid(tariff, start, final_period["periodEnd"],
+                                                                            end))
     counts = _attendance_counts(db, employee.organization_id, employee.id, start, end, attendance_records)
     segs = segments(db, pack, start, end)
     hours, hours_rows = _hours(db, employee.id, start, end)
+    if hours is not None:
+        hours["workday_type_code"] = prof.mx_workday_type_code             # W3-5: LFT Art. 61 length
     zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
 
     daily = _dec(prof.mx_daily_salary)
@@ -545,7 +550,7 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     profile_facts = {c: getattr(prof, c) for c in (
         "id", "effective_from", "mx_identifier_validation_status", "mx_daily_salary", "mx_salary_type",
         "mx_work_state", "mx_work_municipality", "mx_seniority_date", "mx_pay_frequency_code",
-        "mx_professional_min_code", "mx_imss_registration_id", "mx_establishment_id")}
+        "mx_professional_min_code", "mx_imss_registration_id", "mx_establishment_id", "mx_workday_type_code")}
 
     components = {
         "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs],

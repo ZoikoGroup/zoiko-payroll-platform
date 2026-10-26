@@ -109,7 +109,7 @@ def _empty_content(monkeypatch):
     monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})
     for table in ("MX_SPECIAL_PAY_ISN_INCLUSION", "MX_SPECIAL_PAY_RULES", "MX_TERMINATION_REASONS",
                   "MX_PTU_EXCLUSION_REASONS", "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS", "MX_OFFICIAL_HOLIDAYS",
-                  "MX_ORDINARY_EXEMPTION_RULES"):
+                  "MX_ORDINARY_EXEMPTION_RULES", "MX_JORNADA_DAILY_HOURS"):
         monkeypatch.setattr(c, table, {})
     for rule in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",
                  "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE", "MX_CONTRIBUTION_DAYS_RULE"):

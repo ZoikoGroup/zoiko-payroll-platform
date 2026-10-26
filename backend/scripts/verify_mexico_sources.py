@@ -488,6 +488,8 @@ def _rule_citations(c) -> list:
             out += cites(name, obj)
     for rule in getattr(c, "MX_FILING_CALENDAR", ()):
         out += cites(f"filing {rule.report_type} {rule.state or ''}".strip(), rule)
+    for code, (_hours, src, ref) in sorted(getattr(c, "MX_JORNADA_DAILY_HOURS", {}).items()):   # W3-5
+        out.append((f"jornada {code}", src, ref))
     for year, (_dates, src, ref) in sorted(getattr(c, "MX_OFFICIAL_HOLIDAYS", {}).items()):
         out.append((f"holidays {year}", src, ref))
     return out

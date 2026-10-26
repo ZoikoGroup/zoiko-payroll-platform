@@ -650,3 +650,18 @@ A separate agent read only S3, S26, S10, S27 and S24. It agreed on every W3 rule
 - **LSS Art. 31:** fewer than 8 days, only sickness and maternity; 8 or more, none, through the Art. 37 procedure; IMSS incapacity, only retiro. Days are counted per contribution period ("período de cuotas"), framed monthly.
 - **Ley INFONAVIT Art. 29:** the paragraph is the **second-to-last** (corrected). The suspension needs "aviso oportuno"; credit discounts never stop.
 - **LISR Art. 93 I / XIV:** same share, limit, cap and period. Rest-day work shares the **single** weekly cap with overtime, which is why its exemption stays untranscribed.
+
+### TL-LFT-3 · Working-day length (for the hourly rate, D-17)
+
+- **Source:** `S26/S26_DIP_LFT.pdf` Art. 61 (PDF p. 22): "La duración de la jornada diaria será de ocho horas la diurna, siete la nocturna y siete horas y media la mixta".
+- **Transcribed** as `MX_JORNADA_DAILY_HOURS` by SAT c_TipoJornada: 01 Diurna 8, 02 Nocturna 7, 03 Mixta 7.5. Other workday types (04 Por hora … 99) have no length in Art. 61 and block (`MX_WORKDAY_TYPE_UNSUPPORTED`).
+- **Not transcribed:** the hourly-rate rule itself (`mx_hourly_rate_rule`, built as `DAILY_SALARY_OVER_JORNADA_HOURS`). No saved source says how an hourly rate is derived from the daily salary: **D-17**. Overtime keeps blocking (`MX_HOURLY_RATE_RULE_MISSING`).
+
+### TL-ISR-3 · No withholding for a worker on the area minimum wage only (gap register A16)
+
+- **Source:** `S24/S24_DIP_LISR.pdf` Art. 96 ¶1 (PDF p. 130): "No se efectuará retención a las personas que en el mes únicamente perciban un salario mínimo general correspondiente al área geográfica del contribuyente".
+- **Transcribed:** `mx_min_wage_no_withholding_rule` = `NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY`.
+- **When the engine applies it:** the payslip carries only the ordinary salary; the daily salary is at most the zone's general minimum wage; and no professional minimum wage applies. The ISR is then zero, and the trace carries `min_wage_only`.
+- **Readings (D-04):**
+  - "en el mes únicamente" is tested per payslip, not over the whole month;
+  - the minimum wage here is the actual zone wage, not the UMA (the text is about what the worker is paid).

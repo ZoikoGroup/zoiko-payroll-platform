@@ -153,6 +153,14 @@ def _calculate(ctx) -> dict:
     # ISR and employment subsidy (pay-date content, MX-013).
     taxable = sum((l["isr_taxable"] for l in lines), _ZERO)
     tax = isr.withholding(taxable, content.isr_tariff(period.tariff))
+    # W3-5 (gap A16): LISR Art. 96 para 1 — no withholding when the worker is paid only the area minimum wage.
+    min_wage_only = (content.has("mx_min_wage_no_withholding_rule")
+                     and content.text("mx_min_wage_no_withholding_rule").upper() == "NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY"
+                     and not preflight.fact(profile, "mx_professional_min_code")
+                     and daily_salary <= content.min_wage(zone)
+                     and all(l["kind"] == classification.ORDINARY_SALARY for l in lines))
+    if min_wage_only:
+        tax = {**tax, "isr": _ZERO, "min_wage_only": True}
     sub = subsidy.subsidy(content, period.tariff, period.days_paid, taxable, ctx.mx_month_to_date)
     net_isr = subsidy.offset(content, rnd(tax["isr"]), rnd(sub["amount"]))
 
