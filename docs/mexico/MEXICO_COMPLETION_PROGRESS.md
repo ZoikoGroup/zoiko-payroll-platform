@@ -440,3 +440,50 @@ Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch 
 | Report engine | Additive. Existing paths resolve exactly as before (no `[`) |
 | Mexico templates | A manual template seed fills 6 shells and fixes 2. Templates stay Draft; Mexico activation is still refused until W4-3's gate |
 | Other jurisdictions | None (pinned by their report-template tests) |
+
+---
+
+## W4-2 — Phase 12b: dedicated report generators (gap register A1)
+
+> **Review required: Rugvedh (ZP-PRIV) before merge.** New organisation route `POST /api/payroll/mexico/reports/{template_id}/generate` (org admin, tenant-scoped, data class *worker*). It reads Mexico's own tables through their existing service views, and the route registry and inventory gain exactly this entry. No authz, redaction or RLS rule is changed.
+
+**What changed**
+- **New `mexico_report_service.py`** (functions prefixed `mx_report_`, so the route-registry call graph cannot confuse them with other modules' helpers). The generators, each from the named service view, never recomputed:
+
+  | Template | Report type | Built from | Parameters |
+  |---|---|---|---|
+  | MX-CFDI-STATUS | MX_CFDI_STATUS | `mexico_cfdi_service.lifecycle_overview` (never XML) | — |
+  | MX-ISR-MONTHLY | MX_ISR_WITHHOLDING | SAT ISR liabilities with their source runs | `period_key` |
+  | MX-IDSE-MOVEMENTS | MX_IDSE | `mexico_imss_service.list_movements` (NSS masked) | optional `period_key` |
+  | MX-SUA-RECON | MX_SUA | SUA periods with figures and differences | `period_key` |
+  | MX-SIPARE | MX_SIPARE | IMSS / INFONAVIT liabilities | `period_key` |
+  | MX-VACATION-ACCRUAL | MX_VACATION | every Mexican worker's vacation ledger | — |
+  | MX-PTU-DISTRIBUTION | MX_PTU | the PTU cycle with its allocations | `cycle_id` |
+  | MX-ISN-RETURN-CDMX | MX_ISN_RETURN | the state's ISN returns for the period | `period_key` |
+  | MX-ANNUAL-ISR-ADJ (employer year) | MX_ANNUAL_ISR | `mexico_annual_service.employer_year_view` | `employer_profile_id`, `fiscal_year` |
+
+- **Immutable reports:** each is written as a `GeneratedReport`. A regeneration supersedes the previous row (it records `supersedesReportIds`) and never edits it, the Hong Kong rule.
+- **"NOT AN OFFICIAL FILE"** appears on the face of ISR monthly, IDSE, SUA, SIPARE and ISN returns (`officialLayout`).
+- **Guards:**
+  - generation needs an **Active** MX template of a dedicated type, so nothing generates in production until W4-3's activation gate;
+  - the filing guard refuses a dormant or pilot organisation.
+- **Shared code (additive):** `service.MX_DEDICATED_GENERATOR_REPORT_TYPES`; the generic payslip-column generator refuses those Mexico types (like Hong Kong's).
+- **Route registry:** regenerated with `python -m app.core.authz.generate`. The diff was exactly the new route; no existing route was reclassified. Four `/health/*` rows the generator picked up from your **uncommitted** `backend/app/main.py` were removed by hand, so they are not in this commit (they stay your change).
+
+**Tests (`test_mexico_report_generators.py`, 8; the dormancy route list gains the new route — 149 dormancy tests pass. Privacy + Mexico: 1,255 passed; the only failures are the 3 known local-only route-registry ones from your uncommitted `/health` routes)**
+- the generic generator refuses every dedicated type;
+- each generator builds from a real committed world (liabilities with sources, movements, SUA, ISN, CFDI status, vacation);
+- the "not an official file" labels;
+- supersession;
+- **no full RFC / CURP / NSS in any rendered report** (scan against the synthetic worker's identifiers);
+- missing parameters, a Draft template and a non-dedicated type are refused;
+- the annual employer-year view and the PTU distribution.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None (`payroll_generated_reports` already exists) |
+| API | One new org route, behind the Mexico dormancy guard (`require_mexico_tenant`): refused while Mexico is dormant |
+| Report engine | The generic generator refuses 9 Mexico report types (none of which could generate before) |
+| Other jurisdictions | None |

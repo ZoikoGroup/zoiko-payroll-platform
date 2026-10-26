@@ -12085,6 +12085,15 @@ def generate_report_from_template(
             f"{template.template_key} has a dedicated Hong Kong generator "
             "(/api/payroll/hong-kong/reports/...); the generic payslip-column generator cannot render it."
         )
+    if template.jurisdiction_country == "MX" and template.report_type in MX_DEDICATED_GENERATOR_REPORT_TYPES:
+        # Mexico W4-2 (Phase 12b): these reports' subject is one of Mexico's own
+        # tables (CFDI lifecycle, authority liabilities, IMSS movements, SUA, ISN
+        # returns, vacation ledgers, PTU cycles) — never a payslip-column list.
+        raise BadRequestException(
+            f"{template.template_key} has a dedicated Mexico generator "
+            "(/api/payroll/mexico/reports/{template_id}/generate); the generic payslip-column generator cannot "
+            "render it."
+        )
     if template.jurisdiction_country == "HK" and template.status != "Active":
         # The same "Active version is the one in force" rule Singapore applies:
         # a seeded HK template stays inert until a distinct Super Admin approves,
@@ -19313,6 +19322,12 @@ def generate_ky_pension_submission(
 # Every HK report type has a bespoke generator, so the shared
 # generate_report_from_template refuses all of them (see the check inside it).
 # Kept as one tuple so the refusal and the seeded catalog cannot drift apart.
+# Mexico (completion W4-2): report types built only by mexico_report_service
+# (the CFDI receipt by W4-3); MX_ANNUAL_ISR stays a template-engine report too.
+MX_DEDICATED_GENERATOR_REPORT_TYPES = (
+    "MX_CFDI_STATUS", "MX_ISR_WITHHOLDING", "MX_IDSE", "MX_SUA", "MX_SIPARE", "MX_VACATION", "MX_PTU",
+    "MX_ISN_RETURN", "MX_CFDI_RECEIPT",
+)
 _HK_DEDICATED_GENERATOR_REPORT_TYPES = (
     "HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G",
     "HK_EMPF_REMITTANCE", "HK_MPF_CONTRIBUTION_RECORD", "HK_TERMINATION_STATEMENT",

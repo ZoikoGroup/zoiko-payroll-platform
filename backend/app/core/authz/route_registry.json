@@ -10205,6 +10205,33 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/reports/{template_id}/generate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "generate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_generated_reports",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_imss_movements",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_ptu_allocations",
+    "payroll_mx_sua_differences",
+    "payroll_mx_vacation_records"
+   ],
+   "overridden": false
+  },
+  {
    "method": "PUT",
    "path": "/api/payroll/mexico/risk-premiums/{premium_id}/approve",
    "data_class": "tenant_config",

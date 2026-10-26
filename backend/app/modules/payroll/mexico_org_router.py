@@ -483,6 +483,17 @@ def _entity(kind: str) -> str:
     return _ENTITY_PATHS[kind]
 
 
+@router.post("/reports/{template_id}/generate",
+             summary="Generate a dedicated Mexico report from an Active MX template (W4-2: liabilities, IMSS, SUA, ISN, "
+                     "CFDI status, vacation, PTU, annual-adjustment employer year)")
+def mx_reports_generate(template_id: int, payload: Dict[str, Any] = Body(default_factory=dict),
+                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service.mx_report_generate(db, _org_id(current_user), template_id, payload,
+                                                    _actor(current_user))
+
+
 @router.get("/authorities/summary", summary="Social Security Center — registrations, counts and the blocks (§14)")
 def authorities_summary(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     return _imss().center_summary(db, _org_id(current_user))
