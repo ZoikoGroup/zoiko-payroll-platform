@@ -41,8 +41,12 @@ def test_on_is_required_and_no_profile_is_not_started(db):
     assert _items(r)["mx_profile"]["status"] == "NOT_STARTED" and r["liveEligible"] is False
 
 
-def test_items_and_gates_while_content_is_empty(db):
+def test_items_and_gates_while_content_is_empty(db, monkeypatch):
     from app.modules.payroll import mexico_employer_service as esvc
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    for table in ("MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES"):      # empty content (Batch 2 transcribed S9)
+        monkeypatch.setattr(c, table, ())
 
     t = make_org(db)
     emp = new_mx_employee(db, t.org.id)

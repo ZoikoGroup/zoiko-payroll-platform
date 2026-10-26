@@ -215,10 +215,11 @@ def test_imss_modification_movement_from_a_corrected_sbc(db, monkeypatch):
 
 def test_every_phase9_run_type_is_built(db, monkeypatch):
     """9a corrections, 9b aguinaldo, 9c finiquito, 9d PTU: no run type is still
-    refused with MX_RUN_TYPE_PHASE9."""
+    refused (Phase 11d: BUILT_RUN_TYPES, which equalled RUN_TYPES, is gone)."""
     from app.modules.payroll import mexico_run_service
 
-    assert set(mexico_run_service.RUN_TYPES) == set(mexico_run_service.BUILT_RUN_TYPES)
+    assert set(mexico_run_service.RUN_TYPES) == {"ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO", "PTU"}
+    assert not hasattr(mexico_run_service, "BUILT_RUN_TYPES")
 
 
 def test_cfdi_of_a_correction_replaces_the_stamped_original(db, monkeypatch, tmp_path):
