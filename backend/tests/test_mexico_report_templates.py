@@ -62,7 +62,7 @@ def test_mexico_template_activation_is_refused(db):
 def test_no_calendar_entry_without_a_transcribed_verified_rule(db, monkeypatch):
     from app.modules.payroll.engine.countries import mexico_content as c
 
-    assert c.MX_FILING_CALENDAR == ()                             # nothing confirmed from a saved source yet
+    monkeypatch.setattr(c, "MX_FILING_CALENDAR", ())              # W1-5 transcribed the real rules
     assert _seed(db)["calendar"] == []
     rule = c.FilingRule("MX_ISR_WITHHOLDING", "ISR {year}-{month:02d}", "MONTHLY", "SYNTHETIC", 17, None, None,
                         "S24", "SYNTHETIC")
@@ -110,3 +110,19 @@ def test_an_archive_copy_never_seeds_a_due_date(db, monkeypatch, tmp_path):
         monkeypatch.setattr(packs, "MANIFEST_PATH", path)
         counts[status] = len(packs.load_manifest(statuses=packs.mexico_sources.ACTIVATION_STATUSES))
     assert counts == {"ARCHIVE_COPY_VERIFIED": 0, "VERIFIED": 2}
+
+
+def test_the_real_calendar_seeds_only_rules_whose_source_is_verified(db):
+    """W1-5: ISR (S35 CFF Art. 6 I) rests on an archive copy and is skipped; the CDMX ISN rule rests on S22, VERIFIED by a logged
+    direct download, so its 12 monthly due dates (the 17th of the next month) seed."""
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    from app.modules.payroll import mexico_sources
+    from scripts.seed_mexico_canonical_packs import load_manifest
+
+    assert {r.report_type for r in c.MX_FILING_CALENDAR} == {"MX_ISR_WITHHOLDING", "MX_ISN_RETURN"}
+    entries = _seed(db, manifest=load_manifest(statuses=mexico_sources.ACTIVATION_STATUSES))["calendar"]
+    assert len(entries) == 12
+    assert {e.jurisdiction_state for e in entries} == {"CDMX"} and {e.report_type for e in entries} == {"MX_ISN_RETURN"}
+    assert {e.due_date.day for e in entries} == {17}
+    assert min(e.due_date for e in entries) == date(2026, 2, 17) and max(e.due_date for e in entries) == date(2027, 1, 17)

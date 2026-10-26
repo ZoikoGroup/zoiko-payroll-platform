@@ -515,3 +515,56 @@ It added:
 
 | Human G1 / G5 reviewer (name / date / verdict) | |
 |---|---|
+
+## W1-5 — 2026-10-26 (completion programme): filing calendar, movement deadline, holidays, risk-premium period (gap register B18, B11)
+
+New source **S35**: `S35/S35_DIP_CFF.pdf` (Código Fiscal de la Federación, last reform DOF 09-04-2026), SHA-256 `be7427b20d3552775ab42018f8f87578078770095bf8cf46322c25e36ee3aa7d`. Archive capture 20261006134049, digest OK; `ARCHIVE_COPY_VERIFIED`.
+
+### TL-CAL-1 · Filing calendar (`MX_FILING_CALENDAR`)
+
+| Report type | Due | Wording |
+|---|---|---|
+| `MX_ISR_WITHHOLDING` | 17th of the month after the withholding period | **S35** CFF Art. 6 I (PDF p. 4): "en los casos de retención … las enterarán a más tardar el día 17 del mes de calendario inmediato posterior al de terminación del período de la retención". The LISR's own day-17 sentence (Art. 96, p. 131) covers only individuals and Title III non-profits, so the CFF is the general rule for any employer |
+| `MX_IMSS` | **Not listed (D-15)**, removed after the blind transcription | LSS Art. 39 (p. 14) makes quotas monthly ("a más tardar el día diecisiete del mes inmediato siguiente"), but the 1997 LSS **Transitorio VIGÉSIMO SÉPTIMO** (p. 111) keeps retiro / CEAV "en forma bimestral, hasta en tanto no se homologuen los períodos de pago de las Leyes del ISSSTE e INFONAVIT". One IMSS liability carries every branch, so a single monthly date would misstate the RCV part |
+| `MX_ISN_RETURN` (CDMX) | 17th of the following month | S22 Art. 159 (PDF p. 91) |
+| `MX_INFONAVIT` | **Not listed (D-15)** | S27 Art. 35 (p. 22) says "por mensualidades vencidas … días diecisiete del mes inmediato siguiente", but the 1997 decree's Transitorio SEXTO (p. 57) says "continuará siendo de forma bimestral hasta que en la Ley del [ISSSTE] se establezca que la periodicidad de pagos se realizará mensualmente". That law is not saved |
+
+- **Seeding.** Only S22 is VERIFIED, so a manual run of `seed_statutory_report_templates.py` would seed only the CDMX ISN due dates as live filing-calendar rows. The ISR rule (S35) rests on an archive copy and is skipped until it is VERIFIED. **No deploy runs that seed.**
+
+**Blind second transcription (W1-5).** A separate agent read S10, S27, S29, S35, S26, S22 and S24. It agreed on every rule and page above, and on the 2026 dates of both holiday lists (its weekday arithmetic is shown in its report). It found what my search missed: **LSS Transitorio VIGÉSIMO SÉPTIMO** (p. 111, RCV bimonthly), which removed `MX_IMSS` from the calendar. It also noted:
+- the 2016 INFONAVIT decree does not repeal the 1997 Transitorio SEXTO;
+- RACERF Art. 45 allows registration on the working day before employment starts;
+- LSS Art. 34 sets other deadlines for variable salary (the first five business days of odd months);
+- CFF Art. 12 moves a deadline to the next business day when it falls on a non-working day;
+- the CFF names 1 December for the change of Executive while the reformed LFT names 1 October (neither falls in 2026).
+
+### TL-CAL-2 · Work-risk premium period (`MX_RISK_PREMIUM_PERIOD`)
+
+S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733d80f27446af7d5812fc6de80533c9`: the premium "tendrá vigencia desde el primero de marzo del año siguiente a aquel en que concluyó el periodo computado y hasta el día último de febrero del año subsecuente". LSS Art. 74 (S10 p. 26) delegates the period to the regulation. So the rule is **start 1 March**, ending the day before the next start. Engine effect: an employer risk premium can now be approved (before, `MX_NO_RISK_PREMIUM` was the only outcome).
+
+### TL-CAL-3 · IMSS movement deadline and the business-day calendar
+
+- **Deadline:** S10 LSS Art. 15 I (PDF p. 6), SHA-256 `875efb2c8e6562f4236a343c27f3199dc04732890e484e95086f69da05aa632c`: "comunicar sus altas y bajas, las modificaciones de su salario y los demás datos, dentro de plazos no mayores de cinco días hábiles". Counted from the day after the event: RACERF Art. 57 (p. 19, bajas: "contado a partir del día siguiente") and LSS Art. 34 I (salary changes). Transcribed: **5 business days**.
+- **Which days are not business days: D-16 (decision).** LSS Art. 9 fills gaps with "la Ley Federal de Trabajo, del Código o del derecho común, en ese orden". Two lists exist:
+  - **LFT** Arts. 74 (p. 23) and 715 (p. 318), which also excludes "los festivos que señale el calendario oficial" and days the labour authorities suspend work;
+  - **CFF** Art. 12 (p. 7), which also excludes the fiscal authorities' general vacations.
+
+  The 2026 dates each list gives, computed from the rules:
+
+  | Date | LFT Art. 74 | CFF Art. 12 |
+  |---|---|---|
+  | Thu 1 Jan | Yes | Yes |
+  | Mon 2 Feb (first Monday) | Yes | Yes |
+  | Mon 16 Mar (third Monday) | Yes | Yes |
+  | Fri 1 May | Yes | Yes |
+  | Tue 5 May | No | **Yes** |
+  | Wed 16 Sep | Yes | Yes |
+  | Mon 16 Nov (third Monday) | Yes | Yes |
+  | Fri 25 Dec | Yes | Yes |
+  | 1 Oct / 1 Dec (change of Executive, every six years) | Not in 2026 | Not in 2026 |
+  | Election days (LFT Art. 74 IX); authority vacations / official calendar | Not datable from saved sources | Not datable from saved sources |
+
+  **`MX_OFFICIAL_HOLIDAYS` stays EMPTY** until D-16 is decided, so every movement stays `DUE_DATE_UNSOURCED`. The dates above are ready to transcribe once it is.
+
+| Human G2 reviewer (name / date / verdict) | |
+|---|---|

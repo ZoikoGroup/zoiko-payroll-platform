@@ -175,7 +175,7 @@ def test_identifiers_and_scope_constants():
     assert c.MX_CEAV_SEEDED_YEAR == 2026 and c.MX_CEAV_SCHEDULE_YEARS == tuple(range(2023, 2031))
     assert all(rule.startswith("MX_") for rule in c.MX_SLAB_RULES)
     assert set(c.MX_ISN_CONTENT) == set(c.MX_ISN_STATES_IN_SCOPE) == {"CDMX"}
-    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 35))      # S24–S34: addendum, pending approval
+    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 36))      # S24–S35: addendum, pending approval
 
 
 def test_every_content_row_has_its_declared_shape():
@@ -643,3 +643,19 @@ def test_annual_tariff_2026_is_continuous_quota_consistent_and_cited():
     assert _isr_errors(ordered, {}, "ANNUAL") == []
     assert all(r.source == "S2/S2_SAT_Anexo8_RMF2026.pdf" and "C.II" in r.source_ref for r in rows)
     assert ordered[-1].upper is None
+
+
+# ── W1-5 (2026-10-26): calendar, movement deadline, risk-premium period ──
+
+def test_calendar_and_deadlines_are_cited_and_holidays_wait_for_d16():
+    c = _c()
+    rules = {r.report_type: r for r in c.MX_FILING_CALENDAR}
+    _need(rules, "filing calendar")
+    assert {k: (r.frequency, r.due_day, r.state) for k, r in rules.items()} == {
+        "MX_ISR_WITHHOLDING": ("MONTHLY", 17, None), "MX_ISN_RETURN": ("MONTHLY", 17, "CDMX")}
+    assert rules["MX_ISR_WITHHOLDING"].source == "S35/S35_DIP_CFF.pdf" and "Art. 6 I" in rules["MX_ISR_WITHHOLDING"].source_ref
+    assert "MX_INFONAVIT" not in rules and "MX_IMSS" not in rules              # D-15 (RCV / INFONAVIT bimonthly)
+    assert (c.MX_RISK_PREMIUM_PERIOD.start_month, c.MX_RISK_PREMIUM_PERIOD.start_day) == (3, 1)
+    assert c.MX_RISK_PREMIUM_PERIOD.source == "S29/S29_DIP_RACERF.pdf"
+    assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5
+    assert c.MX_OFFICIAL_HOLIDAYS == {}                                         # D-16: LFT or CFF list

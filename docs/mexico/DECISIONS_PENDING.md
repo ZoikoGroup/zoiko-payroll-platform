@@ -17,6 +17,8 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-12 | Indemnity salary (LFT Art. 89 integrated salary; same question as gap C4) | G1 / G5 owners | Every indemnity and the Art. 54 month (`MX_INDEMNITY_SALARY_UNDECIDED`) | Open |
 | D-13 | Does "por cada año de servicios" count a part year? | G5 owner | Art. 50, 54 and 162 amounts (`MX_SERVICE_YEARS_COUNT_UNDECIDED`) | Open |
 | D-14 | PTU cap (LFT Art. 127 VIII): where the excess goes; the three-year average with fewer years | G5 owner | Only an allocation where it changes the result (`MX_PTU_CAP_EXCESS_UNDECIDED`, `MX_PTU_HISTORY_AVERAGE_UNDECIDED`) | Open |
+| D-15 | INFONAVIT and RCV payment periodicity (monthly or bimonthly) | G2 / G3 owners | INFONAVIT and IMSS due dates (not in the calendar) | Open (needs the ISSSTE law) |
+| D-16 | Which days are not business days for an IMSS deadline (LFT Arts. 74 / 715 or CFF Art. 12) | G2 owner | Every IMSS movement due date (`DUE_DATE_UNSOURCED`) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -140,3 +142,16 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **State.** (a) "UNDISTRIBUTED" (residue) is built; (b) both are built. Each blocks only an allocation where it changes the result.
 - **Sources.** S26 Art. 127 VIII (p. 32). Log TL-PTU-1.
 - **Blocks.** `MX_PTU_CAP_EXCESS_UNDECIDED`, `MX_PTU_HISTORY_AVERAGE_UNDECIDED`.
+
+## D-15 · INFONAVIT and RCV payment periodicity
+
+- **Found in the blind transcription:** the 1997 LSS Transitorio VIGÉSIMO SÉPTIMO (S10 p. 111): RCV quotas are paid "en forma bimestral, hasta en tanto no se homologuen los períodos de pago de las Leyes del ISSSTE e INFONAVIT". Both bimonthly rules end on the same unsaved condition. `MX_IMSS` is therefore not in the calendar either.
+- **Question.** Ley INFONAVIT Art. 35 says "por mensualidades vencidas, a más tardar los días diecisiete del mes inmediato siguiente". The 1997 decree's Transitorio SEXTO keeps it "de forma bimestral hasta que en la Ley del Instituto de Seguridad y Servicios Sociales de los Trabajadores del Estado se establezca que la periodicidad de pagos se realizará mensualmente". Has that condition been met? And do retiro and CEAV (LSS) follow the monthly Art. 39 or a bimonthly cycle (Art. 184 speaks of "la cuota correspondiente al bimestre")?
+- **Needs.** The ISSSTE law (not saved; a W2-5 source to find), or an owner's decision on the operating practice.
+- **Blocks.** INFONAVIT and IMSS due dates (neither is in `MX_FILING_CALENDAR`). Engineering option once decided: split the RCV branches into their own liability with a bimonthly rule, and date the other IMSS branches monthly (LSS Art. 39).
+
+## D-16 · Business days for IMSS deadlines
+
+- **Question.** LSS Art. 15 I gives "cinco días hábiles" but does not define them. LSS Art. 9 fills gaps with the LFT first, then the CFF. Which list applies: LFT Arts. 74 / 715 (rest days, official holidays, days labour authorities suspend work) or CFF Art. 12 (adds 5 May; excludes the fiscal authorities' general vacations)?
+- **The 2026 dates** are worked out in TL-CAL-3. They differ only on 5 May, plus days no saved source dates (election days, official-calendar holidays, authority vacations).
+- **Blocks.** `MX_OFFICIAL_HOLIDAYS` stays empty, so every movement is `DUE_DATE_UNSOURCED`.

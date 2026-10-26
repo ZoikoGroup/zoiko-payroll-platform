@@ -104,6 +104,7 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S32", "IMSS — NSS (Número de Seguridad Social) structure and check digit"),
     ("S33", "Banco de México / ABM — CLABE 18-digit structure and check digit"),
     ("S34", "DOF 27-01-2016 — constitutional decree on minimum-wage de-indexation (UMA), Transitorio Tercero"),
+    ("S35", "Código Fiscal de la Federación (CFF), Arts. 12 and 20"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -818,7 +819,26 @@ class FilingRule(NamedTuple):
     needs_g1: bool = True
 
 
-MX_FILING_CALENDAR: tuple = ()        # EMPTY until each rule is confirmed in its saved source
+# W1-5 (2026-10-26) [PENDING G1]: monthly due dates on the 17th, each from its own saved text (log TL-CAL-1).
+# INFONAVIT is NOT listed: Ley INFONAVIT Art. 35 says monthly, but its 1997 Transitorio SEXTO keeps payments
+# bimonthly until the ISSSTE law makes them monthly — that law is not saved (DECISIONS_PENDING D-15).
+# IMSS is NOT listed either: LSS Art. 39 makes quotas monthly (17th of the next month), but the 1997 LSS
+# Transitorio VIGESIMO SEPTIMO keeps retiro / CEAV bimonthly "hasta en tanto no se homologuen los periodos de pago
+# de las Leyes del ISSSTE e INFONAVIT", and one IMSS liability carries every branch — one date would misstate it.
+# Only a rule whose source is VERIFIED is seeded as a live due date (seed_statutory_report_templates).
+MX_FILING_CALENDAR: tuple = (
+    FilingRule("MX_ISR_WITHHOLDING", "{year}-{month:02d}", "MONTHLY",
+               "withholdings remitted by the 17th of the month after the withholding period", 17, None, None,
+               "S35/S35_DIP_CFF.pdf",
+               "Art. 6 I: 'en los casos de retencion o de recaudacion de contribuciones'; 'las enteraran a mas tardar "
+               "el dia 17 del mes de calendario inmediato posterior al de terminacion del periodo de la retencion', "
+               "PDF p. 4"),
+    FilingRule("MX_ISN_RETURN", "{year}-{month:02d}", "MONTHLY",
+               "CDMX payroll tax paid by return by the 17th of the following month", 17, None, "CDMX",
+               "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
+               "Art. 159: 'se pagara mediante declaracion, que presentaran a traves de los medios electronicos que "
+               "establezca la Secretaria, a mas tardar el dia diecisiete del mes siguiente', PDF p. 91"),
+)
 
 
 # Validity window of an employer's annual work-risk premium (Phase 3 Q3,
@@ -835,7 +855,11 @@ class RiskPremiumPeriodRule(NamedTuple):
     needs_g1: bool = True
 
 
-MX_RISK_PREMIUM_PERIOD: Optional[RiskPremiumPeriodRule] = None
+# W1-5 [PENDING G1]: RACERF Art. 32 III (S29) — log TL-CAL-2.
+MX_RISK_PREMIUM_PERIOD: Optional[RiskPremiumPeriodRule] = RiskPremiumPeriodRule(
+    3, 1, "S29/S29_DIP_RACERF.pdf",
+    "Art. 32 III: 'tendra vigencia desde el primero de marzo del ano siguiente a aquel en que concluyo el periodo "
+    "computado y hasta el dia ultimo de febrero del ano subsecuente', PDF p. 12")
 
 
 # Phase 8 (D3): the IMSS affiliation-movement deadline (MX-025: "ordinary
@@ -852,7 +876,14 @@ class MovementDeadlineRule(NamedTuple):
     needs_g1: bool = True
 
 
-MX_IMSS_MOVEMENT_DEADLINE: Optional[MovementDeadlineRule] = None
+# W1-5 [PENDING G1]: LSS Art. 15 I (S10) — five business days, counted from the day after the event (RACERF
+# Art. 57, S29, for bajas; LSS Art. 34 I for salary changes). Which days are NOT business days (LFT Art. 74 /
+# 715 or CFF Art. 12) is DECISIONS_PENDING D-16, so MX_OFFICIAL_HOLIDAYS stays EMPTY and every movement is
+# still DUE_DATE_UNSOURCED until it is decided — log TL-CAL-3.
+MX_IMSS_MOVEMENT_DEADLINE: Optional[MovementDeadlineRule] = MovementDeadlineRule(
+    5, "S10/S10_IMSS_LSS.pdf",
+    "Art. 15 I: 'comunicar sus altas y bajas, las modificaciones de su salario y los demas datos, dentro de plazos "
+    "no mayores de cinco dias habiles', PDF p. 6")
 MX_OFFICIAL_HOLIDAYS: dict = {}       # year -> (tuple of dates, source, source_ref); EMPTY until transcribed
 
 # Phase 8: which filing-calendar report type (payroll_statutory_filing_calendar,

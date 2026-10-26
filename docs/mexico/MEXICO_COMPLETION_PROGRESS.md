@@ -217,3 +217,41 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 | Other jurisdictions | None |
 
 **Gap register:** B15 and B16 done, except D-14 and the Art. 127 II item.
+
+---
+
+## W1-5 — Filing calendar, movement deadline, holidays, risk-premium period (gap register B18, B11)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **S35 saved:** Código Fiscal de la Federación, last reform DOF 09-04-2026 (archive copy, digest verified). Registered in the manifest, the addendum and the content module.
+- **`MX_FILING_CALENDAR`:**
+  - ISR withholding, the 17th of the next month (CFF Art. 6 I, the general rule for every employer);
+  - CDMX ISN, the 17th of the next month (S22 Art. 159).
+  - **IMSS and INFONAVIT are held back (D-15).** RCV (LSS Transitorio VIGÉSIMO SÉPTIMO) and INFONAVIT (1997 Transitorio SEXTO) stay bimonthly until the ISSSTE law changes, and that law is not saved. One IMSS liability carries every branch.
+- **`MX_RISK_PREMIUM_PERIOD`:** from 1 March (RACERF Art. 32 III). An employer risk premium can now be approved once the range is in an Active pack.
+- **`MX_IMSS_MOVEMENT_DEADLINE`:** 5 business days (LSS Art. 15 I), counted from the day after the event (RACERF Art. 57; LSS Art. 34).
+- **`MX_OFFICIAL_HOLIDAYS` stays empty: D-16.** The LFT (Arts. 74 / 715) and CFF (Art. 12) lists differ; both sets of 2026 dates are worked out in TL-CAL-3. Movements remain `DUE_DATE_UNSOURCED`.
+- **Not transcribed:** the authority retry configuration. It is provider- and portal-specific (C1, the PAC).
+- **`compare`:** 538 checks, 0 misses.
+
+**Controls**
+- Blind second transcription (separate agent; 7 sources): agreement on every rule, page and 2026 date. It found the LSS RCV transitory, which removed the IMSS rule, plus five details recorded in TL-CAL.
+- The real filing-calendar seed is pinned: on the real manifest only the CDMX ISN rule (VERIFIED source) seeds its 12 dates, from 17 Feb 2026 to 17 Jan 2027.
+
+**Tests**
+- New: the calendar, deadline and period content test, and the real-calendar seed test.
+- The four tests that pinned these as empty now empty them themselves. The movement test also proves that the real 5-day rule still gives no due date without a holiday list.
+- All `tests/test_mexico_*.py`: in the full run, 972 passed and the 4 empty-pinning tests failed. They were fixed and pass in their files, and the affected files pass after the IMSS rule was removed (62 passed). **0 failing.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Filing calendar | **No deploy runs the template seed.** If someone ran it by hand, it would write 12 live `MX_ISN_RETURN` / CDMX calendar rows (S22 is VERIFIED). The ISR rule is skipped until S35 is VERIFIED |
+| Mexico in production | Dormant. Risk premiums can now pass the period check (approval still needs the legal range in an Active pack). Movements still have no due date |
+| Other jurisdictions | None |
+
+**Gap register:** B18 narrowed (ISR and CDMX ISN calendar, movement deadline and risk-premium period done; IMSS / INFONAVIT D-15; holidays D-16; retry configuration with C1). B11 risk-premium period done.
