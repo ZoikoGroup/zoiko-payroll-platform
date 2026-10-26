@@ -333,3 +333,53 @@ Ordinary earnings are not content: each earning classification carries its own I
 
 | Human G4 reviewer (name / date / verdict) | |
 |---|---|
+
+## W1-3a — 2026-10-26 (completion programme): special-pay exemptions and withholding (gap register B12)
+
+Rule objects in `engine/countries/mexico_rules.py`, wired into `MX_SPECIAL_PAY_RULES` / `MX_AGUINALDO_RULE`. Each cites the wording it rests on; `compare` finds every quote in its file.
+
+Sources: `S24/S24_DIP_LISR.pdf` (SHA-256 `803c2875c09c751c1966b8eb4dca99f460b237da4ef67ee04b4fa325d8c2f786`, last reform DOF 01-04-2024), `S25/S25_DIP_RLISR.pdf` (`0538fd2fa3da9705370350b1e25a1656cc681d2c489545334079e1b35360d6e3`, last reform DOF 06-05-2016), `S26/S26_DIP_LFT.pdf` (`12f09393a1951a91c3f57f579bf611b034edf1a5f78cdbfb828e23ff3a9acbf7`), S34.
+
+### TL-SP-1 · Exempt part (LISR Art. 93)
+
+| Concept | Rule transcribed | Wording (PDF page) |
+|---|---|---|
+| Aguinaldo | Exempt up to **30 days** of the reference wage per calendar year | Art. 93 XIV, p. 123: "Las gratificaciones … durante un año de calendario, hasta el equivalente del salario mínimo general del área geográfica del trabajador elevado a 30 días" |
+| Vacation premium, PTU | Exempt up to **15 days** each, per calendar year | Art. 93 XIV, p. 123: "las primas vacacionales … y la participación de los trabajadores en las utilidades … hasta por el equivalente a 15 días de salario mínimo general del área geográfica del trabajador, por cada uno de los conceptos señalados" |
+| Seniority premium, separation payment, indemnity | Exempt up to **90 days** of the reference wage **per year of service**, one cap shared by all three; a fraction of more than six months counts as a year | Art. 93 XIII, pp. 122–123 |
+| Vacation paid out | **No exemption** (Art. 93 names none) | — |
+| A worker on the area minimum wage | **Blocks** (`MX_ART93_I_NOT_MODELLED`): Art. 93 I exempts in full the benefits within the legal minimums; not modelled | Art. 93 I, p. 121 |
+
+- **Year to date.** The XIV caps are per calendar year, so each payslip now receives the exempt amounts already used that year (`_year_to_date_exempt`, with the same ordering and correction rules as the month-to-date subsidy accumulator; bound into the approval fingerprint).
+- **Shared XIII cap.** The law gives one cap for every separation payment. Splitting it across the three CFDI kinds is not legislated: it is allocated **pro rata** (the total exempt is the law's; the split is an engineering choice, D-04).
+- **Reference wage: D-07 (blocks).** XIII and XIV say "salario mínimo general del área geográfica". The LISR does use "Unidad de Medida y Actualización" in later-reformed articles, but not here. S34 Transitorio Tercero would read such a reference as the UMA; the text would read it as the worker's zone minimum wage (RLISR Art. 167: the place of work). The difference is about 2.7×. Both readings are built and tested; until the G1 owner decides, every special payment blocks with `MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`.
+
+### TL-SP-2 · Withholding (LISR Arts. 95, 96; RLISR Arts. 172, 174)
+
+| Case | Rule | Wording |
+|---|---|---|
+| Aguinaldo, vacation premium, PTU, vacation paid out in an ordinary run | Taxable part withheld with the period's pay (`combine_with_ordinary`) | Art. 96 ¶2, p. 130: "aplicando a la totalidad de los ingresos obtenidos en un mes de calendario" |
+| The same paid in their own run | **RLISR Art. 174** (fr. I–V: ÷365 ×30.4; add the monthly ordinary income; tax difference ÷ fr. I amount; that rate × the payment). Built and tested; the choice of method is **D-08 (blocks)**: Art. 96 makes RLISR 174 an option ("podrán"), and the default needs month-to-date income a special run does not carry | RLISR Art. 174, pp. 45–46 |
+| Monthly ordinary income | **D-09 (blocks):** neither the LISR nor the RLISR says how the "último sueldo mensual ordinario" or "el ingreso ordinario … en el mes" is derived from a daily salary | LISR Arts. 95, 96; RLISR Art. 174 II |
+| Separation payments | Not withheld with ordinary pay (`combine_with_ordinary = False`); the finiquito rule applies Art. 96's separation rate (W1-3b) | Art. 96 ¶7, p. 131; RLISR Art. 172 |
+
+### Blind second transcription (W1-3a)
+
+A separate agent read only S24, S25 and S26. It agreed on **every** limit, unit, period, page and formula in TL-SP-1 and TL-SP-2. In particular:
+- **One cap for all separation payments:** RLISR Art. 172 nets the Art. 93 XIII amount off the combined total.
+- **Art. 93 has no "Unidad de Medida y Actualización";** the law has it elsewhere (Art. 74 p. 89, Art. 79 p. 106).
+- **"Último sueldo mensual ordinario": NOT FOUND.** 30.4 appears only in RLISR Arts. 174 I and 163 I and in the subsidy table.
+
+It also raised three points, all now recorded:
+1. **"cuando dichas gratificaciones se otorguen en forma general"** (Art. 93 XIV) is a condition of the aguinaldo exemption. The statutory aguinaldo (LFT Art. 87) is general by law, so the rule assumes it holds. That is a reading for the G1 owner (D-04). An employer bonus that is not general would need its own classification.
+2. **Sunday premium** (one area minimum wage per Sunday worked) **and overtime** (Art. 93 I: 50%, at most five area minimum wages a week). These are ordinary hour-based lines, not special payments: they are the "Art. 93 exemptions for ordinary earnings" interface (gap register A15, W3).
+3. **Art. 96 ¶1, "No se efectuará retención a las personas que en el mes únicamente perciban un salario mínimo general":** the ordinary ISR path does not apply this. Added to the gap register as **A16** (W3).
+
+### TL-SP-3 · Aguinaldo rule (LFT Art. 87)
+
+- **Payable by:** 19 December, from "antes del día veinte de diciembre" (p. 25).
+- **Fraction:** days employed in the calendar year ÷ days in that year (365 or 366), both ends counted, for "la parte proporcional … conforme al tiempo que hubieren trabajado" (p. 25). The day count is a reading (D-04).
+- Engine effect: an aguinaldo amount is now computed (it used to block with `MX_AGUINALDO_RULE_MISSING`). Its withholding still blocks on D-07 and D-08.
+
+| Human G1 reviewer (name / date / verdict) | |
+|---|---|

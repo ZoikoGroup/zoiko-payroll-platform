@@ -13,6 +13,9 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-05 | 48-hour week for January–April 2026 | G5 owner | Nothing today; the January–April row cites a decree in force only from 1 May 2026 | Open |
 | D-06 | CDMX ISN: are vacation paid out at termination, the separation payment and the indemnity in the base? | G4 owner | Any finiquito with those lines for a CDMX worker (`MX_ISN_SPECIAL_PAY_RULE_MISSING`) | Open |
 | D-10 | CDMX ISN 2026 benefit for micro (1%) and small (0.5%) employers | G4 owner | G4 sign-off / CDMX pack activation; until then a micro or small CDMX employer would be computed at the full 4% | Open |
+| D-07 | Unit of the LISR Art. 93 exempt limits: UMA or the zone minimum wage | G1 owner | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`) | Open |
+| D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
+| D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
 
 ---
 
@@ -54,6 +57,9 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 | CEAV band 1 upper bound 1.0 SM | Stored as a closed band so the engine never treats it as open-ended (TL-CEAV-1) | S11 | G2 |
 | Vacation bands years 6–50 | DERIVED from Art. 76's wording; no row beyond 50 years (TL-VAC-1) | S26 Art. 76 | G5 |
 | CDMX ISN on the vacation premium: in the base | Art. 156 III "Premios, primas, bonos…" read as covering the vacation premium (TL-ISN-2) | S22 Art. 156 III | G4 |
+| Aguinaldo exemption assumes "se otorguen en forma general" holds (the statutory aguinaldo is general by law) | LISR Art. 93 XIV condition (blind transcription) | S24 Art. 93 XIV | G1 |
+| Separation exemption split pro rata across the three CFDI kinds | LISR Art. 93 XIII gives one cap for every separation payment; the split per kind is an engineering allocation (the total exempt is unchanged) (TL-SP-1) | S24 Art. 93 XIII | G1 |
+| Aguinaldo fraction = days employed in the year ÷ days in the year (365 / 366) | "la parte proporcional … conforme al tiempo que hubieren trabajado" (TL-SP-3) | S26 Art. 87 | G5 |
 | Subsidy remainder `NOT_PAYABLE` | Art. Segundo ¶2 of the base decree, still in force (TL-SUB-2) | S3 (DOF 01-05-2024) | G1 |
 
 ## D-05 · 48-hour week for January–April 2026
@@ -74,3 +80,27 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** How is the 2026 benefit applied, and to whom? (a) Is "equivalente al 1% … respecto de la tasa" one percentage point (4% → 3%) or 1% of the rate? (b) What do the SAF general rules require (application, proof of size, sector)? (c) Where does Zoiko record an employer's size and sector?
 - **Sources.** S22, decree of 19-12-2025, Transitorio TRIGÉSIMO SÉPTIMO (PDF p. 815; quoted in TL-ISN-1). The SAF "reglas de carácter general" it refers to are **not saved** (W2-5 source to find).
 - **Blocks.** G4 sign-off of the CDMX pack. The engine applies the pack's 4% to every CDMX employer; it must not reach a micro or small employer in 2026 until this is decided and modelled.
+
+## D-07 · Unit of the LISR Art. 93 exempt limits
+
+- **Question.** Art. 93 XIII (separation: 90 per year of service) and XIV (aguinaldo 30, vacation premium 15, PTU 15) count their limits in "salario mínimo general del área geográfica". Is that (a) the **UMA**, because S34 Transitorio Tercero reads every mention of the minimum wage "como unidad de cuenta, índice, base, medida o referencia para determinar la cuantía de las obligaciones" as the UMA, or (b) the worker's **zone minimum wage**, as the text says (RLISR Art. 167: the zone of the place of work, unless the worker asks in writing for that of their home)?
+- **What weighs on it.**
+  - The LISR does use "Unidad de Medida y Actualización" in articles reformed after 2016 (for example the agricultural regime), but not in Art. 93.
+  - The two readings differ by about 2.7× (UMA 117.31 against the general minimum wage of 315.04 in 2026; 440.87 in the ZLFN).
+  - No saved SAT source (RMF 2026, the payroll guide) states which applies.
+- **Sources.** S24 Art. 93 XIII, XIV (pp. 122–123); S34 Transitorio Tercero (p. 2); S25 Art. 167 (p. 44). Log TL-SP-1.
+- **Blocks.** Every special payment's exempt part: `MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`. One switch (`mexico_rules.MX_EXEMPTION_WAGE_REFERENCE`); both readings are tested.
+- **Same question elsewhere.** LFT Arts. 485–486 (the seniority-premium salary floor and cap, W1-3b) and Art. 93 I also word their limits in the minimum wage.
+
+## D-08 · Withholding method for a special payment in its own run
+
+- **Question.** For aguinaldo and PTU paid in their own run, does the employer withhold (a) under **RLISR Art. 174** (an option the payer "podrá" take: Art. 96 ¶3), or (b) under the Art. 96 default (the monthly tariff on all the month's income)?
+- **State.** (a) is built and tested. (b) needs the month-to-date ordinary income inside a special run, which special runs do not carry today (engineering follow-up, if chosen). Arguably a per-employer option; today it is one switch.
+- **Sources.** S24 Art. 96 ¶2–3 (p. 130); S25 Art. 174 (pp. 45–46). Log TL-SP-2.
+- **Blocks.** Aguinaldo and PTU runs: `MX_SPECIAL_PAY_METHOD_UNDECIDED`.
+
+## D-09 · Monthly ordinary income from a daily salary
+
+- **Question.** LISR Arts. 95 and 96 use the "último sueldo mensual ordinario" (separation withholding), and RLISR Art. 174 II "el ingreso ordinario … que perciba el trabajador en forma regular en el mes". Neither says how to derive it from a daily salary: × 30, × 30.4, or the month's actual ordinary pay?
+- **What weighs on it.** RLISR Art. 174 I (and Art. 163 I, for back pay over several months) uses 30.4 (for the special payment, not for ordinary income). LFT Art. 89 ¶3 divides a monthly salary by 30 (for indemnities, a different law).
+- **Blocks.** RLISR 174 withholding and the separation withholding: `MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`.

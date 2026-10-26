@@ -100,9 +100,12 @@ def test_no_salary_line_blocks():
 
 @pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION_SENIORITY_PREMIUM",
                                   "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"])
-def test_special_pays_block_without_their_transcribed_rule(kind):
+def test_special_pays_block_without_their_transcribed_rule(kind, monkeypatch):
     """Phase 9b: a special payment is routed to its own rule (never the
     ordinary tariff, MX-009); with no rule transcribed it blocks."""
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {})                  # W1-3a: the real rules are transcribed
     earnings = [{"code": "SALARY", "kind": "ORDINARY_SALARY", "amount": D("9000")},
                 {"code": "X", "kind": kind, "amount": D("100")}]
     assert "MX_SPECIAL_PAY_RULE_MISSING" in {k for k, _ in _block(mx_earnings=earnings).reasons}
@@ -172,3 +175,12 @@ def test_other_countries_are_untouched():
 
     us = replace(h.ctx(), country="US")
     assert mexico.calculate(us) == {}
+
+
+@pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU"])
+def test_transcribed_special_pay_rules_wait_for_the_wage_reference_decision(kind):
+    """W1-3a: with the real LISR Art. 93 rules, the exempt part waits for D-07."""
+    earnings = [{"code": "SALARY", "kind": "ORDINARY_SALARY", "amount": D("9000")},
+                {"code": "X", "kind": kind, "amount": D("100")}]
+    codes = {k for k, _ in _block(mx_earnings=earnings).reasons}
+    assert "MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED" in codes and "MX_SPECIAL_PAY_RULE_MISSING" not in codes

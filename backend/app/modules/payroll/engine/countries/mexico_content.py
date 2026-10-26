@@ -25,6 +25,8 @@ from datetime import date
 from decimal import Decimal
 from typing import NamedTuple, Optional
 
+from . import mexico_rules as _rules   # W1-3: rule objects (special pay), written at transcription
+
 SPEC = "ZP-MX-ENG-001 v1.0"
 PACK_STATUS = "Draft"  # seeds never create anything else
 
@@ -839,8 +841,8 @@ MX_AUTHORITY_RETRY_CONFIG: dict = {}  # channel -> {"min_wait_seconds": int, "mi
 # special_pay.py defines the interfaces). EMPTY: every special payment BLOCKS
 # (MX_SPECIAL_PAY_RULE_MISSING / MX_AGUINALDO_RULE_MISSING /
 # MX_ISN_SPECIAL_PAY_RULE_MISSING); none falls back to the ordinary tariff (MX-009).
-MX_SPECIAL_PAY_RULES: dict = {}       # concept (AGUINALDO / VACATION_PREMIUM / VACATION_PAYOUT / PTU / SEPARATION_SENIORITY_PREMIUM / SEPARATION_PAYMENT / SEPARATION_INDEMNITY) -> SpecialPayRule (S24 / S25)
-MX_AGUINALDO_RULE = None              # AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
+MX_SPECIAL_PAY_RULES: dict = dict(_rules.SPECIAL_PAY_RULES)   # W1-3a; concept (AGUINALDO / VACATION_PREMIUM / VACATION_PAYOUT / PTU / SEPARATION_SENIORITY_PREMIUM / SEPARATION_PAYMENT / SEPARATION_INDEMNITY) -> SpecialPayRule (S24 / S25)
+MX_AGUINALDO_RULE = _rules.AGUINALDO_RULE   # W1-3a (LFT Art. 87); AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
 MX_SPECIAL_PAY_ISN_INCLUSION: dict = {   # (state, concept) -> (included: bool, source, source_ref) — state ISN content
     # W1-2 (2026-10-26) [PENDING G1]: S22 Arts. 156 (what counts as remuneration) and 157 (what is not taxed),
     # PDF pp. 89-91 (log TL-ISN-2). NOT listed, so they block (MX_ISN_SPECIAL_PAY_RULE_MISSING): VACATION_PAYOUT,

@@ -85,3 +85,52 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 | Other jurisdictions | None |
 
 **Gap register:** B10 done for CDMX, except D-06 and D-10.
+
+---
+
+## W1-3a — Special-pay exemptions, withholding and the aguinaldo rule (gap register B12)
+
+**ZP-PRIV:** not required. No change to authz, redaction, RLS, migrations or identifiers.
+
+**Shared code (additive):** `engine/base.py` `PayrollContext` gains two optional fields, `mx_year_to_date_exempt` and `mx_separation_date`, both defaulting to None. Only the Mexico engine reads them; no other jurisdiction's path changes.
+
+**What changed**
+- **New `engine/countries/mexico_rules.py`:** the rule objects, wired into `MX_SPECIAL_PAY_RULES` and `MX_AGUINALDO_RULE` (log TL-SP-1 to TL-SP-3).
+  - LISR Art. 93 XIV: aguinaldo 30 days, vacation premium 15, PTU 15, per calendar year.
+  - LISR Art. 93 XIII: separation 90 days per year of service, one shared cap allocated pro rata.
+  - Vacation paid out: no exemption.
+  - A worker on the area minimum wage blocks (`MX_ART93_I_NOT_MODELLED`).
+  - RLISR Art. 174 standalone withholding.
+  - LFT Art. 87: aguinaldo fraction and payable-by date (19 December).
+- **Three decisions, each one switch, each blocking with its own code:**
+  - **D-07** unit of the Art. 93 caps (UMA or zone minimum wage);
+  - **D-08** the withholding method for a special run;
+  - **D-09** monthly ordinary income from a daily salary.
+  Both D-07 readings are built and tested.
+- **Engine seam:** `_year_to_date_exempt` gives every payslip the special-pay exempt amounts already committed in the calendar year. It uses the same payment order, replaced chain and correction deltas as the month-to-date accumulator, and is bound into the input hash (`yearToDateExempt`). Preflight passes the rules the zone, the seniority date, the separation date and the separation total.
+- **`compare`:** 438 checks, 0 misses. Every quoted wording of the new rules is found in S24, S25, S26 or S34.
+
+**Effect on runs (none reachable in production)**
+- An aguinaldo amount is now computed (LFT Art. 87).
+- Any special payment's exempt part blocks with `MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED` (D-07), where it used to block with `MX_SPECIAL_PAY_RULE_MISSING`.
+- Aguinaldo and PTU runs will then block on D-08 and D-09.
+
+**Tests**
+- New: `test_mexico_rules.py` (14 tests: every switch undecided, both units, the year-to-date cap, Art. 93 I, the six-month rounding of years of service, the shared XIII cap, RLISR 174 fractions I–V, the LFT 87 fraction in 365- and 366-day years). Also the accumulator test and the real-rules tests (aguinaldo run, orchestrator).
+- Updated: the "rule missing" tests now empty the rule maps themselves, because the real ones are transcribed.
+- All `tests/test_mexico_*.py`: **958 passed, 63 skipped, 0 failed.** The accumulator test, added during that run, passes with its file (51 passed across benefits, rules and orchestrator).
+
+**Controls.** Blind second transcription (separate agent; S24, S25, S26 only): agreement on every limit, unit, page and formula. It also raised the "en forma general" condition (D-04), the Sunday-premium and overtime exemptions (A15, W3) and Art. 96 ¶1 (new gap item **A16**).
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Shared engine | `PayrollContext` gains two optional Mexico fields (default None). No other jurisdiction reads them |
+| Mexico in production | Dormant. Special payments move from "rule missing" to the named decision codes |
+| Approval fingerprint | Mexican payslips gain the `yearToDateExempt` input component. No Mexican run exists in production, so nothing is invalidated |
+| Other jurisdictions | None (the full suite runs at the end of W1) |
+
+**Gap register:** B12 narrowed (special-pay rules transcribed; D-07, D-08, D-09 open). New A16.
+
