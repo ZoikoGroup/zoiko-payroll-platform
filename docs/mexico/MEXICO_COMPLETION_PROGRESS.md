@@ -487,3 +487,22 @@ Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch 
 | API | One new org route, behind the Mexico dormancy guard (`require_mexico_tenant`): refused while Mexico is dormant |
 | Report engine | The generic generator refuses 9 Mexico report types (none of which could generate before) |
 | Other jurisdictions | None |
+
+---
+
+## W4-3a — Phase 12c: the Mexico template activation gate (plan E6, gap register A6)
+
+**ZP-PRIV:** not required. It replaces a refusal with a stricter, evidence-based gate; no authz, RLS or redaction change.
+
+- **What changed:** `mexico_service.template_activation_refusal` no longer refuses forever. It calls `mexico_report_service.mx_report_activation_refusal`, which refuses until **all** of these hold:
+  1. **Release gates SIGNED:** each gate the report rests on (plan §3 mapping, e.g. register G1–G3, IMSS G2, ISN return G4) is SIGNED from reviewed evidence (`gate_states`; the build signs nothing).
+  2. **Statutory content Active:** `MX-PAYROLL-<year>`, and for an ISN return `MX-ISN-<state>-<year>`.
+  3. **Fields proven** (template-engine reports): every field is a catalogued Mexico path that resolves on a **real committed Mexican payslip of its run type** (ordinary; aguinaldo; finiquito; an ordinary payslip carrying an annual adjustment).
+- **Today:** every Mexico template stays refused (no gate signed, no pack Active), and the refusal names what is missing.
+- **Tests:**
+  - each condition on its own (unsigned gate, inactive pack, no committed payslip);
+  - success once all three hold;
+  - the ISN return needs its state pack and G4;
+  - the old "refused today" test still passes.
+  - Mexico report tests: 14 passed. All Mexico tests: 1,007 passed; the one failure (a test that hands the hook a pack instead of a template) was fixed by reading the report type defensively; scaffolding + report tests 37 passed.
+- **Production effect:** none reachable. Mexico templates were never activatable, and still are not until the gates are signed.

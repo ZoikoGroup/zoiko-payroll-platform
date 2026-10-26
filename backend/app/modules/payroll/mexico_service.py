@@ -196,8 +196,12 @@ def statutory_editors(db: Session, pack) -> set:
 
 
 def template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
-    return ("Mexico report-template activation is refused: Mexico templates are seeded Draft in Phase 2 and go live "
-            "only with the outputs they describe (Phases 6–10).")
+    """Completion W4-3a (Phase 12c, plan E6 / D3): the real gate in place of the
+    permanent refusal — its release gates SIGNED, its statutory content Active,
+    and its fields proven on a committed Mexican payslip (mexico_report_service)."""
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service.mx_report_activation_refusal(db, template)
 
 
 # ---- Calculation and run hooks ----

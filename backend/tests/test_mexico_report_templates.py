@@ -272,3 +272,57 @@ def test_employer_cost_and_register_return_the_engines_own_figures(db, monkeypat
     assert row["values"]["isr"] == float(Decimal(res["isr_withheld"]))
     assert row["values"]["imss_employee"] == float(Decimal(res["imss_employee"]))
     assert row["values"]["subsidy_applied"] == float(Decimal(res["subsidy"]["applied"]))
+
+
+# ── W4-3a (Phase 12c, plan E6): the activation gate ─────────────────────────
+
+def _signed(monkeypatch, unsigned=()):
+    from app.modules.payroll import mexico_service
+
+    monkeypatch.setattr(mexico_service, "gate_states", lambda db: [
+        {"gate": f"G{i}", "state": "OPEN" if f"G{i}" in unsigned else "SIGNED"} for i in range(1, 9)])
+
+
+def _active_pack(db, pack_id, state=None):
+    from app.modules.payroll.models import JurisdictionPack
+
+    db.add(JurisdictionPack(pack_id=pack_id, jurisdiction_country="MX", jurisdiction_state=state, version="1.0",
+                            pack_type="tax", status="Active", effective_from=date(2026, 1, 1),
+                            effective_to=date(2026, 12, 31)))
+    db.commit()
+
+
+def _refusal(db, template):
+    from app.modules.payroll import jurisdiction_hooks
+
+    return jurisdiction_hooks.call("MX", "template_activation_refusal", db, template, 1)
+
+
+def test_activation_needs_signed_gates_active_content_and_proven_fields(db, monkeypatch):
+    from tests import _mx_authority_helpers as ah
+
+    _seed(db)
+    register = _mx_templates(db)["MX-PAYROLL-REGISTER"]
+    why = _refusal(db, register)                                       # today: nothing signed, no Active pack
+    assert "G1" in why and "MX-PAYROLL-2026 is not Active" in why
+    assert "no committed Mexican ordinary/correction payslip" in why
+    ah.committed_world(db, monkeypatch, code="MXGATE1")                 # a real committed payslip proves the fields
+    assert "no committed Mexican" not in _refusal(db, register)
+    _signed(monkeypatch, unsigned=("G3",))
+    _active_pack(db, "MX-PAYROLL-2026")
+    why = _refusal(db, register)
+    assert "G3" in why and "G1" not in why and "MX-PAYROLL-2026" not in why
+    _signed(monkeypatch)
+    assert _refusal(db, register) is None
+
+
+def test_an_isn_return_also_needs_its_state_pack_and_g4(db, monkeypatch):
+    _seed(db)
+    isn = _mx_templates(db)["MX-ISN-RETURN-CDMX"]
+    _signed(monkeypatch, unsigned=("G4",))
+    _active_pack(db, "MX-PAYROLL-2026")
+    why = _refusal(db, isn)
+    assert "G4" in why and "MX-ISN-CDMX-2026 is not Active" in why
+    _signed(monkeypatch)
+    _active_pack(db, "MX-ISN-CDMX-2026", "CDMX")
+    assert _refusal(db, isn) is None                                   # a dedicated report: no field proof needed

@@ -185,3 +185,105 @@ def mx_report_generate(db: Session, org_id: int, template_id: int, params: Optio
     return {"reportId": row.id, "templateKey": template.template_key, "reportType": row.report_type,
             "scopeKey": row.scope_key, "reportingYear": row.reporting_year, "reportingPeriod": row.reporting_period,
             "status": row.status, "officialLayout": note, "renderedData": row.rendered_data}
+
+
+# ═══ W4-3a (Phase 12c, plan E6 / D3): the Mexico template activation gate ═══
+# Replaces the permanent refusal. A Mexico template becomes Active only when
+# (1) every release gate its report rests on is SIGNED (reviewed evidence,
+# mexico_service.gate_states), (2) the statutory content it reports is Active
+# (the national pack of its year; the state's ISN pack for an ISN return), and
+# (3) for a template-engine report, every field is a catalogued Mexico path that
+# resolves on a real committed Mexican payslip of its run type. Today nothing
+# passes (no gate is signed, no pack Active) — by design.
+MX_REPORT_GATES = {
+    "MX_REGISTER": ("G1", "G2", "G3"), "MX_EMPLOYER_COST": ("G2", "G3", "G4"), "MX_JOURNAL": ("G8",),
+    "MX_SUBSIDY": ("G1",), "MX_IMSS": ("G2",), "MX_INFONAVIT": ("G3",), "MX_AGUINALDO": ("G1", "G5"),
+    "MX_FINIQUITO": ("G1", "G5"), "MX_ANNUAL_ISR": ("G1",), "MX_CFDI_RECEIPT": ("G1",), "MX_CFDI_STATUS": ("G1", "G6"),
+    "MX_ISR_WITHHOLDING": ("G1",), "MX_IDSE": ("G2",), "MX_SUA": ("G2",), "MX_SIPARE": ("G2", "G3"),
+    "MX_VACATION": ("G5",), "MX_PTU": ("G5",), "MX_ISN_RETURN": ("G4",),
+}
+# The run type whose committed payslips prove a template-engine report's fields.
+MX_REPORT_RUN_TYPES = {"MX_AGUINALDO": ("AGUINALDO",), "MX_FINIQUITO": ("FINIQUITO",),
+                       "MX_ANNUAL_ISR": ("ORDINARY",)}
+
+
+def _mx_report_fields(db: Session, template) -> list:
+    m = _mx_report_models()
+    out = []
+    for comp in db.query(m.ReportTemplateComponent).filter(m.ReportTemplateComponent.report_template_id == template.id):
+        out += db.query(m.ReportTemplateComponentField).filter(m.ReportTemplateComponentField.component_id == comp.id).all()
+    return out
+
+
+def _mx_report_fields_proven(db: Session, template) -> Optional[str]:
+    """None when every snapshot field resolves on a committed Mexican payslip of
+    the report's run type; else why not (a keyed path needs only its list)."""
+    from app.modules.payroll import service
+
+    fields = [f for f in _mx_report_fields(db, template) if f.data_source_kind == "PAYSLIP_ITEM_JSON"]
+    if not fields:
+        return None
+    catalog = service._PAYSLIP_ITEM_JSON_FIELD_CATALOG.get(MX, {})
+    stray = [f.source_column for f in fields if f.source_column not in catalog]
+    if stray:
+        return f"fields outside the Mexico snapshot catalog: {', '.join(stray[:3])}"
+    m = _mx_report_models()
+    run_types = MX_REPORT_RUN_TYPES.get(template.report_type, ("ORDINARY", "CORRECTION"))
+    rows = (db.query(m.PayslipItem, m.PayrollRun).join(m.PayrollRun, m.PayslipItem.payroll_run_id == m.PayrollRun.id)
+            .filter(m.PayslipItem.mx_calculation_snapshot.isnot(None)).order_by(m.PayslipItem.id.desc()).limit(500))
+    needs_annual = template.report_type == "MX_ANNUAL_ISR"
+    for item, run in rows:
+        if (run.mx_run_type or "ORDINARY") not in run_types or not (run.mx_approval_fingerprint or {}).get("committedAt"):
+            continue
+        snap = {"mx_calculation_snapshot": item.mx_calculation_snapshot}
+        if needs_annual and not ((snap["mx_calculation_snapshot"].get("result") or {}).get("annual_adjustment")):
+            continue
+        missing = []
+        for f in fields:
+            segments = [s for s in f.source_column.split(".") if s]
+            if "[" in f.source_column:
+                cut = next(i for i, s in enumerate(segments) if "[" in s)
+                parent = service._report_json_walk(snap, segments[:cut])
+                if not (parent and isinstance(parent[0], dict)
+                        and isinstance(parent[0].get(segments[cut].split("[")[0]), list)):
+                    missing.append(f.source_column)
+            elif not service._report_json_walk(snap, segments):
+                missing.append(f.source_column)
+        if not missing:
+            return None
+    return (f"no committed Mexican {'/'.join(run_types).lower()} payslip resolves every field yet — a field is proven "
+            f"on a real committed payslip before the template goes live")
+
+
+def mx_report_activation_refusal(db: Session, template) -> Optional[str]:
+    from app.modules.payroll import mexico_service
+
+    reasons = []
+    gates = MX_REPORT_GATES.get(getattr(template, "report_type", None))
+    if gates is None:
+        return (f"Mexico report-template activation is refused: {getattr(template, 'report_type', None)!r} is not a "
+                f"Mexico report type this release can activate.")
+    states = {g["gate"]: g["state"] for g in mexico_service.gate_states(db)}
+    unsigned = [g for g in gates if states.get(g) != "SIGNED"]
+    if unsigned:
+        reasons.append(f"release gate(s) {', '.join(unsigned)} not SIGNED")
+    m = _mx_report_models()
+    year = str(template.reporting_year)
+    pack_ids = [f"MX-PAYROLL-{year}"]
+    if template.report_type == "MX_ISN_RETURN" and template.jurisdiction_state:
+        pack_ids.append(f"MX-ISN-{template.jurisdiction_state}-{year}")
+    for pack_id in pack_ids:
+        active = (db.query(m.JurisdictionPack).filter(m.JurisdictionPack.pack_id == pack_id,
+                                                      m.JurisdictionPack.status == "Active").first())
+        if active is None:
+            reasons.append(f"pack {pack_id} is not Active")
+    if template.report_type not in MX_REPORT_SPECS and template.report_type != "MX_CFDI_RECEIPT":
+        if not _mx_report_fields(db, template):
+            reasons.append("the template has no fields")
+        else:
+            proof = _mx_report_fields_proven(db, template)
+            if proof:
+                reasons.append(proof)
+    if reasons:
+        return "Mexico report-template activation is refused: " + "; ".join(reasons) + "."
+    return None
