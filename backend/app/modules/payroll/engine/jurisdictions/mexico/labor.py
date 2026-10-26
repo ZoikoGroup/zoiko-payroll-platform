@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from .classification import OVERTIME, SUNDAY_PREMIUM
+from .classification import OVERTIME, REST_DAY_WORK, SUNDAY_PREMIUM
 from .errors import MXBlock
 
 _ZERO = Decimal("0")
@@ -105,6 +105,18 @@ def hour_lines(content, hours, policy: dict, daily_salary: Decimal) -> dict:
         sunday = {"sundays": sundays, "policy_pct": policy_pct * _HUNDRED, "statutory_min_pct": floor * _HUNDRED,
                   "amount": amount}
         out.append({"code": code, "kind": SUNDAY_PREMIUM, "amount": amount})
-    if _dec(hours.get("holiday_days") or 0, "rest days worked") > 0:
-        raise MXBlock("MX_REST_DAY_CONTENT_MISSING", "work on a mandatory rest day — no rest-day content is transcribed")
-    return {"lines": out, "overtime": weeks, "sunday": sunday}
+    rest_day = None
+    rest_days = _dec(hours.get("holiday_days") or 0, "rest days worked")
+    if rest_days > 0:
+        # W3-2: LFT Arts. 73 / 75 — on top of the rest day's own salary (already in
+        # ordinary pay), "un salario doble por el servicio prestado".
+        if not content.has("mx_rest_day_work_multiplier"):
+            raise MXBlock("MX_REST_DAY_CONTENT_MISSING", "work on a mandatory rest day — no rest-day content is transcribed")
+        multiplier = content.amount("mx_rest_day_work_multiplier")
+        code = hours.get("rest_day_code")
+        if multiplier <= 0 or not code:
+            raise MXBlock("MX_HOURS_INVALID", "rest days worked need a positive multiplier and a rest-day earning code")
+        amount = daily_salary * multiplier * rest_days
+        rest_day = {"days": rest_days, "multiplier": multiplier, "amount": amount}
+        out.append({"code": code, "kind": REST_DAY_WORK, "amount": amount})
+    return {"lines": out, "overtime": weeks, "sunday": sunday, "rest_day": rest_day}

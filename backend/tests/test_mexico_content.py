@@ -672,3 +672,11 @@ def test_subsidy_monthly_cap_rule_is_transcribed_from_s3_in_the_engine_vocabular
 
     assert [r.text_value for r in rows] == ["CAP_AT_MONTHLY_AMOUNT"] and rows[0].text_value in MONTHLY_CAP_RULES
     assert rows[0].source == "S3/S3_DOF_Decreto_subsidio_empleo_31122025.html" and "para 4" in rows[0].source_ref
+
+
+def test_rest_day_multiplier_is_transcribed_from_lft_art_75():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_rest_day_work_multiplier"]
+    _need(rows, "rest-day multiplier")
+    assert [r.flat_amount for r in rows] == ["2"] and rows[0].source == "S26/S26_DIP_LFT.pdf"
+    assert rows[0].source_ref.startswith("Art. 75 para 2") and "mx_rest_day_work_multiplier" in c.MX_PER_CASE_KEYS

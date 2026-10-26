@@ -190,3 +190,16 @@ def test_sunday_premium_from_the_policy_not_below_the_floor():
 
 def test_rest_day_work_blocks():
     assert _blocked(_ot, _hours(holiday_days=1)).key == "MX_REST_DAY_CONTENT_MISSING"
+
+
+def test_rest_day_work_pays_the_multiplier_on_top_of_the_daily_salary():
+    """W3-2 (LFT Arts. 73, 75): SYNTHETIC multiplier 2, daily salary 600 —
+    2 rest days worked pay 2 x 600 x 2 = 2,400 on a REST_DAY_WORK line."""
+    from app.modules.payroll.engine.jurisdictions.mexico.classification import REST_DAY_WORK
+
+    rates = dict(OT_RATES, mx_rest_day_work_multiplier=h.amt("2"))
+    out = _ot(_hours(holiday_days=2, rest_day_code="DESC"), rates)
+    assert out["rest_day"] == {"days": D("2"), "multiplier": D("2"), "amount": D("2400")}
+    assert {"code": "DESC", "kind": REST_DAY_WORK, "amount": D("2400")} in out["lines"]
+    assert _blocked(_ot, _hours(holiday_days=1), rates).key == "MX_HOURS_INVALID"        # no earning code
+    assert _ot(_hours(rest_day_code="DESC"), rates)["rest_day"] is None                  # none worked

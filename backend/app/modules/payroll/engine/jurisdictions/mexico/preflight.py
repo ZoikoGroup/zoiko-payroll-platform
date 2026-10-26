@@ -114,10 +114,11 @@ def run(ctx) -> dict:
                             f"a {run_type} run carries only {' / '.join(allowed).lower()} lines"))
     elif not any(str(l.get("kind") or "").upper() == classification.ORDINARY_SALARY for l in ordinary):
         reasons.append(("MX_SALARY_LINE_MISSING", "the period has no ordinary-salary earning line"))
-    hour_kinds = (classification.OVERTIME, classification.SUNDAY_PREMIUM)
+    hour_kinds = (classification.OVERTIME, classification.SUNDAY_PREMIUM, classification.REST_DAY_WORK)
     if any(str(l.get("kind") or "").upper() in hour_kinds for l in ordinary):
         reasons.append(("MX_OVERTIME_NOT_FROM_HOURS",
-                        "overtime / Sunday premium is derived only from approved hours (MX-049), never a supplied line"))
+                        "overtime / Sunday premium / rest-day work is derived only from approved hours (MX-049), never a "
+                        "supplied line"))
     elif on is not None:
         facts = {"pay_date": on, "content": content, "daily_salary": fact(profile, "mx_daily_salary") if profile else None,
                  "month_to_date": getattr(ctx, "mx_month_to_date", None), "run_type": run_type or "ORDINARY",

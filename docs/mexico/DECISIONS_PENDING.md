@@ -75,6 +75,7 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 | Annual adjustment: the $400,000 test on gross income | Art. 97 b) "ingresos anuales" (TL-ANN-1) | S24 Art. 97 b) | G1 |
 | Annual adjustment: subtract the subsidy computed each period ("le correspondió"), not only the applied part | S3 Art. Tercero I (TL-ANN-1) | S3 (01-05-2024) | G1 |
 | Subsidy monthly cap applies to the month's payments together | S3 Art. Segundo ¶4 "no podrá exceder el monto mensual máximo" (TL-SUB-3) | S3 (31-12-2025) | G1 |
+| Rest-day work = 2 daily salaries on top of the rest day's own salary | LFT Arts. 73, 75 "independientemente del salario que les corresponda por el descanso obligatorio, un salario doble" (TL-LFT-2) | S26 Arts. 73, 75 | G5 |
 | Subsidy remainder `NOT_PAYABLE` | Art. Segundo ¶2 of the base decree, still in force (TL-SUB-2) | S3 (DOF 01-05-2024) | G1 |
 
 ## D-05 · 48-hour week for January–April 2026

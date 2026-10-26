@@ -594,3 +594,12 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
 - **Interface:** the text key `mx_subsidy_monthly_cap_rule` (vocabulary `subsidy.MONTHLY_CAP_RULES`). While it is absent, the engine still blocks with `MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING`.
 - **Transcribed:** `CAP_AT_MONTHLY_AMOUNT`. Once the month's earlier payments reach the monthly amount, a payment gets only what is left (`capped` in the trace). That the cap applies to the month's payments together, not to each payment, is a reading (D-04).
 - **Blind second transcription:** pending; done for all W3 rows together.
+
+### TL-LFT-2 · Work on a rest day (gap register A15, B17)
+
+- **Source:** `S26/S26_DIP_LFT.pdf`.
+  - Art. 75 ¶2 (PDF p. 24), for a mandatory rest day: "tendrán derecho a que se les pague, independientemente del salario que les corresponda por el descanso obligatorio, un salario doble por el servicio prestado".
+  - Art. 73 (p. 23) uses the same words for the weekly rest day.
+- **Interface:** the per-case amount `mx_rest_day_work_multiplier`; a `REST_DAY_WORK` line from approved hours (`rest_days_worked`), with earning code `MX_REST_DAY_WORK`, classified by the employer like overtime. Absent, the engine still blocks with `MX_REST_DAY_CONTENT_MISSING`. A supplied `REST_DAY_WORK` line is refused (approved hours only).
+- **Transcribed:** **2**, i.e. two daily salaries per rest day worked, on top of the rest day's own salary, which ordinary pay already includes. A reading (D-04): "salario doble" is read as two salaries in addition, not double in total.
+- **Blind second transcription:** pending (all W3 rows together).

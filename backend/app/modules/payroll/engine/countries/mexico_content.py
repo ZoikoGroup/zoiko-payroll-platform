@@ -190,6 +190,8 @@ MX_PARAMETER_KEYS = {
     "mx_overtime_double_weekly_max_hours": ("amount", "Overtime — hours per week paid at the first tier", "national"),
     "mx_overtime_double_multiplier": ("amount", "Overtime — first-tier pay multiplier", "national"),
     "mx_overtime_triple_multiplier": ("amount", "Overtime — second-tier pay multiplier", "national"),
+    # W3-2: work on a rest day (LFT Arts. 73, 75) — daily salaries paid on top of the rest day's own salary.
+    "mx_rest_day_work_multiplier": ("amount", "Rest-day work — extra daily salaries per day worked", "national"),
     # State ISN (spec §15; S22 for CDMX) — lives in MX-ISN-<STATE>-2026 only.
     "mx_isn_rate_pct": ("employer_pct", "State ISN — rate", "state"),
 }
@@ -201,7 +203,7 @@ MX_REQUIRED_TEXT_KEYS = ("mx_rounding_rule", "mx_sbc_min_rule")
 # Non-text keys the engine BLOCKS on per case (overtime is paid only from
 # approved hours) — not required for activation.
 MX_PER_CASE_KEYS = ("mx_overtime_double_weekly_max_hours", "mx_overtime_double_multiplier",
-                    "mx_overtime_triple_multiplier")
+                    "mx_overtime_triple_multiplier", "mx_rest_day_work_multiplier")
 
 
 # ── Content row shapes ────────────────────────────────────────────────────
@@ -336,6 +338,12 @@ MX_SCALAR_CONTENT: tuple = (
               "S3/S3_DOF_Decreto_subsidio_empleo_01052024.html",
               "Art. Segundo para 2: 'la diferencia no podra aplicarse contra el impuesto que resulte a su cargo "
               "posteriormente, ni se entregara cantidad alguna por concepto del subsidio para el empleo'"),
+    # W3-2 (2026-10-26) [PENDING G1]: work on a rest day — log TL-LFT-2.
+    ScalarRow("mx_rest_day_work_multiplier", None, None, "2", None, None, None, _S26,
+              "Art. 75 para 2: 'tendran derecho a que se les pague, independientemente del salario que les corresponda "
+              "por el descanso obligatorio, un salario doble por el servicio prestado', PDF p. 24; Art. 73: 'un "
+              "salario doble por el servicio prestado' on a weekly rest day, PDF p. 23 (read as 2 daily salaries "
+              "on top of the rest day's own, TL-LFT-2)"),
     # W3-1 (2026-10-26) [PENDING G1]: the monthly cap for periods under a month — log TL-SUB-3.
     ScalarRow("mx_subsidy_monthly_cap_rule", None, None, None, "CAP_AT_MONTHLY_AMOUNT", date(2026, 1, 1), None, _S3,
               "Art. Segundo para 4 as reformed: 'Cuando los pagos por salarios sean por periodos menores a un mes, la "

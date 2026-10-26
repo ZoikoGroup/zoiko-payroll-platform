@@ -326,3 +326,14 @@ Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch 
 - **Tests:** the engine cap test (left over, nothing left, under the cap, unknown rule) and the content vocabulary test. Affected files: 164 passed. `compare`: 541 checks, 0 misses.
 - **Production effect:** none reachable (Mexico dormant). The national Draft pack gains one text row on the next manual seed.
 - **Blind second transcription:** pending (all W3 rows together).
+
+---
+
+## W3-2 — Work on a rest day (gap register A15)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `mx_rest_day_work_multiplier` (per case, so not required for activation), a new line kind `REST_DAY_WORK` from approved hours, and the earning code `MX_REST_DAY_WORK` (it needs an approved classification, like overtime). The result trace gains `labor.rest_day`.
+- **Transcribed** from LFT Arts. 73 and 75: **2** extra daily salaries per rest day worked (TL-LFT-2; a D-04 reading).
+- **Tests:** the engine tests (amount, missing code, none worked) and the content test. All Mexico tests: 982 passed. `compare`: 544 checks, 0 misses.
+- **Production effect:** none reachable. The engine module changes are Mexico-only.

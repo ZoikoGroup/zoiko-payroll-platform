@@ -50,6 +50,7 @@ RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
 SALARY_CODE = "MX_SALARY"
 OVERTIME_CODE = "MX_OVERTIME"
 SUNDAY_PREMIUM_CODE = "MX_SUNDAY_PREMIUM"
+REST_DAY_WORK_CODE = "MX_REST_DAY_WORK"          # W3-2
 
 _FIXED_SALARY_DAYS = {"QUINCENAL_15": Decimal("15"), "MONTHLY": Decimal("30")}   # D13 FIXED convention
 _ZERO = Decimal("0")
@@ -321,7 +322,8 @@ def _hours(db: Session, employee_id: int, start: date, end: date):
                         "overtime_dates": list(r.overtime_dates or [])} for r in rows],
              "sundays_worked": sum(int(r.sundays_worked or 0) for r in rows),
              "holiday_days": sum(int(r.rest_days_worked or 0) for r in rows),
-             "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE}
+             "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE,
+             "rest_day_code": REST_DAY_WORK_CODE}
     if overtime > 0:
         # No transcribed rule derives an hourly rate from the daily salary.
         raise MXBlock("MX_HOURLY_RATE_RULE_MISSING",
