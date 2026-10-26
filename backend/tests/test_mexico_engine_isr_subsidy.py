@@ -111,6 +111,23 @@ def test_month_cap_without_a_rule_blocks():
     assert e.key == "MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING"
 
 
+def test_month_cap_rule_pays_only_what_is_left_of_the_monthly_amount():
+    """W3-1 (S3 Art. Segundo para 4): SYNTHETIC monthly amount 300; 200 already
+    applied this month; this fortnight's 150 is cut to the 100 left; nothing
+    is left once the month has had 300."""
+    rates = copy.deepcopy(h.SYN_RATES)
+    rates["mx_subsidy_monthly_cap_rule"] = h.txt("CAP_AT_MONTHLY_AMOUNT")
+    s = _sub("2000", tariff="QUINCENAL_15", days=15, mtd={"taxable": 0, "subsidy_applied": "200"}, rates=rates)
+    assert (s["amount"], s["capped"]) == (D("100"), True)
+    full = _sub("2000", tariff="QUINCENAL_15", days=15, mtd={"taxable": 0, "subsidy_applied": "300"}, rates=rates)
+    assert full["amount"] == 0 and full["capped"] is True
+    under = _sub("2000", tariff="QUINCENAL_15", days=15, mtd={"taxable": 0, "subsidy_applied": "0"}, rates=rates)
+    assert (under["amount"], under["capped"]) == (D("150"), False)
+    rates["mx_subsidy_monthly_cap_rule"] = h.txt("SOMETHING_ELSE")
+    e = _blocked(_sub, "2000", tariff="QUINCENAL_15", days=15, mtd={"taxable": 0, "subsidy_applied": "200"}, rates=rates)
+    assert e.key == "MX_RULE_UNRECOGNISED"
+
+
 def test_january_vs_february_uma_is_chosen_by_the_pay_date_rows():
     """F5 mechanics: the resolver hands the rows in force on the pay date;
     a higher monthly UMA (the February row) gives a higher subsidy."""

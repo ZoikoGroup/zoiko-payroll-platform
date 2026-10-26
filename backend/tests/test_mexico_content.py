@@ -660,3 +660,15 @@ def test_calendar_and_deadlines_are_cited_and_holidays_wait_for_d16():
     assert c.MX_RISK_PREMIUM_PERIOD.source == "S29/S29_DIP_RACERF.pdf"
     assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5
     assert c.MX_OFFICIAL_HOLIDAYS == {}                                         # D-16: LFT or CFF list
+
+
+# ── W3 (2026-10-26): content interfaces for the engine refusals ──
+
+def test_subsidy_monthly_cap_rule_is_transcribed_from_s3_in_the_engine_vocabulary():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_subsidy_monthly_cap_rule"]
+    _need(rows, "subsidy monthly cap rule")
+    from app.modules.payroll.engine.jurisdictions.mexico.subsidy import MONTHLY_CAP_RULES
+
+    assert [r.text_value for r in rows] == ["CAP_AT_MONTHLY_AMOUNT"] and rows[0].text_value in MONTHLY_CAP_RULES
+    assert rows[0].source == "S3/S3_DOF_Decreto_subsidio_empleo_31122025.html" and "para 4" in rows[0].source_ref

@@ -181,6 +181,9 @@ MX_PARAMETER_KEYS = {
     "mx_rounding_rule": ("text", "Monetary rounding — mode and quantum (e.g. MODE:QUANTUM)", "national"),
     "mx_sbc_min_rule": ("text", "SBC floor rule (S10)", "national"),
     "mx_subsidy_remainder_rule": ("text", "Employment subsidy above ISR — remainder handling (S3)", "national"),
+    # W3-1: periods shorter than a month — the month's subsidy never exceeds the monthly amount (S3).
+    "mx_subsidy_monthly_cap_rule": ("text", "Employment subsidy — monthly cap across a month's payments (S3)",
+                                    "national"),
     "mx_infonavit_percentage_basis": ("text", "INFONAVIT credit, PERCENTAGE method — basis (S27/S15)", "national"),
     "mx_infonavit_fixed_amount_basis": ("text", "INFONAVIT credit, FIXED_AMOUNT method — basis (S27/S15)", "national"),
     # Overtime tiers (spec §16; S26 / S18) — dated rows, the reform phases them.
@@ -333,6 +336,11 @@ MX_SCALAR_CONTENT: tuple = (
               "S3/S3_DOF_Decreto_subsidio_empleo_01052024.html",
               "Art. Segundo para 2: 'la diferencia no podra aplicarse contra el impuesto que resulte a su cargo "
               "posteriormente, ni se entregara cantidad alguna por concepto del subsidio para el empleo'"),
+    # W3-1 (2026-10-26) [PENDING G1]: the monthly cap for periods under a month — log TL-SUB-3.
+    ScalarRow("mx_subsidy_monthly_cap_rule", None, None, None, "CAP_AT_MONTHLY_AMOUNT", date(2026, 1, 1), None, _S3,
+              "Art. Segundo para 4 as reformed: 'Cuando los pagos por salarios sean por periodos menores a un mes, la "
+              "cantidad del subsidio para el empleo que corresponda a la persona trabajadora, no podra exceder el "
+              "monto mensual maximo' (read as the month's payments together, TL-SUB-3)"),
     # ── Batch 2 (2026-10-26) [PENDING G1] ──
     # IMSS (spec §8): S10 LSS, consolidated, last reform DOF 15-01-2026. Rates
     # written in words in the LSS are read as numbers (log TL-IMSS-1). Rows

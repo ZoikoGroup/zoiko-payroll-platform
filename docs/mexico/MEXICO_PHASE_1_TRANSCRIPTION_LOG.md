@@ -585,3 +585,12 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
 
 | Human G2 / G3 reviewer (name / date / verdict) | |
 |---|---|
+
+## W3 — 2026-10-26 (completion programme): content interfaces for the engine refusals
+
+### TL-SUB-3 · Subsidy monthly cap (gap register A15)
+
+- **Source:** `S3/S3_DOF_Decreto_subsidio_empleo_31122025.html`, Art. Segundo ¶4 as reformed: "Cuando los pagos por salarios sean por periodos menores a un mes, la cantidad del subsidio para el empleo que corresponda a la persona trabajadora, no podrá exceder el monto mensual máximo que resulte de multiplicar el valor mensual de la Unidad de Medida y Actualización por 15.02%".
+- **Interface:** the text key `mx_subsidy_monthly_cap_rule` (vocabulary `subsidy.MONTHLY_CAP_RULES`). While it is absent, the engine still blocks with `MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING`.
+- **Transcribed:** `CAP_AT_MONTHLY_AMOUNT`. Once the month's earlier payments reach the monthly amount, a payment gets only what is left (`capped` in the trace). That the cap applies to the month's payments together, not to each payment, is a reading (D-04).
+- **Blind second transcription:** pending; done for all W3 rows together.

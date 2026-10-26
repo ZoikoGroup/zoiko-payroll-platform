@@ -314,3 +314,15 @@ Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch 
   - SAF's general rules for the 2026 CDMX ISN benefit (D-10);
   - SAT's CFDI cancellation-reason catalog (W2-3 above).
 - **Rounding (B11):** candidates recorded in D-01; nothing chosen (a G1 decision).
+
+---
+
+## W3-1 — Subsidy monthly cap (gap register A15)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `mx_subsidy_monthly_cap_rule`. When absent, the engine blocks exactly as before (`MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING`).
+- **Transcribed** from S3 Art. Segundo ¶4: `CAP_AT_MONTHLY_AMOUNT` (TL-SUB-3). A short-period payment is cut to what is left of the monthly amount; the trace says `capped`.
+- **Tests:** the engine cap test (left over, nothing left, under the cap, unknown rule) and the content vocabulary test. Affected files: 164 passed. `compare`: 541 checks, 0 misses.
+- **Production effect:** none reachable (Mexico dormant). The national Draft pack gains one text row on the next manual seed.
+- **Blind second transcription:** pending (all W3 rows together).
