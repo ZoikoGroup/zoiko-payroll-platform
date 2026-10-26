@@ -233,6 +233,8 @@ export const getMxSaEmployerReadiness = (orgId, on) =>
   apiFetch(`${MX_SA}/employer-readiness`, { params: { organization_id: orgId, on } });
 export const getMxSaEmployerReadinessSummary = (on) => apiFetch(`${MX_SA}/employer-readiness/summary`, { params: { on } });
 // Phase 7 — CFDI lifecycle, read-only (counts by status, UNKNOWN items, pinned release, blocks).
+export const getMxCfdiValidations = (orgId) =>
+  apiFetch(`${MX_SA}/cfdi/validations`, { params: orgId ? { organization_id: orgId } : {} });
 export const getMxSaCfdiLifecycle = (orgId) => apiFetch(`${MX_SA}/cfdi`, { params: orgId ? { organization_id: orgId } : {} });
 export const getMxSaAuthorities = (orgId) => apiFetch(`${MX_SA}/authorities`, { params: orgId ? { organization_id: orgId } : {} });
 

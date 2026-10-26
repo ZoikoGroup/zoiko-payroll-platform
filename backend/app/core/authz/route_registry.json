@@ -9898,6 +9898,25 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/runs/{run_id}/cfdi/validate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "validate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/mexico/runs/{run_id}/corrections",
    "data_class": "worker",
@@ -17859,6 +17878,22 @@
    "data_class": "platform",
    "action": "create",
    "resource": "withdraw",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/cfdi/validations",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "validations",
    "principals": [
     "super_admin"
    ],

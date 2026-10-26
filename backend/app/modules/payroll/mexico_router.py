@@ -201,6 +201,14 @@ def transition_release(release_id: int, action: str, current_user=Depends(get_cu
     return _mx().transition_release(db, release_id, action, _actor(current_user))
 
 
+@router.get("/cfdi/validations", summary="Validate-only CFDI preview summaries (counts, codes, hashes — G1 evidence)")
+def list_cfdi_validations(organization_id: Optional[int] = Query(None), current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_preview
+
+    return mexico_cfdi_preview.validation_summaries(db, organization_id)
+
+
 # ── Phase 11a — SAT codes for engine-produced amounts (maker-checker, D4) ──────
 
 @router.get("/cfdi-system-concepts", summary="System-concept SAT code mappings (per schema release)")

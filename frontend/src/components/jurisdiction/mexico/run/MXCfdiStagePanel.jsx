@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { generateMxCfdi, getMxRunCfdi, processMxCfdiOutbox } from "../../../../service/payrollService";
+import { generateMxCfdi, getMxRunCfdi, processMxCfdiOutbox, validateMxCfdi } from "../../../../service/payrollService";
 import MXCfdiDetailDrawer from "./MXCfdiDetailDrawer";
 
 // Mexico run stage 6 — CFDI 4.0 + Nómina 1.2 (spec §13, MX-016/017/062).
@@ -17,6 +17,7 @@ export default function MXCfdiStagePanel({ runId }) {
   const [busy, setBusy] = useState(false);
   const [openDoc, setOpenDoc] = useState(null);
   const [tick, setTick] = useState(0);
+  const [preview, setPreview] = useState(null);
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
@@ -84,11 +85,17 @@ export default function MXCfdiStagePanel({ runId }) {
           className="rounded-[10px] border border-border px-3 py-1.5 text-[12px] font-semibold disabled:opacity-40">
           Generate CFDI
         </button>
+        <button type="button" disabled={busy} onClick={() => act(async () => setPreview(await validateMxCfdi(runId)))}
+          data-testid="mx-cfdi-validate"
+          className="rounded-[10px] border border-border px-3 py-1.5 text-[12px] font-semibold disabled:opacity-40">
+          Validate CFDI (no stamping)
+        </button>
         <button type="button" disabled={busy || docs.length === 0} onClick={() => act(() => processMxCfdiOutbox())}
           className="rounded-[10px] border border-border px-3 py-1.5 text-[12px] font-semibold disabled:opacity-40">
           Process PAC queue
         </button>
       </div>
+      {preview && <CfdiPreview preview={preview} />}
       {docs.length === 0 ? (
         <p className="text-[12px] text-foreground-muted">No CFDI documents for this run.</p>
       ) : (
@@ -109,5 +116,43 @@ export default function MXCfdiStagePanel({ runId }) {
       )}
       {openDoc && <MXCfdiDetailDrawer docId={openDoc} onClose={() => { setOpenDoc(null); reload(); }} />}
     </section>
+  );
+}
+
+// Phase 11c: the validate-only preview. Each payslip's receipt is built and
+// validated in memory; only pass / fail, the findings and a payload hash come
+// back — never the XML. A finding that waits for a G1 decision (today: the
+// source of SalarioDiarioIntegrado) is shown first, as its own banner.
+function CfdiPreview({ preview }) {
+  return (
+    <div className="mb-4 rounded-[12px] border border-border p-3" data-testid="mx-cfdi-preview">
+      <p className="mb-2 text-[12px] text-foreground" data-testid="mx-cfdi-preview-summary">
+        <span className="font-semibold">Validation preview:</span> {preview.valid} of {preview.payslips} receipt(s) valid
+        against release #{preview.releaseId} ({preview.setId}, {preview.releaseStatus}). {preview.note}
+      </p>
+      {preview.awaitingDecisions?.length > 0 && (
+        <div className="mb-2 rounded-[10px] border border-warning/60 bg-warning/10 px-3 py-2 text-[12px] text-foreground"
+             role="status" data-testid="mx-cfdi-preview-awaiting">
+          <p className="font-semibold">Waiting for a G1 decision — no receipt can pass until it is recorded:</p>
+          <ul className="list-disc pl-5">{preview.awaitingDecisions.map((m) => <li key={m}>{m}</li>)}</ul>
+        </div>
+      )}
+      <table className="w-full text-[12px]">
+        <thead><tr className="text-left text-foreground-muted"><th className="py-1 pr-3">Payslip</th><th className="pr-3">Result</th><th className="pr-3">Findings</th><th>Payload SHA-256</th></tr></thead>
+        <tbody>
+          {preview.results.map((r) => (
+            <tr key={r.payslipItemId} className="border-b border-border/50 align-top" data-testid="mx-cfdi-preview-row">
+              <td className="py-1 pr-3">#{r.payslipItemId} {r.employeeName}</td>
+              <td className={`pr-3 font-semibold ${r.valid ? "text-success" : "text-error"}`}>{r.valid ? "VALID" : "REFUSED"}</td>
+              <td className="pr-3">
+                {r.code && !r.findings.some((f) => f.rule === r.code) && <code className="text-[11px]">{r.code}</code>}
+                <ul>{r.findings.map((f, i) => <li key={i}><code className="text-[11px]">{f.rule}</code> · {f.message}</li>)}</ul>
+              </td>
+              <td className="font-mono text-[11px]">{r.payloadSha256 ? `${r.payloadSha256.slice(0, 16)}…` : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

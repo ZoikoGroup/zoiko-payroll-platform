@@ -2592,6 +2592,8 @@ export const approveMxOpeningBalance = (rowId) => api.post(`${MX}/opening-balanc
 // Phase 7 — CFDI 4.0 + Nómina 1.2 lifecycle (generation refused until S28/S30/S4, Secret Manager and a PAC exist).
 export const getMxRunCfdi = (runId) => api.get(`${MX}/runs/${runId}/cfdi`);
 export const generateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/generate`, {});
+// Phase 11c: validate-only preview — never signs, stores or returns the XML.
+export const validateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/validate`, {});
 export const processMxCfdiOutbox = () => api.post(`${MX}/cfdi/outbox/process`, {});
 export const getMxCfdiDocument = (docId) => api.get(`${MX}/cfdi/documents/${docId}`);
 export const queryMxCfdiStatus = (docId) => api.post(`${MX}/cfdi/documents/${docId}/status-query`, {});
