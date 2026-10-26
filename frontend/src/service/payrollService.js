@@ -2872,3 +2872,21 @@ export async function uploadBrCertificate(credentialId, file) {
   if (!res.ok) throw new Error(data?.message || data?.detail || "The certificate was refused.");
   return data;
 }
+
+// ── South Africa (ZP-ZA-ENG-001; "ZA" — "SA" above is Saudi Arabia) ────────
+// Tenant routes in tenant_statutory_router.py. Every rule (four-eyes approval,
+// evidence, dormancy while ZA_TENANT_ONBOARDING_ENABLED is off) is enforced
+// server-side; these calls only fetch or submit operator input. Rows come back
+// with snake_case keys, exactly as the router serialises them.
+const ZA = "/api/payroll/south-africa";
+const zaList = (res) => (Array.isArray(res) ? res : res?.data || []);
+export const listZaEmployerRegistrations = async () => zaList(await api.get(`${ZA}/employer-registrations`));
+export const createZaEmployerRegistration = (payload) => api.post(`${ZA}/employer-registrations`, payload);
+export const approveZaEmployerRegistration = (registrationId) =>
+  api.post(`${ZA}/employer-registrations/${registrationId}/approve`, {});
+export const listZaDirectives = async (employeeId) => zaList(await api.get(`${ZA}/employees/${employeeId}/directives`));
+export const captureZaDirective = (employeeId, payload) => api.post(`${ZA}/employees/${employeeId}/directives`, payload);
+export const approveZaDirective = (directiveId) => api.post(`${ZA}/directives/${directiveId}/approve`, {});
+export const revokeZaDirective = (directiveId) => api.post(`${ZA}/directives/${directiveId}/revoke`, {});
+export const listZaEtiLedger = async (employeeId) =>
+  zaList(await api.get(`${ZA}/eti-ledger`, { params: employeeId ? { employee_id: employeeId } : {} }));

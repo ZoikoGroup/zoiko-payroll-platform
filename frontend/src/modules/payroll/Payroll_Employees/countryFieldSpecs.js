@@ -59,6 +59,12 @@ export const COUNTRIES = [
   // and dependants live on the Brazil statutory profile (employee detail →
   // "Manage"), never here.
   { code: "BR", name: "Brazil" },
+  // South Africa (ZP-ZA-ENG-001 Phase 7) — mirrors employee_validation.py's
+  // ZAEmployeeValidation (13-digit ID with YYMMDD date + Luhn, or a passport)
+  // plus bank_routing.py's ZA branch code / account. Residency, employment
+  // type, medical scheme, travel, UIF and ETI facts live on the South Africa
+  // statutory profile (employee detail → "Manage"), never here.
+  { code: "ZA", name: "South Africa" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -121,6 +127,32 @@ function cnpjPassesCheckDigits(value) {
   };
   if (charVal(raw[12]) !== digit([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])) return false;
   return charVal(raw[13]) === digit([6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+}
+
+// South African ID number (mirrors employee_validation.py's
+// za_national_id_is_valid): 13 digits, the first six a real YYMMDD date in
+// either century, and the Luhn check digit.
+function zaIdPassesCheck(value) {
+  const raw = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{13}$/.test(raw)) return false;
+  const yy = Number(raw.slice(0, 2));
+  const mm = Number(raw.slice(2, 4));
+  const dd = Number(raw.slice(4, 6));
+  const isDate = [1900, 2000].some((century) => {
+    const d = new Date(Date.UTC(century + yy, mm - 1, dd));
+    return d.getUTCFullYear() === century + yy && d.getUTCMonth() === mm - 1 && d.getUTCDate() === dd;
+  });
+  if (!isDate) return false;
+  let total = 0;
+  raw.split("").reverse().forEach((ch, index) => {
+    let digit = Number(ch);
+    if (index % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    total += digit;
+  });
+  return total % 10 === 0;
 }
 
 // A PIX key only carries check digits when its declared type is CPF or CNPJ;
@@ -430,6 +462,17 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "bank_ispb", label: "Bank ISPB", type: "text", placeholder: "8 digits", strip: " ", pattern: /^\d{8}$/, error: "ISPB must be exactly 8 digits." },
     { key: "bank_agency_digit", label: "Agency check digit", type: "text", upper: true, strip: " ", pattern: /^[0-9X]$/, error: "Agency check digit must be one digit or X." },
     { key: "bank_account_digit", label: "Account check digit", type: "text", upper: true, strip: " ", pattern: /^[0-9X]$/, error: "Account check digit must be one digit or X." },
+  ],
+  // South Africa — mirrors backend ZAEmployeeValidation. Exactly one of the ID
+  // number or the passport is required (the server enforces the pair). The
+  // SARS income-tax number is format-only: its check-digit rule is PENDING_G1.
+  ZA: [
+    { key: "national_id", label: "South African ID number", type: "text", placeholder: "13 digits", strip: " -", pattern: /^\d{13}$/, check: zaIdPassesCheck, error: "South African ID number must be 13 digits with a real YYMMDD date and a valid Luhn check digit." },
+    { key: "passport_number", label: "Passport number (if no SA ID)", type: "text", placeholder: "6–20 letters/digits", upper: true, strip: " -", pattern: /^[A-Z0-9]{6,20}$/, check: (_value, cf) => !cf?.national_id, error: "Passport number must be 6–20 letters/digits, and only when no South African ID number is given." },
+    { key: "tax_number", label: "SARS income-tax number", type: "text", placeholder: "10 digits", strip: " -", pattern: /^\d{10}$/, error: "SARS income-tax number must be 10 digits." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.ZA).
+    { key: "branch_code", label: "Branch code", type: "text", placeholder: "6 digits", strip: " -", pattern: /^\d{6}$/, error: "Branch code must be 6 digits." },
+    { key: "account_number", label: "Account number", type: "text", placeholder: "7–11 digits", strip: " -", pattern: /^\d{7,11}$/, error: "Account number must be 7-11 digits." },
   ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).

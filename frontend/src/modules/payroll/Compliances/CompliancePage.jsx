@@ -18,6 +18,7 @@ import NLComplianceCentreTab from "./NLComplianceCentreTab";
 import MXComplianceCentreTab from "./MXComplianceCentreTab";
 import MXSocialSecurityCenter from "../../../components/jurisdiction/mexico/authorities/MXSocialSecurityCenter";
 import BRComplianceCentreTab from "./BRComplianceCentreTab";
+import ZAComplianceCentreTab from "./ZAComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -138,9 +139,15 @@ export default function CompliancePage() {
   // Compliance Centre. No base tab is removed for Brazil (Phase 3 plan §2).
   const BR_TAB = "Brazil Compliance Centre";
   const isBrazil = normalizeCountryCode(companyDetails.jurisdictionCountry) === "BR";
+  // South Africa (ZP-ZA-ENG-001 Phase 7; "ZA" — "SA" is Saudi Arabia): employer
+  // registrations, tax directives and the ETI ledger live in the ZA Compliance
+  // Centre; PAYE / UIF / SDL are platform pack data, so the generic Tax
+  // Configuration tab (US fallback) is omitted for ZA organisations.
+  const ZA_TAB = "South Africa Compliance Centre";
+  const isSouthAfrica = normalizeCountryCode(companyDetails.jurisdictionCountry) === "ZA";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico
+    : isNetherlands || isMexico || isSouthAfrica
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   const tabs = [
@@ -153,6 +160,7 @@ export default function CompliancePage() {
     ...(isNetherlands ? [NL_TAB] : []),
     ...(isMexico ? [MX_TAB, MX_SS_TAB] : []),
     ...(isBrazil ? [BR_TAB] : []),
+    ...(isSouthAfrica ? [ZA_TAB] : []),
   ];
   const currentTab = tabs[activeTab];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
@@ -365,6 +373,7 @@ export default function CompliancePage() {
       {currentTab === MX_TAB && <MXComplianceCentreTab />}
       {currentTab === MX_SS_TAB && <MXSocialSecurityCenter />}
       {currentTab === BR_TAB && <BRComplianceCentreTab />}
+      {currentTab === ZA_TAB && <ZAComplianceCentreTab />}
 
       {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab
