@@ -269,3 +269,48 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
   - **Still needed:** SAT's current instructions for reporting the 2024-decree subsidy (TipoOtroPago 002 / `SubsidioAlEmpleo`). The CFDI concept `SUBSIDY_APPLIED` stays unmapped, and A10's `SubsidioAlEmpleo` node stays refused.
 - **Production effect:** none.
 - **Gap register:** B3 done; C6 BLOCKED-ON-SOURCE (W2-5).
+
+---
+
+## End of W1 — full backend suite
+
+Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 976 passed, 16 skipped, **3 failed**: the known local-only `tests/privacy/test_route_registry.py` tests (your uncommitted `/health` routes in `backend/app/main.py`) |
+| 1 | 2,488 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,264 passed, 32 skipped |
+| 3 | 1,142 passed, 67 skipped |
+| 4 | 1,621 passed, 3 skipped |
+
+**Total: 7,491 passed, 120 skipped, 2 xfailed.** The only failures are the 4 known local-only ones. No other jurisdiction's behaviour changed.
+
+
+---
+
+## W2 — Sources still missing
+
+**ZP-PRIV:** not required. Sources, content and docs only.
+
+| Step | Result |
+|---|---|
+| W2-1 S22 (CDMX fiscal code) | **Done in Batch 2.** Latest reform the SAF 2026 edition names: Gaceta of 19-12-2025, saved and spot-checked on 3 amended articles. The SAF edition is **VERIFIED** (logged direct download) |
+| W2-2 2024 subsidy decrees | **Done in Batch 2.** DOF 01-05-2024 and its DOF 31-12-2024 amendment saved (archive copies) |
+| W2-3 SAT `c_MotivoCancelacion` (B22) | **BLOCKED-ON-SOURCE.** Not in the saved catCFDI workbook or XSDs (S30), in RMF 2026 (S1) or in the Anexo 20 standard. The Anexo 20 guide (S30, p. 92) mentions only code "01" (Comprobante emitido con errores con relación) in one worked example. No file with that catalog appears in the archive's 249 captures of SAT's `tramitesyservicios/Paginas/documentos/` folder. Cancellation keeps refusing `MX_CFDI_CANCEL_REASON_UNAVAILABLE`, and the pinned set `sat_2026_08` is unchanged |
+| W2-4 DOF RMF 2026 amendments touching rules 2.7.1.7 / 2.7.5.2 | **None found.** The 1st amendment (S1, DOF 09-07-2026) does not amend them. The 2nd–4th amendments exist in the archive only as SAT advance versions (not law). Neither the 2nd's twelfth advance version (17-09-2026) nor the 4th's second (15-10-2026) mentions either rule (checked in the text; not saved as sources) |
+| W2-5 Other sources | See below |
+
+**W2-5 detail**
+- **S36, Ley del ISSSTE** (Diputados consolidated text, last reform DOF 15-01-2026; archive capture 20261004141029, digest OK; `ARCHIVE_COPY_VERIFIED`).
+  - Art. 21 (p. 11): the RCV and housing-fund quotas are paid "por bimestres vencidos, a más tardar el día diecisiete de los meses de enero, marzo, mayo, julio, septiembre y noviembre de cada año".
+  - So the ISSSTE law has **not** moved to monthly payment. The condition that ends the bimonthly cycle in Ley INFONAVIT's 1997 Transitorio SEXTO and in the LSS's Transitorio VIGÉSIMO SÉPTIMO is not met.
+  - **D-15 is resolved by the sources:** INFONAVIT and RCV are bimonthly. The INFONAVIT due date is transcribed (TL-CAL-4).
+  - **IMSS still has no calendar row.** Its non-RCV branches are monthly (LSS Art. 39) and RCV is bimonthly, but one IMSS liability carries both. New gap item **A18**: split the RCV branches into their own liability.
+- **S35, CFF:** saved in W1-5 (Arts. 6, 12, 20). It now backs the D-01 rounding candidate (Art. 20) and D-16.
+- **Not found (BLOCKED-ON-SOURCE):**
+  - the INFONAVIT payment regulation (the fixed-amount credit basis; not in the Diputados regulations index);
+  - SAT's current CFDI instructions for the 2024-decree subsidy (C6);
+  - SAF's general rules for the 2026 CDMX ISN benefit (D-10);
+  - SAT's CFDI cancellation-reason catalog (W2-3 above).
+- **Rounding (B11):** candidates recorded in D-01; nothing chosen (a G1 decision).

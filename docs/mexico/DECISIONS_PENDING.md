@@ -17,7 +17,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-12 | Indemnity salary (LFT Art. 89 integrated salary; same question as gap C4) | G1 / G5 owners | Every indemnity and the Art. 54 month (`MX_INDEMNITY_SALARY_UNDECIDED`) | Open |
 | D-13 | Does "por cada año de servicios" count a part year? | G5 owner | Art. 50, 54 and 162 amounts (`MX_SERVICE_YEARS_COUNT_UNDECIDED`) | Open |
 | D-14 | PTU cap (LFT Art. 127 VIII): where the excess goes; the three-year average with fewer years | G5 owner | Only an allocation where it changes the result (`MX_PTU_CAP_EXCESS_UNDECIDED`, `MX_PTU_HISTORY_AVERAGE_UNDECIDED`) | Open |
-| D-15 | INFONAVIT and RCV payment periodicity (monthly or bimonthly) | G2 / G3 owners | INFONAVIT and IMSS due dates (not in the calendar) | Open (needs the ISSSTE law) |
+| D-15 | INFONAVIT and RCV payment periodicity (monthly or bimonthly) | G2 / G3 owners | — | **Resolved by sources (W2-5):** S36 Art. 21 still pays bimonthly, so both stay bimonthly. INFONAVIT transcribed; IMSS waits for gap A18 |
 | D-16 | Which days are not business days for an IMSS deadline (LFT Arts. 74 / 715 or CFF Art. 12) | G2 owner | Every IMSS movement due date (`DUE_DATE_UNSOURCED`) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
@@ -30,8 +30,8 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 - **Question.** How is each monetary amount rounded (mode and quantum), and when (each line, or only totals)?
 - **Options.**
   1. 2 decimals, rounded at the end of the calculation (CFDI sources), with a tie-breaking rule chosen by the owner (HALF_UP or HALF_EVEN): none of the sources states one.
-  2. Whole pesos, 1–50 centavos down and 51–99 up (CFF Art. 20 ¶10) — but that paragraph governs **paying** a contribution to the authority, not a payslip line.
-- **Sources.** S30 catCFDI c_Moneda (MXN: 2 decimals); S30 Anexo 20 p. 71 and Guía de llenado Q37/Q39 ("redondear al final del cálculo y no antes"); S30 `tdCFDI.xsd` / S28 `nomina12.xsd` (`t_ImporteMXN`, 2 decimals); CFF Art. 20 ¶10 (read in the archive, **not saved**: save it if it is to back the rule). Detail: `MEXICO_TRANSCRIPTION_BATCH_2_REPORT.md` §4.
+  2. Whole pesos, 1–50 centavos down and 51–99 up (CFF Art. 20 ¶10, **now saved as S35, PDF p. 31**). That paragraph governs **paying** a contribution to the authority, not a payslip line.
+- **Sources.** S30 catCFDI c_Moneda (MXN: 2 decimals); S30 Anexo 20 p. 71 and Guía de llenado Q37/Q39 ("redondear al final del cálculo y no antes"); S30 `tdCFDI.xsd` / S28 `nomina12.xsd` (`t_ImporteMXN`, 2 decimals); CFF Art. 20 ¶10 (S35, PDF p. 31: "Para determinar las contribuciones se considerarán, inclusive, las fracciones del peso. No obstante lo anterior, para efectuar su pago, …"). Detail: `MEXICO_TRANSCRIPTION_BATCH_2_REPORT.md` §4.
 - **Blocks.** Every calculation (`rounding.py`: the rule is read before any amount is produced) and pack activation (`MX_REQUIRED_TEXT_KEYS`). Gate 1b-1 on the scratch seed fails only on this key (W1-1).
 
 ## D-02 · Pay frequency 01 Diario

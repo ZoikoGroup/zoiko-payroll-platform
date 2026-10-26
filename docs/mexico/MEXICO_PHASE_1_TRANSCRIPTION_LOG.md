@@ -568,3 +568,20 @@ S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733
 
 | Human G2 reviewer (name / date / verdict) | |
 |---|---|
+
+## W2-5 — 2026-10-26 (completion programme)
+
+### TL-CAL-4 · INFONAVIT due date and the RCV / INFONAVIT periodicity (closes D-15)
+
+- **New source S36:** `S36/S36_DIP_LISSSTE.pdf` (Ley del ISSSTE, last reform DOF 15-01-2026), SHA-256 `aa6e0e437331debd80d0086155e2d99885ea5e22cb13353c44eb0b1090f0b4d5`; archive capture 20261004141029, digest OK; `ARCHIVE_COPY_VERIFIED`.
+- **What it says.** Art. 21 (PDF p. 11): "El entero de las Cuotas y Aportaciones al seguro de retiro, cesantía en edad avanzada y vejez y al Fondo de la Vivienda será por bimestres vencidos, a más tardar el día diecisiete de los meses de enero, marzo, mayo, julio, septiembre y noviembre de cada año".
+- **Reading.** Both transitorios end only when the ISSSTE law pays monthly:
+  - Ley INFONAVIT 1997 Transitorio SEXTO (S27 p. 57): "hasta que en la Ley del [ISSSTE] se establezca que la periodicidad de pagos se realizará mensualmente";
+  - LSS Transitorio VIGÉSIMO SÉPTIMO (S10 p. 111): "hasta en tanto no se homologuen los períodos de pago de las Leyes del ISSSTE e INFONAVIT".
+
+  The ISSSTE law still pays bimonthly, so **INFONAVIT and RCV are bimonthly**.
+- **Transcribed:** `MX_INFONAVIT`, BIMONTHLY, due the 17th of the month after each bimester (Art. 35 "días diecisiete del mes inmediato siguiente", applied per bimester: 17 March for January–February, and so on). It cites S27, an archive copy, so the calendar seed skips it until S27 is VERIFIED.
+- **IMSS:** RCV bimonthly and the other branches monthly (LSS Art. 39). One IMSS liability carries every branch, so no single date is right: new gap item **A18** (split the RCV branches into their own liability, then add two IMSS rules).
+
+| Human G2 / G3 reviewer (name / date / verdict) | |
+|---|---|

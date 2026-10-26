@@ -105,6 +105,7 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S33", "Banco de México / ABM — CLABE 18-digit structure and check digit"),
     ("S34", "DOF 27-01-2016 — constitutional decree on minimum-wage de-indexation (UMA), Transitorio Tercero"),
     ("S35", "Código Fiscal de la Federación (CFF), Arts. 12 and 20"),
+    ("S36", "Ley del ISSSTE, Art. 21 (RCV and housing-fund payment periodicity)"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -820,11 +821,13 @@ class FilingRule(NamedTuple):
 
 
 # W1-5 (2026-10-26) [PENDING G1]: monthly due dates on the 17th, each from its own saved text (log TL-CAL-1).
-# INFONAVIT is NOT listed: Ley INFONAVIT Art. 35 says monthly, but its 1997 Transitorio SEXTO keeps payments
-# bimonthly until the ISSSTE law makes them monthly — that law is not saved (DECISIONS_PENDING D-15).
+# INFONAVIT (W2-5): Ley INFONAVIT Art. 35 says monthly, but its 1997 Transitorio SEXTO keeps payments bimonthly
+# until the ISSSTE law makes them monthly; the ISSSTE law (S36 Art. 21) still pays the housing fund "por bimestres
+# vencidos", so the condition is not met: BIMONTHLY, the 17th of the month after each bimester (log TL-CAL-4).
 # IMSS is NOT listed either: LSS Art. 39 makes quotas monthly (17th of the next month), but the 1997 LSS
 # Transitorio VIGESIMO SEPTIMO keeps retiro / CEAV bimonthly "hasta en tanto no se homologuen los periodos de pago
-# de las Leyes del ISSSTE e INFONAVIT", and one IMSS liability carries every branch — one date would misstate it.
+# de las Leyes del ISSSTE e INFONAVIT" (S36 Art. 21: still bimonthly), and one IMSS liability carries every branch
+# — one date would misstate it (gap register A18: split the RCV branches into their own liability).
 # Only a rule whose source is VERIFIED is seeded as a live due date (seed_statutory_report_templates).
 MX_FILING_CALENDAR: tuple = (
     FilingRule("MX_ISR_WITHHOLDING", "{year}-{month:02d}", "MONTHLY",
@@ -833,6 +836,13 @@ MX_FILING_CALENDAR: tuple = (
                "Art. 6 I: 'en los casos de retencion o de recaudacion de contribuciones'; 'las enteraran a mas tardar "
                "el dia 17 del mes de calendario inmediato posterior al de terminacion del periodo de la retencion', "
                "PDF p. 4"),
+    FilingRule("MX_INFONAVIT", "{year}-{month:02d}", "BIMONTHLY",
+               "INFONAVIT contributions and credit discounts paid by the 17th of the month after each bimester", 17,
+               None, None, "S27/S27_DIP_LIFNVT.pdf",
+               "Art. 35: 'a mas tardar los dias diecisiete del mes inmediato siguiente', PDF p. 22; 1997 Transitorio "
+               "SEXTO: 'continuara siendo de forma bimestral hasta que en la Ley del Instituto de Seguridad y "
+               "Servicios Sociales de los Trabajadores del Estado se establezca que la periodicidad de pagos se "
+               "realizara mensualmente', PDF p. 57 (the ISSSTE law, S36 Art. 21 p. 11, still pays by bimester: log TL-CAL-4)"),
     FilingRule("MX_ISN_RETURN", "{year}-{month:02d}", "MONTHLY",
                "CDMX payroll tax paid by return by the 17th of the following month", 17, None, "CDMX",
                "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
