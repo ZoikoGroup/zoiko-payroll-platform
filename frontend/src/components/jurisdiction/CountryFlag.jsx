@@ -296,11 +296,25 @@ function Brazil() {
   );
 }
 
+function SouthAfrica() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="8" fill="#DE3831" />
+      <rect y="8" width="24" height="8" fill="#002395" />
+      <path d="M4,4 L12,8 L4,12" fill="none" stroke="#fff" strokeWidth="3.6" />
+      <path d="M4,4 L12,8 L4,12" fill="none" stroke="#007A4D" strokeWidth="2" />
+      <path d="M10,8 H24" fill="none" stroke="#fff" strokeWidth="4.4" />
+      <path d="M10,8 H24" fill="none" stroke="#007A4D" strokeWidth="2.4" />
+      <path d="M0,1.5 L10,8 L0,14.5 Z" fill="#000" stroke="#FFB612" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands, MX: Mexico, BR: Brazil,
+  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {
