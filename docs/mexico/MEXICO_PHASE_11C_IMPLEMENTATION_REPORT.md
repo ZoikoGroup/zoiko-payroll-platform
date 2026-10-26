@@ -10,11 +10,21 @@ Requested 2026-10-23: three items. (1) Border-zone time zones from the pinned c_
 - Recorded in `PRODUCTION_STATE.md`, with 11b added to the after-the-fact review list.
 - `nikhil` = `6efb642`.
 
-**Alembic.**
-- Before: a single head, `a8e4c1f7d3b5` (221 revisions).
-- Now: a single head, **`b9f3d5a1c7e2`** (222 revisions).
+**Merged with `main` (approved 2026-10-26).** While 11c was waiting, `main` gained Venu's Brazil / NL migrations (PRs #124 and #129; #129 deployed green on 2026-10-24, so production should be at `8f90dde5f7b5`). His chain starts at 11a's `a8e4c1f7d3b5`, the parent m18 also had, so merging 11c as built would have left **two alembic heads** and failed the deploy. With your approval:
+1. 11c was committed locally as `6513477`.
+2. `origin/main` was merged into `nikhil` (`4bdaf00`). The three conflicts were all migration bookkeeping (the manifest and two pin tests).
+3. **m18 was re-parented onto `8f90dde5f7b5`.**
+4. The manifest was rebuilt from `main`'s (+1 line); the pins moved to 228 revisions, plus the pending objects from the new production head.
+5. The route registry was checked against a fresh generation: identical.
+- Nothing was pushed. Your uncommitted files were not touched.
 
-**Git.** **Staged on `nikhil`, not committed, not pushed, no PR.**
+**Alembic.**
+- Before (`main`): a single head, `8f90dde5f7b5` (227 revisions).
+- Now: a single head, **`b9f3d5a1c7e2`** (228 revisions), revising `8f90dde5f7b5`.
+
+**Git.**
+- `nikhil` = `4bdaf00`: two local commits (11c and the merge), **not pushed**.
+- The follow-up after the merge (the m18 test's parent, this report, the regenerated browser evidence) is **staged, not committed**.
 
 ## 1. Result
 
@@ -24,9 +34,9 @@ Requested 2026-10-23: three items. (1) Border-zone time zones from the pinned c_
 | Border-zone Fecha | 11 change-over cases at the 2026 boundaries, plus the catalog checks, pass |
 | Overtime days | `test_mexico_overtime_dates.py`: 4 passed |
 | Preview | `test_mexico_cfdi_preview.py`: 4 passed |
-| Migration `b9f3d5a1c7e2` on PostgreSQL 17 | 5/5, three runs; production upgrade path 11/11 |
+| Migration `b9f3d5a1c7e2` on PostgreSQL 17 | 5/5, three runs, before and again after the merge. After the merge: production upgrade path, m17, m16 and named RLS exceptions 17/17 |
 | Browser | §7 |
-| ESLint / `check:undefined` / `vite build` | Clean; 566 files with no undefined names; the build passes |
+| ESLint / `check:undefined` / `vite build` | The changed components are clean. `payrollService.js` keeps its 32 pre-existing problems (the same count as in 10f). After the merge: 579 files with no undefined names, and the build passes |
 | Route registry | +2 routes only: the org preview (worker, org_admin) and the Super Admin summaries (platform) |
 
 ## 2. Item 1 — border-zone time zones: **the catalog does carry the rules**
@@ -172,15 +182,34 @@ Real Chrome (headless) against a scratch database: a committed Mexican run, a re
 | on-5 | The Super Admin's CFDI lifecycle tab lists the summary: run, release, 0/1 valid, the code, "awaiting a G1 decision", and no worker name |
 | on-z1 / z2 | NL unchanged; no 5xx, no page errors |
 
-The first run also passed, but its screenshot showed "REFUSED" running into the code, with the code printed twice. The table was fixed (cell spacing; the code shown once) and the whole run repeated.
+**Re-run after the merge with `main`: 7/7, no 4xx / 5xx, no console errors; screenshots re-inspected.** The first run also passed, but its screenshot showed "REFUSED" running into the code, with the code printed twice. The table was fixed (cell spacing; the code shown once) and the whole run repeated.
 
 Screenshots, inspected:
 - `on_01_preview_awaiting_g1.png`: the banner and the refused row;
 - `on_02_sa_validation_summary.png`: the Super Admin summary row.
 
-## 8. Full suite
+**The throwaway PostgreSQL cluster was rebuilt (2026-10-26).** After the session gap its system-catalog files were partly missing (`could not open file "global/2964"`): the cluster lives in the OS temp folder and came back from an unclean shutdown. A fresh PostgreSQL 17 cluster was initialised in the scratchpad, on the same local-only port, and every PostgreSQL result above comes from it.
 
-_Filled in after the run._
+## 8. Full suite, and the CI failure on PR #130
+
+**PR #130 (`4bdaf00`, 11c plus the merge) was pushed and merged into `main` at 02:56Z (2026-10-26), before this verification finished.** Its CI test job failed, and **the deploy job was skipped**: production is unchanged at `8f90dde5f7b5` (PR #129's code), and m18 has not run. CI: 7,414 passed, 2 failed. Both failures are mine:
+
+| Failing test | Cause | Fix (staged) |
+|---|---|---|
+| `test_mexico_overtime_dates_migrations::test_revision_links` | The test's expected parent was updated after the merge commit, so it was not in what was pushed | `PARENT = "8f90dde5f7b5"` |
+| `test_mexico_dormancy::test_every_route_is_listed` | The new org route `POST /runs/{id}/cfdi/validate` was not added to `ORG_ROUTES`, the list proving every Mexico org route refuses while dormant. Missed by me | Added; the parametrised dormancy test now covers it too |
+
+**Full suite with the fix**, five sequential chunks on scratch SQLite, run alone: **7,413 passed**, 128 skipped, 2 xfailed, and **4 local-only failures**, none Mexico. These are the same four as in 10f–11b, and they come from uncommitted local files, so CI does not see them.
+
+| Chunk | Result |
+|---|---|
+| 0 | 867 passed, 15 skipped, 3 failed (route registry: only the uncommitted `/health/version`, `/health/ready` routes in `main.py`) |
+| 1 | 2,283 passed, 1 skipped, 2 xfailed, 1 failed (`test_hong_kong_configuration…`: uncommitted Hong Kong docs) |
+| 2 | 1,478 passed, 37 skipped (includes `test_mexico_dormancy.py` and `main`'s new Brazil / NL tests) |
+| 3 | 1,726 passed, 69 skipped (includes the 11b / 11c CFDI, overtime and preview tests) |
+| 4 | 1,059 passed, 6 skipped |
+
+`test_communications_dispatch::test_deactivate_organization_response_precedes_email_send` failed once in an earlier, interrupted run. It is a known flaky timing test (1 failure in 3 reruns, then green), not Mexico.
 
 ## 9. What this does in production when merged
 

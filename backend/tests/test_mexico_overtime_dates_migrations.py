@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-REVISION, PARENT = "b9f3d5a1c7e2", "a8e4c1f7d3b5"
+REVISION, PARENT = "b9f3d5a1c7e2", "8f90dde5f7b5"   # re-parented onto main's head (merge 4bdaf00)
 BACKEND = Path(__file__).resolve().parents[1]
 TABLE, COLUMN = "payroll_mx_approved_hours", "overtime_dates"
 
