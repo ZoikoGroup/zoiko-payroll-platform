@@ -35,3 +35,4 @@ Phases 3, 6, 9b–9d (labour policy, hour lines, vacations, aguinaldo, PTU, term
 | Preparer (Super Admin) | | | |
 | Reviewer (a different Super Admin) | | | |
 | Employer payroll owner (G5, G8) | | | |
+- [ ] **[PRE-PILOT]** **PTU trusted-worker salary cap (LFT Art. 127 II), recorded 2026-10-26 (W1-4).** The PTU rule cannot apply it: the engine knows neither who is a trusted worker nor the highest unionised salary. Before a pilot PTU cycle, the employer confirms that no trusted worker exceeds that cap, or the cap is modelled

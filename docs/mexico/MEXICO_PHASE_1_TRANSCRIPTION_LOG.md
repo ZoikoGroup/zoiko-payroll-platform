@@ -446,3 +446,72 @@ It added four details, now recorded:
 
 | Human G1 / G5 reviewer (name / date / verdict) | |
 |---|---|
+
+## W1-4 — 2026-10-26 (completion programme): PTU and the annual ISR adjustment (gap register B15, B16)
+
+Rule objects in `engine/countries/mexico_rules.py`, wired into `MX_PTU_RULE`, `MX_PTU_EXCLUSION_REASONS`, `MX_ANNUAL_ADJUSTMENT_RULE` and `MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS`. The 2026 annual tariff is a new content table, `MX_ISR_ANNUAL_TARIFFS`. `compare`: 533 checks, 0 misses.
+
+### TL-PTU-1 · PTU (LFT Arts. 122–127; LISR Arts. 76 V, 150)
+
+| Element | Rule | Wording (S26 / S24, PDF page) |
+|---|---|---|
+| Split | Half the pool by days worked, half in proportion to salary | Art. 123 p. 31 |
+| Salary | The cash daily rate: the gross of lines whose approved classification carries the PTU flag (`PTU_WAGE_BASE`); finiquito lines are not counted | Art. 124 p. 31: "la cantidad que perciba cada trabajador en efectivo por cuota diaria. No se consideran … las gratificaciones … ni … trabajo extraordinario" |
+| Days | The days paid in committed ordinary and correction runs. A reading (D-04): Art. 127 IV counts maternity and work-risk incapacity as active service, and the engine pays those days; unpaid absences are not counted | Arts. 123, 127 IV |
+| Exclusions (operator-asserted, with evidence and a second approver) | `LFT_127_I_DIRECTOR`, `LFT_127_VI_DOMESTIC`, `LFT_127_VII_EVENTUAL_UNDER_60_DAYS` | Art. 127 I, VI, VII p. 32 |
+| Cap | The more favourable of three months of salary (90 × the year's average cash daily rate) and the average PTU received in the last three years (the employer's DISTRIBUTED cycles) | Art. 127 VIII p. 32 |
+| Payment deadline | 60 days after the annual return is due: company (MORAL), three months after the fiscal year (31 March); individual (FISICA), April (30 April) | Art. 122 p. 31; LISR Art. 76 V p. 91, Art. 150 p. 180 |
+
+**Not modelled.**
+- Art. 127 II, the salary cap for trusted workers (120% of the highest unionised salary): the engine has neither fact. A pre-pilot G5 checklist item.
+- Art. 127 III (one month's salary for workers of people living only from their own work).
+- Art. 126 (exempt employers).
+- Art. 127 V and IX.
+
+**D-14, blocking only the case that needs it.**
+- `MX_PTU_CAP_EXCESS_UNDECIDED`: the law does not say where an amount above the Art. 127 VIII cap goes ("UNDISTRIBUTED", kept as residue, is built).
+- `MX_PTU_HISTORY_AVERAGE_UNDECIDED`: how the three-year average counts a worker with fewer than three years of PTU, when the choice changes the cap.
+
+### TL-ANN-1 · Annual ISR adjustment (LISR Art. 97; S3 Art. Tercero; S2 Anexo 8 C.II)
+
+| Element | Rule | Wording |
+|---|---|---|
+| Not adjusted by the employer | Started after 1 January; left before 1 December; annual income above $400,000.00; the worker told the employer in writing they will file (operator exclusion `LISR_97_C_WORKER_FILES_OWN_RETURN`) | Art. 97 a)–c), pp. 131–132 |
+| The $400,000 test | Applied to **gross** income (`annual_gross`, new in the worker facts). Art. 97 b) says "ingresos anuales … que excedan de $400,000.00" without saying gross or taxable. A reading (D-04) | Art. 97 b) |
+| Annual tax | The 2026 Art. 152 tariff on the year's taxable income, less the employment subsidy that "le correspondió" (`subsidy_due_total`, new in the worker facts: the subsidy computed each period, not only the part applied), never below zero | Art. 97 ¶2; S3 Art. Tercero I–III |
+| Difference owed | Withheld in full in the run that applies it | Art. 97 ¶4: paid "a más tardar en el mes de febrero siguiente" |
+| Difference in the worker's favour | Set against that run's withholding; the rest carried to the following withholdings | Art. 97 ¶4: "contra la retención del mes de diciembre y las retenciones sucesivas, a más tardar dentro del año de calendario posterior" |
+
+**The 2026 annual tariff (S2 C.II, PDF pp. 18–19), 11 brackets:**
+
+| Lower | Upper | Fixed quota | % |
+|---|---|---|---|
+| 0.01 | 10,135.11 | 0 | 1.92 |
+| 10,135.12 | 86,022.11 | 194.59 | 6.40 |
+| 86,022.12 | 151,176.19 | 5,051.37 | 10.88 |
+| 151,176.20 | 175,735.66 | 12,140.13 | 16.00 |
+| 175,735.67 | 210,403.69 | 16,069.64 | 17.92 |
+| 210,403.70 | 424,353.97 | 22,282.14 | 21.36 |
+| 424,353.98 | 668,840.14 | 67,981.92 | 23.52 |
+| 668,840.15 | 1,276,925.98 | 125,485.07 | 30.00 |
+| 1,276,925.99 | 1,702,567.97 | 307,910.81 | 32.00 |
+| 1,702,567.98 | 5,107,703.92 | 444,116.23 | 34.00 |
+| 5,107,703.93 | En adelante | 1,601,862.46 | 35.00 |
+
+- **Checks:** continuous and quota-consistent (`test_annual_tariff_2026_…`); every bracket's four numbers are found on one line of S2 (`compare`).
+- **Not modelled:** the deduction of a local tax on salaries of up to 5% (Art. 97 ¶2–3). No such tax applies in the states in scope.
+
+### Blind second transcription (W1-4)
+
+A separate agent read only S26, S24, S2 and S3. It agreed on **all 11** annual brackets (rows 1–7 on p. 18, rows 8–11 on p. 19, with a warning not to confuse them with the 2025 table C.I), and on every PTU and annual-adjustment rule. It confirmed the open points:
+- **The law is silent** on where an amount above the Art. 127 VIII cap goes, and on averaging fewer than three years: **D-14**.
+- **The $400,000 test is unclear** between gross and taxable ("ingresos anuales por los conceptos a que se refiere este Capítulo"; Art. 98 III e) uses the same words): a D-04 reading.
+- **The subsidy wording is "le correspondió"** in Art. Tercero I–III; "aplicado" does not appear.
+
+It added:
+- **LISR Art. 9 (p. 14)** also states the company deadline: "dentro de los tres meses siguientes a la fecha en la que termine el ejercicio fiscal". It agrees with Art. 76 V.
+- **Art. 122 ¶3:** unclaimed PTU is added to the next year's pool. Not modelled: the employer enters each year's distributable amount, so it includes any carried amount. Noted for G5.
+- **Art. 122 ¶2:** an additional distribution after a tax-authority resolution. That is a new cycle the employer enters, not computed.
+
+| Human G1 / G5 reviewer (name / date / verdict) | |
+|---|---|

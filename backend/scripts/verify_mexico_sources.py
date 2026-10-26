@@ -414,7 +414,8 @@ def _content_checks():
     from app.modules.payroll.engine.countries import mexico_content as c
 
     checks = []
-    for b in c.MX_ISR_TARIFFS:
+    annual = tuple(b for rows in getattr(c, "MX_ISR_ANNUAL_TARIFFS", {}).values() for b in rows)   # W1-4
+    for b in c.MX_ISR_TARIFFS + annual:
         nums = [b.lower, b.fixed_quota, b.rate_pct] + ([b.upper] if b.upper is not None else [])
         checks.append((b.source, f"ISR {b.period} {b.lower}", nums, True))
     derived = getattr(c, "MX_DERIVED_VALUES", {})

@@ -150,13 +150,18 @@ def worker_facts(db: Session, org_id: int, employer_id: int, year: int) -> list:
         res = (item.mx_calculation_snapshot or {}).get("result") or {}
         w = workers.setdefault(item.employee_id, {"employee_id": item.employee_id, "income_by_run_type": {},
                                                   "annual_taxable": _ZERO, "withheld_total": _ZERO,
-                                                  "subsidy_applied_total": _ZERO})
+                                                  "subsidy_applied_total": _ZERO,
+                                                  # W1-4: the subsidy that "le correspondió" (S3 Art. Tercero)
+                                                  # and gross income (LISR Art. 97 b)
+                                                  "subsidy_due_total": _ZERO, "annual_gross": _ZERO})
         taxable = _dec(res.get("isr_taxable"))
         w["income_by_run_type"][kind] = w["income_by_run_type"].get(kind, _ZERO) + taxable
         w["annual_taxable"] += taxable
         prior = _dec(((res.get("annual_adjustment") or {}).get("change")))       # an earlier year's adjustment
         w["withheld_total"] += _dec(res.get("isr_withheld")) - prior
         w["subsidy_applied_total"] += _dec((res.get("subsidy") or {}).get("applied"))
+        w["subsidy_due_total"] += _dec((res.get("subsidy") or {}).get("amount"))
+        w["annual_gross"] += _dec(res.get("gross"))
     out = []
     for employee_id in sorted(workers):
         emp = db.get(m.PayrollEmployee, employee_id)

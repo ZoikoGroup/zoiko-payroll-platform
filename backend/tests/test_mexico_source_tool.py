@@ -114,6 +114,7 @@ def _empty_content(monkeypatch):
                  "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE"):
         monkeypatch.setattr(c, rule, None)
     monkeypatch.setattr(c, "MX_FILING_CALENDAR", ())
+    monkeypatch.setattr(c, "MX_ISR_ANNUAL_TARIFFS", {})                  # W1-4
     return c
 
 

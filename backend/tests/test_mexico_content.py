@@ -630,3 +630,16 @@ def test_cdmx_special_pay_isn_inclusion_follows_arts_156_and_157():
     for (state, concept), (included, source, ref) in c.MX_SPECIAL_PAY_ISN_INCLUSION.items():
         assert source == "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf" and ref.startswith(("Art. 156", "Art. 157"))
         assert included == ref.startswith("Art. 156")      # 156 lists what is taxed, 157 what is not
+
+
+# ── W1-4 (2026-10-26): the LISR Art. 152 annual tariff ──
+
+def test_annual_tariff_2026_is_continuous_quota_consistent_and_cited():
+    c = _c()
+    rows = c.MX_ISR_ANNUAL_TARIFFS.get(2026)
+    _need(rows, "annual ISR tariff 2026")
+    assert len(rows) == 11 and all(r.period == "ANNUAL" for r in rows)
+    ordered = sorted(rows, key=lambda b: Decimal(b.lower))
+    assert _isr_errors(ordered, {}, "ANNUAL") == []
+    assert all(r.source == "S2/S2_SAT_Anexo8_RMF2026.pdf" and "C.II" in r.source_ref for r in rows)
+    assert ordered[-1].upper is None

@@ -479,6 +479,37 @@ MX_ISR_TARIFFS: tuple = (
     IsrBracket('MONTHLY', '141880.67', '425641.99', '37009.69', '34.00', _ISR_FROM, _ISR_TO, _S2, 'Anexo 8 RMF 2026 (DOF 28-12-2025), B.V, PDF p. 6'),
     IsrBracket('MONTHLY', '425642.00', None, '133488.54', '35.00', _ISR_FROM, _ISR_TO, _S2, 'Anexo 8 RMF 2026 (DOF 28-12-2025), B.V, PDF p. 6'),
 )
+# LISR Art. 97 / 152 ANNUAL tariff (W1-4, 2026-10-26) [PENDING G1]: S2 Anexo 8 section C "Tarifa para el cálculo
+# del impuesto correspondiente a los ejercicios 2025 y 2026", II (2026), PDF pp. 18-19. Module-direct: read only
+# by the annual-adjustment rule (mexico_rules), never seeded into a period pack. Log TL-ANN-1.
+MX_ISR_ANNUAL_TARIFFS: dict = {   # fiscal year -> tuple[IsrBracket] (period "ANNUAL")
+    2026: (
+        IsrBracket('ANNUAL', '0.01', '10135.11', '0', '1.92', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '10135.12', '86022.11', '194.59', '6.40', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '86022.12', '151176.19', '5051.37', '10.88', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '151176.20', '175735.66', '12140.13', '16.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '175735.67', '210403.69', '16069.64', '17.92', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '210403.70', '424353.97', '22282.14', '21.36', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '424353.98', '668840.14', '67981.92', '23.52', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '668840.15', '1276925.98', '125485.07', '30.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+        IsrBracket('ANNUAL', '1276925.99', '1702567.97', '307910.81', '32.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+        IsrBracket('ANNUAL', '1702567.98', '5107703.92', '444116.23', '34.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+        IsrBracket('ANNUAL', '5107703.93', None, '1601862.46', '35.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+    ),
+}
+
+
 MX_MIN_WAGES: tuple = (
     # S9: DOF 09-12-2025 CONASAMI resolution, in force from 1 Jan 2026 [PENDING G1]
     MinWageRow("GENERAL", "ZONE", "Zona del Salario Minimo General", "315.04", None, date(2026, 1, 1), None, _S9,
@@ -877,8 +908,8 @@ MX_FINIQUITO_RULE = _rules.FINIQUITO_RULE   # W1-3b; FiniquitoRule (S26 + S24 / 
 # approver. Interfaces in engine/jurisdictions/mexico/ptu.py. EMPTY: no PTU is
 # allocated (MX_PTU_RULE_MISSING) and no operator exclusion is recorded
 # (MX_PTU_EXCLUSION_RULE_MISSING).
-MX_PTU_RULE = None                    # PtuRule (S26 / S21)
-MX_PTU_EXCLUSION_REASONS: dict = {}   # reason code -> PtuExclusionReason (label, source, source_ref) - S26
+MX_PTU_RULE = _rules.PTU_RULE         # W1-4; PtuRule (S26 / S21)
+MX_PTU_EXCLUSION_REASONS: dict = dict(_rules.PTU_EXCLUSION_REASONS)   # W1-4; reason code -> PtuExclusionReason (label, source, source_ref) - S26
 
 # Phase 9e (plan 9e D1-D10): the annual ISR adjustment (LISR Art. 97 / 152 -
 # S24). The RULE OBJECT decides eligibility, the annual ISR and how a
@@ -887,8 +918,8 @@ MX_PTU_EXCLUSION_REASONS: dict = {}   # reason code -> PtuExclusionReason (label
 # engine/jurisdictions/mexico/annual_adjustment.py. EMPTY: nothing is computed
 # (MX_ANNUAL_ADJUSTMENT_RULE_MISSING) and no operator exclusion is recorded
 # (MX_ANNUAL_ADJUSTMENT_EXCLUSION_RULE_MISSING).
-MX_ANNUAL_ADJUSTMENT_RULE = None                 # AnnualAdjustmentRule (S24)
-MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = {}   # reason code -> exclusion reason (label, source, source_ref)
+MX_ANNUAL_ADJUSTMENT_RULE = _rules.ANNUAL_ADJUSTMENT_RULE   # W1-4; AnnualAdjustmentRule (S24)
+MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = dict(_rules.ANNUAL_ADJUSTMENT_EXCLUSION_REASONS)   # W1-4; reason code -> exclusion reason (label, source, source_ref)
 
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the

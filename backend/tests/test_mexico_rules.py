@@ -296,3 +296,92 @@ def test_every_termination_rule_quotes_its_wording():
     r = _r()
     for rule in list(r.TERMINATION_REASONS.values()) + [r.FINIQUITO_RULE]:
         assert rule.citations and all("'" in ref and "PDF p" in ref for _src, ref in rule.citations)
+
+
+# ── W1-4: PTU and the annual adjustment ──
+
+def _w(eid, days, base, excl=None, history=None):
+    return {"employee_id": eid, "days": Decimal(days), "salary_by_kind": {"PTU_WAGE_BASE": Decimal(base)},
+            "operator_exclusion": excl, "ptu_history": history or {}}
+
+
+def test_ptu_splits_half_by_days_half_by_salary_and_excludes_operator_reasons():
+    rule = _r().PTU_RULE
+    out = rule.allocate(Decimal("10000"), [_w(1, 300, 90000), _w(2, 100, 10000), _w(3, 365, 500000, "LFT_127_I_DIRECTOR")],
+                        2026)
+    by = {w["employee_id"]: w for w in out["workers"]}
+    assert by[1]["days_share"] == Decimal("5000") * 300 / 400 and by[1]["salary_share"] == Decimal("5000") * 9 / 10
+    assert by[2]["days_share"] == Decimal("5000") / 4 and by[2]["salary_share"] == Decimal("500")
+    assert by[3] == {"employee_id": 3, "eligible": False, "exclusion_reason": "LFT_127_I_DIRECTOR",
+                     "days_share": 0, "salary_share": 0, "cap_reference": None, "cap_applied": False,
+                     "final_amount": 0}
+    assert by[1]["final_amount"] + by[2]["final_amount"] + out["residue"] == Decimal("10000")
+    assert set(_r().PTU_EXCLUSION_REASONS) == {"LFT_127_I_DIRECTOR", "LFT_127_VI_DOMESTIC",
+                                               "LFT_127_VII_EVENTUAL_UNDER_60_DAYS"}
+
+
+def test_ptu_cap_is_the_more_favourable_of_three_months_and_the_history_average(monkeypatch):
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    r = _r()
+    # daily cash salary 100 → three months = 9,000; this share (≈ 12,500) exceeds it
+    workers = [_w(1, 100, 10000), _w(2, 300, 10000)]
+    with pytest.raises(MXBlock) as exc:
+        r.PTU_RULE.allocate(Decimal("25000"), workers, 2026)
+    assert _codes(exc) == ["MX_PTU_CAP_EXCESS_UNDECIDED"]
+    monkeypatch.setattr(r, "MX_PTU_CAP_EXCESS", "UNDISTRIBUTED")
+    out = r.PTU_RULE.allocate(Decimal("25000"), workers, 2026)
+    w1 = next(w for w in out["workers"] if w["employee_id"] == 1)
+    assert w1["cap_applied"] and w1["final_amount"] == Decimal("9000")
+    assert sum(w["final_amount"] for w in out["workers"]) + out["residue"] == Decimal("25000")
+    # three full years of history above three months' salary: the average is the cap (more favourable)
+    rich = [_w(1, 100, 10000, history={2023: 15000, 2024: 15000, 2025: 15000}), _w(2, 300, 10000)]
+    w1 = next(w for w in r.PTU_RULE.allocate(Decimal("25000"), rich, 2026)["workers"] if w["employee_id"] == 1)
+    assert not w1["cap_applied"]
+    # fewer than three years, and the two averages lead to different caps: D-14 blocks
+    short = [_w(1, 100, 10000, history={2025: 15000}), _w(2, 300, 10000)]
+    with pytest.raises(MXBlock) as exc:
+        r.PTU_RULE.allocate(Decimal("25000"), short, 2026)
+    assert _codes(exc) == ["MX_PTU_HISTORY_AVERAGE_UNDECIDED"]
+
+
+def test_ptu_payment_deadline_is_60_days_after_the_annual_return():
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    rule = _r().PTU_RULE
+    assert rule.payment_deadline(2026, {"taxpayer_type": "MORAL"}) == dt.date(2027, 3, 31) + dt.timedelta(days=60)
+    assert rule.payment_deadline(2026, {"taxpayer_type": "FISICA"}) == dt.date(2027, 4, 30) + dt.timedelta(days=60)
+    with pytest.raises(MXBlock):
+        rule.payment_deadline(2026, {"id": 1})
+
+
+def test_annual_adjustment_eligibility_follows_art_97():
+    rule = _r().ANNUAL_ADJUSTMENT_RULE
+    base = {"date_of_joining": dt.date(2020, 1, 1), "date_of_leaving": None, "annual_gross": Decimal("300000")}
+    assert rule.eligibility(base, 2026) == (True, None)
+    assert rule.eligibility({**base, "date_of_joining": dt.date(2026, 1, 1)}, 2026) == (True, None)
+    assert rule.eligibility({**base, "date_of_joining": dt.date(2026, 1, 2)}, 2026)[0] is False
+    assert rule.eligibility({**base, "date_of_leaving": dt.date(2026, 11, 30)}, 2026)[0] is False
+    assert rule.eligibility({**base, "date_of_leaving": dt.date(2026, 12, 1)}, 2026) == (True, None)
+    assert rule.eligibility({**base, "annual_gross": Decimal("400000.00")}, 2026) == (True, None)
+    assert rule.eligibility({**base, "annual_gross": Decimal("400000.01")}, 2026)[0] is False
+
+
+def test_annual_isr_is_the_art_152_tariff_less_the_subsidy_never_below_zero():
+    rule = _r().ANNUAL_ADJUSTMENT_RULE
+    # 2026 annual tariff, bracket 2: 194.59 + (50,000 − 10,135.12) × 6.40%
+    tax = Decimal("194.59") + (Decimal("50000") - Decimal("10135.12")) * Decimal("0.064")
+    assert rule.annual_isr(Decimal("50000"), 2026, {"subsidy_due_total": Decimal("0")}) == tax
+    assert rule.annual_isr(Decimal("50000"), 2026, {"subsidy_due_total": Decimal("1000")}) == tax - 1000
+    assert rule.annual_isr(Decimal("50000"), 2026, {"subsidy_due_total": Decimal("99999")}) == 0
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    with pytest.raises(MXBlock):
+        rule.annual_isr(Decimal("50000"), 2025, {"subsidy_due_total": Decimal("0")})     # no 2025 table
+
+
+def test_annual_difference_owed_in_full_refund_against_withholdings():
+    rule = _r().ANNUAL_ADJUSTMENT_RULE
+    assert rule.apply_in_run(Decimal("500"), Decimal("300"), {}) == {"withheld": Decimal("800"), "carry_forward": 0}
+    assert rule.apply_in_run(Decimal("500"), Decimal("-200"), {}) == {"withheld": Decimal("300"), "carry_forward": 0}
+    assert rule.apply_in_run(Decimal("500"), Decimal("-800"), {}) == {"withheld": 0, "carry_forward": Decimal("-300")}

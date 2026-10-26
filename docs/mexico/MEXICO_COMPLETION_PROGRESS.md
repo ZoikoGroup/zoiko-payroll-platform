@@ -175,3 +175,45 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 | Other jurisdictions | None |
 
 **Gap register:** B14 narrowed (catalog and rule transcribed; D-11, D-12, D-13, D-07b open). New A17.
+
+---
+
+## W1-4 — PTU and the annual ISR adjustment (gap register B15, B16)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **PTU rule** (LFT Arts. 122–127; LISR Arts. 9, 76 V, 150), with 3 exclusion reasons (Art. 127 I, VI, VII). Log TL-PTU-1:
+  - half the pool by days, half by the cash daily-rate salary (the classifications' PTU flag);
+  - the Art. 127 VIII cap, the more favourable of three months and the three-year average;
+  - the deadline, 60 days after the annual return (31 March for a company, 30 April for an individual).
+- **Annual adjustment rule** (LISR Art. 97; S3 Art. Tercero), with 1 exclusion reason (Art. 97 c). Log TL-ANN-1:
+  - eligibility a) and b);
+  - the 2026 Art. 152 tariff less the subsidy that corresponded, never below zero;
+  - tax owed withheld in full; a balance in the worker's favour set against the following withholdings.
+- **New content table `MX_ISR_ANNUAL_TARIFFS`:** 2026, 11 brackets from S2 Anexo 8 C.II. It is continuous, quota-consistent and machine-checked.
+- **Additive service facts:**
+  - PTU: each worker's PTU history from DISTRIBUTED cycles, and the employer's taxpayer type for the deadline.
+  - Annual: the subsidy due (`subsidy_due_total`) and gross income (`annual_gross`).
+- **New decision D-14** (PTU cap excess; the average over fewer years). It blocks only an allocation where it changes the result.
+- **New G5 item:** the Art. 127 II trusted-worker cap is not modelled.
+- **`compare`:** 533 checks, 0 misses.
+
+**Controls**
+- Blind second transcription (separate agent; S26, S24, S2, S3): all 11 brackets and every rule agree. It confirmed the law's silence behind D-14, the gross-or-taxable ambiguity (D-04) and the "le correspondió" wording, and added LISR Art. 9 and Art. 122 ¶2–3, both recorded.
+
+**Tests**
+- `test_mexico_rules.py`: 6 more (29 in all): the PTU split and exclusions, the cap and both D-14 blocks, the deadlines, the Art. 97 eligibility edges (1 January, 1 December, $400,000.00 / .01), the annual tax with and without the subsidy, and applying a difference.
+- `test_mexico_content.py`: the annual tariff.
+- The PTU and annual fixtures now set "absent" explicitly; the source-tool synthetic fixture empties the annual table.
+- All `tests/test_mexico_*.py`: 972 passed and 4 failed in the full run; those 4 (the synthetic fixture not yet emptying the annual table) were fixed and pass (14/14 in their file). **0 failing.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Mexico in production | Dormant. PTU allocation and the annual adjustment now follow the LFT / LISR. Both still need rounding (D-01) to emit amounts |
+| Other jurisdictions | None |
+
+**Gap register:** B15 and B16 done, except D-14 and the Art. 127 II item.

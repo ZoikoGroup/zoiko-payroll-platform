@@ -545,3 +545,218 @@ class FiniquitoRule:
 
 
 FINIQUITO_RULE = FiniquitoRule()
+
+
+# ═══ W1-4: PTU (LFT Arts. 122–127) and the annual ISR adjustment (LISR Art. 97) ═══
+# Points the sources leave open (DECISIONS_PENDING D-14), None = the case that
+# needs it BLOCKS — only that case:
+#   MX_PTU_CAP_EXCESS — LFT Art. 127 VIII caps a share but does not say where
+#       the amount above the cap goes.  "UNDISTRIBUTED" (kept as residue) or
+#       "REDISTRIBUTED" (not built).
+#   MX_PTU_HISTORY_AVERAGE — "el promedio de la participación recibida en los
+#       últimos tres años" when the worker has fewer than three years of PTU:
+#       "OVER_THREE" (÷ 3) or "OVER_YEARS_RECEIVED".
+MX_PTU_CAP_EXCESS = None
+MX_PTU_HISTORY_AVERAGE = None
+PTU_CAP_EXCESS_RULES = ("UNDISTRIBUTED",)
+PTU_HISTORY_AVERAGES = ("OVER_THREE", "OVER_YEARS_RECEIVED")
+PTU_CAP_SALARY_DAYS = Decimal("90")                     # Art. 127 VIII "tres meses del salario" (as TL-TER-1)
+PTU_DEADLINE_DAYS = 60                                  # Art. 122 "dentro de los sesenta días siguientes"
+ANNUAL_INCOME_LIMIT = Decimal("400000.00")              # LISR Art. 97 b)
+
+_C_122 = (_S26, "Art. 122: 'El reparto de utilidades entre los trabajadores debera efectuarse dentro de los sesenta "
+                "dias siguientes a la fecha en que deba pagarse el impuesto anual', PDF p. 31")
+_C_123 = (_S26, "Art. 123: 'La utilidad repartible se dividira en dos partes iguales: la primera se repartira por igual "
+                "entre todos los trabajadores, tomando en consideracion el numero de dias trabajados por cada uno en el "
+                "ano, independientemente del monto de los salarios. La segunda se repartira en proporcion al monto de "
+                "los salarios devengados por el trabajo prestado durante el ano', PDF p. 31")
+_C_124 = (_S26, "Art. 124: 'se entiende por salario la cantidad que perciba cada trabajador en efectivo por cuota "
+                "diaria. No se consideran como parte de el las gratificaciones, percepciones y demas prestaciones a que "
+                "se refiere el articulo 84, ni las sumas que perciba el trabajador por concepto de trabajo "
+                "extraordinario', PDF p. 31")
+_C_127 = (_S26, "Art. 127: 'Los directores, administradores y gerentes generales de las empresas no participaran en las "
+                "utilidades'; 'Los trabajadores del hogar no participaran en el reparto de utilidades'; 'Los "
+                "trabajadores eventuales tendran derecho a participar en las utilidades de la empresa cuando hayan "
+                "trabajado sesenta dias durante el ano, por lo menos'; 'El monto de la participacion de utilidades "
+                "tendra como limite maximo tres meses del salario del trabajador o el promedio de la participacion "
+                "recibida en los ultimos tres anos; se aplicara el monto que resulte mas favorable al trabajador', "
+                "PDF p. 32")
+_C_76V = (_S24, "Art. 76 V: 'dentro de los tres meses siguientes a la fecha en que termine dicho ejercicio', PDF p. 91")
+_C_150 = (_S24, "Art. 150: 'mediante declaracion que presentaran en el mes de abril del ano siguiente', PDF p. 180")
+_C_97 = (_S24, "Art. 97: 'Al resultado obtenido se le aplicara la tarifa del articulo 152 de esta Ley. Contra el "
+               "impuesto que resulte a cargo del contribuyente se acreditara el importe de los pagos provisionales'; "
+               "'La diferencia que resulte a favor del contribuyente debera compensarse contra la retencion del mes de "
+               "diciembre y las retenciones sucesivas, a mas tardar dentro del ano de calendario posterior'; 'Hayan "
+               "iniciado la prestacion de servicios con posterioridad al 1 de enero del ano de que se trate o hayan "
+               "dejado de prestar servicios al retenedor antes del 1 de diciembre'; 'excedan de $400,000.00'; "
+               "'Comuniquen por escrito al retenedor que presentaran declaracion anual', PDF pp. 131-132")
+_C_S3_ANNUAL = ("S3/S3_DOF_Decreto_subsidio_empleo_01052024.html",
+                "Art. Tercero I: 'El impuesto a cargo del trabajador se disminuira con la suma de las cantidades que por "
+                "concepto de subsidio para el empleo mensual le correspondio al trabajador'; III: 'no habra impuesto a "
+                "cargo del trabajador, ni se entregara cantidad alguna a este ultimo por concepto de subsidio para el "
+                "empleo'")
+_C_S2_ANNUAL = ("S2/S2_SAT_Anexo8_RMF2026.pdf",
+                "C.II: 'Tarifa para el calculo del impuesto correspondiente al ejercicio de 2026 a que se refieren los "
+                "articulos 97', PDF pp. 18-19")
+
+
+class _Reason:
+    def __init__(self, code: str, label: str, citation: tuple):
+        self.code, self.label, self.citations = code, label, (citation,)
+        self.source, self.source_ref = citation
+
+
+PTU_EXCLUSION_REASONS = {r.code: r for r in (
+    _Reason("LFT_127_I_DIRECTOR", "Director, administrador o gerente general (LFT Art. 127 I)",
+            (_S26, "Art. 127 I: 'Los directores, administradores y gerentes generales de las empresas no participaran "
+                   "en las utilidades', PDF p. 32")),
+    _Reason("LFT_127_VI_DOMESTIC", "Trabajador del hogar (LFT Art. 127 VI)",
+            (_S26, "Art. 127 VI: 'Los trabajadores del hogar no participaran en el reparto de utilidades', PDF p. 32")),
+    _Reason("LFT_127_VII_EVENTUAL_UNDER_60_DAYS", "Eventual con menos de sesenta días en el año (LFT Art. 127 VII)",
+            (_S26, "Art. 127 VII: 'Los trabajadores eventuales tendran derecho a participar en las utilidades de la "
+                   "empresa cuando hayan trabajado sesenta dias durante el ano, por lo menos', PDF p. 32")),
+)}
+
+
+class LftPtuRule:
+    """LFT Art. 123: half the pool by days worked, half by salary; Art. 124:
+    the salary is the cash daily rate (the classification's PTU flag —
+    PTU_WAGE_BASE); Art. 127: exclusions (operator-asserted) and the VIII cap."""
+
+    citations = (_C_123, _C_124, _C_127, _C_122, _C_76V, _C_150)
+    source, source_ref = citations[0]
+
+    def _cap(self, w: dict, daily: Decimal) -> Decimal:
+        salary_cap = PTU_CAP_SALARY_DAYS * daily
+        history = {int(y): _d(v, "PTU history") for y, v in (w.get("ptu_history") or {}).items()}
+        if not history:
+            return salary_cap, {"threeMonths": salary_cap, "historyAverage": _ZERO}
+        rule = MX_PTU_HISTORY_AVERAGE
+        over_three = sum(history.values(), _ZERO) / 3
+        over_years = sum(history.values(), _ZERO) / len(history)
+        if len(history) < 3 and over_three != over_years and max(salary_cap, over_years) != max(salary_cap, over_three):
+            if rule is None:
+                raise _blocked("MX_PTU_HISTORY_AVERAGE_UNDECIDED",
+                               f"worker {w.get('employee_id')} has {len(history)} year(s) of PTU: how the Art. 127 VIII "
+                               f"three-year average counts fewer years is a decision (DECISIONS_PENDING D-14)")
+        avg = over_years if rule == "OVER_YEARS_RECEIVED" else over_three
+        return max(salary_cap, avg), {"threeMonths": salary_cap, "historyAverage": avg}
+
+    def allocate(self, pool, workers, fiscal_year) -> dict:
+        pool = _d(pool, "the distributable amount")
+        rows = []
+        for w in workers:
+            excl = w.get("operator_exclusion")
+            days = _d(w.get("days") or 0, "days")
+            base = _d((w.get("salary_by_kind") or {}).get("PTU_WAGE_BASE", _ZERO), "PTU wage base")
+            rows.append({"w": w, "excl": excl, "days": days, "base": base})
+        eligible = [r for r in rows if not r["excl"]]
+        total_days = sum((r["days"] for r in eligible), _ZERO)
+        total_base = sum((r["base"] for r in eligible), _ZERO)
+        if eligible and (total_days <= 0 or total_base <= 0):
+            raise _blocked("MX_PTU_NO_QUALIFYING_BASE", "no eligible worker has qualifying days and PTU wage base")
+        half = pool / 2
+        out, residue, excess_total = [], _ZERO, _ZERO
+        for r in rows:
+            w = r["w"]
+            if r["excl"]:
+                out.append({"employee_id": w["employee_id"], "eligible": False, "exclusion_reason": r["excl"],
+                            "days_share": _ZERO, "salary_share": _ZERO, "cap_reference": None, "cap_applied": False,
+                            "final_amount": _ZERO})
+                continue
+            days_share = half * r["days"] / total_days
+            salary_share = half * r["base"] / total_base
+            share = days_share + salary_share
+            daily = r["base"] / r["days"] if r["days"] > 0 else _ZERO
+            cap, ref = self._cap(w, daily)
+            capped = share > cap
+            if capped:
+                excess_total += share - cap
+            out.append({"employee_id": w["employee_id"], "eligible": True, "exclusion_reason": None,
+                        "days_share": days_share, "salary_share": salary_share,
+                        "cap_reference": {k: str(v) for k, v in ref.items()} | {"cap": str(cap)},
+                        "cap_applied": capped, "final_amount": cap if capped else share})
+        if excess_total > 0:
+            if MX_PTU_CAP_EXCESS is None:
+                raise _blocked("MX_PTU_CAP_EXCESS_UNDECIDED",
+                               "a share exceeds the LFT Art. 127 VIII cap and the law does not say where the excess goes "
+                               "(DECISIONS_PENDING D-14)")
+            if MX_PTU_CAP_EXCESS not in PTU_CAP_EXCESS_RULES:
+                raise _blocked("MX_RULE_UNRECOGNISED", f"PTU cap-excess rule {MX_PTU_CAP_EXCESS!r} is not built")
+            residue += excess_total
+        if not eligible:
+            residue = pool
+        return {"workers": out, "residue": residue,
+                "residue_rule": "LFT Art. 127 VIII excess kept undistributed (D-14)" if excess_total > 0 else
+                "none: shares at full precision; each payment is rounded by the rounding rule (D-01)"}
+
+    def payment_deadline(self, fiscal_year, employer):
+        """Art. 122: 60 days after the annual tax is due — a company (LISR Art.
+        76 V): three months after the fiscal year; an individual (Art. 150): April."""
+        kind = str((employer or {}).get("taxpayer_type") or "").upper()
+        if kind == "MORAL":
+            due = _dt.date(int(fiscal_year) + 1, 3, 31)
+        elif kind == "FISICA":
+            due = _dt.date(int(fiscal_year) + 1, 4, 30)
+        else:
+            raise _blocked("MX_PTU_DEADLINE_TAXPAYER_UNKNOWN", "the employer's taxpayer type (MORAL / FISICA) is not known")
+        return due + _dt.timedelta(days=PTU_DEADLINE_DAYS)
+
+
+ANNUAL_ADJUSTMENT_EXCLUSION_REASONS = {r.code: r for r in (
+    _Reason("LISR_97_C_WORKER_FILES_OWN_RETURN",
+            "El trabajador comunicó por escrito que presentará su declaración anual (LISR Art. 97 c)",
+            (_S24, "Art. 97 c): 'Comuniquen por escrito al retenedor que presentaran declaracion anual', PDF p. 132")),
+)}
+
+
+class Lisr97AnnualAdjustmentRule:
+    """LISR Art. 97 with the subsidy decree's Art. Tercero: who is adjusted,
+    the annual tax and how the difference is applied in a later run."""
+
+    citations = (_C_97, _C_S3_ANNUAL, _C_S2_ANNUAL)
+    source, source_ref = citations[0]
+
+    def eligibility(self, worker, fiscal_year):
+        year = int(fiscal_year)
+        joined, left = worker.get("date_of_joining"), worker.get("date_of_leaving")
+        if joined is not None and _date(joined, "joining date") > _dt.date(year, 1, 1):
+            return False, "LISR Art. 97 a): started after 1 January"
+        if left is not None and _date(left, "leaving date") < _dt.date(year, 12, 1):
+            return False, "LISR Art. 97 a): left before 1 December"
+        gross = worker.get("annual_gross")
+        if gross is None:
+            raise _blocked("MX_ANNUAL_ADJUSTMENT_FACT_MISSING", "the worker's annual gross income is not supplied")
+        if _d(gross, "annual gross income") > ANNUAL_INCOME_LIMIT:
+            return False, "LISR Art. 97 b): annual income above $400,000.00"
+        return True, None
+
+    def annual_isr(self, annual_taxable, fiscal_year, facts) -> Decimal:
+        from ..jurisdictions.mexico import isr
+        from . import mexico_content as content
+
+        table = content.MX_ISR_ANNUAL_TARIFFS.get(int(fiscal_year))
+        if not table:
+            raise _blocked("MX_CONTENT_MISSING", f"no transcribed LISR Art. 152 annual tariff for {fiscal_year}")
+        brackets = [{"lower": Decimal(b.lower), "upper": None if b.upper is None else Decimal(b.upper),
+                     "fixed": Decimal(b.fixed_quota), "rate": Decimal(b.rate_pct) / 100, "rate_pct": Decimal(b.rate_pct)}
+                    for b in sorted(table, key=lambda b: Decimal(b.lower))]
+        tax = isr.withholding(_d(annual_taxable, "annual taxable income"), brackets)["isr"]
+        if (facts or {}).get("subsidy_due_total") is None:
+            raise _blocked("MX_ANNUAL_ADJUSTMENT_FACT_MISSING", "the employment subsidy due in the year is not supplied")
+        subsidy = _d(facts["subsidy_due_total"], "the subsidy due in the year")
+        return max(tax - subsidy, _ZERO)                       # Art. Tercero II / III
+
+    def apply_in_run(self, period_withheld, difference, facts) -> dict:
+        """Owed: withheld in full in the run that applies it. In the worker's
+        favour: set against that run's withholding; what it cannot absorb is
+        carried to the following withholdings (Art. 97 ¶4)."""
+        period_withheld, difference = _d(period_withheld, "period withholding"), _d(difference, "difference")
+        if difference >= 0:
+            return {"withheld": period_withheld + difference, "carry_forward": _ZERO}
+        withheld = max(period_withheld + difference, _ZERO)
+        return {"withheld": withheld, "carry_forward": difference - (withheld - period_withheld)}
+
+
+PTU_RULE = LftPtuRule()
+ANNUAL_ADJUSTMENT_RULE = Lisr97AnnualAdjustmentRule()

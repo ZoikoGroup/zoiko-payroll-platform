@@ -16,6 +16,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-11 | Termination reasons outside the catalog: mutual consent, death, Art. 434 | G5 owner | Recording those terminations (`MX_TERMINATION_REASON_UNKNOWN`) | Open |
 | D-12 | Indemnity salary (LFT Art. 89 integrated salary; same question as gap C4) | G1 / G5 owners | Every indemnity and the Art. 54 month (`MX_INDEMNITY_SALARY_UNDECIDED`) | Open |
 | D-13 | Does "por cada año de servicios" count a part year? | G5 owner | Art. 50, 54 and 162 amounts (`MX_SERVICE_YEARS_COUNT_UNDECIDED`) | Open |
+| D-14 | PTU cap (LFT Art. 127 VIII): where the excess goes; the three-year average with fewer years | G5 owner | Only an allocation where it changes the result (`MX_PTU_CAP_EXCESS_UNDECIDED`, `MX_PTU_HISTORY_AVERAGE_UNDECIDED`) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -67,6 +68,10 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 | "Trabajadores de planta" = indefinite contract (c_TipoContrato 01) | Art. 162 grants the premium to "trabajadores de planta" (TL-TER-1) | S26 Art. 162; S28 c_TipoContrato | G5 |
 | Untaken vacation of completed years is paid at termination | The LFT does not say so outright; Art. 79 ¶2 covers only the part year (TL-TER-2) | S26 Arts. 76, 79 | G5 |
 | Art. 162 IV deferral (more than 10% leaving voluntarily in a year) not modelled: premium paid at separation | Art. 162 IV a) (TL-TER-1) | S26 Art. 162 IV | G5 |
+| PTU days = days paid in committed ordinary and correction runs | Art. 123 "días trabajados"; Art. 127 IV counts maternity and work-risk incapacity as active (TL-PTU-1) | S26 Arts. 123, 127 IV | G5 |
+| PTU three months = 90 × the year's average cash daily rate | Art. 127 VIII "tres meses del salario"; Art. 124 salary (TL-PTU-1) | S26 Arts. 124, 127 VIII | G5 |
+| Annual adjustment: the $400,000 test on gross income | Art. 97 b) "ingresos anuales" (TL-ANN-1) | S24 Art. 97 b) | G1 |
+| Annual adjustment: subtract the subsidy computed each period ("le correspondió"), not only the applied part | S3 Art. Tercero I (TL-ANN-1) | S3 (01-05-2024) | G1 |
 | Subsidy remainder `NOT_PAYABLE` | Art. Segundo ¶2 of the base decree, still in force (TL-SUB-2) | S3 (DOF 01-05-2024) | G1 |
 
 ## D-05 · 48-hour week for January–April 2026
@@ -128,3 +133,10 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 
 - **Question.** LFT Arts. 50 ("veinte días … por cada uno de los años"), 54 and 162 ("doce días … por cada año de servicios") do not say how a part year counts: pro rata, or whole years only? (LISR Art. 93 XIII does say it: more than six months counts as a year; that rule is for the exemption only.)
 - **Blocks.** Those amounts: `MX_SERVICE_YEARS_COUNT_UNDECIDED`. Both options are built.
+
+## D-14 · PTU cap (LFT Art. 127 VIII)
+
+- **Question.** (a) Where does the part of a share above the cap ("tres meses del salario del trabajador o el promedio de la participación recibida en los últimos tres años … el monto que resulte más favorable") go: kept undistributed, or shared among the others? (b) For a worker with fewer than three years of PTU, is the average ÷ 3 or ÷ the years received?
+- **State.** (a) "UNDISTRIBUTED" (residue) is built; (b) both are built. Each blocks only an allocation where it changes the result.
+- **Sources.** S26 Art. 127 VIII (p. 32). Log TL-PTU-1.
+- **Blocks.** `MX_PTU_CAP_EXCESS_UNDECIDED`, `MX_PTU_HISTORY_AVERAGE_UNDECIDED`.
