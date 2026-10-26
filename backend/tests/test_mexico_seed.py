@@ -25,6 +25,18 @@ def _seed_module():
     return seed
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_content_only(monkeypatch):
+    """These tests exercise the seed on SYNTHETIC rows. Since Batch 1
+    (2026-10-26) the real ISR / scalar tables are not empty, so every test here
+    starts from empty tables and sets only the rows it needs. Seeding the real
+    content is tested in test_mexico_activation_gates (today's real packs)."""
+    c = _content()
+    for table in ("MX_SCALAR_CONTENT", "MX_ISR_TARIFFS", "MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE",
+                  "MX_WORKWEEK", "MX_VACATION_DAYS"):
+        monkeypatch.setattr(c, table, ())
+
+
 def _content():
     from app.modules.payroll.engine.countries import mexico_content
 
@@ -157,7 +169,12 @@ def test_only_verified_manifest_rows_are_usable(tmp_path):
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    assert set(seed.load_manifest(path)) == {"S2"}
+    # Phase 11d: a VERIFIED row counts only with its verification-log entry.
+    assert set(seed.load_manifest(path)) == set()
+    _write_log(path, rows)
+    # Draft packs accept VERIFIED and ARCHIVE_COPY_VERIFIED; each file is
+    # keyed CODE/file, and a single-file code by its bare code too.
+    assert set(seed.load_manifest(path)) == {"S2", "S2/S2_synthetic.pdf"}
 
 
 def test_catalog_drift_scope_and_g2_flag_are_refused(db, monkeypatch):
@@ -424,3 +441,88 @@ def test_mexico_registry_rows_are_value_free_and_complete():
                         if scope == "national" and kind != "text" and k not in c.MX_PER_CASE_KEYS}
     inventory = [e for e in fr.get_engine_fallback_inventory()["engineConstants"] if e["country"] == "MX"]
     assert inventory and all(e["value"] is None for e in inventory)
+
+
+# -- Phase 11d (gap register A9) --
+
+def _write_log(manifest_path, rows):
+    """A MATCH verification-log entry for every VERIFIED row (what
+    verify_mexico_sources.py writes after a direct download)."""
+    import csv
+
+    from app.modules.payroll import mexico_sources
+
+    with open(mexico_sources.log_path(manifest_path), "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=mexico_sources.LOG_COLUMNS)
+        writer.writeheader()
+        for r in rows:
+            if r["status"] == "VERIFIED":
+                writer.writerow({"code": r["code"], "file": r["file"], "url": r["url"], "final_url": r["url"],
+                                 "downloaded_at": "2026-10-26T00:00:00Z", "downloader": "test@example.com",
+                                 "response_bytes": r.get("bytes") or "1", "sha256": r["sha256"], "result": "MATCH"})
+
+
+def _manifest_file(tmp_path, rows):
+    path = tmp_path / "SOURCES_MANIFEST.csv"
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    _write_log(path, rows)
+    return path
+
+
+def test_an_archive_copy_may_back_a_draft_pack(db, monkeypatch, tmp_path):
+    m, c, seed = _models(), _content(), _seed_module()
+    monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (_scalar("mx_uma_daily", "1", source="S6"),))
+    path = _manifest_file(tmp_path, [_manifest_row("S6", "a" * 64, status="ARCHIVE_COPY_VERIFIED"),
+                                     _manifest_row("S22", "b" * 64, status="WRONG_VERSION")])
+    manifest = seed.load_manifest(path)
+    assert set(manifest) == {"S6", "S6/S6_synthetic.pdf"}                  # WRONG_VERSION never usable
+    out = seed.seed_mexico(db, manifest=manifest)
+    db.flush()
+    assert out["national"].status == "Draft"
+    row = db.query(m.ContributionRate).filter(m.ContributionRate.jurisdiction_country == "MX").one()
+    assert db.get(m.SourceArtifact, row.source_document_id).checksum_sha256 == "a" * 64
+
+
+def test_a_code_with_several_files_must_be_cited_by_file(db, monkeypatch, tmp_path):
+    m, c, seed = _models(), _content(), _seed_module()
+    two = [{**_manifest_row("S28", "a" * 64), "file": "S28_a.xsd"},
+           {**_manifest_row("S28", "b" * 64), "file": "S28_b.xls"}]
+    manifest = seed.load_manifest(_manifest_file(tmp_path, two))
+    assert set(manifest) == {"S28/S28_a.xsd", "S28/S28_b.xls"}             # never collapsed to one row
+    monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (_scalar("mx_uma_daily", "1", source="S28"),))
+    with pytest.raises(SystemExit, match="S28 has 2 saved files"):
+        seed.seed_mexico(db, manifest=manifest)
+    monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (_scalar("mx_uma_daily", "1", source="S28/S28_b.xls"),))
+    seed.seed_mexico(db, manifest=manifest)
+    db.flush()
+    row = db.query(m.ContributionRate).filter(m.ContributionRate.jurisdiction_country == "MX").one()
+    assert db.get(m.SourceArtifact, row.source_document_id).checksum_sha256 == "b" * 64
+
+
+def test_a_professional_minimum_wage_keeps_its_zone(db, monkeypatch):
+    """The zone is stored (TaxSlab.jurisdiction_state), so Content.min_wage
+    restricts a professional minimum to it and the content check sees it."""
+    m, c, seed = _models(), _content(), _seed_module()
+    from app.modules.payroll import mexico_service, service
+    from app.modules.payroll.engine.jurisdictions.mexico.content import Content
+
+    monkeypatch.setattr(c, "MX_MIN_WAGES", (
+        c.MinWageRow("PROF_X", "PROFESSION", "SYNTHETIC trade", "300", "ZLFN", None, None, "S9", "SYNTHETIC"),
+        c.MinWageRow("PROF_X", "PROFESSION", "SYNTHETIC trade", "200", "GENERAL", None, None, "S9", "SYNTHETIC")))
+    pack = seed.seed_mexico(db, manifest={"S9": _manifest_row("S9", "a" * 64)})["national"]
+    db.flush()
+    slabs = db.query(m.TaxSlab).filter(m.TaxSlab.jurisdiction_pack_id == pack.id).all()
+    assert sorted((s.flat_amount, s.jurisdiction_state) for s in slabs) == [(Decimal("200"), "GENERAL"),
+                                                                           (Decimal("300"), "ZLFN")]
+    rate_map, rows = service.pack_rows_for_golden(db, pack, date(2026, 6, 30))
+    content = Content(rate_map, rows, "SYNTHETIC pack")
+    assert content.min_wage("PROF_X", "ZLFN") == Decimal("300")
+    assert content.min_wage("PROF_X", "GENERAL") == Decimal("200")
+    expected = set(c.expected_national_signatures(pack.effective_from, pack.effective_to))
+    assert set(mexico_service._db_signatures(*mexico_service._pack_rows(db, pack))) == expected
+    slabs[0].jurisdiction_state = None                                   # a lost zone no longer matches
+    db.flush()
+    assert set(mexico_service._db_signatures(*mexico_service._pack_rows(db, pack))) != expected

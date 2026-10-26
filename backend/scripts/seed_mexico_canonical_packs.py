@@ -17,7 +17,11 @@ readiness rows — with zero statutory rows.
 
 Evidence: one SourceArtifact per saved document, matched by URL + SHA-256
 (a changed file becomes a NEW artifact, HK seed pattern). A content row that
-cites a source the manifest does not list as VERIFIED refuses the seed.
+cites a source the manifest does not list as VERIFIED or ARCHIVE_COPY_VERIFIED
+refuses the seed. Phase 11d (gap register A9): an archive copy may back rows in
+these Draft packs only — pack activation refuses any row whose source is not
+VERIFIED (mexico_service activation check "sources_verified"). A row cites a
+source by its code, or as CODE/file when the code has several saved files.
 
 Governance: nothing is ever set Active here, and the registry/readiness rows
 are created only when missing (an existing row is never changed). Re-running
@@ -32,7 +36,6 @@ interactively (type CONFIRM). A non-interactive run is refused.
 Usage:
     python -m scripts.seed_mexico_canonical_packs
 """
-import csv
 import os
 import sys
 from datetime import date, datetime, timezone
@@ -42,6 +45,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import SessionLocal, initialize_database  # noqa: E402
+from app.modules.payroll import mexico_sources  # noqa: E402
 from app.modules.payroll.engine.countries import mexico_content as content  # noqa: E402
 from app.modules.payroll.models import (  # noqa: E402
     ContributionRate, JurisdictionPack, SourceArtifact, StateLocalProgramReadiness, TaxSlab,
@@ -57,9 +61,10 @@ _OVERRIDE_VALUE = "I_UNDERSTAND"
 
 MAIN_PACK_ID, MAIN_FROM, MAIN_TO = content.MX_2026
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_PATH = REPO_ROOT / "docs" / "mexico" / "sources" / "SOURCES_MANIFEST.csv"
-# Manifest statuses whose file may back a seeded row (scripts/verify_mexico_sources.py).
-_USABLE_STATUSES = ("VERIFIED",)
+MANIFEST_PATH = mexico_sources.MANIFEST_PATH
+# Manifest statuses whose file may back a row in these DRAFT packs (Phase 11d):
+# VERIFIED and ARCHIVE_COPY_VERIFIED. Activation needs VERIFIED.
+_USABLE_STATUSES = mexico_sources.DRAFT_STATUSES
 # ISN readiness: Mexico ISN uses the generic "other state payroll" program —
 # not STATE_PT, which is India's employee professional tax (Phase 0 decision 6).
 _ISN_PROGRAM = "OTHER_STATE_PAYROLL"
@@ -84,14 +89,13 @@ def _overlaps(eff_from, eff_to, start, end) -> bool:
 
 # ── evidence ────────────────────────────────────────────────────────────────
 
-def load_manifest(path: Path = None) -> dict:
-    """{code: manifest row} for every usable (VERIFIED) source file."""
-    path = Path(path or MANIFEST_PATH)
-    if not path.is_file():
-        return {}
-    with open(path, encoding="utf-8", newline="") as fh:
-        return {row["code"]: row for row in csv.DictReader(fh)
-                if (row.get("status") or "").strip() in _USABLE_STATUSES}
+def load_manifest(path: Path = None, statuses: tuple = _USABLE_STATUSES) -> dict:
+    """{cite: manifest row} for every usable source file: ``CODE/file`` for
+    each file, and the bare ``CODE`` when the code has exactly one usable file
+    (so S28 / S30, which have several, never collapse to one row). A VERIFIED
+    row counts only with an entry in the verification log beside the manifest."""
+    path = path or MANIFEST_PATH
+    return mexico_sources.usable(mexico_sources.read_rows(path), statuses, mexico_sources.read_log(path))
 
 
 def _upsert_sources(db, manifest: dict, needed: set) -> dict:
@@ -99,8 +103,9 @@ def _upsert_sources(db, manifest: dict, needed: set) -> dict:
     Unreviewed — the human G1 reviewer marks each one reviewed."""
     missing = sorted(needed - set(manifest))
     if missing:
-        raise SystemExit(f"content cites {', '.join(missing)} but SOURCES_MANIFEST.csv has no VERIFIED file for "
-                         "it — save and verify the source first (scripts/verify_mexico_sources.py)")
+        raise SystemExit(f"content cites {', '.join(missing)} but "
+                         + "; ".join(mexico_sources.missing_reason(manifest, m) for m in missing)
+                         + " — save and verify the source first (scripts/verify_mexico_sources.py)")
     ids = {}
     for code in sorted(needed):
         row = manifest[code]
@@ -109,7 +114,7 @@ def _upsert_sources(db, manifest: dict, needed: set) -> dict:
                     .filter(SourceArtifact.source_url == url, SourceArtifact.checksum_sha256 == sha).first())
         if artifact is None:
             artifact = SourceArtifact(
-                agency=(row.get("issuer") or "")[:200] or "unknown", title=f"[{code}] {row['title']}"[:300],
+                agency=(row.get("issuer") or "")[:200] or "unknown", title=f"[{row['code']}] {row['title']}"[:300],
                 source_url=url, checksum_sha256=sha,
                 file_path=f"docs/mexico/sources/{row['file']}", original_filename=row["file"],
                 content_type=row.get("content_type") or None,
@@ -194,13 +199,13 @@ def _add_rate(db, pack, sort_order, row, source_ids, *, state=None):
 
 def _add_slab(db, pack, sort_order, source_ids, *, rule_type, filing_status, rate_label, tax_formula, rate_pct,
               source, min_amount="0", max_amount=None, flat_amount=None, effective_from=None, effective_to=None,
-              tax_table_number=None, assessment_basis=None):
+              tax_table_number=None, assessment_basis=None, jurisdiction_state=None):
     rate_label = _marked(rate_label)
     if len(rate_label) > 150:
         raise SystemExit(f"TaxSlab rate_label longer than 150 characters: {rate_label!r}")
     db.add(TaxSlab(
-        jurisdiction_pack_id=pack.id, jurisdiction_country=CODE, organization_id=None, jurisdiction_state=None,
-        rule_type=rule_type, filing_status=filing_status,
+        jurisdiction_pack_id=pack.id, jurisdiction_country=CODE, organization_id=None,
+        jurisdiction_state=jurisdiction_state, rule_type=rule_type, filing_status=filing_status,
         min_amount=_dec(min_amount), max_amount=_dec(max_amount), rate_pct=_dec(rate_pct),
         flat_amount=_dec(flat_amount), rate_label=rate_label, tax_formula=tax_formula,
         tax_table_number=tax_table_number, assessment_basis=assessment_basis,
@@ -252,7 +257,8 @@ def _seed_national_pack(db, source_ids) -> JurisdictionPack:
         _add_slab(db, pack, order, source_ids, rule_type=content.MX_MIN_WAGE_RULE, filing_status=w.code,
                   flat_amount=w.daily_amount, rate_pct="0", rate_label=f"MXN {w.daily_amount}/day",
                   tax_formula=f"Minimum wage — {w.description}", source=w.source, assessment_basis=w.kind,
-                  effective_from=w.effective_from, effective_to=w.effective_to)
+                  effective_from=w.effective_from, effective_to=w.effective_to,
+                  jurisdiction_state=w.zone)                   # Phase 11d: the zone a professional minimum applies in
     for b in ceav:
         order += 1
         _add_slab(db, pack, order, source_ids, rule_type=content.MX_CEAV_BAND_RULE,

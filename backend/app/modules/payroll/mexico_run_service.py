@@ -41,10 +41,9 @@ MX = "MX"
 SPEC = _content.SPEC
 
 # Codes that refuse the WHOLE operation (dormancy / scope), never a sentinel.
-GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
+GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_UNKNOWN",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
-BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO", "PTU")   # 9a, 9b, 9c, 9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
@@ -104,8 +103,9 @@ def guard(db: Session, employee, run=None) -> None:
         raise MXBlock("MX_ORG_NOT_MEXICAN", "the employee's organisation payroll jurisdiction is not Mexico", org_id)
     if run is not None and run.organization_id != org_id:
         raise MXBlock("MX_RUN_ORG_MISMATCH", "the run belongs to another organisation", org_id)
-    if run is not None and (run.mx_run_type or "ORDINARY") not in BUILT_RUN_TYPES:
-        raise MXBlock("MX_RUN_TYPE_PHASE9", f"{run.mx_run_type} runs are built in a later Phase 9 sub-phase", org_id)
+    if run is not None and (run.mx_run_type or "ORDINARY") not in RUN_TYPES:
+        # Every run type is built (Phase 9a–9d); what remains is an unknown one.
+        raise MXBlock("MX_RUN_TYPE_UNKNOWN", f"{run.mx_run_type!r} is not a Mexico run type", org_id)
 
 
 # ── 1b. Read-only policy for previews (MX-039, OOS-8) ───────────────────────

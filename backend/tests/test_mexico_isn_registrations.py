@@ -17,9 +17,9 @@ def _svc():
 
 @pytest.fixture()
 def seeded(db):
-    from scripts.seed_mexico_canonical_packs import seed_mexico
+    from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
 
-    out = seed_mexico(db, manifest={})
+    out = seed_mexico(db, manifest=load_manifest())
     db.commit()
     return out
 

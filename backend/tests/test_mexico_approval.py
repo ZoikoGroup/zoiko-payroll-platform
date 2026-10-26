@@ -13,11 +13,20 @@ APPROVER = 21
 
 
 def _seed_ready(db, monkeypatch, status):
+    import tempfile
+    from pathlib import Path
+
+    from app.modules.payroll import mexico_sources
     from app.modules.payroll.models import SourceArtifact
     from scripts.seed_mexico_canonical_packs import seed_mexico
-    from tests.test_mexico_activation_gates import _manifest, _synthetic_national_content
+    from tests.test_mexico_activation_gates import _manifest, _synthetic_national_content, _write_manifest
 
     _synthetic_national_content(monkeypatch)
+    # Phase 11d: approval also needs every cited source VERIFIED, with its
+    # verification-log entry — a SYNTHETIC manifest and log on disk.
+    manifest_path = Path(tempfile.mkdtemp()) / "SOURCES_MANIFEST.csv"
+    _write_manifest(manifest_path, list(_manifest().values()))
+    monkeypatch.setattr(mexico_sources, "MANIFEST_PATH", manifest_path)
     pack = seed_mexico(db, manifest=_manifest())["national"]
     for artifact in db.query(SourceArtifact).all():
         artifact.reviewer_id, artifact.reviewer_approved_at = 99, datetime.now(timezone.utc)
@@ -37,9 +46,9 @@ def test_an_empty_draft_pack_can_no_longer_reach_approved(db):
     empty MX Draft pack straight to Approved."""
     from app.core.exceptions import BadRequestException
     from app.modules.payroll.models import JurisdictionPack, TaxConfigurationAudit
-    from scripts.seed_mexico_canonical_packs import seed_mexico
+    from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
 
-    out = seed_mexico(db, manifest={})
+    out = seed_mexico(db, manifest=load_manifest())
     db.commit()
     for pack in (out["national"], out["isn"]["CDMX"]):
         with pytest.raises(BadRequestException, match="move it through In Review to QA first"):
@@ -59,10 +68,14 @@ def test_a_draft_pack_is_refused_even_with_exact_content(db, monkeypatch):
     assert pack.status == "Draft"
 
 
-def test_a_qa_pack_with_empty_content_is_refused_by_gate_1(db):
+def test_a_qa_pack_with_empty_content_is_refused_by_gate_1(db, monkeypatch):
     from app.core.exceptions import BadRequestException
+    from app.modules.payroll.engine.countries import mexico_content as c
     from scripts.seed_mexico_canonical_packs import seed_mexico
 
+    for table in ("MX_SCALAR_CONTENT", "MX_ISR_TARIFFS", "MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE",
+                  "MX_WORKWEEK", "MX_VACATION_DAYS"):          # empty content (Batches 1-2 filled the real one)
+        monkeypatch.setattr(c, table, ())
     pack = seed_mexico(db, manifest={})["national"]
     pack.status = "QA"
     db.commit()
@@ -118,3 +131,22 @@ def test_oos5_other_countries_keep_the_draft_to_approved_auto_advance(db):
     assert pack.status == "Draft"
     row = _approve(db, pack)
     assert (row.status, row.approved_by_id) == ("Approved", APPROVER)
+
+
+def test_a_qa_pack_with_batch1_content_is_still_refused(db):
+    """Today's real national pack (Batch 1: ISR, UMA, subsidy, on archive
+    copies) cannot be approved: the required text rules are not transcribed
+    and no cited source is VERIFIED."""
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import mexico_service
+    from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
+
+    pack = seed_mexico(db, manifest=load_manifest())["national"]
+    pack.status = "QA"
+    db.commit()
+    checks = {ch["key"]: ch for ch in mexico_service.activation_checks(db, pack, actor_id=APPROVER)}
+    assert checks["evidence"]["met"] is True                       # every Batch 1 row links its hashed source
+    assert checks["content"]["met"] is False and checks["sources_verified"]["met"] is False
+    with pytest.raises(BadRequestException, match="approval is refused"):
+        _approve(db, pack)
+    assert pack.approved_by_id is None

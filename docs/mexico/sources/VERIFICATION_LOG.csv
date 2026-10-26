@@ -1,0 +1,2 @@
+code,file,url,final_url,downloaded_at,downloader,response_bytes,sha256,result
+S22,S22_SAF_Codigo_Fiscal_CDMX_2026.pdf,https://cdmxassets.s3.us-east-1.amazonaws.com/media/files-pdf/marco_normativo2026/01_CODIGO_FISCAL_2026.pdf,https://cdmxassets.s3.us-east-1.amazonaws.com/media/files-pdf/marco_normativo2026/01_CODIGO_FISCAL_2026.pdf,2026-10-26T07:01:17Z,claude-code session for the Zoiko Mexico build (operator: nikhil checkout),58814901,5d989b7e659206283c61532c150385a17367a16e85d801cec002f8a1250cfc5f,MATCH

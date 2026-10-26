@@ -105,10 +105,20 @@ def test_content_skeleton_declares_no_statutory_values():
     assert c.MX_2026 == ("MX-PAYROLL-2026", date(2026, 1, 1), date(2026, 12, 31))
     assert c.MX_ISN_STATES_IN_SCOPE == ("CDMX",)
     assert [g for g, _ in c.GATES] == [f"G{i}" for i in range(1, 9)]
-    # Phase 1 tooling names the parameter keys; every content table stays empty
-    # until transcription from the saved official sources.
+    # Phase 1 tooling names the parameter keys. Batches 1-2 (2026-10-26) filled
+    # the content below; the keys still missing wait for their source or
+    # decision (rounding: G1 owner; SBC floor; INFONAVIT credit bases; the
+    # CEAV lowest-band reference, G2). Every transcribed row is cited by file
+    # and awaits G1.
     assert all(k.startswith("mx_") for k in c.MX_PARAMETER_KEYS)
-    assert c.MX_SCALAR_CONTENT == () and c.MX_ISR_TARIFFS == ()
+    missing = {k for k, (_, _, scope) in c.MX_PARAMETER_KEYS.items() if scope == "national"} - {
+        r.key for r in c.MX_SCALAR_CONTENT}
+    assert missing == {"mx_rounding_rule", "mx_sbc_min_rule", "mx_infonavit_percentage_basis",
+                       "mx_infonavit_fixed_amount_basis", "mx_ceav_lowest_band_min_wage_ref"}
+    assert c.MX_ISN_CONTENT == {"CDMX": ()}                          # S22 is a candidate only
+    tables = (c.MX_SCALAR_CONTENT + c.MX_ISR_TARIFFS + c.MX_MIN_WAGES + c.MX_CEAV_SCHEDULE + c.MX_WORKWEEK
+              + c.MX_VACATION_DAYS)
+    assert all(r.needs_g1 and "/" in r.source for r in tables)
     assert all(rt.startswith("MX_") for rt in (c.MX_ISR_TARIFF_RULE, c.MX_CEAV_BAND_RULE, c.MX_MIN_WAGE_RULE,
                                                c.MX_VACATION_DAYS_RULE, c.MX_WORKWEEK_RULE))
 
@@ -204,9 +214,9 @@ def test_other_hook_modules_unchanged():
 
 def test_activation_and_template_refusals(db):
     from app.modules.payroll import jurisdiction_hooks
-    from scripts.seed_mexico_canonical_packs import seed_mexico
+    from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
 
-    pack = seed_mexico(db, manifest={})["national"]                 # Draft, empty content
+    pack = seed_mexico(db, manifest=load_manifest())["national"]    # Draft, Batch 1 content only
     assert "refused" in jurisdiction_hooks.call("MX", "pack_activation_refusal", db, pack)
     assert "refused" in jurisdiction_hooks.call("MX", "template_activation_refusal", db, pack, 1)
     assert jurisdiction_hooks.call("MX", "statutory_editors", db, pack) == set()

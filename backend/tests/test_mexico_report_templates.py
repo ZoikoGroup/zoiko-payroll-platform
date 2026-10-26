@@ -82,3 +82,31 @@ def test_a_verified_rule_seeds_one_entry_per_period(db, monkeypatch):
     isr = sorted((e for e in entries if e.report_type == "MX_ISR_WITHHOLDING"), key=lambda e: e.period_key)
     assert len(isr) == 12 and str(isr[0].due_date) == "2026-02-17" and str(isr[-1].due_date) == "2027-01-17"
     assert len([e for e in entries if e.report_type == "MX_IMSS_BIMONTHLY"]) == 6
+
+
+def test_an_archive_copy_never_seeds_a_due_date(db, monkeypatch, tmp_path):
+    """Phase 11d: due dates are not Draft pack content - only a VERIFIED
+    (directly downloaded) source seeds one; an archive copy is skipped."""
+    import csv
+
+    from scripts import seed_mexico_canonical_packs as packs
+
+    row = {"code": "S24", "title": "SYNTHETIC", "issuer": "t", "url": "https://example.test/S24", "file": "S24.pdf",
+           "sha256": "a" * 64, "bytes": "1", "retrieved_at": "", "content_type": "", "header_version": "",
+           "text_layer": "", "status": "", "note": ""}
+    counts = {}
+    for status in ("ARCHIVE_COPY_VERIFIED", "VERIFIED"):
+        path = tmp_path / f"{status}.csv"
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow({**row, "status": status})
+        with open(path.parent / "VERIFICATION_LOG.csv", "w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=packs.mexico_sources.LOG_COLUMNS)
+            writer.writeheader()
+            writer.writerow({"code": "S24", "file": "S24.pdf", "url": row["url"], "final_url": row["url"],
+                             "downloaded_at": "2026-10-26T00:00:00Z", "downloader": "test@example.com",
+                             "response_bytes": "1", "sha256": row["sha256"], "result": "MATCH"})
+        monkeypatch.setattr(packs, "MANIFEST_PATH", path)
+        counts[status] = len(packs.load_manifest(statuses=packs.mexico_sources.ACTIVATION_STATUSES))
+    assert counts == {"ARCHIVE_COPY_VERIFIED": 0, "VERIFIED": 2}
