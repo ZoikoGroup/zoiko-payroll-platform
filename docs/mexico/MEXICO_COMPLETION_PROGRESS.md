@@ -255,3 +255,17 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 | Other jurisdictions | None |
 
 **Gap register:** B18 narrowed (ISR and CDMX ISN calendar, movement deadline and risk-premium period done; IMSS / INFONAVIT D-15; holidays D-16; retry configuration with C1). B11 risk-premium period done.
+
+---
+
+## W1-6 — Subsidy remainder rule and CFDI subsidy reporting (gap register B3, C6)
+
+**ZP-PRIV:** not required. No code change.
+
+- **Remainder rule: done in Batch 2.** `mx_subsidy_remainder_rule` = `NOT_PAYABLE`, from the DOF 01-05-2024 base decree, Art. Segundo ¶2 (TL-SUB-2). W1-4 added its annual counterpart (Art. Tercero III: no tax and nothing paid when the subsidy exceeds the annual tax).
+- **CFDI reporting (C6): BLOCKED-ON-SOURCE.** Searched again on 2026-10-26:
+  - **The 2024 and 2025 decrees (S3):** say nothing on how the subsidy is reported on the CFDI.
+  - **RMF 2026 (S1), rules 3.17.12 and 3.17.13 (PDF p. 452):** still framed on the 2013 decree ("Decreto DOF 11/12/2013 Décimo"). They say the subsidy is creditable only if noted "de manera expresa y por separado en los comprobantes fiscales de nómina", and that the CFDI must follow the "Guía de llenado del comprobante del recibo de pago de nómina", whose newest saved edition (S4, 2023) predates the 2024 decree.
+  - **Still needed:** SAT's current instructions for reporting the 2024-decree subsidy (TipoOtroPago 002 / `SubsidioAlEmpleo`). The CFDI concept `SUBSIDY_APPLIED` stays unmapped, and A10's `SubsidioAlEmpleo` node stays refused.
+- **Production effect:** none.
+- **Gap register:** B3 done; C6 BLOCKED-ON-SOURCE (W2-5).
