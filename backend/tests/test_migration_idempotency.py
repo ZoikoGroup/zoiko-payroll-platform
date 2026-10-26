@@ -34,6 +34,7 @@ _GUARDED = [
     "5d2c8f1a7b3e",  # Mexico mx_foundation_m1 (guarded from day one)
     "6e4a1d9c3f27",  # Mexico mx_employer_m2 (guarded from day one)
     "8b2f6d4e1a93",  # Mexico mx_employee_m3 (guarded, lock_timeout)
+    "447f57564983",  # South Africa za_foundation (guarded from day one, lock_timeout)
 ]
 
 

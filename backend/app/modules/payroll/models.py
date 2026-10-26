@@ -1200,6 +1200,25 @@ class EmployeeStatutoryProfile(Base):
     br_salario_familia_dependents_count    = Column(SmallInteger, nullable=True)
     br_salario_familia_dependents_evidence_ref = Column(String(300), nullable=True)
 
+    # ── South Africa (ZP-ZA-ENG-001; "ZA" — "SA" is Saudi Arabia) ────────────
+    # The effective-dated tax facts the engine resolves BEFORE it calculates
+    # (ZA-005); a missing required fact BLOCKS, it is never guessed. Nullable,
+    # no default (migration 447f57564983). SA ID / passport / income tax
+    # numbers are NOT here — they live in compliance_fields (masked).
+    za_employment_type             = Column(String(20), nullable=True)    # STANDARD / NON_STANDARD
+    za_tax_residency               = Column(String(20), nullable=True)    # RESIDENT (anything else blocks)
+    za_is_director                 = Column(Boolean, nullable=True)
+    za_medical_scheme_member       = Column(Boolean, nullable=True)
+    za_medical_dependants          = Column(SmallInteger, nullable=True)  # dependants for the medical tax credit
+    za_travel_business_use_80      = Column(Boolean, nullable=True)       # employer satisfied >= 80% business use (ZA-008)
+    za_uif_excluded                = Column(Boolean, nullable=True)
+    za_uif_exclusion_reason        = Column(String(100), nullable=True)
+    za_eti_eligible                = Column(Boolean, nullable=True)
+    za_eti_first_qualifying_month  = Column(Date, nullable=True)
+    za_sez_employee                = Column(Boolean, nullable=True)       # SEZ ETI is deferred scope — blocks
+    za_voluntary_additional_paye   = Column(Numeric(12, 2), nullable=True)
+    za_evidence_ref                = Column(String(300), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1531,6 +1550,9 @@ class PayrollRun(Base):
     # calculation snapshots + engine version + content hash. Written at
     # approval; checked at correction to ensure basis hasn't drifted.
     br_approval_fingerprint = Column(JSON, nullable=True)
+    # South Africa (ZP-ZA-ENG-001 ZA-016): approval bound to the frozen ZA
+    # snapshots + rule pack + engine build; NULL for non-ZA runs (447f57564983).
+    za_approval_fingerprint = Column(JSON, nullable=True)
     # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
     # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
     # so one run is never paid twice. Migration 8f90dde5f7b5.
@@ -1976,6 +1998,10 @@ class PayslipItem(Base):
     # Mexico (ZP-MX-ENG-001): mx_result + input / content hashes, frozen at
     # generation (MX-063 trace). NULL for non-MX payslips.
     mx_calculation_snapshot = Column(JSON, nullable=True)
+    # South Africa (ZP-ZA-ENG-001 ZA-009): frozen ZA inputs + za_result (the
+    # separate PAYE / UIF / SDL / ETI bases and the calculation trace), replayed
+    # exactly as computed. NULL for non-ZA payslips (447f57564983).
+    za_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -11212,3 +11238,185 @@ class PayrollBrValeTransporteElection(Base):
 
     def __repr__(self):
         return f"<PayrollBrValeTransporteElection id={self.id} emp={self.employee_id} elected={self.elected} status={self.status}>"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# South Africa (ZP-ZA-ENG-001) — "ZA"; "SA" in this file is Saudi Arabia.
+# Migration 447f57564983. Every table is tenant-scoped (ZA-014): row-level
+# security TENANT for registrations / SARS artefacts, WORKER "org" for the
+# directive and ETI tables.
+# ═══════════════════════════════════════════════════════════════════════════
+_ZA_JSON = postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
+
+
+class PayrollZaEmployerRegistration(Base):
+    """One effective-dated version of an employer's SARS / DEL registrations:
+    PAYE, UIF, SDL and COIDA references, SDL liability (an employer-level,
+    effective-dated fact — never inferred from one run, ZA-011) and ETI
+    registration. One ACTIVE open row per organisation."""
+    __tablename__ = "payroll_za_employer_registrations"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    paye_reference        = Column(String(20), nullable=False)
+    uif_reference         = Column(String(20), nullable=True)
+    sdl_reference         = Column(String(20), nullable=True)
+    coida_reference       = Column(String(30), nullable=True)
+    sdl_liable            = Column(Boolean, nullable=False)
+    sdl_exemption_reason  = Column(String(200), nullable=True)
+    eti_registered        = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    sector_code           = Column(String(50), nullable=True)
+    bargaining_council    = Column(String(200), nullable=True)
+    evidence_ref          = Column(String(300), nullable=True)
+    source_document_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"), nullable=True)
+    status                = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")  # DRAFT / ACTIVE / SUPERSEDED
+    approved_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at           = Column(DateTime(timezone=True), nullable=True)
+    previous_version_id   = Column(Integer, ForeignKey("payroll_za_employer_registrations.id", ondelete="SET NULL"), nullable=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_za_registration_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_za_registration_dates"),
+        sa.CheckConstraint("sdl_liable OR sdl_exemption_reason IS NOT NULL", name="ck_za_registration_sdl_exemption"),
+        Index("ix_za_registration_org_period", "organization_id", "effective_from"),
+        Index("uq_za_registration_one_active", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaEmployerRegistration org={self.organization_id} paye={self.paye_reference} {self.status}>"
+
+
+class PayrollZaTaxDirective(Base):
+    """A SARS tax directive (ZA-007): an authoritative override ONLY for its
+    employee, amount/type, period and directive number — never generalised into
+    a reusable rule. Captured with its evidence, approved by a second person,
+    and linked to the payslip it was applied to."""
+    __tablename__ = "payroll_za_tax_directives"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    directive_number         = Column(String(30), nullable=False)
+    directive_type           = Column(String(20), nullable=False)   # FIXED_PERCENTAGE / FIXED_AMOUNT / LUMP_SUM / OTHER
+    rate_pct                 = Column(Numeric(7, 4), nullable=True)
+    amount                   = Column(Numeric(14, 2), nullable=True)
+    tax_year                 = Column(String(10), nullable=False)
+    issue_date               = Column(Date, nullable=False)
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)
+    instruction              = Column(String(500), nullable=True)
+    evidence_artifact_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"), nullable=True)
+    evidence_sha256          = Column(String(64), nullable=True)
+    status                   = Column(String(12), nullable=False, default="CAPTURED", server_default="CAPTURED")
+    approved_by_id           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at              = Column(DateTime(timezone=True), nullable=True)
+    applied_payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    created_by_id            = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("directive_type IN ('FIXED_PERCENTAGE', 'FIXED_AMOUNT', 'LUMP_SUM', 'OTHER')",
+                           name="ck_za_directive_type"),
+        sa.CheckConstraint("status IN ('CAPTURED', 'APPROVED', 'APPLIED', 'EXPIRED', 'REVOKED')",
+                           name="ck_za_directive_status"),
+        sa.CheckConstraint("rate_pct IS NOT NULL OR amount IS NOT NULL", name="ck_za_directive_value"),
+        sa.CheckConstraint("rate_pct IS NULL OR (rate_pct >= 0 AND rate_pct <= 100)", name="ck_za_directive_rate"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_za_directive_dates"),
+        Index("uq_za_directive_number", "organization_id", "directive_number", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaTaxDirective {self.directive_number} emp={self.employee_id} {self.status}>"
+
+
+class PayrollZaEtiLedgerEntry(Base):
+    """Employment Tax Incentive per employee per claim month — the
+    qualifying-month history ETI needs (spec §4). An employer incentive: it
+    reduces the EMP201 PAYE remittance, never the employee's PAYE or net pay
+    (ZA-010). A correction is a REVERSED row plus a new one, never an edit."""
+    __tablename__ = "payroll_za_eti_ledger"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    claim_month              = Column(Date, nullable=False)                 # first day of the month
+    qualifying_month_no      = Column(SmallInteger, nullable=False)         # 1..za_eti_qualifying_months_max (content)
+    paid_hours               = Column(Numeric(7, 2), nullable=False)
+    remuneration             = Column(Numeric(14, 2), nullable=False)
+    normalised_remuneration  = Column(Numeric(14, 2), nullable=False)
+    eti_amount               = Column(Numeric(14, 2), nullable=False)
+    content_hash             = Column(String(64), nullable=True)
+    status                   = Column(String(12), nullable=False, default="CALCULATED", server_default="CALCULATED")
+    payroll_run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id          = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    reverses_id              = Column(Integer, ForeignKey("payroll_za_eti_ledger.id", ondelete="SET NULL"), nullable=True)
+    created_by_id            = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at               = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('CALCULATED', 'CLAIMED', 'REVERSED')", name="ck_za_eti_status"),
+        sa.CheckConstraint("qualifying_month_no >= 1", name="ck_za_eti_month_no"),
+        sa.CheckConstraint("eti_amount >= 0 AND paid_hours >= 0 AND remuneration >= 0", name="ck_za_eti_amounts"),
+        Index("uq_za_eti_employee_month", "employee_id", "claim_month", unique=True,
+              postgresql_where=text("status <> 'REVERSED'"), sqlite_where=text("status <> 'REVERSED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaEtiLedgerEntry emp={self.employee_id} {self.claim_month} eti={self.eti_amount} {self.status}>"
+
+
+class PayrollZaSarsArtifact(Base):
+    """One version of a SARS employer artefact — EMP201, EMP501 (interim /
+    annual), IRP5, IT3(a) or a cancellation — built from committed payroll.
+    Carries the BRS version it was validated against, the exact payload and
+    its SHA-256, validation result, submission channel, receipt and raw
+    external response (ZA-015, ZA-019, ZA-020). A rejected or superseded
+    payload is never overwritten: a correction is a new version."""
+    __tablename__ = "payroll_za_sars_artifacts"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact_type       = Column(String(20), nullable=False)   # EMP201 / EMP501_INTERIM / EMP501_ANNUAL / IRP5 / IT3A / CANCELLATION
+    period_key          = Column(String(20), nullable=False)   # e.g. "2026-08" or "2027-INTERIM"
+    version             = Column(SmallInteger, nullable=False, default=1, server_default="1")
+    brs_version         = Column(String(20), nullable=True)
+    payload             = Column(_ZA_JSON, nullable=True)
+    payload_sha256      = Column(String(64), nullable=False)
+    validation_status   = Column(String(12), nullable=False, default="PENDING", server_default="PENDING")
+    validation_errors   = Column(_ZA_JSON, nullable=True)
+    submission_channel  = Column(String(20), nullable=True)    # EASYFILE / EFILING — export-and-evidence only (ZA-002)
+    status              = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    receipt_ref         = Column(String(100), nullable=True)
+    external_response   = Column(_ZA_JSON, nullable=True)
+    source_run_ids      = Column(_ZA_JSON, nullable=True)
+    supersedes_id       = Column(Integer, ForeignKey("payroll_za_sars_artifacts.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at         = Column(DateTime(timezone=True), nullable=True)
+    submitted_at        = Column(DateTime(timezone=True), nullable=True)
+    created_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at          = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("artifact_type IN ('EMP201', 'EMP501_INTERIM', 'EMP501_ANNUAL', 'IRP5', 'IT3A', "
+                           "'CANCELLATION')", name="ck_za_artifact_type"),
+        sa.CheckConstraint("status IN ('DRAFT', 'VALIDATED', 'APPROVED', 'SUBMITTED', 'ACCEPTED', 'REJECTED', "
+                           "'SUPERSEDED')", name="ck_za_artifact_status"),
+        sa.CheckConstraint("validation_status IN ('PENDING', 'PASSED', 'FAILED')", name="ck_za_artifact_validation"),
+        sa.CheckConstraint("submission_channel IS NULL OR submission_channel IN ('EASYFILE', 'EFILING')",
+                           name="ck_za_artifact_channel"),
+        sa.CheckConstraint("version >= 1", name="ck_za_artifact_version"),
+        Index("uq_za_artifact_version", "organization_id", "artifact_type", "period_key", "version", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaSarsArtifact {self.artifact_type} {self.period_key} v{self.version} {self.status}>"
