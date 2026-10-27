@@ -17,6 +17,7 @@ import SaudiArabiaStatutoryProfilePanel from "./SaudiArabiaStatutoryProfilePanel
 import MexicoStatutoryProfilePanel from "./MexicoStatutoryProfilePanel";
 import BrazilStatutoryProfilePanel from "./BrazilStatutoryProfilePanel";
 import SouthAfricaStatutoryProfilePanel from "./SouthAfricaStatutoryProfilePanel";
+import ZADeductionOrdersBlock from "./ZADeductionOrdersBlock";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
 import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
@@ -477,6 +478,8 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                   </p>
                 </div>
               )}
+
+              {employee.countryCode === "ZA" && <ZADeductionOrdersBlock employeeId={employee.id} />}
 
 {employee.countryCode === "IT" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">

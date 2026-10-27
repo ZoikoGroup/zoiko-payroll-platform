@@ -67,7 +67,16 @@ def test_each_value_sits_in_the_slot_its_kind_names():
     slots = {"employee_pct": (2,), "employer_pct": (3,), "pct_pair": (2, 3), "amount": (4,), "text": (5,)}
     for row in content.ZA_SCALAR_CONTENT:
         filled = tuple(i for i in (2, 3, 4, 5) if row[i] is not None)
+        if row[0] in content.ZA_EMPTY_BY_DESIGN:
+            # Phase 9: the spec states no value — the row must stay EMPTY and pending.
+            assert filled == () and row[7] is True, row[0]
+            continue
         assert filled == slots[content.ZA_PARAMETER_KEYS[row[0]]], row[0]
+
+
+def test_only_listed_rows_may_be_empty():
+    empty = {row[0] for row in content.ZA_SCALAR_CONTENT if all(row[i] is None for i in (2, 3, 4, 5))}
+    assert empty == set(content.ZA_EMPTY_BY_DESIGN)
 
 
 def test_values_fit_their_columns():

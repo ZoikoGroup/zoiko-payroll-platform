@@ -739,7 +739,7 @@ _ZA_REGISTRATION_FIELDS = (
     "uif_reference", "sdl_reference", "coida_reference", "sdl_liable",
     "sdl_exemption_reason", "eti_registered", "sector_code", "bargaining_council",
     "evidence_ref", "source_document_id", "status", "created_by_id",
-    "approved_by_id", "approved_at", "previous_version_id",
+    "approved_by_id", "approved_at", "previous_version_id", "za_journal_accounts",
 )
 
 _ZA_DIRECTIVE_FIELDS = (
@@ -1085,3 +1085,146 @@ def za_coida_evidence(assessment_year: str, organization_id: int = Depends(_za_o
     from app.modules.payroll import south_africa_filing as filing
 
     return filing.build_za_coida_evidence(db, organization_id, assessment_year)
+
+
+# -- South Africa (ZP-ZA-ENG-001 Phase 9): exceptions, overrides, deductions,
+#    corrections, journal ---------------------------------------------------
+
+_ZA_OVERRIDE_FIELDS = (
+    "id", "organization_id", "employee_id", "payroll_run_id", "payslip_item_id", "field",
+    "before_value", "after_value", "reason_code", "reason", "evidence_ref", "status",
+    "expires_on", "approved_by_id", "approved_at", "created_by_id", "created_at",
+)
+
+_ZA_DEDUCTION_ORDER_FIELDS = (
+    "id", "employee_id", "jurisdiction", "order_type", "za_authority_type", "za_evidence_ref",
+    "court_reference", "start_date", "end_date", "priority", "fixed_deduction_amount", "status",
+)
+
+
+@router.get("/south-africa/runs/{run_id}/exceptions",
+            summary="South Africa four-eyes exceptions for a run (ZA-016)")
+def za_run_exceptions(run_id: int, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return lifecycle.list_za_run_exceptions(db, organization_id, run_id)
+
+
+@router.post("/south-africa/runs/{run_id}/exceptions/approve",
+             summary="Approve one South Africa run exception (second person)")
+def approve_za_run_exception(
+    run_id: int,
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    out = lifecycle.approve_za_run_exception(db, organization_id, run_id, key=payload.get("key"),
+                                             approver_id=current_user.id, note=payload.get("note"))
+    db.commit()
+    return out
+
+
+@router.get("/south-africa/runs/{run_id}/overrides", summary="South Africa result overrides for a run")
+def list_za_overrides(run_id: int, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return [_za_row(r, _ZA_OVERRIDE_FIELDS) for r in lifecycle.list_za_overrides(db, organization_id, run_id)]
+
+
+@router.post("/south-africa/runs/{run_id}/overrides", summary="Propose a South Africa result override (ZA-017)")
+def propose_za_override(
+    run_id: int,
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    row = lifecycle.propose_za_override(db, organization_id, run_id, payload, current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_OVERRIDE_FIELDS)
+
+
+@router.post("/south-africa/overrides/{override_id}/approve",
+             summary="Approve a South Africa result override (four-eyes)")
+def approve_za_override(
+    override_id: int,
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    row = lifecycle.approve_za_override(db, organization_id, override_id, current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_OVERRIDE_FIELDS)
+
+
+@router.post("/south-africa/overrides/{override_id}/withdraw", summary="Withdraw a South Africa result override")
+def withdraw_za_override(
+    override_id: int,
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    row = lifecycle.withdraw_za_override(db, organization_id, override_id, current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_OVERRIDE_FIELDS)
+
+
+@router.get("/south-africa/employees/{employee_id}/deduction-orders",
+            summary="A South Africa employee's non-statutory deductions")
+def list_za_deduction_orders(employee_id: int, organization_id: int = Depends(_za_org),
+                             db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return [_za_row(r, _ZA_DEDUCTION_ORDER_FIELDS)
+            for r in lifecycle.list_za_deduction_orders(db, organization_id, employee_id)]
+
+
+@router.post("/south-africa/employees/{employee_id}/deduction-orders",
+             summary="Record a South Africa deduction with its authority and evidence (ZA-013)")
+def record_za_deduction_order(
+    employee_id: int,
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    row = lifecycle.record_za_deduction_order(db, organization_id, employee_id, payload, current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_DEDUCTION_ORDER_FIELDS)
+
+
+@router.post("/south-africa/payslips/{payslip_id}/corrections",
+             summary="Correct a committed South Africa payslip (linked delta, original unchanged)")
+def create_za_correction(
+    payslip_id: int,
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return lifecycle.create_za_correction(db, organization_id, payslip_id, payload.get("reason"),
+                                          payload.get("changes") or {}, current_user.id)
+
+
+@router.get("/south-africa/runs/{run_id}/journal", summary="South Africa payroll journal for a run (balanced or blocked)")
+def za_run_journal(run_id: int, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_journal as journal
+
+    return journal.build_za_journal(db, organization_id, run_id)

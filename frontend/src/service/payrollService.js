@@ -2910,3 +2910,19 @@ export const listZaSarsPayments = async () => zaList(await api.get(`${ZA}/sars-p
 export const recordZaSarsPayment = (payload) => api.post(`${ZA}/sars-payments`, payload);
 export const reverseZaSarsPayment = (paymentId) => api.post(`${ZA}/sars-payments/${paymentId}/reverse`, {});
 export const getZaCoidaEvidence = (assessmentYear) => api.get(`${ZA}/coida-evidence/${assessmentYear}`);
+// Phase 9 — four-eyes exceptions, overrides, deductions, corrections, journal.
+// Every four-eyes rule (preparer != approver, maker != approver) is enforced
+// server-side; these calls only submit the operator's decision.
+export const listZaRunExceptions = async (runId) => zaList(await api.get(`${ZA}/runs/${runId}/exceptions`));
+export const approveZaRunException = (runId, key, note) =>
+  api.post(`${ZA}/runs/${runId}/exceptions/approve`, { key, note });
+export const listZaOverrides = async (runId) => zaList(await api.get(`${ZA}/runs/${runId}/overrides`));
+export const proposeZaOverride = (runId, payload) => api.post(`${ZA}/runs/${runId}/overrides`, payload);
+export const approveZaOverride = (overrideId) => api.post(`${ZA}/overrides/${overrideId}/approve`, {});
+export const withdrawZaOverride = (overrideId) => api.post(`${ZA}/overrides/${overrideId}/withdraw`, {});
+export const listZaDeductionOrders = async (employeeId) =>
+  zaList(await api.get(`${ZA}/employees/${employeeId}/deduction-orders`));
+export const recordZaDeductionOrder = (employeeId, payload) =>
+  api.post(`${ZA}/employees/${employeeId}/deduction-orders`, payload);
+export const createZaCorrection = (payslipId, payload) => api.post(`${ZA}/payslips/${payslipId}/corrections`, payload);
+export const getZaRunJournal = (runId) => api.get(`${ZA}/runs/${runId}/journal`);

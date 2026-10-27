@@ -356,6 +356,10 @@ def _south_africa_context(case_context: dict) -> dict:
         "za_variable_items": variable_items,
         "za_eti_paid_hours": _to_decimal(case_context.get("za_eti_paid_hours")),
         "za_eti_qualifying_month_no": None if qualifying_month is None else int(qualifying_month),
+        "za_hours": ({k: _to_decimal(v) for k, v in case_context["za_hours"].items()}
+                     if case_context.get("za_hours") else None),
+        "za_deduction_orders": [dict(o) for o in case_context.get("za_deduction_orders") or []] or None,
+        "za_overrides": [dict(o) for o in case_context.get("za_overrides") or []] or None,
     }
 
 

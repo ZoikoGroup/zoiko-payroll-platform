@@ -54,6 +54,7 @@ from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
 from app.modules.payroll.engine.countries import south_africa_content as _content
 from app.modules.payroll.engine.countries import south_africa_eti as _eti
+from app.modules.payroll.engine.jurisdictions.south_africa import labour as _labour
 
 _COUNTRY = "ZA"
 ZERO = Decimal("0")
@@ -620,6 +621,44 @@ def apply_directive(ctx: PayrollContext, profile, pack: _Pack, computed_paye: De
     return {"applied": applied, "paye": paye, "policyNote": _DIRECTIVE_POLICY}
 
 
+# ── labour controls, deductions and overrides (spec §5, ZA-012, ZA-013; Phase 9) ──
+def _block_on(pack: _Pack, key: str, evaluation: dict) -> None:
+    blocking = [f for f in evaluation["findings"] if f["severity"] == _labour.BLOCK]
+    if blocking:
+        pack.block(key, "; ".join(f"{f['code']}: {f['detail']}" for f in blocking))
+
+
+def apply_overrides(ctx: PayrollContext, pack: _Pack, values: dict) -> list:
+    """Approved manual overrides are applied LAST, over the engine's own figures.
+    Each override records the computed value it was approved against; if the
+    engine now computes something else the approval is stale and BLOCKS — an
+    override never silently lands on a different number than the one reviewed."""
+    applied = []
+    seen = set()
+    for raw in getattr(ctx, "za_overrides", None) or []:
+        field = _field(raw, "field")
+        ref = _field(raw, "id")
+        if field not in _content.OVERRIDE_FIELDS:
+            pack.block("za_override", f"override {ref}: {field!r} is not an overridable field")
+        if field in seen:
+            pack.block("za_override", f"more than one approved override for {field}")
+        seen.add(field)
+        if not str(_field(raw, "reason_code") or "").strip():
+            pack.block("za_override", f"override {ref} for {field} has no reason code")
+        approved_against = _field(raw, "before")
+        if approved_against is None or _dec(approved_against) != values[field]:
+            pack.block("za_override_stale",
+                       f"override {ref} for {field} was approved against {approved_against} but the engine now "
+                       f"computes {values[field]} — re-approve it")
+        amount = _dec(_field(raw, "after"))
+        if amount < ZERO:
+            pack.block("za_override", f"override {ref} for {field} is negative")
+        applied.append({"id": ref, "field": field, "before": str(values[field]), "after": str(amount),
+                        "reasonCode": _field(raw, "reason_code")})
+        values[field] = amount
+    return applied
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """South Africa entry point (standard + enterprise dispatch)."""
     pack = _Pack(ctx.rate_map, getattr(ctx, "za_organization_id", None))
@@ -673,6 +712,23 @@ def calculate(ctx: PayrollContext) -> dict:
         eti = _eti.compute_eti(remuneration=None, **eti_inputs)
     eti_result = {**eti, "amount": str(eti["amount"])}
 
+    labour = _labour.validate_za_labour(
+        hours=getattr(ctx, "za_hours", None), ordinary_pay=_dec(ctx.basic),
+        annual_remuneration=_dec(ctx.gross) * TWELVE, overtime_paid=_dec(ctx.overtime), rate_map=ctx.rate_map)
+    _block_on(pack, "za_labour", labour)
+    net_before = _dec(ctx.gross) - paye_applied - uif["employee"] - retirement
+    deductions = _labour.evaluate_za_deductions(getattr(ctx, "za_deduction_orders", None), net_before,
+                                                ctx.rate_map)
+    _block_on(pack, "za_deductions", deductions)
+
+    values = {"za_paye": paye_applied, "za_uif_employee": uif["employee"], "za_uif_employer": uif["employer"],
+              "za_sdl": sdl["employer"], "za_other_deductions": deductions["total"]}
+    overrides = apply_overrides(ctx, pack, values)
+    paye_applied = values["za_paye"]
+    uif = {**uif, "employee": values["za_uif_employee"], "employer": values["za_uif_employer"]}
+    sdl = {**sdl, "employer": values["za_sdl"]}
+    other_deductions = values["za_other_deductions"]
+
     employee_total = paye_applied + uif["employee"] + retirement
     employer_total = uif["employer"] + sdl["employer"]
 
@@ -696,6 +752,10 @@ def calculate(ctx: PayrollContext) -> dict:
         "uif": uif["trace"],
         "sdl": sdl["trace"],
         "eti": eti_result,
+        "labour": labour,
+        "deductions": {**deductions, "total": str(deductions["total"])},
+        "otherDeductionsTotal": str(other_deductions),
+        "overrides": overrides,
         "employeeTotal": str(employee_total),
         "employerTotal": str(employer_total),
         "rateKeys": sorted((ctx.rate_map or {}).keys()),
@@ -708,6 +768,8 @@ def calculate(ctx: PayrollContext) -> dict:
         "employer_esi": uif["employer"],
         "employer_payroll_tax": sdl["employer"],
         "employee_pension": retirement,
+        # Validated non-statutory deductions (ZA-013) — deducted from net (standard.py).
+        "za_other_deductions_total": other_deductions,
         "za_result": {
             "za_paye": str(paye_applied),
             "za_paye_computed": str(paye["paye"]),
@@ -723,6 +785,9 @@ def calculate(ctx: PayrollContext) -> dict:
             "za_employer_total": str(employer_total),
             "za_eti": eti_result,
             "za_eti_amount": str(eti["amount"]),
+            "za_other_deductions": str(other_deductions),
+            "za_labour_status": labour["status"],
+            "za_overrides_applied": len(overrides),
             "trace": trace,
         },
     }

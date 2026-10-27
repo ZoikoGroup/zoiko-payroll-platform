@@ -5859,6 +5859,12 @@ class CourtOrderedDeduction(Base):
 
     status            = Column(String(20), nullable=False, default="active", server_default="active")  # active / completed / cancelled
 
+    # South Africa (jurisdiction = 'ZA', ZA-013; migration 3880223bfaa0): the
+    # authority a non-statutory deduction rests on (one of the content row
+    # za_deduction_authority_types) and its evidence. NULL for every UK order.
+    za_authority_type = Column(String(30), nullable=True)
+    za_evidence_ref   = Column(String(300), nullable=True)
+
     created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at        = Column(DateTime(timezone=True), server_default=func.now())
     updated_at        = Column(DateTime(timezone=True), onupdate=func.now())
@@ -11281,6 +11287,9 @@ class PayrollZaEmployerRegistration(Base):
     approved_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at           = Column(DateTime(timezone=True), nullable=True)
     previous_version_id   = Column(Integer, ForeignKey("payroll_za_employer_registrations.id", ondelete="SET NULL"), nullable=True)
+    # Chart-of-accounts map for the ZA payroll journal (spec §10; migration
+    # 3880223bfaa0). NULL = not configured -> the journal BLOCKS, never a default.
+    za_journal_accounts   = Column(JSON, nullable=True)
     created_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at            = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
@@ -11489,3 +11498,43 @@ class PayrollZaReconciliationVariance(Base):
 
     def __repr__(self):
         return f"<PayrollZaReconciliationVariance {self.reconciliation_period} {self.month_key} {self.measure} {self.status}>"
+
+
+class PayrollZaPayrollOverride(Base):
+    """A recorded manual override of ONE result field of one employee's ZA
+    payslip in one run (ZA-017). It changes a result, never the rule pack;
+    counts only once a SECOND person approves it; expires; and goes stale (the
+    engine BLOCKS) if the computed `before_value` no longer matches.
+    Migration 3880223bfaa0."""
+    __tablename__ = "payroll_za_payroll_overrides"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    field            = Column(String(40), nullable=False)       # south_africa_content.OVERRIDE_FIELDS
+    before_value     = Column(Numeric(14, 2), nullable=False)   # the computed figure it was reviewed against
+    after_value      = Column(Numeric(14, 2), nullable=False)
+    reason_code      = Column(String(40), nullable=False)
+    reason           = Column(String(500), nullable=False)
+    evidence_ref     = Column(String(300), nullable=True)
+    status           = Column(String(12), nullable=False, default="PROPOSED", server_default="PROPOSED")
+    expires_on       = Column(Date, nullable=False)
+    approved_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at      = Column(DateTime(timezone=True), nullable=True)
+    created_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("field IN ('za_paye', 'za_uif_employee', 'za_uif_employer', 'za_sdl', "
+                           "'za_other_deductions')", name="ck_za_override_field"),
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'APPLIED', 'EXPIRED', 'WITHDRAWN')",
+                           name="ck_za_override_status"),
+        sa.CheckConstraint("after_value >= 0", name="ck_za_override_after"),
+        Index("ix_za_override_org_run", "organization_id", "payroll_run_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaPayrollOverride employee={self.employee_id} {self.field} {self.status}>"

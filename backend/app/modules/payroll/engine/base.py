@@ -973,6 +973,10 @@ class PayrollContext:
     za_variable_items: list = None             # section 7B items: {component, amount, earned_from, earned_to}
     za_eti_paid_hours: Decimal = None          # ETI: hours paid in the claim month
     za_eti_qualifying_month_no: int = None     # ETI: 1..za_eti_qualifying_months_max
+    # Phase 9 — labour, deductions, overrides (spec §5, ZA-012, ZA-013).
+    za_hours: dict = None                      # approved {ordinary, overtime, sunday, public_holiday} | None
+    za_deduction_orders: list = None           # [{id, order_type, authority_type, amount, evidence_ref}]
+    za_overrides: list = None                  # APPROVED [{id, field, before, after, reason_code}]
 
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
