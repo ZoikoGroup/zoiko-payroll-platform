@@ -174,6 +174,21 @@ def decision_transcribed(decision_id: int, body: Dict[str, Any] = Body(...),
     return _decisions().mark_mx_decision_transcribed(db, decision_id, {"reference": body.get("reference")}, _actor(current_user))
 
 
+# ── calculation sandbox (final mile X2) ────────────────────────────────────
+
+@router.post("/sandbox/calculate", summary="Run the engine on SYNTHETIC inputs and the content in force (Draft "
+                                          "allowed); optional what-if candidates for not-yet-approved decisions. "
+                                          "Writes nothing (X2)")
+def mx_sandbox_calculate(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_super_admin),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_sandbox_service
+
+    try:
+        return mexico_sandbox_service.run_mx_sandbox(db, body)
+    finally:
+        db.rollback()                                    # belt and braces: the sandbox never writes
+
+
 @router.get("/readiness/gate-checklists", summary="Per gate: checklist items confirmed by code now vs awaiting "
                                                   "signed evidence (read-only, W5-3)")
 def gate_checklists(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):

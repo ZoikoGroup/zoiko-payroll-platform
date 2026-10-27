@@ -1036,6 +1036,7 @@ POST,/api/super-admin/compliance/mexico/pilot-grants/{grant_id}/revoke,platform,
 POST,/api/super-admin/compliance/mexico/pilot-grants/{grant_id}/withdraw,platform,create,withdraw,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/readiness,platform,read,readiness,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/readiness/gate-checklists,platform,read,gate-checklists,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/mexico/sandbox/calculate,platform,create,calculate,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/statutory-rules,platform,read,statutory-rules,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/uma-min-wage,platform,read,uma-min-wage,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/netherlands/authority-payments/prepare,worker,create,prepare,,tenant,,statutory action is tenant-run (ZP-PRIV decision 3),,yes,authority payments are a tenant action; tenant route exists

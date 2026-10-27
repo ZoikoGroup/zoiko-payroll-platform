@@ -1,4 +1,4 @@
-import { BookOpen, Building2, Gavel, Calculator, ClipboardCheck, FileCheck2, FileCode2, HeartPulse, Home, Landmark, ListChecks, MapPin, Scale, ShieldCheck, Sun, Wallet } from "lucide-react";
+import { BookOpen, Building2, FlaskConical, Gavel, Calculator, ClipboardCheck, FileCheck2, FileCode2, HeartPulse, Home, Landmark, ListChecks, MapPin, Scale, ShieldCheck, Sun, Wallet } from "lucide-react";
 import MXIsrTariffsTab from "../../components/jurisdiction/mexico/MXIsrTariffsTab";
 import MXSubsidyUmaTab from "../../components/jurisdiction/mexico/MXSubsidyUmaTab";
 import MXMinimumWageTab from "../../components/jurisdiction/mexico/MXMinimumWageTab";
@@ -7,6 +7,7 @@ import MXInfonavitTab from "../../components/jurisdiction/mexico/MXInfonavitTab"
 import MXBenefitsWorkweekTab from "../../components/jurisdiction/mexico/MXBenefitsWorkweekTab";
 import MXStatutoryRulesTab from "../../components/jurisdiction/mexico/MXStatutoryRulesTab";
 import MXDecisionsTab from "../../components/jurisdiction/mexico/MXDecisionsTab";
+import MXSandboxTab from "../../components/jurisdiction/mexico/MXSandboxTab";
 import MXEarningClassificationTab from "../../components/jurisdiction/mexico/MXEarningClassificationTab";
 import MXCfdiCatalogTab from "../../components/jurisdiction/mexico/MXCfdiCatalogTab";
 import MXReadinessGatesTab from "../../components/jurisdiction/mexico/MXReadinessGatesTab";
@@ -45,7 +46,8 @@ export function mexicoExtraTabs(orgId, state) {
     )),
     tab("mx-readiness", "Readiness G1–G8", ClipboardCheck, "mx-tests", () => <MXReadinessGatesTab />),
     tab("mx-decisions", "Decisions", Gavel, "mx-readiness", () => <MXDecisionsTab />),
-    tab("mx-cfdi-lifecycle", "CFDI lifecycle", FileCode2, "mx-decisions", () => <MXCfdiLifecycleTab />),
+    tab("mx-sandbox", "Sandbox", FlaskConical, "mx-decisions", () => <MXSandboxTab />),
+    tab("mx-cfdi-lifecycle", "CFDI lifecycle", FileCode2, "mx-sandbox", () => <MXCfdiLifecycleTab />),
     tab("mx-authorities", "Authorities", Landmark, "mx-cfdi-lifecycle", () => <MXAuthoritiesTab />),
   ];
 }

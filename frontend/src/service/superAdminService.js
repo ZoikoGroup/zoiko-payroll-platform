@@ -183,6 +183,8 @@ export const withdrawMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${i
 export const reviseMxDecision = (id) => apiFetch(`${MX_SA}/decisions/${id}/revise`, { method: "POST" });
 export const transcribedMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id}/transcribed`, { method: "POST", body });
 export const getMxDecisionsForBlock = (code) => apiFetch(`${MX_SA}/decisions/by-block/${encodeURIComponent(code)}`);
+// Final mile X2: the calculation sandbox (writes nothing; candidates watermarked).
+export const runMxSandbox = (body) => apiFetch(`${MX_SA}/sandbox/calculate`, { method: "POST", body });
 // Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
 // list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
 export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);

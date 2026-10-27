@@ -148,3 +148,72 @@ Screenshots were inspected. The first pass showed two display defects, both fixe
 | Other jurisdictions | None |
 
 **Gap register:** D-01 … D-23, C4, C5 and C12 now have an in-product path: propose, then approve, then a ticket, then a Draft pack.
+
+---
+
+## X2 — Calculation sandbox and decision-impact preview
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** One new Super Admin route. It reads platform content only, writes nothing, and holds no organisation or worker data. **Do not merge until reviewed — branch protection does not enforce this (C17).**
+
+**What changed**
+- **`mexico_sandbox_service.run_mx_sandbox`.** It takes SYNTHETIC inputs:
+  - pay date and period;
+  - daily salary, minimum-wage zone, work state and pay frequency;
+  - seniority date and work-risk premium;
+  - a synthetic labour policy at the floors the spec's fixtures use (15 / 12 / 25%).
+
+  It builds a `PayrollContext` and runs the production engine (`countries/mexico.calculate`) against the national and state packs covering the pay date. Draft packs are allowed and labelled "NOT ACTIVE — treated as in force for the sandbox only".
+- **The answer** is either:
+  - the engine's full result (ISR, subsidy, SBC segments with UMA, cap and floor, the SBC factor, every IMSS branch and side with its rate and band, INFONAVIT, ISN); or
+  - the first block, with every preflight reason and, for each, the decisions that clear it (by block code; `MX_CONTENT_MISSING` by the missing content key).
+
+  The engine raises without a partial trace, so a blocked answer shows the inputs and content used and the block, not the steps before it.
+- **What-if.** `candidates` holds one or more `{decision, value}` pairs. Each is allowed only for a decision that is not yet approved (OPEN or PROPOSED) and populates exactly one pack-row key; a module switch is never patched, because that would touch code shared with real runs. The value is validated with the decision's grammar (X1), injected into an in-memory copy of the rows, never persisted, and the answer carries **CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR**. Every answer also carries **SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP**.
+- **No writes.** The service never flushes or commits, and the route rolls back after every call. Tests compare every table's row count before and after, including after a commit.
+- **Route:** `POST /super-admin/compliance/mexico/sandbox/calculate` (Super Admin; `platform` in the registry, the only registry change).
+- **UI:** a "Sandbox" tab with the input form, presets for the spec's §21 fixtures F1–F4, a candidates editor, watermark badges, the content labels, and either the calculated tables or the block with "cleared by D-xx — see the Decisions tab".
+
+**Findings (from the sandbox)**
+1. **Even with D-01 decided, every calculation stops next at D-03.** The CEAV lowest-band reference `mx_ceav_lowest_band_min_wage_ref` is read for **every** SBC, not only for ZLFN employees in band 1. `ceav.band_for` evaluates band 1 first, and its lower bound "1.0 SM" needs the reference. This contradicts `DECISIONS_PENDING.md` D-03, which said it blocked only ZLFN band 1; corrected there. It is not an engineering fix: band 1 is in minimum-wage units and band 2 in UMA units, and with the 2026 values (UMA 117.31, minimum wage 315.04) the ranges overlap, so which band an SBC in the gap belongs to is part of D-03. **The path to the first computable case is D-01 and D-03.**
+2. With D-01 and D-03 supplied as SYNTHETIC candidates, the engine reproduces the spec §21 control expectations on the transcribed Draft content:
+   - **F1:** UMA 113.14 in January, 117.31 in February, and the 25-UMA cap moves with it;
+   - **F2:** a first-year SBC factor of 1.049315;
+   - **F3:** CEAV employer 7.513% in band 4.01 UMA, employee 1.125%, retiro 2% separate;
+   - **F4:** a daily floor of 315.04 against 440.87, and 400 / day refused in ZLFN.
+
+   These are engineering controls, not golden values: those still need independent reconciliation (spec §21), and the candidate values are test inputs, not decisions.
+
+**Tests**
+- New `test_mexico_sandbox.py` (14):
+  - no pack means nothing is calculated;
+  - today every run stops at `MX_ROUNDING_RULE_MISSING`, linked to D-01, on the labelled Draft pack;
+  - D-01 alone stops at D-03;
+  - F1, F2, F3 and F4;
+  - candidates refused for a module switch, outside the grammar, for an unknown decision and for a malformed code;
+  - an approved decision cannot be a candidate;
+  - **nothing is written** (every table's count unchanged, even after a commit);
+  - the route is Super Admin only and the candidate watermark is set.
+- The X1 parser no longer treats the generic `MX_CONTENT_MISSING` as a decision's block code; it is traced by content key.
+- Mexico + privacy tests: **1,338 passed, 81 skipped**. The only failures are the 3 known local-only `/health` route-registry tests.
+- Frontend: ESLint is clean on the changed files; `check:undefined` reports 583 files with no undefined names; the build passes.
+
+**Browser: 9/9 PASS** (`final-mile-evidence/RESULTS-X2.md`):
+- x2-1: the expected D-01 block on the labelled Draft pack;
+- x2-2: the D-01 → D-03 chain;
+- x2-3 to x2-6: F2, F1, F3 and F4 through the presets, each watermarked CANDIDATE;
+- x2-7: a D-07 candidate refused on screen;
+- x2-8: no row written to the scratch database (the harness signs in before the snapshot);
+- no 5xx and no page errors.
+
+The only 4xx is the deliberate D-07 refusal. Screenshots inspected, including the watermark (`x2_02b`); the first pass showed the sticky header covering it, so a dedicated shot was added.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | One new Super Admin route; read-only, rolled back |
+| Engine | None. The sandbox calls the engine with in-memory content |
+| Other jurisdictions | None |
+
+**Gap register / W7:** the G1 owner can now see every D-01 option's effect on the §21 fixtures before deciding. W7 (golden vectors) stays blocked on D-01 **and** D-03.

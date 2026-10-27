@@ -150,7 +150,8 @@ def parse_decisions(decisions_md: str, gap_register_md: str) -> list:
     def record(code, title, owner, question, options, block_text, section_text, gate_text=None):
         spec = specs.get(code, {})
         gates = sorted(set(spec.get("gates") or [f"G{g}" for g in _GATES.findall(gate_text or owner)]))
-        codes = sorted(set(_CODES.findall(block_text)) | set(spec.get("codes", [])))
+        # MX_CONTENT_MISSING is generic (any missing row): traced by content key, never as a block code
+        codes = sorted((set(_CODES.findall(block_text)) | set(spec.get("codes", []))) - {"MX_CONTENT_MISSING"})
         return {"code": code, "title": _plain(title)[:200], "gates": gates, "owner_role": _plain(owner)[:60] or None,
                 "question": _plain(question),
                 "options": [{"label": _plain(o), "sources": _sources(o)} for o in options],

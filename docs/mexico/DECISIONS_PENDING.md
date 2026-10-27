@@ -8,7 +8,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 |---|---|---|---|---|
 | D-01 | Monetary rounding rule | G1 owner | Every calculation; pack activation (`mx_rounding_rule` is required) | Open |
 | D-02 | Pay frequency 01 Diario → Art. 96 DAILY? | G1 owner | Daily-paid employees (`MX_PAY_FREQUENCY_MAPPING_MISSING`) | Open |
-| D-03 | CEAV lowest band: which minimum wage anchors "1.0 SM" | G2 owner | ZLFN employees in band 1 (`MX_CEAV_LOWEST_BAND_PENDING_G2`) | Open |
+| D-03 | CEAV lowest band: which minimum wage anchors "1.0 SM" | G2 owner | **Every calculation with CEAV** (`MX_CONTENT_MISSING` on `mx_ceav_lowest_band_min_wage_ref`: band 1's lower bound is read for every SBC — corrected in final mile X2), and ZLFN employees in band 1 (`MX_CEAV_LOWEST_BAND_PENDING_G2`) | Open |
 | D-04 | Interpretations behind transcribed rows (Batch 2, W1-1) | G1 / G2 / G3 / G5 owners | Nothing today (rows are Draft, `[PENDING G1]`); activation needs them confirmed | Open |
 | D-05 | 48-hour week for January–April 2026 | G5 owner | Nothing today; the January–April row cites a decree in force only from 1 May 2026 | Open |
 | D-06 | CDMX ISN: are vacation paid out at termination, the separation payment and the indemnity in the base? | G4 owner | Any finiquito with those lines for a CDMX worker (`MX_ISN_SPECIAL_PAY_RULE_MISSING`) | Open |
@@ -55,6 +55,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 - **Options.** GENERAL; ZONE (the worker's own zone); UMA.
 - **Sources.** S11 Transitorio Segundo table (PDF p. 7, image); S10 Art. 168 II a) table (PDF p. 51); S34 Transitorio Tercero (PDF p. 2); S9 (both zones).
 - **Blocks.** ZLFN employees whose SBC falls in band 1: `MX_CEAV_LOWEST_BAND_PENDING_G2`. Phase 0 decision 4 assigned it to the G2 owner (SUA reconciliation).
+- **Correction (final mile X2, 2026-10-27).** This decision blocks more than ZLFN band 1. `ceav.band_for` evaluates band 1 first for every SBC, and band 1's lower bound "1.0 SM" needs this row, so **every** calculation that reaches CEAV blocks with `MX_CONTENT_MISSING` until it is decided. That is, every ordinary calculation once D-01 is decided. Found with the calculation sandbox. It is not an engineering fix: band 1 is in minimum-wage units and band 2 in UMA units, and with the 2026 values (UMA 117.31, minimum wage 315.04) the two ranges overlap, so which band an SBC in that gap falls in is part of this decision.
 
 ## D-04 · Interpretations behind transcribed rows
 
