@@ -10252,7 +10252,7 @@ class PayrollMxAuthorityLiability(Base):
 
     id                    = Column(Integer, primary_key=True, index=True)
     organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    authority             = Column(String(10), nullable=False)        # SAT_ISR / IMSS / INFONAVIT / ISN
+    authority             = Column(String(10), nullable=False)        # SAT_ISR / IMSS / IMSS_RCV / INFONAVIT / ISN
     registration_id       = Column(Integer, ForeignKey("payroll_mx_imss_registrations.id", ondelete="RESTRICT"), nullable=True, index=True)
     state_code            = Column(String(5), nullable=True)
     scope_key             = Column(String(30), nullable=False)        # ORG / REG:<id> / ST:<state>
@@ -10276,7 +10276,9 @@ class PayrollMxAuthorityLiability(Base):
     updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
 
     __table_args__ = (
-        sa.CheckConstraint("authority IN ('SAT_ISR', 'IMSS', 'INFONAVIT', 'ISN')", name="ck_mx_liability_authority"),
+        # A18 (migration c7d2e9a4f1b6): IMSS_RCV — retiro and CEAV, paid by bimester
+        sa.CheckConstraint("authority IN ('SAT_ISR', 'IMSS', 'IMSS_RCV', 'INFONAVIT', 'ISN')",
+                           name="ck_mx_liability_authority"),
         sa.CheckConstraint("status IN ('ACCRUED', 'FILED', 'PAID', 'RECONCILED', 'UNKNOWN', 'WITHDRAWN')",
                            name="ck_mx_liability_status"),
         UniqueConstraint("organization_id", "authority", "scope_key", "period_key", "sequence",

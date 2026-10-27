@@ -82,7 +82,7 @@ def test_each_dedicated_report_is_built_from_the_service_views(db, monkeypatch):
     liabilities = isr["renderedData"]["data"]["liabilities"]
     assert liabilities and {l["authority"] for l in liabilities} == {"SAT_ISR"} and liabilities[0]["sources"]
     sipare = _R().mx_report_generate(db, w.org.id, templates["MX-SIPARE"].id, {"period_key": "2026-06"}, None)
-    assert {l["authority"] for l in sipare["renderedData"]["data"]["liabilities"]} <= {"IMSS", "INFONAVIT"}
+    assert {l["authority"] for l in sipare["renderedData"]["data"]["liabilities"]} <= {"IMSS", "IMSS_RCV", "INFONAVIT"}
     idse = _R().mx_report_generate(db, w.org.id, templates["MX-IDSE-MOVEMENTS"].id, {}, None)
     assert idse["renderedData"]["data"]["movements"]
 

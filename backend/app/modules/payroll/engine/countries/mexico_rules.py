@@ -300,6 +300,15 @@ AGUINALDO_RULE = Lft87AguinaldoRule()
 #         seniority-premium salary by the minimum wage and twice "el salario
 #         mínimo del área geográfica de aplicación": "ZONE_MIN_WAGE" or "UMA".
 MX_INDEMNITY_SALARY_BASIS = None             # D-12: "POLICY_INTEGRATED"
+# D-22 (completion A17): how a finiquito withholds on vacation paid out, which
+# is ordinary income of the month (LISR Art. 96: the month's whole income).
+#   "MONTHLY_TOTAL_LESS_WITHHELD"  Art. 96 monthly tariff on (month-to-date
+#        taxable + the payout), less the ISR already withheld in the month
+#        (floored at 0)
+#   "INCREMENTAL_MONTHLY"  the monthly tariff on (month-to-date + payout) less
+#        the monthly tariff on month-to-date alone
+MX_FINIQUITO_ORDINARY_WITHHOLDING = None
+FINIQUITO_ORDINARY_METHODS = ("MONTHLY_TOTAL_LESS_WITHHELD", "INCREMENTAL_MONTHLY")
 MX_SERVICE_YEARS_COUNT = None                # D-13: "PROPORTIONAL" | "COMPLETED"
 MX_SENIORITY_PREMIUM_WAGE_REFERENCE = None   # D-07b: "ZONE_MIN_WAGE" | "UMA"
 INDEMNITY_SALARY_BASES = ("POLICY_INTEGRATED",)
@@ -523,13 +532,12 @@ class FiniquitoRule:
         """Separation (LISR Art. 96 ¶7): the rate of the last monthly ordinary
         salary on the separation's taxable total, or the tariff when the total
         is below that salary. Aguinaldo / vacation premium: their special-pay
-        rule (D-08). Vacation paid out is ordinary income of the month, which
-        a finiquito run cannot see yet (gap A17): it BLOCKS."""
-        if _d(taxable_by_concept.get("VACATION_PAYOUT", _ZERO), "VACATION_PAYOUT") > 0:
-            raise _blocked("MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED",
-                           "vacation paid out at termination is ordinary income of the month (LISR Art. 96); a "
-                           "finiquito run carries no month-to-date income yet (gap A17)")
+        rule (D-08). Vacation paid out is ordinary income of the month (LISR
+        Art. 96): withheld against the month-to-date income per D-22 (A17)."""
         total = _ZERO
+        payout = _d(taxable_by_concept.get("VACATION_PAYOUT", _ZERO), "VACATION_PAYOUT")
+        if payout > 0:
+            total += _ordinary_payout_isr(payout, facts)
         separation = sum((_d(v, k) for k, v in taxable_by_concept.items() if k in SEPARATION_CONCEPTS), _ZERO)
         if separation > 0:
             monthly = monthly_ordinary_income(facts)
@@ -542,6 +550,24 @@ class FiniquitoRule:
             if taxable > 0:
                 total += SPECIAL_PAY_RULES[concept].standalone_isr(taxable, facts)
         return total
+
+
+def _ordinary_payout_isr(payout: Decimal, facts) -> Decimal:
+    method = MX_FINIQUITO_ORDINARY_WITHHOLDING
+    if method is None:
+        raise _blocked("MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED",
+                       "vacation paid out at termination is ordinary income of the month (LISR Art. 96); how it is "
+                       "withheld against the month's earlier income is undecided (D-22)")
+    if method not in FINIQUITO_ORDINARY_METHODS:
+        raise _blocked("MX_RULE_UNRECOGNISED", f"MX_FINIQUITO_ORDINARY_WITHHOLDING {method!r} is not one of "
+                                               f"{FINIQUITO_ORDINARY_METHODS}")
+    mtd = facts.get("month_to_date")
+    if not mtd or "isr_withheld" not in mtd:
+        raise _blocked("MX_SPECIAL_PAY_FACT_MISSING", "the month-to-date income and withholding are missing")
+    earlier = _d(mtd.get("taxable") or 0, "month-to-date taxable")
+    if method == "INCREMENTAL_MONTHLY":
+        return monthly_isr(earlier + payout, facts) - monthly_isr(earlier, facts)
+    return max(monthly_isr(earlier + payout, facts) - _d(mtd.get("isr_withheld") or 0, "month-to-date ISR"), _ZERO)
 
 
 FINIQUITO_RULE = FiniquitoRule()

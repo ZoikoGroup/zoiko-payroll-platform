@@ -38,7 +38,12 @@ from app.modules.payroll import mexico_due_dates as due
 from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 _ZERO = Decimal("0")
-AUTHORITIES = ("SAT_ISR", "IMSS", "INFONAVIT", "ISN")
+AUTHORITIES = ("SAT_ISR", "IMSS", "IMSS_RCV", "INFONAVIT", "ISN")
+# Gap A18: LSS Art. 39 (S10 p. 14) — IMSS quotas monthly; LSS Transitorio
+# VIGÉSIMO SÉPTIMO (S10 p. 111) — retiro, cesantía y vejez stay bimonthly. So the
+# RCV branches are their own liability, each dated by its own calendar rule.
+RCV_BRANCHES = ("RETIRO", "CEAV")
+REGISTRATION_AUTHORITIES = ("IMSS", "IMSS_RCV", "INFONAVIT")
 # Zoiko WORKFLOW labels for a SUA difference (D5) — not statutory codes.
 EXPLANATION_CODES = ("TIMING", "SUA_VERSION", "DATA_CORRECTION", "OTHER")
 _SRC_ISN = "payroll_mx_isn_liabilities"
@@ -99,7 +104,7 @@ def registration_for(db: Session, employee_id: int, on):
 def _scope(authority: str, registration_id=None, state=None) -> str:
     if authority == "SAT_ISR":
         return "ORG"
-    return f"REG:{registration_id}" if authority in ("IMSS", "INFONAVIT") else f"ST:{state}"
+    return f"REG:{registration_id}" if authority in REGISTRATION_AUTHORITIES else f"ST:{state}"
 
 
 def _open_liability(db: Session, org_id: int, authority: str, period_key: str, registration_id=None, state=None):
@@ -177,7 +182,8 @@ def _candidate_sources(db: Session, run, item):
     elif reg is not None:
         for (branch, side), amount in branches.items():
             table = f"imss:{branch}:{side or '-'}"[:40]
-            out.append(("IMSS", reg.id, None, table, item.id, branch, side, None, amount))
+            authority = "IMSS_RCV" if branch in RCV_BRANCHES else "IMSS"
+            out.append((authority, reg.id, None, table, item.id, branch, side, None, amount))
         if keep(housing):
             out.append(("INFONAVIT", reg.id, None, _SRC_HOUSING, item.id, "INFONAVIT", "employer", None, housing))
         if keep(credit):
@@ -283,7 +289,7 @@ def reconcile_liability(db: Session, org_id: int, liability_id: int, actor_id) -
     if liab.status != "PAID":
         raise BadRequestException(f"Only a PAID liability can be reconciled (this one is {liab.status})")
     L.require_different(actor_id, liab.paid_by_id, "Reconciling a liability (after its payment was recorded)", org_id)
-    if liab.authority in ("IMSS", "INFONAVIT"):
+    if liab.authority in REGISTRATION_AUTHORITIES:
         sua = (db.query(m.PayrollMxSuaPeriod).filter(m.PayrollMxSuaPeriod.organization_id == org_id,
                                                      m.PayrollMxSuaPeriod.registration_id == liab.registration_id,
                                                      m.PayrollMxSuaPeriod.period_key == liab.period_key).first())
@@ -340,7 +346,7 @@ def _zoiko_totals(db: Session, org_id: int, registration_id: int, period_key: st
     out = defaultdict(lambda: _ZERO)
     q = (db.query(S).join(A, A.id == S.liability_id)
          .filter(A.organization_id == org_id, A.registration_id == registration_id, A.period_key == period_key,
-                 A.authority.in_(("IMSS", "INFONAVIT")), A.status != "WITHDRAWN"))
+                 A.authority.in_(REGISTRATION_AUTHORITIES), A.status != "WITHDRAWN"))
     for src in q:
         out[f"{src.employee_id}|{src.branch_code}:{src.side or '-'}"] += _dec(src.amount)
     return {k: str(v) for k, v in sorted(out.items())}
@@ -721,7 +727,7 @@ def downstream_reasons(db: Session, run) -> list:
     for liab in liabs:
         if liab.status not in ("ACCRUED", "WITHDRAWN") or liab.payload_hash:
             reasons.append(f"{liab.authority} liability {liab.period_key} #{liab.sequence} is {liab.status}")
-        if liab.authority in ("IMSS", "INFONAVIT"):
+        if liab.authority in REGISTRATION_AUTHORITIES:
             sua = (db.query(m.PayrollMxSuaPeriod).filter(m.PayrollMxSuaPeriod.organization_id == run.organization_id,
                                                          m.PayrollMxSuaPeriod.registration_id == liab.registration_id,
                                                          m.PayrollMxSuaPeriod.period_key == liab.period_key).first())
@@ -765,7 +771,7 @@ def withdraw_on_reset(db: Session, run, actor_id) -> dict:
                     L.transition(db, org_id, "ISN_RETURN", ret, "WITHDRAWN", "WITHDRAWN_ON_RESET", actor_id)
                 else:
                     ret.base_total, ret.amount, ret.liability_id = base, amount, live.id
-        if liab.authority in ("IMSS", "INFONAVIT"):
+        if liab.authority in REGISTRATION_AUTHORITIES:
             P = m.PayrollMxSuaPeriod
             sua = db.query(P).filter(P.organization_id == org_id, P.registration_id == liab.registration_id,
                                      P.period_key == liab.period_key, P.status == "DRAFT").first()

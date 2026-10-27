@@ -917,3 +917,82 @@ This is §3 stop condition 2, applied as written: the decision blocks W7 but not
 - Item counts (code / not code): G1 7 / 4, G2 1 / 4, G3 1 / 2, G4 3 / 3, G5 2 / 2, G6 0 / 6, G7 0 / 7, G8 0 / 3.
 - Release-gate and gate-checklist tests: 11 passed with the drafts in place.
 - **Production effect:** none (docs).
+
+---
+
+## A17 — Month-to-date income in special runs (after the report)
+
+**ZP-PRIV:** not required. No route, authz, identifier or migration change.
+
+**What changed**
+- **`mexico_run_service._special_month_to_date`.** Aguinaldo, PTU and finiquito runs now carry the pay date's month-to-date, where they used to carry zeros. It uses the same committed payslips, payment order and correction rules as the ordinary accumulator, plus the **ISR withheld** on them (`mexico_correction_service.contribution(..., with_isr=True)`; a correction contributes its delta). It is bound into each special run's input hash (`monthToDate`).
+- **Ordinary runs are unchanged.** Their month-to-date keeps exactly its two keys, so their input hash does not change (pinned).
+- **The finiquito rule.** Vacation paid out is no longer refused for lack of income (`MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED` is gone). It is withheld against the month per **D-22**: two methods built behind `MX_FINIQUITO_ORDINARY_WITHHOLDING`, which is undecided, so the payout blocks with `MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED`.
+- **The aguinaldo and PTU rules** do not read month-to-date today. D-08 option (b), the Art. 96 default, can now use it once chosen.
+
+**Tests**
+- `test_mexico_rules.py`:
+  - the undecided payout refusal;
+  - both methods against a SYNTHETIC monthly tariff (hand-computed), the floor at 0, a missing ISR fact and an unknown method.
+- `test_mexico_corrections.py`: a special run sees the month's income and withholding, with the correction delta; the ordinary month-to-date keys are unchanged.
+- All `tests/test_mexico_*.py`: **1,060 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Engine | Special runs bind their month-to-date into the input hash. No special run exists in production (Mexico dormant) |
+| Other jurisdictions | None |
+
+**Gap register:** A17 done (method D-22).
+
+---
+
+## A18 — The IMSS retirement branches get their own liability
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** This step adds a migration: `c7d2e9a4f1b6` (`mx_imss_rcv_authority_m19`).
+
+**Why.** The authority ledger kept one IMSS liability per registration and month, but the law dates its parts differently:
+- **LSS Art. 39** (S10, PDF p. 14): quotas "se causan por mensualidades vencidas", paid "a más tardar el día diecisiete del mes inmediato siguiente";
+- **LSS Transitorio VIGÉSIMO SÉPTIMO** (S10, PDF p. 111): retiro, cesantía en edad avanzada y vejez "continuará realizándose en forma bimestral".
+
+So no single calendar rule could date that liability.
+
+**What changed**
+- **New authority `IMSS_RCV`.** The RETIRO and CEAV branches, both sides, accrue to it; every other branch stays `IMSS`. It is keyed per registration and month like IMSS, and it reconciles against SUA and goes into SIPARE with IMSS and INFONAVIT (`REGISTRATION_AUTHORITIES`).
+- **Two filing rules [PENDING G1]:**
+  - `MX_IMSS`: monthly, the 17th of the following month (Art. 39);
+  - `MX_IMSS_RCV`: by bimester, the 17th of the month after it. This applies the Art. 39 day to the transitorio's period, the same reading the INFONAVIT rule uses (D-04 family).
+
+  `MX_LIABILITY_REPORT_TYPES` maps `IMSS_RCV` to `MX_IMSS_RCV`. The seed writes calendar rows only from VERIFIED sources, and S10 is an archive copy, so no due date is seeded yet; liabilities stay `DUE_DATE_UNSOURCED` until S10 is verified.
+- **Migration `c7d2e9a4f1b6`** (child of `b9f3d5a1c7e2`, the single head). It only widens the CHECK constraint `ck_mx_liability_authority`.
+  - No table or column is created, and the RLS policy is unchanged.
+  - On PostgreSQL: `SET LOCAL lock_timeout = '5s'`, then DROP / ADD the constraint `NOT VALID`, then `VALIDATE`.
+  - Guarded and idempotent. Downgrade refuses while any `IMSS_RCV` liability exists.
+  - `MIGRATIONS_MANIFEST.txt` regenerated (229); the Alembic head pins updated.
+- The Super Admin statutory-rules view note is updated. There is no screen change: the liabilities panel shows the authority as stored and scopes it by registration.
+
+**Tests**
+- New `test_mexico_imss_rcv_migrations.py`:
+  - SQLite: upgrade and downgrade are idempotent; rows are kept; an `IMSS_RCV` row is refused before the upgrade and accepted after; another value is still refused; downgrade refuses while an `IMSS_RCV` row exists.
+  - **PostgreSQL 17** (throwaway cluster, 3 of 3 runs):
+    - in flight, ACCESS EXCLUSIVE on `payroll_mx_authority_liabilities` only, about 0.1 s, with `organizations` still readable;
+    - with a reader on the table, the upgrade gives up after 5.22 s, 5.22 s and 5.23 s, and a re-run completes;
+    - the RLS policy and the rows are unchanged;
+    - the real `alembic upgrade head` and `check_schema_drift` pass.
+- Updated:
+  - the accrual test: `IMSS_RCV` equals the RETIRO + CEAV branch amounts, and IMSS + IMSS_RCV equals the payslip's IMSS total;
+  - the route, report-generator and calendar pins.
+- `verify_mexico_sources.py compare`: 565 checks, 0 misses (the four new quotes found in S10).
+- All `tests/test_mexico_*.py`: **1,062 passed, 66 skipped, 0 failed** (two more tests that assumed one IMSS liability or the old calendar were updated: the correction delta now sums IMSS + IMSS_RCV; the calendar seed still writes only the 12 CDMX dates, because S10 is an archive copy). Alembic metadata, migration manifest and deploy-migrate script tests pass.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | **One migration**: widens a CHECK constraint on a Mexico table, empty in production. Lock about 0.1 s, fail-fast at 5 s. Production goes from `b9f3d5a1c7e2` to `c7d2e9a4f1b6` |
+| Ledger | Mexican RCV amounts accrue to `IMSS_RCV`. None exist in production (Mexico dormant) |
+| Other jurisdictions | None |
+
+**Gap register:** A18 done (the due dates wait for a VERIFIED S10, and the bimonthly reading is [PENDING G1]).
