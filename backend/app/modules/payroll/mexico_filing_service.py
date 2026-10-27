@@ -35,10 +35,15 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import mexico_authority_lifecycle as L
 from app.modules.payroll import mexico_due_dates as due
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 _ZERO = Decimal("0")
-AUTHORITIES = ("SAT_ISR", "IMSS", "INFONAVIT", "ISN")
+AUTHORITIES = ("SAT_ISR", "IMSS", "IMSS_RCV", "INFONAVIT", "ISN")
+# Gap A18: LSS Art. 39 (S10 p. 14) — IMSS quotas monthly; LSS Transitorio
+# VIGÉSIMO SÉPTIMO (S10 p. 111) — retiro, cesantía y vejez stay bimonthly. So the
+# RCV branches are their own liability, each dated by its own calendar rule.
+RCV_BRANCHES = ("RETIRO", "CEAV")
+REGISTRATION_AUTHORITIES = ("IMSS", "IMSS_RCV", "INFONAVIT")
 # Zoiko WORKFLOW labels for a SUA difference (D5) — not statutory codes.
 EXPLANATION_CODES = ("TIMING", "SUA_VERSION", "DATA_CORRECTION", "OTHER")
 _SRC_ISN = "payroll_mx_isn_liabilities"
@@ -60,9 +65,9 @@ def guard(db: Session, org_id: int) -> None:
     from app.modules.payroll import mexico_dormancy, service
 
     if not mexico_dormancy.onboarding_enabled(db, org_id):
-        raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
+        raise MXRefuse("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
     if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
-        raise MXBlock("MX_ORG_NOT_MEXICAN", "the organisation's payroll jurisdiction is not Mexico", org_id)
+        raise MXRefuse("MX_ORG_NOT_MEXICAN", "the organisation's payroll jurisdiction is not Mexico", org_id)
 
 
 def _filing_pilot_refusal(db: Session, org_id: int) -> None:
@@ -99,7 +104,7 @@ def registration_for(db: Session, employee_id: int, on):
 def _scope(authority: str, registration_id=None, state=None) -> str:
     if authority == "SAT_ISR":
         return "ORG"
-    return f"REG:{registration_id}" if authority in ("IMSS", "INFONAVIT") else f"ST:{state}"
+    return f"REG:{registration_id}" if authority in REGISTRATION_AUTHORITIES else f"ST:{state}"
 
 
 def _open_liability(db: Session, org_id: int, authority: str, period_key: str, registration_id=None, state=None):
@@ -177,7 +182,8 @@ def _candidate_sources(db: Session, run, item):
     elif reg is not None:
         for (branch, side), amount in branches.items():
             table = f"imss:{branch}:{side or '-'}"[:40]
-            out.append(("IMSS", reg.id, None, table, item.id, branch, side, None, amount))
+            authority = "IMSS_RCV" if branch in RCV_BRANCHES else "IMSS"
+            out.append((authority, reg.id, None, table, item.id, branch, side, None, amount))
         if keep(housing):
             out.append(("INFONAVIT", reg.id, None, _SRC_HOUSING, item.id, "INFONAVIT", "employer", None, housing))
         if keep(credit):
@@ -283,17 +289,17 @@ def reconcile_liability(db: Session, org_id: int, liability_id: int, actor_id) -
     if liab.status != "PAID":
         raise BadRequestException(f"Only a PAID liability can be reconciled (this one is {liab.status})")
     L.require_different(actor_id, liab.paid_by_id, "Reconciling a liability (after its payment was recorded)", org_id)
-    if liab.authority in ("IMSS", "INFONAVIT"):
+    if liab.authority in REGISTRATION_AUTHORITIES:
         sua = (db.query(m.PayrollMxSuaPeriod).filter(m.PayrollMxSuaPeriod.organization_id == org_id,
                                                      m.PayrollMxSuaPeriod.registration_id == liab.registration_id,
                                                      m.PayrollMxSuaPeriod.period_key == liab.period_key).first())
         if sua is None or sua.status not in ("RECONCILED", "PAID"):
-            raise MXBlock("MX_SUA_NOT_RECONCILED", "IMSS / INFONAVIT reconcile only against a RECONCILED SUA period "
+            raise MXRefuse("MX_SUA_NOT_RECONCILED", "IMSS / INFONAVIT reconcile only against a RECONCILED SUA period "
                                                    "for the same registration and month (MX-033)", org_id)
     if liab.authority == "ISN":
         ret = _latest_return(db, org_id, liab.state_code, liab.period_key)
         if ret is None or ret.status != "ACCEPTED":
-            raise MXBlock("MX_ISN_RETURN_NOT_ACCEPTED", "an ISN liability reconciles only against its ACCEPTED "
+            raise MXRefuse("MX_ISN_RETURN_NOT_ACCEPTED", "an ISN liability reconciles only against its ACCEPTED "
                                                         "state return", org_id)
     liab.reconciled_by_id = actor_id
     L.transition(db, org_id, "LIABILITY", liab, "RECONCILED", "RECONCILED", actor_id)
@@ -340,7 +346,7 @@ def _zoiko_totals(db: Session, org_id: int, registration_id: int, period_key: st
     out = defaultdict(lambda: _ZERO)
     q = (db.query(S).join(A, A.id == S.liability_id)
          .filter(A.organization_id == org_id, A.registration_id == registration_id, A.period_key == period_key,
-                 A.authority.in_(("IMSS", "INFONAVIT")), A.status != "WITHDRAWN"))
+                 A.authority.in_(REGISTRATION_AUTHORITIES), A.status != "WITHDRAWN"))
     for src in q:
         out[f"{src.employee_id}|{src.branch_code}:{src.side or '-'}"] += _dec(src.amount)
     return {k: str(v) for k, v in sorted(out.items())}
@@ -473,14 +479,14 @@ def reconcile_sua(db: Session, org_id: int, period_id: int, actor_id) -> dict:
     if period.status != "DRAFT":
         raise BadRequestException(f"Only a DRAFT SUA period can be reconciled (this one is {period.status})")
     if period.sua_totals is None:
-        raise MXBlock("MX_SUA_FIGURES_MISSING", "enter the SUA figures first", org_id)
+        raise MXRefuse("MX_SUA_FIGURES_MISSING", "enter the SUA figures first", org_id)
     if _zoiko_totals(db, org_id, period.registration_id, period.period_key) != (period.zoiko_totals or {}):
-        raise MXBlock("MX_SUA_STALE", "committed amounts changed since the SUA figures were entered — "
+        raise MXRefuse("MX_SUA_STALE", "committed amounts changed since the SUA figures were entered — "
                                       "re-enter the figures", org_id)
     D = m.PayrollMxSuaDifference
     blocking = db.query(D).filter(D.sua_period_id == period.id, D.status != "APPROVED").count()
     if blocking:
-        raise MXBlock("MX_SUA_DIFFERENCES_OPEN", f"{blocking} difference(s) not explained and approved — "
+        raise MXRefuse("MX_SUA_DIFFERENCES_OPEN", f"{blocking} difference(s) not explained and approved — "
                                                  "differences are BLOCKING until then (MX-033)", org_id)
     L.require_different(actor_id, period.figures_entered_by_id, "Reconciling a SUA period", org_id)
     period.reconciled_by_id, period.reconciled_at = actor_id, L.now()
@@ -580,7 +586,7 @@ def draft_isn_return(db: Session, org_id: int, state: str, period_key: str, acto
     state = (state or "").strip().upper()
     reg = _isn_registration(db, org_id, state, period_key)
     if reg is None:
-        raise MXBlock("MX_ISN_REGISTRATION_MISSING", f"no OPEN ISN registration in {state} for {period_key}", org_id)
+        raise MXRefuse("MX_ISN_REGISTRATION_MISSING", f"no OPEN ISN registration in {state} for {period_key}", org_id)
     base, amount, liab = _isn_figures(db, org_id, state, period_key)
     if liab is None:
         raise BadRequestException(f"No committed ISN liability for {state} {period_key} — accrue first")
@@ -639,7 +645,7 @@ def file_isn_return(db: Session, org_id: int, return_id: int, reference: str, ac
         raise BadRequestException(f"Only a DRAFT return can be filed (this one is {ret.status})")
     rec = isn_reconciliation(db, ret)
     if not rec["matches"]:
-        raise MXBlock("MX_ISN_RETURN_UNRECONCILED", "the return does not equal its employee detail and ledger — "
+        raise MXRefuse("MX_ISN_RETURN_UNRECONCILED", "the return does not equal its employee detail and ledger — "
                                                      "refresh the draft (MX-046)", org_id)
     ref = L.require_reference(reference, "Filing an ISN return")
     L.freeze("ISN_RETURN", ret)
@@ -721,7 +727,7 @@ def downstream_reasons(db: Session, run) -> list:
     for liab in liabs:
         if liab.status not in ("ACCRUED", "WITHDRAWN") or liab.payload_hash:
             reasons.append(f"{liab.authority} liability {liab.period_key} #{liab.sequence} is {liab.status}")
-        if liab.authority in ("IMSS", "INFONAVIT"):
+        if liab.authority in REGISTRATION_AUTHORITIES:
             sua = (db.query(m.PayrollMxSuaPeriod).filter(m.PayrollMxSuaPeriod.organization_id == run.organization_id,
                                                          m.PayrollMxSuaPeriod.registration_id == liab.registration_id,
                                                          m.PayrollMxSuaPeriod.period_key == liab.period_key).first())
@@ -765,7 +771,7 @@ def withdraw_on_reset(db: Session, run, actor_id) -> dict:
                     L.transition(db, org_id, "ISN_RETURN", ret, "WITHDRAWN", "WITHDRAWN_ON_RESET", actor_id)
                 else:
                     ret.base_total, ret.amount, ret.liability_id = base, amount, live.id
-        if liab.authority in ("IMSS", "INFONAVIT"):
+        if liab.authority in REGISTRATION_AUTHORITIES:
             P = m.PayrollMxSuaPeriod
             sua = db.query(P).filter(P.organization_id == org_id, P.registration_id == liab.registration_id,
                                      P.period_key == liab.period_key, P.status == "DRAFT").first()

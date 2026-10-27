@@ -870,6 +870,20 @@ MX_FILING_CALENDAR: tuple = (
                "SEXTO: 'continuara siendo de forma bimestral hasta que en la Ley del Instituto de Seguridad y "
                "Servicios Sociales de los Trabajadores del Estado se establezca que la periodicidad de pagos se "
                "realizara mensualmente', PDF p. 57 (the ISSSTE law, S36 Art. 21 p. 11, still pays by bimester: log TL-CAL-4)"),
+    # A18 [PENDING G1]: IMSS quotas monthly (LSS Art. 39); the RCV branches (retiro, CEAV)
+    # by bimester (LSS Transitorio VIGÉSIMO SÉPTIMO), due the 17th of the month after it — the
+    # Art. 39 day applied to the transitorio's period, the reading the INFONAVIT rule uses.
+    FilingRule("MX_IMSS", "{year}-{month:02d}", "MONTHLY",
+               "IMSS quotas (other than retiro and CEAV) determined and paid by the 17th of the following month",
+               17, None, None, "S10/S10_IMSS_LSS.pdf",
+               "Art. 39: 'Las cuotas obrero patronales se causan por mensualidades vencidas'; 'realizar el pago "
+               "respectivo, a mas tardar el dia diecisiete del mes inmediato siguiente', PDF p. 14"),
+    FilingRule("MX_IMSS_RCV", "{year}-{month:02d}", "BIMONTHLY",
+               "retiro, cesantia en edad avanzada y vejez paid by bimester, by the 17th of the month after it", 17,
+               None, None, "S10/S10_IMSS_LSS.pdf",
+               "Transitorio VIGESIMO SEPTIMO: 'El pago de las cuotas obrero patronales respecto del seguro de retiro, "
+               "cesantia en edad avanzada y vejez, continuara realizandose en forma bimestral', PDF p. 111; Art. 39: "
+               "'a mas tardar el dia diecisiete del mes inmediato siguiente', PDF p. 14"),
     FilingRule("MX_ISN_RETURN", "{year}-{month:02d}", "MONTHLY",
                "CDMX payroll tax paid by return by the 17th of the following month", 17, None, "CDMX",
                "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
@@ -926,8 +940,8 @@ MX_OFFICIAL_HOLIDAYS: dict = {}       # year -> (tuple of dates, source, source_
 # Phase 8: which filing-calendar report type (payroll_statutory_filing_calendar,
 # seeded only from verified MX_FILING_CALENDAR rules) dates each authority
 # liability. Names match the Mexico report templates — structural, not law.
-MX_LIABILITY_REPORT_TYPES = {"SAT_ISR": "MX_ISR_WITHHOLDING", "IMSS": "MX_IMSS", "INFONAVIT": "MX_INFONAVIT",
-                             "ISN": "MX_ISN_RETURN"}
+MX_LIABILITY_REPORT_TYPES = {"SAT_ISR": "MX_ISR_WITHHOLDING", "IMSS": "MX_IMSS", "IMSS_RCV": "MX_IMSS_RCV",
+                             "INFONAVIT": "MX_INFONAVIT", "ISN": "MX_ISN_RETURN"}      # IMSS_RCV: gap A18
 
 # Phase 8 B7 (as Phase 7 §4.2): when a channel may call an authority-status
 # NOT_FOUND "definitive" — provider/portal-specific, NO default. EMPTY: never

@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import mexico_dormancy
 from app.modules.payroll import mexico_pilot_service as pilot
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 RELEASE_DAYS = 7
 
@@ -126,7 +126,7 @@ def _xfer_source_snapshot(db: Session, source_id: int) -> tuple:
         cats = pilot._copy_categories(db, source_id)
         for p in cats["laborPolicies"]:
             if p.collective_agreement_id is not None:
-                raise MXBlock("MX_COPY_COLLECTIVE_AGREEMENT", f"labour policy {p.id} references a collective agreement "
+                raise MXRefuse("MX_COPY_COLLECTIVE_AGREEMENT", f"labour policy {p.id} references a collective agreement "
                                                               "— record the agreement in the live organisation first",
                               source_id)
         snap = pilot._mx_copy_snapshot(cats)
@@ -141,11 +141,11 @@ def release_guard(db: Session, org_id: int) -> None:
     """The pilot side: kill switch on, general availability open, a pilot organisation
     (its own grant may have ended — releasing is its last act)."""
     if not mexico_dormancy.flag_enabled():
-        raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
+        raise MXRefuse("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
     if not mexico_dormancy.registry_available(db):
-        raise MXBlock("MX_TRANSFER_REQUIRES_GA", "a release needs general availability (the registry AVAILABLE)", org_id)
+        raise MXRefuse("MX_TRANSFER_REQUIRES_GA", "a release needs general availability (the registry AVAILABLE)", org_id)
     if not mexico_dormancy.is_pilot_organization(db, org_id):
-        raise MXBlock("MX_TRANSFER_NOT_PILOT", "only a pilot organisation releases its master data", org_id)
+        raise MXRefuse("MX_TRANSFER_NOT_PILOT", "only a pilot organisation releases its master data", org_id)
 
 
 def import_guard(db: Session, org_id: int) -> None:
@@ -153,9 +153,9 @@ def import_guard(db: Session, org_id: int) -> None:
     from app.modules.payroll import service
 
     if mexico_dormancy.is_pilot_organization(db, org_id) or not mexico_dormancy.onboarding_enabled(db, org_id):
-        raise MXBlock("MX_TRANSFER_NOT_LIVE", "only an open, live (non-pilot) Mexican organisation imports", org_id)
+        raise MXRefuse("MX_TRANSFER_NOT_LIVE", "only an open, live (non-pilot) Mexican organisation imports", org_id)
     if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
-        raise MXBlock("MX_TRANSFER_NOT_LIVE", "the organisation's payroll jurisdiction is not Mexico", org_id)
+        raise MXRefuse("MX_TRANSFER_NOT_LIVE", "the organisation's payroll jurisdiction is not Mexico", org_id)
 
 
 # ── the release (pilot organisation) ────────────────────────────────────────
@@ -191,7 +191,7 @@ def propose_release(db: Session, org_id: int, data: dict, actor_id: Optional[int
         raise BadRequestException("A release needs a reason")
     refusal = _xfer_target_refusal(db, org_id, target_id)
     if refusal:
-        raise MXBlock(refusal[0], refusal[1], org_id)
+        raise MXRefuse(refusal[0], refusal[1], org_id)
     for r in db.query(R).filter(R.organization_id == org_id, R.target_organization_id == target_id,
                                 R.status.in_(("PROPOSED", "RELEASED"))):
         if release_state(r) in ("PROPOSED", "AVAILABLE"):
@@ -215,13 +215,13 @@ def approve_release(db: Session, org_id: int, release_id: int, actor_id: Optiona
     if row.status != "PROPOSED":
         raise BadRequestException(f"Only a PROPOSED release can be released (this one is {row.status})")
     if actor_id is not None and actor_id == row.proposed_by_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "a release must be released by a pilot-org admin other than its proposer",
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "a release must be released by a pilot-org admin other than its proposer",
                       org_id)
     refusal = _xfer_target_refusal(db, org_id, row.target_organization_id)
     if refusal:
-        raise MXBlock(refusal[0], refusal[1], org_id)
+        raise MXRefuse(refusal[0], refusal[1], org_id)
     if _xfer_source_snapshot(db, org_id)[2] != row.plan_sha256:
-        raise MXBlock("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after the release was proposed — "
+        raise MXRefuse("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after the release was proposed — "
                                                 "revoke it and propose again", org_id)
     now = _xfer_now()
     row.status, row.released_by_id, row.released_at = "RELEASED", actor_id, now
@@ -263,7 +263,7 @@ def _xfer_usable_release(db: Session, org_id: int, release_id: int):
     if row.target_organization_id != org_id:
         raise NotFoundException(f"Release {release_id} not found")
     if release_state(row) != "AVAILABLE":
-        raise MXBlock("MX_TRANSFER_RELEASE_UNAVAILABLE", f"release {row.id} is {release_state(row)} — only an "
+        raise MXRefuse("MX_TRANSFER_RELEASE_UNAVAILABLE", f"release {row.id} is {release_state(row)} — only an "
                                                          "unexpired, unused release can be imported", org_id)
     return row
 
@@ -283,10 +283,10 @@ def preview_import(db: Session, org_id: int, release_id: int) -> dict:
     rel = _xfer_usable_release(db, org_id, release_id)
     refusal = _xfer_target_refusal(db, rel.organization_id, org_id)
     if refusal:
-        raise MXBlock(refusal[0], refusal[1], org_id)
+        raise MXRefuse(refusal[0], refusal[1], org_id)
     snap, counts, fingerprint, not_copied = _xfer_source_snapshot(db, rel.organization_id)
     if fingerprint != rel.plan_sha256:
-        raise MXBlock("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after it was released — ask the "
+        raise MXRefuse("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after it was released — ask the "
                                                 "pilot to revoke and release again", org_id)
     rows = {
         "imssRegistrations": [{"sourceId": i, "registroPatronal": v["registro_patronal"], "riskClass": v["risk_class"]}
@@ -312,7 +312,7 @@ def propose_import(db: Session, org_id: int, release_id: int, data: dict, actor_
     preview = preview_import(db, org_id, release_id)
     reviewed = ((data or {}).get("previewSha256") or "").strip()
     if reviewed != preview["previewSha256"]:
-        raise MXBlock("MX_TRANSFER_DIFF_NOT_REVIEWED", "propose the import with the hash of the diff preview you "
+        raise MXRefuse("MX_TRANSFER_DIFF_NOT_REVIEWED", "propose the import with the hash of the diff preview you "
                                                        "reviewed (it changed, or none was given)", org_id)
     reason = ((data or {}).get("reason") or "").strip()
     if not reason:
@@ -346,15 +346,15 @@ def approve_import(db: Session, org_id: int, copy_id: int, actor_id: Optional[in
     if row.status != "PROPOSED":
         raise BadRequestException(f"Only a PROPOSED import can be approved (this one is {row.status})")
     if actor_id is not None and actor_id == row.proposed_by_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "an import must be approved by a live-org admin other than its proposer",
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "an import must be approved by a live-org admin other than its proposer",
                       org_id)
     rel = _xfer_usable_release(db, org_id, row.release_id)
     refusal = _xfer_target_refusal(db, rel.organization_id, org_id)
     if refusal:
-        raise MXBlock(refusal[0], refusal[1], org_id)
+        raise MXRefuse(refusal[0], refusal[1], org_id)
     snap, _, fingerprint, not_copied = _xfer_source_snapshot(db, rel.organization_id)
     if fingerprint != row.plan_sha256:
-        raise MXBlock("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after it was released", org_id)
+        raise MXRefuse("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after it was released", org_id)
     source_rfcs, target_rfcs = _xfer_rfcs(db, rel.organization_id), _xfer_rfcs(db, org_id)
     profile_map = {source_rfcs[rfc]: target_rfcs[rfc] for rfc in source_rfcs}
     try:

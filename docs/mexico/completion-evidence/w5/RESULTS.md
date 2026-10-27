@@ -1,6 +1,6 @@
 # Mexico completion W4 / W5-1 -- browser check
 
-29/29 PASS
+39/39 PASS
 
 | Check | Result |
 |---|---|
@@ -13,6 +13,16 @@
 | w5-7 choosing 2025 shows the annual tariff as awaiting transcription | PASS |
 | w5-8 the CDMX ISN row shows its 4 % rate, PENDING G1, the source and the date bar | PASS |
 | w5-9 the CEAV 2023-2030 schedule shows its source | PASS |
+| w5-10 the Mexico pack header offers no Hotfix Activate | PASS |
+| w5-11 a generic statutory edit of a Mexico pack is refused (400) | PASS |
+| w5-12 a Mexico hotfix activation is refused (400) | PASS |
+| w5-13 another country's Draft pack still offers Hotfix Activate (unchanged) | PASS |
+| w5-14 the readiness tab lists a checklist for every gate G1-G8 | PASS |
+| w5-15 G1 shows 7 code items (evaluated now) and its evidence items (awaiting signed evidence) | PASS |
+| w5-16 G4 shows unsupported states blocked (met) and D-06 undecided (unmet) | PASS |
+| w5-17 '+ New Policy' for Mexico shows the no-policy page, not India's form | PASS |
+| w5-18 another unmapped country keeps today's fallback (unchanged; OOS-6) | PASS |
+| w5-19 the classification form no longer offers SEPARACION | PASS |
 | w4-1 the Mexico template list shows every national template | PASS |
 | w4-t MX-PAYROLL-REGISTER opens (Draft) with its components, or says which generator builds it | PASS |
 | w4-t MX-EMPLOYER-COST opens (Draft) with its components, or says which generator builds it | PASS |

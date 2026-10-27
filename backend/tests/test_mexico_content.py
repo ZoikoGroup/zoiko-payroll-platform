@@ -653,9 +653,11 @@ def test_calendar_and_deadlines_are_cited_and_holidays_wait_for_d16():
     _need(rules, "filing calendar")
     assert {k: (r.frequency, r.due_day, r.state) for k, r in rules.items()} == {
         "MX_ISR_WITHHOLDING": ("MONTHLY", 17, None), "MX_ISN_RETURN": ("MONTHLY", 17, "CDMX"),
-        "MX_INFONAVIT": ("BIMONTHLY", 17, None)}                               # W2-5: S36 Art. 21 still bimonthly
+        "MX_INFONAVIT": ("BIMONTHLY", 17, None),                               # W2-5: S36 Art. 21 still bimonthly
+        "MX_IMSS": ("MONTHLY", 17, None), "MX_IMSS_RCV": ("BIMONTHLY", 17, None)}     # A18: LSS Art. 39, Trans. XXVII
     assert rules["MX_ISR_WITHHOLDING"].source == "S35/S35_DIP_CFF.pdf" and "Art. 6 I" in rules["MX_ISR_WITHHOLDING"].source_ref
-    assert "MX_IMSS" not in rules                                              # A18: RCV bimonthly, other branches monthly
+    for key, cited in (("MX_IMSS", "Art. 39"), ("MX_IMSS_RCV", "VIGESIMO SEPTIMO")):     # A18: split, each sourced
+        assert rules[key].source == "S10/S10_IMSS_LSS.pdf" and cited in rules[key].source_ref
     assert (c.MX_RISK_PREMIUM_PERIOD.start_month, c.MX_RISK_PREMIUM_PERIOD.start_day) == (3, 1)
     assert c.MX_RISK_PREMIUM_PERIOD.source == "S29/S29_DIP_RACERF.pdf"
     assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5

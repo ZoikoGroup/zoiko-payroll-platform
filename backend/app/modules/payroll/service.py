@@ -8138,6 +8138,19 @@ def _refuse_hk_generic_statutory_edit(pack) -> None:
         )
 
 
+def _refuse_mx_generic_statutory_edit(pack) -> None:
+    """Mexico only (completion W5-2): MX pack rows are seeded from
+    mexico_content — every value cites a saved, hashed source and is re-proven
+    at activation — and are never edited through the generic canonical-row
+    editor, which carries no source. Other countries unchanged."""
+    if pack is not None and pack.jurisdiction_country == "MX":
+        raise BadRequestException(
+            "Mexico statutory rows are not edited here: they are seeded from the transcribed, source-cited "
+            "content (mexico_content) and change only through a code release that passes "
+            "verify_mexico_sources.py compare, then a new pack version. See Compliance → Mexico → Statutory rules."
+        )
+
+
 def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_id: Optional[int] = None) -> TaxSlab:
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
     if not pack:
@@ -8145,6 +8158,7 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
     if pack.pack_type != "tax":
         raise BadRequestException("Canonical tax slabs can only be attached to a pack_type='tax' JurisdictionPack.")
     _refuse_hk_generic_statutory_edit(pack)
+    _refuse_mx_generic_statutory_edit(pack)
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -8222,6 +8236,7 @@ def upsert_canonical_contribution_rate(
     if pack.pack_type != "tax":
         raise BadRequestException("Canonical contribution rates can only be attached to a pack_type='tax' JurisdictionPack.")
     _refuse_hk_generic_statutory_edit(pack)
+    _refuse_mx_generic_statutory_edit(pack)
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -8317,6 +8332,7 @@ def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Opti
     # enforces for edits, applied here for deletes too.
     if pack:
         _refuse_hk_generic_statutory_edit(pack)
+        _refuse_mx_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -8419,6 +8435,7 @@ def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int]
     # status check previously existed here at all.
     if pack:
         _refuse_hk_generic_statutory_edit(pack)
+        _refuse_mx_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -9285,6 +9302,16 @@ def activate_jurisdiction_pack_hotfix(
         # no hotfix path at all (the SG "PROHIBITED" policy, fixed).
         refusal = ("Sweden hotfix activation is not permitted — Swedish statutory content must be activated "
                    "through the normal four-eyes path (ZP-SE-ENG-001 §14).")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, refusal,
+                       path="hotfix")
+        raise BadRequestException(refusal)
+    if row.jurisdiction_country == "MX":
+        # Completion W5-2: Mexico refuses self-approval (_SELF_APPROVAL_REFUSED_COUNTRIES)
+        # and approval needs QA plus content / evidence / VERIFIED sources
+        # (mexico_service.mx_pack_approval_refusal) — hotfix self-approves, so it
+        # would skip both. No Mexico hotfix: the full four-eyes path only.
+        refusal = ("Mexico hotfix activation is not permitted — Mexican statutory content is activated only through "
+                   "the normal four-eyes path (Draft → In Review → QA → Approved by a second Super Admin → Active).")
         _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, refusal,
                        path="hotfix")
         raise BadRequestException(refusal)

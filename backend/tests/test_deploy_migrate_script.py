@@ -112,7 +112,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
                 "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
         tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
-        # Mexico m18 (b9f3d5a1c7e2), then South Africa (447f57564983, re-parented onto it).
+        # Mexico m18 (b9f3d5a1c7e2) and m19 (c7d2e9a4f1b6, a CHECK change only), then South
+        # Africa (447f57564983, re-parented onto c7d2e9a4f1b6).
         assert tables == za_tables
         assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}
         assert columns["payroll_runs"] == {"za_approval_fingerprint"}

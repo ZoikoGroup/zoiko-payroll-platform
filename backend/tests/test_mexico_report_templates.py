@@ -115,14 +115,15 @@ def test_an_archive_copy_never_seeds_a_due_date(db, monkeypatch, tmp_path):
 
 
 def test_the_real_calendar_seeds_only_rules_whose_source_is_verified(db):
-    """W1-5 / W2-5: ISR (S35 CFF Art. 6 I) and INFONAVIT (S27) rest on archive copies and are skipped; the CDMX ISN rule rests on S22, VERIFIED by a logged
+    """W1-5 / W2-5 / A18: ISR (S35 CFF Art. 6 I), INFONAVIT (S27) and IMSS / IMSS RCV (S10) rest on archive copies and are skipped; the CDMX ISN rule rests on S22, VERIFIED by a logged
     direct download, so its 12 monthly due dates (the 17th of the next month) seed."""
     from app.modules.payroll.engine.countries import mexico_content as c
 
     from app.modules.payroll import mexico_sources
     from scripts.seed_mexico_canonical_packs import load_manifest
 
-    assert {r.report_type for r in c.MX_FILING_CALENDAR} == {"MX_ISR_WITHHOLDING", "MX_INFONAVIT", "MX_ISN_RETURN"}
+    assert {r.report_type for r in c.MX_FILING_CALENDAR} == {"MX_ISR_WITHHOLDING", "MX_INFONAVIT", "MX_ISN_RETURN",
+                                                             "MX_IMSS", "MX_IMSS_RCV"}
     entries = _seed(db, manifest=load_manifest(statuses=mexico_sources.ACTIVATION_STATUSES))["calendar"]
     assert len(entries) == 12
     assert {e.jurisdiction_state for e in entries} == {"CDMX"} and {e.report_type for e in entries} == {"MX_ISN_RETURN"}

@@ -1,7 +1,7 @@
 """za_foundation: South Africa statutory-profile columns, snapshot/fingerprint, four ZA tables
 
 Revision ID: 447f57564983
-Revises: b9f3d5a1c7e2 (re-parented from 8f90dde5f7b5 at the 2026-10-26 merge of main; never applied)
+Revises: c7d2e9a4f1b6 (written on 8f90dde5f7b5; re-parented onto b9f3d5a1c7e2 and then onto c7d2e9a4f1b6 at the 2026-10-26 and 2026-10-27 merges of main; never applied)
 Create Date: 2026-10-26
 
 ZP-ZA-ENG-001 Phase 2 (database). "ZA" is South Africa ("SA" is Saudi Arabia).
@@ -42,7 +42,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "447f57564983"
-down_revision: Union[str, Sequence[str], None] = "b9f3d5a1c7e2"
+down_revision: Union[str, Sequence[str], None] = "c7d2e9a4f1b6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

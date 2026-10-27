@@ -279,17 +279,20 @@ def test_the_real_seeded_packs_are_refused_today(db):
     assert "not VERIFIED" in checks["sources_verified"]["detail"]
 
 
-def test_the_hotfix_path_runs_the_same_mexico_gates(db, monkeypatch, ready_pack):
+def test_there_is_no_mexico_hotfix_path(db, ready_pack):
+    """Completion W5-2 (was: the hotfix path runs the same gates). Hotfix
+    self-approves, which Mexico's four-eyes approval forbids — so it is
+    refused outright, before any gate, and the refusal is audited."""
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import mexico_service, service
+    from app.modules.payroll import service
 
-    monkeypatch.setattr(mexico_service, "pack_golden_check",
-                        lambda db, pack: {"casesInWindow": 0, "passed": 0, "failures": []})
-    ready_pack.status = "Approved"
-    db.commit()
-    with pytest.raises(BadRequestException, match="golden vector"):
-        service.activate_jurisdiction_pack_hotfix(db, ready_pack.id, "INC-1", "test", actor_id=ACTIVATOR)
-    assert ready_pack.status == "Approved"
+    for status in ("Approved", "Draft"):
+        ready_pack.status, ready_pack.approved_by_id = status, None
+        db.commit()
+        with pytest.raises(BadRequestException, match="Mexico hotfix activation is not permitted"):
+            service.activate_jurisdiction_pack_hotfix(db, ready_pack.id, "INC-1", "test", actor_id=ACTIVATOR)
+        db.refresh(ready_pack)
+        assert ready_pack.status == status and ready_pack.approved_by_id is None
 
 
 def test_actor_reaches_only_hooks_that_declare_it(db, monkeypatch):

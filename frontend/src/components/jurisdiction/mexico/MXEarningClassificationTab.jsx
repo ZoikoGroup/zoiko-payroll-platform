@@ -87,7 +87,7 @@ export default function MXEarningClassificationTab({ orgId }) {
             <BoolSelect label="PTU wage base" value={form.ptuWageBaseIncluded} onChange={set("ptuWageBaseIncluded")} />
             <Field label="CFDI node">
               <select required className={input} value={form.cfdiNodeType} onChange={set("cfdiNodeType")}>
-                <option value="">— decide —</option>{["PERCEPCION", "DEDUCCION", "OTRO_PAGO", "SEPARACION"].map((o) => <option key={o}>{o}</option>)}
+                <option value="">— decide —</option>{["PERCEPCION", "DEDUCCION", "OTRO_PAGO"].map((o) => <option key={o}>{o}</option>)}
               </select>
             </Field>
             <Field label="SAT concept code"><input className={input} value={form.cfdiConceptCode} onChange={set("cfdiConceptCode")} /></Field>
