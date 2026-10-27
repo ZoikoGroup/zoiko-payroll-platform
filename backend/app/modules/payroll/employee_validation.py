@@ -1764,6 +1764,93 @@ class BREmployeeValidation(EmployeeValidationStrategy):
                 )
 
 
+# -- South Africa (ZP-ZA-ENG-001 Phase 5) -------------------------------------
+
+def _za_yymmdd_is_a_date(digits: str) -> bool:
+    try:
+        yy, mm, dd = int(digits[:2]), int(digits[2:4]), int(digits[4:6])
+    except (TypeError, ValueError):
+        return False
+    for century in (1900, 2000):
+        try:
+            date(century + yy, mm, dd)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def za_national_id_is_valid(value) -> bool:
+    raw = re.sub(r"[\s-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{13}", raw):
+        return False
+    if not _za_yymmdd_is_a_date(raw[:6]):
+        return False
+    total = 0
+    for index, char in enumerate(reversed(raw)):
+        digit = int(char)
+        if index % 2 == 1:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
+class ZAEmployeeValidation(EmployeeValidationStrategy):
+    """South Africa (ZP-ZA-ENG-001 Phase 5) - identity and bank validation.
+
+    DORMANT: consulted only while ZA_TENANT_ONBOARDING_ENABLED is on.
+    Exactly one of national_id / passport_number is required. The 13-digit
+    national ID carries a real YYMMDD date and the standard Luhn check digit.
+    The 10-digit SARS income-tax number is format-checked only: its check
+    digit rule is PENDING_G1 sign-off. Branch code is 6 digits and account
+    number 7-11 digits.
+    """
+
+    country_code = "ZA"
+    duplicate_field = "national_id"
+    SENSITIVE_FIELDS = ("national_id", "passport_number", "tax_number")
+    FIELD_SPECS = {
+        "national_id": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{13}$"),
+            "error": "South African ID number must be 13 digits.",
+        },
+        "passport_number": {
+            "required": False, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{6,20}$"),
+            "error": "Passport number must be 6-20 letters or digits.",
+        },
+        "tax_number": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{10}$"),
+            "error": "SARS income-tax number must be 10 digits (check-digit rule PENDING_G1).",
+        },
+        "branch_code": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{6}$"),
+            "error": "Branch code must be 6 digits.",
+        },
+        "account_number": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{7,11}$"),
+            "error": "Account number must be 7-11 digits.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        national_id = cleaned.get("national_id")
+        passport = cleaned.get("passport_number")
+        if bool(national_id) == bool(passport):
+            raise BadRequestException(
+                "Exactly one of national_id or passport_number is required for ZA employees.")
+        if national_id and not za_national_id_is_valid(national_id):
+            raise BadRequestException(
+                "South African ID number fails the YYMMDD date check or the Luhn check digit.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1797,6 +1884,8 @@ _DORMANT_STRATEGIES = {
     "MX": MXEmployeeValidation,
     # Brazil (ZP-BR-ENG-001 Phase 3): dormant until BR_TENANT_ONBOARDING_ENABLED.
     "BR": BREmployeeValidation,
+    # South Africa (ZP-ZA-ENG-001 Phase 5): dormant until the release gates.
+    "ZA": ZAEmployeeValidation,
 }
 
 
@@ -1808,6 +1897,10 @@ def _dormant_strategy(code: str):
         from app.modules.payroll import brazil_dormancy
 
         return strategy if brazil_dormancy.onboarding_enabled() else None
+    if code == "ZA":
+        from app.modules.payroll import south_africa_dormancy
+
+        return strategy if south_africa_dormancy.onboarding_enabled() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee
@@ -1955,7 +2048,7 @@ def mask_routing(routing):
         key = r.get("key")
         if key == "pix_key":
             out.append({**r, "value": mask_pix_key(r.get("value"))})
-        elif key in ("iban", "clabe", "bank_account"):
+        elif key in ("iban", "clabe", "bank_account", "account_number"):
             out.append({**r, "value": mask_identifier(r.get("value"))})
         else:
             out.append(r)

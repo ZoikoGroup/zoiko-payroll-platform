@@ -1543,7 +1543,7 @@ def check_jurisdiction_readiness(
 # Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
 # pack; an org-synced copy would drop the row-level dates that separate the
 # January and February UMA rows (MX-004).
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -8567,23 +8567,24 @@ def se_activation_blockers(db: Session, pack) -> list:
 
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
-                             "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil"}
+                             "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil",
+                             "ZA": "South Africa"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -9722,6 +9723,22 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["NL"] = {
     "nl_calculation_snapshot.periodCode": ("Payroll Period", "text", False),
 }
 
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["ZA"] = {
+    "za_calculation_snapshot.za_paye": ("PAYE", "currency", True),
+    "za_calculation_snapshot.za_paye_computed": ("PAYE Before Directive", "currency", True),
+    "za_calculation_snapshot.za_paye_remuneration": ("PAYE Remuneration", "currency", True),
+    "za_calculation_snapshot.za_uif_employee": ("UIF (Employee)", "currency", True),
+    "za_calculation_snapshot.za_uif_employer": ("UIF (Employer)", "currency", True),
+    "za_calculation_snapshot.za_uif_base": ("UIF Remuneration", "currency", True),
+    "za_calculation_snapshot.za_sdl": ("SDL (Employer)", "currency", True),
+    "za_calculation_snapshot.za_sdl_base": ("SDL Remuneration", "currency", True),
+    "za_calculation_snapshot.za_retirement_contribution": ("Retirement Fund Contribution", "currency", True),
+    "za_calculation_snapshot.za_medical_credit_applied": ("Medical Tax Credit Applied", "currency", True),
+    "za_calculation_snapshot.za_eti_amount": ("ETI (Employer Incentive)", "currency", True),
+    "za_calculation_snapshot.za_employee_total": ("Total Employee Statutory Deductions", "currency", True),
+    "za_calculation_snapshot.za_employer_total": ("Total Employer Statutory Cost", "currency", True),
+}
+
 # Mexico (ZP-MX-ENG-001, Phase 12a / completion W4-1): paths into the frozen
 # mx_calculation_snapshot.result (engine/jurisdictions/mexico/trace.py; amounts
 # are decimal strings). A segment "name[key=value,…]" selects the matching
@@ -10728,6 +10745,17 @@ _REPORT_COMPONENTS_BY_TYPE = {
     "NL_EMPLOYER_COST": [("employer_info", "Employer"), ("employer_contributions", "Employer Cost")],
     "NL_LOONAANGIFTE_SUMMARY": [("employer_info", "Employer"), ("totals", "Run Totals for the Return")],
     "NL_JOURNAL": [("employer_info", "Employer"), ("totals", "Run Totals")],
+    # South Africa (ZP-ZA-ENG-001 Phase 8). SDL and ETI live in employer
+    # components only, never under employee deductions (ZA-010). The statutory
+    # EMP201 / EMP501 / IRP5 artefacts are produced by south_africa_filing, not
+    # by a template — these are register / evidence reports.
+    "ZA_PAYROLL_REGISTER": [("employer_info", "Employer"), ("employee_info", "Employee"),
+                            ("earnings", "Remuneration Bases"), ("deductions", "Employee Deductions"),
+                            ("employer_contributions", "Employer UIF and SDL")],
+    "ZA_EMP201_SUMMARY": [("employer_info", "Employer"), ("totals", "PAYE / SDL / UIF / ETI for the Month")],
+    "ZA_IRP5_PREVIEW": [("employer_info", "Employer"), ("employee_info", "Employee"),
+                        ("earnings", "Remuneration"), ("deductions", "PAYE, UIF and Retirement")],
+    "ZA_COIDA_EARNINGS": [("employer_info", "Employer"), ("earnings", "COIDA Earnings")],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -19586,7 +19614,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden", "NL": "nl_golden", "MX": "mx_golden", "BR": "br_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden", "CH": "ch_golden", "SA": "sa_golden", "NL": "nl_golden", "MX": "mx_golden", "BR": "br_golden", "ZA": "za_golden"}
 
 
 def run_golden_test_certification(
@@ -20280,6 +20308,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     as_of=period_end or date.today())
             if emp_country == "SA" else None
         )
+        # South Africa (ZP-ZA-ENG-001): read-only profile, registration and
+        # directive resolution as of the period end; a preview advances nothing.
+        south_africa_inputs = (
+            jurisdiction_hooks.call("ZA", "calc_inputs", db, None, emp, None,
+                                    as_of=period_end or date.today())
+            if emp_country == "ZA" else None
+        )
         # Netherlands (ZP-NL-ENG-001): read-only input resolution — a preview
         # never commits a VCR / WKR / vacation ledger (NL-033).
         netherlands_inputs = (
@@ -20471,6 +20506,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             sweden_inputs=sweden_inputs,
             italy_inputs=italy_inputs,
             saudi_inputs=saudi_inputs,
+            south_africa_inputs=south_africa_inputs,
             netherlands_inputs=netherlands_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
@@ -25452,6 +25488,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, resolved_pack)
         if country == "SA" else None
     )
+    # South Africa (ZP-ZA-ENG-001): effective-dated profile, employer
+    # registration and approved directives as of the run's pay date.
+    south_africa_inputs = (
+        jurisdiction_hooks.call("ZA", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "ZA" else None
+    )
     # Netherlands (ZP-NL-ENG-001): resolver for statutory profile, wage-tax
     # table file, VCR snapshots, employer premium decisions, BSN, tax-credit.
     netherlands_inputs = (
@@ -25581,6 +25623,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         sweden_inputs=sweden_inputs,
         italy_inputs=italy_inputs,
         saudi_inputs=saudi_inputs,
+        south_africa_inputs=south_africa_inputs,
         netherlands_inputs=netherlands_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
@@ -25609,6 +25652,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if saudi_inputs is not None:
         from app.modules.payroll import saudi_arabia_service as _sa_service
         saudi_frozen = _sa_service.sa_freeze_context(ctx, calculation_mode)
+    za_frozen = None
+    if south_africa_inputs is not None:
+        from app.modules.payroll import south_africa_service as _za_service
+        za_frozen = _za_service.za_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25777,6 +25824,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # from the payslip exactly as computed (never reconstructed).
         "sa_calculation_snapshot": (_sa_service.sa_payslip_snapshot(result, frozen=saudi_frozen)
                                     if saudi_frozen is not None else result.sa_result),
+        "za_calculation_snapshot": (_za_service.za_payslip_snapshot(result, frozen=za_frozen)
+                                    if za_frozen is not None else result.za_result),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32278,6 +32327,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("SA", "calc_inputs", db, run, employee, None)
         if country == "SA" else None
     )
+    south_africa_inputs = (
+        jurisdiction_hooks.call("ZA", "calc_inputs", db, run, employee, None)
+        if country == "ZA" else None
+    )
     # Brazil (ZP-BR-ENG-001 Phase 6): resolver for statutory profile, establishment,
     # employer, RAT/FAP, concurrent INSS, alimony, VT, CPRB, financial sector.
     brazil_inputs = (
@@ -32433,6 +32486,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         sweden_inputs=sweden_inputs,
         italy_inputs=italy_inputs,
         saudi_inputs=saudi_inputs,
+        south_africa_inputs=south_africa_inputs,
         netherlands_inputs=netherlands_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
@@ -32450,6 +32504,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if saudi_inputs is not None:
         from app.modules.payroll import saudi_arabia_service as _sa_service
         saudi_frozen = _sa_service.sa_freeze_context(ctx, calculation_mode)
+    za_frozen = None
+    if south_africa_inputs is not None:
+        from app.modules.payroll import south_africa_service as _za_service
+        za_frozen = _za_service.za_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -32492,6 +32550,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         nl_calculation_snapshot=calc.nl_result if country == "NL" else None,
         sa_calculation_snapshot=(_sa_service.sa_payslip_snapshot(calc, frozen=saudi_frozen)
                                  if saudi_frozen is not None else None),
+        za_calculation_snapshot=(_za_service.za_payslip_snapshot(calc, frozen=za_frozen)
+                                 if za_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -33152,6 +33212,10 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # Brazil (ZP-BR-ENG-001, BR-E5): the frozen br_result (flat br_* amounts +
         # trace) the payslip breakdown panel renders. Gated to BR.
         "brCalculationSnapshot": item.br_calculation_snapshot if (item.country_code or country) == "BR" else None,
+        # South Africa (ZP-ZA-ENG-001 ZA-009): the frozen za_result (bases, PAYE
+        # trace, UIF/SDL, employer-only ETI) the ZA payslip breakdown renders.
+        # Gated to ZA ("SA" above is Saudi Arabia).
+        "zaCalculationSnapshot": item.za_calculation_snapshot if (item.country_code or country) == "ZA" else None,
     }
 
 
@@ -33266,6 +33330,8 @@ def _get_currency_code(country: str) -> str:
         # Switzerland (ZP-CH-ENG-001) and Saudi Arabia (ZP-SA-ENG-001): without
         # these rows a CH / SA bank transfer file fell through to "USD" below.
         "CH": "CHF", "SA": "SAR",
+        # South Africa (ZP-ZA-ENG-001): rand.
+        "ZA": "ZAR",
     }.get(country, "USD")
 
 

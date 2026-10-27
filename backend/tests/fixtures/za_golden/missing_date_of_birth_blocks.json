@@ -1,0 +1,446 @@
+{
+  "description": "No date of birth: the age rebates cannot be resolved.",
+  "source": "ZP-ZA-ENG-001 v1.0 (22 Sep 2026) \u00a72, ZA-005.",
+  "context": {
+    "country": "ZA",
+    "pay_frequency": "Monthly",
+    "gross": "50000",
+    "basic": "50000",
+    "pay_date": "2026-09-30",
+    "za_has_tax_number": true,
+    "za_statutory_profile": {
+      "za_employment_type": "STANDARD",
+      "za_tax_residency": "RESIDENT",
+      "za_is_director": false,
+      "za_medical_scheme_member": false,
+      "za_medical_dependants": 0,
+      "za_uif_excluded": false
+    },
+    "za_employer_registration": {
+      "sdl_liable": true,
+      "eti_registered": false
+    },
+    "rate_map": {
+      "za_supported_pay_frequencies": {
+        "text_value": "MONTHLY"
+      },
+      "za_paye_tax_year_date_basis": {
+        "text_value": "PENDING_G1"
+      },
+      "za_variable_remuneration_basis": {
+        "text_value": "PENDING_G1"
+      },
+      "za_rounding_mode": {
+        "text_value": "HALF_UP"
+      },
+      "za_rounding_precision": {
+        "flat_amount": "2"
+      },
+      "za_rebate_primary": {
+        "flat_amount": "17820"
+      },
+      "za_rebate_secondary": {
+        "flat_amount": "9765"
+      },
+      "za_rebate_tertiary": {
+        "flat_amount": "3249"
+      },
+      "za_rebate_secondary_age": {
+        "flat_amount": "65"
+      },
+      "za_rebate_tertiary_age": {
+        "flat_amount": "75"
+      },
+      "za_mtc_main_member": {
+        "flat_amount": "376"
+      },
+      "za_mtc_first_dependant": {
+        "flat_amount": "376"
+      },
+      "za_mtc_additional_dependant": {
+        "flat_amount": "254"
+      },
+      "za_retirement_deduction_pct": {
+        "employee_rate_pct": "27.5000"
+      },
+      "za_retirement_annual_cap": {
+        "flat_amount": "430000"
+      },
+      "za_travel_inclusion_default_pct": {
+        "employee_rate_pct": "80.0000"
+      },
+      "za_travel_inclusion_business_pct": {
+        "employee_rate_pct": "20.0000"
+      },
+      "za_travel_business_use_min_pct": {
+        "employee_rate_pct": "80.0000"
+      },
+      "za_uif": {
+        "employee_rate_pct": "1.0000",
+        "employer_rate_pct": "1.0000"
+      },
+      "za_uif_monthly_ceiling": {
+        "flat_amount": "17712"
+      },
+      "za_sdl": {
+        "employer_rate_pct": "1.0000"
+      },
+      "za_sdl_exemption_threshold": {
+        "flat_amount": "500000"
+      },
+      "za_eti_hours_normaliser": {
+        "flat_amount": "160"
+      },
+      "za_eti_qualifying_months_max": {
+        "flat_amount": "24"
+      },
+      "za_eti_min_age": {
+        "flat_amount": "18"
+      },
+      "za_eti_max_age": {
+        "flat_amount": "29"
+      },
+      "za_nmw_hourly": {
+        "flat_amount": "30.23"
+      },
+      "za_bcea_earnings_threshold": {
+        "flat_amount": "269900.90"
+      },
+      "za_emp201_due_day": {
+        "flat_amount": "7"
+      },
+      "za_emp201_non_business_day_rule": {
+        "text_value": "PRECEDING_BUSINESS_DAY"
+      },
+      "za_brs_version": {
+        "text_value": "25.3.0"
+      },
+      "za_record_retention_years": {
+        "flat_amount": "5"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "0",
+        "max_amount": "245100",
+        "rate_pct": "18.0000",
+        "flat_amount": "0"
+      },
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "245100",
+        "max_amount": "383100",
+        "rate_pct": "26.0000",
+        "flat_amount": "44118"
+      },
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "383100",
+        "max_amount": "530200",
+        "rate_pct": "31.0000",
+        "flat_amount": "79998"
+      },
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "530200",
+        "max_amount": "695800",
+        "rate_pct": "36.0000",
+        "flat_amount": "125599"
+      },
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "695800",
+        "max_amount": "887000",
+        "rate_pct": "39.0000",
+        "flat_amount": "185215"
+      },
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "887000",
+        "max_amount": "1878600",
+        "rate_pct": "41.0000",
+        "flat_amount": "259783"
+      },
+      {
+        "rule_type": "ZA_PAYE_BAND",
+        "min_amount": "1878600",
+        "max_amount": null,
+        "rate_pct": "45.0000",
+        "flat_amount": "666339"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "SALARY",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "OVERTIME",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "BONUS",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "COMMISSION",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "LEAVE_PAYOUT",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "TRAVEL_FIXED",
+        "assessment_basis": "TRAVEL_RULE"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "TRAVEL_REIMBURSIVE",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "FRINGE_BENEFIT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "PAYE",
+        "filing_status": "OTHER_EARNINGS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "SALARY",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "OVERTIME",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "BONUS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "COMMISSION",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "LEAVE_PAYOUT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "TRAVEL_FIXED",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "TRAVEL_REIMBURSIVE",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "FRINGE_BENEFIT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "UIF",
+        "filing_status": "OTHER_EARNINGS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "SALARY",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "OVERTIME",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "BONUS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "COMMISSION",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "LEAVE_PAYOUT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "TRAVEL_FIXED",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "TRAVEL_REIMBURSIVE",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "FRINGE_BENEFIT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "SDL",
+        "filing_status": "OTHER_EARNINGS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "SALARY",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "OVERTIME",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "BONUS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "COMMISSION",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "LEAVE_PAYOUT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "TRAVEL_FIXED",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "TRAVEL_REIMBURSIVE",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "FRINGE_BENEFIT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "ETI",
+        "filing_status": "OTHER_EARNINGS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "SALARY",
+        "assessment_basis": "INCLUDED"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "OVERTIME",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "BONUS",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "COMMISSION",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "LEAVE_PAYOUT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "TRAVEL_FIXED",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "TRAVEL_REIMBURSIVE",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "FRINGE_BENEFIT",
+        "assessment_basis": "REVIEW"
+      },
+      {
+        "rule_type": "ZA_EARNING_CLASS",
+        "tax_regime": "COIDA",
+        "filing_status": "OTHER_EARNINGS",
+        "assessment_basis": "REVIEW"
+      }
+    ]
+  },
+  "expected_blocked_key": "date_of_birth",
+  "expected": {}
+}

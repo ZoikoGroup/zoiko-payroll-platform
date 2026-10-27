@@ -13688,6 +13688,455 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/south-africa/artifacts",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "artifacts",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/artifacts/{artifact_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/artifacts/{artifact_id}/receipt",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "receipt",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/artifacts/{artifact_id}/submit",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "submit",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/certificates/{period}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "certificates",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/coida-evidence/{assessment_year}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "coida-evidence",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/directives/{directive_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_tax_directives"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/directives/{directive_id}/revoke",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "revoke",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_tax_directives"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/emp201/{period_key}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "emp201",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_eti_ledger",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/emp201/{period_key}",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "emp201",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_eti_ledger",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/employees/{employee_id}/directives",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "directives",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_za_tax_directives"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/employees/{employee_id}/directives",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "directives",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_za_tax_directives"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/employer-registrations",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "employer-registrations",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/employer-registrations",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "employer-registrations",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/employer-registrations/{registration_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/eti-ledger",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "eti-ledger",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_za_eti_ledger"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/reconciliation/{period}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "reconciliation",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/reconciliation/{period}",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconciliation",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/reconciliation/{period}/variances",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "variances",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/reconciliation/{period}/variances",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "variances",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/sars-payments",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "sars-payments",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/sars-payments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "sars-payments",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/sars-payments/{payment_id}/reverse",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "reverse",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/variances/{variance_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/sweden/leave-ledgers",
    "data_class": "worker",
    "action": "read",
@@ -18994,9 +19443,12 @@
    "scope_level": "platform",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
+   "note": "reviewed: organization-level Mexico readiness status; no per-employee rows",
+   "scan_worker_tables": [
+    "payroll_za_eti_ledger",
+    "payroll_za_tax_directives"
+   ],
+   "overridden": true
   },
   {
    "method": "GET",
@@ -20485,6 +20937,25 @@
    "note": null,
    "scan_worker_tables": [],
    "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/south-africa/summary",
+   "data_class": "aggregate",
+   "action": "read",
+   "resource": "summary",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: ZA readiness and gate status counts; no per-employee rows",
+   "scan_worker_tables": [
+    "payroll_za_eti_ledger",
+    "payroll_za_tax_directives"
+   ],
+   "overridden": true
   },
   {
    "method": "GET",

@@ -30,6 +30,7 @@ _MODULES: Dict[str, str] = {
     "NL": "app.modules.payroll.netherlands_service",
     "MX": "app.modules.payroll.mexico_service",
     "BR": "app.modules.payroll.brazil_service",
+    "ZA": "app.modules.payroll.south_africa_service",
 }
 
 

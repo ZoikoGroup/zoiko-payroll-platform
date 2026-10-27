@@ -78,6 +78,7 @@ from app.modules.payroll.engine.countries import saudi_arabia as _saudi_arabia
 from app.modules.payroll.engine.countries import netherlands as _netherlands
 from app.modules.payroll.engine.countries import mexico as _mexico
 from app.modules.payroll.engine.countries import brazil as _brazil
+from app.modules.payroll.engine.countries import south_africa as _south_africa
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -155,6 +156,7 @@ _calc_saudi_arabia = _saudi_arabia.calculate
 _calc_netherlands = _netherlands.calculate
 _calc_mexico = _mexico.calculate
 _calc_brazil = _brazil.calculate
+_calc_south_africa = _south_africa.calculate
 
 
 _COUNTRY_CALC = {
@@ -226,6 +228,11 @@ _COUNTRY_CALC = {
     # the Phase 5 engine is certified, so Brazil can never fall through to
     # _calc_generic; simple mode is blocked in resolver.py.
     "BR": _calc_brazil,
+    # South Africa (ZP-ZA-ENG-001) — PAYE (tds), UIF (employee_esi /
+    # employer_esi), SDL (employer_payroll_tax) on independent bases; ETI is an
+    # employer incentive, never an employee line. Fail-closed:
+    # countries/south_africa.py; simple mode is blocked in resolver.py.
+    "ZA": _calc_south_africa,
 }
 
 
@@ -601,6 +608,9 @@ class StandardStrategy(PayrollStrategy):
             # the default keeps every other country's result unchanged.
             employer_occupational_hazard=deductions.get("employer_occupational_hazard", Decimal("0")),
             sa_result=deductions.get("sa_result"),
+            # South Africa (ZP-ZA-ENG-001) — the whole ZA dict (bases, PAYE
+            # trace, totals). Absent from every non-ZA calculator dict.
+            za_result=deductions.get("za_result"),
             # Netherlands (ZP-NL-ENG-001) — the whole NL dict (wage tax,
             # employee insurance, employer premiums, Zvw, WKR, car addition,
             # labor pay, net pay, employer cost). Returns under 'nl_result' key.

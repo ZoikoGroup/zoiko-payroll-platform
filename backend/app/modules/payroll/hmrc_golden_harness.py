@@ -308,7 +308,55 @@ def build_context(case_context: dict) -> PayrollContext:
         # countries/brazil.py is a pure function of. A BR case supplies the
         # whole dict on the case context; every other country is unaffected.
         **_brazil_context(case_context),
+        # South Africa (ZP-ZA-ENG-001 §12 golden payroll): the effective-dated
+        # za_* profile, the employer registration and the pay-component split
+        # countries/south_africa.py resolves. None elsewhere.
+        **_south_africa_context(case_context),
     )
+
+
+def _south_africa_context(case_context: dict) -> dict:
+    # A real ZA run carries the statutory profile and the employer registration
+    # in force as ORM rows; the case supplies them as dicts, rebuilt here as
+    # SimpleNamespaces (the Saudi / Sweden pattern) so the engine sees the same
+    # attribute access production gives it.
+    if case_context.get("country") != "ZA":
+        return {}
+    from types import SimpleNamespace
+
+    profile = dict(case_context.get("za_statutory_profile") or {})
+    if profile.get("za_voluntary_additional_paye") is not None:
+        profile["za_voluntary_additional_paye"] = _to_decimal(profile["za_voluntary_additional_paye"])
+    registration = case_context.get("za_employer_registration")
+    directives = []
+    for raw in case_context.get("za_directives") or []:
+        directive = dict(raw)
+        for key in ("effective_from", "effective_to"):
+            directive[key] = _to_date(directive.get(key))
+        for key in ("rate_pct", "amount"):
+            directive[key] = _to_decimal(directive.get(key))
+        directives.append(directive)
+    variable_items = []
+    for raw in case_context.get("za_variable_items") or []:
+        item = dict(raw)
+        item["amount"] = _to_decimal(item.get("amount"))
+        for key in ("earned_from", "earned_to"):
+            item[key] = _to_date(item.get(key))
+        variable_items.append(item)
+    qualifying_month = case_context.get("za_eti_qualifying_month_no")
+    return {
+        "za_statutory_profile": SimpleNamespace(**profile) if profile else None,
+        "za_employer_registration": SimpleNamespace(**registration) if registration else None,
+        "za_organization_id": case_context.get("za_organization_id"),
+        "za_employee_id": case_context.get("za_employee_id"),
+        "za_has_tax_number": case_context.get("za_has_tax_number"),
+        "za_components": {k: _to_decimal(v) for k, v in (case_context.get("za_components") or {}).items()},
+        "za_retirement_fund_contribution": _to_decimal(case_context.get("za_retirement_fund_contribution")),
+        "za_directives": directives,
+        "za_variable_items": variable_items,
+        "za_eti_paid_hours": _to_decimal(case_context.get("za_eti_paid_hours")),
+        "za_eti_qualifying_month_no": None if qualifying_month is None else int(qualifying_month),
+    }
 
 
 def _brazil_context(case_context: dict) -> dict:
@@ -410,11 +458,14 @@ def run_golden_case(case: dict) -> None:
     country_result = getattr(result, "ch_result", None) or {}
     sa_result = getattr(result, "sa_result", None) or {}
     br_result = getattr(result, "br_result", None) or {}
+    za_result = getattr(result, "za_result", None) or {}
 
     diffs = []
     for field_name, expected_raw in case["expected"].items():
         expected = _to_decimal(expected_raw)
-        if field_name.startswith("ch_") and field_name in country_result:
+        if field_name.startswith("za_") and field_name in za_result:
+            actual = za_result[field_name]               # the South Africa engine's own dict (PayrollResult.za_result)
+        elif field_name.startswith("ch_") and field_name in country_result:
             actual = country_result[field_name]          # the Swiss engine's own dict (PayrollResult.ch_result)
         elif field_name.startswith("sa_") and field_name in sa_result:
             actual = sa_result[field_name]               # the Saudi engine's own dict (PayrollResult.sa_result)

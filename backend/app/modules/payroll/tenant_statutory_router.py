@@ -719,3 +719,369 @@ def preview_ch_calculation_for_tenant(
     # of its workers (the data-layer scope makes any other id invisible).
     data = ChCalculationPreviewRequest(**{**payload, "organizationId": organization_id})
     return switzerland_service.preview_ch_calculation(db, data)
+
+# -- South Africa (ZP-ZA-ENG-001 Phase 5) -------------------------------------
+
+def _za_org(organization_id: int = Depends(get_organization_id)) -> int:
+    from app.modules.payroll import south_africa_dormancy
+
+    if not south_africa_dormancy.onboarding_enabled():
+        raise BadRequestException(south_africa_dormancy.DORMANT_MESSAGE)
+    return organization_id
+
+
+def _za_row(row, fields):
+    return {name: getattr(row, name, None) for name in fields}
+
+
+_ZA_REGISTRATION_FIELDS = (
+    "id", "organization_id", "effective_from", "effective_to", "paye_reference",
+    "uif_reference", "sdl_reference", "coida_reference", "sdl_liable",
+    "sdl_exemption_reason", "eti_registered", "sector_code", "bargaining_council",
+    "evidence_ref", "source_document_id", "status", "created_by_id",
+    "approved_by_id", "approved_at", "previous_version_id",
+)
+
+_ZA_DIRECTIVE_FIELDS = (
+    "id", "organization_id", "employee_id", "directive_number", "directive_type",
+    "rate_pct", "amount", "tax_year", "issue_date", "effective_from", "effective_to",
+    "instruction", "evidence_artifact_id", "evidence_sha256", "status",
+    "created_by_id", "approved_by_id", "approved_at", "applied_payslip_item_id",
+)
+
+_ZA_ETI_FIELDS = (
+    "id", "organization_id", "employee_id", "claim_month", "qualifying_month_no",
+    "paid_hours", "remuneration", "normalised_remuneration", "eti_amount",
+    "content_hash", "status", "payroll_run_id", "payslip_item_id", "reverses_id",
+    "created_by_id",
+)
+
+
+@router.get("/south-africa/employer-registrations",
+            summary="Your South Africa employer registrations")
+def list_za_employer_registrations(organization_id: int = Depends(_za_org),
+                                   db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_service as za
+
+    return [_za_row(r, _ZA_REGISTRATION_FIELDS)
+            for r in za.list_za_employer_registrations(db, organization_id)]
+
+
+@router.post("/south-africa/employer-registrations",
+             summary="Record a DRAFT South Africa employer registration")
+def create_za_employer_registration(
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_service as za
+
+    row = za.create_za_employer_registration(db, organization_id, payload,
+                                             actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_REGISTRATION_FIELDS)
+
+
+@router.post("/south-africa/employer-registrations/{registration_id}/approve",
+             summary="Approve a DRAFT South Africa employer registration (four-eyes)")
+def approve_za_employer_registration(
+    registration_id: int,
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_service as za
+
+    row = za.approve_za_employer_registration(db, registration_id,
+                                              approver_id=current_user.id,
+                                              organization_id=organization_id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_REGISTRATION_FIELDS)
+
+
+@router.get("/south-africa/employees/{employee_id}/directives",
+            summary="A South Africa employee's tax directives")
+def list_za_directives(employee_id: int, organization_id: int = Depends(_za_org),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_service as za
+
+    return [_za_row(r, _ZA_DIRECTIVE_FIELDS)
+            for r in za.list_za_directives(db, organization_id, employee_id)]
+
+
+@router.post("/south-africa/employees/{employee_id}/directives",
+             summary="Capture a SARS tax directive with evidence")
+def capture_za_directive(
+    employee_id: int,
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_service as za
+
+    row = za.capture_za_directive(
+        db, organization_id=organization_id, employee_id=employee_id,
+        directive_number=payload.get("directiveNumber") or payload.get("directive_number"),
+        directive_type=payload.get("directiveType") or payload.get("directive_type"),
+        tax_year=payload.get("taxYear") or payload.get("tax_year"),
+        issue_date=payload.get("issueDate") or payload.get("issue_date"),
+        effective_from=payload.get("effectiveFrom") or payload.get("effective_from"),
+        effective_to=payload.get("effectiveTo") or payload.get("effective_to"),
+        rate_pct=payload.get("ratePct") if "ratePct" in payload else payload.get("rate_pct"),
+        amount=payload.get("amount"),
+        instruction=payload.get("instruction"),
+        evidence_artifact_id=(payload.get("evidenceArtifactId")
+                              if "evidenceArtifactId" in payload
+                              else payload.get("evidence_artifact_id")),
+        evidence_sha256=payload.get("evidenceSha256") or payload.get("evidence_sha256"),
+        actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_DIRECTIVE_FIELDS)
+
+
+@router.post("/south-africa/directives/{directive_id}/approve",
+             summary="Approve a CAPTURED tax directive (four-eyes)")
+def approve_za_directive(
+    directive_id: int,
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_service as za
+
+    row = za.approve_za_directive(db, directive_id, approver_id=current_user.id,
+                                  organization_id=organization_id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_DIRECTIVE_FIELDS)
+
+
+@router.post("/south-africa/directives/{directive_id}/revoke",
+             summary="Revoke a tax directive (status change; evidence retained)")
+def revoke_za_directive(
+    directive_id: int,
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_service as za
+
+    row = za.revoke_za_directive(db, directive_id, actor_id=current_user.id,
+                                 organization_id=organization_id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_DIRECTIVE_FIELDS)
+
+
+@router.get("/south-africa/eti-ledger", summary="Read-only South Africa ETI ledger")
+def list_za_eti_ledger(employee_id: Optional[int] = Query(default=None),
+                       organization_id: int = Depends(_za_org),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_service as za
+
+    return [_za_row(r, _ZA_ETI_FIELDS)
+            for r in za.list_za_eti_ledger(db, organization_id, employee_id)]
+
+
+# -- South Africa SARS filing and reconciliation (ZP-ZA-ENG-001 Phase 8) -------
+# Export-and-evidence only (ZA-002): builders read committed payroll; artefacts
+# are versioned, four-eyes approved and never overwritten (ZA-019/ZA-020).
+
+_ZA_ARTIFACT_FIELDS = (
+    "id", "organization_id", "artifact_type", "period_key", "version", "brs_version",
+    "payload_sha256", "validation_status", "validation_errors", "submission_channel",
+    "status", "receipt_ref", "external_response", "source_run_ids", "supersedes_id",
+    "created_by_id", "approved_by_id", "approved_at", "submitted_at",
+)
+
+_ZA_PAYMENT_FIELDS = (
+    "id", "organization_id", "period_key", "paid_on", "amount", "payment_reference",
+    "allocation", "evidence_ref", "status", "reverses_id", "created_by_id",
+)
+
+_ZA_VARIANCE_FIELDS = (
+    "id", "organization_id", "reconciliation_period", "month_key", "measure", "amount",
+    "reason", "evidence_ref", "status", "created_by_id", "approved_by_id", "approved_at",
+)
+
+
+def _za_artifact_row(row, with_payload: bool = False):
+    out = _za_row(row, _ZA_ARTIFACT_FIELDS)
+    if with_payload:
+        out["payload"] = row.payload
+    return out
+
+
+@router.get("/south-africa/emp201/{period_key}", summary="Preview the South Africa EMP201 for a month")
+def preview_za_emp201(period_key: str, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    return filing.build_za_emp201(db, organization_id, period_key)
+
+
+@router.post("/south-africa/emp201/{period_key}", summary="Record the South Africa EMP201 declaration for a month")
+def record_za_emp201(period_key: str, organization_id: int = Depends(_za_org),
+                     current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    payload = filing.build_za_emp201(db, organization_id, period_key)
+    row = filing.record_za_artifact(db, organization_id, "EMP201", period_key, payload, actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_artifact_row(row, with_payload=True)
+
+
+@router.get("/south-africa/reconciliation/{period}", summary="South Africa EMP501 balancing report")
+def preview_za_reconciliation(period: str, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    return filing.build_za_reconciliation(db, organization_id, period)
+
+
+@router.post("/south-africa/reconciliation/{period}", summary="Record the South Africa EMP501 (only when READY)")
+def record_za_reconciliation(period: str, organization_id: int = Depends(_za_org),
+                             current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    report = filing.build_za_reconciliation(db, organization_id, period)
+    if report["status"] != "READY":
+        raise BadRequestException(f"South Africa: the {period} reconciliation is not balanced: {report['issues']}")
+    kind = "EMP501_INTERIM" if period.endswith("INTERIM") else "EMP501_ANNUAL"
+    row = filing.record_za_artifact(db, organization_id, kind, period, report, actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_artifact_row(row, with_payload=True)
+
+
+@router.get("/south-africa/reconciliation/{period}/variances", summary="EMP501 variances for a period")
+def list_za_variances(period: str, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    return [_za_row(r, _ZA_VARIANCE_FIELDS) for r in filing.list_za_variances(db, organization_id, period)]
+
+
+@router.post("/south-africa/reconciliation/{period}/variances", summary="Propose an explained EMP501 variance")
+def propose_za_variance(period: str, payload: Dict[str, Any] = Body(...),
+                        organization_id: int = Depends(_za_org),
+                        current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.propose_za_variance(
+        db, organization_id, reconciliation_period=period,
+        month_key=payload.get("monthKey") or payload.get("month_key"),
+        measure=payload.get("measure"), amount=payload.get("amount"), reason=payload.get("reason"),
+        evidence_ref=payload.get("evidenceRef") or payload.get("evidence_ref"), actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_VARIANCE_FIELDS)
+
+
+@router.post("/south-africa/variances/{variance_id}/approve", summary="Approve an EMP501 variance (four-eyes)")
+def approve_za_variance(variance_id: int, organization_id: int = Depends(_za_org),
+                        current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.approve_za_variance(db, organization_id, variance_id, approver_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_VARIANCE_FIELDS)
+
+
+@router.get("/south-africa/certificates/{period}", summary="Canonical IRP5 / IT3(a) certificates and BRS status")
+def preview_za_certificates(period: str, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    certificates = filing.build_za_certificates(db, organization_id, period)
+    return {"period": period, "certificates": certificates, "brs": filing.map_to_brs(certificates)}
+
+
+@router.get("/south-africa/artifacts", summary="Your South Africa SARS artefacts (all versions)")
+def list_za_artifacts(artifact_type: Optional[str] = Query(default=None),
+                      organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    return [_za_artifact_row(r) for r in filing.list_za_artifacts(db, organization_id, artifact_type)]
+
+
+@router.post("/south-africa/artifacts/{artifact_id}/approve", summary="Approve a SARS artefact (four-eyes)")
+def approve_za_artifact(artifact_id: int, organization_id: int = Depends(_za_org),
+                        current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.approve_za_artifact(db, organization_id, artifact_id, approver_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_artifact_row(row)
+
+
+@router.post("/south-africa/artifacts/{artifact_id}/submit", summary="Record an operator submission to SARS")
+def submit_za_artifact(artifact_id: int, payload: Dict[str, Any] = Body(...),
+                       organization_id: int = Depends(_za_org),
+                       current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.record_za_submission(db, organization_id, artifact_id, payload.get("channel"))
+    db.commit()
+    db.refresh(row)
+    return _za_artifact_row(row)
+
+
+@router.post("/south-africa/artifacts/{artifact_id}/receipt", summary="Record the SARS acceptance or rejection")
+def receipt_za_artifact(artifact_id: int, payload: Dict[str, Any] = Body(...),
+                        organization_id: int = Depends(_za_org),
+                        current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.record_za_receipt(
+        db, organization_id, artifact_id, accepted=bool(payload.get("accepted")),
+        receipt_ref=payload.get("receiptRef") or payload.get("receipt_ref"),
+        raw_response=payload.get("rawResponse") or payload.get("raw_response"))
+    db.commit()
+    db.refresh(row)
+    return _za_artifact_row(row)
+
+
+@router.get("/south-africa/sars-payments", summary="Your South Africa SARS payments")
+def list_za_sars_payments(organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    return [_za_row(r, _ZA_PAYMENT_FIELDS) for r in filing.list_za_sars_payments(db, organization_id)]
+
+
+@router.post("/south-africa/sars-payments", summary="Record a payment made to SARS")
+def record_za_sars_payment(payload: Dict[str, Any] = Body(...), organization_id: int = Depends(_za_org),
+                           current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.record_za_sars_payment(
+        db, organization_id, period_key=payload.get("periodKey") or payload.get("period_key"),
+        paid_on=payload.get("paidOn") or payload.get("paid_on"), amount=payload.get("amount"),
+        payment_reference=payload.get("paymentReference") or payload.get("payment_reference"),
+        allocation=payload.get("allocation") or {},
+        evidence_ref=payload.get("evidenceRef") or payload.get("evidence_ref"), actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_PAYMENT_FIELDS)
+
+
+@router.post("/south-africa/sars-payments/{payment_id}/reverse", summary="Reverse a recorded SARS payment")
+def reverse_za_sars_payment(payment_id: int, organization_id: int = Depends(_za_org),
+                            current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    row = filing.reverse_za_sars_payment(db, organization_id, payment_id, actor_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return _za_row(row, _ZA_PAYMENT_FIELDS)
+
+
+@router.get("/south-africa/coida-evidence/{assessment_year}", summary="COIDA return-of-earnings evidence")
+def za_coida_evidence(assessment_year: str, organization_id: int = Depends(_za_org), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_filing as filing
+
+    return filing.build_za_coida_evidence(db, organization_id, assessment_year)

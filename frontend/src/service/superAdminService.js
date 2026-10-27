@@ -251,6 +251,9 @@ export const getMxSaAuthorities = (orgId) => apiFetch(`${MX_SA}/authorities`, { 
 // READ-ONLY here — they change only through the governed pack editor
 // (draft -> review -> approve -> activate), never by a direct edit.
 const BR_SA = "/api/super-admin/compliance/brazil";
+const ZA_SA = "/api/super-admin/compliance/south-africa";
+
+export const getZaSummary = () => apiFetch(`${ZA_SA}/summary`);
 
 export const listBrOrganizations = () => apiFetch(`${BR_SA}/organizations`);
 export const listBrEmployees = (orgId) => apiFetch(`${BR_SA}/employees`, { params: { org_id: orgId } });

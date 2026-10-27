@@ -19,6 +19,7 @@ import MXCfdiStagePanel from "../../../components/jurisdiction/mexico/run/MXCfdi
 import MXCorrectionsPanel from "../../../components/jurisdiction/mexico/run/MXCorrectionsPanel";
 import BRRunPreflightPanel from "./BRRunPreflightPanel";
 import BRPayslipBreakdown from "./BRPayslipBreakdown";
+import ZAPayslipBreakdown from "./ZAPayslipBreakdown";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -122,10 +123,10 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     ...(labels.solidaritySurcharge ? [[labels.solidaritySurcharge, item.soli]] : []),
     [labels.pf, item.pf],
     [labels.esi, item.esi],
-    ["Professional Tax", item.professionalTax],
+    [labels.professionalTax, item.professionalTax],
     [labels.socialSecurity, item.socialSecurity],
     [labels.medicare, item.medicare],
-    ["National Insurance", item.niEmployee],
+    [labels.niEmployee, item.niEmployee],
     [labels.employeePension || "Workplace Pension", item.employeePension],
     ["Student Loan Deduction", item.studyLoanDeduction],
     // UK: was reaching the API response (once the schema fix landed) but
@@ -147,6 +148,10 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     [labels.employerPension, item.employerPension],
     [labels.employerOccupationalHazard, item.employerOccupationalHazard],
     ["Employer National Insurance", item.employerNi],
+    // Employer-only payroll levies on employer_payroll_tax (AU state payroll
+    // tax, South Africa SDL) — serialized as employerPayrollTax but never
+    // listed here before; never an employee deduction.
+    [labels.employerPayrollTax, item.employerPayrollTax],
     // UK: Apprenticeship Levy — computed since the 2026-09-08 commit but
     // silently discarded before ever reaching a persisted PayslipItem;
     // now actually persisted+serialized (Phase 3), shown here as an
@@ -378,6 +383,7 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
             {nlSnapshot && <NLPayslipBreakdown snapshot={nlSnapshot} employeeName={item.employee} />}
             {mxSnapshot && <MXRunCalculationTrace snapshot={mxSnapshot} />}
             {(item.country || item.countryCode) === "BR" && item.brCalculationSnapshot && <BRPayslipBreakdown snapshot={item.brCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "ZA" && item.zaCalculationSnapshot && <ZAPayslipBreakdown snapshot={item.zaCalculationSnapshot} employeeName={item.employee} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
