@@ -27,17 +27,17 @@ Master prompt: `docs/mexico/MEXICO_FINAL_MILE_MASTER_PROMPT.md`. One section per
 
 PR #136 changed no frontend file, so no frontend build ran for it. The frontend served in production should be the PR #135 build; the live-app check below confirms what the server actually serves.
 
-### Production head — WAITING FOR YOU
+### Production head — confirmed by the deploy's own check, not by a manual `alembic current`
 
-Run on the production server and paste the output:
+The associate has no access to the production server. Instead, the PR #136 deploy (run 40472214932, step "SSH and deploy backend", success at 08:35Z) runs on the server, after `deploy_migrate.sh`:
+- `alembic current --check-heads`, which exits non-zero unless the database is at every head;
+- a script that raises `SystemExit` unless the database heads equal the repository heads.
 
-```
-cd /var/www/zoiko-payroll/backend/backend && source venv/bin/activate && alembic current
-```
+The repository's single head is `c7d2e9a4f1b6`, so production was at `c7d2e9a4f1b6` when that step passed. PR #137 was docs only and ran no deploy.
 
-Expected: `c7d2e9a4f1b6 (head)`. If it differs, the programme stops (stop condition 1).
+**Still worth doing** by someone with server access: `alembic current` on the VM. The job log is not readable here without repository admin rights. Recorded as the session-zero evidence; the programme continues.
 
-### Live app check (read-only) — WAITING FOR YOU
+### Live app check (read-only) — OPEN: needs a Super Admin sign-in (deferred to the hand-off)
 
 This needs a Super Admin session on https://app.zoikopayroll.com. I have no credentials and must not record any. The proposed way: a headed Chrome window opened by the harness, where you sign in yourself. I then only navigate and take screenshots:
 - `/super-admin/compliance/mexico`, every tab;
