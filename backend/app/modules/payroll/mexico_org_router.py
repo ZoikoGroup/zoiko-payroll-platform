@@ -443,6 +443,18 @@ def cfdi_cancel(document_id: int, body: Dict[str, Any] = Body(...), current_user
                                       body.get("replacementUuid"), _actor(current_user))
 
 
+@router.get("/cfdi/documents/{document_id}/receipt",
+            summary="The printed CFDI receipt (PDF) rendered on demand from the stored stamped XML — never stored (W4-3b)")
+def mx_cfdi_document_receipt(document_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import mexico_cfdi_receipt
+
+    pdf = mexico_cfdi_receipt.mx_cfdi_receipt_pdf(db, _org_id(current_user), document_id)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store", "Content-Disposition": f'inline; filename="cfdi-{document_id}.pdf"'})
+
+
 @router.post("/cfdi/reconcile", summary="Move every in-flight CFDI action to UNKNOWN (after a timeout / restore, MX-062)")
 def cfdi_reconcile(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
     from app.modules.payroll import mexico_cfdi_service
@@ -481,6 +493,17 @@ def _entity(kind: str) -> str:
     if kind not in _ENTITY_PATHS:
         raise BadRequestException(f"Unknown authority object {kind!r}")
     return _ENTITY_PATHS[kind]
+
+
+@router.post("/reports/{template_id}/generate",
+             summary="Generate a dedicated Mexico report from an Active MX template (W4-2: liabilities, IMSS, SUA, ISN, "
+                     "CFDI status, vacation, PTU, annual-adjustment employer year)")
+def mx_reports_generate(template_id: int, payload: Dict[str, Any] = Body(default_factory=dict),
+                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service.mx_report_generate(db, _org_id(current_user), template_id, payload,
+                                                    _actor(current_user))
 
 
 @router.get("/authorities/summary", summary="Social Security Center — registrations, counts and the blocks (§14)")

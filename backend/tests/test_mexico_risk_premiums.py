@@ -36,9 +36,12 @@ def _setup(db, admins=2):
     return t, emp, reg
 
 
-def test_draft_is_recorded_but_approval_is_refused_until_the_period_rule_is_transcribed(db):
+def test_draft_is_recorded_but_approval_is_refused_until_the_period_rule_is_transcribed(db, monkeypatch):
     from app.core.exceptions import BadRequestException
+    from app.modules.payroll.engine.countries import mexico_content as c
     from app.modules.payroll.models import TaxConfigurationAudit
+
+    monkeypatch.setattr(c, "MX_RISK_PREMIUM_PERIOD", None)          # W1-5 transcribed the real one (RACERF)
 
     t, _emp, reg = _setup(db)
     doc = evidence_doc(db, t.org.id)

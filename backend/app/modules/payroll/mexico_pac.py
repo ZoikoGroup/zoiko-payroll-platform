@@ -59,6 +59,10 @@ class StampResult:
     code: Optional[str] = None
     message: Optional[str] = None      # redacted, never XML
     raw_response_hash: Optional[str] = None
+    # Completion W4-3b: the PAC's stamped CFDI (the signed XML with its
+    # TimbreFiscalDigital complement). Stored next to the signed XML; the printed
+    # receipt is rendered only from it (RMF 2.7.1.7 needs the SAT seal / serial).
+    stamped_xml: Optional[bytes] = None
 
 
 @dataclass(frozen=True)

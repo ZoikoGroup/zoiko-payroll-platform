@@ -121,9 +121,23 @@ def test_period_without_an_art96_tariff_blocks(p):
 
 
 @pytest.mark.parametrize("field", ["absence_days", "incapacity_days"])
-def test_absence_and_incapacity_block(field):
+def test_absence_and_incapacity_block(field, monkeypatch):
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    monkeypatch.setattr(c, "MX_CONTRIBUTION_DAYS_RULE", None)            # W3-3 transcribed the real rule
     facts = {"start": date(2026, 6, 1), "end": date(2026, 6, 15), "days_paid": 15, field: 1}
     assert _blocked(_period, mx_period=facts).key == "MX_ABSENCE_RULES_MISSING"
+
+
+def test_with_the_lss_31_rule_absences_resolve_and_the_limits_block():
+    """W3-3: fewer than 8 absence days resolve (applied per branch later);
+    8 or more need LSS Art. 37 (not modelled); a multi-segment period cannot
+    place the undated absences."""
+    facts = {"start": date(2026, 6, 1), "end": date(2026, 6, 15), "days_paid": 15, "absence_days": 3,
+             "incapacity_days": 2}
+    p = _period(mx_period=facts)
+    assert (p.absence_days, p.incapacity_days) == (3, 2)
+    assert _blocked(_period, mx_period=dict(facts, absence_days=8)).key == "MX_ABSENCE_ART37_NOT_MODELLED"
 
 
 def test_single_segment_uses_the_pay_date_rows():

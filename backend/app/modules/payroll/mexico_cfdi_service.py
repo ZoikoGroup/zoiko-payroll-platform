@@ -301,6 +301,32 @@ def _adopt_uuid(db: Session, doc, uuid: str, result, event_type: str, actor_id=N
     return True
 
 
+def _store_stamped_xml(db: Session, doc, result, actor_id=None) -> None:
+    """W4-3b: keep the PAC's stamped CFDI beside the signed one (no new column:
+    its reference is the STAMPED_XML_STORED event's detail). A stamped XML that
+    does not carry the adopted UUID is not kept — the receipt then refuses."""
+    xml = getattr(result, "stamped_xml", None)
+    if not xml:
+        return
+    if (doc.uuid or "").encode() not in xml:
+        _event(db, doc, "STAMPED_XML_MISMATCH", actor_id, {"uuid": doc.uuid, "sha256": _sha(xml)})
+        return
+    from app.core import object_storage
+
+    ref = object_storage.save_upload(subdir=f"mx_cfdi/{doc.organization_id}/{doc.payroll_run_id}",
+                                     filename=f"{doc.folio}.stamped.xml", data=xml)
+    _event(db, doc, "STAMPED_XML_STORED", actor_id, {"ref": ref, "sha256": _sha(xml)})
+
+
+def stamped_xml_ref(db: Session, doc):
+    """The stored stamped XML's reference, or None (W4-3b)."""
+    m = _models()
+    ev = (db.query(m.PayrollMxCfdiEvent).filter(m.PayrollMxCfdiEvent.document_id == doc.id,
+                                                m.PayrollMxCfdiEvent.event_type == "STAMPED_XML_STORED")
+          .order_by(m.PayrollMxCfdiEvent.id.desc()).first())
+    return (ev.detail or {}).get("ref") if ev is not None else None
+
+
 def _complete_replacement(db: Session, doc, actor_id=None):
     """original CANCELLED + replacement STAMPED -> original REPLACED."""
     m = _models()
@@ -332,7 +358,8 @@ def _process_stamp(db: Session, item, doc, adapter, actor_id):
     except Exception as exc:                      # transport / timeout → UNKNOWN, never REJECTED (MX-062)
         result = _pac.StampResult(outcome=_pac.UNKNOWN, code="TRANSPORT", message=type(exc).__name__)
     if result.outcome == _pac.ACCEPTED and result.uuid:
-        _adopt_uuid(db, doc, result.uuid, result, "STAMPED", actor_id)
+        if _adopt_uuid(db, doc, result.uuid, result, "STAMPED", actor_id):
+            _store_stamped_xml(db, doc, result, actor_id)
         item.status, item.acknowledged_at = "ACKNOWLEDGED", _now()
     elif result.outcome == _pac.REJECTED:
         doc.pac_response_code, doc.pac_message = result.code, (result.message or "")[:500]

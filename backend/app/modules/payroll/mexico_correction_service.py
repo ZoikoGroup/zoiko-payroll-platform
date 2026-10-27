@@ -120,6 +120,34 @@ def contribution(db: Session, item, run_of_item, me, my_committed_at):
             applied - _dec((o.get("subsidy") or {}).get("applied")))
 
 
+def _exempt_by_kind(res) -> dict:
+    out: dict = {}
+    for c in res.get("concepts") or []:
+        kind = str(c.get("kind") or "").upper()
+        out[kind] = out.get(kind, Decimal("0")) + _dec(c.get("isr_exempt"))
+    return out
+
+
+def exempt_contribution(db: Session, item, run_of_item, me, my_committed_at):
+    """{concept: ISR-exempt amount} this committed payslip adds to `me`'s
+    calendar-year exempt totals (W1-3, LISR Art. 93 XIV), or None — the same
+    gating as `contribution`: a CORRECTION adds its delta, and only to runs
+    committed after it (or not committed)."""
+    res = result_of(item)
+    mine = _exempt_by_kind(res)
+    if (run_of_item.mx_run_type or "ORDINARY") != "CORRECTION":
+        return mine
+    corr_at = (run_of_item.mx_approval_fingerprint or {}).get("committedAt")
+    if my_committed_at is not None and corr_at is not None and \
+            datetime.fromisoformat(corr_at) >= datetime.fromisoformat(my_committed_at):
+        return None
+    original = original_item_for(db, item)
+    if original is None:
+        return mine
+    before = _exempt_by_kind(result_of(original))
+    return {k: mine.get(k, Decimal("0")) - before.get(k, Decimal("0")) for k in set(mine) | set(before)}
+
+
 # ── create / void ───────────────────────────────────────────────────────────
 
 def _run(db: Session, org_id: int, run_id: int):

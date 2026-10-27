@@ -139,7 +139,9 @@ def approve_amount(db: Session, org_id: int, cycle_id: int, actor_id: Optional[i
         raise BadRequestException(f"Only a DRAFT cycle's amount can be approved (this one is {row.status})")
     _four_eyes(actor_id, row.recorded_by_id, "the distributable amount", org_id)
     try:
-        row.payment_deadline = ptu.payment_deadline(row.fiscal_year, {"id": row.employer_profile_id})
+        employer = db.get(_m().PayrollMxEmployerProfile, row.employer_profile_id)
+        row.payment_deadline = ptu.payment_deadline(row.fiscal_year, {     # W1-4: LISR Arts. 76 V / 150 by taxpayer type
+            "id": row.employer_profile_id, "taxpayer_type": getattr(employer, "taxpayer_type", None)})
         row.deadline_rule_ref = ptu.rule_source()
     except MXBlock:
         row.payment_deadline, row.deadline_rule_ref = None, "unsourced — the PTU payment window (S21) is not transcribed"
@@ -263,11 +265,34 @@ def qualifying_facts(db: Session, row) -> list:
                 bucket["PTU_WAGE_BASE"] = bucket.get("PTU_WAGE_BASE", _ZERO) + _dec(c.get("gross"))
     out = []
     excluded = {e["employeeId"]: e["reason"] for e in (row.operator_exclusions or []) if e.get("approvedById")}
+    history = _ptu_history(db, row)
     for employee_id in sorted(workers):
         emp = db.get(m.PayrollEmployee, employee_id)
         out.append({**workers[employee_id], "date_of_joining": emp.date_of_joining if emp else None,
                     "date_of_leaving": emp.date_of_leaving if emp else None,
-                    "operator_exclusion": excluded.get(employee_id)})
+                    "operator_exclusion": excluded.get(employee_id),
+                    "ptu_history": history.get(employee_id, {})})
+    return out
+
+
+def _ptu_history(db: Session, row) -> dict:
+    """{employee_id: {fiscal year: PTU received}} from this employer's
+    DISTRIBUTED cycles of the three previous fiscal years (W1-4: LFT Art. 127
+    VIII caps a share at the more favourable of three months' salary and "el
+    promedio de la participación recibida en los últimos tres años")."""
+    m = _m()
+    years = range(row.fiscal_year - 3, row.fiscal_year)
+    cycles = (db.query(m.PayrollMxPtuCycle)
+              .filter(m.PayrollMxPtuCycle.organization_id == row.organization_id,
+                      m.PayrollMxPtuCycle.employer_profile_id == row.employer_profile_id,
+                      m.PayrollMxPtuCycle.status == "DISTRIBUTED",
+                      m.PayrollMxPtuCycle.fiscal_year.in_(list(years))).all())
+    out: dict = {}
+    for c in cycles:
+        for a in db.query(m.PayrollMxPtuAllocation).filter(m.PayrollMxPtuAllocation.cycle_id == c.id):
+            if a.eligible and a.final_amount is not None:
+                per = out.setdefault(a.employee_id, {})
+                per[c.fiscal_year] = per.get(c.fiscal_year, _ZERO) + _dec(a.final_amount)
     return out
 
 

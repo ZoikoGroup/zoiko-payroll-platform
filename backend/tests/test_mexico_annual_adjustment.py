@@ -49,10 +49,10 @@ def _rules(monkeypatch, *, rule=None, exclusions=True):
     from app.modules.payroll.engine.countries import mexico_content as c
 
     monkeypatch.setattr(mexico_annual_service, "_today", lambda: TODAY)
-    if rule is not False:
-        monkeypatch.setattr(c, "MX_ANNUAL_ADJUSTMENT_RULE", rule or SynAnnualRule())
-    if exclusions:
-        monkeypatch.setattr(c, "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS", {"SYN_OWN_RETURN": SynExclusion()})
+    # W1-4 transcribed the real rule and catalog: "absent" is set explicitly
+    monkeypatch.setattr(c, "MX_ANNUAL_ADJUSTMENT_RULE", None if rule is False else (rule or SynAnnualRule()))
+    monkeypatch.setattr(c, "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS",
+                        {"SYN_OWN_RETURN": SynExclusion()} if exclusions else {})
 
 
 def _S():

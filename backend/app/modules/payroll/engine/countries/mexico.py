@@ -31,6 +31,7 @@ from decimal import Decimal
 from ..jurisdictions.mexico import (ceav, classification, entitlements, imss, infonavit, isn, isr, labor, preflight,
                                     sbc, special_pay, subsidy, termination, trace)
 from ..jurisdictions.mexico import annual_adjustment
+from . import mexico_content as _content        # W3-3: the contribution-days rule
 from ..jurisdictions.mexico.errors import MexicoCalculationBlockedError, MXBlock  # noqa: F401  (re-exported)
 
 __all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoCalculationBlockedError", "MXBlock", "calculate"]
@@ -124,7 +125,9 @@ def _calculate(ctx) -> dict:
     min_wage = labor.minimum_wage(content, daily_salary, zone, preflight.fact(profile, "mx_professional_min_code"))
     week = labor.workweek(content, policy)
     hours = labor.hour_lines(content, ctx.mx_hours, policy, daily_salary)
-    lines = pre["lines"] + classification.classify(hours["lines"], ctx.mx_classifications, on, work_state)
+    hour_facts = {**(pre.get("facts") or {}), "overtime_weeks": hours["overtime"],          # W3-4: Art. 93 I / XIV
+                  "sundays_worked": (hours["sunday"] or {}).get("sundays", 0)}
+    lines = pre["lines"] + classification.classify(hours["lines"], ctx.mx_classifications, on, work_state, hour_facts)
     gross = sum((l["amount"] for l in lines), _ZERO)
     if ctx.gross is not None and Decimal(str(ctx.gross)) != gross:
         raise MXBlock("MX_GROSS_MISMATCH",
@@ -135,6 +138,12 @@ def _calculate(ctx) -> dict:
     base = sbc.compute(daily_salary=daily_salary, policy=policy, seniority_date=preflight.fact(profile, "mx_seniority_date"),
                        on=on, lines=lines, accumulator=ctx.mx_variable_accumulator, segments=period.segments, zone=zone)
     segs = base["segments"]
+    if period.absence_days > 0 or period.incapacity_days > 0:                 # W3-3: LSS Art. 31 per branch
+        rule = _content.MX_CONTRIBUTION_DAYS_RULE
+        for seg in segs:
+            seg["branch_days"] = {b: rule.branch_days(b, seg["days"], period.absence_days, period.incapacity_days)
+                                  for b in ("EM_FIXED_QUOTA", "EM_EXCESS", "EM_CASH", "EM_PENSIONER", "IV",
+                                            "GUARDERIAS", "RETIRO", "CEAV", "RIESGOS_TRABAJO", "INFONAVIT")}
     premium = imss.risk_premium_rate(ctx.mx_risk_premium, ctx.mx_registration, segs)
     social = imss.contributions(segs, premium)
     ceav_er = ceav.employer(segs, zone)
@@ -144,6 +153,14 @@ def _calculate(ctx) -> dict:
     # ISR and employment subsidy (pay-date content, MX-013).
     taxable = sum((l["isr_taxable"] for l in lines), _ZERO)
     tax = isr.withholding(taxable, content.isr_tariff(period.tariff))
+    # W3-5 (gap A16): LISR Art. 96 para 1 — no withholding when the worker is paid only the area minimum wage.
+    min_wage_only = (content.has("mx_min_wage_no_withholding_rule")
+                     and content.text("mx_min_wage_no_withholding_rule").upper() == "NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY"
+                     and not preflight.fact(profile, "mx_professional_min_code")
+                     and daily_salary <= content.min_wage(zone)
+                     and all(l["kind"] == classification.ORDINARY_SALARY for l in lines))
+    if min_wage_only:
+        tax = {**tax, "isr": _ZERO, "min_wage_only": True}
     sub = subsidy.subsidy(content, period.tariff, period.days_paid, taxable, ctx.mx_month_to_date)
     net_isr = subsidy.offset(content, rnd(tax["isr"]), rnd(sub["amount"]))
 
@@ -187,7 +204,8 @@ def _calculate(ctx) -> dict:
         "infonavit_credit": credit_ee, "infonavit_credit_lines": credits["lines"],
         "isn": {**state_tax, "amount": isn_er},
         "employee_total": employee_total, "employer_total": imss_er + housing_er + isn_er,
-        "labor": {"minimum_wage": min_wage, "workweek": week, "overtime": hours["overtime"], "sunday": hours["sunday"]},
+        "labor": {"minimum_wage": min_wage, "workweek": week, "overtime": hours["overtime"], "sunday": hours["sunday"],
+                  "rest_day": hours.get("rest_day")},
         "entitlements": benefits, "concepts": trace.concepts(lines),
         "rounding_rule": rnd.text,
         "content_rows": trace.content_rows(content, *[s["content"] for s in segs if s["content"] is not content],

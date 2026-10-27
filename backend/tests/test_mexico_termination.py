@@ -82,8 +82,7 @@ def _rules(monkeypatch, *, finiquito=True):
     from app.modules.payroll.engine.countries import mexico_content as c
 
     _catalog(monkeypatch)
-    if finiquito:
-        monkeypatch.setattr(c, "MX_FINIQUITO_RULE", SynFiniquitoRule())
+    monkeypatch.setattr(c, "MX_FINIQUITO_RULE", SynFiniquitoRule() if finiquito else None)   # W1-3b: real rule exists
     monkeypatch.setattr(c, "MX_AGUINALDO_RULE", SynAguinaldoRule())
     monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {k: SynSpecialPayRule() for k in CONCEPTS})
     monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {("CDMX", k): (True, "S22", "SYNTHETIC") for k in CONCEPTS})
@@ -123,8 +122,10 @@ def _finiquito(db, w, term_id, pay=date(2026, 6, 25)):
 
 def test_without_the_reason_catalog_no_termination_is_recorded(db, monkeypatch):
     from app.modules.payroll.engine.countries.mexico import MXBlock
+    from app.modules.payroll.engine.countries import mexico_content as c
     from app.modules.payroll.models import PayrollMxTermination
 
+    monkeypatch.setattr(c, "MX_TERMINATION_REASONS", {})               # W1-3b transcribed the real catalog
     w = ah.committed_world(db, monkeypatch, code="MXTRM0")
     with pytest.raises(MXBlock) as exc:
         _record(db, w)
@@ -400,3 +401,14 @@ def test_each_separation_kind_needs_its_own_transcribed_tax_rule(db, monkeypatch
     w = ah.committed_world(db, monkeypatch, code="MXTRM13")
     run = _finiquito(db, w, _approved(db, w)["id"])
     assert "MX_SPECIAL_PAY_RULE_MISSING" in _codes(db, run)
+
+
+def test_the_transcribed_catalog_lists_the_lft_reasons_with_their_sources(db, monkeypatch):
+    """W1-3b: the real catalog (LFT Arts. 47-54, 162) — every reason cites the LFT."""
+    w = ah.committed_world(db, monkeypatch, code="MXTRMR")
+    out = _T().reasons(db, w.org.id)
+    codes = {r["code"] for r in out["reasons"]}
+    assert {"LFT_47_RESCISSION_BY_EMPLOYER", "LFT_48_DISMISSAL_INDEMNIFIED", "LFT_49_NO_REINSTATEMENT",
+            "LFT_51_RESCISSION_BY_WORKER", "LFT_53_III_END_OF_TERM", "LFT_54_INCAPACITY",
+            "LFT_162_VOLUNTARY_SEPARATION"} == codes
+    assert all(r["source"] == "S26/S26_DIP_LFT.pdf" for r in out["reasons"])

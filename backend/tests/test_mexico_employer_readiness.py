@@ -71,6 +71,7 @@ def test_empty_content_dependencies_show_as_blocked(db, monkeypatch):
 
     for table in ("MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES"):      # empty content (Batch 2 transcribed S9)
         monkeypatch.setattr(c, table, ())
+    monkeypatch.setattr(c, "MX_RISK_PREMIUM_PERIOD", None)          # W1-5 transcribed the real one (RACERF)
     t = make_org(db)
     emp = new_employer(db, t.org.id)
     new_registration(db, t.org.id, emp["id"])

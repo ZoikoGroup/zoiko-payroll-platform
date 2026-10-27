@@ -9695,6 +9695,66 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["NL"] = {
     "nl_calculation_snapshot.periodCode": ("Payroll Period", "text", False),
 }
 
+# Mexico (ZP-MX-ENG-001, Phase 12a / completion W4-1): paths into the frozen
+# mx_calculation_snapshot.result (engine/jurisdictions/mexico/trace.py; amounts
+# are decimal strings). A segment "name[key=value,…]" selects the matching
+# items of a list (the keyed selector in _report_json_path_value) and sums
+# them when several match — every other country's path has no "[".
+_MX_SNAP = "mx_calculation_snapshot.result."
+_MX_IMSS_BRANCHES = (
+    ("EM_FIXED_QUOTA", "employer", "IMSS E&M Fixed Quota (Employer)"),
+    ("EM_EXCESS", "employer", "IMSS E&M Excess (Employer)"), ("EM_EXCESS", "employee", "IMSS E&M Excess (Employee)"),
+    ("EM_CASH", "employer", "IMSS E&M Cash Benefits (Employer)"),
+    ("EM_CASH", "employee", "IMSS E&M Cash Benefits (Employee)"),
+    ("EM_PENSIONER", "employer", "IMSS E&M Pensioner Medical (Employer)"),
+    ("EM_PENSIONER", "employee", "IMSS E&M Pensioner Medical (Employee)"),
+    ("IV", "employer", "IMSS Invalidez y Vida (Employer)"), ("IV", "employee", "IMSS Invalidez y Vida (Employee)"),
+    ("GUARDERIAS", "employer", "IMSS Guarderías (Employer)"), ("RETIRO", "employer", "IMSS Retiro (Employer)"),
+    ("CEAV", "employer", "IMSS Cesantía y Vejez (Employer)"), ("CEAV", "employee", "IMSS Cesantía y Vejez (Employee)"),
+    ("RIESGOS_TRABAJO", "employer", "IMSS Riesgos de Trabajo (Employer)"),
+)
+_MX_CONCEPT_KINDS = (
+    ("AGUINALDO", "Aguinaldo"), ("VACATION_PAYOUT", "Vacation Paid Out"), ("VACATION_PREMIUM", "Vacation Premium"),
+    ("PTU", "PTU"), ("SEPARATION_SENIORITY_PREMIUM", "Seniority Premium"),
+    ("SEPARATION_PAYMENT", "Separation Payment"), ("SEPARATION_INDEMNITY", "Indemnity"),
+)
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"] = {
+    _MX_SNAP + "gross": ("Gross Pay", "currency", True),
+    _MX_SNAP + "days_paid": ("Days Paid", "text", False),
+    _MX_SNAP + "tariff_period": ("Art. 96 Tariff Period", "text", False),
+    _MX_SNAP + "isr_taxable": ("ISR Taxable Income", "currency", True),
+    _MX_SNAP + "isr": ("ISR Before Subsidy", "currency", True),
+    _MX_SNAP + "isr_withheld": ("ISR Withheld", "currency", True),
+    _MX_SNAP + "subsidy.amount": ("Employment Subsidy Due", "currency", True),
+    _MX_SNAP + "subsidy.applied": ("Employment Subsidy Applied", "currency", True),
+    _MX_SNAP + "subsidy.remainder": ("Employment Subsidy Not Payable", "currency", True),
+    _MX_SNAP + "imss_employee": ("IMSS (Employee)", "currency", True),
+    _MX_SNAP + "imss_employer": ("IMSS (Employer)", "currency", True),
+    _MX_SNAP + "infonavit_employer": ("INFONAVIT Contribution (Employer)", "currency", True),
+    _MX_SNAP + "infonavit_credit": ("INFONAVIT Credit Discount (Employee)", "currency", True),
+    _MX_SNAP + "isn.amount": ("State Payroll Tax (ISN)", "currency", True),
+    _MX_SNAP + "employee_total": ("Employee Statutory Deductions", "currency", True),
+    _MX_SNAP + "employer_total": ("Employer Statutory Cost", "currency", True),
+    _MX_SNAP + "sbc.components.fixed": ("SBC Fixed Part (daily)", "currency", False),
+    _MX_SNAP + "sbc.components.variable_daily": ("SBC Variable Part (daily)", "currency", False),
+    _MX_SNAP + "special.rule_source": ("Special-Pay Rule Source", "text", False),
+    _MX_SNAP + "special.detail.days": ("Aguinaldo Days", "text", False),
+    _MX_SNAP + "special.detail.fraction": ("Aguinaldo Fraction of the Year", "text", False),
+    _MX_SNAP + "special.detail.vacation.days": ("Vacation Days Owed", "text", False),
+    _MX_SNAP + "special.detail.vacation.payout": ("Vacation Paid Out", "currency", True),
+    _MX_SNAP + "special.detail.vacation.premium": ("Vacation Premium Paid Out", "currency", True),
+    _MX_SNAP + "annual_adjustment.fiscal_year": ("Annual Adjustment — Fiscal Year", "text", False),
+    _MX_SNAP + "annual_adjustment.difference": ("Annual Adjustment — Difference", "currency", True),
+    _MX_SNAP + "annual_adjustment.period_withheld": ("Annual Adjustment — Period ISR Before", "currency", True),
+    _MX_SNAP + "annual_adjustment.withheld": ("Annual Adjustment — ISR Withheld", "currency", True),
+    _MX_SNAP + "annual_adjustment.change": ("Annual Adjustment — Applied This Run", "currency", True),
+    _MX_SNAP + "annual_adjustment.carry_forward": ("Annual Adjustment — Carried Forward", "currency", True),
+    **{f"{_MX_SNAP}imss[branch={b},side={s}].amount": (label, "currency", True) for b, s, label in _MX_IMSS_BRANCHES},
+    **{f"{_MX_SNAP}concepts[kind={k}].{part}": (f"{label} — {name}", "currency", True)
+       for k, label in _MX_CONCEPT_KINDS
+       for part, name in (("gross", "Gross"), ("isr_exempt", "ISR Exempt"), ("isr_taxable", "ISR Taxable"))},
+}
+
 _PAYROLL_RUN_FIELD_CATALOG = {
     "run_code": ("Run Code", "text", False),
     "period_label": ("Period", "text", False),
@@ -9813,6 +9873,10 @@ _REPORT_FIELD_ALLOWED_COLUMNS = {
 # catalogs above regardless of country, since a field being real is what
 # matters, not whether this file guesses it's "typical" for a jurisdiction.
 _PAYSLIP_FIELDS_BY_COUNTRY = {
+    # Mexico (W4-1): scalar payslip columns only — the Mexican figures come
+    # from mx_calculation_snapshot (catalog "MX" above); no identifier or bank
+    # column is offered (MX-061).
+    "MX": ["employee_name", "department", "designation", "gross_pay", "tds", "total_deductions", "net_pay"],
     "IN": ["employee_name", "department", "designation", "pan", "uan", "bank_name", "bank_account",
            "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
            "payable_days", "total_working_days", "pf", "esi", "professional_tax", "tds", "surcharge", "cess",
@@ -10604,7 +10668,7 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("totals", "LPT Totals"),
     ],
     # Mexico (ZP-MX-ENG-001 Phase 2) — the three templates with data today;
-    # every other MX template is a component-less Draft shell (default list).
+    # every other MX template has no components: a dedicated generator builds it (W4-2).
     "MX_REGISTER": [
         ("employer_info", "Employer"), ("employee_info", "Employee"),
         ("earnings", "Perceptions"), ("deductions", "Deductions and Net Pay"),
@@ -10616,6 +10680,19 @@ _REPORT_COMPONENTS_BY_TYPE = {
     # loonaangifte and jaaropgaaf are produced by the NL filing and annual
     # services, not by a template — NL_LOONAANGIFTE_SUMMARY is a run-level
     # reconciliation aid only.
+    # Mexico (W4-1): the template-engine reports over mx_calculation_snapshot.
+    "MX_REGISTER": [("employer_info", "Employer"), ("employee_info", "Employee"), ("earnings", "Perceptions"),
+                    ("deductions", "Deductions and Net Pay"), ("other_payments", "Other Payments")],
+    "MX_EMPLOYER_COST": [("employer_info", "Employer"), ("employer_contributions", "Employer Cost")],
+    "MX_SUBSIDY": [("employer_info", "Employer"), ("employee_info", "Employee"), ("subsidy", "Employment Subsidy")],
+    "MX_IMSS": [("employer_info", "Employer"), ("employee_info", "Employee"), ("sbc", "Salario Base de Cotización"),
+                ("branches", "IMSS Branches"), ("totals", "IMSS Totals")],
+    "MX_INFONAVIT": [("employer_info", "Employer"), ("employee_info", "Employee"), ("infonavit", "INFONAVIT")],
+    "MX_AGUINALDO": [("employer_info", "Employer"), ("employee_info", "Employee"), ("aguinaldo", "Aguinaldo")],
+    "MX_FINIQUITO": [("employer_info", "Employer"), ("employee_info", "Employee"), ("aguinaldo", "Aguinaldo"),
+                     ("vacation", "Vacation"), ("separation", "Separation"), ("totals", "Withholding and Net Pay")],
+    "MX_ANNUAL_ISR": [("employer_info", "Employer"), ("employee_info", "Employee"),
+                      ("annual_adjustment", "Annual ISR Adjustment")],
     "NL_PAYROLL_REGISTER": [("employer_info", "Employer"), ("employee_info", "Employee"),
                             ("earnings", "Gross Wage"), ("deductions", "Deductions and Net Pay")],
     "NL_LOONSTROOK": [("employer_info", "Employer"), ("employee_info", "Employee"), ("earnings", "Gross Wage"),
@@ -11826,6 +11903,8 @@ def _resolve_field_value(
             blob = getattr(target, column_name, None)
             if blob is None:
                 return None
+            if "[" in path:                                   # Mexico W4-1: a keyed list selector
+                return _report_json_path_value(blob, [s for s in path.split(".") if s])
             for segment in filter(None, path.split(".")):
                 if not isinstance(blob, dict) or segment not in blob:
                     return None
@@ -11876,6 +11955,43 @@ def _resolve_field_value(
     if isinstance(value, (date, datetime)):
         value = value.isoformat()
     return value
+
+
+def _report_json_walk(blob, segments) -> list:
+    """Every leaf a dotted path reaches. A segment "name[k=v,k2=v2]" selects the
+    dict items of list `name` whose keys equal those values (as text)."""
+    if not segments:
+        return [blob]
+    head, rest = segments[0], segments[1:]
+    if "[" in head and head.endswith("]"):
+        name, _, selector = head[:-1].partition("[")
+        wanted = dict(p.split("=", 1) for p in selector.split(",") if "=" in p)
+        items = blob.get(name) if isinstance(blob, dict) else None
+        if not isinstance(items, list):
+            return []
+        out = []
+        for item in items:
+            if isinstance(item, dict) and all(str(item.get(k)) == v for k, v in wanted.items()):
+                out += _report_json_walk(item, rest)
+        return out
+    if not isinstance(blob, dict) or head not in blob:
+        return []
+    return _report_json_walk(blob[head], rest)
+
+
+def _report_json_path_value(blob, segments):
+    """A selector path's value: None when nothing matches, the value when one
+    item matches, the sum when several do (all must be numbers or numeric
+    strings — otherwise None, never a guess)."""
+    leaves = _report_json_walk(blob, segments)
+    if not leaves:
+        return None
+    if len(leaves) == 1:
+        return leaves[0]
+    numbers = [_report_json_number(v, "currency") for v in leaves]
+    if any(n is None for n in numbers):
+        return None
+    return str(sum(numbers, Decimal("0")))
 
 
 def _report_json_number(cell, field_type) -> Optional[Decimal]:
@@ -11968,6 +12084,15 @@ def generate_report_from_template(
         raise BadRequestException(
             f"{template.template_key} has a dedicated Hong Kong generator "
             "(/api/payroll/hong-kong/reports/...); the generic payslip-column generator cannot render it."
+        )
+    if template.jurisdiction_country == "MX" and template.report_type in MX_DEDICATED_GENERATOR_REPORT_TYPES:
+        # Mexico W4-2 (Phase 12b): these reports' subject is one of Mexico's own
+        # tables (CFDI lifecycle, authority liabilities, IMSS movements, SUA, ISN
+        # returns, vacation ledgers, PTU cycles) — never a payslip-column list.
+        raise BadRequestException(
+            f"{template.template_key} has a dedicated Mexico generator "
+            "(/api/payroll/mexico/reports/{template_id}/generate); the generic payslip-column generator cannot "
+            "render it."
         )
     if template.jurisdiction_country == "HK" and template.status != "Active":
         # The same "Active version is the one in force" rule Singapore applies:
@@ -19197,6 +19322,12 @@ def generate_ky_pension_submission(
 # Every HK report type has a bespoke generator, so the shared
 # generate_report_from_template refuses all of them (see the check inside it).
 # Kept as one tuple so the refusal and the seeded catalog cannot drift apart.
+# Mexico (completion W4-2): report types built only by mexico_report_service
+# (the CFDI receipt by W4-3); MX_ANNUAL_ISR stays a template-engine report too.
+MX_DEDICATED_GENERATOR_REPORT_TYPES = (
+    "MX_CFDI_STATUS", "MX_ISR_WITHHOLDING", "MX_IDSE", "MX_SUA", "MX_SIPARE", "MX_VACATION", "MX_PTU",
+    "MX_ISN_RETURN", "MX_CFDI_RECEIPT",
+)
 _HK_DEDICATED_GENERATOR_REPORT_TYPES = (
     "HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G",
     "HK_EMPF_REMITTANCE", "HK_MPF_CONTRIBUTION_RECORD", "HK_TERMINATION_STATEMENT",

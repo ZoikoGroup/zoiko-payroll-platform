@@ -48,7 +48,8 @@ def employer(sbc_segments, zone: str) -> dict:
         if index == 0 and zone == "ZLFN":
             raise MXBlock("MX_CEAV_LOWEST_BAND_PENDING_G2",
                           "a ZLFN employee in the lowest CEAV band — its minimum-wage reference is [PENDING G2]")
+        days = (seg.get("branch_days") or {}).get("CEAV", seg["days"])          # W3-3 (LSS Art. 31)
         lines.append({"branch": "CEAV", "side": "employer", "segment": seg["start"].isoformat(),
-                      "band": band["label"], "base": sbc, "days": seg["days"], "rate_pct": band["rate_pct"],
-                      "amount": sbc * seg["days"] * band["rate"]})
+                      "band": band["label"], "base": sbc, "days": days, "rate_pct": band["rate_pct"],
+                      "amount": sbc * days * band["rate"]})
     return {"lines": lines, "employer": sum((l["amount"] for l in lines), _ZERO)}
