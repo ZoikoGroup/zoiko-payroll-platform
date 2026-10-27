@@ -560,3 +560,21 @@ Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch 
 | Other jurisdictions | None |
 
 **Phase 12 plan D4** ("build now from the stored stamped XML") is done. The receipt stays "not an official file" until D-20 and the rule 2.7.1.7 V chain are settled; it becomes G1 evidence once a PAC sandbox stamps (C1).
+
+---
+
+## End of W4 — full backend suite
+
+Run 2026-10-27 08:52–09:17 on `3a44dc1`, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 976 passed, 16 skipped, **3 failed**: the 3 known local-only route-registry tests (the `/health` routes in your uncommitted `main.py`) |
+| 1 | 2,488 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,273 passed, 32 skipped |
+| 3 | 1,139 passed, 67 skipped |
+| 4 | 1,654 passed, 3 skipped |
+
+**Total: 7,530 passed, 120 skipped, 2 xfailed.** That is 25 more passing tests than after W3. No other jurisdiction's behaviour changed; the NL, IE and SE report paths are pinned by the W4-1 tests.
+
+**Browser check of the templates:** done with W5's browser pass, because both touch the same Super Admin compliance workspace.
