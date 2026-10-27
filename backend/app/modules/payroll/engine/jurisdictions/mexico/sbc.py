@@ -102,12 +102,23 @@ def compute(*, daily_salary, policy, seniority_date, on, lines, accumulator, seg
     salary = _dec(daily_salary, "the employee's daily salary", "MX_DAILY_SALARY_MISSING")
     if salary <= 0:
         raise MXBlock("MX_DAILY_SALARY_MISSING", "the employee's daily salary must be more than zero")
+    from ...countries import mexico_content as _c
+
+    extra = _ZERO
     for line in lines:
         if line["sbc"] == "FIXED" and line["kind"] != ORDINARY_SALARY:
-            raise MXBlock("MX_SBC_FIXED_RULE_MISSING",
-                          f"earning {line['code']} is a FIXED SBC item — its integration rule (S10) is not transcribed")
+            rule = _c.MX_SBC_FIXED_INTEGRATION_RULE                        # W3-5: LSS Art. 30 I (D-18)
+            if rule is None:
+                raise MXBlock("MX_SBC_FIXED_RULE_MISSING",
+                              f"earning {line['code']} is a FIXED SBC item — its integration rule (S10) is not "
+                              f"transcribed")
+            daily = _dec(rule.daily_amount(line, {"on": on, "segments": segments}), f"{line['code']} daily SBC amount",
+                         "MX_SBC_FIXED_RULE_INVALID")
+            if daily < 0:
+                raise MXBlock("MX_SBC_FIXED_RULE_INVALID", f"earning {line['code']} integrated a negative daily amount")
+            extra += daily
     integ = integration_factor(policy, service_year(seniority_date, on))
-    fixed = salary * integ["factor"]
+    fixed = salary * integ["factor"] + extra
     variable = variable_daily(accumulator)
     raw = fixed + variable["daily"]
     if zone not in ("GENERAL", "ZLFN"):

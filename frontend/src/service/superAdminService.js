@@ -198,6 +198,9 @@ export const getMxCeavSchedule = (on, packId) => apiFetch(`${MX_SA}/ceav-schedul
 export const getMxInfonavit = (on, packId) => apiFetch(`${MX_SA}/infonavit`, mxOn(on, packId));
 export const getMxBenefitsWorkweek = (on, packId) => apiFetch(`${MX_SA}/benefits-workweek`, mxOn(on, packId));
 export const listMxIsnStates = () => apiFetch(`${MX_SA}/isn-states`);
+// Completion W5-1: one state ISN pack's rows with sources, and the module-direct rules (read-only).
+export const getMxIsnContent = (packId, on) => apiFetch(`${MX_SA}/isn-content`, mxOn(on, packId));
+export const getMxStatutoryRules = (on) => apiFetch(`${MX_SA}/statutory-rules`, mxOn(on));
 export const listMxEarningClassifications = (orgId, on) =>
   apiFetch(`${MX_SA}/earning-classifications`, { params: { ...(orgId ? { org_id: orgId } : {}), ...(on ? { on } : {}) } });
 export const createMxEarningClassification = (payload) =>

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from . import classification, isn, period, rounding, special_pay
+from . import classification, isn, period, rounding, special_pay, termination
 from .content import Content
 from .errors import MXBlock
 
@@ -24,6 +24,20 @@ def fact(obj, name: str):
     if isinstance(obj, dict):
         return obj.get(name)
     return getattr(obj, name, None)
+
+
+def _separation_total(special) -> Decimal:
+    """The whole separation paid in this payment — the base LISR Art. 93 XIII's
+    shared cap is allocated over. A malformed amount is left to
+    special_pay.classify, which reports it."""
+    total = Decimal("0")
+    for line in special or []:
+        if str(line.get("kind") or "").upper() in termination.SEPARATION_KINDS:
+            try:
+                total += Decimal(str(line.get("amount")))
+            except (InvalidOperation, ValueError):
+                continue
+    return total
 
 
 def run(ctx) -> dict:
@@ -100,14 +114,22 @@ def run(ctx) -> dict:
                             f"a {run_type} run carries only {' / '.join(allowed).lower()} lines"))
     elif not any(str(l.get("kind") or "").upper() == classification.ORDINARY_SALARY for l in ordinary):
         reasons.append(("MX_SALARY_LINE_MISSING", "the period has no ordinary-salary earning line"))
-    hour_kinds = (classification.OVERTIME, classification.SUNDAY_PREMIUM)
+    hour_kinds = (classification.OVERTIME, classification.SUNDAY_PREMIUM, classification.REST_DAY_WORK)
     if any(str(l.get("kind") or "").upper() in hour_kinds for l in ordinary):
         reasons.append(("MX_OVERTIME_NOT_FROM_HOURS",
-                        "overtime / Sunday premium is derived only from approved hours (MX-049), never a supplied line"))
+                        "overtime / Sunday premium / rest-day work is derived only from approved hours (MX-049), never a "
+                        "supplied line"))
     elif on is not None:
         facts = {"pay_date": on, "content": content, "daily_salary": fact(profile, "mx_daily_salary") if profile else None,
                  "month_to_date": getattr(ctx, "mx_month_to_date", None), "run_type": run_type or "ORDINARY",
-                 "period": resolved.get("period")}
+                 "period": resolved.get("period"),
+                 # W1-3: what the transcribed special-pay rules read (LISR Art. 93 XIII / XIV) —
+                 # the worker's zone (RLISR Art. 167), the calendar year's exempt amounts already
+                 # used, and for a separation its date, the seniority date and its whole total.
+                 "zone": zone, "seniority_date": fact(profile, "mx_seniority_date") if profile else None,
+                 "year_to_date_exempt": getattr(ctx, "mx_year_to_date_exempt", None),
+                 "separation_date": getattr(ctx, "mx_separation_date", None),
+                 "separation_total": _separation_total(special)}
         resolved["facts"] = facts
         attempt("ordinary_lines", lambda: classification.classify(ordinary, getattr(ctx, "mx_classifications", None),
                                                                   on, work_state) if ordinary else [])

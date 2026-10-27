@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight, FileCheck2, History, MapPin, Percent, ShieldCheck } from "lucide-react";
 import StatusPill from "../../../StatusPill";
 import { useToast } from "../../../../context/ToastContext";
-import { approveCompliancePolicy, getCanonicalContributionRates, setCompliancePolicyStatus } from "../../../../service/superAdminService";
+import { approveCompliancePolicy, setCompliancePolicyStatus } from "../../../../service/superAdminService";
 import { inputClass, STATUS_OPTIONS, STATUS_PILL_MAP } from "../../constants";
 import MXStateIsnTab from "./MXStateIsnTab";
 // Reused as-is, exactly as the Australia state accordion does — both are
@@ -27,12 +27,7 @@ export default function MXStateAccordionRow({ state, isExpanded, onToggle, onPac
   const [updated, setUpdated] = useState(null);
   const selectedPack = updated && pack && updated.id === pack.id ? updated : pack;
   const setSelectedPack = setUpdated;
-  const [rates, setRates] = useState([]);
   const [tab, setTab] = useState("isn");
-
-  useEffect(() => {
-    if (isExpanded && selectedPack) getCanonicalContributionRates({ jurisdictionPackId: selectedPack.id }).then(setRates).catch(() => setRates([]));
-  }, [isExpanded, selectedPack]);
 
   async function changeStatus(newStatus) {
     try {
@@ -115,7 +110,7 @@ export default function MXStateAccordionRow({ state, isExpanded, onToggle, onPac
                   </button>
                 ))}
               </div>
-              {tab === "isn" && <MXStateIsnTab rates={rates} />}
+              {tab === "isn" && <MXStateIsnTab packId={selectedPack.id} />}
               {tab === "sourceEvidence" && (
                 <USStateSourceEvidenceNote linkTo="/super-admin/compliance/mexico" linkLabel="View Source Evidence (Sources tab) →" />
               )}

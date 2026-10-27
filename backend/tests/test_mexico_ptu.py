@@ -67,10 +67,9 @@ def _rules(monkeypatch, *, ptu=True, exclusions=True, rule=None):
     from app.modules.payroll.engine.countries import mexico_content as c
 
     monkeypatch.setattr(mexico_ptu_service, "_today", lambda: TODAY)
-    if ptu:
-        monkeypatch.setattr(c, "MX_PTU_RULE", rule or SynPtuRule())
-    if exclusions:
-        monkeypatch.setattr(c, "MX_PTU_EXCLUSION_REASONS", {"SYN_DIRECTOR": SynExclusion()})
+    # W1-4 transcribed the real rule and catalog: "absent" is set explicitly
+    monkeypatch.setattr(c, "MX_PTU_RULE", (rule or SynPtuRule()) if ptu else None)
+    monkeypatch.setattr(c, "MX_PTU_EXCLUSION_REASONS", {"SYN_DIRECTOR": SynExclusion()} if exclusions else {})
     monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {"PTU": SynSpecialPayRule()})
     monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {("CDMX", "PTU"): (True, "S22", "SYNTHETIC")})
 

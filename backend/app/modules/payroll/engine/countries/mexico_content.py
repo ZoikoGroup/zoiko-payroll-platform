@@ -25,6 +25,8 @@ from datetime import date
 from decimal import Decimal
 from typing import NamedTuple, Optional
 
+from . import mexico_rules as _rules   # W1-3: rule objects (special pay), written at transcription
+
 SPEC = "ZP-MX-ENG-001 v1.0"
 PACK_STATUS = "Draft"  # seeds never create anything else
 
@@ -102,6 +104,8 @@ ADDENDUM_SOURCE_REFERENCES = (
     ("S32", "IMSS — NSS (Número de Seguridad Social) structure and check digit"),
     ("S33", "Banco de México / ABM — CLABE 18-digit structure and check digit"),
     ("S34", "DOF 27-01-2016 — constitutional decree on minimum-wage de-indexation (UMA), Transitorio Tercero"),
+    ("S35", "Código Fiscal de la Federación (CFF), Arts. 12 and 20"),
+    ("S36", "Ley del ISSSTE, Art. 21 (RCV and housing-fund payment periodicity)"),
 )
 ALL_SOURCE_CODES = SOURCE_CODES + tuple(code for code, _ in ADDENDUM_SOURCE_REFERENCES)
 
@@ -177,12 +181,23 @@ MX_PARAMETER_KEYS = {
     "mx_rounding_rule": ("text", "Monetary rounding — mode and quantum (e.g. MODE:QUANTUM)", "national"),
     "mx_sbc_min_rule": ("text", "SBC floor rule (S10)", "national"),
     "mx_subsidy_remainder_rule": ("text", "Employment subsidy above ISR — remainder handling (S3)", "national"),
+    # W3-5: the hourly rate overtime is paid at (D-17), INFONAVIT notices starting / ending inside a period
+    # (Ley INFONAVIT payment regulation, not saved), and no ISR withholding for a worker on the area
+    # minimum wage only (LISR Art. 96 para 1, gap A16) — each blocks only the case that needs it.
+    "mx_hourly_rate_rule": ("text", "Overtime — how the hourly rate is derived from the daily salary (D-17)", "national"),
+    "mx_infonavit_partial_period_rule": ("text", "INFONAVIT credit — notice in force for part of a period", "national"),
+    "mx_min_wage_no_withholding_rule": ("text", "ISR — none withheld at the area minimum wage", "national"),
+    # W3-1: periods shorter than a month — the month's subsidy never exceeds the monthly amount (S3).
+    "mx_subsidy_monthly_cap_rule": ("text", "Employment subsidy — monthly cap across a month's payments (S3)",
+                                    "national"),
     "mx_infonavit_percentage_basis": ("text", "INFONAVIT credit, PERCENTAGE method — basis (S27/S15)", "national"),
     "mx_infonavit_fixed_amount_basis": ("text", "INFONAVIT credit, FIXED_AMOUNT method — basis (S27/S15)", "national"),
     # Overtime tiers (spec §16; S26 / S18) — dated rows, the reform phases them.
     "mx_overtime_double_weekly_max_hours": ("amount", "Overtime — hours per week paid at the first tier", "national"),
     "mx_overtime_double_multiplier": ("amount", "Overtime — first-tier pay multiplier", "national"),
     "mx_overtime_triple_multiplier": ("amount", "Overtime — second-tier pay multiplier", "national"),
+    # W3-2: work on a rest day (LFT Arts. 73, 75) — daily salaries paid on top of the rest day's own salary.
+    "mx_rest_day_work_multiplier": ("amount", "Rest-day work — extra daily salaries per day worked", "national"),
     # State ISN (spec §15; S22 for CDMX) — lives in MX-ISN-<STATE>-2026 only.
     "mx_isn_rate_pct": ("employer_pct", "State ISN — rate", "state"),
 }
@@ -194,7 +209,7 @@ MX_REQUIRED_TEXT_KEYS = ("mx_rounding_rule", "mx_sbc_min_rule")
 # Non-text keys the engine BLOCKS on per case (overtime is paid only from
 # approved hours) — not required for activation.
 MX_PER_CASE_KEYS = ("mx_overtime_double_weekly_max_hours", "mx_overtime_double_multiplier",
-                    "mx_overtime_triple_multiplier")
+                    "mx_overtime_triple_multiplier", "mx_rest_day_work_multiplier")
 
 
 # ── Content row shapes ────────────────────────────────────────────────────
@@ -329,6 +344,22 @@ MX_SCALAR_CONTENT: tuple = (
               "S3/S3_DOF_Decreto_subsidio_empleo_01052024.html",
               "Art. Segundo para 2: 'la diferencia no podra aplicarse contra el impuesto que resulte a su cargo "
               "posteriormente, ni se entregara cantidad alguna por concepto del subsidio para el empleo'"),
+    # W3-5 (2026-10-26) [PENDING G1]: LISR Art. 96 para 1 — gap register A16, log TL-ISR-3.
+    ScalarRow("mx_min_wage_no_withholding_rule", None, None, None, "NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY", None, None,
+              "S24/S24_DIP_LISR.pdf",
+              "Art. 96 para 1: 'No se efectuara retencion a las personas que en el mes unicamente perciban un salario "
+              "minimo general correspondiente al area geografica del contribuyente', PDF p. 130"),
+    # W3-2 (2026-10-26) [PENDING G1]: work on a rest day — log TL-LFT-2.
+    ScalarRow("mx_rest_day_work_multiplier", None, None, "2", None, None, None, _S26,
+              "Art. 75 para 2: 'tendran derecho a que se les pague, independientemente del salario que les corresponda "
+              "por el descanso obligatorio, un salario doble por el servicio prestado', PDF p. 24; Art. 73: 'un "
+              "salario doble por el servicio prestado' on a weekly rest day, PDF p. 23 (read as 2 daily salaries "
+              "on top of the rest day's own, TL-LFT-2)"),
+    # W3-1 (2026-10-26) [PENDING G1]: the monthly cap for periods under a month — log TL-SUB-3.
+    ScalarRow("mx_subsidy_monthly_cap_rule", None, None, None, "CAP_AT_MONTHLY_AMOUNT", date(2026, 1, 1), None, _S3,
+              "Art. Segundo para 4 as reformed: 'Cuando los pagos por salarios sean por periodos menores a un mes, la "
+              "cantidad del subsidio para el empleo que corresponda a la persona trabajadora, no podra exceder el "
+              "monto mensual maximo' (read as the month's payments together, TL-SUB-3)"),
     # ── Batch 2 (2026-10-26) [PENDING G1] ──
     # IMSS (spec §8): S10 LSS, consolidated, last reform DOF 15-01-2026. Rates
     # written in words in the LSS are read as numbers (log TL-IMSS-1). Rows
@@ -477,6 +508,37 @@ MX_ISR_TARIFFS: tuple = (
     IsrBracket('MONTHLY', '141880.67', '425641.99', '37009.69', '34.00', _ISR_FROM, _ISR_TO, _S2, 'Anexo 8 RMF 2026 (DOF 28-12-2025), B.V, PDF p. 6'),
     IsrBracket('MONTHLY', '425642.00', None, '133488.54', '35.00', _ISR_FROM, _ISR_TO, _S2, 'Anexo 8 RMF 2026 (DOF 28-12-2025), B.V, PDF p. 6'),
 )
+# LISR Art. 97 / 152 ANNUAL tariff (W1-4, 2026-10-26) [PENDING G1]: S2 Anexo 8 section C "Tarifa para el cálculo
+# del impuesto correspondiente a los ejercicios 2025 y 2026", II (2026), PDF pp. 18-19. Module-direct: read only
+# by the annual-adjustment rule (mexico_rules), never seeded into a period pack. Log TL-ANN-1.
+MX_ISR_ANNUAL_TARIFFS: dict = {   # fiscal year -> tuple[IsrBracket] (period "ANNUAL")
+    2026: (
+        IsrBracket('ANNUAL', '0.01', '10135.11', '0', '1.92', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '10135.12', '86022.11', '194.59', '6.40', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '86022.12', '151176.19', '5051.37', '10.88', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '151176.20', '175735.66', '12140.13', '16.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '175735.67', '210403.69', '16069.64', '17.92', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '210403.70', '424353.97', '22282.14', '21.36', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '424353.98', '668840.14', '67981.92', '23.52', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 18'),
+        IsrBracket('ANNUAL', '668840.15', '1276925.98', '125485.07', '30.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+        IsrBracket('ANNUAL', '1276925.99', '1702567.97', '307910.81', '32.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+        IsrBracket('ANNUAL', '1702567.98', '5107703.92', '444116.23', '34.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+        IsrBracket('ANNUAL', '5107703.93', None, '1601862.46', '35.00', date(2026, 1, 1), date(2026, 12, 31), _S2,
+                   'Anexo 8 RMF 2026 (DOF 28-12-2025), C.II, PDF p. 19'),
+    ),
+}
+
+
 MX_MIN_WAGES: tuple = (
     # S9: DOF 09-12-2025 CONASAMI resolution, in force from 1 Jan 2026 [PENDING G1]
     MinWageRow("GENERAL", "ZONE", "Zona del Salario Minimo General", "315.04", None, date(2026, 1, 1), None, _S9,
@@ -785,7 +847,35 @@ class FilingRule(NamedTuple):
     needs_g1: bool = True
 
 
-MX_FILING_CALENDAR: tuple = ()        # EMPTY until each rule is confirmed in its saved source
+# W1-5 (2026-10-26) [PENDING G1]: monthly due dates on the 17th, each from its own saved text (log TL-CAL-1).
+# INFONAVIT (W2-5): Ley INFONAVIT Art. 35 says monthly, but its 1997 Transitorio SEXTO keeps payments bimonthly
+# until the ISSSTE law makes them monthly; the ISSSTE law (S36 Art. 21) still pays the housing fund "por bimestres
+# vencidos", so the condition is not met: BIMONTHLY, the 17th of the month after each bimester (log TL-CAL-4).
+# IMSS is NOT listed either: LSS Art. 39 makes quotas monthly (17th of the next month), but the 1997 LSS
+# Transitorio VIGESIMO SEPTIMO keeps retiro / CEAV bimonthly "hasta en tanto no se homologuen los periodos de pago
+# de las Leyes del ISSSTE e INFONAVIT" (S36 Art. 21: still bimonthly), and one IMSS liability carries every branch
+# — one date would misstate it (gap register A18: split the RCV branches into their own liability).
+# Only a rule whose source is VERIFIED is seeded as a live due date (seed_statutory_report_templates).
+MX_FILING_CALENDAR: tuple = (
+    FilingRule("MX_ISR_WITHHOLDING", "{year}-{month:02d}", "MONTHLY",
+               "withholdings remitted by the 17th of the month after the withholding period", 17, None, None,
+               "S35/S35_DIP_CFF.pdf",
+               "Art. 6 I: 'en los casos de retencion o de recaudacion de contribuciones'; 'las enteraran a mas tardar "
+               "el dia 17 del mes de calendario inmediato posterior al de terminacion del periodo de la retencion', "
+               "PDF p. 4"),
+    FilingRule("MX_INFONAVIT", "{year}-{month:02d}", "BIMONTHLY",
+               "INFONAVIT contributions and credit discounts paid by the 17th of the month after each bimester", 17,
+               None, None, "S27/S27_DIP_LIFNVT.pdf",
+               "Art. 35: 'a mas tardar los dias diecisiete del mes inmediato siguiente', PDF p. 22; 1997 Transitorio "
+               "SEXTO: 'continuara siendo de forma bimestral hasta que en la Ley del Instituto de Seguridad y "
+               "Servicios Sociales de los Trabajadores del Estado se establezca que la periodicidad de pagos se "
+               "realizara mensualmente', PDF p. 57 (the ISSSTE law, S36 Art. 21 p. 11, still pays by bimester: log TL-CAL-4)"),
+    FilingRule("MX_ISN_RETURN", "{year}-{month:02d}", "MONTHLY",
+               "CDMX payroll tax paid by return by the 17th of the following month", 17, None, "CDMX",
+               "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf",
+               "Art. 159: 'se pagara mediante declaracion, que presentaran a traves de los medios electronicos que "
+               "establezca la Secretaria, a mas tardar el dia diecisiete del mes siguiente', PDF p. 91"),
+)
 
 
 # Validity window of an employer's annual work-risk premium (Phase 3 Q3,
@@ -802,7 +892,11 @@ class RiskPremiumPeriodRule(NamedTuple):
     needs_g1: bool = True
 
 
-MX_RISK_PREMIUM_PERIOD: Optional[RiskPremiumPeriodRule] = None
+# W1-5 [PENDING G1]: RACERF Art. 32 III (S29) — log TL-CAL-2.
+MX_RISK_PREMIUM_PERIOD: Optional[RiskPremiumPeriodRule] = RiskPremiumPeriodRule(
+    3, 1, "S29/S29_DIP_RACERF.pdf",
+    "Art. 32 III: 'tendra vigencia desde el primero de marzo del ano siguiente a aquel en que concluyo el periodo "
+    "computado y hasta el dia ultimo de febrero del ano subsecuente', PDF p. 12")
 
 
 # Phase 8 (D3): the IMSS affiliation-movement deadline (MX-025: "ordinary
@@ -819,7 +913,14 @@ class MovementDeadlineRule(NamedTuple):
     needs_g1: bool = True
 
 
-MX_IMSS_MOVEMENT_DEADLINE: Optional[MovementDeadlineRule] = None
+# W1-5 [PENDING G1]: LSS Art. 15 I (S10) — five business days, counted from the day after the event (RACERF
+# Art. 57, S29, for bajas; LSS Art. 34 I for salary changes). Which days are NOT business days (LFT Art. 74 /
+# 715 or CFF Art. 12) is DECISIONS_PENDING D-16, so MX_OFFICIAL_HOLIDAYS stays EMPTY and every movement is
+# still DUE_DATE_UNSOURCED until it is decided — log TL-CAL-3.
+MX_IMSS_MOVEMENT_DEADLINE: Optional[MovementDeadlineRule] = MovementDeadlineRule(
+    5, "S10/S10_IMSS_LSS.pdf",
+    "Art. 15 I: 'comunicar sus altas y bajas, las modificaciones de su salario y los demas datos, dentro de plazos "
+    "no mayores de cinco dias habiles', PDF p. 6")
 MX_OFFICIAL_HOLIDAYS: dict = {}       # year -> (tuple of dates, source, source_ref); EMPTY until transcribed
 
 # Phase 8: which filing-calendar report type (payroll_statutory_filing_calendar,
@@ -839,8 +940,8 @@ MX_AUTHORITY_RETRY_CONFIG: dict = {}  # channel -> {"min_wait_seconds": int, "mi
 # special_pay.py defines the interfaces). EMPTY: every special payment BLOCKS
 # (MX_SPECIAL_PAY_RULE_MISSING / MX_AGUINALDO_RULE_MISSING /
 # MX_ISN_SPECIAL_PAY_RULE_MISSING); none falls back to the ordinary tariff (MX-009).
-MX_SPECIAL_PAY_RULES: dict = {}       # concept (AGUINALDO / VACATION_PREMIUM / VACATION_PAYOUT / PTU / SEPARATION_SENIORITY_PREMIUM / SEPARATION_PAYMENT / SEPARATION_INDEMNITY) -> SpecialPayRule (S24 / S25)
-MX_AGUINALDO_RULE = None              # AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
+MX_SPECIAL_PAY_RULES: dict = dict(_rules.SPECIAL_PAY_RULES)   # W1-3a; concept (AGUINALDO / VACATION_PREMIUM / VACATION_PAYOUT / PTU / SEPARATION_SENIORITY_PREMIUM / SEPARATION_PAYMENT / SEPARATION_INDEMNITY) -> SpecialPayRule (S24 / S25)
+MX_AGUINALDO_RULE = _rules.AGUINALDO_RULE   # W1-3a (LFT Art. 87); AguinaldoRule — proportion for part of a year + payable-by date (S26 LFT Art. 87)
 MX_SPECIAL_PAY_ISN_INCLUSION: dict = {   # (state, concept) -> (included: bool, source, source_ref) — state ISN content
     # W1-2 (2026-10-26) [PENDING G1]: S22 Arts. 156 (what counts as remuneration) and 157 (what is not taxed),
     # PDF pp. 89-91 (log TL-ISN-2). NOT listed, so they block (MX_ISN_SPECIAL_PAY_RULE_MISSING): VACATION_PAYOUT,
@@ -864,8 +965,8 @@ MX_SPECIAL_PAY_ISN_INCLUSION: dict = {   # (state, concept) -> (included: bool, 
 # engine/jurisdictions/mexico/termination.py. EMPTY: no termination can be
 # recorded (MX_TERMINATION_RULE_MISSING) and no finiquito calculated
 # (MX_FINIQUITO_RULE_MISSING); an operator never chooses a tax treatment (MX-057).
-MX_TERMINATION_REASONS: dict = {}     # reason code -> TerminationReason (S26)
-MX_FINIQUITO_RULE = None              # FiniquitoRule (S26 + S24 / S25)
+MX_TERMINATION_REASONS: dict = dict(_rules.TERMINATION_REASONS)   # W1-3b; reason code -> TerminationReason (S26)
+MX_FINIQUITO_RULE = _rules.FINIQUITO_RULE   # W1-3b; FiniquitoRule (S26 + S24 / S25)
 
 # Phase 9d (plan 9d D2-D8): PTU. The employer enters the distributable amount
 # (never derived, MX-054); the RULE OBJECT decides the split, which days and
@@ -875,8 +976,8 @@ MX_FINIQUITO_RULE = None              # FiniquitoRule (S26 + S24 / S25)
 # approver. Interfaces in engine/jurisdictions/mexico/ptu.py. EMPTY: no PTU is
 # allocated (MX_PTU_RULE_MISSING) and no operator exclusion is recorded
 # (MX_PTU_EXCLUSION_RULE_MISSING).
-MX_PTU_RULE = None                    # PtuRule (S26 / S21)
-MX_PTU_EXCLUSION_REASONS: dict = {}   # reason code -> PtuExclusionReason (label, source, source_ref) - S26
+MX_PTU_RULE = _rules.PTU_RULE         # W1-4; PtuRule (S26 / S21)
+MX_PTU_EXCLUSION_REASONS: dict = dict(_rules.PTU_EXCLUSION_REASONS)   # W1-4; reason code -> PtuExclusionReason (label, source, source_ref) - S26
 
 # Phase 9e (plan 9e D1-D10): the annual ISR adjustment (LISR Art. 97 / 152 -
 # S24). The RULE OBJECT decides eligibility, the annual ISR and how a
@@ -885,8 +986,35 @@ MX_PTU_EXCLUSION_REASONS: dict = {}   # reason code -> PtuExclusionReason (label
 # engine/jurisdictions/mexico/annual_adjustment.py. EMPTY: nothing is computed
 # (MX_ANNUAL_ADJUSTMENT_RULE_MISSING) and no operator exclusion is recorded
 # (MX_ANNUAL_ADJUSTMENT_EXCLUSION_RULE_MISSING).
-MX_ANNUAL_ADJUSTMENT_RULE = None                 # AnnualAdjustmentRule (S24)
-MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = {}   # reason code -> exclusion reason (label, source, source_ref)
+MX_ANNUAL_ADJUSTMENT_RULE = _rules.ANNUAL_ADJUSTMENT_RULE   # W1-4; AnnualAdjustmentRule (S24)
+MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS: dict = dict(_rules.ANNUAL_ADJUSTMENT_EXCLUSION_REASONS)   # W1-4; reason code -> exclusion reason (label, source, source_ref)
+
+# W3-3: contribution days per branch with absences / incapacity (LSS Art. 31; Ley INFONAVIT Art. 29).
+# None = absence or incapacity days BLOCK (MX_ABSENCE_RULES_MISSING). Interface: check(absence, incapacity,
+# segment_count); branch_days(branch, days, absence, incapacity) -> Decimal.
+MX_CONTRIBUTION_DAYS_RULE = _rules.CONTRIBUTION_DAYS_RULE
+
+# W3-5: daily working-day hours by SAT c_TipoJornada (S28 / pinned set sat_2026_08) — LFT Art. 61 (S26),
+# log TL-LFT-3 [PENDING G1]. Read only once mx_hourly_rate_rule (D-17) is transcribed; any other workday
+# type has no LFT length and BLOCKS.
+MX_JORNADA_DAILY_HOURS: dict = {
+    "01": ("8", "S26/S26_DIP_LFT.pdf", "Art. 61: 'La duracion de la jornada diaria sera de ocho horas la diurna', PDF p. 22"),
+    "02": ("7", "S26/S26_DIP_LFT.pdf", "Art. 61: 'siete la nocturna', PDF p. 22"),
+    "03": ("7.5", "S26/S26_DIP_LFT.pdf", "Art. 61: 'siete horas y media la mixta', PDF p. 22"),
+}
+# W3-5: an earning classified FIXED for the SBC other than the ordinary salary (LSS Art. 30 I) — how a
+# periodic amount becomes a daily SBC amount is DECISIONS_PENDING D-18. None = such a line BLOCKS
+# (MX_SBC_FIXED_RULE_MISSING). Interface: daily_amount(line, facts) -> Decimal >= 0.
+MX_SBC_FIXED_INTEGRATION_RULE = None
+# W3-5: salary days of a FIXED-days period (e.g. 15 a fortnight) that ends inside the period at termination —
+# DECISIONS_PENDING D-19. None = BLOCK (MX_SALARY_DAYS_PARTIAL_PERIOD). Interface:
+# days_paid(tariff, period_start, period_end, termination_date) -> Decimal > 0.
+MX_FIXED_DAYS_TERMINATION_RULE = None
+
+# W3-4: LISR Art. 93 exemptions for ordinary earnings, keyed by the classification's isr_exempt_rule_key
+# (treatment EXEMPT / PARTIAL). A key missing here BLOCKS (MX_EXEMPTION_RULE_MISSING).
+# Interface: rule.exempt(kind, amount, facts) -> Decimal in [0, amount].
+MX_ORDINARY_EXEMPTION_RULES: dict = dict(_rules.ORDINARY_EXEMPTION_RULES)
 
 
 # The 32 federal entities (ISO 3166-2:MX subdivisions; Mexico City keeps the

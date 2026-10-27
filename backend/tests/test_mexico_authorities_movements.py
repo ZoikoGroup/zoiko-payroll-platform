@@ -93,7 +93,10 @@ def test_movement_due_dates_only_from_the_transcribed_rule_and_holidays(db, monk
         raise AssertionError("the weekend-only shared helper must never date a Mexican movement")
 
     monkeypatch.setattr(service, "_add_business_days", _never)
-    assert c.MX_IMSS_MOVEMENT_DEADLINE is None and c.MX_OFFICIAL_HOLIDAYS == {}
+    # W1-5 transcribed the real deadline (LSS Art. 15 I) but no holiday list (D-16): still no due date
+    assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5 and c.MX_OFFICIAL_HOLIDAYS == {}
+    assert due.movement_due(date(2026, 6, 15)) == (None, due.UNSOURCED)
+    monkeypatch.setattr(c, "MX_IMSS_MOVEMENT_DEADLINE", None)
     assert due.movement_due(date(2026, 6, 15)) == (None, due.UNSOURCED)
     monkeypatch.setattr(c, "MX_IMSS_MOVEMENT_DEADLINE", c.MovementDeadlineRule(5, "S13", "SYNTHETIC"))
     assert due.movement_due(date(2026, 6, 15)) == (None, due.UNSOURCED)              # no holiday list for 2026

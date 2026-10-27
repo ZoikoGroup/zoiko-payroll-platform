@@ -414,7 +414,8 @@ def _content_checks():
     from app.modules.payroll.engine.countries import mexico_content as c
 
     checks = []
-    for b in c.MX_ISR_TARIFFS:
+    annual = tuple(b for rows in getattr(c, "MX_ISR_ANNUAL_TARIFFS", {}).values() for b in rows)   # W1-4
+    for b in c.MX_ISR_TARIFFS + annual:
         nums = [b.lower, b.fixed_quota, b.rate_pct] + ([b.upper] if b.upper is not None else [])
         checks.append((b.source, f"ISR {b.period} {b.lower}", nums, True))
     derived = getattr(c, "MX_DERIVED_VALUES", {})
@@ -477,16 +478,18 @@ def _rule_citations(c) -> list:
     for (state, concept), (_inc, src, ref) in sorted(getattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {}).items()):
         out.append((f"ISN {state} {concept}", src, ref))
     for name in ("MX_SPECIAL_PAY_RULES", "MX_TERMINATION_REASONS", "MX_PTU_EXCLUSION_REASONS",
-                 "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS"):
+                 "MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS", "MX_ORDINARY_EXEMPTION_RULES"):
         for key, obj in sorted(getattr(c, name, {}).items()):
             out += cites(f"{name} {key}", obj)
     for name in ("MX_AGUINALDO_RULE", "MX_FINIQUITO_RULE", "MX_PTU_RULE", "MX_ANNUAL_ADJUSTMENT_RULE",
-                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE"):
+                 "MX_RISK_PREMIUM_PERIOD", "MX_IMSS_MOVEMENT_DEADLINE", "MX_CONTRIBUTION_DAYS_RULE"):
         obj = getattr(c, name, None)
         if obj is not None:
             out += cites(name, obj)
     for rule in getattr(c, "MX_FILING_CALENDAR", ()):
         out += cites(f"filing {rule.report_type} {rule.state or ''}".strip(), rule)
+    for code, (_hours, src, ref) in sorted(getattr(c, "MX_JORNADA_DAILY_HOURS", {}).items()):   # W3-5
+        out.append((f"jornada {code}", src, ref))
     for year, (_dates, src, ref) in sorted(getattr(c, "MX_OFFICIAL_HOLIDAYS", {}).items()):
         out.append((f"holidays {year}", src, ref))
     return out

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from .classification import OVERTIME, SUNDAY_PREMIUM
+from .classification import OVERTIME, REST_DAY_WORK, SUNDAY_PREMIUM
 from .errors import MXBlock
 
 _ZERO = Decimal("0")
@@ -65,6 +65,30 @@ def workweek(content, policy: dict) -> dict:
     return {"policy_hours": hours, "statutory_max": maximum}
 
 
+HOURLY_RATE_RULES = ("DAILY_SALARY_OVER_JORNADA_HOURS",)
+
+
+def hourly_rate(content, hours: dict, daily_salary: Decimal) -> Decimal:
+    """W3-5: a supplied rate (tests, legacy inputs), else the transcribed rule
+    (mx_hourly_rate_rule, D-17) over the LFT Art. 61 working-day length of the
+    worker's c_TipoJornada. While the rule is missing, overtime BLOCKS."""
+    if hours.get("hourly_rate") is not None:
+        return _dec(hours.get("hourly_rate"), "hourly rate")
+    if not content.has("mx_hourly_rate_rule"):
+        raise MXBlock("MX_HOURLY_RATE_RULE_MISSING",
+                      "approved overtime needs an hourly-rate rule, which is not transcribed yet (S26, D-17)")
+    rule = content.text("mx_hourly_rate_rule").upper()
+    if rule not in HOURLY_RATE_RULES:
+        raise MXBlock("MX_RULE_UNRECOGNISED", f"mx_hourly_rate_rule {rule!r} is not one of {HOURLY_RATE_RULES}")
+    from ...countries import mexico_content as _c
+
+    entry = _c.MX_JORNADA_DAILY_HOURS.get(str(hours.get("workday_type_code") or ""))
+    if entry is None:
+        raise MXBlock("MX_WORKDAY_TYPE_UNSUPPORTED",
+                      f"workday type {hours.get('workday_type_code') or '(none)'} has no LFT Art. 61 daily length")
+    return daily_salary / Decimal(entry[0])
+
+
 def hour_lines(content, hours, policy: dict, daily_salary: Decimal) -> dict:
     """{lines:[{code, kind, amount}], overtime:[…per week], sunday:{…}}."""
     hours = hours or {}
@@ -72,11 +96,11 @@ def hour_lines(content, hours, policy: dict, daily_salary: Decimal) -> dict:
     overtime = [_dec(w.get("overtime_hours") or 0, f"week {i + 1} overtime hours")
                 for i, w in enumerate(hours.get("weeks") or [])]
     if any(h > 0 for h in overtime):
+        rate = hourly_rate(content, hours, daily_salary)          # W3-5: first, as the run service checked it
         keys = ("mx_overtime_double_weekly_max_hours", "mx_overtime_double_multiplier", "mx_overtime_triple_multiplier")
         if not all(content.has(k) for k in keys):
             raise MXBlock("MX_OVERTIME_RULES_MISSING", "overtime tiers are not transcribed (S26/S18)")
         tier_max, double, triple = (content.amount(k) for k in keys)
-        rate = _dec(hours.get("hourly_rate"), "hourly rate")
         code = hours.get("overtime_code")
         if rate <= 0 or not code:
             raise MXBlock("MX_HOURS_INVALID", "approved overtime needs an hourly rate and an overtime earning code")
@@ -105,6 +129,18 @@ def hour_lines(content, hours, policy: dict, daily_salary: Decimal) -> dict:
         sunday = {"sundays": sundays, "policy_pct": policy_pct * _HUNDRED, "statutory_min_pct": floor * _HUNDRED,
                   "amount": amount}
         out.append({"code": code, "kind": SUNDAY_PREMIUM, "amount": amount})
-    if _dec(hours.get("holiday_days") or 0, "rest days worked") > 0:
-        raise MXBlock("MX_REST_DAY_CONTENT_MISSING", "work on a mandatory rest day — no rest-day content is transcribed")
-    return {"lines": out, "overtime": weeks, "sunday": sunday}
+    rest_day = None
+    rest_days = _dec(hours.get("holiday_days") or 0, "rest days worked")
+    if rest_days > 0:
+        # W3-2: LFT Arts. 73 / 75 — on top of the rest day's own salary (already in
+        # ordinary pay), "un salario doble por el servicio prestado".
+        if not content.has("mx_rest_day_work_multiplier"):
+            raise MXBlock("MX_REST_DAY_CONTENT_MISSING", "work on a mandatory rest day — no rest-day content is transcribed")
+        multiplier = content.amount("mx_rest_day_work_multiplier")
+        code = hours.get("rest_day_code")
+        if multiplier <= 0 or not code:
+            raise MXBlock("MX_HOURS_INVALID", "rest days worked need a positive multiplier and a rest-day earning code")
+        amount = daily_salary * multiplier * rest_days
+        rest_day = {"days": rest_days, "multiplier": multiplier, "amount": amount}
+        out.append({"code": code, "kind": REST_DAY_WORK, "amount": amount})
+    return {"lines": out, "overtime": weeks, "sunday": sunday, "rest_day": rest_day}

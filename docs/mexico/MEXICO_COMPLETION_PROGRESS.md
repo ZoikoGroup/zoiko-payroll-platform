@@ -85,3 +85,573 @@ One section per step of `MEXICO_COMPLETION_MASTER_PROMPT.md`. Each step is one l
 | Other jurisdictions | None |
 
 **Gap register:** B10 done for CDMX, except D-06 and D-10.
+
+---
+
+## W1-3a — Special-pay exemptions, withholding and the aguinaldo rule (gap register B12)
+
+**ZP-PRIV:** not required. No change to authz, redaction, RLS, migrations or identifiers.
+
+**Shared code (additive):** `engine/base.py` `PayrollContext` gains two optional fields, `mx_year_to_date_exempt` and `mx_separation_date`, both defaulting to None. Only the Mexico engine reads them; no other jurisdiction's path changes.
+
+**What changed**
+- **New `engine/countries/mexico_rules.py`:** the rule objects, wired into `MX_SPECIAL_PAY_RULES` and `MX_AGUINALDO_RULE` (log TL-SP-1 to TL-SP-3).
+  - LISR Art. 93 XIV: aguinaldo 30 days, vacation premium 15, PTU 15, per calendar year.
+  - LISR Art. 93 XIII: separation 90 days per year of service, one shared cap allocated pro rata.
+  - Vacation paid out: no exemption.
+  - A worker on the area minimum wage blocks (`MX_ART93_I_NOT_MODELLED`).
+  - RLISR Art. 174 standalone withholding.
+  - LFT Art. 87: aguinaldo fraction and payable-by date (19 December).
+- **Three decisions, each one switch, each blocking with its own code:**
+  - **D-07** unit of the Art. 93 caps (UMA or zone minimum wage);
+  - **D-08** the withholding method for a special run;
+  - **D-09** monthly ordinary income from a daily salary.
+  Both D-07 readings are built and tested.
+- **Engine seam:** `_year_to_date_exempt` gives every payslip the special-pay exempt amounts already committed in the calendar year. It uses the same payment order, replaced chain and correction deltas as the month-to-date accumulator, and is bound into the input hash (`yearToDateExempt`). Preflight passes the rules the zone, the seniority date, the separation date and the separation total.
+- **`compare`:** 438 checks, 0 misses. Every quoted wording of the new rules is found in S24, S25, S26 or S34.
+
+**Effect on runs (none reachable in production)**
+- An aguinaldo amount is now computed (LFT Art. 87).
+- Any special payment's exempt part blocks with `MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED` (D-07), where it used to block with `MX_SPECIAL_PAY_RULE_MISSING`.
+- Aguinaldo and PTU runs will then block on D-08 and D-09.
+
+**Tests**
+- New: `test_mexico_rules.py` (14 tests: every switch undecided, both units, the year-to-date cap, Art. 93 I, the six-month rounding of years of service, the shared XIII cap, RLISR 174 fractions I–V, the LFT 87 fraction in 365- and 366-day years). Also the accumulator test and the real-rules tests (aguinaldo run, orchestrator).
+- Updated: the "rule missing" tests now empty the rule maps themselves, because the real ones are transcribed.
+- All `tests/test_mexico_*.py`: **958 passed, 63 skipped, 0 failed.** The accumulator test, added during that run, passes with its file (51 passed across benefits, rules and orchestrator).
+
+**Controls.** Blind second transcription (separate agent; S24, S25, S26 only): agreement on every limit, unit, page and formula. It also raised the "en forma general" condition (D-04), the Sunday-premium and overtime exemptions (A15, W3) and Art. 96 ¶1 (new gap item **A16**).
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Shared engine | `PayrollContext` gains two optional Mexico fields (default None). No other jurisdiction reads them |
+| Mexico in production | Dormant. Special payments move from "rule missing" to the named decision codes |
+| Approval fingerprint | Mexican payslips gain the `yearToDateExempt` input component. No Mexican run exists in production, so nothing is invalidated |
+| Other jurisdictions | None (the full suite runs at the end of W1) |
+
+**Gap register:** B12 narrowed (special-pay rules transcribed; D-07, D-08, D-09 open). New A16.
+
+
+---
+
+## W1-3b — Termination reasons and the finiquito rule (gap register B14)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **Termination-reason catalog (7 LFT reasons) and the finiquito rule** in `mexico_rules.py`, wired into `MX_TERMINATION_REASONS` and `MX_FINIQUITO_RULE` (log TL-TER-1, TL-TER-2):
+  - Arts. 47, 48, 49–50, 51–52, 53 III, 54 and 162 III;
+  - Art. 50 I / II by contract type (c_TipoContrato 01 / 03);
+  - the seniority premium bounded by Arts. 485–486;
+  - vacation owed (Art. 79);
+  - the separation withholding rate (LISR Art. 96 ¶7, RLISR Art. 172).
+- **New decisions, each one switch that blocks with its own code:**
+  - **D-12** indemnity salary (Art. 89; the same question as C4);
+  - **D-13** part years of service;
+  - **D-07b** the Art. 486 cap unit;
+  - **D-11** reasons left out of the catalog (mutual consent, death, Art. 434).
+- **New gap A17:** special runs carry no month-to-date income, so vacation paid out at termination blocks.
+- **Finiquito facts:** they now carry the contract type and the labour policy, and the contract type is bound into the input hash.
+- **`compare`:** 501 checks, 0 misses.
+
+**Controls**
+- Blind second transcription (separate agent; S26, with S24 and S25): agreement on every amount, condition and page. Its NOT FOUND answers match D-13 and the two readings. It added four details (Art. 89 ¶2 variable pay, the Art. 486 several-areas average, the Art. 50 IV platform workers, the Art. 47 notice), all recorded.
+
+**Tests**
+- `test_mexico_rules.py`: 9 more tests (23 in all). They cover each switch, both service-year counts, the Art. 485–486 bounds under both units, every reason's components, Art. 50 I both branches, unsupported contract types, the 15-year voluntary rule, vacation owed, the separation rate and the below-salary tariff, and the vacation-payout block.
+- Termination tests: the empty-catalog tests empty the map themselves, and the real catalog is pinned.
+- All `tests/test_mexico_*.py`: **969 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Mexico in production | Dormant. Organisations would now see the 7 LFT reasons when recording a termination (Mexico organisations are behind the dormancy flag) |
+| Engine | A finiquito's components and withholding now come from the LFT / LISR. Each amount blocks until D-12, D-13, D-07b and D-09 are decided, and rounding (D-01) still blocks every amount |
+| Other jurisdictions | None |
+
+**Gap register:** B14 narrowed (catalog and rule transcribed; D-11, D-12, D-13, D-07b open). New A17.
+
+---
+
+## W1-4 — PTU and the annual ISR adjustment (gap register B15, B16)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **PTU rule** (LFT Arts. 122–127; LISR Arts. 9, 76 V, 150), with 3 exclusion reasons (Art. 127 I, VI, VII). Log TL-PTU-1:
+  - half the pool by days, half by the cash daily-rate salary (the classifications' PTU flag);
+  - the Art. 127 VIII cap, the more favourable of three months and the three-year average;
+  - the deadline, 60 days after the annual return (31 March for a company, 30 April for an individual).
+- **Annual adjustment rule** (LISR Art. 97; S3 Art. Tercero), with 1 exclusion reason (Art. 97 c). Log TL-ANN-1:
+  - eligibility a) and b);
+  - the 2026 Art. 152 tariff less the subsidy that corresponded, never below zero;
+  - tax owed withheld in full; a balance in the worker's favour set against the following withholdings.
+- **New content table `MX_ISR_ANNUAL_TARIFFS`:** 2026, 11 brackets from S2 Anexo 8 C.II. It is continuous, quota-consistent and machine-checked.
+- **Additive service facts:**
+  - PTU: each worker's PTU history from DISTRIBUTED cycles, and the employer's taxpayer type for the deadline.
+  - Annual: the subsidy due (`subsidy_due_total`) and gross income (`annual_gross`).
+- **New decision D-14** (PTU cap excess; the average over fewer years). It blocks only an allocation where it changes the result.
+- **New G5 item:** the Art. 127 II trusted-worker cap is not modelled.
+- **`compare`:** 533 checks, 0 misses.
+
+**Controls**
+- Blind second transcription (separate agent; S26, S24, S2, S3): all 11 brackets and every rule agree. It confirmed the law's silence behind D-14, the gross-or-taxable ambiguity (D-04) and the "le correspondió" wording, and added LISR Art. 9 and Art. 122 ¶2–3, both recorded.
+
+**Tests**
+- `test_mexico_rules.py`: 6 more (29 in all): the PTU split and exclusions, the cap and both D-14 blocks, the deadlines, the Art. 97 eligibility edges (1 January, 1 December, $400,000.00 / .01), the annual tax with and without the subsidy, and applying a difference.
+- `test_mexico_content.py`: the annual tariff.
+- The PTU and annual fixtures now set "absent" explicitly; the source-tool synthetic fixture empties the annual table.
+- All `tests/test_mexico_*.py`: 972 passed and 4 failed in the full run; those 4 (the synthetic fixture not yet emptying the annual table) were fixed and pass (14/14 in their file). **0 failing.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Mexico in production | Dormant. PTU allocation and the annual adjustment now follow the LFT / LISR. Both still need rounding (D-01) to emit amounts |
+| Other jurisdictions | None |
+
+**Gap register:** B15 and B16 done, except D-14 and the Art. 127 II item.
+
+---
+
+## W1-5 — Filing calendar, movement deadline, holidays, risk-premium period (gap register B18, B11)
+
+**ZP-PRIV:** not required.
+
+**What changed**
+- **S35 saved:** Código Fiscal de la Federación, last reform DOF 09-04-2026 (archive copy, digest verified). Registered in the manifest, the addendum and the content module.
+- **`MX_FILING_CALENDAR`:**
+  - ISR withholding, the 17th of the next month (CFF Art. 6 I, the general rule for every employer);
+  - CDMX ISN, the 17th of the next month (S22 Art. 159).
+  - **IMSS and INFONAVIT are held back (D-15).** RCV (LSS Transitorio VIGÉSIMO SÉPTIMO) and INFONAVIT (1997 Transitorio SEXTO) stay bimonthly until the ISSSTE law changes, and that law is not saved. One IMSS liability carries every branch.
+- **`MX_RISK_PREMIUM_PERIOD`:** from 1 March (RACERF Art. 32 III). An employer risk premium can now be approved once the range is in an Active pack.
+- **`MX_IMSS_MOVEMENT_DEADLINE`:** 5 business days (LSS Art. 15 I), counted from the day after the event (RACERF Art. 57; LSS Art. 34).
+- **`MX_OFFICIAL_HOLIDAYS` stays empty: D-16.** The LFT (Arts. 74 / 715) and CFF (Art. 12) lists differ; both sets of 2026 dates are worked out in TL-CAL-3. Movements remain `DUE_DATE_UNSOURCED`.
+- **Not transcribed:** the authority retry configuration. It is provider- and portal-specific (C1, the PAC).
+- **`compare`:** 538 checks, 0 misses.
+
+**Controls**
+- Blind second transcription (separate agent; 7 sources): agreement on every rule, page and 2026 date. It found the LSS RCV transitory, which removed the IMSS rule, plus five details recorded in TL-CAL.
+- The real filing-calendar seed is pinned: on the real manifest only the CDMX ISN rule (VERIFIED source) seeds its 12 dates, from 17 Feb 2026 to 17 Jan 2027.
+
+**Tests**
+- New: the calendar, deadline and period content test, and the real-calendar seed test.
+- The four tests that pinned these as empty now empty them themselves. The movement test also proves that the real 5-day rule still gives no due date without a holiday list.
+- All `tests/test_mexico_*.py`: in the full run, 972 passed and the 4 empty-pinning tests failed. They were fixed and pass in their files, and the affected files pass after the IMSS rule was removed (62 passed). **0 failing.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Filing calendar | **No deploy runs the template seed.** If someone ran it by hand, it would write 12 live `MX_ISN_RETURN` / CDMX calendar rows (S22 is VERIFIED). The ISR rule is skipped until S35 is VERIFIED |
+| Mexico in production | Dormant. Risk premiums can now pass the period check (approval still needs the legal range in an Active pack). Movements still have no due date |
+| Other jurisdictions | None |
+
+**Gap register:** B18 narrowed (ISR and CDMX ISN calendar, movement deadline and risk-premium period done; IMSS / INFONAVIT D-15; holidays D-16; retry configuration with C1). B11 risk-premium period done.
+
+---
+
+## W1-6 — Subsidy remainder rule and CFDI subsidy reporting (gap register B3, C6)
+
+**ZP-PRIV:** not required. No code change.
+
+- **Remainder rule: done in Batch 2.** `mx_subsidy_remainder_rule` = `NOT_PAYABLE`, from the DOF 01-05-2024 base decree, Art. Segundo ¶2 (TL-SUB-2). W1-4 added its annual counterpart (Art. Tercero III: no tax and nothing paid when the subsidy exceeds the annual tax).
+- **CFDI reporting (C6): BLOCKED-ON-SOURCE.** Searched again on 2026-10-26:
+  - **The 2024 and 2025 decrees (S3):** say nothing on how the subsidy is reported on the CFDI.
+  - **RMF 2026 (S1), rules 3.17.12 and 3.17.13 (PDF p. 452):** still framed on the 2013 decree ("Decreto DOF 11/12/2013 Décimo"). They say the subsidy is creditable only if noted "de manera expresa y por separado en los comprobantes fiscales de nómina", and that the CFDI must follow the "Guía de llenado del comprobante del recibo de pago de nómina", whose newest saved edition (S4, 2023) predates the 2024 decree.
+  - **Still needed:** SAT's current instructions for reporting the 2024-decree subsidy (TipoOtroPago 002 / `SubsidioAlEmpleo`). The CFDI concept `SUBSIDY_APPLIED` stays unmapped, and A10's `SubsidioAlEmpleo` node stays refused.
+- **Production effect:** none.
+- **Gap register:** B3 done; C6 BLOCKED-ON-SOURCE (W2-5).
+
+---
+
+## End of W1 — full backend suite
+
+Run 2026-10-26 15:19–15:43 on `7b55b46`, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 976 passed, 16 skipped, **3 failed**: the known local-only `tests/privacy/test_route_registry.py` tests (your uncommitted `/health` routes in `backend/app/main.py`) |
+| 1 | 2,488 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,264 passed, 32 skipped |
+| 3 | 1,142 passed, 67 skipped |
+| 4 | 1,621 passed, 3 skipped |
+
+**Total: 7,491 passed, 120 skipped, 2 xfailed.** The only failures are the 4 known local-only ones. No other jurisdiction's behaviour changed.
+
+
+---
+
+## W2 — Sources still missing
+
+**ZP-PRIV:** not required. Sources, content and docs only.
+
+| Step | Result |
+|---|---|
+| W2-1 S22 (CDMX fiscal code) | **Done in Batch 2.** Latest reform the SAF 2026 edition names: Gaceta of 19-12-2025, saved and spot-checked on 3 amended articles. The SAF edition is **VERIFIED** (logged direct download) |
+| W2-2 2024 subsidy decrees | **Done in Batch 2.** DOF 01-05-2024 and its DOF 31-12-2024 amendment saved (archive copies) |
+| W2-3 SAT `c_MotivoCancelacion` (B22) | **BLOCKED-ON-SOURCE.** Not in the saved catCFDI workbook or XSDs (S30), in RMF 2026 (S1) or in the Anexo 20 standard. The Anexo 20 guide (S30, p. 92) mentions only code "01" (Comprobante emitido con errores con relación) in one worked example. No file with that catalog appears in the archive's 249 captures of SAT's `tramitesyservicios/Paginas/documentos/` folder. Cancellation keeps refusing `MX_CFDI_CANCEL_REASON_UNAVAILABLE`, and the pinned set `sat_2026_08` is unchanged |
+| W2-4 DOF RMF 2026 amendments touching rules 2.7.1.7 / 2.7.5.2 | **None found.** The 1st amendment (S1, DOF 09-07-2026) does not amend them. The 2nd–4th amendments exist in the archive only as SAT advance versions (not law). Neither the 2nd's twelfth advance version (17-09-2026) nor the 4th's second (15-10-2026) mentions either rule (checked in the text; not saved as sources) |
+| W2-5 Other sources | See below |
+
+**W2-5 detail**
+- **S36, Ley del ISSSTE** (Diputados consolidated text, last reform DOF 15-01-2026; archive capture 20261004141029, digest OK; `ARCHIVE_COPY_VERIFIED`).
+  - Art. 21 (p. 11): the RCV and housing-fund quotas are paid "por bimestres vencidos, a más tardar el día diecisiete de los meses de enero, marzo, mayo, julio, septiembre y noviembre de cada año".
+  - So the ISSSTE law has **not** moved to monthly payment. The condition that ends the bimonthly cycle in Ley INFONAVIT's 1997 Transitorio SEXTO and in the LSS's Transitorio VIGÉSIMO SÉPTIMO is not met.
+  - **D-15 is resolved by the sources:** INFONAVIT and RCV are bimonthly. The INFONAVIT due date is transcribed (TL-CAL-4).
+  - **IMSS still has no calendar row.** Its non-RCV branches are monthly (LSS Art. 39) and RCV is bimonthly, but one IMSS liability carries both. New gap item **A18**: split the RCV branches into their own liability.
+- **S35, CFF:** saved in W1-5 (Arts. 6, 12, 20). It now backs the D-01 rounding candidate (Art. 20) and D-16.
+- **Not found (BLOCKED-ON-SOURCE):**
+  - the INFONAVIT payment regulation (the fixed-amount credit basis; not in the Diputados regulations index);
+  - SAT's current CFDI instructions for the 2024-decree subsidy (C6);
+  - SAF's general rules for the 2026 CDMX ISN benefit (D-10);
+  - SAT's CFDI cancellation-reason catalog (W2-3 above).
+- **Rounding (B11):** candidates recorded in D-01; nothing chosen (a G1 decision).
+
+---
+
+## W3-1 — Subsidy monthly cap (gap register A15)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `mx_subsidy_monthly_cap_rule`. When absent, the engine blocks exactly as before (`MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING`).
+- **Transcribed** from S3 Art. Segundo ¶4: `CAP_AT_MONTHLY_AMOUNT` (TL-SUB-3). A short-period payment is cut to what is left of the monthly amount; the trace says `capped`.
+- **Tests:** the engine cap test (left over, nothing left, under the cap, unknown rule) and the content vocabulary test. Affected files: 164 passed. `compare`: 541 checks, 0 misses.
+- **Production effect:** none reachable (Mexico dormant). The national Draft pack gains one text row on the next manual seed.
+- **Blind second transcription:** pending (all W3 rows together).
+
+---
+
+## W3-2 — Work on a rest day (gap register A15)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `mx_rest_day_work_multiplier` (per case, so not required for activation), a new line kind `REST_DAY_WORK` from approved hours, and the earning code `MX_REST_DAY_WORK` (it needs an approved classification, like overtime). The result trace gains `labor.rest_day`.
+- **Transcribed** from LFT Arts. 73 and 75: **2** extra daily salaries per rest day worked (TL-LFT-2; a D-04 reading).
+- **Tests:** the engine tests (amount, missing code, none worked) and the content test. All Mexico tests: 982 passed. `compare`: 544 checks, 0 misses.
+- **Production effect:** none reachable. The engine module changes are Mexico-only.
+
+---
+
+## W3-3 — IMSS / INFONAVIT contribution days with absences and incapacity (gap register A15)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `MX_CONTRIBUTION_DAYS_RULE` (a rule object). The period carries the absence and incapacity counts; the orchestrator sets per-branch days on the segment; `imss`, `ceav` and `infonavit` read a branch's days when set and the segment's days otherwise. Absent, the engine blocks exactly as before.
+- **Transcribed** from LSS Art. 31 and Ley INFONAVIT Art. 29 (TL-IMSS-4). Still blocked: 8 or more absence days (the Art. 37 procedure) and absences in a multi-segment period.
+- **`compare`** now includes the rule: 549 checks, 0 misses.
+- **Tests:**
+  - rule tests: branch days, never negative, the three blocks;
+  - period tests: resolves with fewer than 8 days, blocks at 8;
+  - the old "absence blocks" tests now empty the rule themselves.
+  - All Mexico tests: 985 passed.
+- **Production effect:** none reachable. Mexico engine modules only.
+
+---
+
+## W3-4 — LISR Art. 93 exemptions for ordinary earnings (gap register A15, B17)
+
+**ZP-PRIV:** not required.
+
+- **Interface:** `MX_ORDINARY_EXEMPTION_RULES`, keyed by `isr_exempt_rule_key`. `classification.classify` takes optional facts; the orchestrator passes the weekly overtime and Sundays worked for the hour lines.
+- **Transcribed:** the overtime rule (Art. 93 I: 50% within the legal limit, at most 5 reference wages a week) and the Sunday-premium rule (Art. 93 XIV: 1 reference wage per Sunday). Log TL-SP-4. Both wait for D-07.
+- **Not transcribed:** the rest-day share of the Art. 93 I cap (no weekly dating).
+- **`compare`:** 557 checks, 0 misses.
+- **Tests:** 4 rule tests (overtime by week and cap, Sunday premium, the D-07 and Art. 93 I blocks, `classify` applying a named rule versus an unknown key). All Mexico tests: 989 passed.
+- **Blind second transcription (W3-1 to W3-4, one agent):** agreement on every rule. It corrected one citation (Ley INFONAVIT Art. 29: the second-to-last paragraph, not the last) and added the "aviso oportuno" condition to the D-04 reading.
+- **Production effect:** none reachable. Mexico engine modules only.
+
+---
+
+## W3-5 — Interfaces for the remaining seams, and gap A16
+
+**ZP-PRIV:** not required.
+
+| Seam (gap register A15) | Interface | State |
+|---|---|---|
+| Hourly rate | `mx_hourly_rate_rule` + `MX_JORNADA_DAILY_HOURS`; the engine derives the rate (`labor.hourly_rate`). The run service no longer refuses before the engine and passes the workday type, now bound into the input hash | Working-day lengths **transcribed** (LFT Art. 61); the rule is **D-17**, so overtime still blocks |
+| INFONAVIT notice for part of a period | `mx_infonavit_partial_period_rule` (`PRORATE_BY_DAYS_IN_FORCE`: days in force per segment; overlapping notices block) | **BLOCKED-ON-SOURCE** (INFONAVIT payment regulation) |
+| FIXED SBC items | `MX_SBC_FIXED_INTEGRATION_RULE.daily_amount(line, facts)` | **D-18** |
+| Fixed days at termination | `MX_FIXED_DAYS_TERMINATION_RULE.days_paid(…)` | **D-19** |
+| **A16** no withholding at the minimum wage | `mx_min_wage_no_withholding_rule` | **Transcribed** (LISR Art. 96 ¶1, TL-ISR-3) |
+
+- With each interface empty, the engine blocks exactly as before (each existing block test still passes).
+- **`compare`:** 561 checks, 0 misses.
+- **Tests:** hourly-rate rule (D-17 block, three working-day lengths, unsupported type, supplied rate); INFONAVIT proration (block, 20 of 30 days, overlap); the A16 orchestrator test (no ISR at exactly the minimum wage with the rule; ISR without the rule or one peso above); the content pins.
+- All Mexico tests: 991 passed on the full run; its 2 failures (a parameter label over the length limit, and the hourly-rate block order) were fixed and pass (112 passed in the affected files).
+- **Production effect:** none reachable. Mexico modules only (the run service's input hash gains the workday type).
+
+**W3 summary:** every A15 seam has a content interface; 6 are transcribed or partly transcribed, 4 wait for D-17, D-18, D-19 or a source. A16 is done.
+
+---
+
+## End of W3 — full backend suite
+
+Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 975 passed, 16 skipped, **4 failed**: the 3 known local-only route-registry tests, and `test_communications_dispatch.py::test_deactivate_organization_response_precedes_email_send`. That test is the **intermittent** one recorded in Batch 2: run alone afterwards it passed 3 of 3, and no Mexico change touches communications |
+| 1 | 2,488 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,270 passed, 32 skipped |
+| 3 | 1,151 passed, 67 skipped |
+| 4 | 1,621 passed, 3 skipped |
+
+**Total: 7,505 passed, 120 skipped, 2 xfailed.** No other jurisdiction's behaviour changed.
+
+---
+
+## W4-1 — Phase 12a: snapshot-bound report templates (gap register A1–A5)
+
+**ZP-PRIV:** not required. No authz, redaction, RLS or migration change. No report gains an identifier: the Mexico field picker offers no RFC, CURP, NSS or bank column, and the snapshot paths hold only figures.
+
+**Shared code (additive), `payroll/service.py`**
+- **E1** `_PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"]`: every `mx_calculation_snapshot.result.*` path the templates use (taxes, subsidy, IMSS / INFONAVIT / ISN totals, SBC parts, special-pay detail, annual adjustment), plus the keyed paths.
+- **E2** keyed list selector. A path segment `name[key=value,…]` selects the matching list items and sums them when several match; no match gives None, and text is never summed (`_report_json_walk` / `_report_json_path_value`). **Only a path containing `[` takes the new route**, and no IE / SE / NL path contains one (tested).
+- **E3** `_PAYSLIP_FIELDS_BY_COUNTRY["MX"]`: scalar columns only.
+- **E4** `_REPORT_COMPONENTS_BY_TYPE` entries for the eight MX template-engine report types.
+
+**Templates (`seed_statutory_report_templates.py`)**
+- **MX-PAYROLL-REGISTER (fixed):** gross, days paid, ISR withheld, **IMSS employee**, **INFONAVIT credit**, total deductions, net pay, **subsidy applied**.
+- **MX-EMPLOYER-COST (fixed):** IMSS, INFONAVIT and ISN employer amounts and the employer total, all summed over the run, read from the engine result. **The two shared columns that were always 0 are removed.**
+- **New:** MX-SUBSIDY, MX-IMSS-BRANCH (14 branch / side amounts via the selector), MX-INFONAVIT, MX-AGUINALDO, MX-FINIQUITO (every concept's gross, exempt and taxable parts via the selector), MX-ANNUAL-ISR-ADJ (the per-run part).
+- MX-IMSS-BRANCH and MX-INFONAVIT say on their face **"NOT AN OFFICIAL FILE"**: the SUA / SIPARE layout sources are not saved (C8).
+- The other 9 shells wait for W4-2's dedicated generators.
+
+**Proof (tests)**
+- every Mexico path is in the MX catalog;
+- the selector picks, sums and misses;
+- **every path resolves on a real committed snapshot of its run type** (ordinary, aguinaldo, finiquito, annual adjustment; at least 20 keyed paths resolve);
+- generating MX-EMPLOYER-COST and MX-PAYROLL-REGISTER on a committed run returns the engine's own figures, and the employer total is no longer 0.
+- Mexico report tests: 12 passed. With the shared, Dutch and German report-template tests and all Mexico tests: **1,090 passed, 0 failed**.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Report engine | Additive. Existing paths resolve exactly as before (no `[`) |
+| Mexico templates | A manual template seed fills 6 shells and fixes 2. Templates stay Draft; Mexico activation is still refused until W4-3's gate |
+| Other jurisdictions | None (pinned by their report-template tests) |
+
+---
+
+## W4-2 — Phase 12b: dedicated report generators (gap register A1)
+
+> **Review required: Rugvedh (ZP-PRIV) before merge.** New organisation route `POST /api/payroll/mexico/reports/{template_id}/generate` (org admin, tenant-scoped, data class *worker*). It reads Mexico's own tables through their existing service views, and the route registry and inventory gain exactly this entry. No authz, redaction or RLS rule is changed.
+
+**What changed**
+- **New `mexico_report_service.py`** (functions prefixed `mx_report_`, so the route-registry call graph cannot confuse them with other modules' helpers). The generators, each from the named service view, never recomputed:
+
+  | Template | Report type | Built from | Parameters |
+  |---|---|---|---|
+  | MX-CFDI-STATUS | MX_CFDI_STATUS | `mexico_cfdi_service.lifecycle_overview` (never XML) | — |
+  | MX-ISR-MONTHLY | MX_ISR_WITHHOLDING | SAT ISR liabilities with their source runs | `period_key` |
+  | MX-IDSE-MOVEMENTS | MX_IDSE | `mexico_imss_service.list_movements` (NSS masked) | optional `period_key` |
+  | MX-SUA-RECON | MX_SUA | SUA periods with figures and differences | `period_key` |
+  | MX-SIPARE | MX_SIPARE | IMSS / INFONAVIT liabilities | `period_key` |
+  | MX-VACATION-ACCRUAL | MX_VACATION | every Mexican worker's vacation ledger | — |
+  | MX-PTU-DISTRIBUTION | MX_PTU | the PTU cycle with its allocations | `cycle_id` |
+  | MX-ISN-RETURN-CDMX | MX_ISN_RETURN | the state's ISN returns for the period | `period_key` |
+  | MX-ANNUAL-ISR-ADJ (employer year) | MX_ANNUAL_ISR | `mexico_annual_service.employer_year_view` | `employer_profile_id`, `fiscal_year` |
+
+- **Immutable reports:** each is written as a `GeneratedReport`. A regeneration supersedes the previous row (it records `supersedesReportIds`) and never edits it, the Hong Kong rule.
+- **"NOT AN OFFICIAL FILE"** appears on the face of ISR monthly, IDSE, SUA, SIPARE and ISN returns (`officialLayout`).
+- **Guards:**
+  - generation needs an **Active** MX template of a dedicated type, so nothing generates in production until W4-3's activation gate;
+  - the filing guard refuses a dormant or pilot organisation.
+- **Shared code (additive):** `service.MX_DEDICATED_GENERATOR_REPORT_TYPES`; the generic payslip-column generator refuses those Mexico types (like Hong Kong's).
+- **Route registry:** regenerated with `python -m app.core.authz.generate`. The diff was exactly the new route; no existing route was reclassified. Four `/health/*` rows the generator picked up from your **uncommitted** `backend/app/main.py` were removed by hand, so they are not in this commit (they stay your change).
+
+**Tests (`test_mexico_report_generators.py`, 8; the dormancy route list gains the new route — 149 dormancy tests pass. Privacy + Mexico: 1,255 passed; the only failures are the 3 known local-only route-registry ones from your uncommitted `/health` routes)**
+- the generic generator refuses every dedicated type;
+- each generator builds from a real committed world (liabilities with sources, movements, SUA, ISN, CFDI status, vacation);
+- the "not an official file" labels;
+- supersession;
+- **no full RFC / CURP / NSS in any rendered report** (scan against the synthetic worker's identifiers);
+- missing parameters, a Draft template and a non-dedicated type are refused;
+- the annual employer-year view and the PTU distribution.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None (`payroll_generated_reports` already exists) |
+| API | One new org route, behind the Mexico dormancy guard (`require_mexico_tenant`): refused while Mexico is dormant |
+| Report engine | The generic generator refuses 9 Mexico report types (none of which could generate before) |
+| Other jurisdictions | None |
+
+---
+
+## W4-3a — Phase 12c: the Mexico template activation gate (plan E6, gap register A6)
+
+**ZP-PRIV:** not required. It replaces a refusal with a stricter, evidence-based gate; no authz, RLS or redaction change.
+
+- **What changed:** `mexico_service.template_activation_refusal` no longer refuses forever. It calls `mexico_report_service.mx_report_activation_refusal`, which refuses until **all** of these hold:
+  1. **Release gates SIGNED:** each gate the report rests on (plan §3 mapping, e.g. register G1–G3, IMSS G2, ISN return G4) is SIGNED from reviewed evidence (`gate_states`; the build signs nothing).
+  2. **Statutory content Active:** `MX-PAYROLL-<year>`, and for an ISN return `MX-ISN-<state>-<year>`.
+  3. **Fields proven** (template-engine reports): every field is a catalogued Mexico path that resolves on a **real committed Mexican payslip of its run type** (ordinary; aguinaldo; finiquito; an ordinary payslip carrying an annual adjustment).
+- **Today:** every Mexico template stays refused (no gate signed, no pack Active), and the refusal names what is missing.
+- **Tests:**
+  - each condition on its own (unsigned gate, inactive pack, no committed payslip);
+  - success once all three hold;
+  - the ISN return needs its state pack and G4;
+  - the old "refused today" test still passes.
+  - Mexico report tests: 14 passed. All Mexico tests: 1,007 passed; the one failure (a test that hands the hook a pack instead of a template) was fixed by reading the report type defensively; scaffolding + report tests 37 passed.
+- **Production effect:** none reachable. Mexico templates were never activatable, and still are not until the gates are signed.
+
+---
+
+## W4-3b — Phase 12c: the stamped XML is kept; the printed CFDI receipt (Phase 12 plan D4)
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** A new org route renders a worker's raw RFC, CURP and NSS. This is the master prompt's one allowed exception (MX-061: the CFDI receipt). The receipt is rendered on demand and never stored, logged or put in a message.
+
+**What changed**
+- **The PAC's stamped CFDI is kept.**
+  - `mexico_pac.StampResult` gains an optional `stamped_xml`.
+  - When a UUID is adopted, `mexico_cfdi_service._store_stamped_xml` saves `{folio}.stamped.xml` beside the signed XML and records `STAMPED_XML_STORED {ref, sha256}`. There is no new column: the reference lives in the event's detail.
+  - A stamped XML that does not carry the adopted UUID is not kept (`STAMPED_XML_MISMATCH`).
+  - New `stamped_xml_ref(db, doc)`.
+- **New `mexico_cfdi_receipt.py`.** It is rendered only from that stored stamped XML, never from engine figures. What it prints, and where each rule is written (saved sources only):
+  - **CFF Art. 29-A I–IV** (S35, p. 57): issuer RFC, name, regime and place of issue; folio; seals; date; receiver RFC, name, postal code and use;
+  - **RMF 2026 rule 2.7.1.7** (S1, pp. 99–100), parts I–IV: the QR; the issuer and SAT CSD serials; the legend "Este documento es una representación impresa de un CFDI"; the issue and certification date-times;
+  - **RMF 2026 rule 2.7.5.2** (S1, p. 162): the folio fiscal and both RFCs;
+  - **Anexo 20 I.D** (S30, pp. 66–67): the QR (`id`, `re`, `rr`, `tt`, `fe`, in that order), printed at 3 cm (≥ 2.75 cm).
+- **"NOT AN OFFICIAL FILE".** The receipt carries this watermark on every page and lists what is missing:
+  - rule 2.7.1.7 V, the original chain of the SAT certification complement, has no formation rule in the saved sources (only examples);
+  - the QR total follows the Anexo 20 text (no non-significant zeros), while the same page's example pads it: **D-20**.
+- **Layout.** Lines wrap by word and are never cut, so both seals (about 344 characters) print whole (CFF 29-A). Rows beside the QR are narrowed, and the QR is drawn first so it is always on page 1. The layout was checked by rendering a synthetic receipt and reading it.
+- **Route:** `GET /api/payroll/mexico/cfdi/documents/{document_id}/receipt`.
+  - Org admin only; it returns the PDF with `Cache-Control: no-store`.
+  - It sits behind the Mexico dormancy guard and the filing guard (it refuses a dormant or pilot organisation).
+  - It refuses a document that is not stamped (STAMPED, CANCEL_REQUESTED, CANCELLED or REPLACED) or that has no stored stamped XML.
+  - Another organisation's document is "not found".
+- **Route registry** regenerated. The diff was exactly the new route (`worker`, `org_admin`, `payroll_mx_cfdi_documents`). The four `/health/*` rows from your uncommitted `backend/app/main.py` were removed by hand again.
+
+**Tests**
+- New `test_mexico_cfdi_receipt.py` (8):
+  - the stamped XML is kept, and the receipt reads only from it (nothing is stored as a report);
+  - every rule 2.7.1.7 / 2.7.5.2 / CFF 29-A field is present;
+  - the receipt's totals equal the payslip snapshot;
+  - the QR sequence and values;
+  - the QR total's zero handling (4 cases);
+  - the PDF is built in memory, with the legend, the watermark, the UUID and a seal-length SAT seal printed whole;
+  - an unstamped document, a stamped one whose payload is not a Comprobante, and an unknown document are all refused.
+- Updated:
+  - the synthetic mock PAC now returns a stamped XML (a TimbreFiscalDigital node with SYNTHETIC SAT data and a seal-length SAT seal);
+  - the lifecycle test expects the extra `STAMPED_XML_STORED` event;
+  - the dormancy route list gains the receipt route.
+- Mexico + privacy tests: **1,283 passed, 78 skipped.** Four failed. Three are the known local-only route-registry tests: the only difference is the 4 `/health/*` routes in your uncommitted `main.py`. The fourth is the lifecycle event list, which was updated after that run. Re-run of lifecycle + receipt + dormancy + route registry: 205 passed, with only the same 3 local-only failures.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None. No new column (the reference lives in the existing event table) |
+| API | One new org route, behind the Mexico dormancy guard: refused while Mexico is dormant |
+| CFDI stamping | When a real PAC adapter returns `stamped_xml`, it is stored. No real adapter exists yet (no PAC transmission is built) |
+| Other jurisdictions | None |
+
+**Phase 12 plan D4** ("build now from the stored stamped XML") is done. The receipt stays "not an official file" until D-20 and the rule 2.7.1.7 V chain are settled; it becomes G1 evidence once a PAC sandbox stamps (C1).
+
+---
+
+## End of W4 — full backend suite
+
+Run 2026-10-27 08:52–09:17 on `3a44dc1`, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 976 passed, 16 skipped, **3 failed**: the 3 known local-only route-registry tests (the `/health` routes in your uncommitted `main.py`) |
+| 1 | 2,488 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,273 passed, 32 skipped |
+| 3 | 1,139 passed, 67 skipped |
+| 4 | 1,654 passed, 3 skipped |
+
+**Total: 7,530 passed, 120 skipped, 2 xfailed.** That is 25 more passing tests than after W3. No other jurisdiction's behaviour changed; the NL, IE and SE report paths are pinned by the W4-1 tests.
+
+**Browser check of the templates:** done with W5's browser pass, because both touch the same Super Admin compliance workspace.
+
+---
+
+## W5-1 — Super Admin: every Mexico content family readable, with its source
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** Two new Super Admin routes were added to the route registry. Both are read-only and return platform content only (no organisation or worker data).
+
+**Audit (read-only survey of the workspace).** Families that existed only in `mexico_content.py`, with no screen:
+- the annual ISR tariff and the filing calendar;
+- special pay (Art. 93), the aguinaldo rule and the state ISN inclusions;
+- termination reasons and the finiquito;
+- PTU and the annual adjustment, each with its exclusions;
+- the ordinary exemptions;
+- working time and the IMSS calendar.
+
+Two existing screens were incomplete:
+- **State ISN** showed the generic rate list, with no source, no PENDING G1 and no date.
+- **CEAV 2023–2030 schedule** had no source column.
+
+The other W5 findings (direct generic edits, readiness per gate, the policy page, SEPARACION, OOS-11) are W5-2 to W5-4.
+
+**What changed**
+- **`GET /super-admin/compliance/mexico/statutory-rules?on=`** (`mexico_service.statutory_rules_view`): every module-direct rule family, read-only. Each item shows:
+  - every citation, with the wording it quotes;
+  - the cited file's manifest row: title, URL, SHA-256 and verification status (`VERIFIED`, `ARCHIVE_COPY_VERIFIED` or `NOT_IN_MANIFEST`);
+  - `[PENDING G1]`.
+
+  Year-keyed families (the annual ISR tariff, official holidays) follow `on`. Without `on`, the national pack's effective-from is used, never the server date. The response also lists the open decision switches (D-07, D-08, D-09, D-12, D-13, D-07b, D-14) and the interfaces with no transcribed rule (D-18, D-19), each shown as undecided.
+- **`GET /super-admin/compliance/mexico/isn-content?pack_id=&on=`**: one state ISN pack's rows through the same `content_view` as the national families (source, PENDING G1, date). It refuses the national pack (404) and a missing `pack_id` (422).
+- **Frontend:**
+  - **New "Statutory rules" tab** (`MXStatutoryRulesTab.jsx`): date bar, one section per family, a source-and-wording column, and an open-decisions table.
+  - **State ISN tab:** now uses the new view. The row's old generic contribution-rates fetch was removed.
+  - **CEAV schedule:** gains a Source column.
+- **Defect found in the browser check and fixed.** Eight component-less report templates still said "Draft shell — filled in Phase N … when this output exists", although W4-2 and W4-3b built their outputs. Each description now says it has no components and names what builds it: the dedicated generator and its data, or, for the receipt, rendering from the stored stamped XML. Official-layout reports keep "NOT AN OFFICIAL FILE". Re-seeding a Draft template updates its description; non-Draft rows are skipped as before.
+- Concept labels are explicit (for example, "PTU (profit sharing)", not "Ptu").
+
+**Tests**
+- New `test_mexico_statutory_rules_view.py` (9):
+  - every rule citation that `verify_mexico_sources.py compare` checks is shown;
+  - every item is read-only, PENDING G1 and sourced, and no cited file is missing from the manifest;
+  - year-keyed families follow the date;
+  - with no pack and no date, the server date is never used;
+  - the open decisions are listed;
+  - the routes are Super Admin only;
+  - a state ISN pack shows its rows with sources, and the national pack and a missing id are refused;
+  - every concept has a label;
+  - no Mexico template is described as an unfilled shell.
+- Mexico + privacy + report-template tests: **1,370 passed, 76 skipped.** The only failures are the 3 known local-only route-registry tests (the `/health` routes in your uncommitted `main.py`). The registry diff is exactly the two new routes.
+- Frontend: ESLint is clean on the changed files; `check:undefined` reports 580 files with no undefined names; `vite build` passes.
+
+**Browser (real Chrome, scratch SQLite, the REAL Draft packs and templates seeded by the deployment scripts; harness in `docs/mexico/completion-evidence/w5/harness/`): 29/29 PASS, with no 4xx / 5xx responses and no console errors.**
+- **W5-1 (9 checks):**
+  - every family's section is present;
+  - the date bar shows the pack's effective-from;
+  - PENDING G1, SHA-256, status and quoted wording are shown;
+  - no file is missing from the manifest;
+  - the decisions are shown undecided;
+  - the 2026 annual tariff has 11 brackets, and 2025 shows "awaiting transcription";
+  - the CDMX ISN row shows 4% with its S22 source and the date bar;
+  - the CEAV schedule shows its source.
+- **W4 (18 checks; the template browser check deferred from the end of W4):** every national Mexico template opens as Draft, either with its components or with a description naming the generator that builds it.
+- **Regression (2 checks):** the NL compliance page is unchanged; no 5xx and no page errors.
+- Screenshots were inspected:
+  - the register shows the W4-1 snapshot paths;
+  - the special-pay citations are complete;
+  - the ISN row shows its rate and source.
+
+  The empty Components tab of the receipt template is what exposed the stale "Draft shell" descriptions.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | Two new read-only Super Admin routes (platform data) |
+| Report templates | Re-seeding a **Draft** Mexico template rewrites its description; nothing else changes |
+| Other jurisdictions | None. A shared `service.py` comment changed; no behaviour changed |

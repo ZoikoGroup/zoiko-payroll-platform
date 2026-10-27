@@ -333,3 +333,335 @@ Ordinary earnings are not content: each earning classification carries its own I
 
 | Human G4 reviewer (name / date / verdict) | |
 |---|---|
+
+## W1-3a — 2026-10-26 (completion programme): special-pay exemptions and withholding (gap register B12)
+
+Rule objects in `engine/countries/mexico_rules.py`, wired into `MX_SPECIAL_PAY_RULES` / `MX_AGUINALDO_RULE`. Each cites the wording it rests on; `compare` finds every quote in its file.
+
+Sources: `S24/S24_DIP_LISR.pdf` (SHA-256 `803c2875c09c751c1966b8eb4dca99f460b237da4ef67ee04b4fa325d8c2f786`, last reform DOF 01-04-2024), `S25/S25_DIP_RLISR.pdf` (`0538fd2fa3da9705370350b1e25a1656cc681d2c489545334079e1b35360d6e3`, last reform DOF 06-05-2016), `S26/S26_DIP_LFT.pdf` (`12f09393a1951a91c3f57f579bf611b034edf1a5f78cdbfb828e23ff3a9acbf7`), S34.
+
+### TL-SP-1 · Exempt part (LISR Art. 93)
+
+| Concept | Rule transcribed | Wording (PDF page) |
+|---|---|---|
+| Aguinaldo | Exempt up to **30 days** of the reference wage per calendar year | Art. 93 XIV, p. 123: "Las gratificaciones … durante un año de calendario, hasta el equivalente del salario mínimo general del área geográfica del trabajador elevado a 30 días" |
+| Vacation premium, PTU | Exempt up to **15 days** each, per calendar year | Art. 93 XIV, p. 123: "las primas vacacionales … y la participación de los trabajadores en las utilidades … hasta por el equivalente a 15 días de salario mínimo general del área geográfica del trabajador, por cada uno de los conceptos señalados" |
+| Seniority premium, separation payment, indemnity | Exempt up to **90 days** of the reference wage **per year of service**, one cap shared by all three; a fraction of more than six months counts as a year | Art. 93 XIII, pp. 122–123 |
+| Vacation paid out | **No exemption** (Art. 93 names none) | — |
+| A worker on the area minimum wage | **Blocks** (`MX_ART93_I_NOT_MODELLED`): Art. 93 I exempts in full the benefits within the legal minimums; not modelled | Art. 93 I, p. 121 |
+
+- **Year to date.** The XIV caps are per calendar year, so each payslip now receives the exempt amounts already used that year (`_year_to_date_exempt`, with the same ordering and correction rules as the month-to-date subsidy accumulator; bound into the approval fingerprint).
+- **Shared XIII cap.** The law gives one cap for every separation payment. Splitting it across the three CFDI kinds is not legislated: it is allocated **pro rata** (the total exempt is the law's; the split is an engineering choice, D-04).
+- **Reference wage: D-07 (blocks).** XIII and XIV say "salario mínimo general del área geográfica". The LISR does use "Unidad de Medida y Actualización" in later-reformed articles, but not here. S34 Transitorio Tercero would read such a reference as the UMA; the text would read it as the worker's zone minimum wage (RLISR Art. 167: the place of work). The difference is about 2.7×. Both readings are built and tested; until the G1 owner decides, every special payment blocks with `MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`.
+
+### TL-SP-2 · Withholding (LISR Arts. 95, 96; RLISR Arts. 172, 174)
+
+| Case | Rule | Wording |
+|---|---|---|
+| Aguinaldo, vacation premium, PTU, vacation paid out in an ordinary run | Taxable part withheld with the period's pay (`combine_with_ordinary`) | Art. 96 ¶2, p. 130: "aplicando a la totalidad de los ingresos obtenidos en un mes de calendario" |
+| The same paid in their own run | **RLISR Art. 174** (fr. I–V: ÷365 ×30.4; add the monthly ordinary income; tax difference ÷ fr. I amount; that rate × the payment). Built and tested; the choice of method is **D-08 (blocks)**: Art. 96 makes RLISR 174 an option ("podrán"), and the default needs month-to-date income a special run does not carry | RLISR Art. 174, pp. 45–46 |
+| Monthly ordinary income | **D-09 (blocks):** neither the LISR nor the RLISR says how the "último sueldo mensual ordinario" or "el ingreso ordinario … en el mes" is derived from a daily salary | LISR Arts. 95, 96; RLISR Art. 174 II |
+| Separation payments | Not withheld with ordinary pay (`combine_with_ordinary = False`); the finiquito rule applies Art. 96's separation rate (W1-3b) | Art. 96 ¶7, p. 131; RLISR Art. 172 |
+
+### Blind second transcription (W1-3a)
+
+A separate agent read only S24, S25 and S26. It agreed on **every** limit, unit, period, page and formula in TL-SP-1 and TL-SP-2. In particular:
+- **One cap for all separation payments:** RLISR Art. 172 nets the Art. 93 XIII amount off the combined total.
+- **Art. 93 has no "Unidad de Medida y Actualización";** the law has it elsewhere (Art. 74 p. 89, Art. 79 p. 106).
+- **"Último sueldo mensual ordinario": NOT FOUND.** 30.4 appears only in RLISR Arts. 174 I and 163 I and in the subsidy table.
+
+It also raised three points, all now recorded:
+1. **"cuando dichas gratificaciones se otorguen en forma general"** (Art. 93 XIV) is a condition of the aguinaldo exemption. The statutory aguinaldo (LFT Art. 87) is general by law, so the rule assumes it holds. That is a reading for the G1 owner (D-04). An employer bonus that is not general would need its own classification.
+2. **Sunday premium** (one area minimum wage per Sunday worked) **and overtime** (Art. 93 I: 50%, at most five area minimum wages a week). These are ordinary hour-based lines, not special payments: they are the "Art. 93 exemptions for ordinary earnings" interface (gap register A15, W3).
+3. **Art. 96 ¶1, "No se efectuará retención a las personas que en el mes únicamente perciban un salario mínimo general":** the ordinary ISR path does not apply this. Added to the gap register as **A16** (W3).
+
+### TL-SP-3 · Aguinaldo rule (LFT Art. 87)
+
+- **Payable by:** 19 December, from "antes del día veinte de diciembre" (p. 25).
+- **Fraction:** days employed in the calendar year ÷ days in that year (365 or 366), both ends counted, for "la parte proporcional … conforme al tiempo que hubieren trabajado" (p. 25). The day count is a reading (D-04).
+- Engine effect: an aguinaldo amount is now computed (it used to block with `MX_AGUINALDO_RULE_MISSING`). Its withholding still blocks on D-07 and D-08.
+
+| Human G1 reviewer (name / date / verdict) | |
+|---|---|
+
+## W1-3b — 2026-10-26 (completion programme): termination reasons and the finiquito rule (gap register B14)
+
+Rule objects in `engine/countries/mexico_rules.py`, wired into `MX_TERMINATION_REASONS` and `MX_FINIQUITO_RULE`. Every citation quotes S26 (LFT), S24 or S25, and `compare` finds each quote (501 checks, 0 misses).
+
+### TL-TER-1 · The reason catalog and its separation components (LFT)
+
+| Code | Reason | Components (kind) | Wording (PDF page) |
+|---|---|---|---|
+| `LFT_47_RESCISSION_BY_EMPLOYER` | Employer rescinds with cause | Seniority premium (022) | Art. 47 p. 15; Art. 162 III p. 52: "a los que sean separados de su empleo, independientemente de la justificación o injustificación del despido" |
+| `LFT_48_DISMISSAL_INDEMNIFIED` | Dismissal; the worker takes the indemnity | 3 months of salary (025) + seniority premium | Art. 48 p. 16: "que se le indemnice con el importe de tres meses de salario" |
+| `LFT_49_NO_REINSTATEMENT` | Employer exempt from reinstating | Art. 50 I or II by years (025) + 3 months (025) + seniority premium | Arts. 49 p. 18, 50 p. 19 |
+| `LFT_51_RESCISSION_BY_WORKER` | Worker rescinds for cause | As Art. 50 (Art. 52) + seniority premium | Arts. 51, 52 p. 20 |
+| `LFT_53_III_END_OF_TERM` | End of the work or the term | None | Art. 53 III p. 20 |
+| `LFT_54_INCAPACITY` | Non-occupational incapacity | One month (023) + seniority premium (12 days a year "de conformidad con lo dispuesto en el artículo 162") | Art. 54 p. 21 |
+| `LFT_162_VOLUNTARY_SEPARATION` | Voluntary separation | Seniority premium only from 15 whole years of service | Art. 162 III p. 52 |
+
+**Amounts**
+- **Art. 50 II (indefinite, c_TipoContrato 01):** 20 days per year of service.
+- **Art. 50 I (fixed term, 03):**
+  - under a year: the salary of half the time served;
+  - over a year: six months for the first year plus 20 days for each later year.
+- **Art. 50 III:** three months, read as **90 days**. LFT Art. 89 ¶3 converts a monthly salary to daily by ÷ 30. A reading (D-04).
+- **Any other contract type** (02 obra determinada, 04–99): blocks with `MX_TERMINATION_CONTRACT_UNSUPPORTED`. Art. 50 I names only "tiempo determinado".
+- **Seniority premium (Art. 162 I):** 12 days per year of service. The salary is bounded by Arts. 485–486: no lower than the minimum wage, no higher than twice "el salario mínimo del área geográfica de aplicación".
+  - "Trabajadores de planta" is read as an indefinite contract (01): a reading (D-04).
+  - Art. 162 IV's deferral when more than 10% of the workforce leaves voluntarily in a year is **not modelled**: the premium is paid at separation (IV a).
+
+**Undecided, each blocking with its own code**
+- **D-12, indemnity salary (Art. 89):** the daily rate "y la parte proporcional de las prestaciones mencionadas en el artículo 84". Built as the daily salary × the labour policy's integration factor (aguinaldo, vacation premium); the same question as gap C4. `MX_INDEMNITY_SALARY_UNDECIDED`.
+- **D-13, part years:** do the "por cada año de servicios" counts take a part year pro rata? `MX_SERVICE_YEARS_COUNT_UNDECIDED`.
+- **D-07b, the Art. 486 cap:** the zone minimum wage, or the UMA? `MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`.
+
+**Not in the catalog (D-11)**
+- **Mutual consent (Art. 53 I):** the LFT grants no component, but whether a voluntary-type premium applies is not settled by the text.
+- **Death (Art. 53 II):** the premium goes to the beneficiaries of Art. 501, not the worker; the receipt has a different payee.
+- **Art. 434 (collective) terminations.**
+- **Back pay and interest (salarios vencidos, Art. 48 ¶2–3):** fixed by a tribunal, never by payroll.
+
+### TL-TER-2 · The finiquito rule
+
+- **Vacation owed:**
+  - the year the termination falls in: its days in proportion to the time served in it (Art. 79 ¶2 p. 24, "remuneración proporcionada al tiempo de servicios prestados");
+  - each completed year: its days not taken or paid out. The LFT does not say outright that untaken days of a completed year are paid at termination (Art. 79 ¶1 forbids paying instead of rest). A reading (D-04).
+- **Separation withholding (LISR Art. 96 ¶7 p. 131, RLISR Art. 172 p. 45):** the separation's taxable total × (monthly ISR on the last monthly ordinary salary ÷ that salary). When the total is below that salary, the monthly tariff applies to it. Needs D-09.
+- **Aguinaldo and vacation premium in the finiquito:** their own special-pay rule (RLISR Art. 174; D-08).
+- **Vacation paid out:** ordinary income of the month (Art. 96). The finiquito run carries no month-to-date income, so it **blocks** (`MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED`), new gap item **A17**.
+
+### Blind second transcription (W1-3b)
+
+A separate agent read only S26, plus S24 and S25 for the withholding. It agreed on **every** amount, condition and page in TL-TER-1 and TL-TER-2. Its NOT FOUND answers match the open points:
+- untaken vacation of completed years paid at termination: not stated;
+- how a part year counts (Arts. 50, 162): not stated (D-13);
+- "tres meses" in days: not stated (Art. 89 gives only ÷ 7 and ÷ 30).
+
+It added four details, now recorded:
+1. **Art. 89 ¶2:** for variable pay, the indemnity salary is the average of the last 30 days actually worked (from a raise, if there was one). Part of D-12.
+2. **Art. 486:** work in several areas is capped at twice the *average* of their minimum wages. Not modelled: the engine uses the worker's one zone.
+3. **Art. 50 IV:** digital-platform workers have their own indemnity. Out of scope (no platform-worker contract type is supported).
+4. **Art. 47, last paragraphs:** without the written notice of the cause, the separation is presumed unjustified. An operator recording `LFT_47_RESCISSION_BY_EMPLOYER` must hold that notice as evidence (the termination record already requires evidence). Added to D-11.
+
+| Human G1 / G5 reviewer (name / date / verdict) | |
+|---|---|
+
+## W1-4 — 2026-10-26 (completion programme): PTU and the annual ISR adjustment (gap register B15, B16)
+
+Rule objects in `engine/countries/mexico_rules.py`, wired into `MX_PTU_RULE`, `MX_PTU_EXCLUSION_REASONS`, `MX_ANNUAL_ADJUSTMENT_RULE` and `MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS`. The 2026 annual tariff is a new content table, `MX_ISR_ANNUAL_TARIFFS`. `compare`: 533 checks, 0 misses.
+
+### TL-PTU-1 · PTU (LFT Arts. 122–127; LISR Arts. 76 V, 150)
+
+| Element | Rule | Wording (S26 / S24, PDF page) |
+|---|---|---|
+| Split | Half the pool by days worked, half in proportion to salary | Art. 123 p. 31 |
+| Salary | The cash daily rate: the gross of lines whose approved classification carries the PTU flag (`PTU_WAGE_BASE`); finiquito lines are not counted | Art. 124 p. 31: "la cantidad que perciba cada trabajador en efectivo por cuota diaria. No se consideran … las gratificaciones … ni … trabajo extraordinario" |
+| Days | The days paid in committed ordinary and correction runs. A reading (D-04): Art. 127 IV counts maternity and work-risk incapacity as active service, and the engine pays those days; unpaid absences are not counted | Arts. 123, 127 IV |
+| Exclusions (operator-asserted, with evidence and a second approver) | `LFT_127_I_DIRECTOR`, `LFT_127_VI_DOMESTIC`, `LFT_127_VII_EVENTUAL_UNDER_60_DAYS` | Art. 127 I, VI, VII p. 32 |
+| Cap | The more favourable of three months of salary (90 × the year's average cash daily rate) and the average PTU received in the last three years (the employer's DISTRIBUTED cycles) | Art. 127 VIII p. 32 |
+| Payment deadline | 60 days after the annual return is due: company (MORAL), three months after the fiscal year (31 March); individual (FISICA), April (30 April) | Art. 122 p. 31; LISR Art. 76 V p. 91, Art. 150 p. 180 |
+
+**Not modelled.**
+- Art. 127 II, the salary cap for trusted workers (120% of the highest unionised salary): the engine has neither fact. A pre-pilot G5 checklist item.
+- Art. 127 III (one month's salary for workers of people living only from their own work).
+- Art. 126 (exempt employers).
+- Art. 127 V and IX.
+
+**D-14, blocking only the case that needs it.**
+- `MX_PTU_CAP_EXCESS_UNDECIDED`: the law does not say where an amount above the Art. 127 VIII cap goes ("UNDISTRIBUTED", kept as residue, is built).
+- `MX_PTU_HISTORY_AVERAGE_UNDECIDED`: how the three-year average counts a worker with fewer than three years of PTU, when the choice changes the cap.
+
+### TL-ANN-1 · Annual ISR adjustment (LISR Art. 97; S3 Art. Tercero; S2 Anexo 8 C.II)
+
+| Element | Rule | Wording |
+|---|---|---|
+| Not adjusted by the employer | Started after 1 January; left before 1 December; annual income above $400,000.00; the worker told the employer in writing they will file (operator exclusion `LISR_97_C_WORKER_FILES_OWN_RETURN`) | Art. 97 a)–c), pp. 131–132 |
+| The $400,000 test | Applied to **gross** income (`annual_gross`, new in the worker facts). Art. 97 b) says "ingresos anuales … que excedan de $400,000.00" without saying gross or taxable. A reading (D-04) | Art. 97 b) |
+| Annual tax | The 2026 Art. 152 tariff on the year's taxable income, less the employment subsidy that "le correspondió" (`subsidy_due_total`, new in the worker facts: the subsidy computed each period, not only the part applied), never below zero | Art. 97 ¶2; S3 Art. Tercero I–III |
+| Difference owed | Withheld in full in the run that applies it | Art. 97 ¶4: paid "a más tardar en el mes de febrero siguiente" |
+| Difference in the worker's favour | Set against that run's withholding; the rest carried to the following withholdings | Art. 97 ¶4: "contra la retención del mes de diciembre y las retenciones sucesivas, a más tardar dentro del año de calendario posterior" |
+
+**The 2026 annual tariff (S2 C.II, PDF pp. 18–19), 11 brackets:**
+
+| Lower | Upper | Fixed quota | % |
+|---|---|---|---|
+| 0.01 | 10,135.11 | 0 | 1.92 |
+| 10,135.12 | 86,022.11 | 194.59 | 6.40 |
+| 86,022.12 | 151,176.19 | 5,051.37 | 10.88 |
+| 151,176.20 | 175,735.66 | 12,140.13 | 16.00 |
+| 175,735.67 | 210,403.69 | 16,069.64 | 17.92 |
+| 210,403.70 | 424,353.97 | 22,282.14 | 21.36 |
+| 424,353.98 | 668,840.14 | 67,981.92 | 23.52 |
+| 668,840.15 | 1,276,925.98 | 125,485.07 | 30.00 |
+| 1,276,925.99 | 1,702,567.97 | 307,910.81 | 32.00 |
+| 1,702,567.98 | 5,107,703.92 | 444,116.23 | 34.00 |
+| 5,107,703.93 | En adelante | 1,601,862.46 | 35.00 |
+
+- **Checks:** continuous and quota-consistent (`test_annual_tariff_2026_…`); every bracket's four numbers are found on one line of S2 (`compare`).
+- **Not modelled:** the deduction of a local tax on salaries of up to 5% (Art. 97 ¶2–3). No such tax applies in the states in scope.
+
+### Blind second transcription (W1-4)
+
+A separate agent read only S26, S24, S2 and S3. It agreed on **all 11** annual brackets (rows 1–7 on p. 18, rows 8–11 on p. 19, with a warning not to confuse them with the 2025 table C.I), and on every PTU and annual-adjustment rule. It confirmed the open points:
+- **The law is silent** on where an amount above the Art. 127 VIII cap goes, and on averaging fewer than three years: **D-14**.
+- **The $400,000 test is unclear** between gross and taxable ("ingresos anuales por los conceptos a que se refiere este Capítulo"; Art. 98 III e) uses the same words): a D-04 reading.
+- **The subsidy wording is "le correspondió"** in Art. Tercero I–III; "aplicado" does not appear.
+
+It added:
+- **LISR Art. 9 (p. 14)** also states the company deadline: "dentro de los tres meses siguientes a la fecha en la que termine el ejercicio fiscal". It agrees with Art. 76 V.
+- **Art. 122 ¶3:** unclaimed PTU is added to the next year's pool. Not modelled: the employer enters each year's distributable amount, so it includes any carried amount. Noted for G5.
+- **Art. 122 ¶2:** an additional distribution after a tax-authority resolution. That is a new cycle the employer enters, not computed.
+
+| Human G1 / G5 reviewer (name / date / verdict) | |
+|---|---|
+
+## W1-5 — 2026-10-26 (completion programme): filing calendar, movement deadline, holidays, risk-premium period (gap register B18, B11)
+
+New source **S35**: `S35/S35_DIP_CFF.pdf` (Código Fiscal de la Federación, last reform DOF 09-04-2026), SHA-256 `be7427b20d3552775ab42018f8f87578078770095bf8cf46322c25e36ee3aa7d`. Archive capture 20261006134049, digest OK; `ARCHIVE_COPY_VERIFIED`.
+
+### TL-CAL-1 · Filing calendar (`MX_FILING_CALENDAR`)
+
+| Report type | Due | Wording |
+|---|---|---|
+| `MX_ISR_WITHHOLDING` | 17th of the month after the withholding period | **S35** CFF Art. 6 I (PDF p. 4): "en los casos de retención … las enterarán a más tardar el día 17 del mes de calendario inmediato posterior al de terminación del período de la retención". The LISR's own day-17 sentence (Art. 96, p. 131) covers only individuals and Title III non-profits, so the CFF is the general rule for any employer |
+| `MX_IMSS` | **Not listed (D-15)**, removed after the blind transcription | LSS Art. 39 (p. 14) makes quotas monthly ("a más tardar el día diecisiete del mes inmediato siguiente"), but the 1997 LSS **Transitorio VIGÉSIMO SÉPTIMO** (p. 111) keeps retiro / CEAV "en forma bimestral, hasta en tanto no se homologuen los períodos de pago de las Leyes del ISSSTE e INFONAVIT". One IMSS liability carries every branch, so a single monthly date would misstate the RCV part |
+| `MX_ISN_RETURN` (CDMX) | 17th of the following month | S22 Art. 159 (PDF p. 91) |
+| `MX_INFONAVIT` | **Not listed (D-15)** | S27 Art. 35 (p. 22) says "por mensualidades vencidas … días diecisiete del mes inmediato siguiente", but the 1997 decree's Transitorio SEXTO (p. 57) says "continuará siendo de forma bimestral hasta que en la Ley del [ISSSTE] se establezca que la periodicidad de pagos se realizará mensualmente". That law is not saved |
+
+- **Seeding.** Only S22 is VERIFIED, so a manual run of `seed_statutory_report_templates.py` would seed only the CDMX ISN due dates as live filing-calendar rows. The ISR rule (S35) rests on an archive copy and is skipped until it is VERIFIED. **No deploy runs that seed.**
+
+**Blind second transcription (W1-5).** A separate agent read S10, S27, S29, S35, S26, S22 and S24. It agreed on every rule and page above, and on the 2026 dates of both holiday lists (its weekday arithmetic is shown in its report). It found what my search missed: **LSS Transitorio VIGÉSIMO SÉPTIMO** (p. 111, RCV bimonthly), which removed `MX_IMSS` from the calendar. It also noted:
+- the 2016 INFONAVIT decree does not repeal the 1997 Transitorio SEXTO;
+- RACERF Art. 45 allows registration on the working day before employment starts;
+- LSS Art. 34 sets other deadlines for variable salary (the first five business days of odd months);
+- CFF Art. 12 moves a deadline to the next business day when it falls on a non-working day;
+- the CFF names 1 December for the change of Executive while the reformed LFT names 1 October (neither falls in 2026).
+
+### TL-CAL-2 · Work-risk premium period (`MX_RISK_PREMIUM_PERIOD`)
+
+S29 RACERF Art. 32 III (PDF p. 12), SHA-256 `78fb70d213053e46d3e739b9d80bf7da733d80f27446af7d5812fc6de80533c9`: the premium "tendrá vigencia desde el primero de marzo del año siguiente a aquel en que concluyó el periodo computado y hasta el día último de febrero del año subsecuente". LSS Art. 74 (S10 p. 26) delegates the period to the regulation. So the rule is **start 1 March**, ending the day before the next start. Engine effect: an employer risk premium can now be approved (before, `MX_NO_RISK_PREMIUM` was the only outcome).
+
+### TL-CAL-3 · IMSS movement deadline and the business-day calendar
+
+- **Deadline:** S10 LSS Art. 15 I (PDF p. 6), SHA-256 `875efb2c8e6562f4236a343c27f3199dc04732890e484e95086f69da05aa632c`: "comunicar sus altas y bajas, las modificaciones de su salario y los demás datos, dentro de plazos no mayores de cinco días hábiles". Counted from the day after the event: RACERF Art. 57 (p. 19, bajas: "contado a partir del día siguiente") and LSS Art. 34 I (salary changes). Transcribed: **5 business days**.
+- **Which days are not business days: D-16 (decision).** LSS Art. 9 fills gaps with "la Ley Federal de Trabajo, del Código o del derecho común, en ese orden". Two lists exist:
+  - **LFT** Arts. 74 (p. 23) and 715 (p. 318), which also excludes "los festivos que señale el calendario oficial" and days the labour authorities suspend work;
+  - **CFF** Art. 12 (p. 7), which also excludes the fiscal authorities' general vacations.
+
+  The 2026 dates each list gives, computed from the rules:
+
+  | Date | LFT Art. 74 | CFF Art. 12 |
+  |---|---|---|
+  | Thu 1 Jan | Yes | Yes |
+  | Mon 2 Feb (first Monday) | Yes | Yes |
+  | Mon 16 Mar (third Monday) | Yes | Yes |
+  | Fri 1 May | Yes | Yes |
+  | Tue 5 May | No | **Yes** |
+  | Wed 16 Sep | Yes | Yes |
+  | Mon 16 Nov (third Monday) | Yes | Yes |
+  | Fri 25 Dec | Yes | Yes |
+  | 1 Oct / 1 Dec (change of Executive, every six years) | Not in 2026 | Not in 2026 |
+  | Election days (LFT Art. 74 IX); authority vacations / official calendar | Not datable from saved sources | Not datable from saved sources |
+
+  **`MX_OFFICIAL_HOLIDAYS` stays EMPTY** until D-16 is decided, so every movement stays `DUE_DATE_UNSOURCED`. The dates above are ready to transcribe once it is.
+
+| Human G2 reviewer (name / date / verdict) | |
+|---|---|
+
+## W2-5 — 2026-10-26 (completion programme)
+
+### TL-CAL-4 · INFONAVIT due date and the RCV / INFONAVIT periodicity (closes D-15)
+
+- **New source S36:** `S36/S36_DIP_LISSSTE.pdf` (Ley del ISSSTE, last reform DOF 15-01-2026), SHA-256 `aa6e0e437331debd80d0086155e2d99885ea5e22cb13353c44eb0b1090f0b4d5`; archive capture 20261004141029, digest OK; `ARCHIVE_COPY_VERIFIED`.
+- **What it says.** Art. 21 (PDF p. 11): "El entero de las Cuotas y Aportaciones al seguro de retiro, cesantía en edad avanzada y vejez y al Fondo de la Vivienda será por bimestres vencidos, a más tardar el día diecisiete de los meses de enero, marzo, mayo, julio, septiembre y noviembre de cada año".
+- **Reading.** Both transitorios end only when the ISSSTE law pays monthly:
+  - Ley INFONAVIT 1997 Transitorio SEXTO (S27 p. 57): "hasta que en la Ley del [ISSSTE] se establezca que la periodicidad de pagos se realizará mensualmente";
+  - LSS Transitorio VIGÉSIMO SÉPTIMO (S10 p. 111): "hasta en tanto no se homologuen los períodos de pago de las Leyes del ISSSTE e INFONAVIT".
+
+  The ISSSTE law still pays bimonthly, so **INFONAVIT and RCV are bimonthly**.
+- **Transcribed:** `MX_INFONAVIT`, BIMONTHLY, due the 17th of the month after each bimester (Art. 35 "días diecisiete del mes inmediato siguiente", applied per bimester: 17 March for January–February, and so on). It cites S27, an archive copy, so the calendar seed skips it until S27 is VERIFIED.
+- **IMSS:** RCV bimonthly and the other branches monthly (LSS Art. 39). One IMSS liability carries every branch, so no single date is right: new gap item **A18** (split the RCV branches into their own liability, then add two IMSS rules).
+
+| Human G2 / G3 reviewer (name / date / verdict) | |
+|---|---|
+
+## W3 — 2026-10-26 (completion programme): content interfaces for the engine refusals
+
+### TL-SUB-3 · Subsidy monthly cap (gap register A15)
+
+- **Source:** `S3/S3_DOF_Decreto_subsidio_empleo_31122025.html`, Art. Segundo ¶4 as reformed: "Cuando los pagos por salarios sean por periodos menores a un mes, la cantidad del subsidio para el empleo que corresponda a la persona trabajadora, no podrá exceder el monto mensual máximo que resulte de multiplicar el valor mensual de la Unidad de Medida y Actualización por 15.02%".
+- **Interface:** the text key `mx_subsidy_monthly_cap_rule` (vocabulary `subsidy.MONTHLY_CAP_RULES`). While it is absent, the engine still blocks with `MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING`.
+- **Transcribed:** `CAP_AT_MONTHLY_AMOUNT`. Once the month's earlier payments reach the monthly amount, a payment gets only what is left (`capped` in the trace). That the cap applies to the month's payments together, not to each payment, is a reading (D-04).
+- **Blind second transcription:** done with the other W3 rows (below).
+
+### TL-LFT-2 · Work on a rest day (gap register A15, B17)
+
+- **Source:** `S26/S26_DIP_LFT.pdf`.
+  - Art. 75 ¶2 (PDF p. 24), for a mandatory rest day: "tendrán derecho a que se les pague, independientemente del salario que les corresponda por el descanso obligatorio, un salario doble por el servicio prestado".
+  - Art. 73 (p. 23) uses the same words for the weekly rest day.
+- **Interface:** the per-case amount `mx_rest_day_work_multiplier`; a `REST_DAY_WORK` line from approved hours (`rest_days_worked`), with earning code `MX_REST_DAY_WORK`, classified by the employer like overtime. Absent, the engine still blocks with `MX_REST_DAY_CONTENT_MISSING`. A supplied `REST_DAY_WORK` line is refused (approved hours only).
+- **Transcribed:** **2**, i.e. two daily salaries per rest day worked, on top of the rest day's own salary, which ordinary pay already includes. A reading (D-04): "salario doble" is read as two salaries in addition, not double in total.
+- **Blind second transcription:** done with the other W3 rows (below).
+
+### TL-IMSS-4 · Contribution days with absences and incapacity (gap register A15, B17)
+
+- **Sources:**
+  - `S10/S10_IMSS_LSS.pdf` Art. 31 (PDF p. 12). I: "Si las ausencias del trabajador son por períodos menores de ocho días consecutivos o interrumpidos, se cotizará y pagará por dichos períodos únicamente en el seguro de enfermedades y maternidad"; ausencias of eight days or more release the employer only "en los términos del artículo 37". IV: incapacity certified by the IMSS: no quotas "excepto por lo que se refiere al ramo de retiro".
+  - `S27/S27_DIP_LIFNVT.pdf` Art. 29, second-to-last paragraph (PDF p. 17; corrected after the blind transcription): INFONAVIT contributions are suspended "cuando no se paguen salarios por ausencias en los términos de la Ley del Seguro Social"; during IMSS incapacity "subsistirá la obligación del pago de aportaciones".
+- **Interface:** `MX_CONTRIBUTION_DAYS_RULE` with `check(absence, incapacity, segment_count)` and `branch_days(branch, days, absence, incapacity)`. Absent, absences and incapacity still block (`MX_ABSENCE_RULES_MISSING`).
+- **Transcribed rule (per contribution segment):**
+
+  | Branch | Days |
+  |---|---|
+  | Sickness and maternity (E&M fixed quota, excess, cash benefits, pensioner medical) | days − incapacity |
+  | Retiro; INFONAVIT employer | days − absences |
+  | Invalidez y Vida, Guarderías, CEAV (both sides), work risk | days − absences − incapacity |
+
+  It **blocks** (`MX_ABSENCE_ART37_NOT_MODELLED`) for 8 or more absence days, and (`MX_ABSENCE_SEGMENT_UNKNOWN`) when the period has more than one contribution segment (the attendance rows give counts, not dates).
+- **Readings (D-04):**
+  - "fewer than eight days … consecutive or interrupted" is counted per period;
+  - an attendance row of sick leave is treated as IMSS-certified incapacity. The attendance rows do not hold the certificate: confirm that sick leave is recorded only with one;
+  - the INFONAVIT suspension for absences holds "siempre que se dé aviso oportuno al Instituto": the rule assumes the employer gives that notice.
+- **Blind second transcription:** done with the other W3 rows (below).
+
+### TL-SP-4 · LISR Art. 93 exemptions for ordinary earnings (gap register A15, B17)
+
+- **Interface:** `MX_ORDINARY_EXEMPTION_RULES`, keyed by the classification's `isr_exempt_rule_key` (treatment EXEMPT / PARTIAL); `rule.exempt(kind, amount, facts)`. A key with no rule still blocks (`MX_EXEMPTION_RULE_MISSING`); a rule used on the wrong line kind blocks (`MX_EXEMPTION_RULE_KIND_MISMATCH`). Hour lines now carry their weekly overtime and Sundays-worked facts into classification.
+- **Transcribed (S24):**
+
+  | Key | Rule | Wording |
+  |---|---|---|
+  | `LISR_93_I_OVERTIME` | Per week: 50% of the overtime paid within the legal limit (the first-tier hours, Art. 66), capped at 5 reference wages. Overtime above the legal limit is fully taxable | Art. 93 I, PDF p. 121: "el 50% de las remuneraciones por concepto de tiempo extraordinario … que no exceda el límite previsto en la legislación laboral y sin que esta exención exceda del equivalente de cinco veces el salario mínimo general del área geográfica del trabajador por cada semana de servicios" |
+  | `LISR_93_XIV_SUNDAY_PREMIUM` | 1 reference wage per Sunday worked | Art. 93 XIV, PDF p. 123 |
+
+- **Shared with W1-3a:**
+  - the reference wage is **D-07** (it blocks until decided);
+  - a worker on the area minimum wage blocks (Art. 93 I, full exemption, not modelled).
+- **Not transcribed:**
+  - rest-day work's Art. 93 I exemption. It shares the 5-wage weekly cap with overtime, and the approved hours do not date rest days by week. A rest-day line classified EXEMPT / PARTIAL keeps blocking.
+- **Blind second transcription:** done with the other W3 rows (below).
+
+### Blind second transcription (W3-1 to W3-4)
+
+A separate agent read only S3, S26, S10, S27 and S24. It agreed on every W3 rule:
+- **Subsidy cap (S3 Art. Segundo ¶4):** the text does not say "per payment" or "per month"; reading it as the month's payments together is an inference (already the D-04 reading). January 2026 uses 15.59%.
+- **Rest-day work (LFT Arts. 73, 75):** the double salary is paid **in addition** to the rest day's own salary ("independientemente").
+- **LSS Art. 31:** fewer than 8 days, only sickness and maternity; 8 or more, none, through the Art. 37 procedure; IMSS incapacity, only retiro. Days are counted per contribution period ("período de cuotas"), framed monthly.
+- **Ley INFONAVIT Art. 29:** the paragraph is the **second-to-last** (corrected). The suspension needs "aviso oportuno"; credit discounts never stop.
+- **LISR Art. 93 I / XIV:** same share, limit, cap and period. Rest-day work shares the **single** weekly cap with overtime, which is why its exemption stays untranscribed.
+
+### TL-LFT-3 · Working-day length (for the hourly rate, D-17)
+
+- **Source:** `S26/S26_DIP_LFT.pdf` Art. 61 (PDF p. 22): "La duración de la jornada diaria será de ocho horas la diurna, siete la nocturna y siete horas y media la mixta".
+- **Transcribed** as `MX_JORNADA_DAILY_HOURS` by SAT c_TipoJornada: 01 Diurna 8, 02 Nocturna 7, 03 Mixta 7.5. Other workday types (04 Por hora … 99) have no length in Art. 61 and block (`MX_WORKDAY_TYPE_UNSUPPORTED`).
+- **Not transcribed:** the hourly-rate rule itself (`mx_hourly_rate_rule`, built as `DAILY_SALARY_OVER_JORNADA_HOURS`). No saved source says how an hourly rate is derived from the daily salary: **D-17**. Overtime keeps blocking (`MX_HOURLY_RATE_RULE_MISSING`).
+
+### TL-ISR-3 · No withholding for a worker on the area minimum wage only (gap register A16)
+
+- **Source:** `S24/S24_DIP_LISR.pdf` Art. 96 ¶1 (PDF p. 130): "No se efectuará retención a las personas que en el mes únicamente perciban un salario mínimo general correspondiente al área geográfica del contribuyente".
+- **Transcribed:** `mx_min_wage_no_withholding_rule` = `NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY`.
+- **When the engine applies it:** the payslip carries only the ordinary salary; the daily salary is at most the zone's general minimum wage; and no professional minimum wage applies. The ISR is then zero, and the trace carries `min_wage_only`.
+- **Readings (D-04):**
+  - "en el mes únicamente" is tested per payslip, not over the whole month;
+  - the minimum wage here is the actual zone wage, not the UMA (the text is about what the worker is paid).

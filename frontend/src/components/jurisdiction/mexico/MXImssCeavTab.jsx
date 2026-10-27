@@ -42,7 +42,8 @@ export default function MXImssCeavTab() {
                columns={[{ key: "year", label: "Year" },
                          { key: "band", label: "Band", render: (b) => `${b.lower} ${b.lowerUnit} – ${b.upper ?? "∞"} ${b.upperUnit || ""}` },
                          { key: "employerPct", label: "Employer %" },
-                         { key: "seeded", label: "In 2026 pack", render: (b) => (b.seeded ? "Yes" : "No") }]} />
+                         { key: "seeded", label: "In 2026 pack", render: (b) => (b.seeded ? "Yes" : "No") },
+                         { key: "source", label: "Source", render: (b) => <span className="text-[11px]">{b.source}</span> }]} />
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-# ZP-MX-ENG-001 — Addendum to the §22 Evidence Register (S24–S34)
+# ZP-MX-ENG-001 — Addendum to the §22 Evidence Register (S24–S36)
 
 **Status: PENDING SPEC-OWNER APPROVAL.** These sources extend the "Official evidence register — reviewed for 2026 design" in spec §22. They were added at the user's direction on 2026-10-15 (Phase 1, answers to Q1–Q3), because the primary legal text for these rules is not among S1–S23. Until the spec owner approves them, every value transcribed from S24–S33 stays `[PENDING G1]`, like every other Phase 1 value.
 
@@ -15,6 +15,8 @@
 | S32 | IMSS | NSS (Número de Seguridad Social) — structure and check digit | IMSS official page or published standard describing the NSS (confirm on imss.gob.mx before saving) | MX-036, spec §12 Identity / IMSS | Added in Phase 4 (Q2). Until saved, NSS is checked as 11 digits only. |
 | S33 | Banco de México / ABM | CLABE (Clave Bancaria Estandarizada) — 18-digit structure and check digit | Banxico / ABM published CLABE standard (confirm the current document before saving) | spec §12 Pay, §20 Bank settlement | Added in Phase 4 (Q2). Until saved, CLABE is checked as 18 digits only; no payment file exists before Phase 10. |
 | S34 | DOF (copy kept by the Cámara de Diputados) | DECRETO … en materia de desindexación del salario mínimo (DOF 27-01-2016), Transitorio Tercero | https://www.diputados.gob.mx/LeyesBiblio/ref/dof/CPEUM_ref_226_27ene16.pdf | MX-021, MX-022, MX-029 | Added 2026-10-26 (completion programme W2-5; proposed in the Transcription Batch 2 report). LSS Arts. 28 and 106 still word the SBC ceiling and the E&M threshold in "salario mínimo"; Transitorio Tercero is what makes those references read as the UMA. Saved as an archive copy (Draft only). |
+| S35 | Cámara de Diputados (consolidated text) | Código Fiscal de la Federación (CFF), Arts. 12 and 20 | https://www.diputados.gob.mx/LeyesBiblio/pdf/CFF.pdf | MX-025, Q2 | Added 2026-10-26 (completion programme W2-5). Art. 12 lists the days not counted in fiscal deadlines (a candidate for the IMSS movement deadline, D-16); Art. 20 is a rounding candidate (D-01). Archive copy (Draft only). |
+| S36 | Cámara de Diputados (consolidated text) | Ley del ISSSTE, Art. 21 | https://www.diputados.gob.mx/LeyesBiblio/pdf/LISSSTE.pdf | MX-030, MX-032 | Added 2026-10-26 (completion programme W2-5). The bimonthly cycle of INFONAVIT (Ley INFONAVIT 1997 Transitorio SEXTO) and of the LSS RCV quotas (Transitorio VIGÉSIMO SÉPTIMO) lasts until the ISSSTE law pays monthly; Art. 21 shows it still pays "por bimestres vencidos". Archive copy (Draft only). |
 
 **S29 fetch checklist (Phase 3):**
 1. Open https://www.diputados.gob.mx/LeyesBiblio/regla.htm and find the RACERF entry under "Ley del Seguro Social".

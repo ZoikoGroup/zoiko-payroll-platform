@@ -175,7 +175,7 @@ def test_identifiers_and_scope_constants():
     assert c.MX_CEAV_SEEDED_YEAR == 2026 and c.MX_CEAV_SCHEDULE_YEARS == tuple(range(2023, 2031))
     assert all(rule.startswith("MX_") for rule in c.MX_SLAB_RULES)
     assert set(c.MX_ISN_CONTENT) == set(c.MX_ISN_STATES_IN_SCOPE) == {"CDMX"}
-    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 35))      # S24–S34: addendum, pending approval
+    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 37))      # S24–S36: addendum, pending approval
 
 
 def test_every_content_row_has_its_declared_shape():
@@ -630,3 +630,53 @@ def test_cdmx_special_pay_isn_inclusion_follows_arts_156_and_157():
     for (state, concept), (included, source, ref) in c.MX_SPECIAL_PAY_ISN_INCLUSION.items():
         assert source == "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf" and ref.startswith(("Art. 156", "Art. 157"))
         assert included == ref.startswith("Art. 156")      # 156 lists what is taxed, 157 what is not
+
+
+# ── W1-4 (2026-10-26): the LISR Art. 152 annual tariff ──
+
+def test_annual_tariff_2026_is_continuous_quota_consistent_and_cited():
+    c = _c()
+    rows = c.MX_ISR_ANNUAL_TARIFFS.get(2026)
+    _need(rows, "annual ISR tariff 2026")
+    assert len(rows) == 11 and all(r.period == "ANNUAL" for r in rows)
+    ordered = sorted(rows, key=lambda b: Decimal(b.lower))
+    assert _isr_errors(ordered, {}, "ANNUAL") == []
+    assert all(r.source == "S2/S2_SAT_Anexo8_RMF2026.pdf" and "C.II" in r.source_ref for r in rows)
+    assert ordered[-1].upper is None
+
+
+# ── W1-5 (2026-10-26): calendar, movement deadline, risk-premium period ──
+
+def test_calendar_and_deadlines_are_cited_and_holidays_wait_for_d16():
+    c = _c()
+    rules = {r.report_type: r for r in c.MX_FILING_CALENDAR}
+    _need(rules, "filing calendar")
+    assert {k: (r.frequency, r.due_day, r.state) for k, r in rules.items()} == {
+        "MX_ISR_WITHHOLDING": ("MONTHLY", 17, None), "MX_ISN_RETURN": ("MONTHLY", 17, "CDMX"),
+        "MX_INFONAVIT": ("BIMONTHLY", 17, None)}                               # W2-5: S36 Art. 21 still bimonthly
+    assert rules["MX_ISR_WITHHOLDING"].source == "S35/S35_DIP_CFF.pdf" and "Art. 6 I" in rules["MX_ISR_WITHHOLDING"].source_ref
+    assert "MX_IMSS" not in rules                                              # A18: RCV bimonthly, other branches monthly
+    assert (c.MX_RISK_PREMIUM_PERIOD.start_month, c.MX_RISK_PREMIUM_PERIOD.start_day) == (3, 1)
+    assert c.MX_RISK_PREMIUM_PERIOD.source == "S29/S29_DIP_RACERF.pdf"
+    assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5
+    assert c.MX_OFFICIAL_HOLIDAYS == {}                                         # D-16: LFT or CFF list
+
+
+# ── W3 (2026-10-26): content interfaces for the engine refusals ──
+
+def test_subsidy_monthly_cap_rule_is_transcribed_from_s3_in_the_engine_vocabulary():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_subsidy_monthly_cap_rule"]
+    _need(rows, "subsidy monthly cap rule")
+    from app.modules.payroll.engine.jurisdictions.mexico.subsidy import MONTHLY_CAP_RULES
+
+    assert [r.text_value for r in rows] == ["CAP_AT_MONTHLY_AMOUNT"] and rows[0].text_value in MONTHLY_CAP_RULES
+    assert rows[0].source == "S3/S3_DOF_Decreto_subsidio_empleo_31122025.html" and "para 4" in rows[0].source_ref
+
+
+def test_rest_day_multiplier_is_transcribed_from_lft_art_75():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_rest_day_work_multiplier"]
+    _need(rows, "rest-day multiplier")
+    assert [r.flat_amount for r in rows] == ["2"] and rows[0].source == "S26/S26_DIP_LFT.pdf"
+    assert rows[0].source_ref.startswith("Art. 75 para 2") and "mx_rest_day_work_multiplier" in c.MX_PER_CASE_KEYS

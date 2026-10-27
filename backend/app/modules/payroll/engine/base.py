@@ -1025,6 +1025,10 @@ class PayrollContext:
     mx_variable_accumulator: dict = None       # prior-bimester variable pay {total, days} (MX-020)
     mx_min_wage_zone: str = None               # GENERAL / ZLFN / UNRESOLVED — derived by the service, never typed
     mx_month_to_date: dict = None              # {taxable, subsidy_applied} already committed in the month
+    # W1-3 (Mexico completion): {special concept: ISR-exempt amount} already used in the
+    # calendar year (LISR Art. 93 XIV), and a finiquito's separation date (Art. 93 XIII).
+    mx_year_to_date_exempt: dict = None
+    mx_separation_date: object = None
     mx_pack: dict = None                       # {pack_id, version, source_codes} of the national rows (MX-063 trace)
     # Phase 6: the national pack rows in force on the pay date as plain dicts
     # {rate_map, slabs} (service.pack_rows_for_golden — row-level dates

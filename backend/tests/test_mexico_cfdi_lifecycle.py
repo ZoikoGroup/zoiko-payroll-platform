@@ -74,7 +74,8 @@ def test_generate_sign_stamp_with_an_event_per_transition(db, monkeypatch, tmp_p
     ch.process(db, w)
     db.refresh(doc)
     assert doc.status == "STAMPED" and doc.uuid.startswith("SYN-") and doc.sat_certificate_number == "SYN-SAT-CERT"
-    assert ch.events(db, doc) == ["GENERATED", "SIGNED", "STAMP_SENT", "STAMPED"]
+    assert ch.events(db, doc) == ["GENERATED", "SIGNED", "STAMP_SENT", "STAMPED",
+                                 "STAMPED_XML_STORED"]                  # W4-3b: the PAC answer kept
     assert [c[0] for c in pac.calls] == ["stamp"]
     S.generate(db, w.run, w.users[0].id)                         # idempotent: one live document per payslip
     assert len(ch.docs(db, w.run)) == 1

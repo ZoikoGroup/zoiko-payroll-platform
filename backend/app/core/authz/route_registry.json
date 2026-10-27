@@ -9080,6 +9080,24 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/receipt",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "receipt",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/mexico/cfdi/documents/{document_id}/status-query",
    "data_class": "worker",
@@ -10202,6 +10220,33 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/reports/{template_id}/generate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "generate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_generated_reports",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_authority_liability_sources",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_imss_movements",
+    "payroll_mx_isn_liabilities",
+    "payroll_mx_ptu_allocations",
+    "payroll_mx_sua_differences",
+    "payroll_mx_vacation_records"
+   ],
    "overridden": false
   },
   {
@@ -18785,6 +18830,22 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/isn-content",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "isn-content",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/isn-states",
    "data_class": "platform",
    "action": "read",
@@ -19092,6 +19153,22 @@
     "payroll_za_tax_directives"
    ],
    "overridden": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/statutory-rules",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "statutory-rules",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
   },
   {
    "method": "GET",
