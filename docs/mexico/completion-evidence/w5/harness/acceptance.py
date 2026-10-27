@@ -139,6 +139,69 @@ with sync_playwright() as p:
     check("w5-9 the CEAV 2023-2030 schedule shows its source", "S11" in ceav or "S10" in ceav, ceav[-500:])
     shot(a, "w5_05_ceav_schedule")
 
+    # ── W5-2: no Mexico hotfix; generic statutory edits refused ────────────
+    open_mx_tab(a, "Statutory rules")
+    check("w5-10 the Mexico pack header offers no Hotfix Activate",
+          a.get_by_role("button", name=re.compile("Hotfix Activate")).count() == 0, "")
+    shot(a, "w5_06_mx_pack_header_no_hotfix")
+    pack_id = json.loads(api(SA_A, "GET", "/api/super-admin/compliance/mexico/packs")[1])[0]["id"]
+    st, txt = api(SA_A, "PUT", "/api/super-admin/compliance/tax-configuration/contribution-rates",
+                  {"jurisdictionPackId": pack_id, "jurisdictionCountry": "MX", "componentKey": "mx_uma_daily",
+                   "label": "x", "flatAmount": "1"})
+    check("w5-11 a generic statutory edit of a Mexico pack is refused (400)",
+          st == 400 and "Mexico statutory rows are not edited here" in txt, f"{st} {txt[:200]}")
+    st, txt = api(SA_A, "PUT", f"/api/super-admin/compliance/policies/{pack_id}/hotfix-activate",
+                  {"incident_id": "INC-W5", "justification": "browser check"})
+    check("w5-12 a Mexico hotfix activation is refused (400)",
+          st == 400 and "Mexico hotfix activation is not permitted" in txt, f"{st} {txt[:200]}")
+    a.goto(APP + "/super-admin/compliance/netherlands", wait_until="load")
+    settle(a, 2000)
+    a.get_by_text("NL-W5-REGRESSION").first.click()
+    settle(a, 1500)
+    check("w5-13 another country's Draft pack still offers Hotfix Activate (unchanged)",
+          a.get_by_role("button", name=re.compile("Hotfix Activate")).count() == 1, "")
+
+    # ── W5-3: readiness per gate, code vs evidence ─────────────────────────
+    open_mx_tab(a, "Readiness G1")
+    panel = tid(a, "mx-gate-checklists")
+    panel.scroll_into_view_if_needed()
+    check("w5-14 the readiness tab lists a checklist for every gate G1-G8",
+          all(tid(a, f"mx-gate-checklist-G{n}").count() == 1 for n in range(1, 9)), "")
+    tid(a, "mx-gate-checklist-G1").locator("button").first.click()
+    settle(a, 800)
+    g1 = tid(a, "mx-gate-checklist-G1").inner_text()
+    code_items = tid(a, "mx-gate-checklist-G1").locator('[data-testid="mx-gate-item-code"]').count()
+    evidence_items = tid(a, "mx-gate-checklist-G1").locator('[data-testid="mx-gate-item-evidence"]').count()
+    check("w5-15 G1 shows 7 code items (evaluated now) and its evidence items (awaiting signed evidence)",
+          code_items == 7 and evidence_items == 4 and "MX-PAYROLL-2026 v1.0 is Draft" in g1
+          and "awaits the gate's signed evidence" in g1 and "code 0/7" in g1, g1[:600])
+    shot(a, "w5_07_gate_checklist_g1", tid(a, "mx-gate-checklist-G1"))
+    tid(a, "mx-gate-checklist-G4").locator("button").first.click()
+    settle(a, 800)
+    g4 = tid(a, "mx-gate-checklist-G4").inner_text()
+    check("w5-16 G4 shows unsupported states blocked (met) and D-06 undecided (unmet)",
+          "payroll is BLOCKED in all" in g4 and "D-06" in g4 and "code 1/3" in g4, g4[:600])
+    shot(a, "w5_08_gate_checklist_g4", tid(a, "mx-gate-checklist-G4"))
+
+    # ── W5-4: Mexico policy page; SEPARACION not offered ───────────────────
+    a.goto(APP + "/super-admin/compliance/policy/new?country=MX", wait_until="load")
+    settle(a, 1500)
+    page = a.locator("main").inner_text()
+    check("w5-17 '+ New Policy' for Mexico shows the no-policy page, not India's form",
+          tid(a, "mx-no-policy-page").count() == 1 and "Mexico has no policy pack" in page and "HRA" not in page,
+          page[:300])
+    shot(a, "w5_09_mx_no_policy_page")
+    a.goto(APP + "/super-admin/compliance/policy/new?country=NL", wait_until="load")
+    settle(a, 1500)
+    check("w5-18 another unmapped country keeps today's fallback (unchanged; OOS-6)",
+          tid(a, "mx-no-policy-page").count() == 0 and len(a.locator("main").inner_text()) > 100, "")
+    open_mx_tab(a, "Earning classification")
+    a.get_by_role("button", name="New classification").first.click()
+    settle(a, 800)
+    nodes = a.locator('form[aria-label="New classification"] select:has(option:text-is("PERCEPCION"))').first.inner_text()
+    check("w5-19 the classification form no longer offers SEPARACION",
+          "PERCEPCION" in nodes and "SEPARACION" not in nodes, nodes)
+
     # ── W4: each Mexico report template ─────────────────────────────────────
     a.goto(APP + "/super-admin/report-templates/mexico", wait_until="load")
     settle(a, 2500)

@@ -32,9 +32,12 @@ from ..jurisdictions.mexico import (ceav, classification, entitlements, imss, in
                                     sbc, special_pay, subsidy, termination, trace)
 from ..jurisdictions.mexico import annual_adjustment
 from . import mexico_content as _content        # W3-3: the contribution-days rule
-from ..jurisdictions.mexico.errors import MexicoCalculationBlockedError, MXBlock  # noqa: F401  (re-exported)
+from ..jurisdictions.mexico.errors import (  # noqa: F401  (re-exported)
+    MexicoActionRefusedError, MexicoCalculationBlockedError, MXBlock, MXRefuse,
+)
 
-__all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoCalculationBlockedError", "MXBlock", "calculate"]
+__all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoActionRefusedError", "MexicoCalculationBlockedError",
+           "MXBlock", "MXRefuse", "calculate"]
 
 _COUNTRY = "MX"
 ENGINE_VERSION = "MX-ENGINE-2026.1"

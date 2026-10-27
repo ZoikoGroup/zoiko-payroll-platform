@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 import { COUNTRY_CODE_TO_POLICY_PAGE, INPolicyPage } from "./PolicyModule";
+import MXNoPolicyPage from "./PolicyModule/MXNoPolicyPage";
 
 // Thin dispatcher — the Policy module was split into one page per
 // jurisdiction (frontend/src/pages/PolicyModule/), mirroring the Tax side's
@@ -19,6 +20,8 @@ import { COUNTRY_CODE_TO_POLICY_PAGE, INPolicyPage } from "./PolicyModule";
 export default function PolicyConfigPage() {
   const [searchParams] = useSearchParams();
   const country = searchParams.get("country");
-  const Page = COUNTRY_CODE_TO_POLICY_PAGE[country] || INPolicyPage;
+  // Mexico (completion W5-4): an explicit "no policy pack" state, never India's
+  // form. Every other unmapped country keeps the India fallback (OOS-6).
+  const Page = COUNTRY_CODE_TO_POLICY_PAGE[country] || (country === "MX" ? MXNoPolicyPage : INPolicyPage);
   return <Page />;
 }

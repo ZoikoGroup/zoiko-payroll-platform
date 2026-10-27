@@ -172,6 +172,8 @@ const MX_SA = "/api/super-admin/compliance/mexico";
 const mxOn = (on, packId) => ({ params: { ...(on ? { on } : {}), ...(packId ? { pack_id: packId } : {}) } });
 
 export const getMxReadiness = () => apiFetch(`${MX_SA}/readiness`);
+// Completion W5-3: per gate, checklist items confirmed by code now vs awaiting signed evidence.
+export const getMxGateChecklists = () => apiFetch(`${MX_SA}/readiness/gate-checklists`);
 // Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
 // list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
 export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);

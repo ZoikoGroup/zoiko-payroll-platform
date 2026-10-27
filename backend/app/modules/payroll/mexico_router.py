@@ -119,6 +119,12 @@ def benefits_workweek(on: Optional[date] = Query(None), pack_id: Optional[int] =
     return _view(db, "benefits", on, pack_id)
 
 
+@router.get("/readiness/gate-checklists", summary="Per gate: checklist items confirmed by code now vs awaiting "
+                                                  "signed evidence (read-only, W5-3)")
+def gate_checklists(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _mx().gate_checklists(db)
+
+
 @router.get("/isn-content", summary="One state ISN pack's rows in force on `on`, with sources (read-only, W5-1)")
 def isn_content(pack_id: int = Query(...), on: Optional[date] = Query(None),
                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):

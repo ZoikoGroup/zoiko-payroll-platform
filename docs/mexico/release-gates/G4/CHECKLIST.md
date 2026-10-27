@@ -17,11 +17,11 @@
 
 Each item is tagged: **PRE-PILOT** (produced before any real Mexican data, from sources, synthetic cases or a test environment), **PILOT-GENERATED** (produced by the non-binding pilot, Phase 10e), or **GO-LIVE CHECK** (a real filing or payment, possible only after general availability; checked in the activation runbook, not gate evidence).
 
-- [ ] **[PRE-PILOT]** For each state to be enabled: base, rate, exemptions and return rules transcribed from that state's saved code, in an Approved state pack
+- [ ] **[PRE-PILOT]** For each state to be enabled: base, rate, exemptions and return rules transcribed from that state's saved code, in an Approved state pack <!-- code: isn_pack_approved -->
 - [ ] **[PRE-PILOT]** A synthetic ISN return per enabled state drafted and reconciled employee → return → ledger
-- [ ] **[PRE-PILOT]** Proof that a worker in any state without an Approved pack is blocked
+- [ ] **[PRE-PILOT]** Proof that a worker in any state without an Approved pack is blocked <!-- code: unsupported_states_blocked -->
 - [ ] **[PRE-PILOT]** **CDMX 2026 micro / small-employer ISN benefit (DECISIONS_PENDING D-10, recorded 2026-10-26).** S22, decree of 19-12-2025, Transitorio TRIGÉSIMO SÉPTIMO (PDF p. 815) gives micro employers a benefit "equivalente al 1%" and small employers "al 0.5% respecto de la tasa", under SAF general rules that are not saved. The CDMX pack carries 4% for every employer. Decide the reading, save the SAF rules, and model the benefit (or confirm no pilot employer qualifies) before sign-off
-- [ ] **[PRE-PILOT]** CDMX ISN on vacation paid out at termination, the separation payment and the indemnity (D-06): decided and transcribed, or a CDMX finiquito with those lines stays blocked
+- [ ] **[PRE-PILOT]** CDMX ISN on vacation paid out at termination, the separation payment and the indemnity (D-06): decided and transcribed, or a CDMX finiquito with those lines stays blocked <!-- code: isn_d06 -->
 - [ ] **[GO-LIVE CHECK]** The first real ISN return filed and accepted, per enabled state (activation runbook §6)
 
 ## What Zoiko already provides

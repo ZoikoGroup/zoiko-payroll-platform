@@ -38,7 +38,7 @@ from app.modules.payroll import mexico_authority_lifecycle as L
 from app.modules.payroll import mexico_due_dates as due
 from app.modules.payroll import mexico_filing_service as F
 from app.modules.payroll.engine.countries import mexico_content as _content
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 WORKLIST_BANNER = "ZOIKO WORKLIST - NOT AN IMSS / IDSE FILE - key these movements into IDSE, then record the outcome in Zoiko"
 _LIVE_BLOCKERS = ("VOIDED",)        # a voided movement (run reset) never blocks regeneration
@@ -218,7 +218,7 @@ def export_worklist(db: Session, org_id: int, actor_id, movement_ids: Optional[l
                      emp.name if emp else "", str(nss).strip(), mv.event_date.isoformat(),
                      "" if mv.sbc is None else str(mv.sbc), mv.due_date.isoformat() if mv.due_date else due.UNSOURCED])
     if missing:
-        raise MXBlock("MX_NSS_MISSING", f"employee(s) {', '.join(str(e) for e in sorted(set(missing)))} have no NSS "
+        raise MXRefuse("MX_NSS_MISSING", f"employee(s) {', '.join(str(e) for e in sorted(set(missing)))} have no NSS "
                                         "on their profile — nothing was exported", org_id)
     batch = f"MXW-{org_id}-{L.now().strftime('%Y%m%d%H%M%S')}"
     for mv in moves:

@@ -102,7 +102,9 @@ def classify(lines, classifications, on: _dt.date, work_state: str, facts: dict 
             continue
         node = row.get("cfdi_node_type")
         if node == "SEPARACION":
-            problems.append(("MX_SPECIAL_PAY_PHASE9", f"earning {code} is a separation payment — Phase 9 (Q8)"))
+            problems.append(("MX_SEPARATION_NOT_A_CLASSIFICATION",           # W5-4 (A13): never approvable now
+                             f"earning {code} is classified SEPARACION — separation pay comes only from the "
+                             "termination reason in a finiquito run"))
             continue
         if node != "PERCEPCION":
             problems.append(("MX_CLASSIFICATION_UNSUPPORTED",

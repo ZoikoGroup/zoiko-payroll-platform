@@ -23,6 +23,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-18 | FIXED SBC items (LSS Art. 30 I): how a periodic amount becomes a daily SBC amount | G2 owner | Any FIXED SBC item other than the salary (`MX_SBC_FIXED_RULE_MISSING`) | Open |
 | D-19 | Fixed salary days (e.g. 15 a fortnight) when employment ends inside the period | G5 owner | That final period (`MX_SALARY_DAYS_PARTIAL_PERIOD`) | Open |
 | D-20 | QR total on the printed CFDI receipt: the text drops the zeros, the example pads them | G1 owner (with the PAC) | Nothing (the receipt is "NOT AN OFFICIAL FILE") | Open |
+| D-21 | How to read the 830 Chihuahua c_CodigoPostal rows whose summer offset is not one hour ahead of winter (gap C11) | G1 owner | A CFDI issued from those postal codes (`MX_CFDI_TIMEZONE_RULE_INVALID`) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -184,3 +185,18 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** Anexo 20 I.D (S30, PDF p. 67) says the `tt` field is the total "máximo a 25 posiciones (18 para los enteros, 1 para carácter “.”, 6 para los decimales), se deben omitir los ceros no significativos". The worked example on the same page pads: `tt=0000014300.000000`. Which form does the SAT verifier expect: `14300` (the text) or the padded form (the example)?
 - **Built.** The text: `mexico_cfdi_receipt.qr_total` drops the non-significant zeros. One function to change if the example is the rule.
 - **Blocks.** Nothing (the receipt is labelled "NOT AN OFFICIAL FILE" anyway, because the rule 2.7.1.7 V certification chain has no saved formation rule). To settle before the receipt is relied on: scan a real PAC-stamped receipt's QR with the SAT verifier, or get the PAC's reading.
+
+## D-21 · Chihuahua border postal codes with an inconsistent time-zone row (gap C11)
+
+- **The data** (pinned set `sat_2026_08`, c_CodigoPostal revision 8.0, published 2026-01-22; S30):
+  - 830 rows, all `c_Estado` CHH, labelled "Tiempo del Centro en Frontera".
+  - Their offsets are winter −6 and summer −7, with summer from the second Sunday of March to the first Sunday of November. The summer offset is one hour behind winter, not ahead.
+  - Every other row with that label (COA 690, NLE 70, TAM 1,280) gives −6 / −5.
+  - The other 2,170 CHH rows are "Tiempo del Centro", −6 all year.
+- **Why it matters.** A receipt's `Fecha` is the local time at the place of issue (S4 p. 6). An employer issuing from one of these postal codes is refused today (`MX_CFDI_TIMEZONE_RULE_INVALID`).
+- **Options** (each is built; the switch is `mexico_cfdi_input.TIMEZONE_INCONSISTENT_ROW_READING`):
+  - **(a) `SAME_LABEL`:** use the offsets every consistent row with the same label gives (−6 / −5).
+  - **(b) `SWAPPED`:** the row's two offsets were exchanged (−7 winter / −6 summer).
+  - **(c) Keep refusing** until SAT publishes a corrected catalog (re-check each c_CodigoPostal revision).
+  - **(d) Save the time-zone law as a source** and read the offsets from it. The law governing Mexico's time zones is not among the saved sources, so none of (a)–(c) can be checked against it here.
+- **Blocks.** Only a CFDI whose place of issue is one of those 830 postal codes. Tests: `test_mexico_timezone_reading.py`.

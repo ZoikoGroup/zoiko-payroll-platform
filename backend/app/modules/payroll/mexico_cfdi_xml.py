@@ -61,6 +61,7 @@ RETIREMENT_PERCEPTIONS = ("039", "044")                 # S4 pp. 44–45: TotalJ
 # Perceptions that need a detail node the engine cannot fill yet (S4 pp. 47–48).
 OVERTIME_PERCEPTION = "019"                             # S4 pp. 48, 51–53: needs the HorasExtra node
 OVERTIME_TYPE_DOUBLE = "Dobles"                         # S28 c_TipoHoras description of double-rate hours (S4 p. 52)
+OVERTIME_TYPE_TRIPLE = "Triples"                        # S28 c_TipoHoras description of triple-rate hours (S4 p. 52)
 PERCEPTION_DETAIL = {"014": "Incapacidades (S4 p. 48)", "039": "JubilacionPensionRetiro (S4 pp. 47–48)",
                      "044": "JubilacionPensionRetiro (S4 pp. 47–48)", "045": "AccionesOTitulos (S4 p. 48)"}
 ISR_DEDUCTION = "002"                                   # S4 p. 60: TotalImpuestosRetenidos

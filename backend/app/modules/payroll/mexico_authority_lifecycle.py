@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll.engine.countries import mexico_content as _content
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 _SPECS = {
     "MOVEMENT": {
@@ -134,7 +134,7 @@ def transition(db: Session, org_id: int, entity_type: str, obj, to: str, event_t
                detail=None):
     frm = obj.status
     if to not in spec(entity_type)["transitions"].get(frm, set()):
-        raise MXBlock("MX_AUTHORITY_ILLEGAL_TRANSITION",
+        raise MXRefuse("MX_AUTHORITY_ILLEGAL_TRANSITION",
                       f"a {spec(entity_type)['label']} cannot go from {frm} to {to}", org_id)
     obj.status = to
     if hasattr(obj, "unknown_since"):
@@ -161,7 +161,7 @@ def event_views(db: Session, entity_type: str, obj) -> list:
 def require_different(actor_id, other_id, what: str, org_id=None) -> None:
     """Four-eyes (D6): the checker is not the maker."""
     if actor_id is not None and other_id is not None and actor_id == other_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", f"{what} must be done by a different person", org_id)
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", f"{what} must be done by a different person", org_id)
 
 
 def require_reference(reference: Optional[str], what: str) -> str:
@@ -244,7 +244,7 @@ def confirm_retry(db: Session, org_id: int, entity_type: str, obj, actor_id, rea
     if obj.status != "UNKNOWN":
         raise BadRequestException(f"Only an UNKNOWN {sp['label']} can be retried")
     if not_found_checks(db, entity_type, obj) < 1:
-        raise MXBlock("MX_AUTHORITY_STATUS_CHECK_REQUIRED",
+        raise MXRefuse("MX_AUTHORITY_STATUS_CHECK_REQUIRED",
                       "record a status check first — a retry is never sent blind (MX-043)", org_id)
     text = (reason or "").strip()
     if not text:
@@ -262,7 +262,7 @@ def freeze(entity_type: str, obj) -> None:
     if obj.payload_hash is None:
         obj.payload_hash = current
     elif obj.payload_hash != current:
-        raise MXBlock("MX_AUTHORITY_PAYLOAD_CHANGED",
+        raise MXRefuse("MX_AUTHORITY_PAYLOAD_CHANGED",
                       f"this {spec(entity_type)['label']} was already transmitted with different figures — "
                       "a retry must resend the same payload", getattr(obj, "organization_id", None))
 

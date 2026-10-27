@@ -41,6 +41,15 @@ SPECIAL_KIND_CONCEPTS = ("AGUINALDO", "VACATION_PREMIUM", "VACATION_PAYOUT", "PT
 # until it is recorded here, a receipt that needs it is refused.
 SDI_SOURCE: Optional[str] = None
 _TZ = "Referencias del Huso Horario"
+# Completion W6-2 (gap register C11, DECISIONS_PENDING D-21): how to read a
+# c_CodigoPostal row whose summer offset is not one hour ahead of its winter
+# offset (830 Chihuahua rows, "Tiempo del Centro en Frontera", -6 / -7). A G1
+# owner decision; None = such a place of issue is refused.
+#   "SAME_LABEL"  the offsets every consistent row with the same time-zone
+#                 description gives (COA / NLE / TAM: -6 / -5)
+#   "SWAPPED"     the row's two offsets exchanged (-7 winter / -6 summer)
+TIMEZONE_INCONSISTENT_ROW_READING: Optional[str] = None
+TIMEZONE_READINGS = ("SAME_LABEL", "SWAPPED")
 
 
 def _d(value) -> Decimal:
@@ -90,12 +99,46 @@ def _change_over(attrs: dict, season: str, year: int, offset: int) -> datetime:
     return local - timedelta(hours=offset)
 
 
+def _inconsistent_offsets(set_id: str, attrs: dict, winter: int, summer: int) -> tuple:
+    """(winter, summer) for a row whose summer offset is not one hour ahead of
+    its winter offset, per TIMEZONE_INCONSISTENT_ROW_READING (D-21); refused
+    while it is undecided, or when the reading finds no single answer."""
+    from collections import Counter
+
+    from app.modules.payroll import mexico_cfdi_schema
+
+    reading = TIMEZONE_INCONSISTENT_ROW_READING
+    refused = (f"the place of issue's c_CodigoPostal row gives a summer offset ({summer}) that is not one hour ahead "
+               f"of its winter offset ({winter}) — inconsistent in the SAT catalog (S30)")
+    if reading is None:
+        raise MXBlock("MX_CFDI_TIMEZONE_RULE_INVALID", f"{refused}; how to read it is undecided (D-21, G1)")
+    if reading not in TIMEZONE_READINGS:
+        raise MXBlock("MX_RULE_UNRECOGNISED", f"TIMEZONE_INCONSISTENT_ROW_READING {reading!r} is not one of "
+                                              f"{TIMEZONE_READINGS}")
+    if reading == "SWAPPED":
+        if winter != summer + 1:
+            raise MXBlock("MX_CFDI_TIMEZONE_RULE_INVALID", f"{refused}, and exchanging them does not make it consistent")
+        return summer, winter
+    label = attrs.get(f"{_TZ}/Descripción del Huso Horario")
+    seen = Counter()
+    for _code, _label, _from, _to, a in mexico_cfdi_schema.catalogs(set_id)["c_CodigoPostal"]["entries"]:
+        w, s = _tz(a, "Diferencia_Horaria_Invierno"), _tz(a, "Diferencia_Horaria_Verano")
+        if a.get(f"{_TZ}/Descripción del Huso Horario") == label and w is not None and s is not None \
+                and int(s) == int(w) + 1:
+            seen[(int(w), int(s))] += 1
+    if len(seen) != 1:
+        raise MXBlock("MX_CFDI_TIMEZONE_RULE_INVALID",
+                      f"{refused}, and the consistent rows labelled {label!r} give {len(seen)} different offset pairs")
+    return next(iter(seen))
+
+
 def local_issue_time(set_id: str, postal_code: str, issued_utc: datetime) -> datetime:
     """S4 p. 6: Fecha is the local time where the receipt is issued, from the
     place of issue's c_CodigoPostal row (S30): its winter and summer offsets
     and, where it observes summer time, the month / day / hour each season
     starts. A row whose summer offset is not one hour ahead of its winter
-    offset is refused as inconsistent (MX_CFDI_TIMEZONE_RULE_INVALID)."""
+    offset is read per D-21 (W6-2), and refused (MX_CFDI_TIMEZONE_RULE_INVALID)
+    while that is undecided."""
     from app.modules.payroll import mexico_cfdi_xml as X
 
     utc = issued_utc if issued_utc.tzinfo else issued_utc.replace(tzinfo=timezone.utc)
@@ -111,9 +154,7 @@ def local_issue_time(set_id: str, postal_code: str, issued_utc: datetime) -> dat
     if winter == summer and not _tz(attrs, "Mes_Inicio_Horario_Verano"):
         return utc + timedelta(hours=winter)
     if summer != winter + 1:
-        raise MXBlock("MX_CFDI_TIMEZONE_RULE_INVALID",
-                      f"the place of issue's c_CodigoPostal row gives a summer offset ({summer}) that is not one hour "
-                      f"ahead of its winter offset ({winter}) — inconsistent in the SAT catalog (S30); reported for G1")
+        winter, summer = _inconsistent_offsets(set_id, attrs, winter, summer)
     starts = _change_over(attrs, "Verano", utc.year, winter)
     ends = _change_over(attrs, "Invierno", utc.year, summer)
     in_summer = starts <= utc < ends if starts < ends else not (ends <= utc < starts)
@@ -136,9 +177,12 @@ def sat_state(set_id: str, internal_code: str, on) -> Optional[str]:
 
 
 def _overtime_detail(set_id: str, result: dict, on) -> dict:
-    """HorasExtra (S4 pp. 51–53) from the approved weeks: the days are the
-    distinct dates recorded on the approved hours. A week with triple-rate hours
-    is refused — dates alone do not tell which days those hours fell on."""
+    """HorasExtra (S4 pp. 51–53), one node per hour type, from the approved
+    weeks. The days of a type are the dates on which hours of that type were
+    worked (S4 p. 51: "el número de días en que el trabajador laboró horas
+    extra"). A week of double-rate hours only may record its dates alone
+    (Phase 11c); a week with triple-rate hours needs the employer's split per
+    date (W6-1, A11), which must add up to the engine's weekly tiers."""
     from decimal import ROUND_HALF_UP
 
     from app.modules.payroll import mexico_cfdi_xml as X
@@ -148,19 +192,45 @@ def _overtime_detail(set_id: str, result: dict, on) -> dict:
         return {"overtimeRefusal": "the result has no approved overtime weeks"}
     if any(not w.get("dates") for w in weeks):
         return {"overtimeRefusal": "the dates on which the overtime was worked are not recorded on every approved week"}
-    if any(_d(w.get("second_tier_hours")) > 0 for w in weeks):
-        return {"overtimeRefusal": "a week has triple-rate hours, and the recorded dates do not tell which days they "
-                                   "fell on (S4 p. 51 counts days per hour type)"}
-    found = [code for code, rows in X._Catalogs(set_id).index.get("c_TipoHoras", {}).items()
-             if any(r[2] == X.OVERTIME_TYPE_DOUBLE for r in rows)]
-    if len(found) != 1:
-        return {"overtimeRefusal": "c_TipoHoras has no single code for double-rate hours (S28)"}
-    days = {d for w in weeks for d in w["dates"]}
-    hours = sum((_d(w.get("first_tier_hours")) for w in weeks), _ZERO)
-    amount = sum((_d(w.get("first_tier_amount", w.get("amount"))) for w in weeks), _ZERO)
-    return {"overtime": [{"days": len(days), "type": found[0],
-                          "hours": int(hours.quantize(Decimal("1"), ROUND_HALF_UP)),     # S4 p. 52: rounded
-                          "amount": amount.quantize(Decimal("0.01"), ROUND_HALF_UP)}]}
+    double_days, triple_days = set(), set()
+    for w in weeks:
+        entries = w["dates"]
+        split = all(isinstance(e, dict) for e in entries)
+        if not split and _d(w.get("second_tier_hours")) > 0:
+            return {"overtimeRefusal": "a week has triple-rate hours, and only its dates are recorded — record the "
+                                       "double and triple hours per date (S4 p. 51 counts days per hour type)"}
+        if not split:
+            double_days |= set(entries)
+            continue
+        double = sum((_d(e.get("double")) for e in entries), _ZERO)
+        triple = sum((_d(e.get("triple")) for e in entries), _ZERO)
+        if double != _d(w.get("first_tier_hours")) or triple != _d(w.get("second_tier_hours")):
+            return {"overtimeRefusal": f"week {w.get('week')}: the hours recorded per date (double {double}, triple "
+                                       f"{triple}) do not match the calculation's weekly tiers (double "
+                                       f"{_d(w.get('first_tier_hours'))}, triple {_d(w.get('second_tier_hours'))})"}
+        double_days |= {e["date"] for e in entries if _d(e.get("double")) > 0}
+        triple_days |= {e["date"] for e in entries if _d(e.get("triple")) > 0}
+    index = X._Catalogs(set_id).index.get("c_TipoHoras", {})
+
+    def code(description):
+        found = [c for c, rows in index.items() if any(r[2] == description for r in rows)]
+        return found[0] if len(found) == 1 else None
+
+    nodes = []
+    for days, description, hours, amount in (
+            (double_days, X.OVERTIME_TYPE_DOUBLE, sum((_d(w.get("first_tier_hours")) for w in weeks), _ZERO),
+             sum((_d(w.get("first_tier_amount", w.get("amount"))) for w in weeks), _ZERO)),
+            (triple_days, X.OVERTIME_TYPE_TRIPLE, sum((_d(w.get("second_tier_hours")) for w in weeks), _ZERO),
+             sum((_d(w.get("amount")) - _d(w.get("first_tier_amount", w.get("amount"))) for w in weeks), _ZERO))):
+        if hours <= 0:
+            continue
+        type_code = code(description)
+        if type_code is None:
+            return {"overtimeRefusal": f"c_TipoHoras has no single code for {description} hours (S28)"}
+        nodes.append({"days": len(days), "type": type_code,
+                      "hours": int(hours.quantize(Decimal("1"), ROUND_HALF_UP)),        # S4 p. 52: rounded
+                      "amount": amount.quantize(Decimal("0.01"), ROUND_HALF_UP)})
+    return {"overtime": nodes}
 
 
 def _concept_lines(db: Session, release_id: int, set_id: str, result: dict, on):

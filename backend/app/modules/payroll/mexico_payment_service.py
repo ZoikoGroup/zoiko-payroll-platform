@@ -34,7 +34,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 _ZERO = Decimal("0")
 WORKLIST_BANNER = ("ZOIKO PAYMENT WORKLIST - NOT A BANK FILE - key these payments into your online banking (SPEI) "
@@ -141,7 +141,7 @@ def create_batch(db: Session, org_id: int, run_id: int, actor_id: Optional[int])
             continue
         lines.append((item, emp, clabe, amount))
     if missing:
-        raise MXBlock("MX_CLABE_MISSING",
+        raise MXRefuse("MX_CLABE_MISSING",
                       f"employee(s) {missing} have no 18-digit CLABE — record it before paying the run", org_id)
     if not lines:
         raise BadRequestException("the run has no payslip with net pay to pay")
@@ -166,7 +166,7 @@ def release_batch(db: Session, org_id: int, batch_id: int, actor_id: Optional[in
     if batch.status != "DRAFT":
         raise BadRequestException(f"Only a DRAFT batch can be released (this one is {batch.status})")
     if actor_id is not None and actor_id == batch.maker_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "a payment batch must be released by someone other than its maker",
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "a payment batch must be released by someone other than its maker",
                       org_id)
     batch.status, batch.checker_id, batch.released_at = "RELEASED", actor_id, datetime.now(timezone.utc)
     _payment_audit(db, actor_id=actor_id, action="release_payment_batch", entity_type="mx_payment_batch",
@@ -226,7 +226,7 @@ def export_worklist(db: Session, org_id: int, batch_id: int, actor_id: Optional[
         w.writerow([it.id, f"ZP-{batch.id}-{it.id}", emp.employee_code, emp.name, clabe, str(it.amount), "MXN",
                     run.pay_date.isoformat() if run and run.pay_date else "", it.status])
     if changed:
-        raise MXBlock("MX_CLABE_CHANGED",
+        raise MXRefuse("MX_CLABE_CHANGED",
                       f"the CLABE of employee(s) {changed} changed or was removed after the batch was built — cancel "
                       f"and rebuild, or re-issue", org_id)
     content = buf.getvalue()
@@ -287,7 +287,7 @@ def reissue(db: Session, org_id: int, batch_id: int, actor_id: Optional[int]) ->
             missing.append(it.employee_id)
         lines.append((it, clabe))
     if missing:
-        raise MXBlock("MX_CLABE_MISSING", f"employee(s) {missing} have no 18-digit CLABE", org_id)
+        raise MXRefuse("MX_CLABE_MISSING", f"employee(s) {missing} have no 18-digit CLABE", org_id)
     B = m.PayrollMxPaymentBatch
     new = B(organization_id=org_id, payroll_run_id=batch.payroll_run_id, reissue_of_batch_id=batch.id,
             file_mode="WORKLIST", status="DRAFT", item_count=len(lines),

@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import mexico_dormancy
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 MAX_PILOT_DAYS = 120
 PILOT_GATES = ("G1", "G2", "G4", "G5", "G7")                 # D2 (G3, G6, G8 are produced during the pilot)
@@ -143,7 +143,7 @@ def propose_grant(db: Session, org_id: int, data: dict, actor_id: Optional[int])
     G = _pilot_models().PayrollMxPilotGrant
     org = _pilot_org(db, org_id)
     if (org.workspace_type or "").upper() != "EVALUATION":
-        raise MXBlock("MX_PILOT_EVALUATION_ONLY", "a pilot is only for an EVALUATION workspace", org_id)
+        raise MXRefuse("MX_PILOT_EVALUATION_ONLY", "a pilot is only for an EVALUATION workspace", org_id)
     reason = ((data or {}).get("reason") or "").strip()
     if not reason:
         raise BadRequestException("A pilot grant needs a reason")
@@ -173,14 +173,14 @@ def approve_grant(db: Session, grant_id: int, actor_id: Optional[int]) -> dict:
     if row.status != "PROPOSED":
         raise BadRequestException(f"Only a PROPOSED grant can be approved (this one is {row.status})")
     if actor_id is not None and actor_id == row.proposed_by_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "a pilot grant must be approved by a Super Admin other than its proposer",
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "a pilot grant must be approved by a Super Admin other than its proposer",
                       row.organization_id)
     unmet = [c for c in pilot_preconditions(db) if not c["met"]]
     if unmet:
-        raise MXBlock("MX_PILOT_PRECONDITIONS", "a pilot grant needs: " + "; ".join(f"{c['label']} ({c['detail']})"
+        raise MXRefuse("MX_PILOT_PRECONDITIONS", "a pilot grant needs: " + "; ".join(f"{c['label']} ({c['detail']})"
                                                                                     for c in unmet), row.organization_id)
     if (_pilot_org(db, row.organization_id).workspace_type or "").upper() != "EVALUATION":
-        raise MXBlock("MX_PILOT_EVALUATION_ONLY", "a pilot is only for an EVALUATION workspace", row.organization_id)
+        raise MXRefuse("MX_PILOT_EVALUATION_ONLY", "a pilot is only for an EVALUATION workspace", row.organization_id)
     if mexico_dormancy._aware(row.expires_at) <= _pilot_now():
         raise BadRequestException("The proposed grant has already expired — propose a new one")
     row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, _pilot_now()
@@ -248,19 +248,19 @@ def pilot_status(db: Session, org_id: int) -> dict:
 
 def refuse_payments(db: Session, org_id: int) -> None:
     if mexico_dormancy.is_pilot_organization(db, org_id):
-        raise MXBlock("MX_PILOT_NO_PAYMENTS", "a pilot organisation never pays salaries through Zoiko — the pilot runs "
+        raise MXRefuse("MX_PILOT_NO_PAYMENTS", "a pilot organisation never pays salaries through Zoiko — the pilot runs "
                                               "alongside the current payroll provider", org_id)
 
 
 def refuse_filings(db: Session, org_id: int) -> None:
     if mexico_dormancy.is_pilot_organization(db, org_id):
-        raise MXBlock("MX_PILOT_NO_FILINGS", "a pilot organisation never files with or pays an authority — "
+        raise MXRefuse("MX_PILOT_NO_FILINGS", "a pilot organisation never files with or pays an authority — "
                                              "reconciliation (e.g. SUA figures) stays available", org_id)
 
 
 def refuse_non_sandbox_pac(db: Session, org_id: int, environment: Optional[str]) -> None:
     if mexico_dormancy.is_pilot_organization(db, org_id) and (environment or "").upper() != "SANDBOX":
-        raise MXBlock("MX_PILOT_SANDBOX_ONLY", f"a pilot organisation stamps only through a SANDBOX PAC "
+        raise MXRefuse("MX_PILOT_SANDBOX_ONLY", f"a pilot organisation stamps only through a SANDBOX PAC "
                                                f"(the employer is set to {environment or 'none'})", org_id)
 
 
@@ -305,7 +305,7 @@ def approve_onboarding_change(db: Session, pause_id: int, actor_id: Optional[int
     if row.status != "PROPOSED":
         raise BadRequestException(f"Only a PROPOSED change can be approved (this one is {row.status})")
     if actor_id is not None and actor_id == row.proposed_by_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "pausing or resuming new Mexican organisations needs a Super Admin "
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "pausing or resuming new Mexican organisations needs a Super Admin "
                                                "other than its proposer")
     if (row.action == "PAUSE") == mexico_dormancy.onboarding_paused(db):
         raise BadRequestException("the switch is already in that state — withdraw this change")
@@ -443,7 +443,7 @@ def _mx_execute_copy(db: Session, snap: dict, target_id: int, actor_id: Optional
                 old = vals[col]
                 values[col] = ids[ref].get(old) if old is not None else None
                 if old is not None and values[col] is None:
-                    raise MXBlock("MX_COPY_REFERENCE", f"{category} row {src_id}: {col} {old} was not copied", target_id)
+                    raise MXRefuse("MX_COPY_REFERENCE", f"{category} row {src_id}: {col} {old} was not copied", target_id)
             values["organization_id"] = target_id
             if "created_by_id" in model.__table__.columns:
                 values["created_by_id"] = actor_id
@@ -514,14 +514,14 @@ def propose_copy(db: Session, source_id: int, target_id: int, reason: str, actor
         raise BadRequestException("A master-data copy needs a reason")
     refusal = _copy_target_refusal(db, source_id, target_id)
     if refusal:
-        raise MXBlock("MX_COPY_REFUSED", refusal, target_id)
+        raise MXRefuse("MX_COPY_REFUSED", refusal, target_id)
     cats = _copy_categories(db, source_id)
     for p in cats["laborPolicies"]:
         if p.collective_agreement_id is not None:
-            raise MXBlock("MX_COPY_COLLECTIVE_AGREEMENT", f"labour policy {p.id} references a collective agreement — "
+            raise MXRefuse("MX_COPY_COLLECTIVE_AGREEMENT", f"labour policy {p.id} references a collective agreement — "
                                                           f"record the agreement in the live organisation first", target_id)
     if not cats["employerProfiles"]:
-        raise MXBlock("MX_COPY_REFUSED", "the pilot organisation has no open employer profile to copy", target_id)
+        raise MXRefuse("MX_COPY_REFUSED", "the pilot organisation has no open employer profile to copy", target_id)
     plan = {"counts": {k: len(v) for k, v in cats.items()}, "notCopied": _mx_not_copied(db, source_id)}
     if db.query(C).filter(C.organization_id == target_id, C.status == "PROPOSED").first() is not None:
         raise BadRequestException("a copy into this organisation is already proposed")
@@ -549,14 +549,14 @@ def approve_copy(db: Session, copy_id: int, actor_id: Optional[int]) -> dict:
     if row.status != "PROPOSED":
         raise BadRequestException(f"Only a PROPOSED copy can be approved (this one is {row.status})")
     if actor_id is not None and actor_id == row.proposed_by_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "a master-data copy must be approved by a Super Admin other than its "
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "a master-data copy must be approved by a Super Admin other than its "
                                                "proposer", row.organization_id)
     refusal = _copy_target_refusal(db, row.source_organization_id, row.organization_id)
     if refusal:
-        raise MXBlock("MX_COPY_REFUSED", refusal, row.organization_id)
+        raise MXRefuse("MX_COPY_REFUSED", refusal, row.organization_id)
     snap = _mx_copy_snapshot(_copy_categories(db, row.source_organization_id))
     if _mx_copy_fingerprint(snap) != row.plan_sha256:
-        raise MXBlock("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after the copy was proposed — cancel "
+        raise MXRefuse("MX_COPY_SOURCE_CHANGED", "the pilot's master data changed after the copy was proposed — cancel "
                                                 "and propose again", row.organization_id)
     try:
         report = _mx_execute_copy(db, snap, row.organization_id, actor_id,

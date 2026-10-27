@@ -655,3 +655,265 @@ The other W5 findings (direct generic edits, readiness per gate, the policy page
 | API | Two new read-only Super Admin routes (platform data) |
 | Report templates | Re-seeding a **Draft** Mexico template rewrites its description; nothing else changes |
 | Other jurisdictions | None. A shared `service.py` comment changed; no behaviour changed |
+
+---
+
+## W5-2 — Nothing statutory is editable outside the governed paths
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** This is an authorisation change: Super Admin write paths are refused for Mexico packs.
+
+**Gaps found**
+1. **Generic row editor.** Four Super Admin routes edit or delete pack rows directly, with no source and no reason:
+   - `PUT` and `DELETE` on `/compliance/tax-configuration/slabs`;
+   - `PUT` and `DELETE` on `/compliance/tax-configuration/contribution-rates`.
+
+   Only Hong Kong refused them. A Mexico pack's rows could be changed through them until activation. The UI hid the tabs, but the API accepted the calls.
+2. **Hotfix activation.** Hotfix self-approves the pack. Mexico refuses self-approval (`_SELF_APPROVAL_REFUSED_COUNTRIES`), and its approval needs QA plus content, evidence and VERIFIED sources (`mx_pack_approval_refusal`), so hotfix would skip both. Mexico's activation checks still ran on that path, but the four-eyes approval did not. Hong Kong and Sweden already refuse hotfix for this reason.
+
+**What changed**
+- **`service._refuse_mx_generic_statutory_edit`:** called beside the Hong Kong refusal at all four generic write paths (rate and slab, upsert and delete). It refuses every Mexico pack in every status and says how Mexico content does change: a code release that passes `verify_mexico_sources.py compare`, then a new pack version.
+- **`activate_jurisdiction_pack_hotfix` refuses Mexico** before any gate, and the refusal is audited (`_audit_refusal`, path `hotfix`).
+- **Frontend:** `JurisdictionLayout` gains the opt-in prop `hideHotfixActivate` (default false). Mexico sets it, so its pack header no longer offers a button that can only be refused. Every other country's header is unchanged.
+
+**The governed change paths that remain** (from the W5 audit; each is four-eyes and audited): pack lifecycle (Draft → In Review → QA → Approved by a second Super Admin → Active, with the Mexico gates), earning classifications, CFDI releases, system concepts, onboarding pause and pilot grants. State ISN packs follow the pack lifecycle. The pack **Edit** button changes only a Draft pack's header (dates, tax year); it is part of the lifecycle and does not change rows.
+
+**Tests**
+- New `test_mexico_generic_edit_refused.py` (6):
+  - every generic write (update a rate, add a rate, update a slab, delete a rate, delete a slab) is refused in Draft, In Review, QA and Approved, and the rows stay unchanged;
+  - the same holds over HTTP (PUT and DELETE return 400);
+  - an Indian Draft pack is still edited and deleted through the generic editor.
+- Changed: `test_mexico_activation_gates.py`, where "the hotfix path runs the same gates" became "there is no Mexico hotfix path". A Draft or Approved pack is refused, with no approval or status recorded.
+- Mexico + privacy + every test touching hotfix or the generic canonical-row editor (all countries): **1,877 passed, 76 skipped.** The only failures are the 4 known local-only ones (3 route-registry tests from the `/health` routes; the Hong Kong docs test).
+- Frontend: `JurisdictionLayout.jsx` has 13 lint problems both before and after the change (none new); `check:undefined` is clean; `vite build` passes.
+
+**Browser (same harness): 33/33 PASS.** New checks:
+- w5-10: no Hotfix button on the Mexico pack header (screenshot inspected);
+- w5-11: a generic edit of a Mexico pack returns 400;
+- w5-12: a Mexico hotfix returns 400;
+- w5-13: an NL Draft pack still offers Hotfix Activate.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Super Admin API | Four generic row routes refuse Mexico packs; Mexico hotfix activation is refused (no Mexico pack is Active, so no emergency path is lost) |
+| UI | The Mexico pack header loses Hotfix Activate |
+| Other jurisdictions | None. The shared functions add a Mexico-only branch, and the layout prop is opt-in. Proven by the Indian-pack and NL-header checks and by the hotfix and canonical-row tests |
+
+---
+
+## W5-3 — Readiness per gate: what code confirms, what awaits evidence
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** One new read-only Super Admin route was added to the route registry. It returns platform data only.
+
+**Before.** Each gate showed only OPEN, SUBMITTED or SIGNED (from its evidence artifact). No screen said which checklist items the code already confirms and which only signed evidence can meet.
+
+**What changed**
+- **The checklist files stay the one list.** In `docs/mexico/release-gates/G*/CHECKLIST.md`, each item a code check can confirm ends with an HTML comment `<!-- code: key -->`, which is invisible when rendered. 14 items across G1–G5 are tagged:
+  - G1: 7 items;
+  - G2, G3: 1 each;
+  - G4: 3;
+  - G5: 2;
+  - G6–G8: none (all need human or external evidence).
+- **`mexico_service.gate_checklists`** parses the files at request time. Each item is one of:
+  - **code**, evaluated now by `_gate_code_checks` (`GATE_CODE_CHECK_KEYS`), with a reason;
+  - **evidence**, met only when the gate is SIGNED.
+
+  The code checks:
+
+  | Key | Met when |
+  |---|---|
+  | `national_pack_approved` | The national pack is Approved or Active, with exact content and every row source-linked |
+  | `sources_verified`, `golden_pass` | The national pack's activation checks pass |
+  | `cfdi_release_active` | A CFDI release is Active |
+  | `pay_frequency_01` | 01 Diario is mapped |
+  | `rounding_rule` | `mx_rounding_rule` is transcribed |
+  | `cfdi_sdi_source` | `SDI_SOURCE` is decided |
+  | `isn_pack_approved` | A state ISN pack is Approved or Active |
+  | `unsupported_states_blocked` | Payroll is BLOCKED in every state without an Active pack |
+  | `isn_d06` | CDMX has an inclusion rule for vacation paid out, the separation payment and the indemnity |
+
+  If the files are missing on a server, the gate says "checklist not available". Nothing here signs a gate.
+- **Route:** `GET /super-admin/compliance/mexico/readiness/gate-checklists`. It is separate from `/readiness` because the golden check is not cheap.
+- **Frontend:** the Readiness tab gains "Gate checklists — code vs evidence". Each gate shows its state, the code items met against the total, and the number of evidence items, and expands to every item with its reason.
+
+**Today (scratch database with the real Draft packs):**
+- **G1:** code 0/7. The pack is Draft and lacks `mx_rounding_rule`; there is no golden vector; no CFDI release is Active; the sources are archive copies, not VERIFIED; 01 Diario, rounding (D-01) and the SDI source are undecided. Its 4 evidence items await the signed evidence.
+- **G4:** code 1/3. Payroll is BLOCKED in all 32 states (met); no state pack is Approved; D-06 is undecided.
+
+**Tests**
+- New `test_mexico_gate_checklists.py` (5):
+  - every code tag is a known check and every check is used;
+  - every gate is split into code and evidence items, with the markdown markup stripped;
+  - the code items match today's state;
+  - a SIGNED gate meets its evidence items, and only that gate's;
+  - the route is Super Admin only.
+- Router, dormancy, release-gate and privacy tests: 433 passed, with only the 3 known `/health` route-registry failures. The registry diff is exactly the new route.
+- Frontend: ESLint is clean; `check:undefined` reports 580 files with no undefined names; the build passes.
+
+**Browser: 36/36 PASS.** New checks:
+- w5-14: every gate has its checklist;
+- w5-15: G1 shows 7 code items with live reasons and 4 evidence items "awaiting the gate's signed evidence";
+- w5-16: G4 shows the met state-block item and D-06 undecided.
+
+Screenshots `w5_07` and `w5_08` were inspected.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | One new read-only Super Admin route |
+| Docs | Checklist items carry invisible code tags; no wording changed |
+| Other jurisdictions | None |
+
+---
+
+## W5-4 — The Mexico policy page, SEPARACION refused at approval, refusal wording (A7, A13, OOS-11)
+
+**ZP-PRIV:** not required. No change to authz, redaction, RLS, migrations or identifiers. Refusals keep their type and status code.
+
+**What changed**
+- **A7 / OOS-6, the policy page.** No Mexican calculation reads a Super Admin policy pack: the engine reads the organisation's own payroll policy read-only, and statutory content lives in the tax packs. So Mexico needs no authoring page. Until now, "+ New Policy" for Mexico opened India's form.
+  - `PolicyConfigPage` now sends `country=MX` to a new `MXNoPolicyPage`. It explains where Mexican statutory content lives (Statutory rules) and that each employer's labour policy is recorded by the organisation and floor-checked against the national pack.
+  - Every other unmapped country (NL, SA, SG, CH, IT) keeps the India fallback. That remains OOS-6 for their owners.
+- **A13, SEPARACION refused at approval** (`mexico_service.approve_classification`). Separation pay is computed only from the LFT termination reason in a finiquito run, never from an earning classification.
+  - The refusal is audited, and the row stays DRAFT. A draft can still be created over the API: the decision was "refuse at approval".
+  - The classification form no longer offers SEPARACION.
+  - The engine's defensive block, for any row approved before this change (none exist in production), now reads `MX_SEPARATION_NOT_A_CLASSIFICATION` with an accurate reason, in place of the stale "Phase 9 (Q8)".
+- **OOS-11, refusal wording.** New `MexicoActionRefusedError` / `MXRefuse` in `engine/jurisdictions/mexico/errors.py`, worded `Mexico action refused (<code>): <reason>`. It is a subclass of `MXBlock`, so the exception handler, the 400 status, `key`, `reason` and `reasons` are all unchanged.
+  - **Moved to it** (67 raises): the transfer (17), pilot (15), filing (9), journal (8), CFDI lifecycle (8), payment (4), authority lifecycle (4), PAC (1) and IMSS movement (1) services.
+  - **Kept as calculation blocks:** the engine, the run service and preflight, the CFDI input / XML / builder / preview, PTU, termination, benefits, correction and annual adjustment.
+  - Neither the frontend nor any test matched the old wording.
+
+**Tests**
+- New `test_mexico_w54_refusals.py` (12):
+  - SEPARACION is refused at approval over HTTP, stays DRAFT, and the refusal is audited;
+  - an action refusal keeps its type, fields and handling, with the new wording;
+  - one AST check per non-calculation service: none raises `MXBlock` any more;
+  - a four-eyes refusal over HTTP reads "Mexico action refused (MX_FOUR_EYES_REQUIRED)".
+- The end-of-W5 full suite below covers W5-4 (it ran on the W5-4 working tree).
+- Frontend: ESLint is clean on the changed files; `check:undefined` reports 581 files with no undefined names; the build passes.
+
+**Browser: 39/39 PASS.** New checks:
+- w5-17: "+ New Policy" for Mexico shows the no-policy page, not India's form (screenshot inspected);
+- w5-18: NL keeps today's fallback;
+- w5-19: the classification form no longer offers SEPARACION.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | A SEPARACION classification can no longer be approved. Mexico's non-calculation refusals change wording only (same code, same 400) |
+| UI | Mexico's "+ New Policy" shows the no-policy page; SEPARACION is not offered |
+| Other jurisdictions | None. The policy dispatcher adds a Mexico-only branch; the other unmapped countries are unchanged (browser w5-18) |
+
+**Gap register:** A7 done for Mexico; A13 done; OOS-11 done.
+
+---
+
+## End of W5 — full backend suite
+
+Run 2026-10-27 10:30–10:56 on `89a444a` plus the W5-4 working tree, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 976 passed, 16 skipped, **4 failed**: the 3 known local-only route-registry tests (the `/health` routes in your uncommitted `main.py`), and `test_communications_dispatch.py::test_deactivate_organization_response_precedes_email_send`, the **intermittent** test recorded in Batch 2 |
+| 1 | 2,518 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,260 passed, 32 skipped |
+| 3 | 1,153 passed, 67 skipped |
+| 4 | 1,654 passed, 3 skipped |
+
+**Total: 7,561 passed, 120 skipped, 2 xfailed.** That is 31 more passing tests than at the end of W4.
+
+**The intermittent test.** Run alone seven times afterwards, it passed 4 and failed 3. Each failure is the same race: the email side effect is recorded before the HTTP response (`['email_sent', 'response_sent']`). It is flaky on its own, not order-dependent, and no Mexico change touches communications. Recorded for its owner; not changed here.
+
+No other jurisdiction's behaviour changed. The shared changes in W5 are Mexico-only branches or opt-in props, each pinned by a test or a browser check against another country.
+
+---
+
+## W6 — CFDI completeness (gap register A10, A11, C11)
+
+**ZP-PRIV:** not required. There is no new route; the approved-hours route gains an optional field. No migration: the per-date split goes into the existing JSON column `overtime_dates`. No identifier is involved.
+
+**W6-1, triple-rate overtime (A11): built.**
+- **Recording.** Approved hours accept `overtimeHoursByDate`: per date, the hours paid at the double and at the triple rate. This is the employer's own record. LFT Art. 68 prices the hours beyond the weekly maximum at triple but does not say which days they fell on, and S4 p. 51 counts the days per hour type.
+- **Validation:**
+  - dates inside the week, none repeated;
+  - hours zero or more, not both zero on a date;
+  - the split adds up to the week's overtime hours;
+  - it cannot be given together with 11c's dates-only `overtimeDates`.
+
+  It stays four-eyes (recorded, then approved by a second person).
+- **CFDI.** `_overtime_detail` builds one HorasExtra node per type, with codes read from `c_TipoHoras` by their descriptions ("Dobles", "Triples"; S28, S4 p. 52):
+  - days = the dates with hours of that type;
+  - hours rounded (S4 p. 52);
+  - amount: the double node takes the double-tier amount, the triple node the rest.
+
+  The split must equal the calculation's weekly tiers, or the receipt is refused with the mismatch. A week of double-rate hours only may still record just its dates.
+- **Still blocked upstream:** overtime is not calculated until the hourly-rate rule is decided (D-17), so no real receipt carries 019 yet.
+
+**W6-2, C11 time zones: options reported, not decided.** The 830 Chihuahua border rows give winter −6 / summer −7. **D-21** sets out the data and four options. Readings (a) and (b) are built behind `TIMEZONE_INCONSISTENT_ROW_READING`, which is undecided, so those postal codes stay refused, now naming D-21.
+
+**A10, the other nodes: still refused, each with its named reason (R-DETAIL-NODE).**
+
+| Node | Why it stays refused |
+|---|---|
+| `SubsidioAlEmpleo` (other payment 002) | C6 is BLOCKED-ON-SOURCE (W1-6): no saved SAT instruction for reporting the 2024-decree subsidy |
+| `CompensacionSaldosAFavor` (other payment 004) | C5: the refund code (004 / 005) is undecided |
+| `Incapacidades` (perception 014, deduction 006) | Its input does not exist. The node needs each incapacity's type (`c_TipoIncapacidad`: riesgo de trabajo, enfermedad general, maternidad…) and days (S4 p. 81: required with 014 or 006), and the platform records only "sick leave" on attendance. **Needs** an IMSS incapacity record (type, days, certificate) on the Mexico side: a new governed input with its own migration. Engineering item, not started |
+| `SeparacionIndemnizacion`, `AccionesOTitulos`, `JubilacionPensionRetiro` | As in the register (B11 / C10; out of scope) |
+
+**Tests**
+- New `test_mexico_overtime_split.py` (4):
+  - recording validation, each rule;
+  - the engine carries the split through its weekly tiers;
+  - a Dobles node and a Triples node with their own days, plus the mismatch and dates-only refusals;
+  - the receipt with both nodes is valid against the pinned XSD.
+- New `test_mexico_timezone_reading.py` (5):
+  - undecided, the receipt is refused naming D-21;
+  - both readings give consistent local times in July and January;
+  - an unknown reading is refused;
+  - consistent rows are unaffected.
+- The 11c overtime and builder time-zone tests are unchanged and pass. All `tests/test_mexico_*.py`: **1,058 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None (the existing JSON column) |
+| API | The approved-hours route accepts an optional `overtimeHoursByDate` |
+| CFDI | A receipt with triple-rate overtime can be built once the split is recorded (none can be stamped: no PAC). Chihuahua border postal codes are refused naming D-21 |
+| Other jurisdictions | None |
+
+**Gap register:** A11 done (pending D-17 for overtime itself). C11 options reported (D-21). A10: SubsidioAlEmpleo (C6), CompensacionSaldosAFavor (C5) and Incapacidades (missing input) stay refused.
+
+---
+
+## W7 — Golden vectors (B21): BLOCKED-ON-DECISION (D-01)
+
+**Not started, and correctly so.** The master prompt runs W7 "once W1 makes a case computable end to end". No Mexican case is computable:
+- `mx_rounding_rule` (**D-01**) is read before any amount is produced (`rounding.py`), so every calculation blocks.
+- Every vector's expected figures depend on the rounding chosen. The two options in D-01, 2 decimals at the end or whole pesos, give different expected amounts.
+- A vector added to `tests/fixtures/mx_golden/` now would fail by construction (the README says so), and it would turn `run_golden_test_certification("MX")` from `NO_REAL_CASES` into a FAIL.
+
+This is §3 stop condition 2, applied as written: the decision blocks W7 but not W8, so W8 went ahead. Once D-01 is decided, write the vectors listed in the master prompt (ordinary weekly / quincenal / monthly, the UMA boundary, subsidy, CEAV high band, minimum-wage geography, CDMX ISN, aguinaldo, vacation premium, finiquito, PTU, annual adjustment), each from an independent step-by-step calculation with its source citations, marked `ENGINEERING — pending G1 confirmation`. Most special-pay vectors also need D-07, D-08 and D-09.
+
+---
+
+## W8 — Gate evidence drafts
+
+**ZP-PRIV:** not required. Docs only.
+
+- **New `docs/mexico/release-gates/G1…G8/EVIDENCE_DRAFT.md`.** Each draft has four parts:
+  1. what engineering produced (sources manifest and verification log, the transcription log and `compare`, the content, the tests by name, the Super Admin views, the browser evidence, the full-suite result);
+  2. the checklist items a code check confirms (the W5-3 tags, live in Readiness → Gate checklists);
+  3. the items not confirmed by code, which a person prepares or signs or an external party produces;
+  4. the open decisions and gaps the gate waits on.
+- Checklist items are read from each `CHECKLIST.md` by the generator, not retyped.
+- Each draft says it is **not a signature**: a gate is signed only by its uploaded evidence, accepted by a second Super Admin.
+- Item counts (code / not code): G1 7 / 4, G2 1 / 4, G3 1 / 2, G4 3 / 3, G5 2 / 2, G6 0 / 6, G7 0 / 7, G8 0 / 3.
+- Release-gate and gate-checklist tests: 11 passed with the drafts in place.
+- **Production effect:** none (docs).
