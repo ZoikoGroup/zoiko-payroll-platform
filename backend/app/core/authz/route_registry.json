@@ -18602,6 +18602,22 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/csd-expiry",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "csd-expiry",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/decisions",
    "data_class": "platform",
    "action": "read",

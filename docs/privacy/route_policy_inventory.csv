@@ -1001,6 +1001,7 @@ POST,/api/super-admin/compliance/mexico/cfdi-system-concepts,platform,create,cfd
 POST,/api/super-admin/compliance/mexico/cfdi-system-concepts/{concept_id}/approve,platform,approve,approve,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/mexico/cfdi-system-concepts/{concept_id}/withdraw,platform,create,withdraw,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/cfdi/validations,platform,read,validations,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/mexico/csd-expiry,platform,read,csd-expiry,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/decisions,platform,read,decisions,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/decisions/by-block/{block_code},platform,read,by-block,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/decisions/{decision_id},platform,read,decisions,super_admin,platform,,,,no,

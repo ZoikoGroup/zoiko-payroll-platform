@@ -389,6 +389,16 @@ def sa_employer_readiness_summary(on: date = Query(...), current_user=Depends(ge
     return _emp().readiness_summary(db, on)
 
 
+@router.get("/csd-expiry", summary="ACTIVE CSD references expired or expiring on a date, every organisation "
+                                  "(public certificate metadata only, X5)")
+def sa_csd_expiry(on: date = Query(...), current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.config import settings
+    from app.modules.payroll import mexico_csd_custody
+
+    return {"on": on.isoformat(), "warningDays": settings.MX_CREDENTIAL_EXPIRY_WARNING_DAYS,
+            "alerts": mexico_csd_custody.csd_expiry_alerts(db, on)}
+
+
 @router.get("/employees/{employee_id}", summary="One Mexican employee's record and readiness (read-only, masked)")
 def sa_employee_record(employee_id: int, organization_id: int = Query(...), on: date = Query(...),
                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):

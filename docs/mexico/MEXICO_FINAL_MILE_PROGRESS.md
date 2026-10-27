@@ -379,3 +379,51 @@ With the flag off, all six routes are refused and the panel shows the dormancy m
 | API | Six org routes, all refused while Mexico is dormant (production) |
 | Templates | One more Draft template when the template seed is run by hand |
 | Other jurisdictions | None. `MX_DEDICATED_GENERATOR_REPORT_TYPES` grew by one; dormancy and registry tests cover the rest |
+
+---
+
+## X5 — Ready-to-plug kits for the external inputs (C1, C3, C15, C7, C8)
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** **Do not merge until reviewed — branch protection does not enforce this (C17).** What needs his eye:
+1. A new Super Admin route, `GET /super-admin/compliance/mexico/csd-expiry`. It is classified `platform` / `super_admin` and reads tenant CSD credential metadata **across every organisation**: the organisation's name, employer profile id, certificate serial, validity and the **first 12 hex characters** of the fingerprint. It never returns the secret reference or the RFC.
+2. The CSD custody interface: the key never leaves custody, and nothing in the interface can return it.
+
+No migration, no new tenant table, and nothing installed in production.
+
+### What was built (no vendor code, no credentials, no production wiring)
+
+| Gap | Built | Production state |
+|---|---|---|
+| **C1 PAC** | **Conformance kit** `tests/_mx_pac_conformance.py`: 10 checks (stamp accepted / rejected, timeout → UNKNOWN then status FOUND with the same UUID on retry, timeout before stamp → NOT_FOUND, duplicate idempotency key, cancel with and without replacement, cancel-status polling, expired CSD, no XML in messages). A driver tells the kit how to provoke each scenario in a sandbox; a scenario it cannot provoke is NOT_RUN, never PASS. **Fake adapter** `tests/_mx_fake_pac.py` passes all 10. It is never registered in `_ADAPTERS`. **`PAC_SELECTION_CHECKLIST.md`**: 15 requirements, 13 questions for candidates, the sandbox facilities per kit check, and the steps after the choice | `_ADAPTERS` still empty: `MX_PAC_NOT_CONFIGURED` |
+| **C3 CSD custody** | `mexico_csd_custody.py`: the `CsdCustodyProvider` interface (`describe` → public facts; `sign` → signature + public certificate). **`CustodySigner`** checks the CSD is ACTIVE, the fingerprint matches the recorded one, and the certificate is in force, all **before** any signature, then hands the signature to a sealer. **Expiry alerts** (expired / missing / within `MX_CREDENTIAL_EXPIRY_WARNING_DAYS`) on the Super Admin Mexico → Employer tab, for every organisation. Test provider `tests/_mx_fake_csd.py`. **`CSD_CUSTODY_CONTRACT.md`** | `_PROVIDERS` empty; the active signer is still `GcpSmSigner` (`MX_CSD_SIGNING_BLOCKED`); `CustodySigner` without a sealer refuses with `MX_CSD_SEALER_NOT_BUILT` |
+| **C15 XML storage** | `mexico_xml_store.py`: the `StampedXmlStore` interface with shared rules: write-once (same bytes idempotent, different bytes `MX_CFDI_XML_WRITE_ONCE`), SHA-256 and size checked on read (`MX_CFDI_XML_INTEGRITY`), `retention_until` (None = undecided, so deletion refuses), and a key check (no traversal, no identifier). Local filesystem store **in tests only**. **`CFDI_XML_STORAGE_CONTRACT.md`** | `_STORE` None: `MX_CFDI_STORAGE_NOT_DURABLE`. The existing CFDI path is unchanged |
+| **C7 SPEI**, **C8 IDSE / SUA / SIPARE** | One-page intake templates, `intake/SPEI_INTAKE.md`, `IDSE_INTAKE.md`, `SUA_INTAKE.md`, `SIPARE_INTAKE.md`: exactly which specification, samples and decisions are needed, and the function each will plug into (`export_worklist`, `record_item_outcome`, `enter_sua_figures`, `record_sua_payment` …) | Worklists only. **No layout invented** |
+
+Nothing here chooses a provider, custody, bucket or retention period. Those are named as decisions in each document. The storage contract cites no retention law: the period is legal's decision.
+
+### Tests
+- New:
+  - `test_mexico_pac_conformance.py` (7): the fake passes all checks; the kit **catches** a timeout reported as REJECTED, a second CFDI for the same key, an expired CSD that stamps, and a cancellation that never settles; an unprovokable scenario is NOT_RUN; nothing reaches `app/`;
+  - `test_mexico_csd_custody.py` (10): production refuses; a custodied signature verifies against the public certificate; six custody refusals sign nothing; expiry alerts (expired / expiring / missing / fine / other org); the Super Admin route and an org admin's refusal;
+  - `test_mexico_xml_store.py` (10): put/get with the hash, write-once, a tampered file refused, retention, key checks, and production with no store.
+- Route registry regenerated: **one** new row (`csd-expiry`, `platform`).
+- **Full suite** (5 sequential chunks, scratch SQLite): **7,651 passed**. The only failures are the known local-only ones: the three `/health` route-registry tests, the HK configuration docs test, and the intermittent communications dispatch test (alone it failed once and then passed twice; X5 does not touch it).
+- Frontend: ESLint is clean on the new and changed files; `check:undefined` reports 586 files with no undefined names; the build passes.
+
+**Browser: 6/6 PASS** (`final-mile-evidence/RESULTS-X5.md`; harness `setup_x5.py` adds a SYNTHETIC expiring CSD and a PAC reference to the X4 scratch DB):
+- the Employer tab lists the EXPIRING CSD with its organisation, serial and masked fingerprint;
+- the PAC reference is not listed;
+- no `gcp-sm` reference appears in the page or the API;
+- an org admin is refused.
+
+Screenshot inspected (`x5_01_csd_expiry_alerts.jpg`).
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | One read-only Super Admin route |
+| UI | A CSD-expiry card on the Super Admin Mexico Employer tab |
+| CFDI | None. The new interfaces are not installed, and generation, signing and stamping refuse exactly as before |
+| Other jurisdictions | None |
