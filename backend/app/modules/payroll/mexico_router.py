@@ -119,6 +119,19 @@ def benefits_workweek(on: Optional[date] = Query(None), pack_id: Optional[int] =
     return _view(db, "benefits", on, pack_id)
 
 
+@router.get("/isn-content", summary="One state ISN pack's rows in force on `on`, with sources (read-only, W5-1)")
+def isn_content(pack_id: int = Query(...), on: Optional[date] = Query(None),
+                current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _view(db, "isn", on, pack_id)
+
+
+@router.get("/statutory-rules", summary="Module-direct rules (special pay, termination, PTU, annual adjustment, "
+                                        "filing calendar, …) with sources (read-only, W5-1)")
+def statutory_rules(on: Optional[date] = Query(None), current_user=Depends(get_current_super_admin),
+                    db: Session = Depends(get_db)):
+    return _mx().statutory_rules_view(db, on=on)
+
+
 @router.get("/isn-states", summary="The 32 federal entities with ISN pack and readiness state (MX-045)")
 def isn_states(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
     return _mx().isn_states(db)

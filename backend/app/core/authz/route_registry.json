@@ -18677,6 +18677,22 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/isn-content",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "isn-content",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/isn-states",
    "data_class": "platform",
    "action": "read",
@@ -18972,6 +18988,22 @@
    "data_class": "platform",
    "action": "read",
    "resource": "readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/statutory-rules",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "statutory-rules",
    "principals": [
     "super_admin"
    ],

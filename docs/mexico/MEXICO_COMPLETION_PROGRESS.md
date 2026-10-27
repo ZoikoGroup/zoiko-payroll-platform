@@ -578,3 +578,80 @@ Run 2026-10-27 08:52–09:17 on `3a44dc1`, in five sequential chunks on scratch 
 **Total: 7,530 passed, 120 skipped, 2 xfailed.** That is 25 more passing tests than after W3. No other jurisdiction's behaviour changed; the NL, IE and SE report paths are pinned by the W4-1 tests.
 
 **Browser check of the templates:** done with W5's browser pass, because both touch the same Super Admin compliance workspace.
+
+---
+
+## W5-1 — Super Admin: every Mexico content family readable, with its source
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** Two new Super Admin routes were added to the route registry. Both are read-only and return platform content only (no organisation or worker data).
+
+**Audit (read-only survey of the workspace).** Families that existed only in `mexico_content.py`, with no screen:
+- the annual ISR tariff and the filing calendar;
+- special pay (Art. 93), the aguinaldo rule and the state ISN inclusions;
+- termination reasons and the finiquito;
+- PTU and the annual adjustment, each with its exclusions;
+- the ordinary exemptions;
+- working time and the IMSS calendar.
+
+Two existing screens were incomplete:
+- **State ISN** showed the generic rate list, with no source, no PENDING G1 and no date.
+- **CEAV 2023–2030 schedule** had no source column.
+
+The other W5 findings (direct generic edits, readiness per gate, the policy page, SEPARACION, OOS-11) are W5-2 to W5-4.
+
+**What changed**
+- **`GET /super-admin/compliance/mexico/statutory-rules?on=`** (`mexico_service.statutory_rules_view`): every module-direct rule family, read-only. Each item shows:
+  - every citation, with the wording it quotes;
+  - the cited file's manifest row: title, URL, SHA-256 and verification status (`VERIFIED`, `ARCHIVE_COPY_VERIFIED` or `NOT_IN_MANIFEST`);
+  - `[PENDING G1]`.
+
+  Year-keyed families (the annual ISR tariff, official holidays) follow `on`. Without `on`, the national pack's effective-from is used, never the server date. The response also lists the open decision switches (D-07, D-08, D-09, D-12, D-13, D-07b, D-14) and the interfaces with no transcribed rule (D-18, D-19), each shown as undecided.
+- **`GET /super-admin/compliance/mexico/isn-content?pack_id=&on=`**: one state ISN pack's rows through the same `content_view` as the national families (source, PENDING G1, date). It refuses the national pack (404) and a missing `pack_id` (422).
+- **Frontend:**
+  - **New "Statutory rules" tab** (`MXStatutoryRulesTab.jsx`): date bar, one section per family, a source-and-wording column, and an open-decisions table.
+  - **State ISN tab:** now uses the new view. The row's old generic contribution-rates fetch was removed.
+  - **CEAV schedule:** gains a Source column.
+- **Defect found in the browser check and fixed.** Eight component-less report templates still said "Draft shell — filled in Phase N … when this output exists", although W4-2 and W4-3b built their outputs. Each description now says it has no components and names what builds it: the dedicated generator and its data, or, for the receipt, rendering from the stored stamped XML. Official-layout reports keep "NOT AN OFFICIAL FILE". Re-seeding a Draft template updates its description; non-Draft rows are skipped as before.
+- Concept labels are explicit (for example, "PTU (profit sharing)", not "Ptu").
+
+**Tests**
+- New `test_mexico_statutory_rules_view.py` (9):
+  - every rule citation that `verify_mexico_sources.py compare` checks is shown;
+  - every item is read-only, PENDING G1 and sourced, and no cited file is missing from the manifest;
+  - year-keyed families follow the date;
+  - with no pack and no date, the server date is never used;
+  - the open decisions are listed;
+  - the routes are Super Admin only;
+  - a state ISN pack shows its rows with sources, and the national pack and a missing id are refused;
+  - every concept has a label;
+  - no Mexico template is described as an unfilled shell.
+- Mexico + privacy + report-template tests: **1,370 passed, 76 skipped.** The only failures are the 3 known local-only route-registry tests (the `/health` routes in your uncommitted `main.py`). The registry diff is exactly the two new routes.
+- Frontend: ESLint is clean on the changed files; `check:undefined` reports 580 files with no undefined names; `vite build` passes.
+
+**Browser (real Chrome, scratch SQLite, the REAL Draft packs and templates seeded by the deployment scripts; harness in `docs/mexico/completion-evidence/w5/harness/`): 29/29 PASS, with no 4xx / 5xx responses and no console errors.**
+- **W5-1 (9 checks):**
+  - every family's section is present;
+  - the date bar shows the pack's effective-from;
+  - PENDING G1, SHA-256, status and quoted wording are shown;
+  - no file is missing from the manifest;
+  - the decisions are shown undecided;
+  - the 2026 annual tariff has 11 brackets, and 2025 shows "awaiting transcription";
+  - the CDMX ISN row shows 4% with its S22 source and the date bar;
+  - the CEAV schedule shows its source.
+- **W4 (18 checks; the template browser check deferred from the end of W4):** every national Mexico template opens as Draft, either with its components or with a description naming the generator that builds it.
+- **Regression (2 checks):** the NL compliance page is unchanged; no 5xx and no page errors.
+- Screenshots were inspected:
+  - the register shows the W4-1 snapshot paths;
+  - the special-pay citations are complete;
+  - the ISN row shows its rate and source.
+
+  The empty Components tab of the receipt template is what exposed the stale "Draft shell" descriptions.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | Two new read-only Super Admin routes (platform data) |
+| Report templates | Re-seeding a **Draft** Mexico template rewrites its description; nothing else changes |
+| Other jurisdictions | None. A shared `service.py` comment changed; no behaviour changed |

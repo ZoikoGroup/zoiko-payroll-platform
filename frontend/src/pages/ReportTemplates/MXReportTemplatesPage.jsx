@@ -3,7 +3,8 @@ import ReportTemplateLayout from "../../components/reportTemplates/ReportTemplat
 
 // Mexico — the shared report-template lifecycle (same thin wrapper as every
 // other jurisdiction). Templates are seeded Draft; activation is refused
-// until the output each one describes exists (Phases 6–10). The CDMX ISN
+// until the report's gates are SIGNED, its content is Active and its fields
+// resolve on a committed payslip (completion W4-3a). The CDMX ISN
 // return lives under /super-admin/report-templates/mexico/CDMX.
 export default function MXReportTemplatesPage() {
   const { jurisdiction } = useParams();

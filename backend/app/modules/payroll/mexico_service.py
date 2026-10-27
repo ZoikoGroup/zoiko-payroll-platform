@@ -571,6 +571,21 @@ def _national_pack(db: Session, pack_row_id: Optional[int] = None):
     return q.order_by(JurisdictionPack.id.desc()).first()
 
 
+def _state_pack(db: Session, pack_row_id: Optional[int]):
+    """W5-1: one state ISN pack (its id is required — 32 entities, no default)."""
+    from app.modules.payroll.models import JurisdictionPack
+
+    if pack_row_id is None:
+        raise BadRequestException("pack_id (a Mexico state ISN pack) is required")
+    pack = (db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id,
+                                              JurisdictionPack.jurisdiction_country == MX,
+                                              JurisdictionPack.pack_type == "tax",
+                                              JurisdictionPack.jurisdiction_state.isnot(None)).first())
+    if pack is None:
+        raise NotFoundException("Mexico state ISN pack", pack_row_id)
+    return pack
+
+
 def _source_view(db: Session, source_document_id) -> Optional[dict]:
     from app.modules.payroll.models import SourceArtifact
 
@@ -591,11 +606,12 @@ _VIEW_RATE_PREFIXES = {
     "benefits": ("mx_aguinaldo_", "mx_vacation_", "mx_sunday_"),
     "isr": (),
     "minwage": (),
+    "isn": ("mx_isn_",),                                         # W5-1: a STATE pack (pack_id required)
 }
 _VIEW_SLAB_RULES = {
     "isr": (_content.MX_ISR_TARIFF_RULE,), "minwage": (_content.MX_MIN_WAGE_RULE,),
     "ceav": (_content.MX_CEAV_BAND_RULE,), "benefits": (_content.MX_WORKWEEK_RULE, _content.MX_VACATION_DAYS_RULE),
-    "uma": (), "imss": (), "infonavit": (),
+    "uma": (), "imss": (), "infonavit": (), "isn": (),
 }
 CONTENT_FAMILIES = tuple(_VIEW_RATE_PREFIXES)
 
@@ -612,7 +628,7 @@ def content_view(db: Session, kind: str, on: Optional[date] = None, pack_row_id:
     governed pack lifecycle."""
     if kind not in _VIEW_RATE_PREFIXES:
         raise NotFoundException("Mexico content family", kind)
-    pack = _national_pack(db, pack_row_id)
+    pack = _state_pack(db, pack_row_id) if kind == "isn" else _national_pack(db, pack_row_id)
     base = {"family": kind, "editable": False, "editVia": "governed pack lifecycle (Draft → review → approve)"}
     if pack is None:
         return {**base, "pack": None, "on": _iso(on), "onSource": "query" if on else None,
@@ -648,6 +664,143 @@ def content_view(db: Session, kind: str, on: Optional[date] = None, pack_row_id:
         out["contentOnly"]["zlfnMunicipalities"] = [
             {"state": m.state, "municipality": m.municipality, "source": m.source} for m in _content.MX_ZLFN_MUNICIPALITIES]
     return out
+
+
+# W5-1: the module-direct rule switches a gate owner decides (DECISIONS_PENDING).
+# None = undecided: every calculation that needs it BLOCKS with its own code.
+_RULE_SWITCHES = (
+    ("MX_EXEMPTION_WAGE_REFERENCE", "D-07", "Unit of the LISR Art. 93 exempt limits"),
+    ("MX_SPECIAL_PAY_WITHHOLDING_METHOD", "D-08", "Withholding method for a special payment in its own run"),
+    ("MX_MONTHLY_ORDINARY_INCOME_DAYS", "D-09", "Monthly ordinary income from a daily salary"),
+    ("MX_INDEMNITY_SALARY_BASIS", "D-12", "Indemnity salary (LFT Art. 89)"),
+    ("MX_SERVICE_YEARS_COUNT", "D-13", "Part years of service"),
+    ("MX_SENIORITY_PREMIUM_WAGE_REFERENCE", "D-07b", "Seniority premium wage reference"),
+    ("MX_PTU_CAP_EXCESS", "D-14", "PTU cap (LFT Art. 127 VIII): the excess"),
+    ("MX_PTU_HISTORY_AVERAGE", "D-14", "PTU cap: the three-year average"),
+)
+# Content interfaces built with no transcribed rule yet (W3-5): None = BLOCK.
+_RULE_INTERFACES = (
+    ("MX_SBC_FIXED_INTEGRATION_RULE", "D-18", "FIXED SBC items (LSS Art. 30 I)"),
+    ("MX_FIXED_DAYS_TERMINATION_RULE", "D-19", "Fixed salary days at termination"),
+)
+
+
+_CONCEPT_LABELS = {
+    "AGUINALDO": "Aguinaldo", "VACATION_PREMIUM": "Vacation premium (prima vacacional)",
+    "VACATION_PAYOUT": "Vacation paid out at termination", "PTU": "PTU (profit sharing)",
+    "SEPARATION_SENIORITY_PREMIUM": "Seniority premium (prima de antigüedad)",
+    "SEPARATION_PAYMENT": "Separation payment", "SEPARATION_INDEMNITY": "Indemnity",
+    "OVERTIME": "Overtime (horas extra)", "SUNDAY_PREMIUM": "Sunday premium (prima dominical)",
+}
+
+
+def _citations_view(citations, manifest: dict, log: list) -> list:
+    """Each (CODE/file, quoted wording) citation with the manifest row of the
+    cited file (title, url, sha256, verification status)."""
+    from app.modules.payroll import mexico_sources
+
+    out = []
+    for cite, ref in citations:
+        row = manifest.get(cite)
+        out.append({"cite": cite, "ref": ref, "title": row.get("title") if row else None,
+                    "url": row.get("url") if row else None, "sha256": row.get("sha256") if row else None,
+                    "status": mexico_sources.effective_status(row, log) if row else "NOT_IN_MANIFEST"})
+    return out
+
+
+def _cites(obj) -> tuple:
+    return tuple(getattr(obj, "citations", None) or ((obj.source, obj.source_ref),))
+
+
+def statutory_rules_view(db: Session, on: Optional[date] = None) -> dict:
+    """W5-1: every module-direct Mexico rule family (not stored as pack rows),
+    read-only, each with its quoted source wording, the manifest row of the
+    cited file and the [PENDING G1] marker. Year-keyed families (annual ISR
+    tariff, official holidays) show the year of `on`; `on` defaults to the
+    national pack's effective_from, never the server date. Changed only by a
+    code release that passes `verify_mexico_sources.py compare`."""
+    from app.modules.payroll import mexico_sources
+    from app.modules.payroll.engine.countries import mexico_rules as _r
+
+    c = _content
+    pack = _national_pack(db)
+    on_source = "query" if on is not None else ("packEffectiveFrom" if pack is not None else None)
+    on = on or (pack.effective_from if pack is not None else None)
+    year = on.year if on else None
+    manifest = {mexico_sources.cite_key(r): r for r in mexico_sources.read_rows()}
+    log = mexico_sources.read_log()
+
+    def item(key, label, citations, **extra):
+        return {"key": key, "label": label, "pendingG1": True, "citations": _citations_view(citations, manifest, log),
+                **extra}
+
+    families = []
+
+    def family(key, title, items, note=None):
+        families.append({"family": key, "title": title, "items": items, "note": note,
+                         "awaitingTranscription": not items})
+
+    family("annualIsr", f"Annual ISR tariff {year or ''}".strip(), [
+        item(b.lower, f"{b.lower} – {b.upper or 'en adelante'}", ((b.source, b.source_ref),),
+             lower=b.lower, upper=b.upper, fixedQuota=b.fixed_quota, ratePct=b.rate_pct)
+        for b in c.MX_ISR_ANNUAL_TARIFFS.get(year, ())])
+    family("filingCalendar", "Filing calendar", [
+        item(f"{r.report_type}{'/' + r.state if r.state else ''}", r.due_rule, _cites(r), reportType=r.report_type,
+             frequency=r.frequency, dueDay=r.due_day, dueMonth=r.due_month, state=r.state)
+        for r in c.MX_FILING_CALENDAR],
+        note="IMSS monthly / bimonthly payment dates are not listed (gap A18)")
+    family("specialPay", "Special pay: LISR Art. 93 exemptions and withholding", [
+        item(k, _CONCEPT_LABELS.get(k, k), _cites(o)) for k, o in sorted(c.MX_SPECIAL_PAY_RULES.items())]
+        + ([item("AGUINALDO_RULE", "Aguinaldo amount and payable-by date (LFT Art. 87)", _cites(c.MX_AGUINALDO_RULE))]
+           if c.MX_AGUINALDO_RULE is not None else []))
+    family("isnInclusion", "State ISN: special pay in the base", [
+        item(f"{st}/{concept}", f"{st}: {_CONCEPT_LABELS.get(concept, concept)}", ((src, ref),), state=st,
+             included=inc) for (st, concept), (inc, src, ref) in sorted(c.MX_SPECIAL_PAY_ISN_INCLUSION.items())],
+        note="A concept not listed for a state BLOCKS (MX_ISN_SPECIAL_PAY_RULE_MISSING; D-06)")
+    family("termination", "Termination reasons and the finiquito", [
+        item(k, o.label, _cites(o)) for k, o in sorted(c.MX_TERMINATION_REASONS.items())]
+        + ([item("FINIQUITO_RULE", "Finiquito: vacation owed and withholding", _cites(c.MX_FINIQUITO_RULE))]
+           if c.MX_FINIQUITO_RULE is not None else []))
+    family("ptu", "PTU (profit sharing)", (
+        [item("PTU_RULE", "Distribution and cap (LFT Arts. 122-127)", _cites(c.MX_PTU_RULE))]
+        if c.MX_PTU_RULE is not None else [])
+        + [item(k, o.label, _cites(o), exclusion=True) for k, o in sorted(c.MX_PTU_EXCLUSION_REASONS.items())])
+    family("annualAdjustment", "Annual ISR adjustment (LISR Art. 97)", (
+        [item("ANNUAL_ADJUSTMENT_RULE", "Annual adjustment", _cites(c.MX_ANNUAL_ADJUSTMENT_RULE))]
+        if c.MX_ANNUAL_ADJUSTMENT_RULE is not None else [])
+        + [item(k, o.label, _cites(o), exclusion=True)
+           for k, o in sorted(c.MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS.items())])
+    family("ordinaryExemptions", "Ordinary earnings: LISR Art. 93 exemptions", [
+        item(k, _CONCEPT_LABELS.get(o.kind, o.kind), _cites(o))
+        for k, o in sorted(c.MX_ORDINARY_EXEMPTION_RULES.items())])
+    working = []
+    if c.MX_CONTRIBUTION_DAYS_RULE is not None:
+        working.append(item("CONTRIBUTION_DAYS", "Absences and incapacity: contribution days (LSS Art. 31)",
+                            _cites(c.MX_CONTRIBUTION_DAYS_RULE)))
+    if c.MX_RISK_PREMIUM_PERIOD is not None:
+        p = c.MX_RISK_PREMIUM_PERIOD
+        working.append(item("RISK_PREMIUM_PERIOD", f"Risk premium period starts {p.start_day:02d}/{p.start_month:02d}",
+                            _cites(p)))
+    if c.MX_IMSS_MOVEMENT_DEADLINE is not None:
+        m = c.MX_IMSS_MOVEMENT_DEADLINE
+        working.append(item("IMSS_MOVEMENT_DEADLINE", f"IMSS movements: {m.business_days} business days", _cites(m)))
+    working += [item(f"JORNADA_{code}", f"Working day {code}: {hours} hours", ((src, ref),))
+                for code, (hours, src, ref) in sorted(c.MX_JORNADA_DAILY_HOURS.items())]
+    holidays = c.MX_OFFICIAL_HOLIDAYS.get(year)
+    if holidays:
+        dates, src, ref = holidays
+        working.append(item(f"HOLIDAYS_{year}", f"Official holidays {year}: {', '.join(d.isoformat() for d in dates)}",
+                            ((src, ref),)))
+    family("workingTime", "Working time and the IMSS calendar", working,
+           note=None if holidays else f"No official holidays transcribed for {year or 'the year'} (D-16)")
+
+    decisions = [{"name": n, "decision": d, "label": lbl, "value": getattr(_r, n, None),
+                  "decided": getattr(_r, n, None) is not None} for n, d, lbl in _RULE_SWITCHES]
+    decisions += [{"name": n, "decision": d, "label": lbl, "value": None,
+                   "decided": getattr(c, n, None) is not None} for n, d, lbl in _RULE_INTERFACES]
+    return {"editable": False, "editVia": "a code release that passes verify_mexico_sources.py compare",
+            "pack": _pack_view(db, pack) if pack is not None else None, "on": _iso(on), "onSource": on_source,
+            "manifestAvailable": bool(manifest), "families": families, "decisions": decisions}
 
 
 def isn_states(db: Session) -> list:

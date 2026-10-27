@@ -10668,7 +10668,7 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("totals", "LPT Totals"),
     ],
     # Mexico (ZP-MX-ENG-001 Phase 2) — the three templates with data today;
-    # every other MX template is a component-less Draft shell (default list).
+    # every other MX template has no components: a dedicated generator builds it (W4-2).
     "MX_REGISTER": [
         ("employer_info", "Employer"), ("employee_info", "Employee"),
         ("earnings", "Perceptions"), ("deductions", "Deductions and Net Pay"),
