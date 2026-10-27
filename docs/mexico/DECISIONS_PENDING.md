@@ -25,6 +25,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-20 | QR total on the printed CFDI receipt: the text drops the zeros, the example pads them | G1 owner (with the PAC) | Nothing (the receipt is "NOT AN OFFICIAL FILE") | Open |
 | D-21 | How to read the 830 Chihuahua c_CodigoPostal rows whose summer offset is not one hour ahead of winter (gap C11) | G1 owner | A CFDI issued from those postal codes (`MX_CFDI_TIMEZONE_RULE_INVALID`) | Open |
 | D-22 | How a finiquito withholds on vacation paid out against the month's earlier income (gap A17) | G1 owner | A finiquito that pays out vacation (`MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED`) | Open |
+| D-23 | Who may approve a decision for a gate: a "gate owner" role (G1 owner …) does not exist in the platform | Release owner + Security lead | Nothing blocks: until decided, the decision register (final mile X1) stores the owner as text and requires a second Super Admin as the four-eyes control | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -210,3 +211,12 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
   - **(b) `INCREMENTAL_MONTHLY`:** the monthly tariff on (month-to-date + payout) less the monthly tariff on month-to-date alone. Only the payout's own tax; earlier periods are left as withheld.
 - **Built regardless.** The month-to-date accumulator for special runs: committed payslips of the pay date's month, in payment order, with correction deltas, and the ISR they withheld. It is bound into the run's input hash (`monthToDate`).
 - **Blocks.** A finiquito whose lines include vacation paid out. Its other lines (separation, aguinaldo, vacation premium) are unaffected.
+
+## D-23 · Gate-owner roles for the decision register (final mile X1)
+
+- **Question.** The decision register records who owns each decision ("G1 owner", "G5 owner", …), but the platform has no such role. Only Super Admins exist, and four-eyes means "a different Super Admin". Should gate-owner roles exist? If so, who holds them, and may only the gate's owner approve its decisions?
+- **Options.**
+  1. Keep the interim control: any second Super Admin approves; the owner is stored as text on the record.
+  2. Add a gate-owner role (or a per-gate attribute on Super Admin users) and require it for approval. This is an authorisation change for the ZP-PRIV owner.
+- **Blocks.** Nothing. The register works with option 1. Option 2 would be a later, separately reviewed change.
+- **Follow-up (same owners plus the G1 owner).** Can an APPROVED decision record be the source a content row cites at activation? Today the activation check `sources_verified` accepts only a VERIFIED manifest file, so a row citing `DECISION/D-01#…` would be approvable in Draft but never activatable. Until this is answered, the canonical seed does not read decision records; an engineer transcribes from the ticket and cites the saved source the decision rests on.

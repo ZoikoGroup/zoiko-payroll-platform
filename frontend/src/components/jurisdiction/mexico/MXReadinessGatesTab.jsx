@@ -64,7 +64,7 @@ function GateChecklists() {
                     onClick={() => setOpen(open === g.gate ? null : g.gate)}>
               <span className="font-semibold text-foreground">{g.gate} · {g.label}</span>
               <span className="text-[12px] text-foreground-muted">
-                {g.state} · code {g.available ? `${g.codeMet}/${g.codeTotal}` : "—"} · evidence items {g.evidenceItems ?? "—"}
+                {g.state} · code {g.available ? `${g.codeMet}/${g.codeTotal}` : "—"} · evidence items {g.evidenceItems ?? "—"} · open decisions {g.openDecisions ?? 0}
               </span>
             </button>
             {open === g.gate && (

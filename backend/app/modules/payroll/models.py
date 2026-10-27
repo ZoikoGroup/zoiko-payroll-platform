@@ -9608,6 +9608,57 @@ class PayrollMxCfdiCatalogEntry(Base):
     )
 
 
+class PayrollMxDecision(Base):
+    """Mexico final mile X1: one recorded decision (DECISIONS_PENDING D-01 …,
+    gap register C4 / C5 / C12) — the question, its options and sources, the
+    block codes it clears and the content key(s) it would populate. OPEN ->
+    PROPOSED (a chosen option with rationale and sources) -> APPROVED by a
+    different Super Admin -> TRANSCRIBED (an engineer seeded the value into a
+    Draft pack); WITHDRAWN; a revision of an APPROVED record is a new version
+    that, once approved, SUPERSEDES it. An approved record is never edited.
+    A decision never changes a calculation by itself. Platform configuration
+    (no organisation, no worker data), so no row-level-security policy; user
+    ids are kept without foreign keys so the table locks nothing shared."""
+    __tablename__ = "payroll_mx_decisions"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    code             = Column(String(10), nullable=False, index=True)       # D-01 … / C4 / C5 / C12
+    version          = Column(Integer, nullable=False, default=1)
+    title            = Column(String(200), nullable=False)
+    gates            = Column(JSON, nullable=False, default=list)          # ["G1", …]
+    owner_role       = Column(String(60), nullable=True)                   # text only (D-23)
+    question         = Column(Text, nullable=False)
+    options          = Column(JSON, nullable=False, default=list)          # [{"label", "sources": [..]}]
+    question_sources = Column(JSON, nullable=False, default=list)          # the S-codes the question rests on
+    block_codes      = Column(JSON, nullable=False, default=list)
+    content_keys     = Column(JSON, nullable=False, default=list)
+    answer_kind      = Column(String(20), nullable=False, default="FREE_TEXT")
+    allowed_values   = Column(JSON, nullable=True)
+    status           = Column(String(12), nullable=False, default="OPEN")
+    chosen_option    = Column(Text, nullable=True)
+    rationale        = Column(Text, nullable=True)
+    cited_sources    = Column(JSON, nullable=True)                         # the proposal's own sources
+    content_hash     = Column(String(64), nullable=True)
+    supersedes_id    = Column(Integer, ForeignKey("payroll_mx_decisions.id", ondelete="RESTRICT"), nullable=True)
+    proposed_by_id   = Column(Integer, nullable=True)
+    proposed_at      = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id   = Column(Integer, nullable=True)
+    approved_at      = Column(DateTime(timezone=True), nullable=True)
+    transcribed_by_id = Column(Integer, nullable=True)
+    transcribed_at   = Column(DateTime(timezone=True), nullable=True)
+    transcription_ref = Column(String(200), nullable=True)                 # the commit / pack that carries it
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'PROPOSED', 'APPROVED', 'TRANSCRIBED', 'WITHDRAWN', 'SUPERSEDED')",
+                           name="ck_mx_decision_status"),
+        sa.CheckConstraint("answer_kind IN ('FREE_TEXT', 'ENUM', 'ROUNDING_RULE', 'PAY_PERIOD')",
+                           name="ck_mx_decision_answer_kind"),
+        UniqueConstraint("code", "version", name="uq_mx_decision_code_version"),
+    )
+
+
 class PayrollMxCfdiSystemConcept(Base):
     """Phase 11a (MEXICO_PHASE_11_PLAN.md §4.3, D4): the SAT code for an amount
     the engine produces itself — no earning classification carries it (ISR

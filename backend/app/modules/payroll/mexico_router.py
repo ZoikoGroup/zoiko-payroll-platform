@@ -119,6 +119,61 @@ def benefits_workweek(on: Optional[date] = Query(None), pack_id: Optional[int] =
     return _view(db, "benefits", on, pack_id)
 
 
+# ── decision register (final mile X1) ──────────────────────────────────────
+
+def _decisions():
+    from app.modules.payroll import mexico_decision_service
+
+    return mexico_decision_service
+
+
+@router.get("/decisions", summary="The decision register: D-01 … and C4 / C5 / C12, by gate and status (X1)")
+def list_decisions(gate: Optional[str] = Query(None), status: Optional[str] = Query(None),
+                   current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().list_mx_decisions(db, gate=gate, status=status)
+
+
+@router.get("/decisions/by-block/{block_code}", summary="The live decisions whose answer clears an engine block code")
+def decisions_for_block(block_code: str, current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    return _decisions().mx_decisions_for_block(db, block_code)
+
+
+@router.get("/decisions/{decision_id}", summary="One decision with its options, sources and transcription ticket")
+def get_decision(decision_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().get_mx_decision(db, decision_id)
+
+
+@router.post("/decisions/{decision_id}/propose", summary="Propose an answer (chosen option, rationale, sources)")
+def propose_decision(decision_id: int, body: Dict[str, Any] = Body(...),
+                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    data = {"chosen_option": body.get("chosenOption"), "rationale": body.get("rationale"),
+            "cited_sources": body.get("citedSources") or [], "owner_role": body.get("ownerRole")}
+    return _decisions().propose_mx_decision(db, decision_id, data, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/approve", summary="Approve a proposal (a different Super Admin — four-eyes)")
+def approve_decision(decision_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().approve_mx_decision(db, decision_id, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/withdraw", summary="Withdraw a proposal (back to OPEN) or an OPEN decision")
+def withdraw_decision(decision_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().withdraw_mx_decision(db, decision_id, {"reason": body.get("reason")}, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/revise", summary="Open a new version of an approved decision")
+def revise_decision(decision_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().revise_mx_decision(db, decision_id, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/transcribed", summary="Record the Draft-pack commit that carries the value")
+def decision_transcribed(decision_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().mark_mx_decision_transcribed(db, decision_id, {"reference": body.get("reference")}, _actor(current_user))
+
+
 @router.get("/readiness/gate-checklists", summary="Per gate: checklist items confirmed by code now vs awaiting "
                                                   "signed evidence (read-only, W5-3)")
 def gate_checklists(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):

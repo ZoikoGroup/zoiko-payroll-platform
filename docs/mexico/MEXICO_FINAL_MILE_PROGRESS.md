@@ -60,3 +60,91 @@ No write of any kind; the session is never saved; no real employee screen is ope
 | `ZP_SMOKE_RUN_ID` | set by the workflow | — |
 
 **Who can configure them:** a ZoikoGroup repository admin (Actions secrets need admin rights on `zoiko-payroll-platform`). The synthetic tenant and identities must exist in production first, which is a decision for the release owner and the ZP-PRIV owner. Not configured here (rule: no secrets).
+
+---
+
+## X1 — The decision register in the Super Admin workspace
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** It adds a migration (`d3f8b2a6c1e9`, one new platform table), 8 Super Admin routes and a four-eyes rule. **Do not merge until reviewed — branch protection does not enforce this (C17).**
+
+**What changed**
+- **Table `payroll_mx_decisions`** (migration `d3f8b2a6c1e9` `mx_final_mile_m20`, child of `c7d2e9a4f1b6`). Each record holds:
+  - code, version, title, gates, owner role (text);
+  - the question and the sources it rests on;
+  - the options, each with its sources;
+  - the block codes it clears and the content keys it would populate;
+  - the answer kind and the allowed values;
+  - status, chosen option, rationale, the proposal's cited sources and a SHA-256 content hash;
+  - the record it supersedes;
+  - proposed-, approved- and transcribed-by, each with a timestamp, and the transcription reference.
+
+  It is a platform table (no organisation, no worker data), so it has no RLS policy, like every Mexico platform table. User ids are plain integers, so the migration locks no existing table.
+- **`mexico_decision_service`**, the state machine:
+  - OPEN → PROPOSED → APPROVED (a **different** Super Admin) → TRANSCRIBED;
+  - withdrawing a proposal returns it to OPEN; withdrawing an OPEN decision (with a reason) makes it WITHDRAWN;
+  - revising an APPROVED record creates a new OPEN version; once that version is approved, the old one becomes SUPERSEDED.
+
+  Approved records are immutable, and every action and every refusal is audited.
+- **Typed answers**, validated at proposal and again at approval against the code that reads them:
+  - D-01 through `rounding.parse` (MODE:QUANTUM);
+  - D-02 against the Art. 96 periods or `UNMAPPED`;
+  - D-07, D-07b, D-13, D-21 and D-22 against the values that are built.
+
+  Everything else is free text.
+- **Finding, and a fix that decides nothing:** D-01 option 2 is the CFF Art. 20 ¶10 whole-peso rule (S35 p. 31: "de 1 hasta 50 centavos … unidad inmediata anterior", "51 a 99 … superior"). That is round-half-down to 1, which the rounding grammar could not express. `HALF_DOWN` was added as a mode, so the option can be written `HALF_DOWN:1`. No content row uses it.
+- **Seed** `scripts/seed_mexico_decisions.py`: every Open decision in `DECISIONS_PENDING.md` (D-15, which sources resolved, is skipped), D-07b (its own switch), D-23 and the gap register's C4, C5 and C12 — **26 records**. It is idempotent, needs the same confirmed target as the pack seed, and never runs on deploy. Markdown marks are stripped for display.
+- **Transcription ticket** on every APPROVED record: the content key(s), the value, the citation `DECISION/<code>#<hash12>`, and the target "the next Draft version of the pack that carries the key (never an Active pack)". It is followed by seed, [PENDING G1], four-eyes approval, then activation gated on VERIFIED sources and signed gates.
+- **Not built:** the canonical seed does not read decision records itself. The prompt allows it ("may"), but a decision-cited row would never pass the activation check `sources_verified`, which requires a VERIFIED manifest file. Whether a decision can stand as a row's source at activation is a question for the G1 owner and the ZP-PRIV owner, added to D-23's follow-ups. Today an engineer transcribes from the ticket.
+- **Traceability:**
+  - `GET …/decisions/by-block/{code}` lists the live decisions that clear an engine block code;
+  - the W5-3 readiness view shows "open decisions N" per gate.
+- **Routes** (all Super Admin, `platform` in the registry; 8 rows added, no other route reclassified):
+  - `GET /decisions`, `/decisions/{id}`, `/decisions/by-block/{code}`;
+  - `POST /decisions/{id}/propose`, `/approve`, `/withdraw`, `/revise`, `/transcribed`.
+
+  The service functions have unique names: the first registry run classified `approve` and `withdraw` as worker routes through the name-collision gotcha.
+- **UI:** a "Decisions" tab with filters by gate and status. Each decision shows its question, options with sources, the block codes it clears, the content keys it populates and its owner. It offers a propose form (a select when the answer is typed), and approve / withdraw / revise / mark-transcribed buttons, each behind a confirmation dialog. The ticket is shown once a decision is approved.
+- **D-23 added:** no gate-owner role exists; until decided, any second Super Admin approves and the owner is text on the record.
+
+**Tests**
+- New `test_mexico_decisions.py` (9):
+  - the seed reads the documents and is idempotent;
+  - typed answers are refused outside their grammar;
+  - `HALF_DOWN:1` gives the CFF whole-peso results (10.50 → 10, 10.51 → 11);
+  - four-eyes, the hash and ticket, immutability and transcription;
+  - a revision supersedes only once approved;
+  - withdrawing a proposal reopens it and keeps the question's sources, and refusals are audited;
+  - **an approved decision changes no calculation** (no `mx_rounding_rule` row appears; the engine still blocks `MX_ROUNDING_RULE_MISSING`);
+  - traceability by block code and open decisions per gate;
+  - the routes are Super Admin only and four-eyes over HTTP.
+- New `test_mexico_final_mile_migrations.py`:
+  - SQLite: idempotent upgrade and downgrade, no other table touched, no `organization_id` column.
+  - **PostgreSQL 17, 3 of 3 runs:** in flight, no lock on any user table, only catalogue reads; `lock_timeout` is 5 s; about 0.11–0.21 s; `organizations` and `payslip_items` readable. The real `alembic upgrade head` from `c7d2e9a4f1b6`, no RLS policy on the table, and `check_schema_drift` all pass.
+- Alembic head pins (`d3f8b2a6c1e9`, 230 revisions), the manifest, and the deploy-script pending-object pins (the new table is pending from `c7d2e9a4f1b6`; the migration names it literally so the self-heal sees it).
+- Mexico + privacy tests: **1,324 passed, 81 skipped**. The only failures are the 3 known local-only `/health` route-registry tests. One more test (`test_mexico_migrations.py`, the Mexico table list) needed the new table and passes after it was added.
+- Frontend: ESLint is clean on the changed files; `check:undefined` reports 582 files with no undefined names; the build passes.
+
+**Browser: 13/13 PASS** (`docs/mexico/final-mile-evidence/RESULTS-X1.md`, harness `final-mile-evidence/harness/`). Every transition was done through the UI:
+- the seeded list, the gate filter, and D-01's details;
+- a refused non-grammar answer, then propose;
+- self-approval refused on screen ("four-eyes");
+- a second Super Admin approves, and the ticket appears;
+- mark transcribed, then revise (v2 OPEN, v1 still in force);
+- withdraw a proposal (back to OPEN), then withdraw an OPEN decision;
+- readiness shows the open decisions.
+
+The only 4xx responses are the two deliberate refusals, and the two console lines are the browser's own records of them.
+
+Screenshots were inspected. The first pass showed two display defects, both fixed: markdown marks in titles and options, and C12 / C5 reading the wrong column for their gate. A third, the question's sources being lost on withdrawal, is fixed by the separate `question_sources` column.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | **One migration** `d3f8b2a6c1e9`: a new empty platform table; no existing table locked. Production `c7d2e9a4f1b6` → `d3f8b2a6c1e9` |
+| API | 8 new Super Admin routes (platform data) |
+| Engine | None. `HALF_DOWN` is a new rounding mode no row uses |
+| Seeding | None on deploy; the register is empty in production until someone runs the seed with a confirmed target |
+| Other jurisdictions | None |
+
+**Gap register:** D-01 … D-23, C4, C5 and C12 now have an in-product path: propose, then approve, then a ticket, then a Draft pack.

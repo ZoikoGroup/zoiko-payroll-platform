@@ -10,12 +10,16 @@ internally; while the row is missing no amount is emitted.
 
 from __future__ import annotations
 
-from decimal import ROUND_DOWN, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_UP, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_DOWN, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_UP, Decimal, InvalidOperation
 
 from .errors import MXBlock
 
 # Vocabulary the transcribed rule may use (names of Decimal modes, no value).
-MODES = {"HALF_UP": ROUND_HALF_UP, "HALF_EVEN": ROUND_HALF_EVEN, "DOWN": ROUND_DOWN, "UP": ROUND_UP}
+# HALF_DOWN (final mile X1): lets D-01 option 2 (CFF Art. 20 ¶10, S35 p. 31 — "de 1 hasta 50 centavos se
+# ajusten a la unidad inmediata anterior", "de 51 a 99 centavos ... a la unidad inmediata superior") be written
+# as HALF_DOWN:1. Adding a mode decides nothing: no content row uses it.
+MODES = {"HALF_UP": ROUND_HALF_UP, "HALF_EVEN": ROUND_HALF_EVEN, "HALF_DOWN": ROUND_HALF_DOWN, "DOWN": ROUND_DOWN,
+         "UP": ROUND_UP}
 
 
 class Rounder:
