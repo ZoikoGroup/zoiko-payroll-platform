@@ -51,4 +51,6 @@ export function mexicoExtraTabs(orgId, state) {
 export const mexicoComplianceConfig = {
   countryLevelLabel: "Mexico — federal pack",
   hiddenTabs: ["rates", "slabs"],
+  // Completion W5-2: no Mexico hotfix (four-eyes only); the backend refuses it too.
+  hideHotfixActivate: true,
 };

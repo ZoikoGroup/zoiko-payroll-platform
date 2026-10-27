@@ -655,3 +655,48 @@ The other W5 findings (direct generic edits, readiness per gate, the policy page
 | API | Two new read-only Super Admin routes (platform data) |
 | Report templates | Re-seeding a **Draft** Mexico template rewrites its description; nothing else changes |
 | Other jurisdictions | None. A shared `service.py` comment changed; no behaviour changed |
+
+---
+
+## W5-2 — Nothing statutory is editable outside the governed paths
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** This is an authorisation change: Super Admin write paths are refused for Mexico packs.
+
+**Gaps found**
+1. **Generic row editor.** Four Super Admin routes edit or delete pack rows directly, with no source and no reason:
+   - `PUT` and `DELETE` on `/compliance/tax-configuration/slabs`;
+   - `PUT` and `DELETE` on `/compliance/tax-configuration/contribution-rates`.
+
+   Only Hong Kong refused them. A Mexico pack's rows could be changed through them until activation. The UI hid the tabs, but the API accepted the calls.
+2. **Hotfix activation.** Hotfix self-approves the pack. Mexico refuses self-approval (`_SELF_APPROVAL_REFUSED_COUNTRIES`), and its approval needs QA plus content, evidence and VERIFIED sources (`mx_pack_approval_refusal`), so hotfix would skip both. Mexico's activation checks still ran on that path, but the four-eyes approval did not. Hong Kong and Sweden already refuse hotfix for this reason.
+
+**What changed**
+- **`service._refuse_mx_generic_statutory_edit`:** called beside the Hong Kong refusal at all four generic write paths (rate and slab, upsert and delete). It refuses every Mexico pack in every status and says how Mexico content does change: a code release that passes `verify_mexico_sources.py compare`, then a new pack version.
+- **`activate_jurisdiction_pack_hotfix` refuses Mexico** before any gate, and the refusal is audited (`_audit_refusal`, path `hotfix`).
+- **Frontend:** `JurisdictionLayout` gains the opt-in prop `hideHotfixActivate` (default false). Mexico sets it, so its pack header no longer offers a button that can only be refused. Every other country's header is unchanged.
+
+**The governed change paths that remain** (from the W5 audit; each is four-eyes and audited): pack lifecycle (Draft → In Review → QA → Approved by a second Super Admin → Active, with the Mexico gates), earning classifications, CFDI releases, system concepts, onboarding pause and pilot grants. State ISN packs follow the pack lifecycle. The pack **Edit** button changes only a Draft pack's header (dates, tax year); it is part of the lifecycle and does not change rows.
+
+**Tests**
+- New `test_mexico_generic_edit_refused.py` (6):
+  - every generic write (update a rate, add a rate, update a slab, delete a rate, delete a slab) is refused in Draft, In Review, QA and Approved, and the rows stay unchanged;
+  - the same holds over HTTP (PUT and DELETE return 400);
+  - an Indian Draft pack is still edited and deleted through the generic editor.
+- Changed: `test_mexico_activation_gates.py`, where "the hotfix path runs the same gates" became "there is no Mexico hotfix path". A Draft or Approved pack is refused, with no approval or status recorded.
+- Mexico + privacy + every test touching hotfix or the generic canonical-row editor (all countries): **1,877 passed, 76 skipped.** The only failures are the 4 known local-only ones (3 route-registry tests from the `/health` routes; the Hong Kong docs test).
+- Frontend: `JurisdictionLayout.jsx` has 13 lint problems both before and after the change (none new); `check:undefined` is clean; `vite build` passes.
+
+**Browser (same harness): 33/33 PASS.** New checks:
+- w5-10: no Hotfix button on the Mexico pack header (screenshot inspected);
+- w5-11: a generic edit of a Mexico pack returns 400;
+- w5-12: a Mexico hotfix returns 400;
+- w5-13: an NL Draft pack still offers Hotfix Activate.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Super Admin API | Four generic row routes refuse Mexico packs; Mexico hotfix activation is refused (no Mexico pack is Active, so no emergency path is lost) |
+| UI | The Mexico pack header loses Hotfix Activate |
+| Other jurisdictions | None. The shared functions add a Mexico-only branch, and the layout prop is opt-in. Proven by the Indian-pack and NL-header checks and by the hotfix and canonical-row tests |

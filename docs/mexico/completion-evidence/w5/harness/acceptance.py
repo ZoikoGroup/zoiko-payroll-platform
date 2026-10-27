@@ -139,6 +139,28 @@ with sync_playwright() as p:
     check("w5-9 the CEAV 2023-2030 schedule shows its source", "S11" in ceav or "S10" in ceav, ceav[-500:])
     shot(a, "w5_05_ceav_schedule")
 
+    # ── W5-2: no Mexico hotfix; generic statutory edits refused ────────────
+    open_mx_tab(a, "Statutory rules")
+    check("w5-10 the Mexico pack header offers no Hotfix Activate",
+          a.get_by_role("button", name=re.compile("Hotfix Activate")).count() == 0, "")
+    shot(a, "w5_06_mx_pack_header_no_hotfix")
+    pack_id = json.loads(api(SA_A, "GET", "/api/super-admin/compliance/mexico/packs")[1])[0]["id"]
+    st, txt = api(SA_A, "PUT", "/api/super-admin/compliance/tax-configuration/contribution-rates",
+                  {"jurisdictionPackId": pack_id, "jurisdictionCountry": "MX", "componentKey": "mx_uma_daily",
+                   "label": "x", "flatAmount": "1"})
+    check("w5-11 a generic statutory edit of a Mexico pack is refused (400)",
+          st == 400 and "Mexico statutory rows are not edited here" in txt, f"{st} {txt[:200]}")
+    st, txt = api(SA_A, "PUT", f"/api/super-admin/compliance/policies/{pack_id}/hotfix-activate",
+                  {"incident_id": "INC-W5", "justification": "browser check"})
+    check("w5-12 a Mexico hotfix activation is refused (400)",
+          st == 400 and "Mexico hotfix activation is not permitted" in txt, f"{st} {txt[:200]}")
+    a.goto(APP + "/super-admin/compliance/netherlands", wait_until="load")
+    settle(a, 2000)
+    a.get_by_text("NL-W5-REGRESSION").first.click()
+    settle(a, 1500)
+    check("w5-13 another country's Draft pack still offers Hotfix Activate (unchanged)",
+          a.get_by_role("button", name=re.compile("Hotfix Activate")).count() == 1, "")
+
     # ── W4: each Mexico report template ─────────────────────────────────────
     a.goto(APP + "/super-admin/report-templates/mexico", wait_until="load")
     settle(a, 2500)

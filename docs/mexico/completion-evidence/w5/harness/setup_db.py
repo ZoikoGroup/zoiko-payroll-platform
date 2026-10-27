@@ -45,5 +45,14 @@ db.add(CompanyComplianceDetails(organization_id=nl.id, name="NL Regression Org",
 db.add(User(email="admin@nlw5.example.com", hashed_password=hash_password(PASSWORD), role=UserRole.ORG_ADMIN,
             organization_id=nl.id, first_name="Nora", last_name="Checker", is_active=True, is_verified=True))
 db.commit()
+# W5-2 regression: a Draft NL tax pack (SYNTHETIC), whose header must still offer Hotfix Activate.
+from datetime import date  # noqa: E402
+
+from app.modules.payroll.models import JurisdictionPack  # noqa: E402
+
+db.add(JurisdictionPack(pack_id="NL-W5-REGRESSION", jurisdiction_country="NL", version="1.0", pack_type="tax",
+                        status="Draft", effective_from=date(2026, 1, 1), effective_to=date(2026, 12, 31),
+                        tax_year="2026", currency="EUR"))
+db.commit()
 db.close()
 print("ok")
