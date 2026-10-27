@@ -889,3 +889,31 @@ No other jurisdiction's behaviour changed. The shared changes in W5 are Mexico-o
 | Other jurisdictions | None |
 
 **Gap register:** A11 done (pending D-17 for overtime itself). C11 options reported (D-21). A10: SubsidioAlEmpleo (C6), CompensacionSaldosAFavor (C5) and Incapacidades (missing input) stay refused.
+
+---
+
+## W7 — Golden vectors (B21): BLOCKED-ON-DECISION (D-01)
+
+**Not started, and correctly so.** The master prompt runs W7 "once W1 makes a case computable end to end". No Mexican case is computable:
+- `mx_rounding_rule` (**D-01**) is read before any amount is produced (`rounding.py`), so every calculation blocks.
+- Every vector's expected figures depend on the rounding chosen. The two options in D-01, 2 decimals at the end or whole pesos, give different expected amounts.
+- A vector added to `tests/fixtures/mx_golden/` now would fail by construction (the README says so), and it would turn `run_golden_test_certification("MX")` from `NO_REAL_CASES` into a FAIL.
+
+This is §3 stop condition 2, applied as written: the decision blocks W7 but not W8, so W8 went ahead. Once D-01 is decided, write the vectors listed in the master prompt (ordinary weekly / quincenal / monthly, the UMA boundary, subsidy, CEAV high band, minimum-wage geography, CDMX ISN, aguinaldo, vacation premium, finiquito, PTU, annual adjustment), each from an independent step-by-step calculation with its source citations, marked `ENGINEERING — pending G1 confirmation`. Most special-pay vectors also need D-07, D-08 and D-09.
+
+---
+
+## W8 — Gate evidence drafts
+
+**ZP-PRIV:** not required. Docs only.
+
+- **New `docs/mexico/release-gates/G1…G8/EVIDENCE_DRAFT.md`.** Each draft has four parts:
+  1. what engineering produced (sources manifest and verification log, the transcription log and `compare`, the content, the tests by name, the Super Admin views, the browser evidence, the full-suite result);
+  2. the checklist items a code check confirms (the W5-3 tags, live in Readiness → Gate checklists);
+  3. the items not confirmed by code, which a person prepares or signs or an external party produces;
+  4. the open decisions and gaps the gate waits on.
+- Checklist items are read from each `CHECKLIST.md` by the generator, not retyped.
+- Each draft says it is **not a signature**: a gate is signed only by its uploaded evidence, accepted by a second Super Admin.
+- Item counts (code / not code): G1 7 / 4, G2 1 / 4, G3 1 / 2, G4 3 / 3, G5 2 / 2, G6 0 / 6, G7 0 / 7, G8 0 / 3.
+- Release-gate and gate-checklist tests: 11 passed with the drafts in place.
+- **Production effect:** none (docs).
