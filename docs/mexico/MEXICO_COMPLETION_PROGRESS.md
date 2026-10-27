@@ -917,3 +917,32 @@ This is §3 stop condition 2, applied as written: the decision blocks W7 but not
 - Item counts (code / not code): G1 7 / 4, G2 1 / 4, G3 1 / 2, G4 3 / 3, G5 2 / 2, G6 0 / 6, G7 0 / 7, G8 0 / 3.
 - Release-gate and gate-checklist tests: 11 passed with the drafts in place.
 - **Production effect:** none (docs).
+
+---
+
+## A17 — Month-to-date income in special runs (after the report)
+
+**ZP-PRIV:** not required. No route, authz, identifier or migration change.
+
+**What changed**
+- **`mexico_run_service._special_month_to_date`.** Aguinaldo, PTU and finiquito runs now carry the pay date's month-to-date, where they used to carry zeros. It uses the same committed payslips, payment order and correction rules as the ordinary accumulator, plus the **ISR withheld** on them (`mexico_correction_service.contribution(..., with_isr=True)`; a correction contributes its delta). It is bound into each special run's input hash (`monthToDate`).
+- **Ordinary runs are unchanged.** Their month-to-date keeps exactly its two keys, so their input hash does not change (pinned).
+- **The finiquito rule.** Vacation paid out is no longer refused for lack of income (`MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED` is gone). It is withheld against the month per **D-22**: two methods built behind `MX_FINIQUITO_ORDINARY_WITHHOLDING`, which is undecided, so the payout blocks with `MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED`.
+- **The aguinaldo and PTU rules** do not read month-to-date today. D-08 option (b), the Art. 96 default, can now use it once chosen.
+
+**Tests**
+- `test_mexico_rules.py`:
+  - the undecided payout refusal;
+  - both methods against a SYNTHETIC monthly tariff (hand-computed), the floor at 0, a missing ISR fact and an unknown method.
+- `test_mexico_corrections.py`: a special run sees the month's income and withholding, with the correction delta; the ordinary month-to-date keys are unchanged.
+- All `tests/test_mexico_*.py`: **1,060 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Engine | Special runs bind their month-to-date into the input hash. No special run exists in production (Mexico dormant) |
+| Other jurisdictions | None |
+
+**Gap register:** A17 done (method D-22).

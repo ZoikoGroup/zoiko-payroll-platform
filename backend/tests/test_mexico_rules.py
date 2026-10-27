@@ -289,7 +289,34 @@ def test_finiquito_isr_separation_rate_and_the_below_salary_tariff(decided_b):
 
     with pytest.raises(MXBlock) as exc:
         rule.isr({"VACATION_PAYOUT": Decimal("100")}, facts)
-    assert _codes(exc) == ["MX_FINIQUITO_ORDINARY_INCOME_UNSUPPORTED"]
+    assert _codes(exc) == ["MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED"]          # A17 built; the method is D-22
+
+
+def test_finiquito_vacation_payout_is_withheld_against_the_month(decided_b, monkeypatch):
+    """Completion A17 / D-22: vacation paid out is ordinary income of the month
+    (LISR Art. 96). SYNTHETIC monthly tariff: 10% to 10,000, then 1,000 + 20%."""
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    r = decided_b
+    rule = r.FINIQUITO_RULE
+    facts = _facts(daily_salary=Decimal("400"))
+    facts["month_to_date"] = {"taxable": Decimal("8000"), "subsidy_applied": Decimal("0"),
+                              "isr_withheld": Decimal("700")}
+    tariff = lambda x: (x - Decimal("0.01")) * Decimal("0.10") if x <= Decimal("10000") else         Decimal("1000") + (x - Decimal("10000.01")) * Decimal("0.20")                       # noqa: E731
+    monkeypatch.setattr(r, "MX_FINIQUITO_ORDINARY_WITHHOLDING", "INCREMENTAL_MONTHLY")
+    assert rule.isr({"VACATION_PAYOUT": Decimal("4000")}, facts) == tariff(Decimal("12000")) - tariff(Decimal("8000"))
+    monkeypatch.setattr(r, "MX_FINIQUITO_ORDINARY_WITHHOLDING", "MONTHLY_TOTAL_LESS_WITHHELD")
+    assert rule.isr({"VACATION_PAYOUT": Decimal("4000")}, facts) == tariff(Decimal("12000")) - Decimal("700")
+    facts["month_to_date"]["isr_withheld"] = Decimal("5000")                        # more already withheld
+    assert rule.isr({"VACATION_PAYOUT": Decimal("4000")}, facts) == Decimal("0")
+    del facts["month_to_date"]["isr_withheld"]
+    with pytest.raises(MXBlock) as exc:
+        rule.isr({"VACATION_PAYOUT": Decimal("4000")}, facts)
+    assert _codes(exc) == ["MX_SPECIAL_PAY_FACT_MISSING"]
+    monkeypatch.setattr(r, "MX_FINIQUITO_ORDINARY_WITHHOLDING", "GUESS")
+    with pytest.raises(MXBlock) as exc:
+        rule.isr({"VACATION_PAYOUT": Decimal("4000")}, facts)
+    assert _codes(exc) == ["MX_RULE_UNRECOGNISED"]
 
 
 def test_every_termination_rule_quotes_its_wording():

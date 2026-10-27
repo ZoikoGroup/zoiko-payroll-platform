@@ -24,6 +24,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-19 | Fixed salary days (e.g. 15 a fortnight) when employment ends inside the period | G5 owner | That final period (`MX_SALARY_DAYS_PARTIAL_PERIOD`) | Open |
 | D-20 | QR total on the printed CFDI receipt: the text drops the zeros, the example pads them | G1 owner (with the PAC) | Nothing (the receipt is "NOT AN OFFICIAL FILE") | Open |
 | D-21 | How to read the 830 Chihuahua c_CodigoPostal rows whose summer offset is not one hour ahead of winter (gap C11) | G1 owner | A CFDI issued from those postal codes (`MX_CFDI_TIMEZONE_RULE_INVALID`) | Open |
+| D-22 | How a finiquito withholds on vacation paid out against the month's earlier income (gap A17) | G1 owner | A finiquito that pays out vacation (`MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED`) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -200,3 +201,12 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
   - **(c) Keep refusing** until SAT publishes a corrected catalog (re-check each c_CodigoPostal revision).
   - **(d) Save the time-zone law as a source** and read the offsets from it. The law governing Mexico's time zones is not among the saved sources, so none of (a)–(c) can be checked against it here.
 - **Blocks.** Only a CFDI whose place of issue is one of those 830 postal codes. Tests: `test_mexico_timezone_reading.py`.
+
+## D-22 · Withholding on vacation paid out in a finiquito (gap A17)
+
+- **Question.** Vacation paid out at termination is ordinary income of the month. LISR Art. 96 (S24, PDF p. 130) says: "La retención se calculará aplicando a la totalidad de los ingresos obtenidos en un mes de calendario". Ordinary runs withhold with the period tables (Anexo 8 B.I–B.V), so the month's earlier withholding need not equal the monthly tariff on the month's earlier income. How is the payout withheld?
+- **Options** (both built; the switch is `mexico_rules.MX_FINIQUITO_ORDINARY_WITHHOLDING`):
+  - **(a) `MONTHLY_TOTAL_LESS_WITHHELD`:** the monthly tariff on (month-to-date taxable + payout), less the ISR already withheld in the month, floored at 0. This catches up any shortfall of the period tables.
+  - **(b) `INCREMENTAL_MONTHLY`:** the monthly tariff on (month-to-date + payout) less the monthly tariff on month-to-date alone. Only the payout's own tax; earlier periods are left as withheld.
+- **Built regardless.** The month-to-date accumulator for special runs: committed payslips of the pay date's month, in payment order, with correction deltas, and the ISR they withheld. It is bound into the run's input hash (`monthToDate`).
+- **Blocks.** A finiquito whose lines include vacation paid out. Its other lines (separation, aguinaldo, vacation premium) are unaffected.

@@ -26,7 +26,7 @@ States: DONE · BLOCKED-ON-DECISION · BLOCKED-ON-SOURCE · EXTERNAL · OPEN —
 | A14 | Dead code | DONE | Phase 11d |
 | A15 | Engine seams with no table | BLOCKED-ON-DECISION | W3: every seam has an interface; hourly rate D-17, FIXED SBC D-18, termination fixed days D-19; INFONAVIT proration BLOCKED-ON-SOURCE |
 | A16 | No ISR for a minimum-wage-only worker | DONE | W3-5 (LISR Art. 96 ¶1) |
-| A17 | Special runs carry no month-to-date income | OPEN — engineering | Build the month-to-date accumulator for finiquito / aguinaldo / PTU runs; not started in this programme |
+| A17 | Special runs carry no month-to-date income | DONE | Built after the report (accumulator with ISR withheld); the finiquito payout method is D-22 |
 | A18 | One IMSS liability mixes monthly and bimonthly branches | OPEN — engineering | Split the RCV branches into their own liability, then add the IMSS filing rules; not started |
 | B1 | ISR tariffs | DONE | Batch 1, [PENDING G1]; activation needs VERIFIED sources (C2) |
 | B2 | UMA | DONE | Batch 1, [PENDING G1] |
@@ -84,7 +84,7 @@ Each is built behind a switch or an interface where it can be. Undecided, the af
 | 3 | **D-17** hourly rate | Every overtime line (W6's triple-rate CFDI waits for it) |
 | 4 | D-02, D-03, D-04, D-05, D-16, D-18, D-19 | Daily pay, CEAV band 1, readings behind transcribed rows, January–April workweek, IMSS business days, FIXED SBC items, fixed days at termination |
 | 5 | D-06, D-10 (G4) · D-11, D-14 (G5) | CDMX ISN on separation lines and the micro / small benefit; other termination reasons; the PTU cap |
-| 6 | D-20, D-21, C5, C12 | QR total on the printed receipt, Chihuahua border time zones, undecided SAT codes, union membership |
+| 6 | D-20, D-21, D-22, C5, C12 | QR total on the printed receipt, Chihuahua border time zones, undecided SAT codes, union membership |
 
 D-15 was resolved by sources (W2-5).
 
@@ -131,7 +131,7 @@ Each commit is one step and can be its own PR. The ZP-PRIV column marks what nee
 - a direct download of every source used by an activated pack (`verify_mexico_sources verify`), so the packs can be approved and activated four-eyes;
 - the PAC chosen with sandbox credentials (C1), CSD custody (C3), durable XML storage (C15);
 - Rugvedh's ZP-PRIV reviews (C16) of every flagged commit, his changes merged first;
-- engineering: A17 (special-run month-to-date income), A18 (IMSS RCV liability split), the IMSS incapacity record behind the `Incapacidades` node;
+- engineering: A18 (IMSS RCV liability split), the IMSS incapacity record behind the `Incapacidades` node;
 - the gate evidence packs signed (drafts: `docs/mexico/release-gates/G*/EVIDENCE_DRAFT.md`).
 
 **Before general availability** (all of G1–G8, the registry AVAILABLE):

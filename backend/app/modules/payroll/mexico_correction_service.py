@@ -100,24 +100,26 @@ def replaced_chain(db: Session, run) -> set:
     return out
 
 
-def contribution(db: Session, item, run_of_item, me, my_committed_at):
+def contribution(db: Session, item, run_of_item, me, my_committed_at, with_isr: bool = False):
     """(taxable, subsidy_applied) this committed payslip adds to `me`'s
     month-to-date, or None when it must not count. Ordinary payslips are
     gated by the caller's payment order; a CORRECTION payslip adds its delta
-    and only to runs committed after the correction (or not committed)."""
+    and only to runs committed after the correction (or not committed).
+    with_isr (A17, special runs): a third element, the ISR withheld."""
     res = result_of(item)
     taxable, applied = _dec(res.get("isr_taxable")), _dec((res.get("subsidy") or {}).get("applied"))
+    isr = _dec(res.get("isr_withheld"))
     if (run_of_item.mx_run_type or "ORDINARY") != "CORRECTION":
-        return taxable, applied
+        return (taxable, applied, isr) if with_isr else (taxable, applied)
     corr_at = (run_of_item.mx_approval_fingerprint or {}).get("committedAt")
     if my_committed_at is not None and corr_at is not None and             datetime.fromisoformat(corr_at) >= datetime.fromisoformat(my_committed_at):
         return None
     original = original_item_for(db, item)
     if original is None:
-        return taxable, applied
+        return (taxable, applied, isr) if with_isr else (taxable, applied)
     o = result_of(original)
-    return (taxable - _dec(o.get("isr_taxable")),
-            applied - _dec((o.get("subsidy") or {}).get("applied")))
+    delta = (taxable - _dec(o.get("isr_taxable")), applied - _dec((o.get("subsidy") or {}).get("applied")))
+    return delta + (isr - _dec(o.get("isr_withheld")),) if with_isr else delta
 
 
 def _exempt_by_kind(res) -> dict:
