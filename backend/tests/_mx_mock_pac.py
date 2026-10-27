@@ -22,6 +22,30 @@ class PacTimeout(Exception):
     pass
 
 
+TFD_NS = "http://www.sat.gob.mx/TimbreFiscalDigital"      # the namespace of the TFD schema in S30 (Anexo 20 p. 124)
+
+
+def _synthetic_stamped(signed_payload, uuid, stamped_at):
+    """SYNTHETIC stamped CFDI: the signed XML plus a TimbreFiscalDigital node
+    carrying the UUID and SYNTHETIC SAT data (never a real PAC answer)."""
+    from lxml import etree
+
+    try:
+        root = etree.fromstring(signed_payload)
+    except etree.XMLSyntaxError:
+        return None                       # a SYNTHETIC non-XML payload (patched signer): nothing to stamp into
+    cfdi_ns = etree.QName(root).namespace
+    comp = root.find(f"{{{cfdi_ns}}}Complemento")
+    if comp is None:
+        comp = etree.SubElement(root, f"{{{cfdi_ns}}}Complemento")
+    tfd = etree.SubElement(comp, f"{{{TFD_NS}}}TimbreFiscalDigital", nsmap={"tfd": TFD_NS})
+    for k, v in (("Version", "1.1"), ("UUID", uuid), ("FechaTimbrado", stamped_at.strftime("%Y-%m-%dT%H:%M:%S")),
+                 ("RfcProvCertif", "SYN010101AAA"), ("SelloCFD", root.get("Sello") or "SYN-SELLO-CFD"),
+                 ("NoCertificadoSAT", "00001000000000000000"), ("SelloSAT", "SYNTHETIC/SAT+SEAL" * 20 + "==")):
+        tfd.set(k, v)
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+
+
 class MockPac(P.PacAdapter):
     provider = "MOCK"
 
@@ -52,8 +76,10 @@ class MockPac(P.PacAdapter):
         if how == "reject":
             return P.StampResult(outcome=P.REJECTED, code="SYN-REJECT", message="synthetic rejection")
         uuid = self._do_stamp(idempotency_key)
-        return P.StampResult(outcome=P.ACCEPTED, uuid=uuid, stamped_at=datetime.now(timezone.utc),
-                             sat_certificate_number="SYN-SAT-CERT", code="SYN-OK")
+        stamped_at = datetime.now(timezone.utc)
+        return P.StampResult(outcome=P.ACCEPTED, uuid=uuid, stamped_at=stamped_at,
+                             sat_certificate_number="SYN-SAT-CERT", code="SYN-OK",
+                             stamped_xml=_synthetic_stamped(signed_payload, uuid, stamped_at))
 
     def query_status(self, document, idempotency_key, credential):
         self.calls.append(("status", idempotency_key, document.payload_hash))

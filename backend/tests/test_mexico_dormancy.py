@@ -42,6 +42,7 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/cfdi/cancellation-reasons"),
     # Phase 8 — authorities
     ("POST", "/reports/1/generate"),                                   # W4-2 dedicated report generators
+    ("GET", "/cfdi/documents/1/receipt"),                              # W4-3b printed CFDI receipt
     ("GET", "/authorities/summary"), ("POST", "/authorities/accrue"), ("GET", "/authorities/liabilities"),
     ("GET", "/authorities/liabilities/1"), ("POST", "/authorities/liabilities/1/file"),
     ("POST", "/authorities/liabilities/1/pay"), ("POST", "/authorities/liabilities/1/reconcile"),

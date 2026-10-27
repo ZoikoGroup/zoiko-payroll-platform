@@ -506,3 +506,57 @@ Run 2026-10-26 16:55–17:20 on `84847ab`, in five sequential chunks on scratch 
   - the old "refused today" test still passes.
   - Mexico report tests: 14 passed. All Mexico tests: 1,007 passed; the one failure (a test that hands the hook a pack instead of a template) was fixed by reading the report type defensively; scaffolding + report tests 37 passed.
 - **Production effect:** none reachable. Mexico templates were never activatable, and still are not until the gates are signed.
+
+---
+
+## W4-3b — Phase 12c: the stamped XML is kept; the printed CFDI receipt (Phase 12 plan D4)
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** A new org route renders a worker's raw RFC, CURP and NSS. This is the master prompt's one allowed exception (MX-061: the CFDI receipt). The receipt is rendered on demand and never stored, logged or put in a message.
+
+**What changed**
+- **The PAC's stamped CFDI is kept.**
+  - `mexico_pac.StampResult` gains an optional `stamped_xml`.
+  - When a UUID is adopted, `mexico_cfdi_service._store_stamped_xml` saves `{folio}.stamped.xml` beside the signed XML and records `STAMPED_XML_STORED {ref, sha256}`. There is no new column: the reference lives in the event's detail.
+  - A stamped XML that does not carry the adopted UUID is not kept (`STAMPED_XML_MISMATCH`).
+  - New `stamped_xml_ref(db, doc)`.
+- **New `mexico_cfdi_receipt.py`.** It is rendered only from that stored stamped XML, never from engine figures. What it prints, and where each rule is written (saved sources only):
+  - **CFF Art. 29-A I–IV** (S35, p. 57): issuer RFC, name, regime and place of issue; folio; seals; date; receiver RFC, name, postal code and use;
+  - **RMF 2026 rule 2.7.1.7** (S1, pp. 99–100), parts I–IV: the QR; the issuer and SAT CSD serials; the legend "Este documento es una representación impresa de un CFDI"; the issue and certification date-times;
+  - **RMF 2026 rule 2.7.5.2** (S1, p. 162): the folio fiscal and both RFCs;
+  - **Anexo 20 I.D** (S30, pp. 66–67): the QR (`id`, `re`, `rr`, `tt`, `fe`, in that order), printed at 3 cm (≥ 2.75 cm).
+- **"NOT AN OFFICIAL FILE".** The receipt carries this watermark on every page and lists what is missing:
+  - rule 2.7.1.7 V, the original chain of the SAT certification complement, has no formation rule in the saved sources (only examples);
+  - the QR total follows the Anexo 20 text (no non-significant zeros), while the same page's example pads it: **D-20**.
+- **Layout.** Lines wrap by word and are never cut, so both seals (about 344 characters) print whole (CFF 29-A). Rows beside the QR are narrowed, and the QR is drawn first so it is always on page 1. The layout was checked by rendering a synthetic receipt and reading it.
+- **Route:** `GET /api/payroll/mexico/cfdi/documents/{document_id}/receipt`.
+  - Org admin only; it returns the PDF with `Cache-Control: no-store`.
+  - It sits behind the Mexico dormancy guard and the filing guard (it refuses a dormant or pilot organisation).
+  - It refuses a document that is not stamped (STAMPED, CANCEL_REQUESTED, CANCELLED or REPLACED) or that has no stored stamped XML.
+  - Another organisation's document is "not found".
+- **Route registry** regenerated. The diff was exactly the new route (`worker`, `org_admin`, `payroll_mx_cfdi_documents`). The four `/health/*` rows from your uncommitted `backend/app/main.py` were removed by hand again.
+
+**Tests**
+- New `test_mexico_cfdi_receipt.py` (8):
+  - the stamped XML is kept, and the receipt reads only from it (nothing is stored as a report);
+  - every rule 2.7.1.7 / 2.7.5.2 / CFF 29-A field is present;
+  - the receipt's totals equal the payslip snapshot;
+  - the QR sequence and values;
+  - the QR total's zero handling (4 cases);
+  - the PDF is built in memory, with the legend, the watermark, the UUID and a seal-length SAT seal printed whole;
+  - an unstamped document, a stamped one whose payload is not a Comprobante, and an unknown document are all refused.
+- Updated:
+  - the synthetic mock PAC now returns a stamped XML (a TimbreFiscalDigital node with SYNTHETIC SAT data and a seal-length SAT seal);
+  - the lifecycle test expects the extra `STAMPED_XML_STORED` event;
+  - the dormancy route list gains the receipt route.
+- Mexico + privacy tests: **1,283 passed, 78 skipped.** Four failed. Three are the known local-only route-registry tests: the only difference is the 4 `/health/*` routes in your uncommitted `main.py`. The fourth is the lifecycle event list, which was updated after that run. Re-run of lifecycle + receipt + dormancy + route registry: 205 passed, with only the same 3 local-only failures.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None. No new column (the reference lives in the existing event table) |
+| API | One new org route, behind the Mexico dormancy guard: refused while Mexico is dormant |
+| CFDI stamping | When a real PAC adapter returns `stamped_xml`, it is stored. No real adapter exists yet (no PAC transmission is built) |
+| Other jurisdictions | None |
+
+**Phase 12 plan D4** ("build now from the stored stamped XML") is done. The receipt stays "not an official file" until D-20 and the rule 2.7.1.7 V chain are settled; it becomes G1 evidence once a PAC sandbox stamps (C1).

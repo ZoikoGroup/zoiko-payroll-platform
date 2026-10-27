@@ -22,6 +22,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-17 | Hourly rate for overtime: daily salary ÷ the LFT Art. 61 working-day length? | G5 owner | Every overtime line (`MX_HOURLY_RATE_RULE_MISSING`) | Open |
 | D-18 | FIXED SBC items (LSS Art. 30 I): how a periodic amount becomes a daily SBC amount | G2 owner | Any FIXED SBC item other than the salary (`MX_SBC_FIXED_RULE_MISSING`) | Open |
 | D-19 | Fixed salary days (e.g. 15 a fortnight) when employment ends inside the period | G5 owner | That final period (`MX_SALARY_DAYS_PARTIAL_PERIOD`) | Open |
+| D-20 | QR total on the printed CFDI receipt: the text drops the zeros, the example pads them | G1 owner (with the PAC) | Nothing (the receipt is "NOT AN OFFICIAL FILE") | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -177,3 +178,9 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 
 - **Question.** When the employer's labour policy pays fixed salary days (e.g. 15 a fortnight, 30 a month) and employment ends inside the period, how many days are paid? (The LFT does not say; it is a pay convention.)
 - **Blocks.** That final period: `MX_SALARY_DAYS_PARTIAL_PERIOD`. Interface: `MX_FIXED_DAYS_TERMINATION_RULE.days_paid(tariff, period_start, period_end, termination_date)`.
+
+## D-20 · Zero-padding of the QR total on the printed CFDI receipt
+
+- **Question.** Anexo 20 I.D (S30, PDF p. 67) says the `tt` field is the total "máximo a 25 posiciones (18 para los enteros, 1 para carácter “.”, 6 para los decimales), se deben omitir los ceros no significativos". The worked example on the same page pads: `tt=0000014300.000000`. Which form does the SAT verifier expect: `14300` (the text) or the padded form (the example)?
+- **Built.** The text: `mexico_cfdi_receipt.qr_total` drops the non-significant zeros. One function to change if the example is the rule.
+- **Blocks.** Nothing (the receipt is labelled "NOT AN OFFICIAL FILE" anyway, because the rule 2.7.1.7 V certification chain has no saved formation rule). To settle before the receipt is relied on: scan a real PAC-stamped receipt's QR with the SAT verifier, or get the PAC's reading.

@@ -479,6 +479,7 @@ GET,/api/payroll/mexico/cfdi/cancellation-reasons,tenant_config,read,cancellatio
 GET,/api/payroll/mexico/cfdi/documents/{document_id},worker,read,documents,org_admin|payroll_admin,tenant,,,payroll_mx_cfdi_documents,no,
 POST,/api/payroll/mexico/cfdi/documents/{document_id}/cancel,worker,create,cancel,org_admin,tenant,,,payroll_mx_cfdi_documents,no,
 POST,/api/payroll/mexico/cfdi/documents/{document_id}/confirm-retry,worker,create,confirm-retry,org_admin,tenant,,,payroll_mx_cfdi_documents,no,
+GET,/api/payroll/mexico/cfdi/documents/{document_id}/receipt,worker,read,receipt,org_admin,tenant,,,payroll_mx_cfdi_documents,no,
 POST,/api/payroll/mexico/cfdi/documents/{document_id}/status-query,worker,create,status-query,org_admin,tenant,,,payroll_mx_cfdi_documents,no,
 POST,/api/payroll/mexico/cfdi/outbox/process,worker,create,process,org_admin,tenant,,,payroll_mx_cfdi_documents,no,
 POST,/api/payroll/mexico/cfdi/reconcile,worker,create,reconcile,org_admin,tenant,,,payroll_mx_cfdi_documents,no,
