@@ -217,10 +217,11 @@ def test_a_lower_correction_posts_a_negative_delta(db, monkeypatch):
     _approve(db, w, corr_run)
     s.F.accrue(db, w.org.id, w.users[0].id)
     (imss,) = ah.liabilities(db, w, "IMSS")
+    (rcv,) = ah.liabilities(db, w, "IMSS_RCV")                                 # A18: retiro and CEAV apart
     (new,) = ah.rh.mx_items(db, corr_run)
     o, c = orig.mx_calculation_snapshot["result"], new.mx_calculation_snapshot["result"]
     expected = D(str(c["imss_employee"])) + D(str(c["imss_employer"]))
-    assert imss.amount == expected < D(str(o["imss_employee"])) + D(str(o["imss_employer"]))
+    assert imss.amount + rcv.amount == expected < D(str(o["imss_employee"])) + D(str(o["imss_employer"]))
 
 
 def test_imss_modification_movement_from_a_corrected_sbc(db, monkeypatch):

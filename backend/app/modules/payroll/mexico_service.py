@@ -860,7 +860,7 @@ def statutory_rules_view(db: Session, on: Optional[date] = None) -> dict:
         item(f"{r.report_type}{'/' + r.state if r.state else ''}", r.due_rule, _cites(r), reportType=r.report_type,
              frequency=r.frequency, dueDay=r.due_day, dueMonth=r.due_month, state=r.state)
         for r in c.MX_FILING_CALENDAR],
-        note="IMSS monthly / bimonthly payment dates are not listed (gap A18)")
+        note="IMSS quotas are monthly; retiro and CEAV (IMSS_RCV) by bimester (gap A18)")
     family("specialPay", "Special pay: LISR Art. 93 exemptions and withholding", [
         item(k, _CONCEPT_LABELS.get(k, k), _cites(o)) for k, o in sorted(c.MX_SPECIAL_PAY_RULES.items())]
         + ([item("AGUINALDO_RULE", "Aguinaldo amount and payable-by date (LFT Art. 87)", _cites(c.MX_AGUINALDO_RULE))]

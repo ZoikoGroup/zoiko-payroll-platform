@@ -113,7 +113,7 @@ def _mx_report_body(db: Session, org_id: int, template, params: dict) -> tuple:
         return "ORG", as_of[:4], as_of, {"lifecycle": mexico_cfdi_service.lifecycle_overview(db, org_id)}
     if rtype in ("MX_ISR_WITHHOLDING", "MX_SIPARE"):
         period = _mx_report_period(params)
-        authorities = ("SAT_ISR",) if rtype == "MX_ISR_WITHHOLDING" else ("IMSS", "INFONAVIT")
+        authorities = ("SAT_ISR",) if rtype == "MX_ISR_WITHHOLDING" else ("IMSS", "IMSS_RCV", "INFONAVIT")
         rows = [mexico_filing_service.liability_view(db, mexico_filing_service._liability(db, org_id, r["id"]),
                                                      with_sources=True)
                 for r in mexico_filing_service.list_liabilities(db, org_id, period) if r["authority"] in authorities]

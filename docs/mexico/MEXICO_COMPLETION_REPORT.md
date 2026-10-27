@@ -27,7 +27,7 @@ States: DONE · BLOCKED-ON-DECISION · BLOCKED-ON-SOURCE · EXTERNAL · OPEN —
 | A15 | Engine seams with no table | BLOCKED-ON-DECISION | W3: every seam has an interface; hourly rate D-17, FIXED SBC D-18, termination fixed days D-19; INFONAVIT proration BLOCKED-ON-SOURCE |
 | A16 | No ISR for a minimum-wage-only worker | DONE | W3-5 (LISR Art. 96 ¶1) |
 | A17 | Special runs carry no month-to-date income | DONE | Built after the report (accumulator with ISR withheld); the finiquito payout method is D-22 |
-| A18 | One IMSS liability mixes monthly and bimonthly branches | OPEN — engineering | Split the RCV branches into their own liability, then add the IMSS filing rules; not started |
+| A18 | One IMSS liability mixes monthly and bimonthly branches | DONE | Built after the report: `IMSS_RCV` authority, migration c7d2e9a4f1b6 (ZP-PRIV), monthly / bimonthly rules [PENDING G1] |
 | B1 | ISR tariffs | DONE | Batch 1, [PENDING G1]; activation needs VERIFIED sources (C2) |
 | B2 | UMA | DONE | Batch 1, [PENDING G1] |
 | B3 | Employment subsidy | DONE | Batch 1–2, W1-6, W3-1 |
@@ -131,7 +131,7 @@ Each commit is one step and can be its own PR. The ZP-PRIV column marks what nee
 - a direct download of every source used by an activated pack (`verify_mexico_sources verify`), so the packs can be approved and activated four-eyes;
 - the PAC chosen with sandbox credentials (C1), CSD custody (C3), durable XML storage (C15);
 - Rugvedh's ZP-PRIV reviews (C16) of every flagged commit, his changes merged first;
-- engineering: A18 (IMSS RCV liability split), the IMSS incapacity record behind the `Incapacidades` node;
+- engineering: the IMSS incapacity record behind the `Incapacidades` node;
 - the gate evidence packs signed (drafts: `docs/mexico/release-gates/G*/EVIDENCE_DRAFT.md`).
 
 **Before general availability** (all of G1–G8, the registry AVAILABLE):

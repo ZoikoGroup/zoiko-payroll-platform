@@ -16,7 +16,7 @@ def test_org_authority_flow_through_the_api(db, monkeypatch):
                                                           "MX_FILING_CALENDAR_EMPTY", "MX_AUTHORITY_TRANSMISSION"}
         assert a.post(f"{ORG_BASE}/authorities/accrue").json()["sourcesAdded"] > 0
         liabs = a.get(f"{ORG_BASE}/authorities/liabilities").json()
-        assert {l["authority"] for l in liabs} == {"SAT_ISR", "IMSS", "INFONAVIT", "ISN"}
+        assert {l["authority"] for l in liabs} == {"SAT_ISR", "IMSS", "IMSS_RCV", "INFONAVIT", "ISN"}   # A18
         assert all(l["dueState"] == "DUE_DATE_UNSOURCED" for l in liabs)
         gen = a.post(f"{ORG_BASE}/authorities/movements/generate").json()
         (mv,) = gen["created"]
