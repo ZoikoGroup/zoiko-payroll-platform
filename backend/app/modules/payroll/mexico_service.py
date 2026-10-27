@@ -92,6 +92,118 @@ def gate_states(db: Session) -> list:
     return out
 
 
+# ── W5-3: per gate, which checklist items code confirms and which await evidence ──
+# Each docs/mexico/release-gates/G*/CHECKLIST.md item ending in
+# `<!-- code: key -->` is evaluated live by _GATE_CODE_CHECKS[key]; every other
+# item can only be met by the gate's signed evidence (a human or an external
+# party). The checklist file stays the one list — nothing is duplicated here.
+import re as _re
+
+_CHECKLIST_ITEM = _re.compile(r"^- \[[ xX]\] (?:\*\*\[(?P<phase>[A-Z -]+)\]\*\* )?(?P<text>.*?)"
+                              r"(?: <!-- code: (?P<code>[a-z0-9_]+) -->)?\s*$")
+
+
+def _plain_markdown(text: str) -> str:
+    return _re.sub(r"\*\*|`", "", text).strip()
+
+
+def _gate_code_checks(db: Session) -> dict:
+    """key -> (met, detail), computed once per call."""
+    from app.modules.payroll import mexico_cfdi_input
+    from app.modules.payroll.models import JurisdictionPack, PayrollMxCfdiSchemaRelease
+
+    out = {}
+    pack = _national_pack(db)
+    checks = {c["key"]: c for c in activation_checks(db, pack)} if pack is not None else {}
+    if pack is None:
+        out["national_pack_approved"] = (False, "no national Mexico pack is seeded")
+    else:
+        unmet = [c["detail"] for k, c in checks.items() if k in ("content", "evidence") and not c["met"]]
+        approved = pack.status in ("Approved", "Active")
+        out["national_pack_approved"] = (
+            approved and not unmet,
+            f"{pack.pack_id} v{pack.version} is {pack.status}" + (f"; {unmet[0]}" if unmet else "; content exact and "
+                                                                    "every row source-linked"))
+    for key, check in (("sources_verified", "sources_verified"), ("golden_pass", "golden")):
+        c = checks.get(check)
+        out[key] = (bool(c and c["met"]), c["detail"] if c else "no national Mexico pack is seeded")
+    active = (db.query(PayrollMxCfdiSchemaRelease).filter(PayrollMxCfdiSchemaRelease.status == "Active").first())
+    out["cfdi_release_active"] = ((True, f"CFDI release #{active.id} is Active") if active
+                                  else (False, "no CFDI schema / catalog release is Active"))
+    period = _content.MX_PAY_FREQUENCY_ISR_PERIOD.get("01")
+    out["pay_frequency_01"] = ((True, f"01 Diario maps to {period}") if period
+                               else (False, "01 Diario is not mapped (MX_PAY_FREQUENCY_MAPPING_MISSING)"))
+    rounding = [r for r in _content.MX_SCALAR_CONTENT if r.key == "mx_rounding_rule" and r.text_value]
+    out["rounding_rule"] = ((True, f"mx_rounding_rule = {rounding[0].text_value}") if rounding
+                            else (False, "mx_rounding_rule is not transcribed (D-01) — every calculation blocks"))
+    sdi = mexico_cfdi_input.SDI_SOURCE
+    out["cfdi_sdi_source"] = ((True, f"SalarioDiarioIntegrado source decided ({sdi}); the concept mappings are "
+                                     "confirmed in the CFDI catalog release") if sdi
+                              else (False, "SDI_SOURCE is undecided — every receipt with an IMSS registration is "
+                                           "refused"))
+    states = (db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == MX,
+                                                JurisdictionPack.pack_type == "tax",
+                                                JurisdictionPack.jurisdiction_state.isnot(None),
+                                                JurisdictionPack.status.in_(("Approved", "Active"))).all())
+    out["isn_pack_approved"] = ((True, "Approved / Active: " + ", ".join(sorted({p.jurisdiction_state for p in states})))
+                                if states else (False, "no state ISN pack is Approved or Active"))
+    entities = isn_states(db)
+    leaking = [s["code"] for s in entities if not s["supported"] and s["payroll"] != "BLOCKED"]
+    out["unsupported_states_blocked"] = (
+        (False, f"payroll is not BLOCKED for unsupported state(s) {leaking}") if leaking
+        else (True, f"payroll is BLOCKED in all {sum(not s['supported'] for s in entities)} state(s) without an "
+                    "Active ISN pack"))
+    missing = [k for k in ("VACATION_PAYOUT", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY")
+               if ("CDMX", k) not in _content.MX_SPECIAL_PAY_ISN_INCLUSION]
+    out["isn_d06"] = ((False, f"CDMX inclusion undecided for {', '.join(missing)} (D-06)") if missing
+                      else (True, "every CDMX special-pay concept has its inclusion rule"))
+    return out
+
+
+GATE_CODE_CHECK_KEYS = ("national_pack_approved", "sources_verified", "golden_pass", "cfdi_release_active",
+                        "pay_frequency_01", "rounding_rule", "cfdi_sdi_source", "isn_pack_approved",
+                        "unsupported_states_blocked", "isn_d06")
+
+
+def gate_checklists(db: Session) -> dict:
+    """W5-3: each gate's checklist items, split into "code" (evaluated now)
+    and "evidence" (met only by the gate's signed evidence pack)."""
+    from app.modules.payroll import mexico_sources
+
+    root = mexico_sources.REPO_ROOT / "docs" / "mexico" / "release-gates"
+    states = {g["gate"]: g["state"] for g in gate_states(db)}
+    results = None
+    gates = []
+    for key, label in GATES:
+        path = root / key / "CHECKLIST.md"
+        if not path.is_file():
+            gates.append({"gate": key, "label": label, "state": states[key], "available": False, "items": []})
+            continue
+        items = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = _CHECKLIST_ITEM.match(line)
+            if not line.startswith("- [") or not m:
+                continue
+            item = {"phase": m.group("phase"), "text": _plain_markdown(m.group("text")), "code": m.group("code")}
+            if item["code"]:
+                if results is None:
+                    results = _gate_code_checks(db)
+                met, detail = results.get(item["code"], (False, f"unknown code check {item['code']}"))
+                item.update(kind="code", met=met, detail=detail)
+            else:
+                signed = states[key] == "SIGNED"
+                item.update(kind="evidence", met=signed,
+                            detail="in the signed gate evidence" if signed else "awaits the gate's signed evidence")
+            items.append(item)
+        code = [i for i in items if i["kind"] == "code"]
+        gates.append({"gate": key, "label": label, "state": states[key], "available": True, "items": items,
+                      "codeMet": sum(i["met"] for i in code), "codeTotal": len(code),
+                      "evidenceItems": len(items) - len(code)})
+    return {"gates": gates, "note": "Code items are evaluated now; evidence items are met only when the gate is "
+                                    "SIGNED (uploaded evidence reviewed by a second Super Admin). Nothing here signs "
+                                    "a gate."}
+
+
 def owner_decisions(db: Session) -> list:
     out = []
     for key, label, tag in OWNER_DECISIONS:

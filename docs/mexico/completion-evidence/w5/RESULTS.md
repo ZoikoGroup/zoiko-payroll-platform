@@ -1,6 +1,6 @@
 # Mexico completion W4 / W5-1 -- browser check
 
-33/33 PASS
+36/36 PASS
 
 | Check | Result |
 |---|---|
@@ -17,6 +17,9 @@
 | w5-11 a generic statutory edit of a Mexico pack is refused (400) | PASS |
 | w5-12 a Mexico hotfix activation is refused (400) | PASS |
 | w5-13 another country's Draft pack still offers Hotfix Activate (unchanged) | PASS |
+| w5-14 the readiness tab lists a checklist for every gate G1-G8 | PASS |
+| w5-15 G1 shows 7 code items (evaluated now) and its evidence items (awaiting signed evidence) | PASS |
+| w5-16 G4 shows unsupported states blocked (met) and D-06 undecided (unmet) | PASS |
 | w4-1 the Mexico template list shows every national template | PASS |
 | w4-t MX-PAYROLL-REGISTER opens (Draft) with its components, or says which generator builds it | PASS |
 | w4-t MX-EMPLOYER-COST opens (Draft) with its components, or says which generator builds it | PASS |

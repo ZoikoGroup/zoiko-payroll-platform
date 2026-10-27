@@ -18,7 +18,7 @@
 
 Each item is tagged: **PRE-PILOT** (produced before any real Mexican data, from sources, synthetic cases or a test environment), **PILOT-GENERATED** (produced by the non-binding pilot, Phase 10e), or **GO-LIVE CHECK** (a real filing or payment, possible only after general availability; checked in the activation runbook, not gate evidence).
 
-- [ ] **[PRE-PILOT]** The 5% employer contribution transcribed from S27, in an Approved pack
+- [ ] **[PRE-PILOT]** The 5% employer contribution transcribed from S27, in an Approved pack <!-- code: national_pack_approved -->
 - [ ] **[PILOT-GENERATED]** Credit notices (retention, suspension, modification) of the pilot's real workers applied, and reconciled against INFONAVIT's own figures
 - [ ] **[GO-LIVE CHECK]** The first INFONAVIT liability filed and paid through SUA / SIPARE (activation runbook §6; the pilot never files)
 

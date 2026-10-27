@@ -161,6 +161,28 @@ with sync_playwright() as p:
     check("w5-13 another country's Draft pack still offers Hotfix Activate (unchanged)",
           a.get_by_role("button", name=re.compile("Hotfix Activate")).count() == 1, "")
 
+    # ── W5-3: readiness per gate, code vs evidence ─────────────────────────
+    open_mx_tab(a, "Readiness G1")
+    panel = tid(a, "mx-gate-checklists")
+    panel.scroll_into_view_if_needed()
+    check("w5-14 the readiness tab lists a checklist for every gate G1-G8",
+          all(tid(a, f"mx-gate-checklist-G{n}").count() == 1 for n in range(1, 9)), "")
+    tid(a, "mx-gate-checklist-G1").locator("button").first.click()
+    settle(a, 800)
+    g1 = tid(a, "mx-gate-checklist-G1").inner_text()
+    code_items = tid(a, "mx-gate-checklist-G1").locator('[data-testid="mx-gate-item-code"]').count()
+    evidence_items = tid(a, "mx-gate-checklist-G1").locator('[data-testid="mx-gate-item-evidence"]').count()
+    check("w5-15 G1 shows 7 code items (evaluated now) and its evidence items (awaiting signed evidence)",
+          code_items == 7 and evidence_items == 4 and "MX-PAYROLL-2026 v1.0 is Draft" in g1
+          and "awaits the gate's signed evidence" in g1 and "code 0/7" in g1, g1[:600])
+    shot(a, "w5_07_gate_checklist_g1", tid(a, "mx-gate-checklist-G1"))
+    tid(a, "mx-gate-checklist-G4").locator("button").first.click()
+    settle(a, 800)
+    g4 = tid(a, "mx-gate-checklist-G4").inner_text()
+    check("w5-16 G4 shows unsupported states blocked (met) and D-06 undecided (unmet)",
+          "payroll is BLOCKED in all" in g4 and "D-06" in g4 and "code 1/3" in g4, g4[:600])
+    shot(a, "w5_08_gate_checklist_g4", tid(a, "mx-gate-checklist-G4"))
+
     # ── W4: each Mexico report template ─────────────────────────────────────
     a.goto(APP + "/super-admin/report-templates/mexico", wait_until="load")
     settle(a, 2500)

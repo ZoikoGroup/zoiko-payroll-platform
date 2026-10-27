@@ -700,3 +700,70 @@ The other W5 findings (direct generic edits, readiness per gate, the policy page
 | Super Admin API | Four generic row routes refuse Mexico packs; Mexico hotfix activation is refused (no Mexico pack is Active, so no emergency path is lost) |
 | UI | The Mexico pack header loses Hotfix Activate |
 | Other jurisdictions | None. The shared functions add a Mexico-only branch, and the layout prop is opt-in. Proven by the Indian-pack and NL-header checks and by the hotfix and canonical-row tests |
+
+---
+
+## W5-3 — Readiness per gate: what code confirms, what awaits evidence
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** One new read-only Super Admin route was added to the route registry. It returns platform data only.
+
+**Before.** Each gate showed only OPEN, SUBMITTED or SIGNED (from its evidence artifact). No screen said which checklist items the code already confirms and which only signed evidence can meet.
+
+**What changed**
+- **The checklist files stay the one list.** In `docs/mexico/release-gates/G*/CHECKLIST.md`, each item a code check can confirm ends with an HTML comment `<!-- code: key -->`, which is invisible when rendered. 14 items across G1–G5 are tagged:
+  - G1: 7 items;
+  - G2, G3: 1 each;
+  - G4: 3;
+  - G5: 2;
+  - G6–G8: none (all need human or external evidence).
+- **`mexico_service.gate_checklists`** parses the files at request time. Each item is one of:
+  - **code**, evaluated now by `_gate_code_checks` (`GATE_CODE_CHECK_KEYS`), with a reason;
+  - **evidence**, met only when the gate is SIGNED.
+
+  The code checks:
+
+  | Key | Met when |
+  |---|---|
+  | `national_pack_approved` | The national pack is Approved or Active, with exact content and every row source-linked |
+  | `sources_verified`, `golden_pass` | The national pack's activation checks pass |
+  | `cfdi_release_active` | A CFDI release is Active |
+  | `pay_frequency_01` | 01 Diario is mapped |
+  | `rounding_rule` | `mx_rounding_rule` is transcribed |
+  | `cfdi_sdi_source` | `SDI_SOURCE` is decided |
+  | `isn_pack_approved` | A state ISN pack is Approved or Active |
+  | `unsupported_states_blocked` | Payroll is BLOCKED in every state without an Active pack |
+  | `isn_d06` | CDMX has an inclusion rule for vacation paid out, the separation payment and the indemnity |
+
+  If the files are missing on a server, the gate says "checklist not available". Nothing here signs a gate.
+- **Route:** `GET /super-admin/compliance/mexico/readiness/gate-checklists`. It is separate from `/readiness` because the golden check is not cheap.
+- **Frontend:** the Readiness tab gains "Gate checklists — code vs evidence". Each gate shows its state, the code items met against the total, and the number of evidence items, and expands to every item with its reason.
+
+**Today (scratch database with the real Draft packs):**
+- **G1:** code 0/7. The pack is Draft and lacks `mx_rounding_rule`; there is no golden vector; no CFDI release is Active; the sources are archive copies, not VERIFIED; 01 Diario, rounding (D-01) and the SDI source are undecided. Its 4 evidence items await the signed evidence.
+- **G4:** code 1/3. Payroll is BLOCKED in all 32 states (met); no state pack is Approved; D-06 is undecided.
+
+**Tests**
+- New `test_mexico_gate_checklists.py` (5):
+  - every code tag is a known check and every check is used;
+  - every gate is split into code and evidence items, with the markdown markup stripped;
+  - the code items match today's state;
+  - a SIGNED gate meets its evidence items, and only that gate's;
+  - the route is Super Admin only.
+- Router, dormancy, release-gate and privacy tests: 433 passed, with only the 3 known `/health` route-registry failures. The registry diff is exactly the new route.
+- Frontend: ESLint is clean; `check:undefined` reports 580 files with no undefined names; the build passes.
+
+**Browser: 36/36 PASS.** New checks:
+- w5-14: every gate has its checklist;
+- w5-15: G1 shows 7 code items with live reasons and 4 evidence items "awaiting the gate's signed evidence";
+- w5-16: G4 shows the met state-block item and D-06 undecided.
+
+Screenshots `w5_07` and `w5_08` were inspected.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | One new read-only Super Admin route |
+| Docs | Checklist items carry invisible code tags; no wording changed |
+| Other jurisdictions | None |

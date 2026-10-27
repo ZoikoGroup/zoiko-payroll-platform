@@ -19000,6 +19000,22 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/readiness/gate-checklists",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "gate-checklists",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/statutory-rules",
    "data_class": "platform",
    "action": "read",
