@@ -26,6 +26,9 @@ REVISION = "447f57564983"
 TENANT = ("payroll_za_employer_registrations", "payroll_za_sars_artifacts")
 WORKER_ORG = ("payroll_za_tax_directives", "payroll_za_eti_ledger")
 NEW_TABLES = TENANT + WORKER_ORG
+# Phase 8 (c15d5b87d6f5): SARS payments + approved reconciliation variances, both TENANT.
+P8_REVISION = "c15d5b87d6f5"
+P8_TABLES = ("payroll_za_sars_payments", "payroll_za_reconciliation_variances")
 
 
 def _load(prefix):
@@ -91,7 +94,7 @@ def test_classify_agrees_with_the_policies_the_revision_applies(classified):
 def test_every_south_africa_table_has_a_policy_source(classified):
     _rls, worker, tenant = classified
     za = {t for t in set(worker) | tenant if t.startswith("payroll_za_")}
-    assert za == set(NEW_TABLES)
+    assert za == set(NEW_TABLES) | set(P8_TABLES)
 
 
 def test_revision_emits_the_derived_policy(classified):
@@ -117,8 +120,8 @@ def model_engine():
     engine.dispose()
 
 
-def _run(engine, fn_name):
-    module = _load(REVISION)
+def _run(engine, fn_name, revision=REVISION):
+    module = _load(revision)
     with engine.begin() as conn:
         ctx = MigrationContext.configure(conn)
         with Operations.context(ctx):
@@ -186,7 +189,7 @@ def test_deploy_drift_filter_explains_every_za_object():
         tables, columns = pending_objects("c7d2e9a4f1b6")
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
+    assert tables == set(NEW_TABLES) | set(P8_TABLES)
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot"}
     assert columns["payroll_runs"] == {"za_approval_fingerprint"}
@@ -195,3 +198,35 @@ def test_deploy_drift_filter_explains_every_za_object():
 def test_revision_is_a_single_child_of_the_previous_head():
     module = _load(REVISION)
     assert (module.revision, module.down_revision) == (REVISION, "c7d2e9a4f1b6")
+
+
+# ── Phase 8: c15d5b87d6f5 (SARS payments, reconciliation variances) ─────────
+def test_p8_tables_are_tenant_and_the_revision_emits_the_tenant_policy(classified):
+    rls, worker, tenant = classified
+    for table in P8_TABLES:
+        assert table in tenant and table not in worker, table
+    bind = _CaptureBind()
+    _load(P8_REVISION)._rls_for_new_tables(bind)
+    assert _policies(bind.sql) == {t: " ".join(rls._TENANT_PREDICATE.split()) for t in P8_TABLES}
+    for table in P8_TABLES:
+        assert f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY' in bind.sql
+
+
+def test_p8_tables_match_the_models_replay_and_downgrade(model_engine):
+    engine, metadata = model_engine
+    with engine.begin() as conn:
+        for table in P8_TABLES:
+            conn.execute(sa.text(f'DROP TABLE "{table}"'))
+    _run(engine, "upgrade", P8_REVISION)
+    for table in P8_TABLES:
+        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns}, table
+    before = set(sa.inspect(engine).get_table_names())
+    _run(engine, "upgrade", P8_REVISION)                                  # replay: no-op
+    assert set(sa.inspect(engine).get_table_names()) == before
+    _run(engine, "downgrade", P8_REVISION)
+    assert before - set(sa.inspect(engine).get_table_names()) == set(P8_TABLES)
+
+
+def test_p8_revision_is_the_single_child_of_the_za_foundation():
+    module = _load(P8_REVISION)
+    assert (module.revision, module.down_revision) == (P8_REVISION, REVISION)

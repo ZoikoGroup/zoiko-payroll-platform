@@ -93,7 +93,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # payroll_za_* tables, 13 za_* profile columns, the payslip snapshot and
         # the run fingerprint — all pending on top of every production revision.
         za_tables = {"payroll_za_employer_registrations", "payroll_za_tax_directives", "payroll_za_eti_ledger",
-                     "payroll_za_sars_artifacts"}
+                     "payroll_za_sars_artifacts",
+                     # Phase 8 (c15d5b87d6f5): SARS payments + approved reconciliation variances.
+                     "payroll_za_sars_payments", "payroll_za_reconciliation_variances"}
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
         assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables
         # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2

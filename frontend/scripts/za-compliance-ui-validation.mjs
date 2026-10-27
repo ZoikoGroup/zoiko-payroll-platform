@@ -142,6 +142,34 @@ check("The broken band-form modal is gone and not imported", () =>
   !config.includes("ZABandFormModal") &&
   !overview.includes("ZABandFormModal"));
 
+// ── Phase 8: SARS filing panel (export-and-evidence, ZA-002 / ZA-010 / ZA-018) ──
+const filingPanel = read("modules/payroll/Reports/ZAFilingPanel.jsx");
+const reportsPage = read("modules/payroll/Reports/ReportsPage.jsx");
+const payrollService = read("service/payrollService.js");
+
+check("The SARS filing tab is shown for ZA organisations only", () =>
+  reportsPage.includes('import ZAFilingPanel from "./ZAFilingPanel"') &&
+  reportsPage.includes("isSouthAfrica ? [ZA_FILING_TAB]") &&
+  reportsPage.includes('isSouthAfrica && activeTab === "za-filing"') &&
+  reportsPage.includes('normalizeCountryCode(jurisdictionCountry) === "ZA"'));
+
+check("Every filing call goes to the South Africa tenant routes", () =>
+  ["/emp201/", "/reconciliation/", "/certificates/", "/artifacts", "/sars-payments", "/coida-evidence/"]
+    .every((p) => payrollService.includes("${ZA}" + p)));
+
+check("No SARS source code or BRS field is hard-coded in the filing panel", () =>
+  !/\b(3601|3605|3701|3810|4001|4005|4102|4141|4142)\b/.test(filingPanel));
+
+check("ETI is presented as the employer's incentive, never an employee deduction", () =>
+  filingPanel.includes("ETI available (employer)") && !/employee[^\n]*ETI|ETI[^\n]*employee deduction/i.test(
+    filingPanel.replace("never an employee deduction", "")));
+
+check("There is no portal automation — submission is recorded by the operator", () =>
+  !/fetch\(["'`]https?:\/\/[^"'`]*sars/i.test(filingPanel) && filingPanel.includes("Submitted via"));
+
+check("The BRS-blocked state is surfaced, not hidden", () =>
+  filingPanel.includes('data-testid="za-brs-blocked"') && filingPanel.includes("never guessed"));
+
 console.log(`za-compliance-ui-validation: ${passed} passed, ${failures.length} failed`);
 for (const failure of failures) console.log(`  FAIL ${failure}`);
 process.exit(failures.length ? 1 : 0);

@@ -183,6 +183,13 @@ ZA_PARAMETER_KEYS = {
     "za_emp201_non_business_day_rule": "text",
     "za_brs_version": "text",
     "za_record_retention_years": "amount",
+    # SARS filing and reconciliation (spec §9, ZA-015/019; Phase 8)
+    "za_emp501_interim_months": "text",
+    "za_emp501_interim_window_open": "text",
+    "za_emp501_interim_window_close": "text",
+    "za_emp501_annual_close": "text",
+    "za_eti_offset_policy": "text",
+    "za_reconciliation_tolerance": "amount",
 }
 
 # ── ContributionRate scalar content ───────────────────────────────────────
@@ -272,7 +279,43 @@ ZA_SCALAR_CONTENT = (
      None, None, None, "25.3.0", "S4", True, None, None),
     ("za_record_retention_years", "SARS payroll/tax record retention (years, minimum)",
      None, None, "5", None, "S14", False, None, None),
+
+    # ── SARS filing and reconciliation (spec §9; Phase 8) ─────────────────
+    # Interim EMP501 covers March–August of the tax year (S5).
+    ("za_emp501_interim_months", "EMP501 interim reconciliation months (MM-MM)",
+     None, None, None, "03-08", "S5", False, None, None),
+    # The 2026 window is SARS-notice driven and changes every year — PENDING_G1.
+    ("za_emp501_interim_window_open", "EMP501 interim submission window opens",
+     None, None, None, "2026-09-21", "S5", True, None, None),
+    ("za_emp501_interim_window_close", "EMP501 interim submission window closes",
+     None, None, None, "2026-10-31", "S5", True, None, None),
+    # Annual filing season to 31 May, "subject to SARS notice" (S1) — PENDING_G1.
+    ("za_emp501_annual_close", "EMP501 annual reconciliation closes (MM-DD)",
+     None, None, None, "05-31", "S1", True, None, None),
+    # How ETI reduces the EMP201 PAYE remittance and is carried forward is not
+    # decided by the specification — PENDING_G1: EMP201 shows ETI available but
+    # utilises none until this is signed.
+    ("za_eti_offset_policy", "ETI offset against the EMP201 PAYE remittance",
+     None, None, None, "PENDING_G1", "S8", True, None, None),
+    # Zero tolerance until G1 signs another value (ZA-019).
+    ("za_reconciliation_tolerance", "EMP501 balancing tolerance per month (ZAR)",
+     None, None, "0", None, "S5", True, None, None),
 )
+
+# ── SARS PAYE BRS catalogue (ZA-015, ZA-018) ──────────────────────────────
+# Versioned BRS field / source-code catalogue the export mapping layer reads.
+# DELIBERATELY EMPTY: the official SARS PAYE BRS v25.3.0 document (S4) is not
+# archived yet, and a source code is never guessed. While a version's catalogue
+# is empty, south_africa_filing.map_to_brs returns BLOCKED.
+ZA_BRS_CATALOG = {
+    "25.3.0": {"source_codes": {}, "fields": {}, "evidence": "S4"},
+}
+
+# Canonical certificate lines (internal names only — NOT SARS source codes).
+# The BRS mapping layer translates these once the catalogue is archived.
+ZA_CERTIFICATE_LINES = ("SALARY", "OVERTIME", "BONUS", "COMMISSION", "LEAVE_PAYOUT", "TRAVEL_FIXED",
+                        "PAYE", "UIF_EMPLOYEE", "RETIREMENT_EMPLOYEE", "MEDICAL_CREDIT")
+ETI_OFFSET_POLICIES = ("PENDING_G1", "OFFSET_UP_TO_PAYE")
 
 # ── PAYE bands — TaxSlab rule_type="ZA_PAYE_BAND" (spec §2, S2) ───────────
 # (min_amount, max_amount, rate_pct, base_tax, label, source)

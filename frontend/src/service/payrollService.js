@@ -2892,3 +2892,21 @@ export const approveZaDirective = (directiveId) => api.post(`${ZA}/directives/${
 export const revokeZaDirective = (directiveId) => api.post(`${ZA}/directives/${directiveId}/revoke`, {});
 export const listZaEtiLedger = async (employeeId) =>
   zaList(await api.get(`${ZA}/eti-ledger`, { params: employeeId ? { employee_id: employeeId } : {} }));
+// Phase 8 — SARS filing and reconciliation (export-and-evidence, ZA-002).
+export const previewZaEmp201 = (periodKey) => api.get(`${ZA}/emp201/${periodKey}`);
+export const recordZaEmp201 = (periodKey) => api.post(`${ZA}/emp201/${periodKey}`, {});
+export const previewZaReconciliation = (period) => api.get(`${ZA}/reconciliation/${period}`);
+export const recordZaReconciliation = (period) => api.post(`${ZA}/reconciliation/${period}`, {});
+export const listZaVariances = async (period) => zaList(await api.get(`${ZA}/reconciliation/${period}/variances`));
+export const proposeZaVariance = (period, payload) => api.post(`${ZA}/reconciliation/${period}/variances`, payload);
+export const approveZaVariance = (varianceId) => api.post(`${ZA}/variances/${varianceId}/approve`, {});
+export const previewZaCertificates = (period) => api.get(`${ZA}/certificates/${period}`);
+export const listZaArtifacts = async (artifactType) =>
+  zaList(await api.get(`${ZA}/artifacts`, { params: artifactType ? { artifact_type: artifactType } : {} }));
+export const approveZaArtifact = (artifactId) => api.post(`${ZA}/artifacts/${artifactId}/approve`, {});
+export const submitZaArtifact = (artifactId, channel) => api.post(`${ZA}/artifacts/${artifactId}/submit`, { channel });
+export const recordZaArtifactReceipt = (artifactId, payload) => api.post(`${ZA}/artifacts/${artifactId}/receipt`, payload);
+export const listZaSarsPayments = async () => zaList(await api.get(`${ZA}/sars-payments`));
+export const recordZaSarsPayment = (payload) => api.post(`${ZA}/sars-payments`, payload);
+export const reverseZaSarsPayment = (paymentId) => api.post(`${ZA}/sars-payments/${paymentId}/reverse`, {});
+export const getZaCoidaEvidence = (assessmentYear) => api.get(`${ZA}/coida-evidence/${assessmentYear}`);

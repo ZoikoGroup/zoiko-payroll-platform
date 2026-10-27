@@ -883,6 +883,18 @@ def statutory_editors(db: Session, pack) -> set:
 
 
 def template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
+    """Phase 8 (ZA-015/018): a template that would feed a SARS reconciliation or
+    certificate export cannot go live while the BRS source-code catalogue for
+    the configured version is empty — the export would have to guess codes."""
+    from app.modules.payroll.engine.countries import south_africa_content as content
+
+    report_type = str(getattr(template, "report_type", "") or "").upper()
+    if not (report_type.startswith("ZA_EMP501") or report_type.startswith("ZA_IRP5")):
+        return None
+    version = next((row[5] for row in content.ZA_SCALAR_CONTENT if row[0] == "za_brs_version"), None)
+    if not (content.ZA_BRS_CATALOG.get(version) or {}).get("source_codes"):
+        return (f"South Africa: SARS PAYE BRS v{version} source-code catalogue is not archived (evidence S4) - "
+                f"{report_type} templates stay inactive until it is.")
     return None
 
 

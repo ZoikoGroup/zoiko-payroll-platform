@@ -11426,3 +11426,66 @@ class PayrollZaSarsArtifact(Base):
 
     def __repr__(self):
         return f"<PayrollZaSarsArtifact {self.artifact_type} {self.period_key} v{self.version} {self.status}>"
+
+
+class PayrollZaSarsPayment(Base):
+    """One payment made to SARS against an EMP201 period (Phase 8, ZA-019):
+    the PRN, date, amount and its PAYE / SDL / UIF allocation. A mistake is a
+    REVERSED row plus a new one, never an edit. Migration c15d5b87d6f5."""
+    __tablename__ = "payroll_za_sars_payments"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    period_key         = Column(String(20), nullable=False)        # EMP201 month, e.g. "2026-09"
+    paid_on            = Column(Date, nullable=False)
+    amount             = Column(Numeric(14, 2), nullable=False)
+    payment_reference  = Column(String(60), nullable=False)        # SARS PRN
+    allocation         = Column(_ZA_JSON, nullable=True)           # {"paye": "...", "sdl": "...", "uif": "..."}
+    evidence_ref       = Column(String(300), nullable=True)
+    status             = Column(String(12), nullable=False, default="RECORDED", server_default="RECORDED")
+    reverses_id        = Column(Integer, ForeignKey("payroll_za_sars_payments.id", ondelete="SET NULL"), nullable=True)
+    created_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at         = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("amount > 0", name="ck_za_sars_payment_amount"),
+        sa.CheckConstraint("status IN ('RECORDED', 'RECONCILED', 'REVERSED')", name="ck_za_sars_payment_status"),
+        Index("ix_za_sars_payment_org_period", "organization_id", "period_key"),
+        Index("uq_za_sars_payment_reference", "organization_id", "payment_reference", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaSarsPayment {self.period_key} {self.payment_reference} {self.amount} {self.status}>"
+
+
+class PayrollZaReconciliationVariance(Base):
+    """An explained difference for one month of an EMP501 reconciliation
+    period. It counts towards READY only once a SECOND person approves it
+    (ZA-019). Migration c15d5b87d6f5."""
+    __tablename__ = "payroll_za_reconciliation_variances"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    reconciliation_period  = Column(String(20), nullable=False)    # "2027-INTERIM" / "2027-ANNUAL"
+    month_key              = Column(String(7), nullable=False)     # "2026-09"
+    measure                = Column(String(30), nullable=False)    # PAYROLL_VS_EMP201 / EMP201_VS_PAYMENT / CERTIFICATES_VS_EMP201
+    amount                 = Column(Numeric(14, 2), nullable=False)
+    reason                 = Column(String(500), nullable=False)
+    evidence_ref           = Column(String(300), nullable=True)
+    status                 = Column(String(12), nullable=False, default="PROPOSED", server_default="PROPOSED")
+    approved_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at            = Column(DateTime(timezone=True), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'APPROVED', 'WITHDRAWN')", name="ck_za_variance_status"),
+        sa.CheckConstraint("measure IN ('PAYROLL_VS_EMP201', 'EMP201_VS_PAYMENT', 'CERTIFICATES_VS_EMP201')",
+                           name="ck_za_variance_measure"),
+        Index("ix_za_variance_org_period", "organization_id", "reconciliation_period"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollZaReconciliationVariance {self.reconciliation_period} {self.month_key} {self.measure} {self.status}>"

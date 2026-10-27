@@ -10745,6 +10745,17 @@ _REPORT_COMPONENTS_BY_TYPE = {
     "NL_EMPLOYER_COST": [("employer_info", "Employer"), ("employer_contributions", "Employer Cost")],
     "NL_LOONAANGIFTE_SUMMARY": [("employer_info", "Employer"), ("totals", "Run Totals for the Return")],
     "NL_JOURNAL": [("employer_info", "Employer"), ("totals", "Run Totals")],
+    # South Africa (ZP-ZA-ENG-001 Phase 8). SDL and ETI live in employer
+    # components only, never under employee deductions (ZA-010). The statutory
+    # EMP201 / EMP501 / IRP5 artefacts are produced by south_africa_filing, not
+    # by a template — these are register / evidence reports.
+    "ZA_PAYROLL_REGISTER": [("employer_info", "Employer"), ("employee_info", "Employee"),
+                            ("earnings", "Remuneration Bases"), ("deductions", "Employee Deductions"),
+                            ("employer_contributions", "Employer UIF and SDL")],
+    "ZA_EMP201_SUMMARY": [("employer_info", "Employer"), ("totals", "PAYE / SDL / UIF / ETI for the Month")],
+    "ZA_IRP5_PREVIEW": [("employer_info", "Employer"), ("employee_info", "Employee"),
+                        ("earnings", "Remuneration"), ("deductions", "PAYE, UIF and Retirement")],
+    "ZA_COIDA_EARNINGS": [("employer_info", "Employer"), ("earnings", "COIDA Earnings")],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
