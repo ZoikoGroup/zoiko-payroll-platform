@@ -348,7 +348,9 @@ def record_hours(employee_id: int, body: Dict[str, Any] = Body(...), current_use
             "ordinary_hours": body.get("ordinaryHours"), "overtime_hours": body.get("overtimeHours"),
             "sundays_worked": body.get("sundaysWorked"), "rest_days_worked": body.get("restDaysWorked"),
             "evidence_document_id": body.get("evidenceDocumentId"),
-            "overtime_dates": [_date(d) for d in (body.get("overtimeDates") or [])]}   # Phase 11c
+            "overtime_dates": [_date(d) for d in (body.get("overtimeDates") or [])],   # Phase 11c
+            "overtime_by_date": [{"date": _date(e.get("date")), "double": e.get("double"), "triple": e.get("triple")}
+                                 for e in (body.get("overtimeHoursByDate") or [])]}         # W6-1 (A11)
     return mexico_run_service.record_hours(db, _org_id(current_user), employee_id, data, _actor(current_user))
 
 

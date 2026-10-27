@@ -1263,19 +1263,39 @@ def record_hours(db: Session, org_id: int, employee_id: int, data: dict, actor_i
     # (the CFDI HorasExtra node needs them, S4 p. 51). Optional — without
     # them the receipt of a payslip with overtime is refused.
     dates = data.get("overtime_dates") or []
-    if dates:
+    # Completion W6-1 (gap register A11): or, per date, how many of the hours were
+    # paid at the double and at the triple rate — the employer's own record. The
+    # law (LFT Art. 68) prices the hours beyond the weekly maximum at triple but
+    # does not say which days they fell on, and S4 p. 51 counts days per hour type.
+    by_date = data.get("overtime_by_date") or []
+    if dates and by_date:
+        raise BadRequestException("give either overtimeDates or overtimeHoursByDate, not both")
+    if dates or by_date:
         if vals["overtime_hours"] <= 0:
-            raise BadRequestException("overtimeDates are given only with overtime hours")
-        if any(not isinstance(d, date) for d in dates):
-            raise BadRequestException("overtimeDates must be ISO dates")
-        if len(set(dates)) != len(dates):
-            raise BadRequestException("overtimeDates must not repeat a date")
-        if any(not (week <= d <= week + timedelta(days=6)) for d in dates):
+            raise BadRequestException("overtime dates are given only with overtime hours")
+        days = [e["date"] for e in by_date] if by_date else dates
+        if any(not isinstance(d, date) for d in days):
+            raise BadRequestException("overtime dates must be ISO dates")
+        if len(set(days)) != len(days):
+            raise BadRequestException("overtime dates must not repeat a date")
+        if any(not (week <= d <= week + timedelta(days=6)) for d in days):
             raise BadRequestException("every overtime date must fall inside the recorded week")
+    stored = sorted(d.isoformat() for d in dates) or None
+    if by_date:
+        entries = []
+        for e in by_date:
+            double, triple = _dec(e.get("double")), _dec(e.get("triple"))
+            if double < 0 or triple < 0 or double + triple <= 0:
+                raise BadRequestException(f"{e['date'].isoformat()}: double and triple hours must be zero or more, "
+                                          "and not both zero")
+            entries.append({"date": e["date"].isoformat(), "double": str(double), "triple": str(triple)})
+        if sum((_dec(e["double"]) + _dec(e["triple"]) for e in entries), _ZERO) != vals["overtime_hours"]:
+            raise BadRequestException("the hours per date must add up to the week's overtime hours")
+        stored = sorted(entries, key=lambda e: e["date"])
     row = H(organization_id=org_id, employee_id=employee_id, week_start=week, ordinary_hours=vals["ordinary_hours"],
             overtime_hours=vals["overtime_hours"], sundays_worked=int(vals["sundays_worked"]),
             rest_days_worked=int(vals["rest_days_worked"]), evidence_document_id=data["evidence_document_id"],
-            overtime_dates=sorted(d.isoformat() for d in dates) or None, status="DRAFT", recorded_by_id=actor_id)
+            overtime_dates=stored, status="DRAFT", recorded_by_id=actor_id)
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="create", entity_type="mx_approved_hours", entity_id=row.id,

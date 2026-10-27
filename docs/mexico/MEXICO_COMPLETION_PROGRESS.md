@@ -831,3 +831,61 @@ Run 2026-10-27 10:30–10:56 on `89a444a` plus the W5-4 working tree, in five se
 **The intermittent test.** Run alone seven times afterwards, it passed 4 and failed 3. Each failure is the same race: the email side effect is recorded before the HTTP response (`['email_sent', 'response_sent']`). It is flaky on its own, not order-dependent, and no Mexico change touches communications. Recorded for its owner; not changed here.
 
 No other jurisdiction's behaviour changed. The shared changes in W5 are Mexico-only branches or opt-in props, each pinned by a test or a browser check against another country.
+
+---
+
+## W6 — CFDI completeness (gap register A10, A11, C11)
+
+**ZP-PRIV:** not required. There is no new route; the approved-hours route gains an optional field. No migration: the per-date split goes into the existing JSON column `overtime_dates`. No identifier is involved.
+
+**W6-1, triple-rate overtime (A11): built.**
+- **Recording.** Approved hours accept `overtimeHoursByDate`: per date, the hours paid at the double and at the triple rate. This is the employer's own record. LFT Art. 68 prices the hours beyond the weekly maximum at triple but does not say which days they fell on, and S4 p. 51 counts the days per hour type.
+- **Validation:**
+  - dates inside the week, none repeated;
+  - hours zero or more, not both zero on a date;
+  - the split adds up to the week's overtime hours;
+  - it cannot be given together with 11c's dates-only `overtimeDates`.
+
+  It stays four-eyes (recorded, then approved by a second person).
+- **CFDI.** `_overtime_detail` builds one HorasExtra node per type, with codes read from `c_TipoHoras` by their descriptions ("Dobles", "Triples"; S28, S4 p. 52):
+  - days = the dates with hours of that type;
+  - hours rounded (S4 p. 52);
+  - amount: the double node takes the double-tier amount, the triple node the rest.
+
+  The split must equal the calculation's weekly tiers, or the receipt is refused with the mismatch. A week of double-rate hours only may still record just its dates.
+- **Still blocked upstream:** overtime is not calculated until the hourly-rate rule is decided (D-17), so no real receipt carries 019 yet.
+
+**W6-2, C11 time zones: options reported, not decided.** The 830 Chihuahua border rows give winter −6 / summer −7. **D-21** sets out the data and four options. Readings (a) and (b) are built behind `TIMEZONE_INCONSISTENT_ROW_READING`, which is undecided, so those postal codes stay refused, now naming D-21.
+
+**A10, the other nodes: still refused, each with its named reason (R-DETAIL-NODE).**
+
+| Node | Why it stays refused |
+|---|---|
+| `SubsidioAlEmpleo` (other payment 002) | C6 is BLOCKED-ON-SOURCE (W1-6): no saved SAT instruction for reporting the 2024-decree subsidy |
+| `CompensacionSaldosAFavor` (other payment 004) | C5: the refund code (004 / 005) is undecided |
+| `Incapacidades` (perception 014, deduction 006) | Its input does not exist. The node needs each incapacity's type (`c_TipoIncapacidad`: riesgo de trabajo, enfermedad general, maternidad…) and days (S4 p. 81: required with 014 or 006), and the platform records only "sick leave" on attendance. **Needs** an IMSS incapacity record (type, days, certificate) on the Mexico side: a new governed input with its own migration. Engineering item, not started |
+| `SeparacionIndemnizacion`, `AccionesOTitulos`, `JubilacionPensionRetiro` | As in the register (B11 / C10; out of scope) |
+
+**Tests**
+- New `test_mexico_overtime_split.py` (4):
+  - recording validation, each rule;
+  - the engine carries the split through its weekly tiers;
+  - a Dobles node and a Triples node with their own days, plus the mismatch and dates-only refusals;
+  - the receipt with both nodes is valid against the pinned XSD.
+- New `test_mexico_timezone_reading.py` (5):
+  - undecided, the receipt is refused naming D-21;
+  - both readings give consistent local times in July and January;
+  - an unknown reading is refused;
+  - consistent rows are unaffected.
+- The 11c overtime and builder time-zone tests are unchanged and pass. All `tests/test_mexico_*.py`: **1,058 passed, 63 skipped, 0 failed.**
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None (the existing JSON column) |
+| API | The approved-hours route accepts an optional `overtimeHoursByDate` |
+| CFDI | A receipt with triple-rate overtime can be built once the split is recorded (none can be stamped: no PAC). Chihuahua border postal codes are refused naming D-21 |
+| Other jurisdictions | None |
+
+**Gap register:** A11 done (pending D-17 for overtime itself). C11 options reported (D-21). A10: SubsidioAlEmpleo (C6), CompensacionSaldosAFavor (C5) and Incapacidades (missing input) stay refused.
