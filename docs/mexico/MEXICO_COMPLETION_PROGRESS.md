@@ -767,3 +767,67 @@ Screenshots `w5_07` and `w5_08` were inspected.
 | API | One new read-only Super Admin route |
 | Docs | Checklist items carry invisible code tags; no wording changed |
 | Other jurisdictions | None |
+
+---
+
+## W5-4 — The Mexico policy page, SEPARACION refused at approval, refusal wording (A7, A13, OOS-11)
+
+**ZP-PRIV:** not required. No change to authz, redaction, RLS, migrations or identifiers. Refusals keep their type and status code.
+
+**What changed**
+- **A7 / OOS-6, the policy page.** No Mexican calculation reads a Super Admin policy pack: the engine reads the organisation's own payroll policy read-only, and statutory content lives in the tax packs. So Mexico needs no authoring page. Until now, "+ New Policy" for Mexico opened India's form.
+  - `PolicyConfigPage` now sends `country=MX` to a new `MXNoPolicyPage`. It explains where Mexican statutory content lives (Statutory rules) and that each employer's labour policy is recorded by the organisation and floor-checked against the national pack.
+  - Every other unmapped country (NL, SA, SG, CH, IT) keeps the India fallback. That remains OOS-6 for their owners.
+- **A13, SEPARACION refused at approval** (`mexico_service.approve_classification`). Separation pay is computed only from the LFT termination reason in a finiquito run, never from an earning classification.
+  - The refusal is audited, and the row stays DRAFT. A draft can still be created over the API: the decision was "refuse at approval".
+  - The classification form no longer offers SEPARACION.
+  - The engine's defensive block, for any row approved before this change (none exist in production), now reads `MX_SEPARATION_NOT_A_CLASSIFICATION` with an accurate reason, in place of the stale "Phase 9 (Q8)".
+- **OOS-11, refusal wording.** New `MexicoActionRefusedError` / `MXRefuse` in `engine/jurisdictions/mexico/errors.py`, worded `Mexico action refused (<code>): <reason>`. It is a subclass of `MXBlock`, so the exception handler, the 400 status, `key`, `reason` and `reasons` are all unchanged.
+  - **Moved to it** (67 raises): the transfer (17), pilot (15), filing (9), journal (8), CFDI lifecycle (8), payment (4), authority lifecycle (4), PAC (1) and IMSS movement (1) services.
+  - **Kept as calculation blocks:** the engine, the run service and preflight, the CFDI input / XML / builder / preview, PTU, termination, benefits, correction and annual adjustment.
+  - Neither the frontend nor any test matched the old wording.
+
+**Tests**
+- New `test_mexico_w54_refusals.py` (12):
+  - SEPARACION is refused at approval over HTTP, stays DRAFT, and the refusal is audited;
+  - an action refusal keeps its type, fields and handling, with the new wording;
+  - one AST check per non-calculation service: none raises `MXBlock` any more;
+  - a four-eyes refusal over HTTP reads "Mexico action refused (MX_FOUR_EYES_REQUIRED)".
+- The end-of-W5 full suite below covers W5-4 (it ran on the W5-4 working tree).
+- Frontend: ESLint is clean on the changed files; `check:undefined` reports 581 files with no undefined names; the build passes.
+
+**Browser: 39/39 PASS.** New checks:
+- w5-17: "+ New Policy" for Mexico shows the no-policy page, not India's form (screenshot inspected);
+- w5-18: NL keeps today's fallback;
+- w5-19: the classification form no longer offers SEPARACION.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| API | A SEPARACION classification can no longer be approved. Mexico's non-calculation refusals change wording only (same code, same 400) |
+| UI | Mexico's "+ New Policy" shows the no-policy page; SEPARACION is not offered |
+| Other jurisdictions | None. The policy dispatcher adds a Mexico-only branch; the other unmapped countries are unchanged (browser w5-18) |
+
+**Gap register:** A7 done for Mexico; A13 done; OOS-11 done.
+
+---
+
+## End of W5 — full backend suite
+
+Run 2026-10-27 10:30–10:56 on `89a444a` plus the W5-4 working tree, in five sequential chunks on scratch SQLite, alone.
+
+| Chunk | Result |
+|---|---|
+| 0 | 976 passed, 16 skipped, **4 failed**: the 3 known local-only route-registry tests (the `/health` routes in your uncommitted `main.py`), and `test_communications_dispatch.py::test_deactivate_organization_response_precedes_email_send`, the **intermittent** test recorded in Batch 2 |
+| 1 | 2,518 passed, 2 skipped, 2 xfailed, **1 failed**: the known local-only Hong Kong docs test |
+| 2 | 1,260 passed, 32 skipped |
+| 3 | 1,153 passed, 67 skipped |
+| 4 | 1,654 passed, 3 skipped |
+
+**Total: 7,561 passed, 120 skipped, 2 xfailed.** That is 31 more passing tests than at the end of W4.
+
+**The intermittent test.** Run alone seven times afterwards, it passed 4 and failed 3. Each failure is the same race: the email side effect is recorded before the HTTP response (`['email_sent', 'response_sent']`). It is flaky on its own, not order-dependent, and no Mexico change touches communications. Recorded for its owner; not changed here.
+
+No other jurisdiction's behaviour changed. The shared changes in W5 are Mexico-only branches or opt-in props, each pinned by a test or a browser check against another country.

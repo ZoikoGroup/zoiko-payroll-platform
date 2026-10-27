@@ -1099,6 +1099,14 @@ def approve_classification(db: Session, classification_id: int, actor_id: Option
     if row.created_by_id == actor_id:
         _refuse(db, et, row.id, "approve", actor_id,
                 "You created this classification — a different Super Admin must approve it (maker-checker).")
+    if row.cfdi_node_type == "SEPARACION":
+        # Completion W5-4 (gap register A13): separation pay is computed only from
+        # the LFT termination reason in a finiquito run (MX_TERMINATION_REASONS),
+        # never from an earning classification — so none is ever approved.
+        _refuse(db, et, row.id, "approve", actor_id,
+                "A SEPARACION classification is never approved: separation pay (seniority premium, indemnity, "
+                "separation payment) is computed from the termination reason in a finiquito run, not from an "
+                "earning classification.")
     if row.organization_id is None and not (row.cfdi_concept_code
                                             and _catalog_has_code(db, row.cfdi_node_type, row.cfdi_concept_code)):
         _refuse(db, et, row.id, "approve", actor_id,

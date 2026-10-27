@@ -41,7 +41,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 _ZERO = Decimal("0")
 _CENT = Decimal("0.01")
@@ -162,7 +162,7 @@ def approve_mapping(db: Session, org_id: int, mapping_id: int, actor_id: Optiona
     if row.status != "DRAFT":
         raise BadRequestException(f"Only a DRAFT mapping can be approved (this one is {row.status})")
     if actor_id is not None and actor_id == row.maker_id:
-        raise MXBlock("MX_FOUR_EYES_REQUIRED", "a journal mapping must be approved by someone other than its maker",
+        raise MXRefuse("MX_FOUR_EYES_REQUIRED", "a journal mapping must be approved by someone other than its maker",
                       org_id)
     previous = approved_mapping(db, org_id)
     if previous is not None:
@@ -237,7 +237,7 @@ def _post_payslip(acc: dict, amounts: dict, reg: str, sign: int, item_id: int) -
     """Add one payslip's figures (sign -1 removes an original's) to `acc`."""
     a = amounts
     if sum(a["kinds"].values(), _ZERO) != a["gross"]:
-        raise MXBlock("MX_JOURNAL_UNBALANCED",
+        raise MXRefuse("MX_JOURNAL_UNBALANCED",
                       f"payslip {item_id}: its earning lines do not add up to its gross {a['gross']}")
     for kind, amount in a["kinds"].items():
         acc[("WAGES_EXPENSE", kind)] += sign * amount
@@ -253,7 +253,7 @@ def _post_payslip(acc: dict, amounts: dict, reg: str, sign: int, item_id: int) -
     acc[("INFONAVIT_CREDIT_PAYABLE", reg)] += sign * a["credit"]
     other = a["gross"] - a["net"] - a["isr"] - a["imss_ee"] - a["credit"]
     if other < 0:
-        raise MXBlock("MX_JOURNAL_UNBALANCED",
+        raise MXRefuse("MX_JOURNAL_UNBALANCED",
                       f"payslip {item_id}: net pay {a['net']} is more than gross less its deductions — the journal "
                       f"cannot balance", None)
     acc[("OTHER_DEDUCTIONS_PAYABLE", "")] += sign * other
@@ -270,14 +270,14 @@ def journal_lines(db: Session, run) -> list:
     for item in mexico_run_service._mx_items(db, run):
         snap = item.mx_calculation_snapshot or {}
         if snap.get("blocked") or not snap.get("result"):
-            raise MXBlock("MX_JOURNAL_BLOCKED_ITEM", f"payslip {item.id} has no committed calculation",
+            raise MXRefuse("MX_JOURNAL_BLOCKED_ITEM", f"payslip {item.id} has no committed calculation",
                           run.organization_id)
         reg = _registration_label(db, item.employee_id, run.pay_date)
         _post_payslip(acc, _payslip_amounts(corrections.result_of(item), item.net_pay), reg, 1, item.id)
         if is_correction:
             original = corrections.original_item_for(db, item)
             if original is None:
-                raise MXBlock("MX_JOURNAL_BLOCKED_ITEM", f"correction payslip {item.id} has no original",
+                raise MXRefuse("MX_JOURNAL_BLOCKED_ITEM", f"correction payslip {item.id} has no original",
                               run.organization_id)
             _post_payslip(acc, _payslip_amounts(corrections.result_of(original), original.net_pay), reg, -1,
                           original.id)
@@ -336,18 +336,18 @@ def export_journal(db: Session, org_id: int, run_id: int, actor_id: Optional[int
     run = _journal_run(db, org_id, run_id)
     mapping = approved_mapping(db, org_id)
     if mapping is None:
-        raise MXBlock("MX_JOURNAL_MAPPING_MISSING", "approve an account mapping before exporting a journal", org_id)
+        raise MXRefuse("MX_JOURNAL_MAPPING_MISSING", "approve an account mapping before exporting a journal", org_id)
     lines = journal_lines(db, run)
     if not lines:
         raise BadRequestException("the run has no amount to journal")
     unmapped = sorted({l["lineType"] for l in lines if not account_for(mapping.accounts, l["lineType"],
                                                                        l["dimension"])})
     if unmapped:
-        raise MXBlock("MX_JOURNAL_ACCOUNT_UNMAPPED",
+        raise MXRefuse("MX_JOURNAL_ACCOUNT_UNMAPPED",
                       f"mapping v{mapping.version} has no account for {', '.join(unmapped)}", org_id)
     debit, credit = _totals(lines)
     if debit != credit:
-        raise MXBlock("MX_JOURNAL_UNBALANCED", f"debits {debit} ≠ credits {credit}", org_id)
+        raise MXRefuse("MX_JOURNAL_UNBALANCED", f"debits {debit} ≠ credits {credit}", org_id)
     buf = io.StringIO()
     w = csv.writer(buf)
     from app.modules.payroll import mexico_pilot_service

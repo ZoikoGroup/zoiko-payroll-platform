@@ -183,6 +183,25 @@ with sync_playwright() as p:
           "payroll is BLOCKED in all" in g4 and "D-06" in g4 and "code 1/3" in g4, g4[:600])
     shot(a, "w5_08_gate_checklist_g4", tid(a, "mx-gate-checklist-G4"))
 
+    # ── W5-4: Mexico policy page; SEPARACION not offered ───────────────────
+    a.goto(APP + "/super-admin/compliance/policy/new?country=MX", wait_until="load")
+    settle(a, 1500)
+    page = a.locator("main").inner_text()
+    check("w5-17 '+ New Policy' for Mexico shows the no-policy page, not India's form",
+          tid(a, "mx-no-policy-page").count() == 1 and "Mexico has no policy pack" in page and "HRA" not in page,
+          page[:300])
+    shot(a, "w5_09_mx_no_policy_page")
+    a.goto(APP + "/super-admin/compliance/policy/new?country=NL", wait_until="load")
+    settle(a, 1500)
+    check("w5-18 another unmapped country keeps today's fallback (unchanged; OOS-6)",
+          tid(a, "mx-no-policy-page").count() == 0 and len(a.locator("main").inner_text()) > 100, "")
+    open_mx_tab(a, "Earning classification")
+    a.get_by_role("button", name="New classification").first.click()
+    settle(a, 800)
+    nodes = a.locator('form[aria-label="New classification"] select:has(option:text-is("PERCEPCION"))').first.inner_text()
+    check("w5-19 the classification form no longer offers SEPARACION",
+          "PERCEPCION" in nodes and "SEPARACION" not in nodes, nodes)
+
     # ── W4: each Mexico report template ─────────────────────────────────────
     a.goto(APP + "/super-admin/report-templates/mexico", wait_until="load")
     settle(a, 2500)
