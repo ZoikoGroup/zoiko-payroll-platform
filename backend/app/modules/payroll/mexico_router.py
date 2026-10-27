@@ -174,6 +174,36 @@ def decision_transcribed(decision_id: int, body: Dict[str, Any] = Body(...),
     return _decisions().mark_mx_decision_transcribed(db, decision_id, {"reference": body.get("reference")}, _actor(current_user))
 
 
+# ── report-template library tools (final mile X3b) ─────────────────────────
+
+def _reports():
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service
+
+
+@router.get("/report-templates/coverage", summary="Every Mexico template: build kind, field-path proof and the "
+                                                  "activation gate's answer (read-only, X3)")
+def mx_template_coverage(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _reports().mx_template_coverage(db)
+
+
+@router.post("/report-templates/{template_id}/sandbox-preview",
+             summary="A template-engine template's fields against one sandbox result (watermarked, never stored)")
+def mx_template_sandbox_preview(template_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    try:
+        return _reports().mx_template_sandbox_preview(db, template_id, body)
+    finally:
+        db.rollback()
+
+
+@router.get("/report-templates/compare", summary="Diff two Mexico report templates (fields and metadata)")
+def mx_compare_templates(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _reports().mx_compare_templates(db, from_id, to_id)
+
+
 # ── calculation sandbox (final mile X2) ────────────────────────────────────
 
 @router.post("/sandbox/calculate", summary="Run the engine on SYNTHETIC inputs and the content in force (Draft "

@@ -84,6 +84,7 @@ def _specs() -> dict:
         "D-22": {"keys": ["mexico_rules.MX_FINIQUITO_ORDINARY_WITHHOLDING"], "kind": "ENUM",
                  "allowed": list(r.FINIQUITO_ORDINARY_METHODS)},
         "D-23": {"keys": []},
+        "D-24": {"keys": ["report MX-RUN-VARIANCE: high-value delta threshold (MXN)"], "kind": "AMOUNT"},
         "C4": {"keys": ["mexico_cfdi_input.SDI_SOURCE"], "codes": ["MX_CFDI_INPUT_MISSING"]},
         "C5": {"keys": ["CFDI system concepts: INFONAVIT_CREDIT, VACATION_PAYOUT, ANNUAL_ADJUSTMENT_REFUND"]},
         "C12": {"keys": ["CFDI Receptor Sindicalizado field"]},
@@ -227,6 +228,15 @@ def validate_answer(row, chosen: str) -> None:
             rounding.parse(chosen)
         except MXBlock as exc:
             raise BadRequestException(f"{row.code}: {exc.reason}")
+    elif row.answer_kind == "AMOUNT":
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            amount = Decimal(chosen)
+        except (InvalidOperation, ValueError):
+            amount = None
+        if amount is None or not amount.is_finite() or amount < 0:
+            raise BadRequestException(f"{row.code}: {chosen!r} is not an amount (MXN, zero or more)")
     elif row.answer_kind in ("ENUM", "PAY_PERIOD") and chosen not in (row.allowed_values or []):
         raise BadRequestException(f"{row.code}: {chosen!r} is not one of {', '.join(row.allowed_values or [])}")
 

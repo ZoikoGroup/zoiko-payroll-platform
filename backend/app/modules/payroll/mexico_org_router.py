@@ -453,6 +453,7 @@ def mx_cfdi_document_receipt(document_id: int, current_user=Depends(get_current_
     from app.modules.payroll import mexico_cfdi_receipt
 
     pdf = mexico_cfdi_receipt.mx_cfdi_receipt_pdf(db, _org_id(current_user), document_id)
+    mexico_cfdi_receipt.record_render(db, _org_id(current_user), document_id, _actor(current_user))   # X3
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Cache-Control": "no-store", "Content-Disposition": f'inline; filename="cfdi-{document_id}.pdf"'})
 

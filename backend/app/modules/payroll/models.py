@@ -9653,7 +9653,7 @@ class PayrollMxDecision(Base):
     __table_args__ = (
         sa.CheckConstraint("status IN ('OPEN', 'PROPOSED', 'APPROVED', 'TRANSCRIBED', 'WITHDRAWN', 'SUPERSEDED')",
                            name="ck_mx_decision_status"),
-        sa.CheckConstraint("answer_kind IN ('FREE_TEXT', 'ENUM', 'ROUNDING_RULE', 'PAY_PERIOD')",
+        sa.CheckConstraint("answer_kind IN ('FREE_TEXT', 'ENUM', 'ROUNDING_RULE', 'PAY_PERIOD', 'AMOUNT')",
                            name="ck_mx_decision_answer_kind"),
         UniqueConstraint("code", "version", name="uq_mx_decision_code_version"),
     )

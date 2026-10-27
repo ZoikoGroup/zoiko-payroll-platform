@@ -2164,6 +2164,25 @@ def _mx_templates():
                                 f"{generated} the vacation ledger (days and premium accrued, taken, paid out)."),
         "MX-PTU-DISTRIBUTION": ("PTU distribution", "PTU", "AGGREGATE",
                                 f"{generated} one PTU cycle's per-worker allocation."),
+        # Final mile X3 (spec §7, §10, §13, §14, §20)
+        "MX-RUN-VARIANCE": ("Run variance vs the prior committed run", "RUN_VARIANCE", "AGGREGATE",
+                            f"{generated} two committed runs' payslips; high-value deltas flagged only against the "
+                            "approved D-24 threshold."),
+        "MX-PREFLIGHT-EXCEPTIONS": ("Preflight exceptions", "PREFLIGHT", "AGGREGATE",
+                                    f"{generated} the run's preflight exceptions (code, employee reference, "
+                                    "clearing action)."),
+        "MX-SBC-MOVEMENTS": ("SBC and IMSS movements", "SBC_MOVEMENTS", "AGGREGATE",
+                             f"{generated} the SBC history, the bimester accumulators and the IMSS movements."),
+        "MX-WORK-RISK-ANNUAL": ("Work-risk premium history", "WORK_RISK", "AGGREGATE",
+                                f"{generated} the premium history per Registro Patronal.{not_official}"),
+        "MX-INFONAVIT-NOTICES": ("INFONAVIT credit notices", "INFONAVIT_NOTICES", "AGGREGATE",
+                                 f"{generated} the notice register (no notice, no withholding)."),
+        "MX-LABOR-COMPLIANCE": ("Labour compliance exceptions", "LABOR_COMPLIANCE", "AGGREGATE",
+                                f"{generated} the labour checks recorded on the run's committed payslips."),
+        "MX-PAYMENT-WORKLIST": ("Net-pay settlement worklist", "PAYMENT_WORKLIST", "AGGREGATE",
+                                f"{generated} the run's payment batches. NOT A BANK FILE (C7)."),
+        "MX-IDENTIFIER-ACCESS-AUDIT": ("Identifier access audit", "ID_ACCESS_AUDIT", "AGGREGATE",
+                                       f"{generated} the renders of the printed CFDI receipt (who, when)."),
     }
     out = {key: dict(name=name, report_type=f"MX_{rtype}", scope=scope, components=[], description=description)
            for key, (name, rtype, scope, description) in later.items()}

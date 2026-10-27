@@ -10240,12 +10240,17 @@
     "payroll_generated_reports",
     "payroll_mx_annual_isr_adjustments",
     "payroll_mx_authority_liability_sources",
+    "payroll_mx_benefit_accruals",
     "payroll_mx_cfdi_documents",
     "payroll_mx_imss_movements",
     "payroll_mx_isn_liabilities",
+    "payroll_mx_payment_items",
     "payroll_mx_ptu_allocations",
+    "payroll_mx_sbc_history",
     "payroll_mx_sua_differences",
-    "payroll_mx_vacation_records"
+    "payroll_mx_vacation_records",
+    "payroll_mx_variable_accumulators",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -19132,6 +19137,54 @@
    "data_class": "platform",
    "action": "read",
    "resource": "gate-checklists",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/report-templates/compare",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "compare",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/report-templates/coverage",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "coverage",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/report-templates/{template_id}/sandbox-preview",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "sandbox-preview",
    "principals": [
     "super_admin"
    ],

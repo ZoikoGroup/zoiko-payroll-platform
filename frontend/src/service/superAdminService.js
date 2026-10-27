@@ -185,6 +185,10 @@ export const transcribedMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/
 export const getMxDecisionsForBlock = (code) => apiFetch(`${MX_SA}/decisions/by-block/${encodeURIComponent(code)}`);
 // Final mile X2: the calculation sandbox (writes nothing; candidates watermarked).
 export const runMxSandbox = (body) => apiFetch(`${MX_SA}/sandbox/calculate`, { method: "POST", body });
+// Final mile X3b: template library tools (read-only; previews watermarked).
+export const getMxTemplateCoverage = () => apiFetch(`${MX_SA}/report-templates/coverage`);
+export const compareMxReportTemplates = (from, to) => apiFetch(`${MX_SA}/report-templates/compare`, { params: { from, to } });
+export const previewMxTemplateInSandbox = (id, body) => apiFetch(`${MX_SA}/report-templates/${id}/sandbox-preview`, { method: "POST", body });
 // Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
 // list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
 export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);
