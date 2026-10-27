@@ -35,7 +35,8 @@ MX_M14_TABLES = {"payroll_mx_pilot_grants", "payroll_mx_master_copies"}         
 MX_M15_TABLES = {"payroll_mx_master_releases"}                                  # Phase 10f
 MX_M16_TABLES = {"payroll_mx_onboarding_pauses"}                                # Phase 10g
 MX_M17_TABLES = {"payroll_mx_cfdi_system_concepts"}                             # Phase 11a
-MX_M20_TABLES = {"payroll_mx_decisions"}                                         # final mile X1
+MX_M20_TABLES = {"payroll_mx_decisions", "payroll_mx_parallel_imports",           # final mile X1, X4
+                 "payroll_mx_parallel_differences"}
 
 
 def _path(rev):

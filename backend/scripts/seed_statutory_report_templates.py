@@ -2183,6 +2183,9 @@ def _mx_templates():
                                 f"{generated} the run's payment batches. NOT A BANK FILE (C7)."),
         "MX-IDENTIFIER-ACCESS-AUDIT": ("Identifier access audit", "ID_ACCESS_AUDIT", "AGGREGATE",
                                        f"{generated} the renders of the printed CFDI receipt (who, when)."),
+        # Final mile X4 (spec §22 G8)
+        "MX-PARALLEL-DIFF": ("Parallel payroll differences", "PARALLEL_DIFF", "AGGREGATE",
+                             f"{generated} one imported legacy cycle against the run's committed results."),
     }
     out = {key: dict(name=name, report_type=f"MX_{rtype}", scope=scope, components=[], description=description)
            for key, (name, rtype, scope, description) in later.items()}

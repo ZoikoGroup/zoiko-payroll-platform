@@ -13,6 +13,7 @@ import MXPtuCyclePanel from "./MXPtuCyclePanel";
 import MXAnnualAdjustmentPanel from "./MXAnnualAdjustmentPanel";
 import MXPaymentsPanel from "./MXPaymentsPanel";
 import MXJournalPanel from "./MXJournalPanel";
+import MXParallelPayrollPanel from "./MXParallelPayrollPanel";
 import MXPilotBanner from "./MXPilotBanner";
 import MXMasterTransferPanel from "./MXMasterTransferPanel";
 
@@ -82,6 +83,7 @@ export default function MXComplianceCentreTab() {
       <MXAnnualAdjustmentPanel />
       <MXPaymentsPanel />
       <MXJournalPanel />
+      <MXParallelPayrollPanel />
       <MXMasterTransferPanel />
     </div>
   );

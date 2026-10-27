@@ -9659,6 +9659,63 @@ class PayrollMxDecision(Base):
     )
 
 
+class PayrollMxParallelImport(Base):
+    """Mexico final mile X4: one legacy payroll's results for a committed Zoiko
+    run, for the G8 parallel cycles (spec §22, MX-064). Only the column mapping,
+    the file's SHA-256 and counts are kept — never the file. Employees are
+    matched by their internal reference (employee code), never by RFC / CURP /
+    NSS. A re-import of the same run supersedes the previous one. TENANT table."""
+    __tablename__ = "payroll_mx_parallel_imports"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False, index=True)
+    source_label     = Column(String(120), nullable=False)
+    column_mapping   = Column(JSON, nullable=False)
+    file_sha256      = Column(String(64), nullable=False)
+    row_count        = Column(Integer, nullable=False, default=0)
+    unmatched        = Column(JSON, nullable=False, default=list)          # references with no Zoiko payslip
+    status           = Column(String(12), nullable=False, default="CURRENT")
+    created_by_id    = Column(Integer, nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('CURRENT', 'SUPERSEDED', 'WITHDRAWN')", name="ck_mx_parallel_import_status"),
+    )
+
+
+class PayrollMxParallelDifference(Base):
+    """Mexico final mile X4: one employee × concept of a parallel import — the
+    legacy amount, Zoiko's committed amount and the delta. MATCH (no delta) or
+    UNEXPLAINED -> EXPLAINED (a reason) -> ACCEPTED (a second reviewer). WORKER
+    table (employee_id)."""
+    __tablename__ = "payroll_mx_parallel_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    import_id        = Column(Integer, ForeignKey("payroll_mx_parallel_imports.id", ondelete="CASCADE"), nullable=False,
+                              index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=False, index=True)
+    concept          = Column(String(30), nullable=False)
+    legacy_amount    = Column(Numeric(16, 2), nullable=False)
+    zoiko_amount     = Column(Numeric(16, 2), nullable=False)
+    delta            = Column(Numeric(16, 2), nullable=False)
+    state            = Column(String(12), nullable=False, default="UNEXPLAINED")
+    reason           = Column(String(500), nullable=True)
+    explained_by_id  = Column(Integer, nullable=True)
+    explained_at     = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_id   = Column(Integer, nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("state IN ('MATCH', 'UNEXPLAINED', 'EXPLAINED', 'ACCEPTED')",
+                           name="ck_mx_parallel_difference_state"),
+        UniqueConstraint("import_id", "employee_id", "concept", name="uq_mx_parallel_difference"),
+    )
+
+
 class PayrollMxCfdiSystemConcept(Base):
     """Phase 11a (MEXICO_PHASE_11_PLAN.md §4.3, D4): the SAT code for an amount
     the engine produces itself — no earning classification carries it (ISR

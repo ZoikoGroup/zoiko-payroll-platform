@@ -23,7 +23,7 @@ def _mx_templates(db):
 def test_all_mexico_templates_are_seeded_draft(db):
     _seed(db)
     templates = _mx_templates(db)
-    assert len(templates) == 26          # plan v1.1 §5: 17 national + the CDMX ISN return; final mile X3: + 8
+    assert len(templates) == 27          # plan v1.1 §5: 17 national + the CDMX ISN return; final mile X3: + 8; X4: + 1
     assert {t.status for t in templates.values()} == {"Draft"}
     isn = [t for t in templates.values() if t.report_type == "MX_ISN_RETURN"]
     assert [(t.template_key, t.jurisdiction_state) for t in isn] == [("MX-ISN-RETURN-CDMX", "CDMX")]

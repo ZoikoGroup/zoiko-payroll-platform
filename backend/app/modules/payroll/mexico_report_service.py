@@ -49,6 +49,8 @@ MX_REPORT_SPECS = {
     "MX_PAYMENT_WORKLIST": (("run_id",), "NOT A BANK FILE (gap register C7): a settlement worklist; each account is "
                                          "shown by its last four digits only."),
     "MX_ID_ACCESS_AUDIT": ((), None),
+    # Final mile X4 (spec §22 G8, MX-064): one parallel cycle's differences.
+    "MX_PARALLEL_DIFF": (("import_id",), None),
 }
 # Final mile X3: who holds the D-24 high-value threshold the variance report flags against.
 VARIANCE_THRESHOLD_DECISION = "D-24"
@@ -389,6 +391,16 @@ def _mx_report_body(db: Session, org_id: int, template, params: dict) -> tuple:
                         for e, d in rows],
             "note": "Each render of the printed CFDI receipt — the one view that shows RFC / CURP / NSS (MX-061) — is "
                     "recorded here by who and when; no identifier appears in this report."}
+    if rtype == "MX_PARALLEL_DIFF":
+        from app.modules.payroll import mexico_parallel_service
+
+        try:
+            import_id = int(params.get("import_id"))
+        except (TypeError, ValueError):
+            raise BadRequestException("import_id is required")
+        view = mexico_parallel_service.parallel_import_view(db, org_id, import_id)
+        run = db.get(_mx_report_models().PayrollRun, view["runId"])
+        return f"PARALLEL:{import_id}", str(run.pay_date.year), run.pay_date.isoformat(), view
     raise BadRequestException(f"{rtype} has no dedicated Mexico generator")
 
 
@@ -440,7 +452,7 @@ MX_REPORT_GATES = {
     "MX_VACATION": ("G5",), "MX_PTU": ("G5",), "MX_ISN_RETURN": ("G4",),
     "MX_RUN_VARIANCE": ("G1", "G8"), "MX_PREFLIGHT": ("G1",), "MX_SBC_MOVEMENTS": ("G2",), "MX_WORK_RISK": ("G2",),
     "MX_INFONAVIT_NOTICES": ("G3",), "MX_LABOR_COMPLIANCE": ("G5",), "MX_PAYMENT_WORKLIST": ("G6",),
-    "MX_ID_ACCESS_AUDIT": ("G7",),
+    "MX_ID_ACCESS_AUDIT": ("G7",), "MX_PARALLEL_DIFF": ("G8",),
 }
 # The run type whose committed payslips prove a template-engine report's fields.
 MX_REPORT_RUN_TYPES = {"MX_AGUINALDO": ("AGUINALDO",), "MX_FINIQUITO": ("FINIQUITO",),

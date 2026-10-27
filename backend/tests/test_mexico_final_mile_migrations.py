@@ -1,13 +1,16 @@
-"""Mexico final mile migration d3f8b2a6c1e9 (mx_final_mile_m20) — one new platform
-table, payroll_mx_decisions (X1).
+"""Mexico final mile migration d3f8b2a6c1e9 (mx_final_mile_m20) — the programme's
+one revision: payroll_mx_decisions (X1, platform), payroll_mx_parallel_imports
+(X4, TENANT) and payroll_mx_parallel_differences (X4, WORKER).
 
 SQLite (always): guarded, idempotent upgrade / downgrade; no other table touched.
 
 PostgreSQL (MX_PG6_TEST_URL → a THROWAWAY database on 127.0.0.1, else skipped):
   - in flight (DDL applied, not committed): no existing table is locked
-    exclusively (the table has no foreign key to a shared table); organizations
-    and payslip_items still readable and writable;
-  - lock_timeout is set before any DDL;
+    exclusively; organizations / payroll_runs / payroll_employees take SHARE ROW
+    EXCLUSIVE (the X4 foreign keys): reads continue, writes wait;
+  - lock_timeout is set before any DDL, and a writer makes it fail fast;
+  - row-level security on the two X4 tables only, with the predicate
+    d7f9b1c3e5a6 derives (and none on the platform decisions table);
   - the real CLI (env.py) upgrades from c7d2e9a4f1b6 and check_schema_drift passes."""
 
 import os
@@ -22,6 +25,8 @@ import sqlalchemy as sa
 REVISION, PARENT = "d3f8b2a6c1e9", "c7d2e9a4f1b6"
 BACKEND = Path(__file__).resolve().parents[1]
 TABLE = "payroll_mx_decisions"
+IMPORTS, DIFFS = "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"
+NEW_TABLES = (TABLE, IMPORTS, DIFFS)
 
 
 def _module():
@@ -64,7 +69,7 @@ def _tables(engine):
 def test_revision_links():
     mod = _module()
     assert (mod.revision, mod.down_revision) == (REVISION, PARENT)
-    assert mod.NEW_TABLES == (TABLE,)
+    assert mod.NEW_TABLES == NEW_TABLES
     source = (next((BACKEND / "alembic" / "versions").glob(f"{REVISION}_*.py"))).read_text(encoding="utf-8")
     assert "ForeignKey(\"users" not in source and "apply_rls" not in source     # no shared lock, no RLS sweep
 
@@ -83,10 +88,10 @@ def sqlite_engine(tmp_path):
 def test_sqlite_upgrade_downgrade_idempotent(sqlite_engine):
     eng = sqlite_engine
     others = _tables(eng)
-    assert TABLE not in others
+    assert not (set(NEW_TABLES) & others)
     for _ in range(2):
         _run(eng, "upgrade")
-    assert _tables(eng) == others | {TABLE}
+    assert _tables(eng) == others | set(NEW_TABLES)
     cols = {c["name"] for c in sa.inspect(eng).get_columns(TABLE)}
     assert {"code", "version", "status", "chosen_option", "content_hash", "supersedes_id"} <= cols
     assert "organization_id" not in cols                                     # platform table, no tenant data
@@ -121,7 +126,7 @@ def pg_engine():
 
 
 @pg
-def test_pg_in_flight_no_existing_table_is_locked_exclusively(pg_engine):
+def test_pg_in_flight_reads_continue_writes_wait_nothing_exclusive(pg_engine):
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
@@ -139,16 +144,62 @@ def test_pg_in_flight_no_existing_table_is_locked_exclusively(pg_engine):
         probe.execute(sa.text("SET statement_timeout = '1000ms'"))
         probe.execute(sa.text("SELECT set_config('app.rls_mode', 'system', true)"))
         readable = (probe.execute(sa.text("SELECT count(*) FROM organizations")).scalar(),
-                    probe.execute(sa.text("SELECT count(*) FROM payslip_items")).scalar())
+                    probe.execute(sa.text("SELECT count(*) FROM payslip_items")).scalar(),
+                    probe.execute(sa.text("SELECT count(*) FROM payroll_employees")).scalar())
+        probe.rollback()
+        write_waits = False
+        try:
+            probe.execute(sa.text("LOCK TABLE payroll_runs IN ROW EXCLUSIVE MODE NOWAIT"))
+        except sa.exc.OperationalError:
+            write_waits = True
         probe.rollback()
     tx.rollback()
     conn.close()
     held_ms = round((time.perf_counter() - started) * 1000, 2)
     print(f"\nMEASURED in flight: locks = {[tuple(m) for m in modes]}; lock_timeout = {timeout}; ~{held_ms} ms")
+    held = {(r, m) for r, m in modes}
     assert timeout == "5s"
-    assert {r for r, m in modes if m == "AccessExclusiveLock"} <= {TABLE}
-    assert readable == (0, 0)
-    assert TABLE not in _tables(eng)                                          # rolled back: nothing applied
+    assert {r for r, m in modes if m == "AccessExclusiveLock"} <= set(NEW_TABLES)
+    assert {("organizations", "ShareRowExclusiveLock"), ("payroll_runs", "ShareRowExclusiveLock"),
+            ("payroll_employees", "ShareRowExclusiveLock")} <= held
+    assert not [r for r, m in modes if r in ("payslip_items", "users")]       # never referenced
+    assert readable == (0, 0, 0) and write_waits
+    assert not (set(NEW_TABLES) & _tables(eng))                               # rolled back: nothing applied
+
+
+@pg
+def test_pg_a_writer_on_payroll_runs_makes_it_fail_fast(pg_engine):
+    eng = pg_engine
+    holder = eng.connect()
+    tx = holder.begin()
+    holder.execute(sa.text("LOCK TABLE payroll_runs IN ROW EXCLUSIVE MODE"))      # an in-flight payroll write
+    started = time.monotonic()
+    with pytest.raises(sa.exc.OperationalError, match="lock timeout"):
+        _run(eng, "upgrade")
+    elapsed = time.monotonic() - started
+    tx.rollback()
+    holder.close()
+    print(f"\nMEASURED: with a writer on payroll_runs the upgrade gave up after {elapsed:.2f} s")
+    assert 4 <= elapsed < 15 and not (set(NEW_TABLES) & _tables(eng))   # one transaction: nothing half-applied
+
+
+@pg
+def test_pg_rls_on_the_x4_tables_only_with_the_derived_predicate(pg_engine):
+    eng = pg_engine
+    _run(eng, "upgrade")
+    with eng.connect() as c:
+        for table in (IMPORTS, DIFFS):
+            flags = c.execute(sa.text("SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                                      "WHERE relname = :t"), {"t": table}).one()
+            policies = c.execute(sa.text("SELECT policyname FROM pg_policies WHERE tablename = :t"),
+                                 {"t": table}).scalars().all()
+            assert tuple(flags) == (True, True) and policies == [_rls().POLICY], table
+        assert c.execute(sa.text("SELECT count(*) FROM pg_policies WHERE tablename = :t"), {"t": TABLE}).scalar() == 0
+        worker, tenant = _rls().classify(c)
+    assert IMPORTS in tenant and worker.get(DIFFS) == "org"                  # the predicates d7f9 derives
+    _run(eng, "upgrade")                                                      # guarded re-run is a no-op
+    _run(eng, "downgrade")
+    assert not (set(NEW_TABLES) & _tables(eng))
 
 
 @pg
@@ -158,7 +209,7 @@ def test_pg_real_cli_path_and_schema_drift(pg_engine):
     up = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=BACKEND, env=env,
                         capture_output=True, text=True, timeout=120)
     assert up.returncode == 0, up.stderr[-2000:]
-    assert TABLE in _tables(pg_engine)
+    assert set(NEW_TABLES) <= _tables(pg_engine)
     with pg_engine.connect() as c:
         assert c.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == REVISION
         policies = c.execute(sa.text("SELECT count(*) FROM pg_policies WHERE tablename = :t"), {"t": TABLE}).scalar()

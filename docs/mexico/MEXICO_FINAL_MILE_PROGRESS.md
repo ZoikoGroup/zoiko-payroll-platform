@@ -300,3 +300,82 @@ Screenshots inspected.
 | CFDI | Each receipt render writes one CFDI event (no identifier) |
 | Templates | Eight more Draft templates when someone runs the template seed by hand |
 | Other jurisdictions | None. `MX_DEDICATED_GENERATOR_REPORT_TYPES` grew; NL / IE / SE / DE report paths are pinned by the shared report tests run here |
+
+---
+
+## X4 — Parallel-payroll comparison (spec §22 G8, MX-064)
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** **Do not merge until reviewed — branch protection does not enforce this (C17).** What needs his eye:
+1. **Migration.** Two new tables join the programme's one revision `d3f8b2a6c1e9`:
+   - `payroll_mx_parallel_imports` is a TENANT table;
+   - `payroll_mx_parallel_differences` is a WORKER table (it has `employee_id`).
+
+   The revision puts row-level security on these two tables only, with the predicate `d7f9b1c3e5a6.classify()` derives (tenant / worker-org). It is never a sweep over every table.
+2. **Six org routes**, all tenant-scoped and dormancy-guarded:
+   - the registry classifies five as `worker` and the withdraw route as `tenant_config`;
+   - reads need a payroll operator, writes an org admin.
+3. **Imported payroll data.** Legacy amounts per employee are stored, but never the file: only the column mapping, the SHA-256 and counts.
+4. **Identifier refusal.** A column named like an identifier, or a cell shaped like an RFC, CURP, NSS or CLABE, refuses the whole file, and the refusal names only the row. Reasons are scanned the same way.
+5. The existing `POST /reports/{template_id}/generate` registry row gains `payroll_mx_parallel_differences`.
+
+### What was built
+- **Import.** `mexico_parallel_service.import_parallel` takes the CSV text from the browser plus a column mapping for the employee code and any of 12 concepts:
+  - net; ISR withheld; subsidy applied;
+  - IMSS employee and employer; retiro; CEAV employee and employer;
+  - INFONAVIT employer and credit;
+  - ISN; employer total.
+
+  It runs against a **committed** run of the caller's organisation. Employees are matched by **employee code only**. Zoiko's side is read from each payslip's frozen snapshot, never recomputed. Unmatched codes are listed on both sides. A re-import supersedes the CURRENT import, which then cannot be edited.
+- **Review.** Each employee × concept is either MATCH or UNEXPLAINED. **EXPLAINED** needs a reason; **ACCEPTED** needs a **different** org admin (four-eyes). Nothing here ever changes a payslip.
+- **D-25 (new decision: release owner, G8, AMOUNT)** sets the materiality threshold. While it is unapproved, **no cycle is ever declared clean**: the verdict is "not decidable". With it approved, a cycle is clean only when no unaccepted difference exceeds the threshold and no employee is unmatched. Zoiko picks no tolerance.
+- **Report.** `MX_PARALLEL_DIFF` (template `MX-PARALLEL-DIFF`, Draft, gate G8) is a dedicated generator reading the import view. Employees appear by code.
+- **UI.** A "Parallel payroll" panel in the Mexico Compliance Centre: file, column mapping, differences, explain / accept, and the verdict.
+
+### Tests
+- **New `test_mexico_parallel.py` (9):**
+  - D-25 is seeded as an Open G8 AMOUNT decision;
+  - an identical cycle matches but is not clean until D-25 is approved;
+  - a reason, then a second reviewer, are required, with materiality applied against D-25;
+  - identifier columns, values, match keys and reasons are refused without echoing the value, and nothing is recorded;
+  - bad mapping, amounts and duplicates are refused, and unmatched employees are listed;
+  - another tenant's import or run returns 404;
+  - re-import supersedes and freezes the old import, and withdraw works;
+  - an uncommitted run is refused;
+  - the report has no full identifier;
+  - the routes enforce four-eyes over HTTP.
+- **Pins updated:**
+  - `MX_M20_TABLES`;
+  - the deploy pending-object pins (`MX_X4_TABLES`);
+  - the template count, now 27;
+  - the dormancy `ORG_ROUTES` (+6);
+  - the route registry and inventory, regenerated with only the six new rows and one changed row.
+- **PostgreSQL 17** (throwaway cluster, `test_mexico_final_mile_migrations.py`): **6/6** pass. Measured:
+  - in flight, no existing table is locked exclusively;
+  - organizations, payroll_runs and payroll_employees hold SHARE ROW EXCLUSIVE: reads continue and a writer's NOWAIT is refused;
+  - the revision was held about 208 ms;
+  - with a writer on payroll_runs, the upgrade gave up after **5.14 s** with nothing applied;
+  - RLS is enabled and forced with the `zoiko_rls` policy on the two X4 tables, `classify()` agrees, and the decisions table has no policy;
+  - the real CLI upgrades from `c7d2e9a4f1b6` and `check_schema_drift` passes.
+- **Full suite** (5 sequential chunks, scratch SQLite): **7,624 passed**, 127 skipped, 2 xfailed. The only failures are the known local-only ones: the three `/health` route-registry tests (the associate's uncommitted `main.py`) and the HK configuration docs test. One manifest failure appeared because the migration docstring was edited after the manifest was regenerated; the manifest was regenerated again (this revision is unmerged) and its tests now pass.
+- **Frontend.** ESLint is clean on the new panel and the tab. The 32 `no-useless-catch` errors in `payrollService.js` are at existing lines 2146–2240, not in the eight added lines. `check:undefined` reports 585 files with no undefined names, and the build passes.
+
+**Browser:** **10/10 PASS** with the flag on and **8/8** with it off (`final-mile-evidence/RESULTS-X4-on.md` and `RESULTS-X4-off.md`). The new harness files are `setup_x4.py`, `serve_x4.py`, `x4_patches.py` and `x4_legacy.csv`; the synthetic identifiers for the leak scan stay in the scratchpad.
+
+With the flag on:
+- the identifier file is refused (row named, value not shown);
+- the import shows 2 matches, 1 unexplained net difference of 12.50, the unmatched legacy employee, and **NOT DECIDABLE (D-25 unset)**;
+- the explainer's own accept is refused;
+- the second admin accepts;
+- no identifier appears in the panel or the API;
+- the NL admin sees no Mexico panel and gets 403 from the API.
+
+With the flag off, all six routes are refused and the panel shows the dormancy message. Screenshots inspected.
+
+**Production effect**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | Two more tables in the unmerged `d3f8b2a6c1e9` (still one head). The brief SHARE ROW EXCLUSIVE lock on organizations, payroll_runs and payroll_employees is measured above; deploy at a quiet time |
+| API | Six org routes, all refused while Mexico is dormant (production) |
+| Templates | One more Draft template when the template seed is run by hand |
+| Other jurisdictions | None. `MX_DEDICATED_GENERATOR_REPORT_TYPES` grew by one; dormancy and registry tests cover the rest |

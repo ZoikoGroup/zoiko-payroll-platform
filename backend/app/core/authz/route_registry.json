@@ -9827,6 +9827,117 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/differences/{diff_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/differences/{diff_id}/explain",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "explain",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/parallel/imports",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/imports",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "imports",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/parallel/imports/{import_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/imports/{import_id}/withdraw",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/mexico/payments/batches",
    "data_class": "worker",
@@ -10244,6 +10355,7 @@
     "payroll_mx_cfdi_documents",
     "payroll_mx_imss_movements",
     "payroll_mx_isn_liabilities",
+    "payroll_mx_parallel_differences",
     "payroll_mx_payment_items",
     "payroll_mx_ptu_allocations",
     "payroll_mx_sbc_history",
