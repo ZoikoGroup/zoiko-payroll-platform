@@ -41,10 +41,9 @@ MX = "MX"
 SPEC = _content.SPEC
 
 # Codes that refuse the WHOLE operation (dormancy / scope), never a sentinel.
-GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
+GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_UNKNOWN",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
-BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO", "PTU")   # 9a, 9b, 9c, 9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
@@ -104,8 +103,9 @@ def guard(db: Session, employee, run=None) -> None:
         raise MXBlock("MX_ORG_NOT_MEXICAN", "the employee's organisation payroll jurisdiction is not Mexico", org_id)
     if run is not None and run.organization_id != org_id:
         raise MXBlock("MX_RUN_ORG_MISMATCH", "the run belongs to another organisation", org_id)
-    if run is not None and (run.mx_run_type or "ORDINARY") not in BUILT_RUN_TYPES:
-        raise MXBlock("MX_RUN_TYPE_PHASE9", f"{run.mx_run_type} runs are built in a later Phase 9 sub-phase", org_id)
+    if run is not None and (run.mx_run_type or "ORDINARY") not in RUN_TYPES:
+        # Every run type is built (Phase 9a–9d); what remains is an unknown one.
+        raise MXBlock("MX_RUN_TYPE_UNKNOWN", f"{run.mx_run_type!r} is not a Mexico run type", org_id)
 
 
 # ── 1b. Read-only policy for previews (MX-039, OOS-8) ───────────────────────
@@ -317,7 +317,8 @@ def _hours(db: Session, employee_id: int, start: date, end: date):
     if not rows:
         return None, []
     overtime = sum((_dec(r.overtime_hours) for r in rows), _ZERO)
-    hours = {"weeks": [{"week_start": r.week_start, "overtime_hours": _dec(r.overtime_hours)} for r in rows],
+    hours = {"weeks": [{"week_start": r.week_start, "overtime_hours": _dec(r.overtime_hours),
+                        "overtime_dates": list(r.overtime_dates or [])} for r in rows],
              "sundays_worked": sum(int(r.sundays_worked or 0) for r in rows),
              "holiday_days": sum(int(r.rest_days_worked or 0) for r in rows),
              "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE}
@@ -1186,6 +1187,7 @@ def _hours_view(r) -> dict:
     return {"id": r.id, "employeeId": r.employee_id, "weekStart": r.week_start.isoformat(),
             "ordinaryHours": str(r.ordinary_hours), "overtimeHours": str(r.overtime_hours),
             "sundaysWorked": r.sundays_worked, "restDaysWorked": r.rest_days_worked,
+            "overtimeDates": list(r.overtime_dates or []),
             "evidenceDocumentId": r.evidence_document_id, "status": r.status, "recordedById": r.recorded_by_id,
             "approvedById": r.approved_by_id, "approvedAt": r.approved_at.isoformat() if r.approved_at else None}
 
@@ -1206,10 +1208,23 @@ def record_hours(db: Session, org_id: int, employee_id: int, data: dict, actor_i
         if v < 0:
             raise BadRequestException(f"{key} must be zero or more")
         vals[key] = v
+    # Phase 11c: the dates inside the week on which the overtime was worked
+    # (the CFDI HorasExtra node needs them, S4 p. 51). Optional — without
+    # them the receipt of a payslip with overtime is refused.
+    dates = data.get("overtime_dates") or []
+    if dates:
+        if vals["overtime_hours"] <= 0:
+            raise BadRequestException("overtimeDates are given only with overtime hours")
+        if any(not isinstance(d, date) for d in dates):
+            raise BadRequestException("overtimeDates must be ISO dates")
+        if len(set(dates)) != len(dates):
+            raise BadRequestException("overtimeDates must not repeat a date")
+        if any(not (week <= d <= week + timedelta(days=6)) for d in dates):
+            raise BadRequestException("every overtime date must fall inside the recorded week")
     row = H(organization_id=org_id, employee_id=employee_id, week_start=week, ordinary_hours=vals["ordinary_hours"],
             overtime_hours=vals["overtime_hours"], sundays_worked=int(vals["sundays_worked"]),
             rest_days_worked=int(vals["rest_days_worked"]), evidence_document_id=data["evidence_document_id"],
-            status="DRAFT", recorded_by_id=actor_id)
+            overtime_dates=sorted(d.isoformat() for d in dates) or None, status="DRAFT", recorded_by_id=actor_id)
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="create", entity_type="mx_approved_hours", entity_id=row.id,

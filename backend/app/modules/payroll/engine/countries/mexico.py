@@ -13,9 +13,10 @@ reason at once) → hour-based lines → classification → SBC → IMSS / CEAV 
 INFONAVIT → ISR + subsidy → ISN → entitlements → result. Every rate, tariff,
 threshold and rule is a content row; a missing one BLOCKS (MX-001/MX-003).
 
-Not reachable in production yet: mexico_service.calc_inputs — the only hook
-that builds a real Mexican context — still raises MX_ENGINE_NOT_IMPLEMENTED
-until Phase 6 wires the run.
+Reached through mexico_service.calc_inputs (Phase 6: the guarded input
+builder in mexico_run_service). In production Mexico is dormant, so every path
+into a Mexican run refuses with MX_DORMANT; with the content tables still empty
+every calculation BLOCKS on its first missing row (gap register §B).
 
 Returns the generic keys (`tds` = ISR after subsidy; `mx_employee_total` =
 IMSS employee branches + INFONAVIT credit, summed by engine/standard.py) and

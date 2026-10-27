@@ -31,7 +31,8 @@ AFTER_E1A3 = ("payroll_mx_cfdi_system_concepts", "payroll_mx_onboarding_pauses",
 # Platform configuration (no organization_id): no RLS policy, like every platform table.
 PLATFORM_TABLES = {"payroll_mx_onboarding_pauses",                    # Phase 10g
                    "payroll_mx_cfdi_system_concepts"}                 # Phase 11a
-AFTER_E1A3_COLUMNS = (("payroll_nl_expat_decisions", "recorded_by"),)   # NL f84626be0cb1 (PR #118)
+AFTER_E1A3_COLUMNS = (("payroll_nl_expat_decisions", "recorded_by"),    # NL f84626be0cb1 (PR #118)
+                      ("payroll_mx_approved_hours", "overtime_dates"))   # Mexico b9f3d5a1c7e2 (Phase 11c)
 
 
 def _rls():

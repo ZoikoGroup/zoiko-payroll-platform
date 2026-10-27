@@ -183,7 +183,7 @@ def test_deploy_drift_filter_explains_every_za_object():
     here = os.getcwd()
     os.chdir(VERSIONS.parents[1])
     try:
-        tables, columns = pending_objects("8f90dde5f7b5")
+        tables, columns = pending_objects("b9f3d5a1c7e2")
     finally:
         os.chdir(here)
     assert tables == set(NEW_TABLES)
@@ -194,4 +194,4 @@ def test_deploy_drift_filter_explains_every_za_object():
 
 def test_revision_is_a_single_child_of_the_previous_head():
     module = _load(REVISION)
-    assert (module.revision, module.down_revision) == (REVISION, "8f90dde5f7b5")
+    assert (module.revision, module.down_revision) == (REVISION, "b9f3d5a1c7e2")

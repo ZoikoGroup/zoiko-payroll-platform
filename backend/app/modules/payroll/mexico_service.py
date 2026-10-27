@@ -169,12 +169,15 @@ def mx_pack_approval_refusal(db: Session, pack, actor_id: Optional[int] = None) 
     """Approving a Mexico pack (Phase 2, open item 5) requires the pack to be
     in QA — the transition graph's last step before Approved, so the shared
     Draft -> Approved auto-advance can never fire for Mexico — and activation
-    gates 1 (content exact) and 2 (every row source-linked) to hold already."""
+    gates 1 (content exact) and 2 (every row source-linked) to hold already,
+    and (Phase 11d) every cited source to be VERIFIED, not an archive copy."""
     if pack.status != "QA":
         return (f"Mexico pack approval is refused: {pack.pack_id} v{pack.version} is {pack.status} — move it through "
                 "In Review to QA first (Draft → In Review → QA → Approved).")
-    for check in activation_checks(db, pack, actor_id)[:2]:          # gate 1 (content), gate 2 (evidence)
-        if not check["met"]:
+    # Gate 1 (content), gate 2 (evidence) and, Phase 11d, every cited source
+    # VERIFIED: an archive copy backs a Draft pack only, never an Approved one.
+    for check in activation_checks(db, pack, actor_id):
+        if check["key"] in ("content", "evidence", "sources_verified") and not check["met"]:
             return f"Mexico pack approval is refused: {check['detail']}"
     return None
 
@@ -372,7 +375,8 @@ def _db_signatures(rates, slabs) -> list:
     out = [_content.rate_signature(r.component_key, r.employee_rate_pct, r.employer_rate_pct, r.flat_amount,
                                    r.text_value, r.effective_from, r.effective_to) for r in rates]
     out += [_content.slab_signature(s.rule_type, s.filing_status, s.min_amount, s.max_amount, s.flat_amount,
-                                    s.rate_pct, s.effective_from, s.effective_to, s.tax_table_number) for s in slabs]
+                                    s.rate_pct, s.effective_from, s.effective_to, s.tax_table_number,
+                                    jurisdiction_state=s.jurisdiction_state) for s in slabs]
     return out
 
 
@@ -457,6 +461,28 @@ def activation_checks(db: Session, pack, actor_id: Optional[int] = None) -> list
     else:
         ev = (True, f"every row links one of {len(artifacts)} hashed source file(s)")
     checks.append({"key": "evidence", "label": "Every row linked to a hashed source", "met": ev[0], "detail": ev[1]})
+
+    # Phase 11d (gap register A9): an ARCHIVE_COPY_VERIFIED source may back a
+    # Draft pack only — every cited file must be VERIFIED (a direct download)
+    # in docs/mexico/sources/SOURCES_MANIFEST.csv, with its entry in
+    # VERIFICATION_LOG.csv, before the pack goes live.
+    from app.modules.payroll import mexico_sources
+
+    manifest_rows, log_rows = mexico_sources.read_rows(), mexico_sources.read_log()
+    if not artifacts:
+        sv = (False, "no cited source to confirm")
+    elif not manifest_rows:
+        sv = (False, "SOURCES_MANIFEST.csv cannot be read — no source can be confirmed VERIFIED")
+    else:
+        unverified = [a.id for a in artifacts
+                      if not mexico_sources.verified_artifact(manifest_rows, a.source_url, a.checksum_sha256,
+                                                              log_rows)]
+        sv = ((False, f"source artifact(s) {unverified[:5]} are not VERIFIED in SOURCES_MANIFEST.csv with a matching "
+                      "VERIFICATION_LOG.csv entry — an archive copy feeds a Draft pack only; verify a direct "
+                      "download from the official URL with scripts/verify_mexico_sources.py first")
+              if unverified else (True, f"all {len(artifacts)} cited source file(s) are VERIFIED"))
+    checks.append({"key": "sources_verified", "label": "Every cited source VERIFIED (not an archive copy)",
+                   "met": sv[0], "detail": sv[1]})
 
     unreviewed = [a.id for a in artifacts if a.reviewer_approved_at is None or a.reviewer_id is None]
     self_reviewed = [a.id for a in artifacts if actor_id is not None and a.reviewer_id == actor_id]

@@ -46,6 +46,8 @@ def _rules(monkeypatch, *, aguinaldo=True, special=True, isn=True):
     if special:
         monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {"AGUINALDO": SynSpecialPayRule(),
                                                         "VACATION_PREMIUM": SynSpecialPayRule("50")})
+    if not isn:                                          # W1-2 transcribed the real CDMX inclusions
+        monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {})
     if isn:
         monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {("CDMX", "AGUINALDO"): (True, "S22", "SYNTHETIC"),
                                                                 ("CDMX", "VACATION_PREMIUM"): (True, "S22", "SYNTHETIC")})

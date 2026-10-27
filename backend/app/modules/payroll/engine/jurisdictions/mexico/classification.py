@@ -84,8 +84,11 @@ def classify(lines, classifications, on: _dt.date, work_state: str) -> list:
             problems.append(("MX_EARNING_INVALID", f"earning {code} has unknown kind {kind!r}"))
             continue
         if kind in SPECIAL_PAY_KINDS:
+            # Invariant (Phase 11d): preflight routes special kinds to
+            # special_pay.classify first, so an ordinary line never carries one.
             problems.append(("MX_SPECIAL_PAY_PHASE9",
-                             f"earning {code} is a special payment ({kind}) — its withholding is built in Phase 9 (Q8)"))
+                             f"earning {code} is a special payment ({kind}) — it is calculated by its own rule, never "
+                             f"as an ordinary line"))
             continue
         amount = _amount(line.get("amount"), code)
         row = classifications.get(code)

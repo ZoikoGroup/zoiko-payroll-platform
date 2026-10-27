@@ -38,9 +38,9 @@ def test_no_active_pack_is_blocked_content_and_cannot_activate(db):
 
 
 def test_a_draft_seeded_pack_does_not_count(db):
-    from scripts.seed_mexico_canonical_packs import seed_mexico
+    from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
 
-    seed_mexico(db, manifest={})
+    seed_mexico(db, manifest=load_manifest())
     db.commit()
     t, emp = _setup(db)
     assert _policy(db, t.org.id, emp["id"])["floorCheckStatus"] == "BLOCKED_CONTENT"

@@ -2181,7 +2181,11 @@ def seed_mexico(db, manifest=None):
             description="Draft shell — state ISN return, filled in Phase 8 from the certified state pack.",
             regulatory_authority=f"{state} state treasury", source_references=mexico_content.SPEC))
 
-    manifest = load_manifest() if manifest is None else manifest
+    # Due dates are not Draft pack content: only a VERIFIED (directly
+    # downloaded) source may seed one — never an archive copy (Phase 11d).
+    from app.modules.payroll import mexico_sources
+
+    manifest = load_manifest(statuses=mexico_sources.ACTIVATION_STATUSES) if manifest is None else manifest
     entries = []
     for rule in mexico_content.MX_FILING_CALENDAR:
         if rule.source not in manifest:

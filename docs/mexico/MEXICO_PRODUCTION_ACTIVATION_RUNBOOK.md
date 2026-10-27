@@ -23,7 +23,7 @@ Each item above is built, tested and reviewed like any other phase before the st
 
 | Step | Check |
 |---|---|
-| 1.1 Save every source the gates need (see `release-gates/G1…G8/CHECKLIST.md`) under `docs/mexico/sources/`, with `SOURCES_MANIFEST.csv` updated (SHA-256, retrieval date, version header). Replace S22, which is saved but the wrong version. | Every source a launch gate names has status `VERIFIED` in the manifest. |
+| 1.1 Save every source the gates need (see `release-gates/G1…G8/CHECKLIST.md`) under `docs/mexico/sources/`, with `SOURCES_MANIFEST.csv` updated (SHA-256, retrieval date, version header). Replace S22, which is saved but the wrong version. | Every source a launch gate names has status `VERIFIED` in the manifest, set by `verify_mexico_sources.py verify` with its `MATCH` entry in `VERIFICATION_LOG.csv`. |
 | 1.2 Transcribe the content (ISR tariffs and subsidy, UMA, minimum wages, IMSS branches and CEAV, INFONAVIT, each enabled state's ISN, labour floors, special-pay rules) into the Mexico packs. Every row is source-linked. | The pack's activation readiness (Readiness G1–G8 tab) shows content exact and every row source-linked. |
 | 1.3 Move each pack Draft → In Review → QA → Approved → Active. A Super Admin who edited a row cannot approve it. | Each launch pack is Active. |
 | 1.4 Load the CFDI schema and catalog releases from S28 / S30 and make them Active. | CFDI release Active. |

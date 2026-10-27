@@ -347,7 +347,8 @@ def record_hours(employee_id: int, body: Dict[str, Any] = Body(...), current_use
     data = {"week_start": _date(body.get("weekStart")) if body.get("weekStart") else None,
             "ordinary_hours": body.get("ordinaryHours"), "overtime_hours": body.get("overtimeHours"),
             "sundays_worked": body.get("sundaysWorked"), "rest_days_worked": body.get("restDaysWorked"),
-            "evidence_document_id": body.get("evidenceDocumentId")}
+            "evidence_document_id": body.get("evidenceDocumentId"),
+            "overtime_dates": [_date(d) for d in (body.get("overtimeDates") or [])]}   # Phase 11c
     return mexico_run_service.record_hours(db, _org_id(current_user), employee_id, data, _actor(current_user))
 
 
@@ -392,6 +393,14 @@ def generate_cfdi(run_id: int, current_user=Depends(get_current_org_admin), db: 
     from app.modules.payroll import mexico_cfdi_service
 
     return mexico_cfdi_service.generate(db, _run(db, current_user, run_id), _actor(current_user))
+
+
+@router.post("/runs/{run_id}/cfdi/validate",
+             summary="Validate-only CFDI preview: build and validate in memory; never signs, stores or returns XML")
+def validate_cfdi(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_preview
+
+    return mexico_cfdi_preview.validate_run(db, _run(db, current_user, run_id), _actor(current_user))
 
 
 @router.post("/cfdi/outbox/process", summary="Process pending PAC actions (explicit, operator-triggered — D5)")

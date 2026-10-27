@@ -111,6 +111,16 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                 "created_by_id"} == columns["payroll_br_employer_profiles"]
         assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
                 "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
+        tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
+        # Mexico m18 (b9f3d5a1c7e2), then South Africa (447f57564983, re-parented onto it).
+        assert tables == za_tables
+        assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}
+        assert columns["payroll_runs"] == {"za_approval_fingerprint"}
+        assert columns["payslip_items"] == {"za_calculation_snapshot"}
+        assert len(columns["payroll_employee_statutory_profiles"]) == 13
+        # Once m18 is in production only South Africa is pending.
+        tables, columns = pending_objects("b9f3d5a1c7e2")
+        assert tables == za_tables and "payroll_mx_approved_hours" not in columns
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables
