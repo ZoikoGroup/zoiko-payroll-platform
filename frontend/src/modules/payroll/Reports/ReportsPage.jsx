@@ -15,6 +15,7 @@ import USNewHireReportingPanel from "./USNewHireReportingPanel";
 import CHElmSubmissionsPanel from "./CHElmSubmissionsPanel";
 import NLLoonaangiftePanel from "./NLLoonaangiftePanel";
 import NLJaaropgaafPanel from "./NLJaaropgaafPanel";
+import ZAFilingPanel from "./ZAFilingPanel";
 import { normalizeCountryCode } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
@@ -44,6 +45,9 @@ const CH_ELM_TAB = { id: "ch-elm", label: "Swiss ELM submissions", icon: Landmar
 // employer-wide, never tied to a single PayrollRun (same reasoning as PD7A).
 const NL_LOONAANGIFTE_TAB = { id: "nl-loonaangifte", label: "Loonaangifte", icon: Landmark };
 const NL_JAAROPGAAF_TAB = { id: "nl-jaaropgaaf", label: "Jaaropgaaf", icon: FileText };
+// South Africa (ZP-ZA-ENG-001 Phase 8): EMP201 / EMP501 / IRP5 / COIDA evidence —
+// export-and-evidence, employer-wide like the NL loonaangifte tab.
+const ZA_FILING_TAB = { id: "za-filing", label: "SARS Filing", icon: Landmark };
 // Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
 // reasoning as the PD7A tab above.
 const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark };
@@ -76,6 +80,8 @@ export default function ReportsPage() {
   const isPr = jurisdictionCountry === "PR";
   const isSwitzerland = normalizeCountryCode(jurisdictionCountry) === "CH";
   const isNetherlands = normalizeCountryCode(jurisdictionCountry) === "NL";
+  // "ZA" is South Africa — "SA" is Saudi Arabia.
+  const isSouthAfrica = normalizeCountryCode(jurisdictionCountry) === "ZA";
   const tabs = [
     ...BASE_TABS,
     ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
@@ -85,6 +91,7 @@ export default function ReportsPage() {
     ...(isPr ? [PR_ASUME_TAB] : []),
     ...(isSwitzerland ? [CH_ELM_TAB] : []),
     ...(isNetherlands ? [NL_LOONAANGIFTE_TAB, NL_JAAROPGAAF_TAB] : []),
+    ...(isSouthAfrica ? [ZA_FILING_TAB] : []),
   ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
@@ -329,6 +336,7 @@ export default function ReportsPage() {
       {isSwitzerland && activeTab === "ch-elm" && <CHElmSubmissionsPanel />}
       {isNetherlands && activeTab === "nl-loonaangifte" && <NLLoonaangiftePanel />}
       {isNetherlands && activeTab === "nl-jaaropgaaf" && <NLJaaropgaafPanel />}
+      {isSouthAfrica && activeTab === "za-filing" && <ZAFilingPanel />}
       {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
       {isUs && activeTab === "us-941" && <USForm941Panel />}
       {isUs && activeTab === "us-940" && <USForm940Panel />}

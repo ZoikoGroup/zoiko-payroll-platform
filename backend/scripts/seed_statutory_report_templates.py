@@ -1588,6 +1588,7 @@ def run():
         seed_hong_kong(db)
         seed_mexico(db)
         seed_netherlands(db)
+        seed_south_africa(db)
         # ------------------------------------------------------------------
         # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) templates.
         # ------------------------------------------------------------------
@@ -2467,6 +2468,99 @@ def seed_netherlands(db):
             reporting_year=NL_TEMPLATE_YEAR, document_scope=t["scope"], components=t["components"],
             description=t["description"], regulatory_authority="Belastingdienst",
             source_references="ZP-NL-ENG-001 v1.0 §16 (S19 payslip content)"))
+    return seeded
+
+
+# ── South Africa (ZP-ZA-ENG-001 Phase 8) ────────────────────────────────────
+# Register / evidence templates over the frozen za_calculation_snapshot
+# (service._PAYSLIP_ITEM_JSON_FIELD_CATALOG["ZA"]). SDL and ETI sit in employer
+# components only (ZA-010). The statutory EMP201 / EMP501 / IRP5 artefacts are
+# produced by south_africa_filing, not by these templates; ZA_EMP501* / ZA_IRP5*
+# templates are refused activation while the BRS catalogue is empty.
+ZA_TEMPLATE_YEAR = "2027"
+_ZA_SNAP = "za_calculation_snapshot."
+
+
+def _za(field_key, label, path, field_type="currency", aggregation=None):
+    return (field_key, label, field_type, "PAYSLIP_ITEM_JSON", _ZA_SNAP + path, aggregation)
+
+
+_ZA_EMPLOYER = ("employer_info", "Employer", [
+    ("employer_name", "Employer", "text", "EMPLOYER_PROFILE", "name", None),
+    ("employer_tax_no", "PAYE Reference", "text", "EMPLOYER_PROFILE", "tax_no", None),
+    ("period_label", "Period", "text", "PAYROLL_RUN", "period_label", None),
+    ("pay_date", "Pay Date", "date", "PAYROLL_RUN", "pay_date", None),
+])
+_ZA_EMPLOYEE = ("employee_info", "Employee", [
+    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+])
+_ZA_EMPLOYEE_DEDUCTIONS = [
+    _za("paye", "PAYE", "za_paye"),
+    _za("uif_employee", "UIF (Employee)", "za_uif_employee"),
+    _za("retirement", "Retirement Fund Contribution", "za_retirement_contribution"),
+]
+_ZA_EMPLOYER_COST = [
+    _za("uif_employer", "UIF (Employer)", "za_uif_employer"),
+    _za("sdl", "SDL (Employer)", "za_sdl"),
+]
+
+
+def _za_templates():
+    return {
+        "ZA-PAYROLL-REGISTER": dict(
+            name="South Africa payroll register", report_type="ZA_PAYROLL_REGISTER", scope="AGGREGATE",
+            description="Per-employee register: the separate PAYE / UIF / SDL bases, employee deductions and "
+                        "the employer's UIF and SDL (never employee deductions).",
+            components=[_ZA_EMPLOYER, _ZA_EMPLOYEE,
+                        ("earnings", "Remuneration Bases", [
+                            _za("paye_remuneration", "PAYE Remuneration", "za_paye_remuneration"),
+                            _za("uif_base", "UIF Remuneration", "za_uif_base"),
+                            _za("sdl_base", "SDL Remuneration", "za_sdl_base")]),
+                        ("deductions", "Employee Deductions", _ZA_EMPLOYEE_DEDUCTIONS),
+                        ("employer_contributions", "Employer UIF and SDL", _ZA_EMPLOYER_COST)]),
+        "ZA-EMP201-SUMMARY": dict(
+            name="South Africa EMP201 run summary", report_type="ZA_EMP201_SUMMARY", scope="AGGREGATE",
+            description="Run totals of PAYE, SDL, UIF and the employer's ETI — a reconciliation aid for the "
+                        "monthly EMP201 the filing service builds.",
+            components=[_ZA_EMPLOYER,
+                        ("totals", "PAYE / SDL / UIF / ETI for the Month", [
+                            _za("paye", "PAYE", "za_paye", aggregation="SUM_RUN"),
+                            _za("sdl", "SDL (Employer)", "za_sdl", aggregation="SUM_RUN"),
+                            _za("uif_employee", "UIF (Employee)", "za_uif_employee", aggregation="SUM_RUN"),
+                            _za("uif_employer", "UIF (Employer)", "za_uif_employer", aggregation="SUM_RUN"),
+                            _za("eti", "ETI (Employer Incentive)", "za_eti_amount", aggregation="SUM_RUN")])]),
+        "ZA-IRP5-PREVIEW": dict(
+            name="South Africa IRP5 / IT3(a) preview", report_type="ZA_IRP5_PREVIEW", scope="PER_EMPLOYEE",
+            description="Per-employee certificate preview with internal line names only — no SARS source codes "
+                        "until the BRS v25.3.0 catalogue is archived.",
+            components=[_ZA_EMPLOYER, _ZA_EMPLOYEE,
+                        ("earnings", "Remuneration", [
+                            _za("paye_remuneration", "PAYE Remuneration (YTD)", "za_paye_remuneration",
+                                aggregation="SUM_YTD")]),
+                        ("deductions", "PAYE, UIF and Retirement", [
+                            _za("paye", "PAYE (YTD)", "za_paye", aggregation="SUM_YTD"),
+                            _za("uif_employee", "UIF (Employee, YTD)", "za_uif_employee", aggregation="SUM_YTD"),
+                            _za("retirement", "Retirement Fund (YTD)", "za_retirement_contribution",
+                                aggregation="SUM_YTD")])]),
+        "ZA-COIDA-EARNINGS": dict(
+            name="South Africa COIDA earnings evidence", report_type="ZA_COIDA_EARNINGS", scope="AGGREGATE",
+            description="Earnings evidence for the Compensation Fund return of earnings — no assessment rate.",
+            components=[_ZA_EMPLOYER,
+                        ("earnings", "COIDA Earnings", [
+                            _za("paye_remuneration", "Remuneration (see COIDA classification)",
+                                "za_paye_remuneration", aggregation="SUM_RUN")])]),
+    }
+
+
+def seed_south_africa(db):
+    print("Seeding South Africa report templates (ZP-ZA-ENG-001, Draft)...")
+    seeded = []
+    for key, t in _za_templates().items():
+        seeded.append(_seed_template(
+            db, template_key=key, name=t["name"], report_type=t["report_type"], country="ZA",
+            reporting_year=ZA_TEMPLATE_YEAR, document_scope=t["scope"], components=t["components"],
+            description=t["description"], regulatory_authority="SARS",
+            source_references="ZP-ZA-ENG-001 v1.0 §9 / §12"))
     return seeded
 
 if __name__ == "__main__":

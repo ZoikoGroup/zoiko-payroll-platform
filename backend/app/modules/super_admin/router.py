@@ -4977,3 +4977,13 @@ def switzerland_qst_tariff_affected_payslips(tariff_file_id: int, current_user=D
     from app.modules.payroll import switzerland_service
 
     return switzerland_service.qst_tariff_affected_payslips(db, tariff_file_id)
+
+# -- South Africa (ZP-ZA-ENG-001 Phase 5) -------------------------------------
+
+@router.get("/compliance/south-africa/summary",
+            summary="South Africa compliance summary (read-only; stays PLANNED)")
+def south_africa_compliance_summary(current_user=Depends(get_current_super_admin),
+                                    db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_service
+
+    return south_africa_service.statutory_summary(db)

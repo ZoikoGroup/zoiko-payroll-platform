@@ -16,6 +16,7 @@ import NetherlandsStatutoryProfilePanel from "./NetherlandsStatutoryProfilePanel
 import SaudiArabiaStatutoryProfilePanel from "./SaudiArabiaStatutoryProfilePanel";
 import MexicoStatutoryProfilePanel from "./MexicoStatutoryProfilePanel";
 import BrazilStatutoryProfilePanel from "./BrazilStatutoryProfilePanel";
+import SouthAfricaStatutoryProfilePanel from "./SouthAfricaStatutoryProfilePanel";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
 import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
@@ -108,6 +109,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showMxStatutory, setShowMxStatutory] = useState(false);
   const [showBrStatutory, setShowBrStatutory] = useState(false);
   const [showSaStatutory, setShowSaStatutory] = useState(false);
+  const [showZaStatutory, setShowZaStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
@@ -441,6 +443,41 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "ZA" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="za-identity-block">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">South Africa identity &amp; bank routing</h4>
+                  {/* ID / passport / tax number arrive masked from the API (ZAEmployeeValidation SENSITIVE_FIELDS). */}
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.ZA.map((spec) => (
+                      <DetailRow key={spec.key} label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])} />
+                    ))}
+                  </dl>
+                </div>
+              )}
+
+              {employee.countryCode === "ZA" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      South Africa statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowZaStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Employment type, tax residency, medical scheme, travel, UIF and ETI facts — required before South
+                    African payroll can be calculated for this employee. Tax directives are captured and approved in the
+                    Compliance Centre.
+                  </p>
+                </div>
+              )}
+
 {employee.countryCode === "IT" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <div className="flex items-center justify-between">
@@ -636,6 +673,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showSaStatutory && (
         <SaudiArabiaStatutoryProfilePanel employee={employee} onClose={() => setShowSaStatutory(false)} />
+      )}
+      {showZaStatutory && (
+        <SouthAfricaStatutoryProfilePanel employee={employee} onClose={() => setShowZaStatutory(false)} />
       )}
       {showSwissStatutory && (
         <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />

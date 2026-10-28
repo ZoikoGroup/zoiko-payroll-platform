@@ -93,8 +93,16 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         brazil_tables = {"payroll_br_risk_assignments", "payroll_br_cprb_options", "payroll_br_credential_refs",
                          "payroll_br_concurrent_inss_declarations", "payroll_br_alimony_orders",
                          "payroll_br_vale_transporte_elections"}
+        # South Africa foundation (447f57564983, ZP-ZA-ENG-001 Phase 2): four
+        # payroll_za_* tables, 13 za_* profile columns, the payslip snapshot and
+        # the run fingerprint — all pending on top of every production revision.
+        za_tables = {"payroll_za_employer_registrations", "payroll_za_tax_directives", "payroll_za_eti_ledger",
+                     "payroll_za_sars_artifacts",
+                     # Phase 8 (c15d5b87d6f5): SARS payments + approved reconciliation variances.
+                     "payroll_za_sars_payments", "payroll_za_reconciliation_variances"}
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
         assert tables == {"payroll_mx_cfdi_system_concepts", "payroll_mx_decisions", *MX_X4_TABLES} | brazil_tables
+        assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables
         # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2
         # (135dbbeb9818, 8f90dde5f7b5), on top of production a8e4c1f7d3b5: every
         # table AND every column on an existing table must be explained, or a
@@ -102,9 +110,12 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = pending_objects("a8e4c1f7d3b5")
         assert tables == brazil_tables | {"payroll_mx_decisions", *MX_X4_TABLES}                  # + Mexico final mile X1
         assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel"}
+        assert tables == brazil_tables | za_tables
+        assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint"}
         assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
                                                          "authority_payment_id"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 10
+        assert len(columns["payroll_employee_statutory_profiles"]) == 10 + 13
+        assert "za_calculation_snapshot" in columns["payslip_items"]
         assert {"version", "previous_version_id", "effective_from", "effective_to",
                 "created_by_id"} == columns["payroll_br_employer_profiles"]
         assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
@@ -113,6 +124,16 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert tables == {"payroll_mx_decisions", *MX_X4_TABLES} and columns == {"payroll_mx_approved_hours": {"overtime_dates"}}   # Mexico m18
         tables, columns = pending_objects("c7d2e9a4f1b6")        # production since PR #136 (A18)
         assert tables == {"payroll_mx_decisions", *MX_X4_TABLES} and columns == {}               # Mexico final mile X1 (m20)
+        # Mexico m18 (b9f3d5a1c7e2) and m19 (c7d2e9a4f1b6, a CHECK change only), then South
+        # Africa (447f57564983, re-parented onto c7d2e9a4f1b6).
+        assert tables == za_tables
+        assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}
+        assert columns["payroll_runs"] == {"za_approval_fingerprint"}
+        assert columns["payslip_items"] == {"za_calculation_snapshot"}
+        assert len(columns["payroll_employee_statutory_profiles"]) == 13
+        # Once m18 is in production only South Africa is pending.
+        tables, columns = pending_objects("b9f3d5a1c7e2")
+        assert tables == za_tables and "payroll_mx_approved_hours" not in columns
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

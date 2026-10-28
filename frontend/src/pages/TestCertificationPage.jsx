@@ -34,6 +34,9 @@ const JURISDICTIONS = [
   // Brazil (ZP-BR-ENG-001) — golden cases for INSS, IRRF (+ reduction),
   // salário-família, FGTS and CPP, sourced per br_golden/README.md.
   { value: "BR", label: "Brazil (Receita Federal / eSocial)", fixturesPath: "backend/tests/fixtures/br_golden/README.md" },
+  // South Africa (ZP-ZA-ENG-001) - PLANNED; certification is supporting
+  // information only while activation gates G1-G8 remain unevidenced.
+  { value: "ZA", label: "South Africa (SARS)", fixturesPath: "backend/tests/fixtures/za_golden/README.md" },
 ];
 
 export default function TestCertificationPage() {

@@ -631,6 +631,26 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{7}$", "example": "6201501", "primary": False},
         ],
     },
+    # South Africa (ZP-ZA-ENG-001 Phase 5) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live South African payroll stays disabled until
+    # the release gates are signed and the registry row leaves PLANNED.
+    # Formats only; the SARS reference check-digit rules remain PENDING_G1.
+    "ZA": {
+        "label": "PAYE / UIF / SDL / COIDA / CIPC",
+        "currency": "ZAR",
+        "fields": [
+            {"key": "paye_reference", "label": "PAYE reference (SARS)",
+             "pattern": r"^7\d{9}$", "example": "7123456789", "primary": True},
+            {"key": "uif_reference", "label": "UIF reference (Department of Employment and Labour)",
+             "pattern": r"^U\d{9}$", "example": "U123456789", "primary": False},
+            {"key": "sdl_reference", "label": "SDL reference (SARS)",
+             "pattern": r"^L\d{9}$", "example": "L123456789", "primary": False},
+            {"key": "coida_reference", "label": "COIDA registration number",
+             "pattern": r"^[A-Za-z0-9 /.-]{6,30}$", "example": "1234567/ABC", "primary": False},
+            {"key": "cipc_number", "label": "CIPC company registration number",
+             "pattern": r"^\d{4}/\d{6}/\d{2}$", "example": "2026/123456/07", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -679,6 +699,11 @@ COUNTRY_NAME_TO_CODE = {
     "brasil": "BR",
     "república federativa do brasil": "BR",
     "republica federativa do brasil": "BR",
+    "south africa": "ZA",
+    "south africa (za)": "ZA",
+    "republic of south africa": "ZA",
+    "za": "ZA",
+    "rsa": "ZA",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -706,6 +731,7 @@ CODE_TO_COUNTRY_NAME = {
     "NL": "Netherlands",
     "MX": "Mexico",
     "BR": "Brazil",
+    "ZA": "South Africa",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

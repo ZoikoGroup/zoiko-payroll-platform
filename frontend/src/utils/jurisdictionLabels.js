@@ -41,6 +41,8 @@ const INCOME_TAX_LABELS = {
   // on labour income, from the Receita Federal's progressive table (and its
   // reduction), ZP-BR-ENG-001.
   BR: "IRRF (Imposto de Renda)",
+  // South Africa — PAYE (Pay As You Earn) monthly withholding
+  ZA: "PAYE",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -51,10 +53,17 @@ const INCOME_TAX_LABELS = {
 // (ZP-SA-ENG-001 — the engine NEVER returns a `tds` key and tds stays 0.00).
 const NO_PAYROLL_INCOME_TAX = new Set(["HK", "SA"]);
 
+// South Africa (ZP-ZA-ENG-001) maps onto the generic fields exactly as
+// countries/south_africa.py returns them: PAYE -> tds, employee UIF -> esi,
+// employer UIF -> employerEsi, SDL -> employerPayrollTax (employer only),
+// retirement fund -> employeePension. ETI is an employer incentive and the
+// medical tax credit sits inside PAYE — neither is a payslip line (ZA-010).
 const PF_LABELS = { DE: "Pension Insurance" };
-const ESI_LABELS = { DE: "Social Insurance (Health / Unemployment / Care)", CA: "Employment Insurance (EI)" };
+const ESI_LABELS = { DE: "Social Insurance (Health / Unemployment / Care)", CA: "Employment Insurance (EI)", ZA: "UIF (Employee)" };
 const EMPLOYER_PF_LABELS = { DE: "Employer Pension Insurance" };
-const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution" };
+const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution", ZA: "UIF (Employer)" };
+// Employer-only payroll levies carried on employer_payroll_tax.
+const EMPLOYER_PAYROLL_TAX_LABELS = { AU: "State Payroll Tax (Employer)", ZA: "SDL (Employer)" };
 const SOCIAL_SECURITY_LABELS = {
   CA: "Canada Pension Plan (CPP)",
   BB: "NIS", DO: "SFS (Seguro Familiar de Salud)", GY: "NIS", JM: "NIS", TT: "NIS",
@@ -87,6 +96,8 @@ const EMPLOYEE_PENSION_LABELS = {
   BR: "FGTS",
   // Saudi Arabia — GOSI Pension (Employee share), from sa_result.employee_pension
   SA: "GOSI Pension (Employee)",
+  // South Africa — the employee's retirement fund contribution (employee_pension)
+  ZA: "Retirement Fund Contribution",
 };
 const NI_EMPLOYEE_LABELS = { JM: "Education Tax" };
 
@@ -133,6 +144,7 @@ export function getPayrollLabels(country) {
     employerSocialSecurity: EMPLOYER_SOCIAL_SECURITY_LABELS[c] || "Employer Social Security",
     medicare: MEDICARE_LABELS[c] || "Medicare",
     employerPension: EMPLOYER_PENSION_LABELS[c] || "Employer Pension",
+    employerPayrollTax: EMPLOYER_PAYROLL_TAX_LABELS[c] || "Employer Payroll Tax",
     // Saudi GOSI Occupational Hazards — employer-only (ZP-SA-ENG-001 §4).
     employerOccupationalHazard: c === "SA" ? "GOSI Occupational Hazards (Employer)" : "Occupational Hazards (Employer)",
     churchTax: CHURCH_TAX_LABELS[c] || null,
@@ -156,6 +168,7 @@ const TAX_ID_LABELS = {
   HK: "Business Registration No. / IRD Employer's File No.",
   CH: "UID (Business Identification No.)",
   BR: "CNPJ / CPF",
+  ZA: "SARS PAYE / UIF / SDL Registration",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only
@@ -171,6 +184,7 @@ const STATE_RULE_NOTES = {
   NL: "One national regime: loonheffing, employee insurance and Zvw do not vary by province.",
   HK: "One territory-wide regime: MPF is deducted through payroll; Salaries Tax is assessed by the IRD on the employee and is never withheld from pay.",
   BR: "Core CLT payroll contributions (INSS, FGTS, IRRF) are federal; state rules mainly affect indirect taxes and regional benefits.",
+  ZA: "Sectoral bargaining council agreements and COIDA classifications may vary by industry/province.",
 };
 
 // The one statutory ID that best identifies an employee to their tax
@@ -210,6 +224,9 @@ const IDENTITY_FIELD = {
   NL: { label: "BSN", get: (p) => p.complianceFields?.bsn },
   // Masked server-side (SENSITIVE_FIELDS) where applicable, like BSN/HKID.
   BR: { label: "CPF", get: (p) => p.complianceFields?.cpf },
+  // South Africa — SARS income-tax number (ZAEmployeeValidation's tax_number,
+  // masked server-side as a SENSITIVE_FIELD).
+  ZA: { label: "SARS Tax Number", get: (p) => p.complianceFields?.tax_number },
 };
 
 export function getIdentityField(payslip) {

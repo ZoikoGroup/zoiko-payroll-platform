@@ -459,6 +459,25 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     br_salario_familia_dependents_count: Optional[int] = Field(None, validation_alias="brSalarioFamiliaDependentsCount")
     br_salario_familia_dependents_evidence_ref: Optional[str] = Field(None, validation_alias="brSalarioFamiliaDependentsEvidenceRef")
 
+    # ── South Africa (ZP-ZA-ENG-001 ZA-005; "ZA" — "SA" above is Saudi Arabia) —
+    # the za_* facts on models.py's EmployeeStatutoryProfile, validated by
+    # south_africa_service._za_statutory_profile_errors; fields not sent carry
+    # forward from the previous ZA version (_za_profile_values). Identity / tax
+    # numbers live in compliance_fields, never here.
+    za_employment_type: Optional[str] = Field(None, validation_alias="zaEmploymentType")
+    za_tax_residency: Optional[str] = Field(None, validation_alias="zaTaxResidency")
+    za_is_director: Optional[bool] = Field(None, validation_alias="zaIsDirector")
+    za_medical_scheme_member: Optional[bool] = Field(None, validation_alias="zaMedicalSchemeMember")
+    za_medical_dependants: Optional[int] = Field(None, validation_alias="zaMedicalDependants")
+    za_travel_business_use_80: Optional[bool] = Field(None, validation_alias="zaTravelBusinessUse80")
+    za_uif_excluded: Optional[bool] = Field(None, validation_alias="zaUifExcluded")
+    za_uif_exclusion_reason: Optional[str] = Field(None, validation_alias="zaUifExclusionReason")
+    za_eti_eligible: Optional[bool] = Field(None, validation_alias="zaEtiEligible")
+    za_eti_first_qualifying_month: Optional[date] = Field(None, validation_alias="zaEtiFirstQualifyingMonth")
+    za_sez_employee: Optional[bool] = Field(None, validation_alias="zaSezEmployee")
+    za_voluntary_additional_paye: Optional[Decimal] = Field(None, validation_alias="zaVoluntaryAdditionalPaye")
+    za_evidence_ref: Optional[str] = Field(None, validation_alias="zaEvidenceRef")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -664,6 +683,21 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     brIrrfDependentsEvidenceRef: Optional[str] = Field(None, validation_alias="br_irrf_dependents_evidence_ref", serialization_alias="brIrrfDependentsEvidenceRef")
     brSalarioFamiliaDependentsCount: Optional[int] = Field(None, validation_alias="br_salario_familia_dependents_count", serialization_alias="brSalarioFamiliaDependentsCount")
     brSalarioFamiliaDependentsEvidenceRef: Optional[str] = Field(None, validation_alias="br_salario_familia_dependents_evidence_ref", serialization_alias="brSalarioFamiliaDependentsEvidenceRef")
+
+    # ── South Africa (ZP-ZA-ENG-001) — see Create schema above ──
+    zaEmploymentType: Optional[str] = Field(None, validation_alias="za_employment_type", serialization_alias="zaEmploymentType")
+    zaTaxResidency: Optional[str] = Field(None, validation_alias="za_tax_residency", serialization_alias="zaTaxResidency")
+    zaIsDirector: Optional[bool] = Field(None, validation_alias="za_is_director", serialization_alias="zaIsDirector")
+    zaMedicalSchemeMember: Optional[bool] = Field(None, validation_alias="za_medical_scheme_member", serialization_alias="zaMedicalSchemeMember")
+    zaMedicalDependants: Optional[int] = Field(None, validation_alias="za_medical_dependants", serialization_alias="zaMedicalDependants")
+    zaTravelBusinessUse80: Optional[bool] = Field(None, validation_alias="za_travel_business_use_80", serialization_alias="zaTravelBusinessUse80")
+    zaUifExcluded: Optional[bool] = Field(None, validation_alias="za_uif_excluded", serialization_alias="zaUifExcluded")
+    zaUifExclusionReason: Optional[str] = Field(None, validation_alias="za_uif_exclusion_reason", serialization_alias="zaUifExclusionReason")
+    zaEtiEligible: Optional[bool] = Field(None, validation_alias="za_eti_eligible", serialization_alias="zaEtiEligible")
+    zaEtiFirstQualifyingMonth: Optional[date] = Field(None, validation_alias="za_eti_first_qualifying_month", serialization_alias="zaEtiFirstQualifyingMonth")
+    zaSezEmployee: Optional[bool] = Field(None, validation_alias="za_sez_employee", serialization_alias="zaSezEmployee")
+    zaVoluntaryAdditionalPaye: Optional[Decimal] = Field(None, validation_alias="za_voluntary_additional_paye", serialization_alias="zaVoluntaryAdditionalPaye")
+    zaEvidenceRef: Optional[str] = Field(None, validation_alias="za_evidence_ref", serialization_alias="zaEvidenceRef")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses
@@ -1450,6 +1484,9 @@ class PayslipItemResponse(BaseModel):
     # BRPayslipBreakdown panel never rendered — BR-E5).
     saCalculationSnapshot: Optional[dict] = None
     brCalculationSnapshot: Optional[dict] = None
+    # South Africa (ZP-ZA-ENG-001): emitted by _serialize_payslip for ZA only;
+    # declared so response_model does not strip it (ZAPayslipBreakdown).
+    zaCalculationSnapshot: Optional[dict] = None
     # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
     # input / content hashes, or the blocked reasons). Emitted for MX only;
     # declared here so response_model does not strip it.
