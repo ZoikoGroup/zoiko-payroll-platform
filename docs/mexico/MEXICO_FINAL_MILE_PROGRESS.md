@@ -445,3 +445,25 @@ Screenshot inspected (`x5_01_csd_expiry_alerts.jpg`).
 **S23 (the 2025 personal data law) is not saved** in `docs/mexico/sources/`, so no article is cited; saving it goes into the X7 source runbook.
 
 **Production effect:** none (documents only).
+
+---
+
+## X7 — Review and decision packets
+
+Documents only; no code and no production effect.
+
+- **`ZP_PRIV_REVIEW_PACKETS.md` (Rugvedh, C16):** 13 packets.
+  - **W4-3b first.** It renders raw RFC / CURP / NSS. Its controls are org_admin only, organisation-scoped, rendered on demand, `no-store`, and every render audited since X3.
+  - **One test gap is flagged honestly:** no test asks for another organisation's *real* receipt. Only a non-existent id is tested; the code does check the organisation.
+  - Then the sources gate, W4-2, W5-1, W5-2, W5-3, the A18 migration, and X1–X6, each with what changed, the data, the masking, the threats, the proving tests and an approve / change-requested line.
+  - A separate note on `payslip_items.compliance_fields` (the platform-wide plaintext identifier snapshot, Phase 11b finding, Q9 / HK D-4).
+  - It also lists the earlier reviews still pending: 10c, 10f, 10g, 11a, 11b.
+- **`D01_ROUNDING_DECISION_BRIEF.md` (G1 owner):** no recommendation. It gives what each source says, three candidate readings (`HALF_UP:0.01`, `HALF_EVEN:0.01`, `HALF_DOWN:1`), and the "when" question, which the `MODE:QUANTUM` grammar cannot record.
+  - It includes the **X2 what-if results** for the §21 fixtures under each reading, watermarked, with D-03 held at the candidate GENERAL. Script `final-mile-evidence/harness/d01_whatif.py`; output `D01_WHATIF_RESULTS.json`.
+  - **Facts:** HALF_UP and HALF_EVEN are identical on every fixture (no exact half centavo), and whole pesos change every amount by up to 0.99.
+  - Then the order for D-03 (the second blocker on every calculation), D-07, D-08, D-09, D-17, D-12 and D-13, with the block codes each clears.
+- **`SOURCE_DOWNLOAD_RUNBOOK.md` (C2):** generated from the manifest. For each of the 32 non-VERIFIED files: the official URL, the full expected SHA-256, the exact `verify` command (with `file=` where a code has several files), what it unlocks and its gate.
+  - It also covers the WRONG_VERSION S22 file, what a MISMATCH means for the consolidated laws, and the sources the gates cite that are not saved at all (S5, S8, S12–S17, S19–S21, S23, S31–S33).
+  - `verify_mexico_sources check` passes locally (exit 0).
+
+**Contradiction found:** the master prompt points to `MEXICO_TRANSCRIPTION_BATCH_2_REPORT.md` **§3** for the rounding candidates. They are in **§4** (§3 is S22). The brief cites §4.
