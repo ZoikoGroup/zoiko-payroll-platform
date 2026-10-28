@@ -34,6 +34,10 @@ regenerate them if the content changes.
 | `bonus_timing_unsigned_blocks` | §4, ZA-006 | A bonus earned in the **previous** month is outside the pay period; the PENDING_G1 timing basis BLOCKS |
 | `bonus_same_period_uif_review_blocks` | §4, ZA-006 | A bonus earned **inside** the pay period passes the derived 7B check, then BLOCKS on its unsigned UIF treatment |
 | `*_blocks` | §1, ZA-005/006/011 | Weekly pay, non-residents, non-standard employment, missing tax number / date of birth / employer registration / content row, an unrecorded director UIF status and a cross-tax-year payment all BLOCK — never guessed |
+| `labour_below_nmw_blocks` | §5, ZA-012 | F1 salary over 2,000 approved ordinary hours is R25.00/h, below the R30.23 NMW: BLOCK (no hours recorded is a WARN, not a block) |
+| `deduction_court_order_reduces_net` | §5, ZA-013 | An authorised, evidenced R500 court-order deduction comes off net only; PAYE / UIF / SDL unchanged |
+| `deduction_without_evidence_blocks`, `damage_deduction_blocks` | §5, ZA-013 | No evidence BLOCKS; a damage deduction BLOCKS while the damage / loss limit is unconfigured (the spec states none) |
+| `override_stale_blocks`, `override_applies_after_approval` | ZA-017 | An approved override is applied last only while its reviewed `before` still equals the computed figure; otherwise it is stale and BLOCKS |
 
 Not covered here: weekly / fortnightly tables and the certified SARS periodic
 algorithm itself. The PAYE method is the annualised-monthly cross-check over the

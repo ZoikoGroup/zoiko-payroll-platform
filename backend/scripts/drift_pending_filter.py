@@ -68,12 +68,11 @@ def pending_revisions(stamp_rev: str, alembic_ini: str = "alembic.ini") -> list:
     heads = script.get_heads()
     if len(heads) != 1:
         raise SystemExit(f"Expected exactly 1 head, found {len(heads)}: {heads}")
-    out = []
-    for rev in script.walk_revisions(base="base" if stamp_rev == "base" else stamp_rev, head=heads[0]):
-        if rev.revision == stamp_rev:
-            continue
-        out.append(rev)
-    return out
+    # Every ancestor of the head that the stamp does not already include: across
+    # a merge revision this also covers the OTHER branch (a database at one side
+    # of the merge runs the other side too), which a stamp -> head walk misses.
+    done = set() if stamp_rev == "base" else {r.revision for r in script.iterate_revisions(stamp_rev, "base")}
+    return [rev for rev in script.walk_revisions(base="base", head=heads[0]) if rev.revision not in done]
 
 
 def pending_objects(stamp_rev: str, alembic_ini: str = "alembic.ini") -> tuple:

@@ -99,7 +99,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         za_tables = {"payroll_za_employer_registrations", "payroll_za_tax_directives", "payroll_za_eti_ledger",
                      "payroll_za_sars_artifacts",
                      # Phase 8 (c15d5b87d6f5): SARS payments + approved reconciliation variances.
-                     "payroll_za_sars_payments", "payroll_za_reconciliation_variances"}
+                     "payroll_za_sars_payments", "payroll_za_reconciliation_variances",
+                     # Phase 9 (3880223bfaa0, on merge 92c67cab49fc): approved result overrides.
+                     "payroll_za_payroll_overrides"}
         mx_final_mile = {"payroll_mx_decisions", *MX_X4_TABLES}     # Mexico m20 (d3f8b2a6c1e9)
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
         assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables | mx_final_mile
@@ -133,6 +135,14 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert len(columns["payroll_employee_statutory_profiles"]) == 13
         tables, columns = pending_objects("b9f3d5a1c7e2")
         assert tables == za_tables | mx_final_mile and "payroll_mx_approved_hours" not in columns
+        # Across merge 92c67cab49fc each side also runs the OTHER side (scripts.drift_pending_filter
+        # counts every head ancestor the stamp lacks, not only the stamp -> head path).
+        tables, columns = pending_objects("c15d5b87d6f5")      # a database at South Africa P8
+        assert tables == mx_final_mile | {"payroll_za_payroll_overrides"}
+        assert columns == {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
+                           "payroll_za_employer_registrations": {"za_journal_accounts"}}
+        tables, columns = pending_objects("d3f8b2a6c1e9")      # a database at Mexico m20
+        assert tables == za_tables
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables
