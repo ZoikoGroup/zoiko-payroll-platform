@@ -320,6 +320,10 @@ class StandardStrategy(PayrollStrategy):
             # Employee GOSI arrives via employee_pension/social_security above.
             # Absent -> 0 everywhere else.
             + deductions.get("sa_other_deductions_total", Decimal("0"))
+            # South Africa: validated non-statutory deductions (court order /
+            # consent / collective / damage — authority + evidence enforced by
+            # countries/south_africa.py, ZA-013). Absent -> 0 everywhere else.
+            + deductions.get("za_other_deductions_total", Decimal("0"))
             # Netherlands: Zvw employee contribution + any lawful Whk employee
             # recovery (wage tax arrives as tds, pension as employee_pension).
             # Employer premiums are never in here (NL-035). 0 elsewhere.

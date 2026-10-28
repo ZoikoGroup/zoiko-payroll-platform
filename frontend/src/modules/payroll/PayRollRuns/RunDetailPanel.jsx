@@ -20,6 +20,7 @@ import MXCorrectionsPanel from "../../../components/jurisdiction/mexico/run/MXCo
 import BRRunPreflightPanel from "./BRRunPreflightPanel";
 import BRPayslipBreakdown from "./BRPayslipBreakdown";
 import ZAPayslipBreakdown from "./ZAPayslipBreakdown";
+import ZARunExceptionsPanel from "./ZARunExceptionsPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -503,6 +504,9 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </>
               )}
               {items.some((i) => (i.country || i.countryCode) === "BR") && <BRRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "ZA") && (
+                <ZARunExceptionsPanel runId={run.id} runStatus={(detail || run).status} items={items} />
+              )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

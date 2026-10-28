@@ -36,6 +36,7 @@ _GUARDED = [
     "8b2f6d4e1a93",  # Mexico mx_employee_m3 (guarded, lock_timeout)
     "447f57564983",  # South Africa za_foundation (guarded from day one, lock_timeout)
     "c15d5b87d6f5",  # South Africa Phase 8 SARS payments / variances (guarded, lock_timeout)
+    "3880223bfaa0",  # South Africa Phase 9 overrides / deduction authority (guarded, lock_timeout)
 ]
 
 

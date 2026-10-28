@@ -121,6 +121,10 @@ def seed_south_africa_pack(db: Session, *, effective_from: date = date(2026, 3, 
         er_shown = f"{er}%" if er is not None else "—"
         if ee is not None or er is not None:
             total = " / ".join(s for s in (ee_shown, er_shown) if s != "—")
+        elif text is None and flat is None:
+            # Empty by design (content.ZA_EMPTY_BY_DESIGN): the specification gives
+            # no value, so the row exists only to make "not configured" explicit.
+            total = "NOT CONFIGURED"
         else:
             total = text if text is not None else str(flat)
         db.add(ContributionRate(
@@ -570,6 +574,25 @@ def get_za_employer_registration(db: Session, organization_id: int, as_of=None):
             .first())
 
 
+def _za_journal_accounts(raw) -> Optional[dict]:
+    """The employer's chart-of-accounts map for the ZA journal (spec §10): only
+    the known account keys, each a non-blank account code. Absent -> None (the
+    journal then BLOCKS rather than using a default account)."""
+    from app.modules.payroll.south_africa_journal import ACCOUNT_KEYS
+
+    if raw in (None, {}):
+        return None
+    if not isinstance(raw, dict):
+        raise BadRequestException("journalAccounts must be an object of account key -> account code.")
+    unknown = sorted(set(raw) - set(ACCOUNT_KEYS))
+    if unknown:
+        raise BadRequestException(f"journalAccounts has unknown key(s) {unknown}; allowed: {list(ACCOUNT_KEYS)}.")
+    blank = sorted(k for k, v in raw.items() if not str(v or "").strip())
+    if blank:
+        raise BadRequestException(f"journalAccounts has blank account code(s) for {blank}.")
+    return {k: str(v).strip()[:40] for k, v in raw.items()}
+
+
 def create_za_employer_registration(db: Session, organization_id: int, data, actor_id: Optional[int] = None):
     from app.modules.payroll.models import PayrollZaEmployerRegistration
 
@@ -599,6 +622,7 @@ def create_za_employer_registration(db: Session, organization_id: int, data, act
     ends = _as_date(ends_raw, "effectiveTo") if ends_raw is not None else None
     if ends is not None and ends < starts:
         raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
+    accounts = _za_journal_accounts(_field(data, "za_journal_accounts", _field(data, "journalAccounts")))
 
     row = PayrollZaEmployerRegistration(
         organization_id=organization_id, effective_from=starts, effective_to=ends,
@@ -609,7 +633,7 @@ def create_za_employer_registration(db: Session, organization_id: int, data, act
         bargaining_council=(_field(data, "bargaining_council", _field(data, "bargainingCouncil")) or None),
         evidence_ref=(_field(data, "evidence_ref", _field(data, "evidenceRef")) or None),
         source_document_id=_field(data, "source_document_id", _field(data, "sourceDocumentId")),
-        status="DRAFT", created_by_id=actor_id)
+        za_journal_accounts=accounts, status="DRAFT", created_by_id=actor_id)
     db.add(row)
     db.flush()
     return row
@@ -671,10 +695,31 @@ def _za_compliance_value(employee, *keys):
     return None
 
 
-def resolve_za_calc_inputs(db: Session, organization_id: int, employee, as_of: Optional[date] = None) -> dict:
+def _za_hours(db: Session, employee, period_start: date, period_end: date) -> Optional[dict]:
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return lifecycle.za_hours(db, employee, period_start, period_end)
+
+
+def _za_deduction_orders(db: Session, employee, on: date) -> Optional[list]:
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return lifecycle.za_deduction_orders(db, employee, on)
+
+
+def _za_overrides_for(db: Session, employee, run, on: date) -> Optional[list]:
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return lifecycle.za_overrides_for(db, employee, run, on)
+
+
+def resolve_za_calc_inputs(db: Session, organization_id: int, employee, as_of: Optional[date] = None,
+                            run=None) -> dict:
     from app.modules.payroll import service
 
     on = as_of or date.today()
+    period_start = getattr(run, "period_start", None) or date(on.year, on.month, 1)
+    period_end = getattr(run, "period_end", None) or on
     profile = service.resolve_employee_statutory_profile(db, employee.id, organization_id, on)
     if profile is not None and (profile.country_code or "").upper() != ZA:
         profile = None
@@ -709,12 +754,16 @@ def resolve_za_calc_inputs(db: Session, organization_id: int, employee, as_of: O
         "za_variable_items": variable_items,
         "za_eti_paid_hours": paid_hours,
         "za_eti_qualifying_month_no": qualifying_no,
+        # Phase 9 (spec §5, ZA-013, ZA-017) — plain JSON-safe values only.
+        "za_hours": _za_hours(db, employee, period_start, period_end),
+        "za_deduction_orders": _za_deduction_orders(db, employee, on),
+        "za_overrides": _za_overrides_for(db, employee, run, on),
     }
 
 
 def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of: Optional[date] = None) -> dict:
     on = as_of or getattr(run, "pay_date", None) or date.today()
-    return resolve_za_calc_inputs(db, employee.organization_id, employee, on)
+    return resolve_za_calc_inputs(db, employee.organization_id, employee, on, run=run)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -745,6 +794,13 @@ def _za_before_run_transition(db: Session, run, next_status, actor_id) -> None:
             raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
                 f"South Africa: {missing} payslip(s) have no frozen ZA calculation snapshot - "
                 "recalculate the run before approval."))
+        from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+        lifecycle.before_approval(db, run, actor_id)
+    elif next_status == PayrollStatus.PAID:
+        from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+        lifecycle.commit_run(db, run, actor_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -899,7 +955,9 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
 
 
 def _za_pack_holidays(db: Session, year: int) -> list:
-    return []
+    from app.modules.payroll import south_africa_lifecycle as lifecycle
+
+    return lifecycle.za_public_holidays(year)
 
 
 def payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
@@ -962,12 +1020,15 @@ _ZA_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime",
 _ZA_CTX_PLAIN = ("pay_frequency", "za_organization_id", "za_employee_id", "za_has_tax_number",
                  "za_components", "za_retirement_fund_contribution", "za_directives",
                  "za_variable_items", "za_eti_paid_hours", "za_eti_qualifying_month_no",
+                 "za_hours", "za_deduction_orders", "za_overrides",
                  "unpaid_leave_days", "date_of_joining")
-_ZA_CTX_DATES = ("pay_date", "period_start", "period_end")
+# date_of_birth: the age rebates and ETI age test need it, so a replay without it BLOCKS.
+_ZA_CTX_DATES = ("pay_date", "period_start", "period_end", "date_of_birth")
 _ZA_RATE_FIELDS = ("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
                    "effective_from", "effective_to")
+# flat_amount: the PAYE band's base tax and the ETI flat amount — a replay without it cannot compute.
 _ZA_SLAB_FIELDS = ("rule_type", "filing_status", "tax_regime", "assessment_basis", "rate_pct",
-                   "employer_rate_pct", "min_amount", "max_amount", "rate_label",
+                   "employer_rate_pct", "min_amount", "max_amount", "flat_amount", "rate_label",
                    "effective_from", "effective_to")
 _ZA_REGISTRATION_FIELDS = ("id", "sdl_liable", "sdl_exemption_reason", "eti_registered",
                            "effective_from", "effective_to")
@@ -1023,7 +1084,7 @@ def za_thaw_context(frozen: dict):
     slabs = []
     for s in frozen.get("slabs") or []:
         view = dict(s)
-        for f in ("rate_pct", "employer_rate_pct", "min_amount", "max_amount"):
+        for f in ("rate_pct", "employer_rate_pct", "min_amount", "max_amount", "flat_amount"):
             view[f] = _dec_or_none(view.get(f))
         view["effective_from"], view["effective_to"] = (
             _date_or_none(view.get("effective_from")), _date_or_none(view.get("effective_to")))

@@ -170,6 +170,42 @@ check("There is no portal automation — submission is recorded by the operator"
 check("The BRS-blocked state is surfaced, not hidden", () =>
   filingPanel.includes('data-testid="za-brs-blocked"') && filingPanel.includes("never guessed"));
 
+// ── Phase 9: approval checks, overrides, deductions, corrections, journal ──
+const runChecks = read("modules/payroll/PayRollRuns/ZARunExceptionsPanel.jsx");
+const runDetail = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+const breakdown = read("modules/payroll/PayRollRuns/ZAPayslipBreakdown.jsx");
+const deductionBlock = read("modules/payroll/Payroll_Employees/ZADeductionOrdersBlock.jsx");
+const employeeDetail = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
+const phase9 = [runChecks, breakdown, deductionBlock].join("\n");
+
+check("The ZA approval checks panel is mounted only for runs with ZA payslips", () =>
+  runDetail.includes('import ZARunExceptionsPanel from "./ZARunExceptionsPanel"') &&
+  runDetail.includes('items.some((i) => (i.country || i.countryCode) === "ZA") && (') &&
+  employeeDetail.includes('employee.countryCode === "ZA" && <ZADeductionOrdersBlock'));
+
+check("Every Phase 9 call goes to the South Africa tenant routes", () =>
+  ["/runs/${runId}/exceptions", "/runs/${runId}/overrides", "/overrides/${overrideId}/approve",
+   "/employees/${employeeId}/deduction-orders", "/payslips/${payslipId}/corrections", "/runs/${runId}/journal"]
+    .every((p) => payrollService.includes("${ZA}" + p)));
+
+check("Exceptions and overrides are approved only through the API (no client-side approval state)", () =>
+  runChecks.includes("approveZaRunException(runId, r.key)") && runChecks.includes("approveZaOverride(r.id)") &&
+  !/localStorage|sessionStorage/.test(runChecks) && !/approved\s*:\s*true/.test(runChecks));
+
+check("No BCEA premium multiplier or damage-deduction percentage is hard-coded", () =>
+  !/\b(1\.5|2\.0|1,5)\s*[x×]|multiplier\s*[:=]\s*\d|limit(Pct)?\s*[:=]\s*\d|\b25\s*%/i.test(phase9));
+
+check("ETI is still never an employee line", () =>
+  !/deduct[^\n]*\beti\b|\beti\b[^\n]*deduction/i.test(
+    phase9.replace("never changes the employee&apos;s PAYE or net pay", "")));
+
+check("Labour findings and overrides are disclosed on the payslip breakdown", () =>
+  breakdown.includes('data-testid="za-labour-checks"') && breakdown.includes('data-testid="za-overrides-note"') &&
+  breakdown.includes("Authorised deductions (ZA-013)"));
+
+check("A blocked journal is surfaced, never hidden", () =>
+  runChecks.includes('data-testid="za-journal-blocked"'));
+
 console.log(`za-compliance-ui-validation: ${passed} passed, ${failures.length} failed`);
 for (const failure of failures) console.log(`  FAIL ${failure}`);
 process.exit(failures.length ? 1 : 0);

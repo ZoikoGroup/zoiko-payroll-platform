@@ -43,6 +43,10 @@ export default function ZAPayslipBreakdown({ snapshot, employeeName }) {
   const sdl = trace.sdl || {};
   const bases = trace.bases || {};
   const eti = snapshot.za_eti || {};
+  const labour = trace.labour || {};
+  const deductions = trace.deductions || {};
+  const overrides = trace.overrides || [];
+  const SEVERITY = { BLOCK: "text-error", WARN: "text-warning", OK: "text-success" };
   const rebates = (paye.rebates || []).map((r) => `${r.rebate} ${zar(r.amount)}`).join(" + ");
 
   return (
@@ -75,6 +79,10 @@ export default function ZAPayslipBreakdown({ snapshot, employeeName }) {
           ["Retirement fund contribution", zar(snapshot.za_retirement_contribution)],
           ["Employee total", zar(snapshot.za_employee_total)],
         ]} />
+        <Rows title="Authorised deductions (ZA-013)" tone="text-error" rows={[
+          ...(deductions.lines || []).map((l) => [`${l.orderType} · ${l.authorityType}`, zar(l.amount)]),
+          ["Deducted from net pay", (deductions.lines || []).length ? zar(snapshot.za_other_deductions) : null],
+        ]} />
         <Rows title="Employer contributions (not deducted from pay)" tone="text-category-teal" rows={[
           ["UIF (employer)", zar(snapshot.za_uif_employer)],
           ["UIF ceiling applied", uif.ceilingApplied === undefined ? null : (uif.ceilingApplied ? "Yes" : "No")],
@@ -82,6 +90,26 @@ export default function ZAPayslipBreakdown({ snapshot, employeeName }) {
           ["Employer total", zar(snapshot.za_employer_total)],
         ]} />
       </div>
+      {(labour.findings || []).length > 0 && (
+        <div className="mt-4" data-testid="za-labour-checks">
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Labour checks (spec §5)</p>
+          <ul className="space-y-1">
+            {labour.findings.map((f) => (
+              <li key={f.code} className="text-[12px]">
+                <span className={`font-semibold ${SEVERITY[f.severity] || "text-foreground"}`}>{f.severity}</span>
+                <span className="text-foreground"> · {f.detail}</span>
+              </li>
+            ))}
+          </ul>
+          {labour.hourly && <p className="mt-1 text-[11px] text-foreground-muted">Ordinary hourly rate {zar(labour.hourly)}</p>}
+        </div>
+      )}
+      {overrides.length > 0 && (
+        <p className="mt-3 text-[12px] text-warning" data-testid="za-overrides-note">
+          {overrides.length} approved manual override(s) applied:{" "}
+          {overrides.map((o) => `${o.field} ${zar(o.before)} → ${zar(o.after)} (${o.reasonCode})`).join("; ")}
+        </p>
+      )}
       <div className="mt-4 rounded-lg border border-dashed border-border bg-surface-muted p-3" data-testid="za-eti-box">
         <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Employer incentive — ETI</p>
         <p className="mt-1 text-[12px] text-foreground">
