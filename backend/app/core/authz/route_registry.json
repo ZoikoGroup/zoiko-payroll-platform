@@ -9827,6 +9827,117 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/differences/{diff_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/differences/{diff_id}/explain",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "explain",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/parallel/imports",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/imports",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "imports",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/parallel/imports/{import_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/parallel/imports/{import_id}/withdraw",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/mexico/payments/batches",
    "data_class": "worker",
@@ -10240,12 +10351,18 @@
     "payroll_generated_reports",
     "payroll_mx_annual_isr_adjustments",
     "payroll_mx_authority_liability_sources",
+    "payroll_mx_benefit_accruals",
     "payroll_mx_cfdi_documents",
     "payroll_mx_imss_movements",
     "payroll_mx_isn_liabilities",
+    "payroll_mx_parallel_differences",
+    "payroll_mx_payment_items",
     "payroll_mx_ptu_allocations",
+    "payroll_mx_sbc_history",
     "payroll_mx_sua_differences",
-    "payroll_mx_vacation_records"
+    "payroll_mx_vacation_records",
+    "payroll_mx_variable_accumulators",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -19128,6 +19245,150 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/csd-expiry",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "csd-expiry",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/decisions",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/decisions/by-block/{block_code}",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "by-block",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/decisions/{decision_id}",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/decisions/{decision_id}/approve",
+   "data_class": "platform",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/decisions/{decision_id}/propose",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "propose",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/decisions/{decision_id}/revise",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "revise",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/decisions/{decision_id}/transcribed",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "transcribed",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/decisions/{decision_id}/withdraw",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/earning-classifications",
    "data_class": "platform",
    "action": "read",
@@ -19650,6 +19911,70 @@
    "data_class": "platform",
    "action": "read",
    "resource": "gate-checklists",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/report-templates/compare",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "compare",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/report-templates/coverage",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "coverage",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/report-templates/{template_id}/sandbox-preview",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "sandbox-preview",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/sandbox/calculate",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "calculate",
    "principals": [
     "super_admin"
    ],

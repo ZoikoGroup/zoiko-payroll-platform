@@ -1,8 +1,11 @@
 """za_payroll_overrides: approved result overrides, ZA deduction authority, journal accounts
 
 Revision ID: 3880223bfaa0
-Revises: c15d5b87d6f5
+Revises: 92c67cab49fc
 Create Date: 2026-10-27
+
+Written on c15d5b87d6f5; re-parented (never applied anywhere) onto main's merge
+revision 92c67cab49fc (Mexico m20 + South Africa P8) on 2026-10-28.
 
 ZP-ZA-ENG-001 Phase 9 (labour controls, lifecycle, corrections). "ZA" is South
 Africa ("SA" is Saudi Arabia).
@@ -39,7 +42,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "3880223bfaa0"
-down_revision: Union[str, Sequence[str], None] = "c15d5b87d6f5"
+down_revision: Union[str, Sequence[str], None] = "92c67cab49fc"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

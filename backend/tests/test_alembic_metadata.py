@@ -252,6 +252,8 @@ def test_alembic_heads_is_single_head():
     # payroll_mx_approved_hours; child of 8f90dde5f7b5 (re-parented when main was merged).
     # c7d2e9a4f1b6 (2026-10-27, Mexico mx_imss_rcv_authority_m19, gap A18): widens one CHECK
     # constraint on payroll_mx_authority_liabilities; single child of b9f3d5a1c7e2.
+    # d3f8b2a6c1e9 (2026-10-27, Mexico mx_final_mile_m20, final mile X1): one new platform table,
+    # payroll_mx_decisions; single child of c7d2e9a4f1b6.
     # 447f57564983 (2026-10-26, South Africa za_foundation, ZP-ZA-ENG-001 Phase 2):
     # za_* profile columns, za_ snapshot / fingerprint, four payroll_za_* tables +
     # their RLS policies; additive and guarded. Written on 8f90dde5f7b5, re-parented
@@ -260,11 +262,14 @@ def test_alembic_heads_is_single_head():
     # c15d5b87d6f5 (2026-10-27, South Africa Phase 8): SARS payments + approved
     # reconciliation variances - two new tables + their RLS policies; additive and
     # guarded, single child of 447f57564983.
+    # 92c67cab49fc (2026-10-28): empty merge of the two chains above, which both grow from
+    # c7d2e9a4f1b6 (PR #138 merged them into main with two heads; its deploy failed at the test
+    # stage, so neither chain is applied anywhere).
     # 3880223bfaa0 (2026-10-27, South Africa Phase 9): payroll_za_payroll_overrides
     # + its RLS policy, nullable za_authority_type / za_evidence_ref on
     # payroll_court_ordered_deductions and za_journal_accounts on
-    # payroll_za_employer_registrations; additive and guarded, single child of
-    # c15d5b87d6f5 - single head.
+    # payroll_za_employer_registrations; additive and guarded. Written on
+    # c15d5b87d6f5, re-parented (never applied) onto 92c67cab49fc - single head.
     assert heads == ["3880223bfaa0"]
 
 
@@ -300,6 +305,9 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
         "998877665544",
         "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        # c7d2e9a4f1b6: Mexico's final mile (d3f8b2a6c1e9) and South Africa's
+        # 447f57564983 both grow from it; rejoined by merge 92c67cab49fc.
+        "c7d2e9a4f1b6",
         # cd62503afe26: main's 2d0cdeeeecc4 (HK convergence) and venu's
         # c9d8e7f6a5b4 (Italy F24 causale) both grow from it; rejoined by
         # merge f898189cb4e3.
@@ -316,7 +324,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 232   # + 3880223bfaa0 (South Africa Phase 9 overrides / deduction authority / journal accounts) + c15d5b87d6f5 (South Africa Phase 8 SARS payments/variances) + 447f57564983 (South Africa za_foundation) + c7d2e9a4f1b6 (Mexico mx_imss_rcv_authority_m19) + b9f3d5a1c7e2 (Mexico mx_overtime_dates_m18) + 8f90dde5f7b5 (NL SEPA file storage, payment channel) + 135dbbeb9818 (widen tax_slabs.rate_pct 7,4) + e4ba9fc8c17c (Brazil br_run_approval_fingerprint) + b9f3a7c2e5d1 (Brazil br_employee_m3) + 64424fd61652 (Brazil br_employer_m2) + a6ca8aab2043 (Brazil br_employer_reshape) + b3f7c1e9d5a2 (Mexico mx_journal_m13) + a1d5e8c2f7b4 (Mexico mx_payments_m12) + f84626be0cb1 (NL expat recorded_by) + a8e4c1f7d3b5 (Mexico mx_cfdi_system_concepts_m17) + f6c2a9d1e4b7 (Mexico mx_onboarding_m16) + e5b1d8f3a7c2 (Mexico mx_transfer_m15) + d2a7c9e4f1b8 (Mexico mx_pilot_m14) + e7a2c4f9b1d6 (Mexico mx_annual_adjustment_m11) + c6e1a9d4f2b7 (Mexico mx_ptu_m10) + b4d8f2c6a9e3 (Mexico mx_terminations_m9) + c3e5a7b9d1f4 (merge ZP-PRIV with Mexico M8) + ZP-PRIV a7c3e91f2b60, b2f4d6a8c0e1, c5e7a9b1d3f4, d7f9b1c3e5a6, e1a3c5e7f9b2 + a6d2f9c4b8e1 (Mexico mx_benefits_m8) + f5c1a8d3e9b2 (Mexico mx_corrections_m7) + e3b9c2d7f4a1 (Mexico mx_authorities_m6) + d8b3e5f1a2c7 (Mexico mx_cfdi_m5) + c4f7a2d9e6b1 (Mexico mx_run_m4) + b7a1c9e3d5f2 (Brazil Phase 0 foundation) + 8b2f6d4e1a93 (Mexico mx_employee_m3) + 6e4a1d9c3f27 (Mexico mx_employer_m2) + 5d2c8f1a7b3e (Mexico mx_foundation_m1) + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
+    assert len(revs) == 234   # + 3880223bfaa0 (South Africa Phase 9 overrides / deduction authority / journal accounts) + 92c67cab49fc (merge Mexico final mile with South Africa) + d3f8b2a6c1e9 (Mexico mx_final_mile_m20) + c15d5b87d6f5 (South Africa Phase 8 SARS payments/variances) + 447f57564983 (South Africa za_foundation) + c7d2e9a4f1b6 (Mexico mx_imss_rcv_authority_m19) + b9f3d5a1c7e2 (Mexico mx_overtime_dates_m18) + 8f90dde5f7b5 (NL SEPA file storage, payment channel) + 135dbbeb9818 (widen tax_slabs.rate_pct 7,4) + e4ba9fc8c17c (Brazil br_run_approval_fingerprint) + b9f3a7c2e5d1 (Brazil br_employee_m3) + 64424fd61652 (Brazil br_employer_m2) + a6ca8aab2043 (Brazil br_employer_reshape) + b3f7c1e9d5a2 (Mexico mx_journal_m13) + a1d5e8c2f7b4 (Mexico mx_payments_m12) + f84626be0cb1 (NL expat recorded_by) + a8e4c1f7d3b5 (Mexico mx_cfdi_system_concepts_m17) + f6c2a9d1e4b7 (Mexico mx_onboarding_m16) + e5b1d8f3a7c2 (Mexico mx_transfer_m15) + d2a7c9e4f1b8 (Mexico mx_pilot_m14) + e7a2c4f9b1d6 (Mexico mx_annual_adjustment_m11) + c6e1a9d4f2b7 (Mexico mx_ptu_m10) + b4d8f2c6a9e3 (Mexico mx_terminations_m9) + c3e5a7b9d1f4 (merge ZP-PRIV with Mexico M8) + ZP-PRIV a7c3e91f2b60, b2f4d6a8c0e1, c5e7a9b1d3f4, d7f9b1c3e5a6, e1a3c5e7f9b2 + a6d2f9c4b8e1 (Mexico mx_benefits_m8) + f5c1a8d3e9b2 (Mexico mx_corrections_m7) + e3b9c2d7f4a1 (Mexico mx_authorities_m6) + d8b3e5f1a2c7 (Mexico mx_cfdi_m5) + c4f7a2d9e6b1 (Mexico mx_run_m4) + b7a1c9e3d5f2 (Brazil Phase 0 foundation) + 8b2f6d4e1a93 (Mexico mx_employee_m3) + 6e4a1d9c3f27 (Mexico mx_employer_m2) + 5d2c8f1a7b3e (Mexico mx_foundation_m1) + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
 
 
 def test_germany_head_chain_wiring_is_intact():

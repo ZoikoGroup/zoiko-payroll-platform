@@ -174,6 +174,21 @@ const mxOn = (on, packId) => ({ params: { ...(on ? { on } : {}), ...(packId ? { 
 export const getMxReadiness = () => apiFetch(`${MX_SA}/readiness`);
 // Completion W5-3: per gate, checklist items confirmed by code now vs awaiting signed evidence.
 export const getMxGateChecklists = () => apiFetch(`${MX_SA}/readiness/gate-checklists`);
+// Final mile X1: the decision register (four-eyes; an approval changes no calculation).
+export const listMxDecisions = (gate, status) =>
+  apiFetch(`${MX_SA}/decisions`, { params: { ...(gate ? { gate } : {}), ...(status ? { status } : {}) } });
+export const proposeMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id}/propose`, { method: "POST", body });
+export const approveMxDecision = (id) => apiFetch(`${MX_SA}/decisions/${id}/approve`, { method: "POST" });
+export const withdrawMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id}/withdraw`, { method: "POST", body });
+export const reviseMxDecision = (id) => apiFetch(`${MX_SA}/decisions/${id}/revise`, { method: "POST" });
+export const transcribedMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id}/transcribed`, { method: "POST", body });
+export const getMxDecisionsForBlock = (code) => apiFetch(`${MX_SA}/decisions/by-block/${encodeURIComponent(code)}`);
+// Final mile X2: the calculation sandbox (writes nothing; candidates watermarked).
+export const runMxSandbox = (body) => apiFetch(`${MX_SA}/sandbox/calculate`, { method: "POST", body });
+// Final mile X3b: template library tools (read-only; previews watermarked).
+export const getMxTemplateCoverage = () => apiFetch(`${MX_SA}/report-templates/coverage`);
+export const compareMxReportTemplates = (from, to) => apiFetch(`${MX_SA}/report-templates/compare`, { params: { from, to } });
+export const previewMxTemplateInSandbox = (id, body) => apiFetch(`${MX_SA}/report-templates/${id}/sandbox-preview`, { method: "POST", body });
 // Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
 // list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
 export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);
@@ -237,6 +252,8 @@ export const getMxSaEmployer = (orgId, employerId) =>
 export const getMxSaEmployerReadiness = (orgId, on) =>
   apiFetch(`${MX_SA}/employer-readiness`, { params: { organization_id: orgId, on } });
 export const getMxSaEmployerReadinessSummary = (on) => apiFetch(`${MX_SA}/employer-readiness/summary`, { params: { on } });
+// Final mile X5 (C3): ACTIVE CSD references expired / expiring on a date, every organisation (public metadata only).
+export const getMxCsdExpiryAlerts = (on) => apiFetch(`${MX_SA}/csd-expiry`, { params: { on } });
 // Phase 7 — CFDI lifecycle, read-only (counts by status, UNKNOWN items, pinned release, blocks).
 export const getMxCfdiValidations = (orgId) =>
   apiFetch(`${MX_SA}/cfdi/validations`, { params: orgId ? { organization_id: orgId } : {} });

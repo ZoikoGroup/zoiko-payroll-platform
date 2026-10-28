@@ -195,7 +195,9 @@ def test_deploy_drift_filter_explains_every_za_object():
         tables, columns = pending_objects("c7d2e9a4f1b6")
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES)
+    # Mexico m20 (d3f8b2a6c1e9) also grows from c7d2e9a4f1b6 (joined by merge 92c67cab49fc).
+    mexico_m20 = {"payroll_mx_decisions", "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"}
+    assert tables == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | mexico_m20
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
@@ -273,6 +275,7 @@ def test_p9_matches_the_models_replays_and_downgrades(model_engine):
     assert "court_reference" in _cols(engine, "payroll_court_ordered_deductions")   # neighbours untouched
 
 
-def test_p9_revision_is_the_single_child_of_phase_8():
+def test_p9_revision_is_the_single_child_of_the_za_p8_mexico_m20_merge():
     module = _load(P9_REVISION)
-    assert (module.revision, module.down_revision) == (P9_REVISION, P8_REVISION)
+    assert (module.revision, module.down_revision) == (P9_REVISION, "92c67cab49fc")
+    assert tuple(_load("92c67cab49fc").down_revision) == (P8_REVISION, "d3f8b2a6c1e9")

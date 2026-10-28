@@ -8,7 +8,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 |---|---|---|---|---|
 | D-01 | Monetary rounding rule | G1 owner | Every calculation; pack activation (`mx_rounding_rule` is required) | Open |
 | D-02 | Pay frequency 01 Diario → Art. 96 DAILY? | G1 owner | Daily-paid employees (`MX_PAY_FREQUENCY_MAPPING_MISSING`) | Open |
-| D-03 | CEAV lowest band: which minimum wage anchors "1.0 SM" | G2 owner | ZLFN employees in band 1 (`MX_CEAV_LOWEST_BAND_PENDING_G2`) | Open |
+| D-03 | CEAV lowest band: which minimum wage anchors "1.0 SM" | G2 owner | **Every calculation with CEAV** (`MX_CONTENT_MISSING` on `mx_ceav_lowest_band_min_wage_ref`: band 1's lower bound is read for every SBC — corrected in final mile X2), and ZLFN employees in band 1 (`MX_CEAV_LOWEST_BAND_PENDING_G2`) | Open |
 | D-04 | Interpretations behind transcribed rows (Batch 2, W1-1) | G1 / G2 / G3 / G5 owners | Nothing today (rows are Draft, `[PENDING G1]`); activation needs them confirmed | Open |
 | D-05 | 48-hour week for January–April 2026 | G5 owner | Nothing today; the January–April row cites a decree in force only from 1 May 2026 | Open |
 | D-06 | CDMX ISN: are vacation paid out at termination, the separation payment and the indemnity in the base? | G4 owner | Any finiquito with those lines for a CDMX worker (`MX_ISN_SPECIAL_PAY_RULE_MISSING`) | Open |
@@ -25,6 +25,9 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-20 | QR total on the printed CFDI receipt: the text drops the zeros, the example pads them | G1 owner (with the PAC) | Nothing (the receipt is "NOT AN OFFICIAL FILE") | Open |
 | D-21 | How to read the 830 Chihuahua c_CodigoPostal rows whose summer offset is not one hour ahead of winter (gap C11) | G1 owner | A CFDI issued from those postal codes (`MX_CFDI_TIMEZONE_RULE_INVALID`) | Open |
 | D-22 | How a finiquito withholds on vacation paid out against the month's earlier income (gap A17) | G1 owner | A finiquito that pays out vacation (`MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED`) | Open |
+| D-23 | Who may approve a decision for a gate: a "gate owner" role (G1 owner …) does not exist in the platform | Release owner + Security lead | Nothing blocks: until decided, the decision register (final mile X1) stores the owner as text and requires a second Super Admin as the four-eyes control | Open |
+| D-24 | High-value threshold for the run-variance report (MX-RUN-VARIANCE, spec §13 stage 4) | Release owner | Nothing blocks: the report shows every delta and flags none while it is unset | Open |
+| D-25 | Materiality threshold for a parallel-payroll difference (spec §22 G8, final mile X4) | Release owner (G8) | G8 evidence: no parallel cycle is declared clean while it is unset (every difference is still listed, explained and accepted) | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -54,6 +57,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 - **Options.** GENERAL; ZONE (the worker's own zone); UMA.
 - **Sources.** S11 Transitorio Segundo table (PDF p. 7, image); S10 Art. 168 II a) table (PDF p. 51); S34 Transitorio Tercero (PDF p. 2); S9 (both zones).
 - **Blocks.** ZLFN employees whose SBC falls in band 1: `MX_CEAV_LOWEST_BAND_PENDING_G2`. Phase 0 decision 4 assigned it to the G2 owner (SUA reconciliation).
+- **Correction (final mile X2, 2026-10-27).** This decision blocks more than ZLFN band 1. `ceav.band_for` evaluates band 1 first for every SBC, and band 1's lower bound "1.0 SM" needs this row, so **every** calculation that reaches CEAV blocks with `MX_CONTENT_MISSING` until it is decided. That is, every ordinary calculation once D-01 is decided. Found with the calculation sandbox. It is not an engineering fix: band 1 is in minimum-wage units and band 2 in UMA units, and with the 2026 values (UMA 117.31, minimum wage 315.04) the two ranges overlap, so which band an SBC in that gap falls in is part of this decision.
 
 ## D-04 · Interpretations behind transcribed rows
 
@@ -210,3 +214,24 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
   - **(b) `INCREMENTAL_MONTHLY`:** the monthly tariff on (month-to-date + payout) less the monthly tariff on month-to-date alone. Only the payout's own tax; earlier periods are left as withheld.
 - **Built regardless.** The month-to-date accumulator for special runs: committed payslips of the pay date's month, in payment order, with correction deltas, and the ISR they withheld. It is bound into the run's input hash (`monthToDate`).
 - **Blocks.** A finiquito whose lines include vacation paid out. Its other lines (separation, aguinaldo, vacation premium) are unaffected.
+
+## D-23 · Gate-owner roles for the decision register (final mile X1)
+
+- **Question.** The decision register records who owns each decision ("G1 owner", "G5 owner", …), but the platform has no such role. Only Super Admins exist, and four-eyes means "a different Super Admin". Should gate-owner roles exist? If so, who holds them, and may only the gate's owner approve its decisions?
+- **Options.**
+  1. Keep the interim control: any second Super Admin approves; the owner is stored as text on the record.
+  2. Add a gate-owner role (or a per-gate attribute on Super Admin users) and require it for approval. This is an authorisation change for the ZP-PRIV owner.
+- **Blocks.** Nothing. The register works with option 1. Option 2 would be a later, separately reviewed change.
+- **Follow-up (same owners plus the G1 owner).** Can an APPROVED decision record be the source a content row cites at activation? Today the activation check `sources_verified` accepts only a VERIFIED manifest file, so a row citing `DECISION/D-01#…` would be approvable in Draft but never activatable. Until this is answered, the canonical seed does not read decision records; an engineer transcribes from the ticket and cites the saved source the decision rests on.
+
+## D-24 · High-value delta threshold for run variance (final mile X3)
+
+- **Question.** Spec §13 stage 4 asks for "high-value deltas" when a run is approved. Above what change (MXN, in an employee's net pay or employer cost against the prior committed run) is a delta flagged?
+- **Options.** A fixed MXN amount, entered in the decision register (answer kind AMOUNT). A percentage rule would need a small change to the report.
+- **Blocks.** Nothing. MX-RUN-VARIANCE shows every delta and flags none until an approved value exists.
+
+## D-25 · Materiality threshold for parallel-payroll differences (final mile X4)
+
+- **Question.** Spec §22 G8 asks for parallel cycles with "all material differences explained". Above what absolute difference (MXN, per employee and concept, between the legacy payroll and Zoiko's committed result) is a difference material?
+- **Options.** A fixed MXN amount, entered in the decision register (answer kind AMOUNT). Zero means every difference is material. A per-concept or percentage rule would need a small change to the comparison.
+- **Blocks.** G8 evidence only. The comparison lists, explains and accepts every difference regardless; it never declares a cycle clean until an approved value exists.

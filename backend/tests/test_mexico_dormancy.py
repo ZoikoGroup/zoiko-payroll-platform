@@ -88,6 +88,10 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("POST", "/journal/exports/1/void"),
     # Phase 10e — pilot banner
     ("GET", "/pilot-status"),
+    # Final mile X4 — parallel payroll
+    ("GET", "/parallel/imports"), ("POST", "/parallel/imports"), ("GET", "/parallel/imports/1"),
+    ("POST", "/parallel/imports/1/withdraw"), ("POST", "/parallel/differences/1/explain"),
+    ("POST", "/parallel/differences/1/accept"),
 ]
 
 
