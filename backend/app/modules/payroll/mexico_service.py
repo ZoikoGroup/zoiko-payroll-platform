@@ -170,14 +170,18 @@ def gate_checklists(db: Session) -> dict:
     and "evidence" (met only by the gate's signed evidence pack)."""
     from app.modules.payroll import mexico_sources
 
+    from app.modules.payroll import mexico_decision_service
+
     root = mexico_sources.REPO_ROOT / "docs" / "mexico" / "release-gates"
     states = {g["gate"]: g["state"] for g in gate_states(db)}
+    open_decisions = mexico_decision_service.open_by_gate(db)          # final mile X1
     results = None
     gates = []
     for key, label in GATES:
         path = root / key / "CHECKLIST.md"
         if not path.is_file():
-            gates.append({"gate": key, "label": label, "state": states[key], "available": False, "items": []})
+            gates.append({"gate": key, "label": label, "state": states[key], "available": False, "items": [],
+                          "openDecisions": open_decisions.get(key, 0)})
             continue
         items = []
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -198,7 +202,7 @@ def gate_checklists(db: Session) -> dict:
         code = [i for i in items if i["kind"] == "code"]
         gates.append({"gate": key, "label": label, "state": states[key], "available": True, "items": items,
                       "codeMet": sum(i["met"] for i in code), "codeTotal": len(code),
-                      "evidenceItems": len(items) - len(code)})
+                      "evidenceItems": len(items) - len(code), "openDecisions": open_decisions.get(key, 0)})
     return {"gates": gates, "note": "Code items are evaluated now; evidence items are met only when the gate is "
                                     "SIGNED (uploaded evidence reviewed by a second Super Admin). Nothing here signs "
                                     "a gate."}

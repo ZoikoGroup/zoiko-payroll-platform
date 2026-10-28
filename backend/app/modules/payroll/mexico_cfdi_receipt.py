@@ -150,6 +150,19 @@ def mx_cfdi_receipt_data(db: Session, org_id: int, document_id: int) -> dict:
     return data
 
 
+def record_render(db: Session, org_id: int, document_id: int, actor_id: Optional[int]) -> None:
+    """Final mile X3: every render of the receipt — the one view that shows RFC
+    / CURP / NSS — is an audit event (who, when); no identifier is stored."""
+    from app.modules.payroll import mexico_cfdi_service
+
+    m = mexico_cfdi_service._models()
+    doc = db.get(m.PayrollMxCfdiDocument, document_id)
+    if doc is None or doc.organization_id != org_id:
+        return
+    mexico_cfdi_service._event(db, doc, "RECEIPT_RENDERED", actor_id, {"by": actor_id})
+    db.commit()
+
+
 def mx_cfdi_receipt_pdf(db: Session, org_id: int, document_id: int) -> bytes:
     """The receipt as a PDF, with the Anexo 20 QR (≥ 2.75 cm) — built in memory."""
     from reportlab.graphics import renderPDF

@@ -453,6 +453,7 @@ def mx_cfdi_document_receipt(document_id: int, current_user=Depends(get_current_
     from app.modules.payroll import mexico_cfdi_receipt
 
     pdf = mexico_cfdi_receipt.mx_cfdi_receipt_pdf(db, _org_id(current_user), document_id)
+    mexico_cfdi_receipt.record_render(db, _org_id(current_user), document_id, _actor(current_user))   # X3
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Cache-Control": "no-store", "Content-Disposition": f'inline; filename="cfdi-{document_id}.pdf"'})
 
@@ -1123,6 +1124,52 @@ def void_journal_export(export_id: int, body: Dict[str, Any] = Body(...), curren
 
 
 # ── Pilot status (Phase 10e) — the banner on a pilot organisation's screens ──
+
+# ── parallel payroll (final mile X4, spec §22 G8) ──────────────────────────
+
+def _parallel():
+    from app.modules.payroll import mexico_parallel_service
+
+    return mexico_parallel_service
+
+
+@router.get("/parallel/imports", summary="Parallel-payroll imports (legacy cycle vs committed run) with their summary")
+def parallel_imports(run_id: Optional[int] = Query(None), current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    return _parallel().list_parallel_imports(db, _org_id(current_user), run_id)
+
+
+@router.post("/parallel/imports", summary="Import a legacy payroll's results for a committed run (CSV + mapping; "
+                                          "matched by employee code, identifiers refused)")
+def parallel_import(payload: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    return _parallel().import_parallel(db, _org_id(current_user), payload, _actor(current_user))
+
+
+@router.get("/parallel/imports/{import_id}", summary="One parallel import: every difference and the D-25 verdict")
+def parallel_import_detail(import_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    return _parallel().parallel_import_view(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel/imports/{import_id}/withdraw", summary="Withdraw a CURRENT parallel import")
+def parallel_import_withdraw(import_id: int, current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    return _parallel().withdraw_parallel_import(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel/differences/{diff_id}/explain", summary="Explain a parallel difference (reason required)")
+def parallel_difference_explain(diff_id: int, payload: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _parallel().explain_parallel_difference(db, _org_id(current_user), diff_id, payload.get("reason"),
+                                                   _actor(current_user))
+
+
+@router.post("/parallel/differences/{diff_id}/accept", summary="Accept an explained difference (a second reviewer)")
+def parallel_difference_accept(diff_id: int, current_user=Depends(get_current_org_admin),
+                               db: Session = Depends(get_db)):
+    return _parallel().accept_parallel_difference(db, _org_id(current_user), diff_id, _actor(current_user))
+
 
 @router.get("/pilot-status", summary="Whether this organisation is a non-binding Mexico pilot")
 def pilot_status(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):

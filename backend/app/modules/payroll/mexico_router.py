@@ -119,6 +119,106 @@ def benefits_workweek(on: Optional[date] = Query(None), pack_id: Optional[int] =
     return _view(db, "benefits", on, pack_id)
 
 
+# ── decision register (final mile X1) ──────────────────────────────────────
+
+def _decisions():
+    from app.modules.payroll import mexico_decision_service
+
+    return mexico_decision_service
+
+
+@router.get("/decisions", summary="The decision register: D-01 … and C4 / C5 / C12, by gate and status (X1)")
+def list_decisions(gate: Optional[str] = Query(None), status: Optional[str] = Query(None),
+                   current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().list_mx_decisions(db, gate=gate, status=status)
+
+
+@router.get("/decisions/by-block/{block_code}", summary="The live decisions whose answer clears an engine block code")
+def decisions_for_block(block_code: str, current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    return _decisions().mx_decisions_for_block(db, block_code)
+
+
+@router.get("/decisions/{decision_id}", summary="One decision with its options, sources and transcription ticket")
+def get_decision(decision_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().get_mx_decision(db, decision_id)
+
+
+@router.post("/decisions/{decision_id}/propose", summary="Propose an answer (chosen option, rationale, sources)")
+def propose_decision(decision_id: int, body: Dict[str, Any] = Body(...),
+                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    data = {"chosen_option": body.get("chosenOption"), "rationale": body.get("rationale"),
+            "cited_sources": body.get("citedSources") or [], "owner_role": body.get("ownerRole")}
+    return _decisions().propose_mx_decision(db, decision_id, data, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/approve", summary="Approve a proposal (a different Super Admin — four-eyes)")
+def approve_decision(decision_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().approve_mx_decision(db, decision_id, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/withdraw", summary="Withdraw a proposal (back to OPEN) or an OPEN decision")
+def withdraw_decision(decision_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().withdraw_mx_decision(db, decision_id, {"reason": body.get("reason")}, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/revise", summary="Open a new version of an approved decision")
+def revise_decision(decision_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().revise_mx_decision(db, decision_id, _actor(current_user))
+
+
+@router.post("/decisions/{decision_id}/transcribed", summary="Record the Draft-pack commit that carries the value")
+def decision_transcribed(decision_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _decisions().mark_mx_decision_transcribed(db, decision_id, {"reference": body.get("reference")}, _actor(current_user))
+
+
+# ── report-template library tools (final mile X3b) ─────────────────────────
+
+def _reports():
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service
+
+
+@router.get("/report-templates/coverage", summary="Every Mexico template: build kind, field-path proof and the "
+                                                  "activation gate's answer (read-only, X3)")
+def mx_template_coverage(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _reports().mx_template_coverage(db)
+
+
+@router.post("/report-templates/{template_id}/sandbox-preview",
+             summary="A template-engine template's fields against one sandbox result (watermarked, never stored)")
+def mx_template_sandbox_preview(template_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    try:
+        return _reports().mx_template_sandbox_preview(db, template_id, body)
+    finally:
+        db.rollback()
+
+
+@router.get("/report-templates/compare", summary="Diff two Mexico report templates (fields and metadata)")
+def mx_compare_templates(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _reports().mx_compare_templates(db, from_id, to_id)
+
+
+# ── calculation sandbox (final mile X2) ────────────────────────────────────
+
+@router.post("/sandbox/calculate", summary="Run the engine on SYNTHETIC inputs and the content in force (Draft "
+                                          "allowed); optional what-if candidates for not-yet-approved decisions. "
+                                          "Writes nothing (X2)")
+def mx_sandbox_calculate(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_super_admin),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_sandbox_service
+
+    try:
+        return mexico_sandbox_service.run_mx_sandbox(db, body)
+    finally:
+        db.rollback()                                    # belt and braces: the sandbox never writes
+
+
 @router.get("/readiness/gate-checklists", summary="Per gate: checklist items confirmed by code now vs awaiting "
                                                   "signed evidence (read-only, W5-3)")
 def gate_checklists(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
@@ -287,6 +387,16 @@ def sa_employer_readiness(organization_id: int = Query(...), on: date = Query(..
 def sa_employer_readiness_summary(on: date = Query(...), current_user=Depends(get_current_super_admin),
                                   db: Session = Depends(get_db)):
     return _emp().readiness_summary(db, on)
+
+
+@router.get("/csd-expiry", summary="ACTIVE CSD references expired or expiring on a date, every organisation "
+                                  "(public certificate metadata only, X5)")
+def sa_csd_expiry(on: date = Query(...), current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.config import settings
+    from app.modules.payroll import mexico_csd_custody
+
+    return {"on": on.isoformat(), "warningDays": settings.MX_CREDENTIAL_EXPIRY_WARNING_DAYS,
+            "alerts": mexico_csd_custody.csd_expiry_alerts(db, on)}
 
 
 @router.get("/employees/{employee_id}", summary="One Mexican employee's record and readiness (read-only, masked)")

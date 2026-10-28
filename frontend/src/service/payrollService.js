@@ -2753,6 +2753,14 @@ export const approveMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/
 export const withdrawMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/withdraw`, {});
 export const getMxRunJournal = (runId) => api.get(`${MX}/runs/${runId}/journal`);
 export const voidMxJournalExport = (id, reason) => api.post(`${MX}/journal/exports/${id}/void`, { reason });
+// Mexico parallel payroll (final mile X4, spec §22 G8): a legacy cycle's results
+// (CSV text, read in the browser, never stored) against a committed run.
+export const listMxParallelImports = (runId) => api.get(`${MX}/parallel/imports${runId ? `?run_id=${runId}` : ""}`);
+export const createMxParallelImport = (payload) => api.post(`${MX}/parallel/imports`, payload);
+export const getMxParallelImport = (id) => api.get(`${MX}/parallel/imports/${id}`);
+export const withdrawMxParallelImport = (id) => api.post(`${MX}/parallel/imports/${id}/withdraw`, {});
+export const explainMxParallelDifference = (id, reason) => api.post(`${MX}/parallel/differences/${id}/explain`, { reason });
+export const acceptMxParallelDifference = (id) => api.post(`${MX}/parallel/differences/${id}/accept`, {});
 
 export async function exportMxRunJournal(runId) {
   const res = await fetch(`${API_BASE_URL}${MX}/runs/${runId}/journal/export`, {

@@ -23,6 +23,10 @@ def _code_lines():
     return [ln for ln in _SCRIPT.read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("#")]
 
 
+# Mexico final mile X4: the parallel-payroll tables join m20 (d3f8b2a6c1e9).
+MX_X4_TABLES = ("payroll_mx_parallel_imports", "payroll_mx_parallel_differences")
+
+
 def test_the_deploy_script_never_runs_the_mutating_sync_schema():
     code = "\n".join(_code_lines())
     assert "sync_schema" not in code
@@ -97,12 +101,15 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      # Phase 8 (c15d5b87d6f5): SARS payments + approved reconciliation variances.
                      "payroll_za_sars_payments", "payroll_za_reconciliation_variances"}
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
+        assert tables == {"payroll_mx_cfdi_system_concepts", "payroll_mx_decisions", *MX_X4_TABLES} | brazil_tables
         assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables
         # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2
         # (135dbbeb9818, 8f90dde5f7b5), on top of production a8e4c1f7d3b5: every
         # table AND every column on an existing table must be explained, or a
         # self-heal refuses.
         tables, columns = pending_objects("a8e4c1f7d3b5")
+        assert tables == brazil_tables | {"payroll_mx_decisions", *MX_X4_TABLES}                  # + Mexico final mile X1
+        assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel"}
         assert tables == brazil_tables | za_tables
         assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint"}
         assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
@@ -114,6 +121,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
                 "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
         tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
+        assert tables == {"payroll_mx_decisions", *MX_X4_TABLES} and columns == {"payroll_mx_approved_hours": {"overtime_dates"}}   # Mexico m18
+        tables, columns = pending_objects("c7d2e9a4f1b6")        # production since PR #136 (A18)
+        assert tables == {"payroll_mx_decisions", *MX_X4_TABLES} and columns == {}               # Mexico final mile X1 (m20)
         # Mexico m18 (b9f3d5a1c7e2) and m19 (c7d2e9a4f1b6, a CHECK change only), then South
         # Africa (447f57564983, re-parented onto c7d2e9a4f1b6).
         assert tables == za_tables
