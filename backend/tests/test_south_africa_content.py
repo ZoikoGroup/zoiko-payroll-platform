@@ -76,7 +76,8 @@ def test_each_value_sits_in_the_slot_its_kind_names():
 
 def test_only_listed_rows_may_be_empty():
     empty = {row[0] for row in content.ZA_SCALAR_CONTENT if all(row[i] is None for i in (2, 3, 4, 5))}
-    assert empty == set(content.ZA_EMPTY_BY_DESIGN)
+    expected = set(content.ZA_EMPTY_BY_DESIGN)
+    assert empty == expected
 
 
 def test_values_fit_their_columns():
