@@ -1,4 +1,4 @@
-import { BookOpen, Building2, FlaskConical, Gavel, Calculator, ClipboardCheck, FileCheck2, FileCode2, HeartPulse, Home, Landmark, ListChecks, MapPin, Scale, ShieldCheck, Sun, Wallet } from "lucide-react";
+import { BookOpen, Building2, FlaskConical, Gavel, History, Calculator, ClipboardCheck, FileCheck2, FileCode2, HeartPulse, Home, Landmark, ListChecks, MapPin, Scale, ShieldCheck, Sun, Wallet } from "lucide-react";
 import MXIsrTariffsTab from "../../components/jurisdiction/mexico/MXIsrTariffsTab";
 import MXSubsidyUmaTab from "../../components/jurisdiction/mexico/MXSubsidyUmaTab";
 import MXMinimumWageTab from "../../components/jurisdiction/mexico/MXMinimumWageTab";
@@ -7,6 +7,7 @@ import MXInfonavitTab from "../../components/jurisdiction/mexico/MXInfonavitTab"
 import MXBenefitsWorkweekTab from "../../components/jurisdiction/mexico/MXBenefitsWorkweekTab";
 import MXStatutoryRulesTab from "../../components/jurisdiction/mexico/MXStatutoryRulesTab";
 import MXDecisionsTab from "../../components/jurisdiction/mexico/MXDecisionsTab";
+import MXConfigVersionsTab from "../../components/jurisdiction/mexico/MXConfigVersionsTab";
 import MXSandboxTab from "../../components/jurisdiction/mexico/MXSandboxTab";
 import MXEarningClassificationTab from "../../components/jurisdiction/mexico/MXEarningClassificationTab";
 import MXCfdiCatalogTab from "../../components/jurisdiction/mexico/MXCfdiCatalogTab";
@@ -40,7 +41,8 @@ export function mexicoExtraTabs(orgId, state) {
     tab("mx-earnings", "Earning classification", ListChecks, "mx-rules", () => <MXEarningClassificationTab orgId={orgId} />),
     tab("mx-cfdi", "CFDI catalogs", FileCode2, "mx-earnings", () => <MXCfdiCatalogTab />),
     tab("mx-isn", "State ISN", MapPin, "mx-cfdi", () => <MXStateAccordionWorkspace initialSelectedState={state} />),
-    tab("mx-sources", "Sources", FileCheck2, "mx-isn", () => <SourceEvidencePanel />),
+    tab("mx-versions", "Versions", History, "mx-isn", () => <MXConfigVersionsTab />),
+    tab("mx-sources", "Sources", FileCheck2, "mx-versions", () => <SourceEvidencePanel />),
     tab("mx-tests", "Tests", ShieldCheck, "mx-sources", () => (
       <TestCertificationPanel jurisdiction="MX" label="Mexico (SAT / IMSS)" fixturesPath="backend/tests/fixtures/mx_golden/README.md" />
     )),

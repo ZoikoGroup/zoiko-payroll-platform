@@ -19245,6 +19245,70 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/configuration/compare",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "compare",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/configuration/packs/{pack_row_id}",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "packs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/configuration/packs/{pack_row_id}/new-version",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "new-version",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/configuration/versions",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "versions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/mexico/csd-expiry",
    "data_class": "platform",
    "action": "read",
@@ -19943,6 +20007,38 @@
    "data_class": "platform",
    "action": "read",
    "resource": "coverage",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/mexico/report-templates/versions",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "versions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/mexico/report-templates/{template_id}/new-version",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "new-version",
    "principals": [
     "super_admin"
    ],

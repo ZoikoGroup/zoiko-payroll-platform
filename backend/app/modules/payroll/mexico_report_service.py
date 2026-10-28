@@ -507,14 +507,16 @@ def _mx_report_fields_proven(db: Session, template) -> Optional[str]:
             f"on a real committed payslip before the template goes live")
 
 
-def mx_report_activation_refusal(db: Session, template) -> Optional[str]:
+def _mx_activation_platform_reasons(db: Session, template) -> Optional[list]:
+    """The activation conditions that read no tenant data: the report's gates
+    SIGNED, its content pack Active, and (template-engine reports) fields present.
+    None = the report type cannot be activated at all."""
     from app.modules.payroll import mexico_service
 
     reasons = []
     gates = MX_REPORT_GATES.get(getattr(template, "report_type", None))
     if gates is None:
-        return (f"Mexico report-template activation is refused: {getattr(template, 'report_type', None)!r} is not a "
-                f"Mexico report type this release can activate.")
+        return None
     states = {g["gate"]: g["state"] for g in mexico_service.gate_states(db)}
     unsigned = [g for g in gates if states.get(g) != "SIGNED"]
     if unsigned:
@@ -532,10 +534,19 @@ def mx_report_activation_refusal(db: Session, template) -> Optional[str]:
     if template.report_type not in MX_REPORT_SPECS and template.report_type != "MX_CFDI_RECEIPT":
         if not _mx_report_fields(db, template):
             reasons.append("the template has no fields")
-        else:
-            proof = _mx_report_fields_proven(db, template)
-            if proof:
-                reasons.append(proof)
+    return reasons
+
+
+def mx_report_activation_refusal(db: Session, template) -> Optional[str]:
+    reasons = _mx_activation_platform_reasons(db, template)
+    if reasons is None:
+        return (f"Mexico report-template activation is refused: {getattr(template, 'report_type', None)!r} is not a "
+                f"Mexico report type this release can activate.")
+    if (template.report_type not in MX_REPORT_SPECS and template.report_type != "MX_CFDI_RECEIPT"
+            and _mx_report_fields(db, template)):
+        proof = _mx_report_fields_proven(db, template)        # reads committed payslips (tenant data)
+        if proof:
+            reasons.append(proof)
     if reasons:
         return "Mexico report-template activation is refused: " + "; ".join(reasons) + "."
     return None
@@ -656,3 +667,76 @@ def mx_compare_templates(db: Session, from_id: int, to_id: int) -> dict:
                    "contentHash": template_content_hash(db, b)},
             "added": sorted(set(fb) - set(fa)), "removed": sorted(set(fa) - set(fb)), "changed": changed,
             "metadata": meta, "identical": not (set(fa) ^ set(fb)) and not changed and not meta}
+
+
+# ═══ Template versions (configuration-versions parity, 2026-10-28) ════════════
+# Every version of every Mexico report template, with what the activation gate
+# answers for it, and "new version" — a Draft copy of the CHOSEN version (the
+# rollback path). The shared upsert_report_template pre-populates a new version
+# from the template's LATEST version, so a rollback to an older version needs
+# this copy. Activation stays the shared lifecycle behind mx_report_activation_refusal.
+_TEMPLATE_COPY_SKIP = {"id", "version", "status", "approved_by_id", "created_by_id", "updated_by_id", "created_at",
+                       "updated_at", "previous_version_id", "change_summary"}
+
+
+def mx_template_versions(db: Session) -> list:
+    from app.modules.payroll.hong_kong_service import template_content_hash
+
+    groups = {}
+    for t in _mx_templates(db):
+        groups.setdefault(t.template_key, {"templateKey": t.template_key, "name": t.name, "reportType": t.report_type,
+                                           "state": t.jurisdiction_state, "kind": _kind(t), "versions": []})
+        groups[t.template_key]["versions"].append({
+            "id": t.id, "version": t.version, "status": t.status, "reportingYear": t.reporting_year,
+            "fields": len(_mx_report_fields(db, t)), "contentHash": template_content_hash(db, t),
+            "approvedById": t.approved_by_id, "previousVersionId": t.previous_version_id,
+            "changeSummary": t.change_summary, "createdAt": t.created_at.isoformat() if t.created_at else None,
+            "activationRefusal": _mx_platform_gate_text(db, t)})
+    return list(groups.values())
+
+
+def _mx_platform_gate_text(db: Session, template) -> Optional[str]:
+    """What the activation gate already refuses on platform data alone (gates,
+    pack, fields). The proof on a real committed payslip reads tenant data, so a
+    platform view never runs it: activation itself still does."""
+    reasons = _mx_activation_platform_reasons(db, template)
+    if reasons is None:
+        return "not a Mexico report type this release can activate"
+    if reasons:
+        return "; ".join(reasons) + " (and the payslip field proof at activation)"
+    return None
+
+
+def mx_template_new_version(db: Session, template_id: int, version: str, reason: str, actor_id: Optional[int]) -> dict:
+    from app.core.exceptions import NotFoundException
+    from app.modules.payroll import service
+
+    m = _mx_report_models()
+    src = db.get(m.ReportTemplate, template_id)
+    if src is None or src.jurisdiction_country != MX:
+        raise NotFoundException("Mexico report template", template_id)
+    version, reason = (version or "").strip(), (reason or "").strip()
+    if not version or len(version) > 20:
+        raise BadRequestException("A new version needs a version number (at most 20 characters)")
+    if not reason:
+        raise BadRequestException("A new version needs a reason (the rollback or the change it starts)")
+    if actor_id is None:
+        raise BadRequestException("A new version needs an identified Super Admin")
+    if db.query(m.ReportTemplate).filter(m.ReportTemplate.template_key == src.template_key,
+                                         m.ReportTemplate.version == version).first():
+        raise BadRequestException(f"{src.template_key} v{version} already exists")
+    cols = {c.name: getattr(src, c.name) for c in m.ReportTemplate.__table__.columns
+            if c.name not in _TEMPLATE_COPY_SKIP}
+    new = m.ReportTemplate(**cols, version=version, status="Draft", previous_version_id=src.id,
+                           created_by_id=actor_id, updated_by_id=actor_id,
+                           change_summary=f"Copy of v{src.version}: {reason}"[:500])
+    db.add(new)
+    db.commit()
+    db.refresh(new)
+    service._clone_report_template_structure(db, source_template_id=src.id, target_template_id=new.id)
+    service.record_tax_audit(db, actor_id=actor_id, action="new_version", entity_type="report_template",
+                             entity_id=new.id, tax_version=new.version, legal_reference=new.source_references,
+                             old_value={"copiedFrom": src.id, "version": src.version},
+                             new_value={"version": new.version, "status": "Draft"}, reason=reason)
+    return {"id": new.id, "templateKey": new.template_key, "version": new.version, "status": new.status,
+            "copiedFrom": {"id": src.id, "version": src.version}, "fields": len(_mx_report_fields(db, new))}

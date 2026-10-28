@@ -181,6 +181,14 @@ export const proposeMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id
 export const approveMxDecision = (id) => apiFetch(`${MX_SA}/decisions/${id}/approve`, { method: "POST" });
 export const withdrawMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id}/withdraw`, { method: "POST", body });
 export const reviseMxDecision = (id) => apiFetch(`${MX_SA}/decisions/${id}/revise`, { method: "POST" });
+// Mexico configuration versions (Hong Kong parity): every pack version, one version's rows, compare, and a
+// Draft copy of a chosen version (the rollback path — rows are never edited).
+export const getMxConfigVersions = (on) => apiFetch(`${MX_SA}/configuration/versions`, { params: on ? { on } : {} });
+export const getMxConfigPack = (id) => apiFetch(`${MX_SA}/configuration/packs/${id}`);
+export const compareMxConfigVersions = (fromId, toId) =>
+  apiFetch(`${MX_SA}/configuration/compare`, { params: { from: fromId, to: toId } });
+export const newMxConfigVersion = (id, body) =>
+  apiFetch(`${MX_SA}/configuration/packs/${id}/new-version`, { method: "POST", body });
 export const transcribedMxDecision = (id, body) => apiFetch(`${MX_SA}/decisions/${id}/transcribed`, { method: "POST", body });
 export const getMxDecisionsForBlock = (code) => apiFetch(`${MX_SA}/decisions/by-block/${encodeURIComponent(code)}`);
 // Final mile X2: the calculation sandbox (writes nothing; candidates watermarked).
@@ -189,6 +197,10 @@ export const runMxSandbox = (body) => apiFetch(`${MX_SA}/sandbox/calculate`, { m
 export const getMxTemplateCoverage = () => apiFetch(`${MX_SA}/report-templates/coverage`);
 export const compareMxReportTemplates = (from, to) => apiFetch(`${MX_SA}/report-templates/compare`, { params: { from, to } });
 export const previewMxTemplateInSandbox = (id, body) => apiFetch(`${MX_SA}/report-templates/${id}/sandbox-preview`, { method: "POST", body });
+// Template versions: every version with its activation-gate answer, and a Draft copy of a chosen version.
+export const getMxTemplateVersions = () => apiFetch(`${MX_SA}/report-templates/versions`);
+export const newMxTemplateVersion = (id, body) =>
+  apiFetch(`${MX_SA}/report-templates/${id}/new-version`, { method: "POST", body });
 // Phase 10e: pilot grants (four-eyes, revocable, expiring) and the read-only
 // list of governed master-data copies (its worker routes stay retired, ZP-PRIV).
 export const listMxPilotGrants = () => apiFetch(`${MX_SA}/pilot-grants`);
