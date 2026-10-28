@@ -140,7 +140,8 @@ export default function MXReadinessGatesTab() {
             <h3 className="mb-1 text-[14px] font-semibold text-foreground">Release gates</h3>
             <p className="mb-2 text-[12px] text-foreground-muted">
               A gate is signed only by its evidence: on the Sources tab, add a source with Form/Publication # = its evidence tag,
-              upload the signed evidence pack, and a different Super Admin marks it reviewed. Checklists: {data.documents?.releaseGates}.
+              upload the signed evidence pack, and a different Super Admin marks it reviewed. A reviewed file is never replaced: register a new
+              source and supersede the old one. Checklists: {data.documents?.releaseGates}.
             </p>
             <Table rows={data.gates} rowKey={(g) => g.gate} columns={[
               { key: "gate", label: "Gate" }, { key: "label", label: "Area" },

@@ -1261,6 +1261,19 @@ def add_catalog_entry(db: Session, release_id: int, data: dict, actor_id: Option
             "description": entry.description, "validFrom": _iso(entry.valid_from), "validTo": _iso(entry.valid_to)}
 
 
+def _catalog_entry_authors(db: Session, release_id: int) -> set:
+    """Every Super Admin who added an entry to this release (from the audit rows
+    add_catalog_entry writes; entries carry no author column)."""
+    from app.modules.payroll.models import PayrollMxCfdiCatalogEntry, TaxConfigurationAudit as A
+
+    ids = [i for (i,) in db.query(PayrollMxCfdiCatalogEntry.id)
+           .filter(PayrollMxCfdiCatalogEntry.schema_release_id == release_id)]
+    if not ids:
+        return set()
+    return {a for (a,) in db.query(A.actor_id).filter(A.entity_type == "mx_cfdi_catalog_entry", A.action == "create",
+                                                      A.entity_id.in_(ids), A.actor_id.isnot(None))}
+
+
 RELEASE_ACTIONS = {"submit": ("Draft", "In Review"), "approve": ("In Review", "Approved"),
                    "activate": ("Approved", "Active"), "supersede": ("Active", "Superseded")}
 
@@ -1283,6 +1296,10 @@ def transition_release(db: Session, release_id: int, action: str, actor_id: Opti
     if action == "approve" and release.created_by_id == actor_id:
         _refuse(db, et, release.id, action, actor_id,
                 "You registered this release — a different Super Admin must approve it (maker-checker).")
+    if action == "approve" and actor_id in _catalog_entry_authors(db, release.id):     # final mile X8
+        _refuse(db, et, release.id, action, actor_id,
+                "You added catalog entries to this release — a Super Admin who added none must approve it "
+                "(maker-checker).")
     if action == "activate":
         _refuse(db, et, release.id, action, actor_id,
                 "Pinning a CFDI release live needs the Phase 7 PAC validation (MX-015) — activation is refused in "

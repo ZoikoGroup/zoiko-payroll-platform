@@ -2633,6 +2633,8 @@ export const generateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/gene
 // Phase 11c: validate-only preview — never signs, stores or returns the XML.
 export const validateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/validate`, {});
 export const processMxCfdiOutbox = () => api.post(`${MX}/cfdi/outbox/process`, {});
+// Final mile X8: the restore step of MEXICO_UNKNOWN_STATE_RUNBOOK.md (every in-flight CFDI → UNKNOWN, MX-062).
+export const reconcileMxCfdiAfterRestore = () => api.post(`${MX}/cfdi/reconcile`, {});
 export const getMxCfdiDocument = (docId) => api.get(`${MX}/cfdi/documents/${docId}`);
 export const queryMxCfdiStatus = (docId) => api.post(`${MX}/cfdi/documents/${docId}/status-query`, {});
 export const confirmMxCfdiRetry = (docId, reason) => api.post(`${MX}/cfdi/documents/${docId}/confirm-retry`, { reason });

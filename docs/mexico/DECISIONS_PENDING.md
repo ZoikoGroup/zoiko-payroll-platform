@@ -28,6 +28,9 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 | D-23 | Who may approve a decision for a gate: a "gate owner" role (G1 owner …) does not exist in the platform | Release owner + Security lead | Nothing blocks: until decided, the decision register (final mile X1) stores the owner as text and requires a second Super Admin as the four-eyes control | Open |
 | D-24 | High-value threshold for the run-variance report (MX-RUN-VARIANCE, spec §13 stage 4) | Release owner | Nothing blocks: the report shows every delta and flags none while it is unset | Open |
 | D-25 | Materiality threshold for a parallel-payroll difference (spec §22 G8, final mile X4) | Release owner (G8) | G8 evidence: no parallel cycle is declared clean while it is unset (every difference is still listed, explained and accepted) | Open |
+| D-26 | Should making Mexico generally available (service registry AVAILABLE) need a second Super Admin? (final mile X8) | Release owner + Security lead | Nothing blocks. Today one Super Admin with a reason can do it once G1–G8 are signed, Q9 is recorded and the identity key is set; pilot grants and the onboarding pause already need two | Open |
+| D-27 | Four-eyes for retiring Active Mexico content: moving an Active pack to Deprecated / Retired / Superseded, and archiving an Active earning classification (final mile X8) | G1 owner + Release owner | Nothing blocks. Both are single-person today; creating and approving them is four-eyes | Open |
+| D-28 | Organisation-side four-eyes and effective dating for employer configuration (spec §11 panels A–G; final mile X8) | Release owner + Employer | Nothing blocks. Single org admin today for employer versions, establishments, the INFONAVIT model, labour-policy activation and credential references / rotation (risk premiums, hours, opening balances, SUA, liabilities, payments, journal and parallel differences are already four-eyes). Establishments and the INFONAVIT model are not effective-dated | Open |
 | D-07 | Unit of the LISR Art. 93 exempt limits (and, D-07b, of the LFT Art. 486 seniority-premium cap): UMA or the zone minimum wage | G1 owner (D-07b: G5) | Every special payment (`MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED`); every seniority premium (`MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED`) | Open |
 | D-08 | Withholding method for a special payment paid in its own run | G1 owner | Aguinaldo and PTU runs (`MX_SPECIAL_PAY_METHOD_UNDECIDED`) | Open |
 | D-09 | Monthly ordinary income from a daily salary (LISR Arts. 95, 96; RLISR Art. 174) | G1 owner | RLISR 174 withholding and separation withholding (`MX_MONTHLY_ORDINARY_INCOME_UNDECIDED`) | Open |
@@ -235,3 +238,22 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** Spec §22 G8 asks for parallel cycles with "all material differences explained". Above what absolute difference (MXN, per employee and concept, between the legacy payroll and Zoiko's committed result) is a difference material?
 - **Options.** A fixed MXN amount, entered in the decision register (answer kind AMOUNT). Zero means every difference is material. A per-concept or percentage rule would need a small change to the comparison.
 - **Blocks.** G8 evidence only. The comparison lists, explains and accepts every difference regardless; it never declares a cycle clean until an approved value exists.
+
+
+## D-26 · Four-eyes on Mexico general availability (final mile X8)
+
+- **Question.** `POST /super-admin/compliance/jurisdictions/MX/service-registry` sets Mexico AVAILABLE for every organisation. Should it need a second Super Admin, like pilot grants and the onboarding pause?
+- **Options.** Keep single-person (the gate already requires G1–G8 SIGNED, Q9 recorded and the identity-token key set); or propose-and-approve by a second Super Admin.
+- **Blocks.** Nothing.
+
+## D-27 · Four-eyes on retiring Active Mexico content (final mile X8)
+
+- **Question.** Should moving an Active Mexico pack to Deprecated / Retired / Superseded, or archiving an Active earning classification, need a second Super Admin? Either action can stop every Mexican calculation.
+- **Options.** Keep single-person (a fast stop); or four-eyes like approval.
+- **Blocks.** Nothing.
+
+## D-28 · Organisation-side four-eyes and effective dating (final mile X8)
+
+- **Question.** Which employer configuration changes need a second org admin, and should establishments and the INFONAVIT operating model be effective-dated?
+- **Options.** Per item: employer profile versions, establishments, IMSS registrations, the INFONAVIT model, labour-policy activation, credential references and rotation. Each item can be single-person, four-eyes, or four-eyes only once the organisation is live.
+- **Blocks.** Nothing. The answer shapes G5 / G7 evidence.

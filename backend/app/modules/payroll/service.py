@@ -3060,6 +3060,8 @@ _HK_EVIDENCE_PREFIXES = ("HK-GATE-G", "HK-DECISION-D", "HK-PRODUCTION-VERIFICATI
 _GOVERNED_EVIDENCE_PREFIXES = {
     "SG": ("SG-GATE-G", "SG-DECISION-D", "SG-OPS-DEPLOYMENT"),
     "HK": _HK_EVIDENCE_PREFIXES,
+    # Mexico final mile X8: release-gate and decision evidence (mexico_service._mx_evidence).
+    "MX": ("MX-GATE-G", "MX-DECISION-"),
 }
 # Countries whose canonical statutory sources are hash-pinned: a source the
 # country's canonical pack / rate / slab rows cite, registered with the
@@ -3073,6 +3075,10 @@ _HASH_PINNED_SOURCE_COUNTRIES = ("HK",)
 
 def _is_hk_evidence(row) -> bool:
     return governed_evidence_country(row) == "HK"
+
+
+def _is_mx_evidence(row) -> bool:
+    return governed_evidence_country(row) == "MX"
 
 
 def _hash_pinned_source(db: Session, row) -> bool:
@@ -3463,6 +3469,10 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
         raise BadRequestException(
             f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
         )
+    if _is_mx_evidence(row) and not row.file_path:          # Mexico final mile X8
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
+        )
     if _is_sg_gate_evidence(row):
         _sg_refuse_if_rejected(db, row, "review", reviewer_id)
     if _is_hk_evidence(row):
@@ -3517,7 +3527,7 @@ def upload_source_artifact_file(
     # was accepted, so it is never replaced in place (that kept the review on a
     # file the reviewer never saw) — register a new artifact and supersede.
     hash_pinned = not _is_sg_gate_evidence(row) and _hash_pinned_source(db, row)
-    if row.reviewer_approved_at is not None and (_is_hk_evidence(row) or hash_pinned):
+    if row.reviewer_approved_at is not None and (_is_hk_evidence(row) or _is_mx_evidence(row) or hash_pinned):
         raise BadRequestException(
             f"Source artifact #{row.id} has been reviewed — its file cannot be replaced. Register a new artifact "
             "and supersede this one.")
@@ -8151,6 +8161,16 @@ def _refuse_mx_generic_statutory_edit(pack) -> None:
         )
 
 
+def _existing_row_pack(db: Session, model, row_id):
+    """The pack an existing canonical row belongs to NOW (Mexico final mile X8):
+    the editors otherwise check only the target pack id the caller sends, so a
+    row could be moved out of a Mexico pack through any editable pack."""
+    if not row_id:
+        return None
+    pack_id = db.query(model.jurisdiction_pack_id).filter(model.id == row_id).scalar()
+    return db.get(JurisdictionPack, pack_id) if pack_id else None
+
+
 def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_id: Optional[int] = None) -> TaxSlab:
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
     if not pack:
@@ -8159,6 +8179,7 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         raise BadRequestException("Canonical tax slabs can only be attached to a pack_type='tax' JurisdictionPack.")
     _refuse_hk_generic_statutory_edit(pack)
     _refuse_mx_generic_statutory_edit(pack)
+    _refuse_mx_generic_statutory_edit(_existing_row_pack(db, TaxSlab, data.id))
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -8237,6 +8258,7 @@ def upsert_canonical_contribution_rate(
         raise BadRequestException("Canonical contribution rates can only be attached to a pack_type='tax' JurisdictionPack.")
     _refuse_hk_generic_statutory_edit(pack)
     _refuse_mx_generic_statutory_edit(pack)
+    _refuse_mx_generic_statutory_edit(_existing_row_pack(db, ContributionRate, data.id))
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -11282,7 +11304,7 @@ def _set_report_template_status(
 # or field — from the audit trail) may approve it; elsewhere only the LAST
 # editor is refused (_SELF_APPROVAL_REFUSED_COUNTRIES) or, at Publish, the
 # approver must differ from updated_by_id. Per-country opt-in.
-_ANY_EDITOR_APPROVAL_REFUSED_COUNTRIES = ("HK",)
+_ANY_EDITOR_APPROVAL_REFUSED_COUNTRIES = ("HK", "MX")   # MX: Mexico final mile X8
 
 
 def report_template_editors(db: Session, template) -> set:
