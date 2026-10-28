@@ -427,3 +427,21 @@ Screenshot inspected (`x5_01_csd_expiry_alerts.jpg`).
 | UI | A CSD-expiry card on the Super Admin Mexico Employer tab |
 | CFDI | None. The new interfaces are not installed, and generation, signing and stamping refuse exactly as before |
 | Other jurisdictions | None |
+
+---
+
+## X6 — The IMSS incapacity record: proposal only (A10 Incapacidades)
+
+**ZP-PRIV. Review required: Rugvedh (ZP-PRIV) and legal before any build.** Documentation only: no code, no migration, no table.
+
+`INCAPACITY_RECORD_PROPOSAL.md` covers:
+- the minimum fields, from the pinned `nomina12.xsd` (S28 lines 609–642: `DiasIncapacidad` required ≥ 1, `TipoIncapacidad` required from `c_TipoIncapacidad`, `ImporteMonetario` optional) and the W3-3 interface (`Lss31ContributionDays.branch_days`, S10 Art. 31, S27 Art. 29);
+- what is deliberately not stored (diagnosis, medical notes, prognosis, free text);
+- the S23 legal-basis question, access roles, encryption, retention (a new `HEALTH_INCAPACITY` category starting BLOCKED_UNDECIDED), audit and redaction;
+- the exact files and tests a build would touch, and ten questions for Rugvedh and legal.
+
+**Finding (reported, not changed):** `mexico_run_service._attendance_counts` counts any "sick" leave row as an IMSS incapacity day. LSS Art. 31 IV covers only IMSS-certified incapacity; an uncertified sick day is an Art. 31 I absence, and the two give different contribution days. No production effect (Mexico is dormant), but it must be fixed before G2, by the record this proposal asks permission for. Question 9 asks the owners to confirm the reading.
+
+**S23 (the 2025 personal data law) is not saved** in `docs/mexico/sources/`, so no article is cited; saving it goes into the X7 source runbook.
+
+**Production effect:** none (documents only).
