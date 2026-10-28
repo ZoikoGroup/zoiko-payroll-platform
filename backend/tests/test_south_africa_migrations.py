@@ -189,7 +189,9 @@ def test_deploy_drift_filter_explains_every_za_object():
         tables, columns = pending_objects("c7d2e9a4f1b6")
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) | set(P8_TABLES)
+    # Mexico m20 (d3f8b2a6c1e9) also grows from c7d2e9a4f1b6 (joined by merge 92c67cab49fc).
+    mexico_m20 = {"payroll_mx_decisions", "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"}
+    assert tables == set(NEW_TABLES) | set(P8_TABLES) | mexico_m20
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot"}
     assert columns["payroll_runs"] == {"za_approval_fingerprint"}
