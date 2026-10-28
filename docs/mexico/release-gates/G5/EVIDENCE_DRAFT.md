@@ -12,6 +12,12 @@
 - Super Admin read-only views (W5-1): Compliance → Mexico → Statutory rules, and each content tab, show every value with its source file, SHA-256, verification status and [PENDING G1]; readiness per gate (W5-3) shows which checklist items code confirms now. Browser evidence: `docs/mexico/completion-evidence/w5/` (39/39 PASS)
 - Full backend suite at the end of W5 (2026-10-27): 7,561 passed, 120 skipped, 2 xfailed; only the known local-only failures and one intermittent communications test (`MEXICO_COMPLETION_PROGRESS.md`, End of W5)
 
+**Final mile (2026-10-28) — what the new tooling now produces for this gate:**
+
+- Decision register: D-05, D-11, D-13, D-17, D-19, and D-28 (organisation-side four-eyes and effective dating)
+- Sandbox fixture F4 (minimum-wage geography: 400/day lawful in the general zone, blocked in ZLFN)
+- Report MX-LABOR-COMPLIANCE
+
 ## 2. Checklist items a code check confirms (state is live in Readiness → Gate checklists)
 
 - [PRE-PILOT] Minimum wage zones and professional minimums, the 2026 workweek and overtime rules, vacations and the vacation premium, aguinaldo and PTU transcribed from S8, S9, S17, S18, S21 and S26 — code check `national_pack_approved`

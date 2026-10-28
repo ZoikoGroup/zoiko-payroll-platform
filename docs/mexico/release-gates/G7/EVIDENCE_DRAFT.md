@@ -9,6 +9,14 @@
 - Retention: no period chosen by the platform; nothing purged without an approved policy (`test_mexico_retention.py`)
 - Full backend suite at the end of W5 (2026-10-27): 7,561 passed, 120 skipped, 2 xfailed; only the known local-only failures and one intermittent communications test (`MEXICO_COMPLETION_PROGRESS.md`, End of W5)
 
+**Final mile (2026-10-28) — what the new tooling now produces for this gate:**
+
+- Report MX-IDENTIFIER-ACCESS-AUDIT: every render of the full-identifier CFDI receipt (who, when)
+- `ZP_PRIV_REVIEW_PACKETS.md` (13 packets, W4-3b first) and the `payslip_items.compliance_fields` note
+- CSD custody interface (key never returned) and Super Admin CSD expiry alerts; XML store contract
+- `INCAPACITY_RECORD_PROPOSAL.md` (health data — ZP-PRIV and legal, nothing built)
+- Configuration re-audit `MEXICO_SUPER_ADMIN_CONFIG_AUDIT.md`: Mexico rows can no longer be moved through another pack; MX gate / decision evidence is governed (no replacement after review); D-26, D-27
+
 ## 2. Checklist items a code check confirms (state is live in Readiness → Gate checklists)
 
 - None: every item of this gate needs a person or an external party.

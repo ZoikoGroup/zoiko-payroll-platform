@@ -7,6 +7,11 @@
 - Pilot machinery: four-eyes pilot grants, the PILOT watermark, no payments or filings in the pilot (`test_mexico_pilot.py`), the onboarding pause (`test_mexico_onboarding_pause.py`), the payroll journal for reconciliation (`test_mexico_journal.py`)
 - Full backend suite at the end of W5 (2026-10-27): 7,561 passed, 120 skipped, 2 xfailed; only the known local-only failures and one intermittent communications test (`MEXICO_COMPLETION_PROGRESS.md`, End of W5)
 
+**Final mile (2026-10-28) — what the new tooling now produces for this gate:**
+
+- Parallel-payroll comparison (Mexico Compliance Centre → Parallel payroll): legacy CSV against a committed run, matched by employee code (identifiers refused), each difference explained and accepted by a second admin, report MX-PARALLEL-DIFF (`test_mexico_parallel.py`, browser 10/10)
+- D-25 materiality threshold: no cycle is declared clean until the release owner approves it
+
 ## 2. Checklist items a code check confirms (state is live in Readiness → Gate checklists)
 
 - None: every item of this gate needs a person or an external party.

@@ -9,6 +9,13 @@
 - Salary payments released four-eyes (`test_mexico_payments.py`); the payroll journal (`test_mexico_journal.py`)
 - Full backend suite at the end of W5 (2026-10-27): 7,561 passed, 120 skipped, 2 xfailed; only the known local-only failures and one intermittent communications test (`MEXICO_COMPLETION_PROGRESS.md`, End of W5)
 
+**Final mile (2026-10-28) — what the new tooling now produces for this gate:**
+
+- Report MX-PAYMENT-WORKLIST (NOT A BANK FILE)
+- Intake templates: `intake/SPEI_INTAKE.md`, IDSE / SUA / SIPARE
+- PAC conformance kit and checklist; durable XML store contract (`CFDI_XML_STORAGE_CONTRACT.md`, write-once, hash-checked, retention field)
+- "Reconcile after restore" on the run's CFDI stage (the UNKNOWN-state runbook's restore step; X8)
+
 ## 2. Checklist items a code check confirms (state is live in Readiness → Gate checklists)
 
 - None: every item of this gate needs a person or an external party.

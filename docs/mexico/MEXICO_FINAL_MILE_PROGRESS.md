@@ -542,3 +542,20 @@ Screenshots inspected.
 | Super Admin | Mexico rows can no longer be moved by the generic editors. Mexico evidence files are frozen once reviewed. Stricter template and catalog approval |
 | Organisation | One new button (dormant while Mexico is off) |
 | Other jurisdictions | None. Each change is a Mexico entry in a per-country list or a Mexico-only check |
+
+---
+
+## X9 — Close-out
+
+- **Full backend suite** (5 chunks, at the X8 state; X9 is documents only): **7,906 passed**. The only failures are the known local-only ones.
+- **Frontend:** ESLint is clean on the changed files; `check:undefined` reports 602 files; the build passes.
+- **Gate evidence drafts:** `release-gates/G1–G8/EVIDENCE_DRAFT.md` each gain a "Final mile — what the new tooling now produces for this gate" list.
+- **Gap register:** rows for X1–X8 added as each step closed.
+- **`MEXICO_FINAL_MILE_REPORT.md`:**
+  - session zero, now at production `92c67cab49fc`;
+  - every gap item with its next action and owner, and whether that action is in product or outside;
+  - the commits grouped by PR;
+  - the path to pilot;
+  - seven contradictions found.
+
+**Production effect:** none (documents only).
