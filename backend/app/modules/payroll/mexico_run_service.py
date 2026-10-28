@@ -158,6 +158,11 @@ def payment_period(profile, start: date, end: date) -> str:
         raise MXBlock("MX_PAY_FREQUENCY_MAPPING_MISSING",
                       "the S28 c_PeriodicidadPago → Art. 96 period mapping is not transcribed yet")
     mapped = _content.MX_PAY_FREQUENCY_ISR_PERIOD.get(code)
+    if mapped is None and code == "01":                  # D-02 (sweep S1): daily pay frequency, as answered
+        from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+        answer = switch("D-02")
+        mapped = None if answer in (None, "UNMAPPED") else answer
     if mapped is None:
         raise MXBlock("MX_PAY_FREQUENCY_MAPPING_MISSING", f"pay-frequency code {code!r} has no Art. 96 period")
     actual = run_period_kind(start, end)
@@ -465,7 +470,31 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
                 period: Optional[tuple] = None, allowance_items: Optional[list] = None,
                 attendance_records: Optional[list] = None) -> dict:
     """PayrollContext kwargs for one Mexican employee — read-only. `run` None
-    = preview (pay date = as_of, the preview's period end)."""
+    = preview (pay date = as_of, the preview's period end).
+
+    Sweep S1: the decision register's APPROVED answers are applied while the
+    inputs are built and handed to the engine (mx_decisions); pack-row decisions
+    fill a row the pack does not carry; the answers used are part of the input
+    components (and so of the input hash)."""
+    from app.modules.payroll import mexico_decision_config as decision_config
+
+    guard(db, employee, run)                          # dormancy first: nothing is read for a dormant organisation
+    with decision_config.applying(db) as answers:
+        inputs = _calc_inputs(db, run, employee, resolved_pack, as_of, period=period,
+                              allowance_items=allowance_items, attendance_records=attendance_records)
+    rate_maps = [(inputs.get("mx_pack_rows") or {}).get("rate_map")]
+    rate_maps += [seg.get("rate_map") for seg in ((inputs.get("mx_period") or {}).get("segments") or [])]
+    decision_config.overlay_pack_rows(rate_maps, answers)
+    inputs["mx_decisions"] = dict(answers or {})
+    components = inputs.get("mx_input_components")
+    if components is not None and answers:
+        components["decisions"] = decision_config.fingerprint(answers)
+    return inputs
+
+
+def _calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[date] = None, *,
+                 period: Optional[tuple] = None, allowance_items: Optional[list] = None,
+                 attendance_records: Optional[list] = None) -> dict:
     from app.modules.payroll import mexico_employer_service, service
 
     guard(db, employee, run)
@@ -510,7 +539,9 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
             raise MXBlock("MX_EMPLOYEE_TERMINATED",
                           f"the employment ended on {ended.termination_date.isoformat()}, before this period",
                           employee.organization_id)
-        fixed_rule = _content.MX_FIXED_DAYS_TERMINATION_RULE                      # W3-5 (D-19)
+        from app.modules.payroll.engine.jurisdictions.mexico.decision_rules import fixed_days_termination_rule
+
+        fixed_rule = fixed_days_termination_rule(_content.MX_FIXED_DAYS_TERMINATION_RULE)   # W3-5 (D-19)
         if tariff in _FIXED_SALARY_DAYS and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR" \
                 and fixed_rule is None:
             raise MXBlock("MX_SALARY_DAYS_PARTIAL_PERIOD",
@@ -522,8 +553,7 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     days_paid = salary_days(tariff, start, end, policy_row.salary_days_convention if policy_row else None)
     if final_period is not None and tariff in _FIXED_SALARY_DAYS \
             and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR":
-        days_paid = _dec(_content.MX_FIXED_DAYS_TERMINATION_RULE.days_paid(tariff, start, final_period["periodEnd"],
-                                                                            end))
+        days_paid = _dec(fixed_rule.days_paid(tariff, start, final_period["periodEnd"], end))
     counts = _attendance_counts(db, employee.organization_id, employee.id, start, end, attendance_records)
     segs = segments(db, pack, start, end)
     hours, hours_rows = _hours(db, employee.id, start, end)
@@ -545,7 +575,10 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         "id": policy_row.id, "version": policy_row.version, "ordinary_weekly_hours": policy_row.ordinary_weekly_hours,
         "aguinaldo_days": policy_row.aguinaldo_days, "vacation_policy": policy_row.vacation_policy,
         "vacation_premium_pct": policy_row.vacation_premium_pct, "sunday_premium_pct": policy_row.sunday_premium_pct,
-        "salary_days_convention": policy_row.salary_days_convention}
+        "salary_days_convention": policy_row.salary_days_convention,
+        # sweep S1 (D-17): the weekly schedule and the employer's own daily-hours figure
+        "weekly_schedule": policy_row.weekly_schedule,
+        "hourly_rate_daily_hours": getattr(policy_row, "hourly_rate_daily_hours", None)}
     # Phase 9b: the vacation premium of approved vacation records (special pay, engine special_pay).
     from app.modules.payroll import mexico_benefits_service as benefits
 
@@ -855,7 +888,11 @@ def _snapshot_is_pilot(inputs: dict) -> bool:
 
 def payslip_snapshot(mx_result: dict, inputs: dict) -> dict:
     comps = inputs.get("mx_input_components") or {}
+    from app.modules.payroll import mexico_decision_config
+
     return {"result": mx_result, "inputHash": input_hash(comps), "components": comps,
+            # sweep S1: the decision answers this payslip was calculated with
+            "decisions": mexico_decision_config.trace(inputs.get("mx_decisions")),
             "pack": _plain(inputs.get("mx_pack")), "engineVersion": (mx_result or {}).get("engine_version"),
             # Phase 10f: generated in a pilot organisation — non-binding (not part of the input hash)
             "pilot": _snapshot_is_pilot(inputs)}

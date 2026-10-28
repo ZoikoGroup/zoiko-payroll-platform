@@ -219,10 +219,17 @@ def seed_decisions(db: Session, decisions_md: Optional[str] = None, gap_register
 # ── answers ──────────────────────────────────────────────────────────────────
 
 def validate_answer(row, chosen: str) -> None:
-    """Refuse an answer the consuming code could not read."""
+    """Refuse an answer the consuming code could not read. A decision built as
+    configuration (sweep S1, mexico_decision_config) is checked against the
+    options built today, whatever kind its row was seeded with."""
+    from app.modules.payroll import mexico_decision_config
+
     chosen = (chosen or "").strip()
     if not chosen:
         raise BadRequestException("A proposal needs the chosen option")
+    if mexico_decision_config.spec(row.code) is not None:
+        mexico_decision_config.parse(row.code, chosen)
+        return
     if row.answer_kind == "ROUNDING_RULE":
         from app.modules.payroll.engine.jurisdictions.mexico import rounding
         from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
@@ -263,13 +270,28 @@ def ticket(row) -> Optional[dict]:
             "transcribed": row.status == "TRANSCRIBED", "transcriptionRef": row.transcription_ref}
 
 
+def _configured_answer(row) -> dict:
+    """The answer grammar the code reads (sweep S1), else the seeded one."""
+    from app.modules.payroll import mexico_decision_config
+
+    c = mexico_decision_config.spec(row.code)
+    if c is None:
+        return {"answerKind": row.answer_kind, "allowedValues": row.allowed_values, "configuration": None}
+    options = c["options"]
+    allowed = ([f"{p}={v}" for p, vs in options.items() for v in vs] if isinstance(options, dict) else options)
+    return {"answerKind": c["kind"], "allowedValues": allowed,
+            "configuration": {"target": c["target"], "changes": c["changes"], "needs": c["needs"],
+                              "parts": list(options) if isinstance(options, dict) else None,
+                              "notBuilt": c.get("notBuilt")}}
+
+
 def view(row) -> dict:
     iso = lambda d: d.isoformat() if d else None  # noqa: E731
     return {"id": row.id, "code": row.code, "version": row.version, "title": row.title, "gates": row.gates or [],
             "ownerRole": row.owner_role, "question": row.question, "options": row.options or [],
             "blockCodes": row.block_codes or [], "contentKeys": row.content_keys or [],
             "questionSources": row.question_sources or [],
-            "answerKind": row.answer_kind, "allowedValues": row.allowed_values, "status": row.status,
+            **_configured_answer(row), "status": row.status,
             "chosenOption": row.chosen_option, "rationale": row.rationale, "citedSources": row.cited_sources or [],
             "contentHash": row.content_hash, "supersedesId": row.supersedes_id,
             "proposedById": row.proposed_by_id, "proposedAt": iso(row.proposed_at),

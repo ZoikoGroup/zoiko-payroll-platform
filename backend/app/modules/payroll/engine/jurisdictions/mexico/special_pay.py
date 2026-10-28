@@ -67,7 +67,18 @@ def aguinaldo_rule():
     return found
 
 
+# D-06 (sweep S1): the CDMX payroll-tax base for three termination payments — each IN or OUT once answered.
+ISN_D06_STATE = "CDMX"
+ISN_D06_CONCEPTS = ("VACATION_PAYOUT", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY")
+
+
 def isn_included(state: Optional[str], concept: str) -> bool:
+    if state == ISN_D06_STATE and concept in ISN_D06_CONCEPTS:
+        from .decisions import switch
+
+        answer = (switch("D-06") or {}).get(concept)
+        if answer is not None:
+            return answer == "IN"
     entry = _content.MX_SPECIAL_PAY_ISN_INCLUSION.get((state, concept))
     if entry is None:
         raise MXBlock("MX_ISN_SPECIAL_PAY_RULE_MISSING",

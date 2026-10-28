@@ -158,7 +158,8 @@ def test_no_sat_literal_outside_the_cited_tables():
               "OVERTIME_PERCEPTION", "OVERTIME_TYPE_DOUBLE"}
     code_like = __import__("re").compile(r"^(\d{2,8}|[A-Z]{1,4}\d{0,2}|CN01|PUE|MXN|ACT)$")
     allowed = {"MX", "O", "E", "N", "I", "Sí", "No", "X", "ISR", "IMSS", "MEX", "PTU", "SAT", "CSD", "UUID", "RFC",
-               "CURP", "NSS", "SDI", "SBC", "DB", "PAC"}
+               "CURP", "NSS", "SDI", "SBC", "DB", "PAC",
+               "C4", "C12"}                       # decision-register codes (sweep S1), not SAT values
     offenders = []
     for name in ("mexico_cfdi_xml.py", "mexico_cfdi_input.py"):
         tree = ast.parse((BACKEND / "app" / "modules" / "payroll" / name).read_text(encoding="utf-8"))

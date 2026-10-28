@@ -107,7 +107,9 @@ def compute(*, daily_salary, policy, seniority_date, on, lines, accumulator, seg
     extra = _ZERO
     for line in lines:
         if line["sbc"] == "FIXED" and line["kind"] != ORDINARY_SALARY:
-            rule = _c.MX_SBC_FIXED_INTEGRATION_RULE                        # W3-5: LSS Art. 30 I (D-18)
+            from .decision_rules import sbc_fixed_integration_rule
+
+            rule = sbc_fixed_integration_rule(_c.MX_SBC_FIXED_INTEGRATION_RULE)   # W3-5: LSS Art. 30 I (D-18)
             if rule is None:
                 raise MXBlock("MX_SBC_FIXED_RULE_MISSING",
                               f"earning {line['code']} is a FIXED SBC item — its integration rule (S10) is not "
