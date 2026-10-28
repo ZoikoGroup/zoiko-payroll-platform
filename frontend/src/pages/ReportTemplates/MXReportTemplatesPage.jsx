@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import ReportTemplateLayout from "../../components/reportTemplates/ReportTemplateLayout";
 import MXTemplateLibraryPanel from "../../components/jurisdiction/mexico/MXTemplateLibraryPanel";
+import MXTemplateVersionsPanel from "../../components/jurisdiction/mexico/MXTemplateVersionsPanel";
 
 // Mexico — the shared report-template lifecycle (same thin wrapper as every
 // other jurisdiction). Templates are seeded Draft; activation is refused
@@ -21,6 +22,8 @@ export default function MXReportTemplatesPage() {
       />
       {/* Final mile X3b: library tools (coverage, version diff, sandbox preview) */}
       <MXTemplateLibraryPanel />
+      {/* Template versions: each version's gate answer, Draft copy of a chosen version (rollback) */}
+      <div className="mt-6"><MXTemplateVersionsPanel /></div>
     </>
   );
 }
