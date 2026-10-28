@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { generateMxCfdi, getMxRunCfdi, processMxCfdiOutbox, validateMxCfdi } from "../../../../service/payrollService";
+import {
+  generateMxCfdi, getMxRunCfdi, processMxCfdiOutbox, reconcileMxCfdiAfterRestore, validateMxCfdi,
+} from "../../../../service/payrollService";
 import MXCfdiDetailDrawer from "./MXCfdiDetailDrawer";
 
 // Mexico run stage 6 — CFDI 4.0 + Nómina 1.2 (spec §13, MX-016/017/062).
@@ -93,6 +95,16 @@ export default function MXCfdiStagePanel({ runId }) {
         <button type="button" disabled={busy || docs.length === 0} onClick={() => act(() => processMxCfdiOutbox())}
           className="rounded-[10px] border border-border px-3 py-1.5 text-[12px] font-semibold disabled:opacity-40">
           Process PAC queue
+        </button>
+        <button type="button" disabled={busy} data-testid="mx-cfdi-reconcile"
+          onClick={() => {
+            if (window.confirm("Only after a timeout or a database restore (MEXICO_UNKNOWN_STATE_RUNBOOK.md): every CFDI "
+              + "in flight in your organisation becomes UNKNOWN and is resolved by status queries. Continue?")) {
+              act(() => reconcileMxCfdiAfterRestore());
+            }
+          }}
+          className="rounded-[10px] border border-error/40 px-3 py-1.5 text-[12px] font-semibold text-error disabled:opacity-40">
+          Reconcile after restore
         </button>
       </div>
       {preview && <CfdiPreview preview={preview} />}

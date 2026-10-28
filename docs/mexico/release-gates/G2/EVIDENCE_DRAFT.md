@@ -12,6 +12,13 @@
 - Super Admin read-only views (W5-1): Compliance → Mexico → Statutory rules, and each content tab, show every value with its source file, SHA-256, verification status and [PENDING G1]; readiness per gate (W5-3) shows which checklist items code confirms now. Browser evidence: `docs/mexico/completion-evidence/w5/` (39/39 PASS)
 - Full backend suite at the end of W5 (2026-10-27): 7,561 passed, 120 skipped, 2 xfailed; only the known local-only failures and one intermittent communications test (`MEXICO_COMPLETION_PROGRESS.md`, End of W5)
 
+**Final mile (2026-10-28) — what the new tooling now produces for this gate:**
+
+- Decision register: D-03 (CEAV lowest band — blocks every calculation), D-16, D-18
+- Sandbox fixtures F1–F3 (UMA boundary, first-year SBC factor, CEAV high band) reproduce with candidate answers (`test_mexico_sandbox.py`)
+- Reports: MX-SBC-MOVEMENTS, MX-WORK-RISK-ANNUAL (NOT AN OFFICIAL FILE)
+- Intake templates for the official layouts: `intake/IDSE_INTAKE.md`, `intake/SUA_INTAKE.md`, `intake/SIPARE_INTAKE.md`
+
 ## 2. Checklist items a code check confirms (state is live in Readiness → Gate checklists)
 
 - [PRE-PILOT] Every IMSS branch rate, ceiling and the 2026 CEAV band transcribed, in an Approved pack — code check `national_pack_approved`

@@ -467,3 +467,95 @@ Documents only; no code and no production effect.
   - `verify_mexico_sources check` passes locally (exit 0).
 
 **Contradiction found:** the master prompt points to `MEXICO_TRANSCRIPTION_BATCH_2_REPORT.md` **§3** for the rounding candidates. They are in **§4** (§3 is S22). The brief cites §4.
+
+---
+
+## Incident — PR #138 left two Alembic heads (fixed by merge revision 92c67cab49fc)
+
+PR #138 merged Mexico m20 (`d3f8b2a6c1e9`) and South Africa (`447f57564983 → c15d5b87d6f5`, Venu) into `main`. Both grow from production's `c7d2e9a4f1b6`, so `main` had two heads. Git's auto-merge also kept **both** sides' pins in `test_alembic_metadata.py` and `test_deploy_migrate_script.py`.
+
+- **Deploy run 40628518029 failed at the test stage; the backend deploy was skipped**, and production stayed at `c7d2e9a4f1b6`.
+- **The frontend deployed anyway** (it is a separate workflow), so the new Super Admin Mexico screens called routes that were not yet live.
+
+**Fix** (`8635a7e`, merged as PR #139):
+- an empty merge revision `92c67cab49fc`, touching neither author's migration;
+- pins rewritten from the real merged chain (`pending_objects()`), including a one-line change in Venu's `test_south_africa_migrations.py`;
+- the manifest regenerated.
+
+**Proof:** on PostgreSQL 17, `alembic upgrade head` from `c7d2e9a4f1b6` succeeds and `check_schema_drift` passes. The full suite passed 7,899 (known local-only failures only). The GitHub-reported failures, including the Singapore snapshot fallout, pass (53/53).
+
+**Lesson** (recorded in memory): before a merge to `main`, compute the heads of the merge result.
+
+---
+
+## X8 — Super Admin configuration re-audit
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** **Do not merge until reviewed — branch protection does not enforce this (C17).** The fixes change a shared statutory write path (`service.py`, Mexico-only checks) and the governed-evidence rules.
+
+The full audit table (platform and organisation, every item: where configured, who, four-eyes, effective-dated, any ungoverned path) is in **`MEXICO_SUPER_ADMIN_CONFIG_AUDIT.md`**.
+
+**Fixed:**
+1. **A statutory value could change outside a governed path.** The generic slab and rate editors checked only the *target* pack, so a row of an Active Mexico pack could be moved into another country's editable pack and changed. `_existing_row_pack` now checks the row's current pack first. **The same hole exists for every other country**; it is reported, not changed.
+2. Mexico gate and decision evidence is governed: review needs an uploaded file, and a reviewed file is never replaced (previously a gate stayed SIGNED on a replaced file).
+3. No editor of a Mexico report-template version may approve it (MX joins HK).
+4. A Super Admin who added CFDI catalog entries may not approve that release.
+5. UI: "Reconcile after restore" on the run's CFDI stage (the UNKNOWN-state runbook step had no screen), and the Readiness text on evidence.
+
+**Decisions added:**
+- **D-26:** four-eyes on general availability.
+- **D-27:** four-eyes on retiring Active content.
+- **D-28:** organisation-side four-eyes and effective dating.
+
+**Reported, not changed:**
+- org payroll operators can create MX *policy* packs (no Mexico code reads them);
+- NULL-maker four-eyes (system rows);
+- the master-copy routes versus the UI;
+- pack status changes from the UI send no reason (shared screen).
+
+**Tests:** new `test_mexico_config_audit_x8.py` (7):
+- a row move is refused and both packs are untouched;
+- another country's editor is unchanged;
+- MX evidence: review without a file is refused, and replacement after review is refused (G1 still SIGNED);
+- an ordinary source is not governed;
+- the template any-editor rule;
+- catalog entry authors are refused.
+
+The W5-2 and HK remediation tests still pass (62/62 with the new file).
+
+- **Full suite** (5 sequential chunks, scratch SQLite): **7,906 passed**. The only failures are the known local-only ones (the three `/health` route-registry tests and the HK configuration docs test).
+- Frontend: ESLint is clean on the changed files, and `check:undefined` reports 602 files. The build passes.
+
+**Browser: 5/5 PASS** (`final-mile-evidence/RESULTS-X8.md`, harness `acceptance_x8.py` on the X4 scratch world):
+- the reconcile button is shown;
+- cancelling sends nothing;
+- confirming sends one POST;
+- the Readiness rule text appears;
+- no 5xx and no page errors.
+
+Screenshots inspected.
+
+**Production effect:**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Super Admin | Mexico rows can no longer be moved by the generic editors. Mexico evidence files are frozen once reviewed. Stricter template and catalog approval |
+| Organisation | One new button (dormant while Mexico is off) |
+| Other jurisdictions | None. Each change is a Mexico entry in a per-country list or a Mexico-only check |
+
+---
+
+## X9 — Close-out
+
+- **Full backend suite** (5 chunks, at the X8 state; X9 is documents only): **7,906 passed**. The only failures are the known local-only ones.
+- **Frontend:** ESLint is clean on the changed files; `check:undefined` reports 602 files; the build passes.
+- **Gate evidence drafts:** `release-gates/G1–G8/EVIDENCE_DRAFT.md` each gain a "Final mile — what the new tooling now produces for this gate" list.
+- **Gap register:** rows for X1–X8 added as each step closed.
+- **`MEXICO_FINAL_MILE_REPORT.md`:**
+  - session zero, now at production `92c67cab49fc`;
+  - every gap item with its next action and owner, and whether that action is in product or outside;
+  - the commits grouped by PR;
+  - the path to pilot;
+  - seven contradictions found.
+
+**Production effect:** none (documents only).

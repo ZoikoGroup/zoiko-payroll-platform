@@ -87,6 +87,7 @@ def _specs() -> dict:
         "D-24": {"keys": ["report MX-RUN-VARIANCE: high-value delta threshold (MXN)"], "kind": "AMOUNT"},
         "D-25": {"keys": ["parallel payroll (X4): materiality threshold per difference (MXN)"], "kind": "AMOUNT",
                  "gates": ["G8"]},
+        "D-28": {"keys": [], "gates": ["G5", "G7"]},                    # final mile X8: org-side four-eyes
         "C4": {"keys": ["mexico_cfdi_input.SDI_SOURCE"], "codes": ["MX_CFDI_INPUT_MISSING"]},
         "C5": {"keys": ["CFDI system concepts: INFONAVIT_CREDIT, VACATION_PAYOUT, ANNUAL_ADJUSTMENT_REFUND"]},
         "C12": {"keys": ["CFDI Receptor Sindicalizado field"]},

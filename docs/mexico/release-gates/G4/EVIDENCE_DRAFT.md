@@ -12,6 +12,11 @@
 - Super Admin read-only views (W5-1): Compliance → Mexico → Statutory rules, and each content tab, show every value with its source file, SHA-256, verification status and [PENDING G1]; readiness per gate (W5-3) shows which checklist items code confirms now. Browser evidence: `docs/mexico/completion-evidence/w5/` (39/39 PASS)
 - Full backend suite at the end of W5 (2026-10-27): 7,561 passed, 120 skipped, 2 xfailed; only the known local-only failures and one intermittent communications test (`MEXICO_COMPLETION_PROGRESS.md`, End of W5)
 
+**Final mile (2026-10-28) — what the new tooling now produces for this gate:**
+
+- Decision register: D-06, D-10 (CDMX ISN)
+- Sandbox: every fixture shows the CDMX ISN line from the Draft state pack
+
 ## 2. Checklist items a code check confirms (state is live in Readiness → Gate checklists)
 
 - [PRE-PILOT] For each state to be enabled: base, rate, exemptions and return rules transcribed from that state's saved code, in an Approved state pack — code check `isn_pack_approved`
