@@ -210,8 +210,16 @@ def test_pg_real_cli_path_and_schema_drift(pg_engine):
                         capture_output=True, text=True, timeout=120)
     assert up.returncode == 0, up.stderr[-2000:]
     assert set(NEW_TABLES) <= _tables(pg_engine)
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
+    (head,) = script.get_heads()
+    # The database is at the repository head (merge 92c67cab49fc joins South Africa's chain,
+    # which also grows from c7d2e9a4f1b6), and this revision is in its history.
+    assert REVISION in {rev.revision for rev in script.walk_revisions("base", head)}
     with pg_engine.connect() as c:
-        assert c.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == REVISION
+        assert c.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == head
         policies = c.execute(sa.text("SELECT count(*) FROM pg_policies WHERE tablename = :t"), {"t": TABLE}).scalar()
     assert policies == 0                                                      # platform table: no RLS policy
     drift = subprocess.run([sys.executable, "-m", "scripts.check_schema_drift"], cwd=BACKEND, env=env,
