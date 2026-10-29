@@ -2,6 +2,7 @@ import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 
 import ProtectedRoute from "./components/ProtectedRoute";
+import PageTitleUpdater from "./components/PageTitleUpdater";
 import PayrollShell from "./components/PayrollShell";
 import SuperAdminShell from "./components/SuperAdminShell";
 import LoginPage from "./pages/LoginPage";
@@ -109,8 +110,10 @@ function AccountSecurityRoute() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
+    <>
+      <PageTitleUpdater />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/trial-register" element={<TrialSignupPage />} />
       <Route path="/register/success" element={<RegistrationSuccessPage />} />
@@ -505,5 +508,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<LandingRedirect />} />
     </Routes>
+    </>
   );
 }

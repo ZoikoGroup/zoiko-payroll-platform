@@ -11497,6 +11497,65 @@ class PayrollZaEtiLedgerEntry(Base):
         return f"<PayrollZaEtiLedgerEntry emp={self.employee_id} {self.claim_month} eti={self.eti_amount} {self.status}>"
 
 
+class PayrollZaParallelImport(Base):
+    """One incumbent payroll's results for one committed ZA run (G6 parallel
+    cycle, ZP-ZA-ENG-001 §13). Only the column mapping, the file's SHA-256 and
+    counts are kept, never the file. ACCEPTED only by a second person.
+    Migration 67c8d7454716."""
+    __tablename__ = "payroll_za_parallel_imports"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False)
+    source_label     = Column(String(120), nullable=False)
+    file_sha256      = Column(String(64), nullable=False)
+    column_mapping   = Column(JSON, nullable=False)
+    row_count        = Column(Integer, nullable=False)
+    matched_count    = Column(Integer, nullable=False, default=0, server_default="0")
+    unmatched_count  = Column(Integer, nullable=False, default=0, server_default="0")
+    status           = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+    accepted_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+    created_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_za_parallel_import_status"),
+        Index("ix_za_parallel_import_org_run", "organization_id", "payroll_run_id"),
+    )
+
+
+class PayrollZaParallelDifference(Base):
+    """One non-zero per-employee, per-concept delta between Zoiko's committed ZA
+    snapshot and the incumbent. UNEXPLAINED -> EXPLAINED (reason) -> ACCEPTED
+    (someone other than the explainer). Never changes a payslip.
+    Migration 67c8d7454716."""
+    __tablename__ = "payroll_za_parallel_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    import_id        = Column(Integer, ForeignKey("payroll_za_parallel_imports.id", ondelete="CASCADE"), nullable=False,
+                              index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    concept          = Column(String(30), nullable=False)
+    zoiko_amount     = Column(Numeric(14, 2), nullable=False)
+    incumbent_amount = Column(Numeric(14, 2), nullable=False)
+    delta            = Column(Numeric(14, 2), nullable=False)
+    status           = Column(String(12), nullable=False, default="UNEXPLAINED", server_default="UNEXPLAINED")
+    reason           = Column(String(1000), nullable=True)
+    explained_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    explained_at     = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("concept IN ('gross', 'paye', 'uif_employee', 'uif_employer', 'sdl', "
+                           "'other_deductions', 'net')", name="ck_za_parallel_diff_concept"),
+        sa.CheckConstraint("status IN ('UNEXPLAINED', 'EXPLAINED', 'ACCEPTED')", name="ck_za_parallel_diff_status"),
+    )
+
+
 class PayrollZaSarsArtifact(Base):
     """One version of a SARS employer artefact — EMP201, EMP501 (interim /
     annual), IRP5, IT3(a) or a cancellation — built from committed payroll.

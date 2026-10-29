@@ -14184,6 +14184,144 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/south-africa/parallel-differences/{diff_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/parallel-differences/{diff_id}/explain",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "explain",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/parallel-imports",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/parallel-imports",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_za_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/south-africa/parallel-imports/{import_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/parallel-imports/{import_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/south-africa/parallel-imports/{import_id}/withdraw",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_za_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/south-africa/payslips/{payslip_id}/corrections",
    "data_class": "worker",
    "action": "create",
@@ -21543,6 +21681,38 @@
    "data_class": "platform",
    "action": "create",
    "resource": "upload",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/south-africa/readiness",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "readiness",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/south-africa/readiness/gate-checklists",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "gate-checklists",
    "principals": [
     "super_admin"
    ],

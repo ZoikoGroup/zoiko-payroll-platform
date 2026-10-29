@@ -32,6 +32,11 @@ P8_TABLES = ("payroll_za_sars_payments", "payroll_za_reconciliation_variances")
 # Phase 9 (3880223bfaa0): approved result overrides (WORKER "org") + nullable columns.
 P9_REVISION = "3880223bfaa0"
 P9_TABLES = ("payroll_za_payroll_overrides",)
+# Phase 10 (67c8d7454716): G6 parallel cycles - imports TENANT, differences WORKER "org".
+P10_REVISION = "67c8d7454716"
+P10_TENANT = ("payroll_za_parallel_imports",)
+P10_WORKER = ("payroll_za_parallel_differences",)
+P10_TABLES = P10_TENANT + P10_WORKER
 P9_COLUMNS = {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
               "payroll_za_employer_registrations": {"za_journal_accounts"}}
 
@@ -99,7 +104,7 @@ def test_classify_agrees_with_the_policies_the_revision_applies(classified):
 def test_every_south_africa_table_has_a_policy_source(classified):
     _rls, worker, tenant = classified
     za = {t for t in set(worker) | tenant if t.startswith("payroll_za_")}
-    assert za == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES)
+    assert za == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
 
 
 def test_revision_emits_the_derived_policy(classified):
@@ -197,7 +202,7 @@ def test_deploy_drift_filter_explains_every_za_object():
         os.chdir(here)
     # Mexico m20 (d3f8b2a6c1e9) also grows from c7d2e9a4f1b6 (joined by merge 92c67cab49fc).
     mexico_m20 = {"payroll_mx_decisions", "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"}
-    assert tables == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | mexico_m20
+    assert tables == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES) | mexico_m20
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
@@ -279,3 +284,39 @@ def test_p9_revision_is_the_single_child_of_the_za_p8_mexico_m20_merge():
     module = _load(P9_REVISION)
     assert (module.revision, module.down_revision) == (P9_REVISION, "92c67cab49fc")
     assert tuple(_load("92c67cab49fc").down_revision) == (P8_REVISION, "d3f8b2a6c1e9")
+
+
+# ── Phase 10: 67c8d7454716 (G6 parallel payroll cycles) ─────────────────────
+def test_p10_tables_get_the_policy_classify_derives(classified):
+    rls, worker, tenant = classified
+    for table in P10_TENANT:
+        assert table in tenant and table not in worker, table
+    for table in P10_WORKER:
+        assert worker.get(table) == "org" and table not in tenant, table
+    bind = _CaptureBind()
+    _load(P10_REVISION)._rls_for_new_tables(bind)
+    want = {t: " ".join(rls._TENANT_PREDICATE.split()) for t in P10_TENANT}
+    want.update({t: " ".join(rls._worker_predicate("org").split()) for t in P10_WORKER})
+    assert _policies(bind.sql) == want
+    for table in P10_TABLES:
+        assert f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY' in bind.sql
+
+
+def test_p10_matches_the_models_replays_and_downgrades(model_engine):
+    engine, metadata = model_engine
+    with engine.begin() as conn:
+        for table in reversed(P10_TABLES):
+            conn.execute(sa.text(f'DROP TABLE "{table}"'))
+    _run(engine, "upgrade", P10_REVISION)
+    for table in P10_TABLES:
+        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns}, table
+    before = {t: _cols(engine, t) for t in sa.inspect(engine).get_table_names()}
+    _run(engine, "upgrade", P10_REVISION)                                 # replay: no-op
+    assert {t: _cols(engine, t) for t in sa.inspect(engine).get_table_names()} == before
+    _run(engine, "downgrade", P10_REVISION)
+    assert set(before) - set(sa.inspect(engine).get_table_names()) == set(P10_TABLES)
+
+
+def test_p10_revision_is_the_single_child_of_phase_9():
+    module = _load(P10_REVISION)
+    assert (module.revision, module.down_revision) == (P10_REVISION, P9_REVISION)

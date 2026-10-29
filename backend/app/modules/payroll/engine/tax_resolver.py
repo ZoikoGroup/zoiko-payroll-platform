@@ -315,7 +315,7 @@ def find_active_tax_pack(
     return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
 
 
-_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL", "ZA")
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL", "ZA", "JP")
 
 
 def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str],
@@ -346,6 +346,12 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     za_refusal = entering_south_africa_refusal(old_country, new_country)
     if za_refusal:
         return za_refusal
+    # Japan (ZP-JP-ENG-001 Phase 1): dormant until G0-G8 are signed.
+    from app.modules.payroll.japan_dormancy import entering_japan_refusal
+
+    jp_refusal = entering_japan_refusal(old_country, new_country)
+    if jp_refusal:
+        return jp_refusal
 
     new_code = get_jurisdiction_code(new_country)
     if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):

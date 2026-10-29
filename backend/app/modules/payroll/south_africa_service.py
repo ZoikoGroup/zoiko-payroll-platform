@@ -809,16 +809,12 @@ def _za_before_run_transition(db: Session, run, next_status, actor_id) -> None:
 
 def transition_za_service_registry(db: Session, target: str, reason: str,
                                    actor_id: Optional[int] = None, as_of: Optional[date] = None):
-    from app.modules.payroll import service
+    from app.modules.payroll import service, south_africa_readiness
 
     def readiness():
-        requirements = [{
-            "key": "za_activation_readiness",
-            "label": "South Africa activation readiness",
-            "detail": "not met - South Africa remains PLANNED until release gates G1-G8 are evidenced",
-            "met": False,
-        }]
-        return requirements, {r["key"]: r["detail"] for r in requirements}
+        unmet = south_africa_readiness.ga_preconditions(db)
+        unmet_list = [u for u in unmet if not u.get("met")]
+        return unmet_list, {u["key"]: u["detail"] for u in unmet_list}
 
     return service.transition_service_registry(
         db, ZA, target, reason, actor_id, label="South Africa", readiness=readiness,
@@ -843,6 +839,10 @@ ZA_DECISIONS = {
     "D-1": ("Retention period per data category", True),
     "D-2": ("Deletion vs anonymisation at end of retention", True),
     "D-3": ("South Africa payroll-run approval four-eyes", True),
+    "D-4": ("Parallel-cycle materiality threshold (rand per employee per concept)", True),
+    "D-5": ("POPIA posture and data location (hosting region, cross-border transfer basis)", True),
+    "D-6": ("Values or 'not applicable' for the deliberately empty rows: BCEA overtime / Sunday / public-holiday multipliers, damage-deduction limit, four-eyes variable-pay % and bank-change window", True),
+    "D-7": ("ETI treatment: EMP201 offset policy (za_eti_offset_policy) and accounting (incentive income vs reduction of PAYE payable)", True),
 }
 
 
@@ -969,6 +969,7 @@ def _za_payslip_hold_view(item) -> Optional[dict]:
 
 
 def statutory_summary(db: Session) -> dict:
+    from app.modules.payroll import south_africa_readiness
     from app.modules.payroll.models import (JurisdictionPack, PayrollZaEtiLedgerEntry,
                                             PayrollZaEmployerRegistration, PayrollZaTaxDirective)
 
@@ -982,6 +983,8 @@ def statutory_summary(db: Session) -> dict:
                   .filter(PayrollZaTaxDirective.status == "APPROVED").count())
     eti_entries = (db.query(PayrollZaEtiLedgerEntry)
                    .filter(PayrollZaEtiLedgerEntry.status.in_(ETI_LEDGER_STATUSES)).count())
+    gates = south_africa_readiness.gate_states(db)
+    signed_gates = sum(1 for g in gates if g.get("state") == "SIGNED")
     return {
         "jurisdiction": ZA, "spec": SPEC, "available": False,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
@@ -991,7 +994,15 @@ def statutory_summary(db: Session) -> dict:
         "approvedDirectives": directives,
         "liveEtiEntries": eti_entries,
         "decisions": owner_decisions(db),
-        "note": "South Africa remains PLANNED; activation gates G1-G8 are not yet evidenced.",
+        "gates": gates,
+        "signedGates": signed_gates,
+        "gateChecklists": south_africa_readiness.gate_checklists(db),
+        "gaPreconditions": south_africa_readiness.ga_preconditions(db),
+        "codeChecks": south_africa_readiness.code_check_rows(db),
+        "noGo": list(south_africa_readiness.NO_GO),
+        "openPoints": south_africa_readiness.open_points(),
+        "documents": {"releaseGates": "docs/south-africa/release-gates/README.md"},
+        "note": f"South Africa remains PLANNED; activation gates G0–G7 are not yet evidenced ({signed_gates}/8 signed).",
     }
 
 

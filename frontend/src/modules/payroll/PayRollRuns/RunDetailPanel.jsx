@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronDown, Loader2, RotateCcw, ListTree } from "lucide-react";
+import { X, ChevronDown, Loader2, RotateCcw, ListTree, Sparkles } from "lucide-react";
 import { getRunById, getRunItems, getRunLeaveSummary, recalculateEmployeePayslip } from "../../../service/payrollService";
 import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
@@ -401,6 +401,12 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
   const [items, setItems] = useState([]);
   const [leaveSummary, setLeaveSummary] = useState({});
   const [loading, setLoading] = useState(true);
+  const [showAssist, setShowAssist] = useState(false);
+
+  const totalGross = detail?.gross ?? detail?.totalGross ?? run?.gross ?? items.reduce((s, i) => s + (Number(i.salary) || 0), 0);
+  const totalDeductions = detail?.deductions ?? detail?.totalDeductions ?? run?.deductions ?? items.reduce((s, i) => s + (Number(i.totalDeductions) || 0), 0);
+  const totalNet = detail?.net ?? detail?.totalNet ?? run?.net ?? items.reduce((s, i) => s + (Number(i.netPay) || 0), 0);
+  const totalEmployees = detail?.employees ?? run?.employees ?? items.length;
 
   const load = useCallback(async () => {
     if (!run?.id) return;
@@ -426,25 +432,46 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
   if (!run) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-background/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/60" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-5xl flex-col bg-surface border-l border-border shadow-[0_24px_48px_rgba(0,0,0,0.15)]"
+        className="flex h-full max-h-[96vh] w-full max-w-[96vw] xl:max-w-7xl 2xl:max-w-[1560px] flex-col rounded-2xl bg-surface border border-border shadow-[0_24px_60px_rgba(0,0,0,0.25)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
-          <div>
-            <h2 className="text-[15px] font-bold text-foreground">
-              Payroll Run &middot; {detail?.period || run.period}
-            </h2>
-            <p className="text-[12px] text-foreground-muted mt-0.5">Run details and employee-level breakdown</p>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-surface">
+          <div className="flex items-center gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-foreground">
+                  Payroll Run &middot; {detail?.period || run.period}
+                </h2>
+                <StatusBadge status={detail?.status || run.status} />
+              </div>
+              <p className="text-xs text-foreground-muted mt-0.5">Run details and employee-level breakdown</p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close panel"
-            className="border border-border bg-surface-muted rounded-[12px] p-2 text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
-          >
-            <X size={15} />
-          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setShowAssist((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-semibold transition-all duration-200 ${
+                showAssist
+                  ? "border-primary bg-primary text-white shadow-sm"
+                  : "border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary"
+              }`}
+              aria-expanded={showAssist}
+              aria-label={showAssist ? "Close AI Assist panel" : "Ask AI Assist about this run"}
+            >
+              <Sparkles size={14} />
+              <span>{showAssist ? "Close Assist" : "Ask Assist"}</span>
+            </button>
+            <button
+              onClick={onClose}
+              aria-label="Close panel"
+              className="border border-border bg-surface-muted rounded-[12px] p-2 text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -466,9 +493,28 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </div>
               )}
 
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Employees</p>
+                  <p className="mt-1 text-2xl font-extrabold text-foreground">{totalEmployees}</p>
+                </div>
+                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Gross Earnings</p>
+                  <p className="mt-1 text-2xl font-extrabold text-foreground">{fmtCurrencyLocal(totalGross, fmtCurrency)}</p>
+                </div>
+                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Deductions</p>
+                  <p className="mt-1 text-2xl font-extrabold text-error">{fmtCurrencyLocal(totalDeductions, fmtCurrency)}</p>
+                </div>
+                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Net Salary</p>
+                  <p className="mt-1 text-2xl font-extrabold text-primary">{fmtCurrencyLocal(totalNet, fmtCurrency)}</p>
+                </div>
+              </div>
+
               <div className="bg-surface-muted rounded-[18px] p-5 mb-5">
                 <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-4">Run Information</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
                   <InfoField label="Payroll Period">{detail?.period || run.period}</InfoField>
                   <InfoField label="Payroll Status"><StatusBadge status={detail?.status || run.status} /></InfoField>
                   <InfoField label="Approval Status">
@@ -484,13 +530,29 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </div>
               </div>
 
-              <div className="mb-5">
-                <AssistInlinePanel
-                  contextObject={{ type: "PAYROLL_RUN", id: run.id }}
-                  title="Ask Assist about this run"
-                  subtitle={`Ask about readiness, exceptions, or status for ${detail?.period || run.period} — answered using only this run's own data.`}
-                />
-              </div>
+              {showAssist && (
+                <div className="mb-6 rounded-[18px] border border-primary/20 bg-surface shadow-md overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-primary/5 border-b border-primary/10">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                      <Sparkles size={14} />
+                      <span>Assist AI &middot; Run Insights</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAssist(false)}
+                      className="inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground px-2 py-1 rounded-lg hover:bg-surface-muted transition-colors"
+                    >
+                      <X size={14} />
+                      <span>Close</span>
+                    </button>
+                  </div>
+                  <AssistInlinePanel
+                    contextObject={{ type: "PAYROLL_RUN", id: run.id }}
+                    title="Ask Assist about this run"
+                    subtitle={`Ask about readiness, exceptions, or status for ${detail?.period || run.period} — answered using only this run's own data.`}
+                  />
+                </div>
+              )}
 
               {items.some((i) => (i.country || i.countryCode) === "SG") && <SGRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "HK") && <HKRunPreflightPanel runId={run.id} />}
@@ -520,7 +582,9 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                         {BREAKDOWN_COLUMNS.map((col) => (
                           <th
                             key={col.key}
-                            className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap"
+                            className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap ${
+                              ["gross", "deductions", "net"].includes(col.key) ? "text-right" : "text-left"
+                            }`}
                           >
                             {col.label}
                           </th>

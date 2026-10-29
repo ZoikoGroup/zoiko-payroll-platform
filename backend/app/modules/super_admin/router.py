@@ -4987,3 +4987,28 @@ def south_africa_compliance_summary(current_user=Depends(get_current_super_admin
     from app.modules.payroll import south_africa_service
 
     return south_africa_service.statutory_summary(db)
+
+
+@router.get("/compliance/south-africa/readiness",
+            summary="South Africa release gates G0-G7 (read-only)")
+def south_africa_compliance_readiness(current_user=Depends(get_current_super_admin),
+                                      db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_readiness, south_africa_service
+
+    return {
+        "gates": south_africa_readiness.gate_states(db),
+        "codeChecks": south_africa_readiness.code_check_rows(db),
+        "gaPreconditions": south_africa_readiness.ga_preconditions(db),
+        "decisions": south_africa_service.owner_decisions(db),
+        "noGo": list(south_africa_readiness.NO_GO),
+        "openPoints": south_africa_readiness.open_points(),
+    }
+
+
+@router.get("/compliance/south-africa/readiness/gate-checklists",
+            summary="South Africa gate checklists (read-only)")
+def south_africa_compliance_gate_checklists(current_user=Depends(get_current_super_admin),
+                                            db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_readiness
+
+    return south_africa_readiness.gate_checklists(db)

@@ -2936,3 +2936,14 @@ export const recordZaDeductionOrder = (employeeId, payload) =>
   api.post(`${ZA}/employees/${employeeId}/deduction-orders`, payload);
 export const createZaCorrection = (payslipId, payload) => api.post(`${ZA}/payslips/${payslipId}/corrections`, payload);
 export const getZaRunJournal = (runId) => api.get(`${ZA}/runs/${runId}/journal`);
+// Phase 10 — G6 parallel payroll cycles against an incumbent payroll. Four-eyes
+// (importer != acceptor, explainer != acceptor) is enforced server-side.
+export const listZaParallelImports = async (runId) =>
+  zaList(await api.get(`${ZA}/parallel-imports`, { params: runId ? { run_id: runId } : {} }));
+export const importZaParallel = (payload) => api.post(`${ZA}/parallel-imports`, payload);
+export const getZaParallelImport = (importId) => api.get(`${ZA}/parallel-imports/${importId}`);
+export const acceptZaParallelImport = (importId) => api.post(`${ZA}/parallel-imports/${importId}/accept`, {});
+export const withdrawZaParallelImport = (importId) => api.post(`${ZA}/parallel-imports/${importId}/withdraw`, {});
+export const explainZaParallelDifference = (diffId, reason) =>
+  api.post(`${ZA}/parallel-differences/${diffId}/explain`, { reason });
+export const acceptZaParallelDifference = (diffId) => api.post(`${ZA}/parallel-differences/${diffId}/accept`, {});
