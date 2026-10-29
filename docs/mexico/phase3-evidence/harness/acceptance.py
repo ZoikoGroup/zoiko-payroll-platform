@@ -21,7 +21,7 @@ CER = sys.argv[1]
 PASSWORD = "BrowserCheck!2026"      # throwaway, scratch DB only
 results, errors, responses = [], [], []
 GCP_REF = "gcp-sm://projects/zoiko-browser-check/secrets/mx-csd-key/versions/1"
-PEM_KEY = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgSYNTHETICKEY\n-----END PRIVATE KEY-----"  # privacy-scan: allow (synthetic throwaway harness key)
+PEM_KEY = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgSYNTHETICKEY\n-----END PRIVATE KEY-----"  # privacy-scan: allow — SYNTHETIC; the harness proves it is refused
 
 
 def token(email):

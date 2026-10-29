@@ -81,7 +81,7 @@ def test_unknown_fields_are_refused_and_never_echoed_on_the_credential_route(db)
         url = f"{ORG_BASE}/employers/{emp['id']}/credentials"
         for body in ({"kind": "PAC", "secretRef": GCP_REF, "password": "should-never-be-accepted"},
                      {"kind": "PAC", "secretRef": {"privateKey": "should-never-be-accepted"}},
-                     {"kind": "PAC", "secretRef": "-----BEGIN PRIVATE KEY-----should-never-be-accepted"}):  # privacy-scan: allow (refused secret fixture)
+                     {"kind": "PAC", "secretRef": "-----BEGIN PRIVATE KEY-----should-never-be-accepted"}):  # privacy-scan: allow — SYNTHETIC; must be refused
             r = c.post(url, json=body)
             assert r.status_code == 400 and "should-never-be-accepted" not in r.text, r.text
         assert "password: extra_forbidden" in c.post(url, json={"kind": "PAC", "secretRef": GCP_REF,

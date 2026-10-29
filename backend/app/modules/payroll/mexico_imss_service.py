@@ -14,8 +14,9 @@ transcribed):
   MODIFICACION  EVERY committed SBC change (sbc_total differs from the
                 previous committed row under the same registration); the
                 operator may withdraw one only with a recorded reason
-  BAJA          only a recorded end of employment (the employee's
-                date_of_leaving) for an employee with a live ALTA
+  BAJA          only an APPROVED termination (Phase 9c, D6 — the employee's
+                date_of_leaving alone no longer generates one) for an employee
+                with a live ALTA; approving the termination generates it
 
 MX-061: the NSS is read only to build a worklist on request (D12) — never
 stored by this module, never logged; every view masks it; each export is
@@ -37,7 +38,7 @@ from app.modules.payroll import mexico_authority_lifecycle as L
 from app.modules.payroll import mexico_due_dates as due
 from app.modules.payroll import mexico_filing_service as F
 from app.modules.payroll.engine.countries import mexico_content as _content
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 WORKLIST_BANNER = "ZOIKO WORKLIST - NOT AN IMSS / IDSE FILE - key these movements into IDSE, then record the outcome in Zoiko"
 _LIVE_BLOCKERS = ("VOIDED",)        # a voided movement (run reset) never blocks regeneration
@@ -120,20 +121,54 @@ def generate_movements(db: Session, org_id: int, actor_id: Optional[int] = None)
                         db, org_id, existing, source_kind="SBC_CHANGE", source_key=key, movement_type="MODIFICACION",
                         reg_id=reg.id, employee_id=employee_id, run_id=row.payroll_run_id,
                         event_date=row.effective_from, sbc=row.sbc_total, actor_id=actor_id))
-        if emp is not None and emp.date_of_leaving is not None:
-            last = hist[-1] if hist else None
-            for reg_id in prev_by_reg:
-                alta_live = any(k.startswith(f"ALTA:{employee_id}:{reg_id}:") and
-                                any(mv.status not in ("VOIDED", "REJECTED", "WITHDRAWN") for mv in mvs)
-                                for k, mvs in existing.items())
-                key = f"BAJA:{employee_id}:{reg_id}:{emp.date_of_leaving.isoformat()}"
-                if alta_live and not _blocked(existing, key):
-                    created.append(_new_movement(
-                        db, org_id, existing, source_kind="END_OF_EMPLOYMENT", source_key=key, movement_type="BAJA",
-                        reg_id=reg_id, employee_id=employee_id, run_id=None, event_date=emp.date_of_leaving,
-                        sbc=last.sbc_total if last is not None else None, actor_id=actor_id))
+        term = _settling_termination(db, employee_id)
+        if term is not None:
+            created += _bajas(db, org_id, existing, employee_id, hist, prev_by_reg, term, actor_id)
     db.commit()
     return {"created": [movement_view(db, mv) for mv in created], "skipped": _dedupe(skipped)}
+
+
+def _settling_termination(db: Session, employee_id: int):
+    from app.modules.payroll import mexico_termination_service
+
+    return mexico_termination_service.settling(db, employee_id)
+
+
+def _bajas(db: Session, org_id: int, existing: dict, employee_id: int, hist: list, regs, term, actor_id) -> list:
+    """One BAJA per registration with a live ALTA, dated the termination date."""
+    last = hist[-1] if hist else None
+    out = []
+    for reg_id in regs:
+        alta_live = any(k.startswith(f"ALTA:{employee_id}:{reg_id}:") and
+                        any(mv.status not in ("VOIDED", "REJECTED", "WITHDRAWN") for mv in mvs)
+                        for k, mvs in existing.items())
+        key = f"BAJA:{employee_id}:{reg_id}:{term.termination_date.isoformat()}"
+        if alta_live and not _blocked(existing, key):
+            out.append(_new_movement(
+                db, org_id, existing, source_kind="TERMINATION", source_key=key, movement_type="BAJA",
+                reg_id=reg_id, employee_id=employee_id, run_id=None, event_date=term.termination_date,
+                sbc=last.sbc_total if last is not None else None, actor_id=actor_id))
+    return out
+
+
+def baja_for_termination(db: Session, org_id: int, term, actor_id) -> dict:
+    """Phase 9c: the BAJA of one approved termination, generated at approval
+    (no commit — the caller's transaction). Skipped, with the reason, when the
+    employee has no live ALTA (never committed in a run: nothing to deregister)."""
+    m = L.models()
+    H = m.PayrollMxSbcHistory
+    hist = (db.query(H).filter(H.organization_id == org_id, H.employee_id == term.employee_id)
+            .order_by(H.effective_from, H.id).all())
+    regs = []
+    for row in hist:
+        reg = F.registration_for(db, term.employee_id, row.effective_from)
+        if reg is not None and reg.id not in regs:
+            regs.append(reg.id)
+    existing = _existing(db, org_id)
+    created = _bajas(db, org_id, existing, term.employee_id, hist, regs, term, actor_id)
+    skipped = [] if created else [{"employeeId": term.employee_id, "code": "MX_NO_LIVE_ALTA",
+                                   "message": "no live ALTA for this employee — no BAJA is needed"}]
+    return {"created": created, "skipped": skipped}
 
 
 def _dedupe(rows: list) -> list:
@@ -150,11 +185,19 @@ def _movement(db: Session, org_id: int, movement_id: int):
     return L.load(db, "MOVEMENT", org_id, movement_id)
 
 
+def _imss_pilot_refusal(db: Session, org_id: int) -> None:
+    """Phase 10e: a pilot organisation never files with IMSS (MX_PILOT_NO_FILINGS)."""
+    from app.modules.payroll import mexico_pilot_service
+
+    mexico_pilot_service.refuse_filings(db, org_id)
+
+
 def export_worklist(db: Session, org_id: int, actor_id, movement_ids: Optional[list] = None) -> dict:
     """The operator's worklist for keying into IDSE (D1 / D12): built on
     request, returned once, never stored; marks the movements EXPORTED and
     freezes their payload (a retry re-exports exactly the same facts)."""
     F.guard(db, org_id)
+    _imss_pilot_refusal(db, org_id)
     m = L.models()
     M = m.PayrollMxImssMovement
     q = db.query(M).filter(M.organization_id == org_id, M.status == "PENDING")
@@ -175,7 +218,7 @@ def export_worklist(db: Session, org_id: int, actor_id, movement_ids: Optional[l
                      emp.name if emp else "", str(nss).strip(), mv.event_date.isoformat(),
                      "" if mv.sbc is None else str(mv.sbc), mv.due_date.isoformat() if mv.due_date else due.UNSOURCED])
     if missing:
-        raise MXBlock("MX_NSS_MISSING", f"employee(s) {', '.join(str(e) for e in sorted(set(missing)))} have no NSS "
+        raise MXRefuse("MX_NSS_MISSING", f"employee(s) {', '.join(str(e) for e in sorted(set(missing)))} have no NSS "
                                         "on their profile — nothing was exported", org_id)
     batch = f"MXW-{org_id}-{L.now().strftime('%Y%m%d%H%M%S')}"
     for mv in moves:
@@ -201,6 +244,7 @@ def export_worklist(db: Session, org_id: int, actor_id, movement_ids: Optional[l
 def record_outcome(db: Session, org_id: int, movement_id: int, outcome: str, actor_id, reference: Optional[str] = None,
                    evidence_ref: Optional[str] = None, reason: Optional[str] = None) -> dict:
     F.guard(db, org_id)
+    _imss_pilot_refusal(db, org_id)
     mv = _movement(db, org_id, movement_id)
     outcome = (outcome or "").upper()
     if outcome == "FILED":
@@ -235,6 +279,13 @@ def withdraw(db: Session, org_id: int, movement_id: int, reason: str, actor_id) 
     before it ever left Zoiko, and only with a recorded reason."""
     F.guard(db, org_id)
     mv = _movement(db, org_id, movement_id)
+    withdraw_movement(db, org_id, mv, reason, actor_id)
+    db.commit()
+    return movement_view(db, mv, detail=True)
+
+
+def withdraw_movement(db: Session, org_id: int, mv, reason: str, actor_id) -> None:
+    """The withdrawal itself, in the caller's transaction (no commit)."""
     if mv.status != "PENDING" or mv.payload_hash is not None:
         raise BadRequestException("Only a PENDING movement that was never exported can be withdrawn")
     text = (reason or "").strip()
@@ -242,8 +293,6 @@ def withdraw(db: Session, org_id: int, movement_id: int, reason: str, actor_id) 
         raise BadRequestException("Withdrawing a movement needs a reason")
     mv.withdrawn_reason = text[:300]
     L.transition(db, org_id, "MOVEMENT", mv, "WITHDRAWN", "WITHDRAWN", actor_id, {"reason": mv.withdrawn_reason})
-    db.commit()
-    return movement_view(db, mv, detail=True)
 
 
 def regenerate(db: Session, org_id: int, movement_id: int, actor_id) -> dict:

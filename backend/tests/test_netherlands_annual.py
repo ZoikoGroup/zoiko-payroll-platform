@@ -14,6 +14,7 @@ from app.modules.payroll.models import (
     PayrollNlAnnualStatement,
     PayrollRun,
     PayrollStatus,
+    PayslipItem,
 )
 from app.modules.payroll.engine.countries.netherlands_content import (
     NL_CAR_ADDITION_BANDS, NL_MIN_WAGE_RATES, NL_PERIOD_MAXIMA, NL_SCALAR_CONTENT, NL_WKR_BANDS,
@@ -253,3 +254,31 @@ class TestAnnualStatement:
         stmt = ann.generate_annual_statement(db, nlx.org.id, nlx.emp.id, 2026, actor_id=801)
         # Should only include January (committed), not February (draft)
         assert stmt.fiscal_wage > D("0")
+
+class TestAnnualStatementNlR1:
+    """NL-R1 regressions: fiscal wage is the payslip ledger only (no VCR
+    double-count) and correction deltas are part of the annual figure."""
+
+    def test_fiscal_wage_is_the_ledger_sum_not_doubled(self, db, nlx):
+        runs = [_run_and_approve(db, nlx, m) for m in (1, 2)]
+        stmt = ann.generate_annual_statement(db, nlx.org.id, nlx.emp.id, 2026, actor_id=801)
+        gross = sum(D(str((i.nl_calculation_snapshot or {}).get("totals", {}).get("gross", "0")))
+                    for r in runs for i in db.query(PayslipItem).filter_by(payroll_run_id=r.id).all())
+        assert gross > 0 and stmt.fiscal_wage == gross
+
+    def test_correction_deltas_are_included(self, db, nlx):
+        run = _run_and_approve(db, nlx, 1)
+        original = db.query(PayslipItem).filter_by(payroll_run_id=run.id).one()
+        before = ann._aggregate_payslip_totals(db, nlx.org.id, nlx.emp.id, 2026)
+        corr_run = PayrollRun(organization_id=nlx.org.id, period_label="NL correction 1", period_start=run.period_start,
+                              period_end=run.period_end, pay_date=run.pay_date, status="Paid")
+        db.add(corr_run)
+        db.flush()
+        db.add(PayslipItem(payroll_run_id=corr_run.id, employee_id=nlx.emp.id, organization_id=nlx.org.id,
+                           employee_name="x", country_code="NL", gross_pay=D("100"), net_pay=D("70"),
+                           nl_calculation_snapshot={"correction": {"originalPayslipId": original.id, "sequence": 1},
+                                                    "totals": {"gross": "100", "wageTax": "30"}}))
+        db.flush()
+        after = ann._aggregate_payslip_totals(db, nlx.org.id, nlx.emp.id, 2026)
+        assert after["fiscal_wage"] == before["fiscal_wage"] + D("100")
+        assert after["wage_tax_withheld"] == before["wage_tax_withheld"] + D("30")

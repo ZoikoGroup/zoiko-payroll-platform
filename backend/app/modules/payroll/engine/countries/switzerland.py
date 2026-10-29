@@ -1166,7 +1166,10 @@ def calculate(ctx: PayrollContext) -> dict:
         elif comp in (CH_AHV, CH_IV, CH_EO):
             base = bases.get(comp, ZERO)
             after_w = before_w + base
-            after_wh = before_wh + (locals().get(f"{comp.lower()}_ee", ZERO) + locals().get(f"{comp.lower()}_er", ZERO))
+            # Explicit map (CH-E2): the old locals() lookup built "ch_ahv_ee",
+            # which never exists, so the withheld total never grew.
+            withheld = {CH_AHV: ahv_ee + ahv_er, CH_IV: iv_ee + iv_er, CH_EO: eo_ee + eo_er}[comp]
+            after_wh = before_wh + withheld
         else:
             after_w = before_w
             after_wh = before_wh

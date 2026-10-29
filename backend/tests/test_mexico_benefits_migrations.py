@@ -241,24 +241,8 @@ def test_pg_a_writer_on_payslip_items_makes_it_fail_fast(pg_engine):
     assert set(NEW_TABLES) <= _tables(eng)
 
 
-@pg
-def test_pg_real_cli_path_and_schema_drift(pg_engine):
-    env = {**os.environ, "PAYROLL_DATABASE_URL": PG_URL, "DATABASE_URL": PG_URL, "PYTHONIOENCODING": "utf-8",
-           "PAYROLL_DB_SSL_MODE": "disable"}
-    up = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=BACKEND, env=env,
-                        capture_output=True, text=True, timeout=120)
-    assert up.returncode == 0, up.stderr[-2000:]
-    cur = subprocess.run([sys.executable, "-m", "alembic", "current"], cwd=BACKEND, env=env, capture_output=True,
-                         text=True, timeout=120)
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    (head,) = script.get_heads()
-    # The database is at the repository head, and this revision is in its history
-    # (a later phase's migration may sit above it).
-    assert head in cur.stdout, cur.stdout + cur.stderr[-500:]
-    assert REVISION in {rev.revision for rev in script.walk_revisions("base", head)}
-    drift = subprocess.run([sys.executable, "-m", "scripts.check_schema_drift"], cwd=BACKEND, env=env,
-                           capture_output=True, text=True, timeout=120)
-    assert drift.returncode == 0, drift.stdout[-2000:] + drift.stderr[-2000:]
+# The real CLI path for this revision is now production's: from Rugvedh's ZP-PRIV
+# head e1a3c5e7f9b2 through a6d2f9c4b8e1 and the merge c3e5a7b9d1f4, with schema
+# drift checked — tests/test_privacy_mexico_merge_migration.py. (Stamping
+# f5c1a8d3e9b2 on a create_all database no longer works: the ZP-PRIV revisions
+# after it create their tables unguarded.)

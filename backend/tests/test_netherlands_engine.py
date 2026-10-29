@@ -42,6 +42,7 @@ RATES = {
     "nl_expat_salary_threshold_young_master": _rate(amount="36497.00"),
     "nl_expat_max_facility_pct": _rate(employee="30.00"),
     "nl_expat_allowance_cap": _rate(amount="78600.00"), "nl_wnt_cap": _rate(amount="262000.00"),
+    "nl_aow_age_years": _rate(amount="67"),
 }
 
 

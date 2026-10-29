@@ -47,7 +47,11 @@ def test_modificacion_for_a_committed_sbc_change_only(db, monkeypatch):
     assert mod.payroll_run_id == run3.id and mod.event_date == date(2026, 7, 1) and mod.sbc > moves[0].sbc
 
 
-def test_baja_only_from_a_recorded_end_of_employment(db, monkeypatch):
+def test_baja_only_from_an_approved_termination(db, monkeypatch):
+    """Phase 9c D6: a date of leaving alone generates nothing; an APPROVED
+    termination is the only BAJA source (a DRAFT one is not)."""
+    from app.modules.payroll.models import PayrollMxTermination
+
     s = ah.svc()
     w = ah.committed_world(db, monkeypatch)
     s.I.generate_movements(db, w.org.id, w.users[0].id)
@@ -55,8 +59,19 @@ def test_baja_only_from_a_recorded_end_of_employment(db, monkeypatch):
     w.employee.date_of_leaving = date(2026, 6, 20)
     db.commit()
     s.I.generate_movements(db, w.org.id, w.users[0].id)
+    assert [m.movement_type for m in ah.movements(db, w)] == ["ALTA"]
+    term = PayrollMxTermination(organization_id=w.org.id, employee_id=w.employee.id, termination_date=date(2026, 6, 20),
+                                reason_code="SYNTHETIC", evidence_ref="letter", status="DRAFT")
+    db.add(term)
+    db.commit()
+    s.I.generate_movements(db, w.org.id, w.users[0].id)
+    assert [m.movement_type for m in ah.movements(db, w)] == ["ALTA"]
+    term.status = "APPROVED"
+    db.commit()
+    s.I.generate_movements(db, w.org.id, w.users[0].id)
     baja = ah.movements(db, w)[-1]
     assert (baja.movement_type, baja.event_date, baja.payroll_run_id) == ("BAJA", date(2026, 6, 20), None)
+    assert baja.source_kind == "TERMINATION"
     assert s.I.generate_movements(db, w.org.id, w.users[0].id)["created"] == []
 
 
@@ -78,7 +93,10 @@ def test_movement_due_dates_only_from_the_transcribed_rule_and_holidays(db, monk
         raise AssertionError("the weekend-only shared helper must never date a Mexican movement")
 
     monkeypatch.setattr(service, "_add_business_days", _never)
-    assert c.MX_IMSS_MOVEMENT_DEADLINE is None and c.MX_OFFICIAL_HOLIDAYS == {}
+    # W1-5 transcribed the real deadline (LSS Art. 15 I) but no holiday list (D-16): still no due date
+    assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5 and c.MX_OFFICIAL_HOLIDAYS == {}
+    assert due.movement_due(date(2026, 6, 15)) == (None, due.UNSOURCED)
+    monkeypatch.setattr(c, "MX_IMSS_MOVEMENT_DEADLINE", None)
     assert due.movement_due(date(2026, 6, 15)) == (None, due.UNSOURCED)
     monkeypatch.setattr(c, "MX_IMSS_MOVEMENT_DEADLINE", c.MovementDeadlineRule(5, "S13", "SYNTHETIC"))
     assert due.movement_due(date(2026, 6, 15)) == (None, due.UNSOURCED)              # no holiday list for 2026

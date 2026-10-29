@@ -364,16 +364,22 @@ for _m, _p in (
 # Zoiko staff only through an approved Support Access grant.
 _MX = "/api/super-admin/compliance/mexico"
 _BR = "/api/super-admin/compliance/brazil"
-# Super Admin org-scoped employee reads. The route handler requires an explicit
-# organization_id (422 when missing, 404 when unknown) and scopes every
-# worker-table query to that organisation, so a platform principal never does
-# an unscoped cross-tenant read (ZP-PRIV B02).
-_set("GET", f"{_MX}/employees", data_class="platform", principals={"super_admin"},
-     note="reviewed: Super Admin org-scoped Mexican employee list; requires an explicit organization_id")
-_set("GET", f"{_MX}/employees/{{employee_id}}", data_class="platform", principals={"super_admin"},
-     note="reviewed: Super Admin org-scoped Mexican employee record; requires an explicit organization_id")
-_set("GET", f"{_BR}/employees", data_class="platform", principals={"super_admin"},
-     note="reviewed: Super Admin org-scoped Brazilian employee list; requires an explicit organization_id")
+_retire("GET", f"{_MX}/employees", R_JIT, "lists Mexican employees (names, codes) of one organization")
+_retire("GET", f"{_MX}/employees/{{employee_id}}", R_JIT, "one Mexican employee's record and readiness")
+_retire("GET", f"{_BR}/employees", R_JIT, "lists Brazilian employees (names, codes) of one organization")
+_retire("GET", f"{_BR}/employees/{{employee_id}}", R_JIT,
+       "one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)")
+# Mexico Phase 10e D5: the governed copy of a pilot's master data (employees and
+# their statutory profiles) into a new live organisation moves worker rows
+# between two tenants. Built and tested in mexico_pilot_service; its Super
+# Admin routes stay RETIRED until the ZP-PRIV owner decides how a cross-tenant
+# copy is authorised (a reviewed tenant_lifecycle override, or a tenant-run
+# handshake between the two organisations' admins). The routes never return
+# worker values (ids, counts and column names only - tested).
+_retire("POST", f"{_MX}/master-copies", R_TENANT,
+        "Phase 10e D5 master-data copy between tenants (reads worker rows) - awaits the ZP-PRIV owner's decision")
+_retire("POST", f"{_MX}/master-copies/{{copy_id}}/approve", R_TENANT,
+        "Phase 10e D5 master-data copy between tenants (writes worker rows) - awaits the ZP-PRIV owner's decision")
 # Registry and counts only - no identity, pay or per-person row.
 _set("GET", f"{_MX}/organizations", data_class="aggregate",
      note="reviewed: organization id + name of tenants with Mexico payroll (registry metadata)")
@@ -410,6 +416,9 @@ for _method, _path in (
 # totals — no payslip row, identity or per-person figure is returned.
 _set("GET", "/api/payroll/runs/{run_id}", data_class="tenant_config",
      note="reviewed: run detail with per-country payslip totals (aggregates only); no worker row returned")
+# Reports now include per-country totals, not individual payslip rows.
+_set("GET", "/api/payroll/reports", data_class="tenant_config",
+     note="reviewed: reports list with per-country payslip totals (aggregates only); no worker row returned")
 # Billing pages that read the country ledger (country usage, plan-change
 # impact, the checkout downgrade guard): the ledger's first read may seed it
 # from per-country employee COUNTS — no worker row is read out or returned.
@@ -422,3 +431,11 @@ _set("GET", "/api/billing/plan-change-impact", data_class="tenant_config", princ
 # Runs list adds per-country payslip totals (service.attach_run_country_totals).
 _set("GET", "/api/payroll/runs", data_class="tenant_config",
      note="reviewed: runs list with per-country payslip totals (aggregates only); no worker row returned")
+# South Africa compliance summary: readiness/status counts only - no worker row.
+_set("GET", "/api/super-admin/compliance/south-africa/summary", data_class="aggregate",
+     note="reviewed: ZA readiness and gate status counts; no per-employee rows")
+
+# Mexico readiness was previously classified platform; the scan now sees worker
+# tables through shared helpers but the route returns org-level status only.
+_set("GET", f"{_MX}/readiness", data_class="platform",
+     note="reviewed: organization-level Mexico readiness status; no per-employee rows")

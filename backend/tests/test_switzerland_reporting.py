@@ -138,14 +138,44 @@ def test_lohnausweis_generates_from_committed_periods_stored_exact_rendered_fran
     # base_salary -> ch_la treatment BOX_1; two months at 8000 stored EXACT
     assert D(boxes["BOX_1"]["valueExact"]) == D("16000")
     assert boxes["BOX_1"]["valueFrancs"] == 16000
-    # 2 x 640 source tax, exact string persisted in rendered_data
-    assert D(boxes["BOX_QST_WITHHELD"]["valueExact"]) == D("1280")
-    assert boxes["BOX_QST_WITHHELD"]["valueFrancs"] == 1280
+    # 2 x 640 source tax, exact string persisted in rendered_data (Ziffer 12 on the official Lohnausweis)
+    assert D(boxes["BOX_12"]["valueExact"]) == D("1280")
+    assert boxes["BOX_12"]["valueFrancs"] == 1280
     # exact Decimal strings really are what the DB row carries
     row = db.get(GeneratedReport, cert["reportId"])
     stored = row.rendered_data
     assert D(next(b for b in stored["boxes"] if b["boxCode"] == "BOX_1")["valueExact"]) == D("16000")
     assert stored["payslipCount"] == 2 and stored["unmappedEarnings"] == {}
+
+
+def test_lohnausweis_follows_the_official_form_layout(db, ch):  # noqa: F811
+    """CH-R1: Ziffer 9 carries EVERY employee AHV/IV/EO/ALV/NBU contribution,
+    Ziffer 10.1 the employee BVG, 8 and 11 are computed, employer
+    contributions never appear, and box C carries the AHV number."""
+    creator, approver = _make_user(db, "la.form@t.ch"), _make_user(db, "la.form2@t.ch")
+    template = _lohnausweis_template(db, creator, approver)
+    _approve(db, ch, 3)
+    ahv = "".join(("756", "1234", "5678", "97"))       # built at runtime (repository PII scan)
+    ch.emp.compliance_fields = {**(ch.emp.compliance_fields or {}), "ahv_number": ahv}
+    db.flush()
+    cert = _generate(db, ch, template.id, creator.id)
+    boxes = {b["boxCode"]: D(b["valueExact"]) for b in cert["boxes"]}
+
+    totals = {}
+    for item in db.query(PayslipItem).filter_by(employee_id=ch.emp.id).all():
+        for k, v in ((item.ch_calculation_snapshot or {}).get("totalsAll") or {}).items():
+            totals[k] = totals.get(k, D("0")) + D(v)
+    box9 = sum(totals.get(k, D("0")) for k in ("ch_ahv_employee", "ch_iv_employee", "ch_eo_employee",
+                                                 "ch_alv_employee", "ch_uvg_employee"))
+    assert box9 > totals.get("ch_ahv_employee", D("0"))                 # not AHV alone (the old bug)
+    assert boxes["BOX_9"] == box9
+    assert boxes.get("BOX_10_1", D("0")) == totals.get("ch_bvg_employee", D("0"))
+    assert boxes["BOX_8"] == boxes["BOX_1"]
+    assert boxes["BOX_11"] == boxes["BOX_8"] - boxes["BOX_9"] - boxes.get("BOX_10_1", D("0"))
+    assert set(boxes) <= set(svc.CH_LA_BOX_LABELS)                       # official Ziffern only
+    assert not any("employer" in label.lower() for label in svc.CH_LA_BOX_LABELS.values())
+    stored = db.get(GeneratedReport, cert["reportId"]).rendered_data
+    assert stored["employee"]["registrationNumber"] == ahv              # box C, was always blank
 
 
 def test_draft_payslips_are_excluded_from_the_certificate(db, ch):  # noqa: F811
@@ -209,7 +239,7 @@ def test_lohnausweis_regeneration_supersedes_and_links_corrections(db, ch):  # n
     assert db.get(GeneratedReport, first["reportId"]).status == "Superseded"
     db.refresh(march_item)
     boxes = {b["boxCode"]: b for b in second["boxes"]}
-    assert D(boxes["BOX_QST_WITHHELD"]["valueExact"]) == D("1120")          # 480 (March) + 640 (April)
+    assert D(boxes["BOX_12"]["valueExact"]) == D("1120")          # 480 (March) + 640 (April)
     assert len(second["corrections"]) == 1
     corr = second["corrections"][0]
     assert corr["periodStart"] == "2026-03-01" and corr["sequence"] == 1
@@ -450,3 +480,38 @@ def test_nothing_claims_a_swissdec_channel(db, ch):  # noqa: F811
                root / "app/modules/payroll/engine/countries/switzerland_content.py"]
     for path in targets:
         assert "Swissdec" not in path.read_text(encoding="utf-8"), f"{path.name} must not claim a Swissdec channel"
+
+# ── CH-R2: ELM annual totals, BFS wages, QST canton, per-receiver settlement ──
+
+def test_elm_annual_build_sums_every_period_and_counts_each_employee_once(db, ch):  # noqa: F811
+    _approve(db, ch, 3)
+    _approve(db, ch, 4)
+    subs = {s["domain"]: s for s in svc.build_ch_elm_submissions(db, ch.org.id, 2026, month=None,
+                                                                  actor_id=AUTHORIZER)["submissions"]}
+    assert 'ch_qst_total="1280"' in subs["QST"]["payload"]               # 640 + 640, not March only
+    assert 'headcount="1"' in subs["QST"]["payload"]
+    gross = sum(D(str(i.gross_pay)) for i in db.query(PayslipItem).filter_by(employee_id=ch.emp.id).all())
+    assert f'wages="{svc._exact(gross)}"' in subs["BFS"]["payload"]          # gross pay, not deductions
+    assert gross > 0
+
+
+def test_elm_qst_receiver_never_unknown():
+    from types import SimpleNamespace
+
+    with pytest.raises(BadRequestException, match="unknown canton"):
+        svc._ch_elm_receiver(None, 1, None, SimpleNamespace(employee_id=5, ch_qst_canton=None,
+                                                            ch_residence_canton=None), "QST")
+    assert svc._ch_elm_receiver(None, 1, None, SimpleNamespace(ch_qst_canton="ch-ge"), "QST") == "CANTON:CH-GE"
+
+
+def test_elm_settlement_is_unique_per_receiver_not_per_domain(db, ch):  # noqa: F811
+    _approve(db, ch, 3)
+    qst = _qst_view(svc.build_ch_elm_submissions(db, ch.org.id, 2026, month=3, actor_id=AUTHORIZER)["submissions"])
+    other = ChElmSubmission(organization_id=ch.org.id, domain="QST", receiver_id="CANTON:CH-GE", canton="CH-GE",
+                            schema_version=svc.CH_ELM_SCHEMA_VERSION, period_key="2026-03",
+                            transport_status="NOT_SENT", idempotency_key="test-ge-qst-2026-03")
+    db.add(other)
+    db.flush()
+    svc.transition_ch_elm_submission(db, ch.org.id, qst["submissionId"], "RECEIVE", actor_id=AUTHORIZER)
+    received = svc.transition_ch_elm_submission(db, ch.org.id, other.id, "RECEIVE", actor_id=AUTHORIZER)
+    assert received["authorityAckStatus"] == "RECEIVED"                 # a second canton is not a duplicate

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Optional
 
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXRefuse
 
 # Outcomes (provider-neutral)
 ACCEPTED, REJECTED, UNKNOWN = "ACCEPTED", "REJECTED", "UNKNOWN"
@@ -59,6 +59,10 @@ class StampResult:
     code: Optional[str] = None
     message: Optional[str] = None      # redacted, never XML
     raw_response_hash: Optional[str] = None
+    # Completion W4-3b: the PAC's stamped CFDI (the signed XML with its
+    # TimbreFiscalDigital complement). Stored next to the signed XML; the printed
+    # receipt is rendered only from it (RMF 2.7.1.7 needs the SAT seal / serial).
+    stamped_xml: Optional[bytes] = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +122,7 @@ _PROVIDER_RETRY_CONFIG: Dict[str, ProviderRetryConfig] = {}
 def get_adapter(provider: Optional[str], environment: Optional[str]) -> PacAdapter:
     factory = _ADAPTERS.get(((provider or "").upper(), (environment or "").upper()))
     if factory is None:
-        raise MXBlock("MX_PAC_NOT_CONFIGURED",
+        raise MXRefuse("MX_PAC_NOT_CONFIGURED",
                       f"no PAC adapter is configured for provider {provider or '(none)'} / {environment or '(none)'} — "
                       "the PAC provider is not chosen yet (Phase 7 D10)")
     return factory()

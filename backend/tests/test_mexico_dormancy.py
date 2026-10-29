@@ -35,11 +35,14 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("POST", "/runs/1/reset"), ("GET", "/employees/1/hours"), ("POST", "/employees/1/hours"),
     ("POST", "/hours/1/approve"), ("POST", "/employees/1/opening-balances"), ("POST", "/opening-balances/1/approve"),
     # Phase 7 CFDI routes — dormant the same way
-    ("GET", "/runs/1/cfdi"), ("POST", "/runs/1/cfdi/generate"), ("POST", "/cfdi/outbox/process"),
+    ("GET", "/runs/1/cfdi"), ("POST", "/runs/1/cfdi/generate"), ("POST", "/runs/1/cfdi/validate"),   # 11c preview
+    ("POST", "/cfdi/outbox/process"),
     ("GET", "/cfdi/documents/1"), ("POST", "/cfdi/documents/1/status-query"),
     ("POST", "/cfdi/documents/1/confirm-retry"), ("POST", "/cfdi/documents/1/cancel"), ("POST", "/cfdi/reconcile"),
     ("GET", "/cfdi/cancellation-reasons"),
     # Phase 8 — authorities
+    ("POST", "/reports/1/generate"),                                   # W4-2 dedicated report generators
+    ("GET", "/cfdi/documents/1/receipt"),                              # W4-3b printed CFDI receipt
     ("GET", "/authorities/summary"), ("POST", "/authorities/accrue"), ("GET", "/authorities/liabilities"),
     ("GET", "/authorities/liabilities/1"), ("POST", "/authorities/liabilities/1/file"),
     ("POST", "/authorities/liabilities/1/pay"), ("POST", "/authorities/liabilities/1/reconcile"),
@@ -60,6 +63,35 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     # Phase 9b — vacation and aguinaldo
     ("GET", "/employees/1/vacation"), ("POST", "/employees/1/vacation"), ("POST", "/vacation/1/approve"),
     ("POST", "/vacation/1/withdraw"), ("POST", "/aguinaldo-runs"),
+    # Phase 9c — termination and finiquito
+    ("GET", "/termination-reasons"), ("GET", "/employees/1/terminations"), ("POST", "/employees/1/terminations"),
+    ("POST", "/terminations/1/approve"), ("POST", "/terminations/1/cancel"), ("POST", "/terminations/1/finiquito-run"),
+    # Phase 9d — PTU
+    ("GET", "/ptu/exclusion-reasons"), ("GET", "/ptu/cycles"), ("POST", "/ptu/cycles"), ("GET", "/ptu/cycles/1"),
+    ("POST", "/ptu/cycles/1/approve-amount"), ("POST", "/ptu/cycles/1/exclusions"),
+    ("POST", "/ptu/cycles/1/exclusions/1/approve"), ("POST", "/ptu/cycles/1/allocate"),
+    ("POST", "/ptu/cycles/1/approve-allocation"), ("POST", "/ptu/cycles/1/ptu-run"), ("POST", "/ptu/cycles/1/cancel"),
+    ("GET", "/employees/1/ptu"),
+    # Phase 9e — annual ISR adjustment
+    ("GET", "/annual-adjustments/exclusion-reasons"), ("GET", "/annual-adjustments"),
+    ("POST", "/annual-adjustments/compute"), ("POST", "/annual-adjustments/approve"),
+    ("POST", "/annual-adjustments/apply"), ("POST", "/annual-adjustments/1/exclusion"),
+    ("POST", "/annual-adjustments/1/exclusion/approve"), ("GET", "/employees/1/annual-adjustments"),
+    # Phase 10a — salary payments
+    ("GET", "/payments/batches"), ("POST", "/runs/1/payment-batch"), ("GET", "/payments/batches/1"),
+    ("POST", "/payments/batches/1/release"), ("POST", "/payments/batches/1/cancel"),
+    ("POST", "/payments/batches/1/worklist"), ("POST", "/payments/items/1/outcome"),
+    ("POST", "/payments/batches/1/reissue"),
+    # Phase 10b — payroll journal
+    ("GET", "/journal/mappings"), ("POST", "/journal/mappings"), ("POST", "/journal/mappings/1/approve"),
+    ("POST", "/journal/mappings/1/withdraw"), ("GET", "/runs/1/journal"), ("POST", "/runs/1/journal/export"),
+    ("POST", "/journal/exports/1/void"),
+    # Phase 10e — pilot banner
+    ("GET", "/pilot-status"),
+    # Final mile X4 — parallel payroll
+    ("GET", "/parallel/imports"), ("POST", "/parallel/imports"), ("GET", "/parallel/imports/1"),
+    ("POST", "/parallel/imports/1/withdraw"), ("POST", "/parallel/differences/1/explain"),
+    ("POST", "/parallel/differences/1/accept"),
 ]
 
 
@@ -90,13 +122,27 @@ def test_every_route_is_listed():
     assert mounted == {(m, shape(ORG_BASE + p)) for m, p in ORG_ROUTES}
 
 
+def _names_an_employee(path):
+    return "/employees/1" in path or "/exclusions/1/" in path
+
+
 @pytest.mark.parametrize("method,path", ORG_ROUTES)
 def test_flag_off_every_org_route_refuses_even_for_a_mexican_org(db, method, path):
     t = make_org(db)                                            # payroll jurisdiction MX
+    # ZP-PRIV's policy check runs before the Mexico guard. A principal it
+    # admits meets the dormancy refusal; one it does not (a payroll admin on an
+    # org-admin route) is refused by the policy itself; an employee route
+    # naming an employee who does not exist is answered 404 by the policy.
+    # Every case is a refusal and nothing is written.
     for role in ("org_admin", "payroll_admin"):
         with http(db, principal(t.org.id, role=role)) as c:
             r = _call(c, method, path)
-        assert r.status_code == 403 and "not open for onboarding" in r.json()["message"], (role, r.text)
+        body = r.json()
+        dormant = r.status_code == 403 and "not open for onboarding" in body["message"]
+        by_policy = (r.status_code == 403 and body.get("error") == "ACCESS_DENIED") or                     (r.status_code == 404 and _names_an_employee(path))
+        assert dormant or by_policy, (role, r.text)
+        if role == "org_admin" and not _names_an_employee(path):
+            assert dormant, r.text
 
 
 def test_flag_off_writes_nothing(db):
@@ -297,7 +343,7 @@ def test_jurisdiction_change_gate_is_identical_for_every_non_mexican_pair(db, mo
     countries = [c for c in REGISTRATION_COUNTRIES if get_jurisdiction_code(c) != "MX"]
     values = [None, ""] + countries + [get_jurisdiction_code(c) for c in countries if get_jurisdiction_code(c)]
     with_branch = {(o, n): get_jurisdiction_change_block_reason(db, o, n) for o in values for n in values}
-    monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal", lambda old, new: None)
+    monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal", lambda old, new, *a: None)
     without_branch = {(o, n): get_jurisdiction_change_block_reason(db, o, n) for o in values for n in values}
     assert with_branch == without_branch
     assert len(with_branch) > 100
@@ -310,7 +356,7 @@ def test_the_mexico_branch_only_fires_for_a_change_into_mexico(db, monkeypatch):
     calls = []
     real = mexico_dormancy.entering_mexico_refusal
     monkeypatch.setattr(mexico_dormancy, "entering_mexico_refusal",
-                        lambda old, new: calls.append((old, new)) or real(old, new))
+                        lambda old, new, *a: calls.append((old, new)) or real(old, new, *a))
     assert get_jurisdiction_change_block_reason(db, "India", "Germany") is None
     assert get_jurisdiction_change_block_reason(db, "India", "Mexico") == mexico_dormancy.DORMANT_MESSAGE
     assert calls == [("India", "Germany"), ("India", "Mexico")]

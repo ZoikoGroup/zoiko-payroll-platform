@@ -956,6 +956,28 @@ class PayrollContext:
     # pay only with the employee's recorded consent.
     sa_overtime_comp_leave_consented: bool = False
 
+    # ── South Africa (ZP-ZA-ENG-001; "ZA" — "SA" above is Saudi Arabia) ────────
+    # Pre-resolved by the service layer (Phase 5) from the effective-dated
+    # EmployeeStatutoryProfile (za_* columns) and the employer registration.
+    # countries/south_africa.py BLOCKS rather than guesses any that are missing
+    # (ZA-005). date_of_birth / period_end above are reused. All default to
+    # None so every non-ZA caller is unaffected.
+    za_statutory_profile: object = None        # EmployeeStatutoryProfile | None
+    za_organization_id: int = None
+    za_employee_id: int = None
+    za_employer_registration: object = None    # PayrollZaEmployerRegistration in force (sdl_liable, …)
+    za_has_tax_number: bool = None             # an income tax reference is recorded (masked elsewhere)
+    za_components: dict = None                 # {BONUS|COMMISSION|LEAVE_PAYOUT|TRAVEL_FIXED|… : amount}
+    za_retirement_fund_contribution: Decimal = None   # employee contribution this period
+    za_directives: list = None                 # APPROVED directives in force (dicts from the service)
+    za_variable_items: list = None             # section 7B items: {component, amount, earned_from, earned_to}
+    za_eti_paid_hours: Decimal = None          # ETI: hours paid in the claim month
+    za_eti_qualifying_month_no: int = None     # ETI: 1..za_eti_qualifying_months_max
+    # Phase 9 — labour, deductions, overrides (spec §5, ZA-012, ZA-013).
+    za_hours: dict = None                      # approved {ordinary, overtime, sunday, public_holiday} | None
+    za_deduction_orders: list = None           # [{id, order_type, authority_type, amount, evidence_ref}]
+    za_overrides: list = None                  # APPROVED [{id, field, before, after, reason_code}]
+
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
     # BLOCKS (NetherlandsCalculationBlockedError) rather than guess any that
@@ -1007,6 +1029,10 @@ class PayrollContext:
     mx_variable_accumulator: dict = None       # prior-bimester variable pay {total, days} (MX-020)
     mx_min_wage_zone: str = None               # GENERAL / ZLFN / UNRESOLVED — derived by the service, never typed
     mx_month_to_date: dict = None              # {taxable, subsidy_applied} already committed in the month
+    # W1-3 (Mexico completion): {special concept: ISR-exempt amount} already used in the
+    # calendar year (LISR Art. 93 XIV), and a finiquito's separation date (Art. 93 XIII).
+    mx_year_to_date_exempt: dict = None
+    mx_separation_date: object = None
     mx_pack: dict = None                       # {pack_id, version, source_codes} of the national rows (MX-063 trace)
     # Phase 6: the national pack rows in force on the pay date as plain dicts
     # {rate_map, slabs} (service.pack_rows_for_golden — row-level dates
@@ -1022,6 +1048,9 @@ class PayrollContext:
     # into the result trace.
     mx_run_type: str = None
     mx_special_detail: dict = None
+    # Phase 9e: an approved annual ISR adjustment applied to this ordinary payslip
+    # ({id, difference, fiscal_year}); None for every other payslip and country.
+    mx_annual_adjustment: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
     # Resolved by the service layer before dispatch; engine/countries/brazil.py
@@ -1029,35 +1058,42 @@ class PayrollContext:
     # matching every other country's calculator). None/absent for every non-BR
     # calculation — existing calculations for every other country are unaffected.
     #
-    # brazil_inputs: dict carrying all Brazil-specific scalars:
+    # brazil_inputs: dict carrying all Brazil-specific scalars. Phase 5
+    # (engine/countries/brazil.py) makes the REQUIRED keys fail closed when
+    # absent (BR-001 — the old RAT/FAP/third-party defaults are gone):
     #   {
-    #     "dependents":               int,    # IRRF + Salário-Família eligible dependents
-    #     "alimony":                  str,    # Decimal-string pension alimentícia (IRRF deduction)
-    #     "vt_benefit":               str,    # Decimal-string Vale-Transporte employer provision
-    #     "opt_out_simplified_irrf":  bool,   # True → always use legal deductions (rare)
-    #     "rat_pct":                  str,    # Decimal-string risk class rate e.g. "2" = 2%
-    #     "fap_factor":               str,    # Decimal-string FAP multiplier e.g. "1.0"
-    #     "third_party_pct":          str,    # Decimal-string Outras Entidades / FPAS rate
+    #     "competence_month":         str,    # ISO date of the competence month (INSS/FGTS/SF/CPP; BR-014)
+    #     "esocial_category":         str,    # "101" ordinary CLT, "103" apprentice (BR-045)
+    #     "contract_salary":          str,    # Decimal-string contracted monthly base salary (VT cap + minimum-wage floor)
+    #     "earnings":                 list,   # [{rubricCode, amount}] → CP/IRRF/FGTS bases by incidence (BR-002)
+    #     "rat_pct":                  str,    # Decimal-string risk class rate e.g. "2" = 2% (REQUIRED)
+    #     "fap_factor":               str,    # Decimal-string FAP multiplier e.g. "1.0" (required)
+    #     "third_party_pct":          str,    # Decimal-string Outras Entidades / FPAS rate (required)
     #     "cprb_opted":               bool,   # True → 10% CPRB transition rate
     #     "financial_sector":         bool,   # True → +2.5% CPP add-on
+    #     "dependents":               int,    # IRRF + Salário-Família eligible dependents
+    #     "alimony":                  str,    # Decimal-string pension alimentícia (IRRF + net deduction)
+    #     "vt_benefit":               str,    # Decimal-string Vale-Transporte employer provision
+    #     "opt_out_simplified_irrf":  bool,   # True → always use legal deductions (rare)
     #     "concurrent_inss_base":     str,    # Decimal-string salary already absorbed in concurrent jobs
     #     "concurrent_inss_deducted": str,    # Decimal-string INSS already withheld in concurrent jobs
     #     "concurrent_sf_base":       str,    # Decimal-string remuneration from concurrent employer (SF eligibility)
     #   }
-    # Empty dict for every non-BR employee. Phase 0 (scaffolding): every
-    # Brazilian calculation BLOCKS in countries/brazil.py before these are
-    # read; Phase 5 makes each required key fail closed when absent (BR-001).
+    # Empty dict for every non-BR employee. A missing REQUIRED key makes
+    # countries/brazil.py BLOCK (BR_MISSING_INPUT); it never silently defaults.
     brazil_inputs: dict = field(default_factory=dict)
 
-    # brazil_is_apprentice: True → FGTS 2% (not ordinary 8%), per BR-045.
-    # False for every non-BR employee and for every regular CLT worker.
+    # brazil_is_apprentice: SUPERSEDED in Phase 5 — the engine derives the
+    # apprentice flag from brazil_inputs["esocial_category"] == "103" (BR-045),
+    # never from this raw boolean. Kept on the context for backward
+    # compatibility with the Phase 2 scaffold and existing callers.
     brazil_is_apprentice: bool = False
 
     # brazil_statutory_profile / brazil_establishment / brazil_employer_profile:
     # Pre-resolved ORM row objects for Phase 3+ — eSocial/DCTFWeb/FGTS Digital
     # integration wiring. None for every Phase 2 calculation; engine/countries/
     # brazil.py does not read these yet (Phase 2 scope: calculation engine only).
-    brazil_statutory_profile: object = None    # PayrollBrStatutoryProfile | None (Phase 3)
+    brazil_statutory_profile: object = None    # EmployeeStatutoryProfile | None (Phase 3/4 — br_* block)
     brazil_establishment: object = None        # PayrollBrEstablishment | None (Phase 3)
     brazil_employer_profile: object = None     # PayrollBrEmployerProfile | None (Phase 3)
     brazil_organization_id: int = None         # for blocked-error context only
@@ -1666,6 +1702,12 @@ class PayrollResult:
     # employee/employer pension slots). 0 for every non-SA country.
     employer_occupational_hazard: Decimal = Decimal("0")
 
+    # South Africa (ZP-ZA-ENG-001) — the whole dict countries/south_africa.py
+    # returns under 'za_result' (separate PAYE / UIF / SDL bases, the PAYE
+    # trace, totals). PAYE, UIF and SDL also arrive on the generic tds /
+    # employee_esi / employer_esi / employer_payroll_tax fields. None elsewhere.
+    za_result: dict = None
+
     # Netherlands (ZP-NL-ENG-001) — the whole dict countries/netherlands.py
     # returns under 'nl_result' key (wage_tax, employee_insurance, whk, zvw,
     # wkr, car_addition, labor_pay, net_pay, employer_cost, pack, parameters,
@@ -1695,6 +1737,7 @@ class PayrollResult:
     br_irrf_reduction: Decimal = Decimal("0")
     br_salario_familia: Decimal = Decimal("0")
     br_vale_transporte_deduction: Decimal = Decimal("0")
+    br_alimony_deduction: Decimal = Decimal("0")   # Court-ordered alimony — reduces net pay (BR-032)
     br_base_fgts: Decimal = Decimal("0")
     br_fgts_deposit: Decimal = Decimal("0")    # Employer liability — never in net pay
     br_cpp_employer: Decimal = Decimal("0")    # Employer liability — never in net pay

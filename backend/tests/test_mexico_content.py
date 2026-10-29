@@ -175,7 +175,7 @@ def test_identifiers_and_scope_constants():
     assert c.MX_CEAV_SEEDED_YEAR == 2026 and c.MX_CEAV_SCHEDULE_YEARS == tuple(range(2023, 2031))
     assert all(rule.startswith("MX_") for rule in c.MX_SLAB_RULES)
     assert set(c.MX_ISN_CONTENT) == set(c.MX_ISN_STATES_IN_SCOPE) == {"CDMX"}
-    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 34))      # S24–S33: addendum, pending approval
+    assert c.ALL_SOURCE_CODES == tuple(f"S{i}" for i in range(1, 37))      # S24–S36: addendum, pending approval
 
 
 def test_every_content_row_has_its_declared_shape():
@@ -195,21 +195,34 @@ def test_every_row_is_sourced_and_g1_flagged():
             + list(c.MX_WORKWEEK) + list(c.MX_VACATION_DAYS)
             + [r for rows in c.MX_ISN_CONTENT.values() for r in rows])
     for row in rows:
-        assert row.source in c.ALL_SOURCE_CODES and row.source_ref and row.needs_g1 is True, row
+        # a cite is CODE or CODE/file (Phase 11d: multi-file codes are cited by file)
+        assert row.source.split("/")[0] in c.ALL_SOURCE_CODES and row.source_ref and row.needs_g1 is True, row
     for row in c.MX_SCALAR_CONTENT:
         assert row.key in c.MX_PARAMETER_KEYS and row.pending_g2 == (row.key in c.MX_PENDING_G2_KEYS)
 
 
-def test_cited_sources_are_verified_files_with_matching_hashes():
+def test_cited_sources_are_saved_files_with_matching_hashes():
+    """Every cite resolves to a manifest file usable for a Draft pack (VERIFIED
+    with its log entry, or an ARCHIVE_COPY_VERIFIED capture — Phase 11d), and
+    every saved file still hashes to its row. Activation additionally needs
+    VERIFIED (the sources_verified gate), which no archive copy satisfies."""
     c = _c()
     rows = (list(c.MX_SCALAR_CONTENT) + list(c.MX_ISR_TARIFFS) + list(c.MX_MIN_WAGES) + list(c.MX_CEAV_SCHEDULE)
             + list(c.MX_WORKWEEK) + list(c.MX_VACATION_DAYS)
             + [r for rows in c.MX_ISN_CONTENT.values() for r in rows])
     _need(rows, "provenance")
+    from app.modules.payroll import mexico_sources
     from scripts import verify_mexico_sources as v
 
-    verified = {r["code"] for r in v.read_manifest(MANIFEST) if r["status"] == "VERIFIED"}
-    assert {row.source for row in rows} <= verified
+    usable = mexico_sources.usable(mexico_sources.read_rows(MANIFEST), mexico_sources.DRAFT_STATUSES,
+                                   mexico_sources.read_log(MANIFEST))
+    assert {row.source for row in rows} <= set(usable)
+    assert all("/" in row.source for row in rows)                  # Batch 1 onward: cited by file
+    # The source binaries live outside git (team evidence store); where they
+    # are checked out, every one must still hash to its manifest row.
+    cited = [usable[row.source] for row in rows]
+    if not all((MANIFEST.parent / r["file"]).is_file() for r in cited):
+        pytest.skip("source binaries not checked out here — hashes checked where they are")
     assert v.cmd_check(MANIFEST) == []
 
 
@@ -302,6 +315,50 @@ def test_every_isr_tariff_is_continuous_and_quota_consistent():
     assert errors == []
 
 
+def test_the_7_10_and_15_day_tariffs_are_the_daily_tariff_times_days():
+    """TL-ISR-2: S2 prints B.II-B.IV as B.I x days — every upper limit and
+    quota exactly, the rates unchanged. This replaces the previous-bracket quota
+    formula for those three tables (their documented exceptions)."""
+    c = _c()
+    _need(c.MX_ISR_TARIFFS, "ISR tariffs")
+    daily = c.isr_tariff_in_force("DAILY", date(2026, 6, 30))
+    for period, days in (("WEEKLY_7", 7), ("DECENAL_10", 10), ("QUINCENAL_15", 15)):
+        table = c.isr_tariff_in_force(period, date(2026, 6, 30))
+        assert len(table) == len(daily) == 11
+        for d, row in zip(daily, table):
+            assert row.rate_pct == d.rate_pct
+            assert Decimal(row.fixed_quota) == Decimal(d.fixed_quota) * days, (period, row)
+            if d.upper is not None:
+                assert Decimal(row.upper) == Decimal(d.upper) * days, (period, row)
+    # every documented exception is in one of these three tables, nowhere else
+    assert {p for p, _ in c.MX_ISR_ARITHMETIC_EXCEPTIONS} <= {"WEEKLY_7", "DECENAL_10", "QUINCENAL_15"}
+    assert set(c.MX_ISR_ARITHMETIC_EXCEPTIONS.values()) == {"TL-ISR-2"}
+
+
+def test_documented_isr_exceptions_are_exactly_the_failing_brackets():
+    """No exception hides a bracket that closes, and none is missing."""
+    c = _c()
+    _need(c.MX_ISR_TARIFFS, "ISR tariffs")
+    failing = set()
+    for period in c.MX_ISR_PERIODS:
+        for e in _isr_errors(c.isr_tariff_in_force(period, date(2026, 6, 30)), {}, period):
+            m = re.match(rf"{period}: bracket (\d+) quota", e)
+            assert m, e                                          # only quota failures may be excepted
+            failing.add((period, int(m.group(1))))
+    assert failing == set(c.MX_ISR_ARITHMETIC_EXCEPTIONS)
+
+
+def test_pay_frequency_map_is_cited_and_never_guesses():
+    c = _c()
+    _need(c.MX_PAY_FREQUENCY_ISR_PERIOD, "pay-frequency map")
+    assert set(c.MX_PAY_FREQUENCY_ISR_PERIOD) == set(c.MX_PAY_FREQUENCY_ISR_PERIOD_SOURCES)
+    assert set(c.MX_PAY_FREQUENCY_ISR_PERIOD.values()) <= set(c.MX_ISR_PERIODS)
+    for code, (catalog, table, marker) in c.MX_PAY_FREQUENCY_ISR_PERIOD_SOURCES.items():
+        assert catalog[0].startswith("S28/") and table[0].startswith("S2/") and marker == c.PENDING_G1
+    # 01 Diario is a G1 decision; codes with no Art. 96 table in S2 are never mapped
+    assert not {"01", "03", "06", "07", "08", "09", "99"} & set(c.MX_PAY_FREQUENCY_ISR_PERIOD)
+
+
 def test_monthly_isr_tariff_equals_spec_section_4():
     c = _c()
     _need(c.MX_ISR_TARIFFS, "ISR tariffs")
@@ -311,7 +368,9 @@ def test_monthly_isr_tariff_equals_spec_section_4():
         spec.append((bounds[0], bounds[1] if len(bounds) > 1 else None, _nums(row[1])[0], _nums(row[2])[0]))
     ours = [(Decimal(b.lower), Decimal(b.upper) if b.upper is not None else None, Decimal(b.fixed_quota),
              Decimal(b.rate_pct)) for b in c.isr_tariff_in_force("MONTHLY", date(2026, 6, 30))]
-    assert ours == spec, "spec §4 and S2 disagree — stop and ask (Phase 1 plan §6 change 1)"
+    # 2026-10-26 rule: the spec is not a source. If S2 and spec §4 ever differ,
+    # S2 wins and the difference is listed in the transcription log and the report.
+    assert ours == spec, "S2 differs from spec §4 — S2 wins; list the difference (transcription log)"
 
 
 def test_uma_changes_on_1_february_2026():
@@ -375,3 +434,251 @@ def test_ceav_lowest_band_reference_is_present_and_pending_g2():
     _need(rows, "CEAV lowest-band reference")
     assert all(r.pending_g2 and r.text_value for r in rows)
     assert {r.key for r in c.MX_SCALAR_CONTENT if r.pending_g2} == {"mx_ceav_lowest_band_min_wage_ref"}
+
+
+# ── Batch 2 (2026-10-26): IMSS, CEAV, INFONAVIT, minimum wages, LFT, workweek ──
+
+def test_derived_values_are_rebuilt_from_their_printed_components():
+    """TL-IMSS-2 / TL-WW-2: no source prints these values. Each is recomputed
+    from the printed base and annual steps (S10 Art. 106 + 1995 Transitorio
+    DECIMO NOVENO), the printed quota share (Art. 107) or the printed overtime
+    premium (S18 Arts. 66 / 68)."""
+    c = _c()
+    _need(c.MX_DERIVED_VALUES, "derived values")
+    rows = {r.key: r for r in c.MX_SCALAR_CONTENT}
+    for key, d in c.MX_DERIVED_VALUES.items():
+        row = rows[key]
+        value = Decimal(row.employer_pct or row.employee_pct or row.flat_amount)
+        if "base" in d:
+            expected = Decimal(d["base"]) + d["direction"] * d["steps"] * Decimal(d["step"])
+        elif "quota" in d:
+            expected = Decimal(d["quota"]) * Decimal(d["share"]) / 100
+        else:
+            expected = 1 + Decimal(d["premium"]) / 100
+        assert value == expected, (key, value, expected)
+        assert "DERIVED" in row.source_ref or "read as" in row.source_ref, key
+
+
+def test_vacation_rows_follow_the_art_76_wording():
+    """TL-VAC-1: 12 days after the first year, +2 per year up to 20, then +2 per
+    five years from the sixth year — rebuilt from MX_VACATION_RULE_NUMBERS."""
+    c = _c()
+    _need(c.MX_VACATION_DAYS, "vacation schedule")
+    first, step, cap, every = (int(x) for x in c.MX_VACATION_RULE_NUMBERS)
+    for row in c.vacation_days_in_force(date(2026, 6, 30)):
+        y = row.service_year_from
+        expected = min(first + step * (y - 1), cap) if y <= 5 else cap + step * ((y - 6) // every + 1)
+        assert int(row.days) == expected, row
+        if y >= 6:
+            assert (row.service_year_to - y + 1) == every and (y - 6) % every == 0
+    years = sorted((r.service_year_from, r.service_year_to) for r in c.MX_VACATION_DAYS)
+    assert years[0][0] == 1 and all(b[0] == a[1] + 1 for a, b in zip(years, years[1:]))   # no gaps
+
+
+def test_ceav_schedule_shape_and_steps():
+    """S11's table is a scanned image (TL-CEAV-1): 8 bands x 2023-2030, rates rise
+    across bands within a year, and each band rises by a near-constant annual
+    step (the decree phases the 2023 rates into the 2030 ones)."""
+    c = _c()
+    _need(c.MX_CEAV_SCHEDULE, "CEAV schedule")
+    by_year = {}
+    for b in c.MX_CEAV_SCHEDULE:
+        by_year.setdefault(b.year, []).append(b)
+    assert sorted(by_year) == list(c.MX_CEAV_SCHEDULE_YEARS) and all(len(v) == 8 for v in by_year.values())
+    for year, bands in by_year.items():
+        rates = [Decimal(b.employer_pct) for b in sorted(bands, key=lambda b: Decimal(b.lower_multiple))]
+        assert rates == sorted(rates) and len(set(rates)) == 8, year
+    for i in range(8):
+        col = [Decimal(sorted(by_year[y], key=lambda b: Decimal(b.lower_multiple))[i].employer_pct)
+               for y in sorted(by_year)]
+        steps = [b - a for a, b in zip(col, col[1:])]
+        assert max(steps) - min(steps) <= Decimal("0.002"), (i, steps)
+
+
+def test_ceav_2030_column_equals_the_lss_art_168_text_table():
+    """The machine-checkable half of TL-CEAV-1: S10 Art. 168 II a) prints the
+    final schedule, which must equal S11's 2030 column exactly."""
+    c = _c()
+    _need(c.MX_CEAV_SCHEDULE, "CEAV schedule")
+    from app.modules.payroll import mexico_sources
+    from scripts import verify_mexico_sources as v
+
+    cite, year, _ = c.MX_CEAV_TEXT_CROSSCHECK
+    row = mexico_sources.usable(mexico_sources.read_rows(MANIFEST), mexico_sources.DRAFT_STATUSES,
+                                mexico_sources.read_log(MANIFEST)).get(cite)
+    path = MANIFEST.parent / row["file"] if row else None
+    if path is None or not path.is_file():
+        pytest.skip("S10 binary not checked out here")
+    text = v.extract_text(path)
+    start = text.index("Cuota Patronal")                        # the rates are in order (labels may drift)
+    table = text[start:text.index("b) Los trabajadores", start)]
+    printed = re.findall(r"(\d{1,2}\.\d{3})%", table)
+    ours = [b.employer_pct for b in sorted((b for b in c.MX_CEAV_SCHEDULE if b.year == year),
+                                           key=lambda b: Decimal(b.lower_multiple))]
+    assert printed == ours
+
+
+def test_minimum_wages_zones_and_professions():
+    c = _c()
+    _need(c.MX_MIN_WAGES, "minimum wages")
+    rows = c.min_wages_in_force(date(2026, 6, 30))
+    zones = {r.code: r for r in rows if r.kind == "ZONE"}
+    assert set(zones) == {"GENERAL", "ZLFN"} and Decimal(zones["ZLFN"].daily_amount) > Decimal(zones["GENERAL"].daily_amount)
+    prof = {}
+    for r in rows:
+        if r.kind == "PROFESSION":
+            prof.setdefault(r.code, {})[r.zone] = Decimal(r.daily_amount)
+    assert len(prof) == 61 and all(set(z) == {"ZLFN", "GENERAL"} for z in prof.values())
+    # S9 resolutivo SEXTO: a ZLFN amount below the ZSMG one would be replaced by it — none is
+    assert all(z["ZLFN"] >= z["GENERAL"] for z in prof.values())
+    # every professional minimum is at least its zone's general minimum
+    assert all(z["GENERAL"] >= Decimal(zones["GENERAL"].daily_amount) for z in prof.values())
+
+
+def test_zlfn_municipalities_are_federal_entities_and_unique():
+    c = _c()
+    _need(c.MX_ZLFN_MUNICIPALITIES, "ZLFN municipalities")
+    states = {code for code, _ in c.MX_FEDERAL_ENTITIES}
+    keys = [(m.state, m.municipality) for m in c.MX_ZLFN_MUNICIPALITIES]
+    assert len(keys) == 45 and len(set(keys)) == 45 and {s for s, _ in keys} <= states
+    assert {s for s, _ in keys} == {"BCN", "SON", "CHH", "COA", "NLE", "TAM"}
+    # "Guerrero" is two different municipalities (Coahuila and Tamaulipas), as S9 lists them
+    assert {s for s, m in keys if m == "Guerrero"} == {"COA", "TAM"}
+
+
+def test_overtime_phase_in_agrees_with_the_workweek_rows():
+    c = _c()
+    _need(c.MX_WORKWEEK, "workweek")
+    for row in c.MX_WORKWEEK:
+        on = row.effective_from
+        scalar = c.scalar_rows_in_force(on)["mx_overtime_double_weekly_max_hours"].flat_amount
+        assert dict(row.overtime_rules)["overtime_weekly_hours"] == scalar, on
+    hours = [int(w.ordinary_weekly_max_hours) for w in sorted(c.MX_WORKWEEK, key=lambda w: w.effective_from)]
+    assert hours == sorted(hours, reverse=True) and hours[-1] < hours[0]
+
+
+def test_subsidy_remainder_rule_is_in_the_engine_vocabulary():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_subsidy_remainder_rule"]
+    _need(rows, "subsidy remainder rule")
+    from app.modules.payroll.engine.jurisdictions.mexico.subsidy import REMAINDER_RULES
+
+    assert [r.text_value for r in rows] == ["NOT_PAYABLE"] and "NOT_PAYABLE" in REMAINDER_RULES
+    assert rows[0].source == "S3/S3_DOF_Decreto_subsidio_empleo_01052024.html"
+
+
+# ── W1-1 (2026-10-26): SBC floor and INFONAVIT percentage basis ──
+
+def test_sbc_floor_rule_is_in_the_engine_vocabulary_and_cites_lss_art_28():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_sbc_min_rule"]
+    _need(rows, "SBC floor rule")
+    from app.modules.payroll.engine.jurisdictions.mexico.sbc import SBC_MIN_RULES
+
+    assert [r.text_value for r in rows] == ["RAISE_TO_ZONE_MIN_WAGE"] and rows[0].text_value in SBC_MIN_RULES
+    assert rows[0].source == "S10/S10_IMSS_LSS.pdf" and rows[0].source_ref.startswith("Art. 28")
+    assert "limite inferior" in rows[0].source_ref
+
+
+def test_infonavit_bases_percentage_transcribed_fixed_amount_still_blocks():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_infonavit_percentage_basis"]
+    _need(rows, "INFONAVIT percentage basis")
+    from app.modules.payroll.engine.jurisdictions.mexico.infonavit import BASIS_RULES
+
+    assert [r.text_value for r in rows] == ["SBC_TIMES_DAYS"] and rows[0].text_value in BASIS_RULES["PERCENTAGE"][1]
+    assert rows[0].source == "S27/S27_DIP_LIFNVT.pdf" and rows[0].source_ref.startswith("Art. 29 III")
+    # S27 states no per-period rule for a fixed-amount discount: it stays untranscribed and blocks
+    assert not [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_infonavit_fixed_amount_basis"]
+
+
+def test_ceilings_read_in_uma_cite_the_de_indexation_decree():
+    c = _c()
+    rows = {r.key: r for r in c.MX_SCALAR_CONTENT if r.key in ("mx_sbc_max_uma_multiple", "mx_imss_em_excess_threshold_uma")}
+    _need(rows, "SBC ceiling / E&M threshold")
+    assert all("S34 Transitorio Tercero" in r.source_ref for r in rows.values())
+    assert "S34" in c.ALL_SOURCE_CODES
+
+
+# ── W1-2 (2026-10-26): CDMX state ISN ──
+
+def test_cdmx_isn_rate_cites_the_verified_2026_code():
+    c = _c()
+    rows = c.MX_ISN_CONTENT["CDMX"]
+    _need(rows, "CDMX ISN")
+    assert [(r.key, r.employer_pct, r.employee_pct) for r in rows] == [("mx_isn_rate_pct", "4", None)]
+    assert rows[0].source == "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf" and rows[0].source_ref.startswith("Art. 158")
+    assert c.isn_rows_in_force("CDMX", date(2026, 6, 30))["mx_isn_rate_pct"] is rows[0]
+    # the 2022 text (3%) is WRONG_VERSION and is never cited
+    assert not any("S22_CDMX_Codigo_Fiscal_2026.pdf" in r.source for r in rows)
+
+
+def test_cdmx_special_pay_isn_inclusion_follows_arts_156_and_157():
+    c = _c()
+    inc = {concept: entry[0] for (state, concept), entry in c.MX_SPECIAL_PAY_ISN_INCLUSION.items() if state == "CDMX"}
+    _need(inc, "CDMX special-pay ISN inclusion")
+    assert inc == {"AGUINALDO": True, "VACATION_PREMIUM": True, "SEPARATION_SENIORITY_PREMIUM": True, "PTU": False}
+    from app.modules.payroll.engine.jurisdictions.mexico import special_pay
+    from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
+
+    assert set(inc) <= set(special_pay.CONCEPTS)
+    # not named by Art. 156 or 157: they keep blocking (DECISIONS_PENDING D-06)
+    for concept in ("VACATION_PAYOUT", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"):
+        with pytest.raises(MXBlock) as exc:
+            special_pay.isn_included("CDMX", concept)
+        assert exc.value.reasons[0][0] == "MX_ISN_SPECIAL_PAY_RULE_MISSING"
+    for (state, concept), (included, source, ref) in c.MX_SPECIAL_PAY_ISN_INCLUSION.items():
+        assert source == "S22/S22_SAF_Codigo_Fiscal_CDMX_2026.pdf" and ref.startswith(("Art. 156", "Art. 157"))
+        assert included == ref.startswith("Art. 156")      # 156 lists what is taxed, 157 what is not
+
+
+# ── W1-4 (2026-10-26): the LISR Art. 152 annual tariff ──
+
+def test_annual_tariff_2026_is_continuous_quota_consistent_and_cited():
+    c = _c()
+    rows = c.MX_ISR_ANNUAL_TARIFFS.get(2026)
+    _need(rows, "annual ISR tariff 2026")
+    assert len(rows) == 11 and all(r.period == "ANNUAL" for r in rows)
+    ordered = sorted(rows, key=lambda b: Decimal(b.lower))
+    assert _isr_errors(ordered, {}, "ANNUAL") == []
+    assert all(r.source == "S2/S2_SAT_Anexo8_RMF2026.pdf" and "C.II" in r.source_ref for r in rows)
+    assert ordered[-1].upper is None
+
+
+# ── W1-5 (2026-10-26): calendar, movement deadline, risk-premium period ──
+
+def test_calendar_and_deadlines_are_cited_and_holidays_wait_for_d16():
+    c = _c()
+    rules = {r.report_type: r for r in c.MX_FILING_CALENDAR}
+    _need(rules, "filing calendar")
+    assert {k: (r.frequency, r.due_day, r.state) for k, r in rules.items()} == {
+        "MX_ISR_WITHHOLDING": ("MONTHLY", 17, None), "MX_ISN_RETURN": ("MONTHLY", 17, "CDMX"),
+        "MX_INFONAVIT": ("BIMONTHLY", 17, None),                               # W2-5: S36 Art. 21 still bimonthly
+        "MX_IMSS": ("MONTHLY", 17, None), "MX_IMSS_RCV": ("BIMONTHLY", 17, None)}     # A18: LSS Art. 39, Trans. XXVII
+    assert rules["MX_ISR_WITHHOLDING"].source == "S35/S35_DIP_CFF.pdf" and "Art. 6 I" in rules["MX_ISR_WITHHOLDING"].source_ref
+    for key, cited in (("MX_IMSS", "Art. 39"), ("MX_IMSS_RCV", "VIGESIMO SEPTIMO")):     # A18: split, each sourced
+        assert rules[key].source == "S10/S10_IMSS_LSS.pdf" and cited in rules[key].source_ref
+    assert (c.MX_RISK_PREMIUM_PERIOD.start_month, c.MX_RISK_PREMIUM_PERIOD.start_day) == (3, 1)
+    assert c.MX_RISK_PREMIUM_PERIOD.source == "S29/S29_DIP_RACERF.pdf"
+    assert c.MX_IMSS_MOVEMENT_DEADLINE.business_days == 5
+    assert c.MX_OFFICIAL_HOLIDAYS == {}                                         # D-16: LFT or CFF list
+
+
+# ── W3 (2026-10-26): content interfaces for the engine refusals ──
+
+def test_subsidy_monthly_cap_rule_is_transcribed_from_s3_in_the_engine_vocabulary():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_subsidy_monthly_cap_rule"]
+    _need(rows, "subsidy monthly cap rule")
+    from app.modules.payroll.engine.jurisdictions.mexico.subsidy import MONTHLY_CAP_RULES
+
+    assert [r.text_value for r in rows] == ["CAP_AT_MONTHLY_AMOUNT"] and rows[0].text_value in MONTHLY_CAP_RULES
+    assert rows[0].source == "S3/S3_DOF_Decreto_subsidio_empleo_31122025.html" and "para 4" in rows[0].source_ref
+
+
+def test_rest_day_multiplier_is_transcribed_from_lft_art_75():
+    c = _c()
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_rest_day_work_multiplier"]
+    _need(rows, "rest-day multiplier")
+    assert [r.flat_amount for r in rows] == ["2"] and rows[0].source == "S26/S26_DIP_LFT.pdf"
+    assert rows[0].source_ref.startswith("Art. 75 para 2") and "mx_rest_day_work_multiplier" in c.MX_PER_CASE_KEYS

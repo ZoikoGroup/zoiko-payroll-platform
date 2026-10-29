@@ -682,9 +682,10 @@ export const downloadBankTransferFile = async (runId, format, country) => {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) {
+    // Show the server's reason (e.g. "already paid through SEPA") — not a generic failure.
     let detail = "Failed to generate bank transfer file";
     try { detail = (await res.json())?.detail || detail; } catch { /* non-JSON error body */ }
-    throw new Error(detail);
+    throw new Error(typeof detail === "string" ? detail : "Failed to generate bank transfer file");
   }
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") || "";
@@ -2466,6 +2467,12 @@ export const prepareNlTerminationSettlement = (employeeId, payload) => api.post(
 export const approveNlTerminationSettlement = (settlementId) => api.put(`${NL}/termination-settlements/${settlementId}/approve`, {});
 export const getNlRunPreflight = (runId) => api.get(`${NL}/runs/${runId}/preflight`);
 export const getNlRunFingerprint = (runId) => api.get(`${NL}/runs/${runId}/fingerprint`);
+
+// Brazil (ZP-BR-ENG-001 Phase 6)
+const BR = "/api/payroll/brazil";
+export const getBrRunPreflight = (runId) => api.get(`${BR}/runs/${runId}/preflight`);
+export const getBrRunFingerprint = (runId) => api.get(`${BR}/runs/${runId}/fingerprint`);
+
 export const listNlReturns = (taxYear) => nlList(api.get(`${NL}/loonaangifte`, { params: taxYear ? { tax_year: taxYear } : {} }));
 export const getNlReturn = (returnId) => api.get(`${NL}/loonaangifte/${returnId}`);
 export const buildNlReturn = (payload) => api.post(`${NL}/loonaangifte/build`, payload);
@@ -2476,6 +2483,34 @@ export const issueNlAnnualStatement = (statementId) => api.put(`${NL}/annual-sta
 export const listNlPaymentBatches = () => nlList(api.get(`${NL}/payment-batches`));
 export const getNlPaymentBatch = (batchId) => api.get(`${NL}/payment-batches/${batchId}`);
 export const createNlSalaryBatch = (runId, payload = {}) => api.post(`${NL}/runs/${runId}/salary-batch`, payload);
+export const previewNlSalaryBatch = (runId) => api.get(`${NL}/runs/${runId}/salary-batch/preview`);
+export const downloadNlPaymentBatchFile = async (batchId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${NL}/payment-batches/${batchId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((b) => b?.detail).catch(() => null);
+    throw new Error(typeof detail === "string" ? detail : "Could not download the payment file.");
+  }
+  const blob = await res.blob();
+  const match = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `pain001_${batchId}.xml`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return { filename, size: blob.size };
+};
+export const submitNlPaymentBatch = (batchId) => api.post(`${NL}/payment-batches/${batchId}/submit`, {});
+export const recordNlPaymentBankResult = (batchId, outcome) =>
+  api.post(`${NL}/payment-batches/${batchId}/bank-result`, { outcome });
+export const reconcileNlPaymentBatch = (batchId, bankReference) =>
+  api.post(`${NL}/payment-batches/${batchId}/reconcile`, { bank_reference: bankReference });
 export const getNlWkr = (taxYear) => api.get(`${NL}/wkr`, { params: { tax_year: taxYear } });
 
 // ── Mexico (ZP-MX-ENG-001) — organisation API (/api/payroll/mexico), Phase 3 ──
@@ -2529,7 +2564,11 @@ export const approveMxOpeningBalance = (rowId) => api.post(`${MX}/opening-balanc
 // Phase 7 — CFDI 4.0 + Nómina 1.2 lifecycle (generation refused until S28/S30/S4, Secret Manager and a PAC exist).
 export const getMxRunCfdi = (runId) => api.get(`${MX}/runs/${runId}/cfdi`);
 export const generateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/generate`, {});
+// Phase 11c: validate-only preview — never signs, stores or returns the XML.
+export const validateMxCfdi = (runId) => api.post(`${MX}/runs/${runId}/cfdi/validate`, {});
 export const processMxCfdiOutbox = () => api.post(`${MX}/cfdi/outbox/process`, {});
+// Final mile X8: the restore step of MEXICO_UNKNOWN_STATE_RUNBOOK.md (every in-flight CFDI → UNKNOWN, MX-062).
+export const reconcileMxCfdiAfterRestore = () => api.post(`${MX}/cfdi/reconcile`, {});
 export const getMxCfdiDocument = (docId) => api.get(`${MX}/cfdi/documents/${docId}`);
 export const queryMxCfdiStatus = (docId) => api.post(`${MX}/cfdi/documents/${docId}/status-query`, {});
 export const confirmMxCfdiRetry = (docId, reason) => api.post(`${MX}/cfdi/documents/${docId}/confirm-retry`, { reason });
@@ -2572,6 +2611,117 @@ export const recordMxVacation = (employeeId, payload) => api.post(`${MX}/employe
 export const approveMxVacation = (recordId) => api.post(`${MX}/vacation/${recordId}/approve`, {});
 export const withdrawMxVacation = (recordId, reason) => api.post(`${MX}/vacation/${recordId}/withdraw`, { reason });
 export const openMxAguinaldoRun = (year, payDate) => api.post(`${MX}/aguinaldo-runs`, { year, payDate });
+export const getMxTerminationReasons = () => api.get(`${MX}/termination-reasons`);
+export const listMxTerminations = (employeeId) => api.get(`${MX}/employees/${employeeId}/terminations`);
+export const recordMxTermination = (employeeId, payload) => api.post(`${MX}/employees/${employeeId}/terminations`, payload);
+export const approveMxTermination = (terminationId) => api.post(`${MX}/terminations/${terminationId}/approve`, {});
+export const cancelMxTermination = (terminationId, reason) => api.post(`${MX}/terminations/${terminationId}/cancel`, { reason });
+export const openMxFiniquitoRun = (terminationId, payDate) => api.post(`${MX}/terminations/${terminationId}/finiquito-run`, { payDate });
+export const getMxPtuExclusionReasons = () => api.get(`${MX}/ptu/exclusion-reasons`);
+export const listMxPtuCycles = () => api.get(`${MX}/ptu/cycles`);
+export const createMxPtuCycle = (payload) => api.post(`${MX}/ptu/cycles`, payload);
+export const approveMxPtuAmount = (cycleId) => api.post(`${MX}/ptu/cycles/${cycleId}/approve-amount`, {});
+export const recordMxPtuExclusion = (cycleId, payload) => api.post(`${MX}/ptu/cycles/${cycleId}/exclusions`, payload);
+export const approveMxPtuExclusion = (cycleId, employeeId) => api.post(`${MX}/ptu/cycles/${cycleId}/exclusions/${employeeId}/approve`, {});
+export const allocateMxPtu = (cycleId) => api.post(`${MX}/ptu/cycles/${cycleId}/allocate`, {});
+export const approveMxPtuAllocation = (cycleId) => api.post(`${MX}/ptu/cycles/${cycleId}/approve-allocation`, {});
+export const openMxPtuRun = (cycleId, payDate) => api.post(`${MX}/ptu/cycles/${cycleId}/ptu-run`, { payDate });
+export const cancelMxPtuCycle = (cycleId, reason) => api.post(`${MX}/ptu/cycles/${cycleId}/cancel`, { reason });
+export const getMxEmployeePtu = (employeeId) => api.get(`${MX}/employees/${employeeId}/ptu`);
+export const getMxAnnualExclusionReasons = () => api.get(`${MX}/annual-adjustments/exclusion-reasons`);
+export const listMxAnnualAdjustments = () => api.get(`${MX}/annual-adjustments`);
+export const computeMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjustments/compute`, payload);
+export const approveMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjustments/approve`, payload);
+export const applyMxAnnualAdjustment = (payload) => api.post(`${MX}/annual-adjustments/apply`, payload);
+export const recordMxAnnualExclusion = (rowId, payload) => api.post(`${MX}/annual-adjustments/${rowId}/exclusion`, payload);
+export const approveMxAnnualExclusion = (rowId) => api.post(`${MX}/annual-adjustments/${rowId}/exclusion/approve`, {});
+export const getMxEmployeeAnnualAdjustments = (employeeId) => api.get(`${MX}/employees/${employeeId}/annual-adjustments`);
+export const listMxPaymentBatches = (runId) => api.get(`${MX}/payments/batches`, { params: runId ? { run_id: runId } : {} });
+export const createMxPaymentBatch = (runId) => api.post(`${MX}/runs/${runId}/payment-batch`, {});
+export const releaseMxPaymentBatch = (batchId) => api.post(`${MX}/payments/batches/${batchId}/release`, {});
+export const cancelMxPaymentBatch = (batchId, reason) => api.post(`${MX}/payments/batches/${batchId}/cancel`, { reason });
+export const recordMxPaymentOutcome = (itemId, payload) => api.post(`${MX}/payments/items/${itemId}/outcome`, payload);
+export const reissueMxPayments = (batchId) => api.post(`${MX}/payments/batches/${batchId}/reissue`, {});
+
+// The payment worklist (Phase 10a D2): built on request and handed straight to
+// the browser — never stored by Zoiko. It is NOT a bank file (no layout saved).
+export async function exportMxPaymentWorklist(batchId) {
+  const res = await fetch(`${API_BASE_URL}${MX}/payments/batches/${batchId}/worklist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAccessToken()}` },
+    body: "{}",
+  });
+  if (!res.ok) {
+    let message = "The worklist export was refused.";
+    try { const j = await res.json(); message = j.message || j.detail || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `zoiko-mx-payment-worklist-batch-${batchId}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return batchId;
+}
+
+// Mexico payroll journal (Phase 10b, D6): the employer's account mapping
+// (versioned, four-eyes) and the journal of a committed run. The export is a
+// CSV handed to the browser — nothing is posted to any ledger.
+export const listMxJournalMappings = () => api.get(`${MX}/journal/mappings`);
+// Phase 10e: is this organisation a non-binding Mexico pilot? (its banner)
+export const getMxPilotStatus = () => api.get(`${MX}/pilot-status`);
+// Phase 10f (option B): the tenant-run master-data transfer pilot -> live organisation.
+const MXT = "/api/payroll/mexico-transfer";
+export const getMxTransferStatus = () => api.get(`${MXT}/status`);
+export const proposeMxRelease = (payload) => api.post(`${MXT}/releases`, payload);
+export const releaseMxRelease = (id) => api.post(`${MXT}/releases/${id}/release`, {});
+export const revokeMxRelease = (id, reason) => api.post(`${MXT}/releases/${id}/revoke`, { reason });
+export const previewMxImport = (releaseId) => api.get(`${MXT}/releases/${releaseId}/preview`);
+export const proposeMxImport = (releaseId, payload) => api.post(`${MXT}/releases/${releaseId}/import`, payload);
+export const approveMxImport = (id) => api.post(`${MXT}/imports/${id}/approve`, {});
+export const cancelMxImport = (id, reason) => api.post(`${MXT}/imports/${id}/cancel`, { reason });
+export const createMxJournalMapping = (payload) => api.post(`${MX}/journal/mappings`, payload);
+export const approveMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/approve`, {});
+export const withdrawMxJournalMapping = (id) => api.post(`${MX}/journal/mappings/${id}/withdraw`, {});
+export const getMxRunJournal = (runId) => api.get(`${MX}/runs/${runId}/journal`);
+export const voidMxJournalExport = (id, reason) => api.post(`${MX}/journal/exports/${id}/void`, { reason });
+// Mexico parallel payroll (final mile X4, spec §22 G8): a legacy cycle's results
+// (CSV text, read in the browser, never stored) against a committed run.
+export const listMxParallelImports = (runId) => api.get(`${MX}/parallel/imports${runId ? `?run_id=${runId}` : ""}`);
+export const createMxParallelImport = (payload) => api.post(`${MX}/parallel/imports`, payload);
+export const getMxParallelImport = (id) => api.get(`${MX}/parallel/imports/${id}`);
+export const withdrawMxParallelImport = (id) => api.post(`${MX}/parallel/imports/${id}/withdraw`, {});
+export const explainMxParallelDifference = (id, reason) => api.post(`${MX}/parallel/differences/${id}/explain`, { reason });
+export const acceptMxParallelDifference = (id) => api.post(`${MX}/parallel/differences/${id}/accept`, {});
+
+export async function exportMxRunJournal(runId) {
+  const res = await fetch(`${API_BASE_URL}${MX}/runs/${runId}/journal/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAccessToken()}` },
+    body: "{}",
+  });
+  if (!res.ok) {
+    let message = "The journal export was refused.";
+    try { const j = await res.json(); message = j.message || j.detail || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const name = (disposition.match(/filename="([^"]+)"/) || [])[1] || `zoiko-mx-journal-run-${runId}.csv`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return runId;
+}
 // kind: movements | liabilities | isn-returns | sua-periods
 export const markMxAuthorityUnknown = (kind, id, note) => api.post(`${MX}/authorities/${kind}/${id}/unknown`, { note });
 export const checkMxAuthorityStatus = (kind, id, found, reference) =>
@@ -2617,3 +2767,106 @@ export async function uploadMxCertificate(credentialId, file) {
   if (!res.ok) throw new Error(data?.message || data?.detail || "The certificate was refused.");
   return data;
 }
+
+// ── Brazil (ZP-BR-ENG-001) — organisation API (/api/payroll/brazil), Phase 3 ──
+// Employer onboarding for YOUR organisation only: legal employers (CNPJ-root
+// version chains), establishments, RAT/FAP per year, CPRB option per year,
+// credential references (gcp-sm:// only — never a key, password or the A1
+// PKCS#12 bundle) and readiness on an explicit date (`on`).
+const BR_ORG = "/api/payroll/brazil";
+const brList = async (promise) => {
+  const res = await promise;
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listBrEmployers = () => brList(api.get(`${BR_ORG}/employers`));
+export const getBrEmployer = (employerId) => api.get(`${BR_ORG}/employers/${employerId}`);
+export const createBrEmployer = (payload) => api.post(`${BR_ORG}/employers`, payload);
+export const createBrEmployerVersion = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/versions`, payload);
+export const createBrEstablishment = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/establishments`, payload);
+export const deactivateBrEstablishment = (id, activeTo) => api.put(`${BR_ORG}/establishments/${id}/deactivate`, { activeTo });
+export const createBrRiskAssignment = (establishmentId, payload) =>
+  api.post(`${BR_ORG}/establishments/${establishmentId}/risk-assignments`, payload);
+export const activateBrRiskAssignment = (riskId) => api.put(`${BR_ORG}/risk-assignments/${riskId}/activate`, {});
+export const createBrCprbOption = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/cprb-options`, payload);
+export const createBrCredential = (employerId, payload) => api.post(`${BR_ORG}/employers/${employerId}/credentials`, payload);
+export const revokeBrCredential = (credentialId) => api.put(`${BR_ORG}/credentials/${credentialId}/revoke`, {});
+export const getBrReadinessOn = (on) => api.get(`${BR_ORG}/readiness`, { params: { on } });
+
+// Phase 4b — employees. The profile itself is saved through
+// createEmployeeStatutoryProfile (shared route); these read the employee's
+// Brazilian record and readiness, and write the child records.
+export const getBrEmployeeRecord = (employeeId) => api.get(`${BR_ORG}/employees/${employeeId}`);
+export const getBrEmployeeReadiness = (employeeId, on) =>
+  api.get(`${BR_ORG}/employees/${employeeId}/readiness`, { params: { on } });
+export const recordBrConcurrentInss = (employeeId, payload) =>
+  api.post(`${BR_ORG}/employees/${employeeId}/concurrent-inss-declarations`, payload);
+export const recordBrAlimonyOrder = (employeeId, payload) =>
+  api.post(`${BR_ORG}/employees/${employeeId}/alimony-orders`, payload);
+export const closeBrAlimonyOrder = (orderId, payload) =>
+  api.put(`${BR_ORG}/alimony-orders/${orderId}/close`, payload);
+export const recordBrValeTransporte = (employeeId, payload) =>
+  api.post(`${BR_ORG}/employees/${employeeId}/vale-transporte-elections`, payload);
+
+// The PUBLIC .cer is sent as the raw request body (in memory, 16 KB cap).
+export async function uploadBrCertificate(credentialId, file) {
+  const res = await fetch(`${API_BASE_URL}${BR_ORG}/credentials/${credentialId}/certificate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${getAccessToken()}` },
+    body: await file.arrayBuffer(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || data?.detail || "The certificate was refused.");
+  return data;
+}
+
+// ── South Africa (ZP-ZA-ENG-001; "ZA" — "SA" above is Saudi Arabia) ────────
+// Tenant routes in tenant_statutory_router.py. Every rule (four-eyes approval,
+// evidence, dormancy while ZA_TENANT_ONBOARDING_ENABLED is off) is enforced
+// server-side; these calls only fetch or submit operator input. Rows come back
+// with snake_case keys, exactly as the router serialises them.
+const ZA = "/api/payroll/south-africa";
+const zaList = (res) => (Array.isArray(res) ? res : res?.data || []);
+export const listZaEmployerRegistrations = async () => zaList(await api.get(`${ZA}/employer-registrations`));
+export const createZaEmployerRegistration = (payload) => api.post(`${ZA}/employer-registrations`, payload);
+export const approveZaEmployerRegistration = (registrationId) =>
+  api.post(`${ZA}/employer-registrations/${registrationId}/approve`, {});
+export const listZaDirectives = async (employeeId) => zaList(await api.get(`${ZA}/employees/${employeeId}/directives`));
+export const captureZaDirective = (employeeId, payload) => api.post(`${ZA}/employees/${employeeId}/directives`, payload);
+export const approveZaDirective = (directiveId) => api.post(`${ZA}/directives/${directiveId}/approve`, {});
+export const revokeZaDirective = (directiveId) => api.post(`${ZA}/directives/${directiveId}/revoke`, {});
+export const listZaEtiLedger = async (employeeId) =>
+  zaList(await api.get(`${ZA}/eti-ledger`, { params: employeeId ? { employee_id: employeeId } : {} }));
+// Phase 8 — SARS filing and reconciliation (export-and-evidence, ZA-002).
+export const previewZaEmp201 = (periodKey) => api.get(`${ZA}/emp201/${periodKey}`);
+export const recordZaEmp201 = (periodKey) => api.post(`${ZA}/emp201/${periodKey}`, {});
+export const previewZaReconciliation = (period) => api.get(`${ZA}/reconciliation/${period}`);
+export const recordZaReconciliation = (period) => api.post(`${ZA}/reconciliation/${period}`, {});
+export const listZaVariances = async (period) => zaList(await api.get(`${ZA}/reconciliation/${period}/variances`));
+export const proposeZaVariance = (period, payload) => api.post(`${ZA}/reconciliation/${period}/variances`, payload);
+export const approveZaVariance = (varianceId) => api.post(`${ZA}/variances/${varianceId}/approve`, {});
+export const previewZaCertificates = (period) => api.get(`${ZA}/certificates/${period}`);
+export const listZaArtifacts = async (artifactType) =>
+  zaList(await api.get(`${ZA}/artifacts`, { params: artifactType ? { artifact_type: artifactType } : {} }));
+export const approveZaArtifact = (artifactId) => api.post(`${ZA}/artifacts/${artifactId}/approve`, {});
+export const submitZaArtifact = (artifactId, channel) => api.post(`${ZA}/artifacts/${artifactId}/submit`, { channel });
+export const recordZaArtifactReceipt = (artifactId, payload) => api.post(`${ZA}/artifacts/${artifactId}/receipt`, payload);
+export const listZaSarsPayments = async () => zaList(await api.get(`${ZA}/sars-payments`));
+export const recordZaSarsPayment = (payload) => api.post(`${ZA}/sars-payments`, payload);
+export const reverseZaSarsPayment = (paymentId) => api.post(`${ZA}/sars-payments/${paymentId}/reverse`, {});
+export const getZaCoidaEvidence = (assessmentYear) => api.get(`${ZA}/coida-evidence/${assessmentYear}`);
+// Phase 9 — four-eyes exceptions, overrides, deductions, corrections, journal.
+// Every four-eyes rule (preparer != approver, maker != approver) is enforced
+// server-side; these calls only submit the operator's decision.
+export const listZaRunExceptions = async (runId) => zaList(await api.get(`${ZA}/runs/${runId}/exceptions`));
+export const approveZaRunException = (runId, key, note) =>
+  api.post(`${ZA}/runs/${runId}/exceptions/approve`, { key, note });
+export const listZaOverrides = async (runId) => zaList(await api.get(`${ZA}/runs/${runId}/overrides`));
+export const proposeZaOverride = (runId, payload) => api.post(`${ZA}/runs/${runId}/overrides`, payload);
+export const approveZaOverride = (overrideId) => api.post(`${ZA}/overrides/${overrideId}/approve`, {});
+export const withdrawZaOverride = (overrideId) => api.post(`${ZA}/overrides/${overrideId}/withdraw`, {});
+export const listZaDeductionOrders = async (employeeId) =>
+  zaList(await api.get(`${ZA}/employees/${employeeId}/deduction-orders`));
+export const recordZaDeductionOrder = (employeeId, payload) =>
+  api.post(`${ZA}/employees/${employeeId}/deduction-orders`, payload);
+export const createZaCorrection = (payslipId, payload) => api.post(`${ZA}/payslips/${payslipId}/corrections`, payload);
+export const getZaRunJournal = (runId) => api.get(`${ZA}/runs/${runId}/journal`);

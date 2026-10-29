@@ -41,8 +41,12 @@ def test_on_is_required_and_no_profile_is_not_started(db):
     assert _items(r)["mx_profile"]["status"] == "NOT_STARTED" and r["liveEligible"] is False
 
 
-def test_items_and_gates_while_content_is_empty(db):
+def test_items_and_gates_while_content_is_empty(db, monkeypatch):
     from app.modules.payroll import mexico_employer_service as esvc
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    for table in ("MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES"):      # empty content (Batch 2 transcribed S9)
+        monkeypatch.setattr(c, table, ())
 
     t = make_org(db)
     emp = new_mx_employee(db, t.org.id)
@@ -111,6 +115,27 @@ def test_employer_readiness_shows_the_employee_exceptions_line(db):
     assert line["status"] == "BLOCKED" and "1 of 1" in line["detail"] and line["gateMapping"] == "unmapped"
 
 
+def test_super_admin_readiness_never_evaluates_the_employee_exceptions_line(db):
+    """ZP-PRIV: the same employer seen by a platform principal (masked view and
+    the per-gate summary) does not read employee rows — the line is not
+    evaluated, so it is never PASS and the employer is never live-eligible."""
+    from app.modules.payroll import mexico_employer_service as esvc
+
+    t = make_org(db)
+    emp = new_mx_employee(db, t.org.id)
+    w = mx_workplace(db, t.org.id)
+    save_mx_profile(db, emp, t.org.id, mx_establishment_id=w.establishment["id"])
+    on = date(2026, 3, 1)
+    org_view = esvc.organisation_readiness(db, t.org.id, on)["employers"][0]
+    sa_view = esvc.organisation_readiness(db, t.org.id, on, masked=True)["employers"][0]
+    line = lambda r: next(i for i in r["items"] if i["key"] == "employee_exceptions")  # noqa: E731
+    assert line(org_view)["status"] == "BLOCKED" and "1 of 1" in line(org_view)["detail"]
+    assert line(sa_view)["status"] == "NOT_STARTED" and "not shown to platform users" in line(sa_view)["detail"]
+    assert "1 of 1" not in str(sa_view) and sa_view["liveEligible"] is False
+    summary = esvc.readiness_summary(db, on)
+    assert summary["employers"][0]["liveEligible"] is False
+
+
 def test_readiness_routes_org_and_super_admin(db):
     t = make_org(db)
     emp = new_mx_employee(db, t.org.id)
@@ -119,6 +144,6 @@ def test_readiness_routes_org_and_super_admin(db):
         assert c.get(f"{ORG_BASE}/employees/{emp.id}/readiness").status_code == 422
         assert c.get(f"{ORG_BASE}/employees/{emp.id}/readiness", params={"on": "2026-03-01"}).status_code == 200
     with http(db, SUPER_ADMIN) as c:
+        # ZP-PRIV: one employee's record is worker-level data — Super Admin is refused.
         r = c.get(f"{SA_BASE}/employees/{emp.id}", params={"organization_id": t.org.id, "on": "2026-03-01"})
-        assert r.status_code == 200 and r.json()["readiness"]["liveEligible"] is False
-        assert all("*" in v for v in r.json()["identifiers"].values())
+        assert r.status_code == 403 and "RFC" not in r.text and "CURP" not in r.text

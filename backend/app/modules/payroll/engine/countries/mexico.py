@@ -13,9 +13,10 @@ reason at once) → hour-based lines → classification → SBC → IMSS / CEAV 
 INFONAVIT → ISR + subsidy → ISN → entitlements → result. Every rate, tariff,
 threshold and rule is a content row; a missing one BLOCKS (MX-001/MX-003).
 
-Not reachable in production yet: mexico_service.calc_inputs — the only hook
-that builds a real Mexican context — still raises MX_ENGINE_NOT_IMPLEMENTED
-until Phase 6 wires the run.
+Reached through mexico_service.calc_inputs (Phase 6: the guarded input
+builder in mexico_run_service). In production Mexico is dormant, so every path
+into a Mexican run refuses with MX_DORMANT; with the content tables still empty
+every calculation BLOCKS on its first missing row (gap register §B).
 
 Returns the generic keys (`tds` = ISR after subsidy; `mx_employee_total` =
 IMSS employee branches + INFONAVIT credit, summed by engine/standard.py) and
@@ -28,10 +29,15 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ..jurisdictions.mexico import (ceav, classification, entitlements, imss, infonavit, isn, isr, labor, preflight,
-                                    sbc, special_pay, subsidy, trace)
-from ..jurisdictions.mexico.errors import MexicoCalculationBlockedError, MXBlock  # noqa: F401  (re-exported)
+                                    sbc, special_pay, subsidy, termination, trace)
+from ..jurisdictions.mexico import annual_adjustment
+from . import mexico_content as _content        # W3-3: the contribution-days rule
+from ..jurisdictions.mexico.errors import (  # noqa: F401  (re-exported)
+    MexicoActionRefusedError, MexicoCalculationBlockedError, MXBlock, MXRefuse,
+)
 
-__all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoCalculationBlockedError", "MXBlock", "calculate"]
+__all__ = ["ENGINE_VERSION", "MX_NO_FALLBACK", "MexicoActionRefusedError", "MexicoCalculationBlockedError",
+           "MXBlock", "MXRefuse", "calculate"]
 
 _COUNTRY = "MX"
 ENGINE_VERSION = "MX-ENGINE-2026.1"
@@ -74,11 +80,22 @@ def _special_run(ctx, pre) -> dict:
     gross = sum((l["amount"] for l in lines), _ZERO)
     if ctx.gross is not None and Decimal(str(ctx.gross)) != gross:
         raise MXBlock("MX_GROSS_MISMATCH", f"the payslip gross {ctx.gross} is not the sum of its special lines {gross}")
-    concept = special_pay.RUN_CONCEPT[pre["special_run"]]
-    rule = special_pay.rule(concept)
     taxable = sum((l["isr_taxable"] for l in lines), _ZERO)
     exempt = sum((l["isr_exempt"] for l in lines), _ZERO)
-    withheld = rnd(special_pay._dec(rule.standalone_isr(taxable, pre["facts"]), "ISR amount"))
+    if pre["special_run"] == "FINIQUITO":
+        # Phase 9c: the finiquito's lines are withheld together by the
+        # transcribed finiquito rule (S24 / S25), per concept.
+        concept = "FINIQUITO"
+        by_concept = {}
+        for l in lines:
+            by_concept[l["kind"]] = by_concept.get(l["kind"], _ZERO) + l["isr_taxable"]
+        withheld = rnd(termination.isr(by_concept, {**pre["facts"], "lines": lines}))
+        rule_source = termination.rule_source()
+    else:
+        concept = special_pay.RUN_CONCEPTS[pre["special_run"]][0]
+        rule = special_pay.rule(concept)
+        withheld = rnd(special_pay._dec(rule.standalone_isr(taxable, pre["facts"]), "ISR amount"))
+        rule_source = f"{rule.source} {rule.source_ref}"
     if withheld < _ZERO:
         raise MXBlock("MX_SPECIAL_PAY_RULE_INVALID", f"the {concept} rule returned a negative withholding")
     state_tax = isn.employer(lines, work_state, ctx.mx_isn_state_pack)
@@ -94,8 +111,7 @@ def _special_run(ctx, pre) -> dict:
         "concepts": trace.concepts(lines), "rounding_rule": rnd.text,
         "content_rows": trace.content_rows(content, state_tax["content"]), "pack": getattr(ctx, "mx_pack", None),
         "special": {"run_type": pre["special_run"], "concept": concept, "isr_exempt": exempt,
-                    "rule_source": f"{rule.source} {rule.source_ref}",
-                    "detail": getattr(ctx, "mx_special_detail", None)},
+                    "rule_source": rule_source, "detail": getattr(ctx, "mx_special_detail", None)},
     }
     return {"tds": withheld, "mx_employee_total": _ZERO, "mx_result": trace.build(**result)}
 
@@ -112,7 +128,9 @@ def _calculate(ctx) -> dict:
     min_wage = labor.minimum_wage(content, daily_salary, zone, preflight.fact(profile, "mx_professional_min_code"))
     week = labor.workweek(content, policy)
     hours = labor.hour_lines(content, ctx.mx_hours, policy, daily_salary)
-    lines = pre["lines"] + classification.classify(hours["lines"], ctx.mx_classifications, on, work_state)
+    hour_facts = {**(pre.get("facts") or {}), "overtime_weeks": hours["overtime"],          # W3-4: Art. 93 I / XIV
+                  "sundays_worked": (hours["sunday"] or {}).get("sundays", 0)}
+    lines = pre["lines"] + classification.classify(hours["lines"], ctx.mx_classifications, on, work_state, hour_facts)
     gross = sum((l["amount"] for l in lines), _ZERO)
     if ctx.gross is not None and Decimal(str(ctx.gross)) != gross:
         raise MXBlock("MX_GROSS_MISMATCH",
@@ -123,6 +141,12 @@ def _calculate(ctx) -> dict:
     base = sbc.compute(daily_salary=daily_salary, policy=policy, seniority_date=preflight.fact(profile, "mx_seniority_date"),
                        on=on, lines=lines, accumulator=ctx.mx_variable_accumulator, segments=period.segments, zone=zone)
     segs = base["segments"]
+    if period.absence_days > 0 or period.incapacity_days > 0:                 # W3-3: LSS Art. 31 per branch
+        rule = _content.MX_CONTRIBUTION_DAYS_RULE
+        for seg in segs:
+            seg["branch_days"] = {b: rule.branch_days(b, seg["days"], period.absence_days, period.incapacity_days)
+                                  for b in ("EM_FIXED_QUOTA", "EM_EXCESS", "EM_CASH", "EM_PENSIONER", "IV",
+                                            "GUARDERIAS", "RETIRO", "CEAV", "RIESGOS_TRABAJO", "INFONAVIT")}
     premium = imss.risk_premium_rate(ctx.mx_risk_premium, ctx.mx_registration, segs)
     social = imss.contributions(segs, premium)
     ceav_er = ceav.employer(segs, zone)
@@ -132,6 +156,14 @@ def _calculate(ctx) -> dict:
     # ISR and employment subsidy (pay-date content, MX-013).
     taxable = sum((l["isr_taxable"] for l in lines), _ZERO)
     tax = isr.withholding(taxable, content.isr_tariff(period.tariff))
+    # W3-5 (gap A16): LISR Art. 96 para 1 — no withholding when the worker is paid only the area minimum wage.
+    min_wage_only = (content.has("mx_min_wage_no_withholding_rule")
+                     and content.text("mx_min_wage_no_withholding_rule").upper() == "NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY"
+                     and not preflight.fact(profile, "mx_professional_min_code")
+                     and daily_salary <= content.min_wage(zone)
+                     and all(l["kind"] == classification.ORDINARY_SALARY for l in lines))
+    if min_wage_only:
+        tax = {**tax, "isr": _ZERO, "min_wage_only": True}
     sub = subsidy.subsidy(content, period.tariff, period.days_paid, taxable, ctx.mx_month_to_date)
     net_isr = subsidy.offset(content, rnd(tax["isr"]), rnd(sub["amount"]))
 
@@ -146,6 +178,20 @@ def _calculate(ctx) -> dict:
     imss_er = sum((r["amount"] for r in imss_rows if r["side"] == "employer"), _ZERO)
     employee_total = imss_ee + credit_ee
     withholding = net_isr["withholding"]
+    # Phase 9e: an approved annual ISR adjustment of an ended fiscal year,
+    # applied by the transcribed rule as its own section (MX-010 — the year's
+    # payslips are never edited).
+    annual = None
+    adjustment = getattr(ctx, "mx_annual_adjustment", None)
+    if adjustment:
+        difference = Decimal(str(adjustment["difference"]))
+        applied = annual_adjustment.apply_in_run(withholding, difference, {"pay_date": on, "content": content,
+                                                                           "fiscal_year": adjustment["fiscal_year"]})
+        annual = {"adjustment_id": adjustment["id"], "fiscal_year": adjustment["fiscal_year"],
+                  "difference": difference, "period_withheld": withholding, "withheld": applied["withheld"],
+                  "change": applied["change"], "carry_forward": applied["carry_forward"],
+                  "rule_source": applied["rule_source"]}
+        withholding = applied["withheld"]
 
     result = {
         "engine_version": ENGINE_VERSION, "pay_date": on, "tariff_period": period.tariff,
@@ -161,11 +207,14 @@ def _calculate(ctx) -> dict:
         "infonavit_credit": credit_ee, "infonavit_credit_lines": credits["lines"],
         "isn": {**state_tax, "amount": isn_er},
         "employee_total": employee_total, "employer_total": imss_er + housing_er + isn_er,
-        "labor": {"minimum_wage": min_wage, "workweek": week, "overtime": hours["overtime"], "sunday": hours["sunday"]},
+        "labor": {"minimum_wage": min_wage, "workweek": week, "overtime": hours["overtime"], "sunday": hours["sunday"],
+                  "rest_day": hours.get("rest_day")},
         "entitlements": benefits, "concepts": trace.concepts(lines),
         "rounding_rule": rnd.text,
         "content_rows": trace.content_rows(content, *[s["content"] for s in segs if s["content"] is not content],
                                            state_tax["content"]),
         "pack": getattr(ctx, "mx_pack", None),
     }
+    if annual is not None:
+        result["annual_adjustment"] = annual
     return {"tds": withholding, "mx_employee_total": employee_total, "mx_result": trace.build(**result)}

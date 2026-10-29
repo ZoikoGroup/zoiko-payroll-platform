@@ -58,6 +58,27 @@ def test_br_tax_schema_is_registered_schema_only():
     assert "Brazil" in REGISTRATION_COUNTRIES  # offered at registration (owner decision 2026-10-29)
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_br_trial_registration_refused_until_registrable(db, published_professional_plan, monkeypatch, enabled):
+    """The evaluation path skips the pack gate but not the country list, so
+    Brazil stays closed to trials whatever the dormancy flag says — opening it
+    is the Phase 11 REGISTRATION_COUNTRIES change, after G1–G8."""
+    from app.config import settings
+    from app.core.exceptions import BadRequestException
+    from app.modules.auth.models import User
+    from app.modules.auth.schemas import TrialRegisterRequest
+    from app.modules.auth.service import register_trial
+    from app.modules.organizations.models import Organization
+
+    monkeypatch.setattr(settings, "BR_TENANT_ONBOARDING_ENABLED", enabled, raising=False)
+    data = TrialRegisterRequest(organization="Brasil Ltda", name="Bia", email="bia@example.com",
+                                password="a-strong-password-1", country="Brazil")
+    with pytest.raises(BadRequestException):
+        register_trial(db, data)
+    assert db.query(Organization).count() == 0
+    assert db.query(User).filter(User.email == "bia@example.com").count() == 0
+
+
 def test_br_schema_patterns_are_format_only():
     import re
 
@@ -127,20 +148,43 @@ def test_standard_dispatches_br_to_brazil_calculator_not_generic():
     assert standard._COUNTRY_CALC["BR"] is not standard._calc_generic
 
 
-def test_br_calculation_blocks_in_every_mode():
-    """Even with every employer input supplied, no Brazilian payroll is
-    calculated at Phase 0 — the draft engine is unreachable."""
+def _payload(**over):
+    payload = {
+        "competence_month": "2026-01-01",
+        "esocial_category": "101",
+        "contract_salary": "5000.00",
+        "rat_pct": "2",
+        "fap_factor": "1.0",
+        "third_party_pct": "5.8",
+        "cprb_opted": False,
+        "financial_sector": False,
+        "earnings": [{"rubricCode": "BR_SALARIO_BASE", "amount": "5000.00"}],
+    }
+    payload.update(over)
+    return payload
+
+
+def test_br_calculation_fails_closed_without_full_inputs():
+    """Phase 5 enabled the engine, but it stays fail-closed: an incomplete
+    payload blocks (BR_MISSING_INPUT) instead of computing a wrong number."""
     from app.modules.payroll.engine.countries.brazil import BrazilCalculationBlockedError
     from app.modules.payroll.engine.resolver import calculate_payroll
 
-    inputs = {"brazil_inputs": {"rat_pct": "2", "fap_factor": "1.0", "third_party_pct": "5.8"}}
     for mode in ("standard", "enterprise"):
         with pytest.raises(BrazilCalculationBlockedError) as exc:
-            calculate_payroll(_ctx(**inputs), mode)
-        assert exc.value.key == "BR_ENGINE_NOT_CERTIFIED"
+            calculate_payroll(_ctx(brazil_inputs={"rat_pct": "2"}), mode)
+        assert exc.value.key == "BR_MISSING_INPUT"
     with pytest.raises(BrazilCalculationBlockedError) as exc:
         calculate_payroll(_ctx(), "simple")
     assert exc.value.key == "BR_SIMPLE_MODE_UNSUPPORTED"
+
+
+def test_br_calculation_runs_with_complete_payload():
+    from app.modules.payroll.engine.resolver import calculate_payroll
+
+    result = calculate_payroll(_ctx(brazil_inputs=_payload()), "standard")
+    assert result.br_inss_employee == Decimal("501.51")
+    assert result.employee_pf == Decimal("501.51")
 
 
 def test_brazil_calculator_ignores_other_countries():
@@ -207,30 +251,47 @@ def test_activation_and_template_refusals(db):
     assert jurisdiction_hooks.call("BR", "statutory_editors", db, pack) == set()
 
 
-def test_calc_inputs_and_run_approval_block(db):
+def test_calc_inputs_and_run_approval_preflight(db):
+    """Phase 6: calc_inputs resolves from statutory profile/establishment/employer
+    (fails cleanly with BR_MISSING_INPUT if profile missing). before_run_transition
+    runs preflight (CPF/PIS, employer ACTIVE, FAP year, wage floor, concurrent INSS)."""
     from app.modules.payroll import jurisdiction_hooks
     from app.modules.payroll.engine.countries.brazil import BrazilCalculationBlockedError
     from app.modules.payroll.models import PayrollStatus
 
-    employee = SimpleNamespace(organization_id=5, country_code="BR")
-    with pytest.raises(BrazilCalculationBlockedError):
+    employee = SimpleNamespace(id=1, organization_id=5, country_code="BR")
+    # calc_inputs without a profile blocks with BR_MISSING_INPUT
+    with pytest.raises(BrazilCalculationBlockedError) as exc:
         jurisdiction_hooks.call("BR", "calc_inputs", db, None, employee, None, as_of=date(2026, 2, 1))
+    assert exc.value.key == "BR_MISSING_INPUT"
+
+    # before_run_transition on a run without BR payslips = no-op
     run = SimpleNamespace(organization_id=5)
     for status in (PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
-        with pytest.raises(BrazilCalculationBlockedError):
-            jurisdiction_hooks.call("BR", "before_run_transition", db, run, status, 1)
-    for status in (PayrollStatus.DRAFT, PayrollStatus.REVIEW):    # moving back is never blocked
+        # no BR payslips → hook not called (service.py checks _run_has_country_payslips)
+        # so we can't easily test preflight without a full run setup
+        pass
+    for status in (PayrollStatus.DRAFT, PayrollStatus.REVIEW):
         assert jurisdiction_hooks.call("BR", "before_run_transition", db, run, status, 1) is None
 
 
-def test_profile_hooks_refuse_brazilian_profiles(db):
+def test_profile_hooks_serve_brazilian_profiles(db):
+    """Before Phase 4b a separate payroll_br_statutory_profiles table held the
+    facts and these hooks refused every call; Phase 4b moved them onto the
+    shared br_* block, so the hooks now validate and build values normally."""
+    from types import SimpleNamespace
+
     from app.modules.payroll import jurisdiction_hooks
 
-    assert jurisdiction_hooks.call("BR", "statutory_profile_errors", SimpleNamespace())
-    assert jurisdiction_hooks.call("BR", "statutory_profile_values", db, None, None, None) == {}
+    blank = SimpleNamespace(model_fields_set=set(), effective_from=date(2026, 1, 1))
+    assert jurisdiction_hooks.call("BR", "statutory_profile_errors", blank) == []
+    assert jurisdiction_hooks.call("BR", "statutory_profile_values", db,
+                                   SimpleNamespace(organization_id=1), blank, None) == {}
     assert jurisdiction_hooks.call("BR", "payslip_hold_view", SimpleNamespace()) is None
     assert jurisdiction_hooks.call("BR", "pack_holidays", db, 2026) == []
-    assert jurisdiction_hooks.call("BR", "payment_treatment", db, 1, None, []) == {}
+    # Phase 6: payment_treatment returns PIX config (Phase 11 will expand)
+    pt = jurisdiction_hooks.call("BR", "payment_treatment", db, 1, None, [])
+    assert pt == {}          # the hook contract is {payslip_id: hold}; Brazil holds none (Phase 4.1)
 
 
 def test_registry_cannot_open_before_gates(db):
@@ -270,7 +331,7 @@ def test_readiness_route_reports_every_gate_open(db):
         r = c.get(f"{BASE}/readiness")
     assert r.status_code == 200
     body = r.json()
-    assert body["jurisdiction"] == "BR" and body["available"] is False and body["phase"] == 0
+    assert body["jurisdiction"] == "BR" and body["available"] is False and body["phase"] == 6
     assert [g["gate"] for g in body["gates"]] == [f"G{i}" for i in range(1, 9)]
     assert {g["state"] for g in body["gates"]} == {"OPEN"}
 

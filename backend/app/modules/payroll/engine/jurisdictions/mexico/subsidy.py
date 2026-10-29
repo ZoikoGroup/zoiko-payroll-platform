@@ -25,6 +25,8 @@ from .errors import MXBlock
 
 _ZERO = Decimal("0")
 REMAINDER_RULES = ("NOT_PAYABLE", "CASH_PAYABLE")
+# W3-1: how the month's payments are capped at the monthly amount (mx_subsidy_monthly_cap_rule).
+MONTHLY_CAP_RULES = ("CAP_AT_MONTHLY_AMOUNT",)
 
 
 def _mtd(month_to_date, field: str) -> Decimal:
@@ -55,11 +57,17 @@ def subsidy(content, tariff: str, days_paid: Decimal, taxable: Decimal, month_to
             raise MXBlock("MX_CONTENT_INVALID", "mx_subsidy_period_days_divisor must be more than zero")
         amount = monthly / divisor * days_paid
     applied = _mtd(month_to_date, "subsidy_applied")
+    capped = False
     if applied + amount > monthly:
-        raise MXBlock("MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING",
-                      "the month's subsidy would exceed the monthly amount and no capping rule is transcribed (S3)")
+        if not content.has("mx_subsidy_monthly_cap_rule"):
+            raise MXBlock("MX_SUBSIDY_MONTHLY_CAP_RULE_MISSING",
+                          "the month's subsidy would exceed the monthly amount and no capping rule is transcribed (S3)")
+        rule = content.text("mx_subsidy_monthly_cap_rule").upper()
+        if rule not in MONTHLY_CAP_RULES:
+            raise MXBlock("MX_RULE_UNRECOGNISED", f"mx_subsidy_monthly_cap_rule {rule!r} is not one of {MONTHLY_CAP_RULES}")
+        amount, capped = max(monthly - applied, _ZERO), True             # S3 Art. Segundo ¶4
     return {"eligible": True, "amount": amount, "monthly_amount": monthly, "month_income": month_income,
-            "ceiling": ceiling, "divisor": divisor}
+            "ceiling": ceiling, "divisor": divisor, "capped": capped}
 
 
 def offset(content, isr: Decimal, subsidy_amount: Decimal) -> dict:

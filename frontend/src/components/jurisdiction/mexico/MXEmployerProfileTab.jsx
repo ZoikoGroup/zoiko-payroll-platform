@@ -7,6 +7,7 @@ import {
   MXCredentialRefsPanel, MXIsnRegistrationsPanel, MXLaborPolicyPanel, MXLegalEntityPanel, MXRegistrationsPanel,
 } from "./employer/MXEmployerPanels";
 import MXEmployerReadiness from "./employer/MXEmployerReadiness";
+import MXCsdExpiryAlerts from "./employer/MXCsdExpiryAlerts";
 
 // Super Admin view of one organisation's Mexico employers (spec §11 A–H) —
 // READ-ONLY (Phase 3 Q5): the tenant authors its own employer facts in
@@ -23,12 +24,18 @@ export default function MXEmployerProfileTab({ orgId }) {
   const [readiness, readinessError] = useLoad(
     () => (orgId ? getMxSaEmployerReadiness(orgId, on) : Promise.resolve(null)), [orgId, on]);
   if (!orgId) {
-    return <div className={card}><p className="text-[13px] text-foreground-muted">Select an organisation above to see its Mexico employers.</p></div>;
+    return (
+      <div className="flex flex-col gap-4">
+        <MXCsdExpiryAlerts on={on} />
+        <div className={card}><p className="text-[13px] text-foreground-muted">Select an organisation above to see its Mexico employers.</p></div>
+      </div>
+    );
   }
   const shown = detail && detail.employerId === employerId ? detail : null;
   const mine = readiness?.employers?.find((e) => e.employerId === employerId);
   return (
     <div className="flex flex-col gap-4" data-testid="mx-sa-employer">
+      <MXCsdExpiryAlerts on={on} />
       <div className={card}>
         <p className="text-[12px] text-foreground-muted">
           Read-only. The organisation records its legal employers, registrations, labour policy and credential references

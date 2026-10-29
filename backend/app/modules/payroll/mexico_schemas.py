@@ -17,15 +17,45 @@ class MXGateState(BaseModel):
     gate: str
     label: str
     state: str  # OPEN / SUBMITTED / SIGNED
+    evidenceTag: Optional[str] = None
+    artifactId: Optional[int] = None
+    definition: Optional[str] = None
+    checklist: Optional[str] = None
+
+
+class MXOwnerDecision(BaseModel):
+    key: str
+    label: str
+    evidenceTag: str
+    state: str  # OPEN / SUBMITTED / RECORDED
+    artifactId: Optional[int] = None
+
+
+class MXRetentionCategory(BaseModel):
+    category: str
+    label: str
+    state: str
+    blocker: Optional[str] = None
 
 
 class MXReadinessResponse(BaseModel):
     jurisdiction: str
     spec: str
     available: bool
+    level: str = "DORMANT"                 # DORMANT / PILOT (n organisations) / AVAILABLE
+    registry: Optional[str] = None          # PLANNED / AVAILABLE
+    pilotGrants: List[dict] = []
+    pilotPreconditions: List[dict] = []
+    gaPreconditions: List[dict] = []
+    onboardingEnabled: bool = False
+    onboardingPaused: bool = False          # Phase 10g: no NEW Mexican organisations
     engineVersion: str
     phase: int
     gates: List[MXGateState]
+    signedGates: int = 0
+    decisions: List[MXOwnerDecision] = []
+    retention: List[MXRetentionCategory] = []
+    documents: Dict[str, str] = {}
     note: str
 
 
@@ -86,6 +116,22 @@ class MXCatalogEntryCreate(BaseModel):
     def to_service(self) -> dict:
         return {"catalog_name": self.catalogName, "code": self.code, "description": self.description,
                 "valid_from": self.validFrom, "valid_to": self.validTo}
+
+
+class MXPinnedSetLoad(BaseModel):
+    setId: str
+
+
+class MXSystemConceptCreate(BaseModel):
+    releaseId: int
+    conceptKey: str
+    nodeType: str
+    satCode: str
+    sourceRef: str
+
+    def to_service(self) -> dict:
+        return {"release_id": self.releaseId, "concept_key": self.conceptKey, "node_type": self.nodeType,
+                "sat_code": self.satCode, "source_ref": self.sourceRef}
 
 
 # ── Phase 3 — employer onboarding (organisation API, /api/payroll/mexico) ────

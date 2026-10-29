@@ -139,7 +139,7 @@ def test_service_health_reports_all_six_jobs(db):
         "token_cleanup_sweep",
     }
     for job in report["scheduled_jobs"]:
-        assert job["state"] in {"unknown", "healthy", "error"}
+        assert job["state"] in {"unknown", "healthy", "stale", "error"}   # stale: a sweep run earlier in this process missed its schedule
 
 
 # ── Integrations ───────────────────────────────────────────────────────────

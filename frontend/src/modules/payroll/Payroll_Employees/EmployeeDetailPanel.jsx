@@ -14,7 +14,11 @@ import ItalyStatutoryProfilePanel from "./ItalyStatutoryProfilePanel";
 import HKStatutoryProfilePanel from "./HKStatutoryProfilePanel";
 import SwitzerlandStatutoryProfilePanel from "./SwitzerlandStatutoryProfilePanel";
 import NetherlandsStatutoryProfilePanel from "./NetherlandsStatutoryProfilePanel";
+import SaudiArabiaStatutoryProfilePanel from "./SaudiArabiaStatutoryProfilePanel";
 import MexicoStatutoryProfilePanel from "./MexicoStatutoryProfilePanel";
+import BrazilStatutoryProfilePanel from "./BrazilStatutoryProfilePanel";
+import SouthAfricaStatutoryProfilePanel from "./SouthAfricaStatutoryProfilePanel";
+import ZADeductionOrdersBlock from "./ZADeductionOrdersBlock";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
 import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
@@ -105,6 +109,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showSwissStatutory, setShowSwissStatutory] = useState(false);
   const [showNlStatutory, setShowNlStatutory] = useState(false);
   const [showMxStatutory, setShowMxStatutory] = useState(false);
+  const [showBrStatutory, setShowBrStatutory] = useState(false);
+  const [showSaStatutory, setShowSaStatutory] = useState(false);
+  const [showZaStatutory, setShowZaStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
@@ -302,6 +309,19 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "BR" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="br-identity-block">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">Brazil identity &amp; bank routing (PIX / COMPE)</h4>
+                  {/* CPF / PIS-NIS / PIX / account arrive masked from the API (BREmployeeValidation SENSITIVE_FIELDS). */}
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.BR.map((spec) => (
+                      <DetailRow key={spec.key} label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])} />
+                    ))}
+                  </dl>
+                </div>
+              )}
+
               {employee.countryCode === "US" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">US Tax Details</h4>
@@ -361,6 +381,107 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                   </p>
                 </div>
               )}
+
+{employee.countryCode === "BR" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Brazil statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowBrStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    eSocial category, CBO, contract and dependants, concurrent-employment INSS, court-ordered alimony
+                    and vale-transporte elections, plus readiness — Brazilian payroll stays blocked until its release
+                    gates are signed.
+                  </p>
+                </div>
+              )}
+
+{employee.countryCode === "CH" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Switzerland statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowSwissStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Work / residence / QST cantons, source-tax tariff, BVG / UVG / KTG schemes and hours — required
+                    before Swiss payroll can be calculated for this employee.
+                  </p>
+                </div>
+              )}
+
+{employee.countryCode === "SA" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Saudi Arabia statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowSaStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Worker class, cohort and its evidence, GOSI-registered wage, identity and contract facts —
+                    required before Saudi payroll can be calculated for this employee.
+                  </p>
+                </div>
+              )}
+
+              {employee.countryCode === "ZA" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="za-identity-block">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">South Africa identity &amp; bank routing</h4>
+                  {/* ID / passport / tax number arrive masked from the API (ZAEmployeeValidation SENSITIVE_FIELDS). */}
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.ZA.map((spec) => (
+                      <DetailRow key={spec.key} label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])} />
+                    ))}
+                  </dl>
+                </div>
+              )}
+
+              {employee.countryCode === "ZA" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      South Africa statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowZaStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Employment type, tax residency, medical scheme, travel, UIF and ETI facts — required before South
+                    African payroll can be calculated for this employee. Tax directives are captured and approved in the
+                    Compliance Centre.
+                  </p>
+                </div>
+              )}
+
+              {employee.countryCode === "ZA" && <ZADeductionOrdersBlock employeeId={employee.id} />}
 
 {employee.countryCode === "IT" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
@@ -551,6 +672,15 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showMxStatutory && (
         <MexicoStatutoryProfilePanel employee={employee} onClose={() => setShowMxStatutory(false)} />
+      )}
+      {showBrStatutory && (
+        <BrazilStatutoryProfilePanel employee={employee} onClose={() => setShowBrStatutory(false)} />
+      )}
+      {showSaStatutory && (
+        <SaudiArabiaStatutoryProfilePanel employee={employee} onClose={() => setShowSaStatutory(false)} />
+      )}
+      {showZaStatutory && (
+        <SouthAfricaStatutoryProfilePanel employee={employee} onClose={() => setShowZaStatutory(false)} />
       )}
       {showSwissStatutory && (
         <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />

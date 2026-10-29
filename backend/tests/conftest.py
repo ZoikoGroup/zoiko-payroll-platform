@@ -92,6 +92,29 @@ def _reset_rollout_switches():
         current.update(original)
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _cheap_bcrypt_rounds():
+    """Hash test passwords with bcrypt's minimum cost (4 rounds) instead of
+    the production default (12). Every user a test creates, and every login
+    it makes, otherwise spends ~0.25s per hash on purpose-built slowness that
+    proves nothing a cheaper real bcrypt hash doesn't. Production hashing in
+    app/core/security.py is untouched; verify() reads the cost from the hash
+    itself, so these hashes still verify normally.
+
+    Imported here, at first-test setup, not at module scope: importing
+    app.core.security pulls in app.config, which must not load before
+    test_assist.py sets its own PAYROLL_DATABASE_URL during collection (see
+    the `db` fixture's docstring)."""
+    from passlib.context import CryptContext
+
+    from app.core import security
+
+    original = security.pwd_context
+    security.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4)
+    yield
+    security.pwd_context = original
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
@@ -217,6 +240,36 @@ def pytest_sessionfinish(session, exitstatus):
               f"{REAL_DELIVERY_ATTEMPTS[:5]}")
 
 
+_SCHEMA_TEMPLATES: dict = {}
+
+
+def _sqlite_schema_template(metadata):
+    """A SQLite connection holding the empty schema for `metadata`, built
+    with create_all once and reused as the copy source for every `db`.
+
+    Keyed on the current set of table names: test files register further
+    models (and test-only tables) on Base.metadata as they are imported, so
+    a test that sees new tables gets a template built from exactly the
+    metadata it would have passed to create_all itself."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    key = frozenset(metadata.tables)
+    template = _SCHEMA_TEMPLATES.get(key)
+    if template is None:
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        metadata.create_all(engine)
+        # Keep the engine alive with its one pooled connection; the raw
+        # sqlite3 connection is the backup source.
+        template = (engine, engine.raw_connection().driver_connection)
+        _SCHEMA_TEMPLATES[key] = template
+    return template[1]
+
+
 @pytest.fixture()
 def db():
     """A fresh, isolated SQLite in-memory database for one test.
@@ -241,7 +294,15 @@ def db():
     module-level setup has already executed during collection), avoids
     that race entirely. (This fixture builds its own separate SQLite
     engine regardless, so it doesn't touch the global engine either way —
-    the ordering only matters for not disturbing other test files.)"""
+    the ordering only matters for not disturbing other test files.)
+
+    The schema is built once into a template database (see
+    _sqlite_schema_template) and copied into each test's own fresh
+    in-memory database with SQLite's backup API — the same empty,
+    unshared database create_all would have produced, without re-running
+    DDL for every table on every test."""
+    import sqlite3
+
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -258,12 +319,9 @@ def db():
     import app.modules.support_access.models  # noqa: F401
     import app.modules.security.models  # noqa: F401
 
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
+    raw = sqlite3.connect(":memory:", check_same_thread=False)
+    _sqlite_schema_template(Base.metadata).backup(raw)
+    engine = create_engine("sqlite:///:memory:", creator=lambda: raw, poolclass=StaticPool)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     session = SessionLocal()
     try:
@@ -271,6 +329,7 @@ def db():
     finally:
         session.close()
         engine.dispose()
+        raw.close()
 
 
 @pytest.fixture()
@@ -331,13 +390,15 @@ def raw_log_messages():
     covered by tests/privacy/test_redaction_federation_governance.py."""
     import logging
 
-    from app.core.redaction import RedactingLogFilter
-
+    # By class NAME, not isinstance: a test module that re-imports app modules
+    # (e.g. clears sys.modules) leaves filters of an older RedactingLogFilter
+    # class on pytest's session-wide handlers (live-logging / log-file), which
+    # sit before caplog's handler and would still mask the record in place.
     removed = []
     for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "celery", "celery.task"):
         for handler in logging.getLogger(name).handlers:
             for f in list(handler.filters):
-                if isinstance(f, RedactingLogFilter):
+                if type(f).__name__ == "RedactingLogFilter":
                     handler.removeFilter(f)
                     removed.append((handler, f))
     yield

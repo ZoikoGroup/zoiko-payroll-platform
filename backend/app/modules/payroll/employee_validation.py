@@ -705,7 +705,7 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
 
 class DEEmployeeValidation(EmployeeValidationStrategy):
     country_code = "DE"
-    SENSITIVE_FIELDS = ('steuer_id', 'rv_nummer')   # IBAN is also DE's bank routing value — bank details are out of this scope
+    SENSITIVE_FIELDS = ('steuer_id', 'rv_nummer')   # IBAN is masked platform-wide (PLATFORM_SENSITIVE_COMPLIANCE_FIELDS)
     FIELD_SPECS = {
         "steuer_id": {
             "required": True, "strip_chars": " ",
@@ -1366,6 +1366,18 @@ class CHEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^756\d{10}$"),
             "error": "AHV number must be the 13-digit AHV/AVS number 756.XXXX.XXXX.XX from the AHV insurance card.",
         },
+        # Salary bank account (bank_routing.ROUTING_FIELDS["CH"]): CH IBAN =
+        # CH + 2 check digits + 5-digit IID (bank clearing number) + 12 chars.
+        "iban": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^CH\d{2}\d{5}[A-Z0-9]{12}$"),
+            "error": "Swiss IBAN must be CH, 2 check digits, a 5-digit bank clearing number (IID) and 12 characters.",
+        },
+        "bic": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "BIC must be 8 or 11 characters.",
+        },
     }
 
     @classmethod
@@ -1374,6 +1386,9 @@ class CHEmployeeValidation(EmployeeValidationStrategy):
         if n and not swiss_ahv_number_is_valid(n):
             raise BadRequestException("AHV number fails the EAN-13 check digit — check the number against the "
                                       "employee's AHV insurance card (AHV-Ausweis).")
+        iban = cleaned.get("iban")
+        if iban and not iban_checksum_ok(iban):
+            raise BadRequestException("IBAN fails the mod-97 check digits — check it against the bank statement.")
 
 
 def sa_national_id_is_valid(value: str) -> bool:
@@ -1396,26 +1411,25 @@ def sa_national_id_is_valid(value: str) -> bool:
     return check == digits[9]
 
 
-def sa_iban_mod97_valid(value: str) -> bool:
-    """Saudi IBAN — SA + 22 alphanumeric (2 country + 2 check + 18 BBAN).
-    Standard ISO 13616 mod-97 validation."""
+def iban_checksum_ok(value: str) -> bool:
+    """ISO 13616 IBAN check digits (mod 97 == 1) for any country. Shape is the
+    caller's FIELD_SPECS pattern; this is only the checksum."""
     raw = re.sub(r"[\s-]", "", str(value or "").upper())
-    if not re.fullmatch(r"SA\d{22}", raw):
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", raw):
         return False
-    # Move first 4 chars to end: SA + 2 check -> end
-    rearranged = raw[4:] + raw[:4]
-    # Convert letters to numbers (A=10, B=11, ... Z=35)
-    numeric = ""
-    for ch in rearranged:
-        if ch.isdigit():
-            numeric += ch
-        else:
-            numeric += str(ord(ch) - 55)
-    # Compute mod 97
-    remainder = 0
-    for ch in numeric:
-        remainder = (remainder * 10 + int(ch)) % 97
-    return remainder == 1
+    numeric = "".join(str(int(ch, 36)) for ch in raw[4:] + raw[:4])
+    return int(numeric) % 97 == 1
+
+
+def sa_iban_mod97_valid(value: str) -> bool:
+    """Saudi IBAN — SA + 2 check digits + 2-digit bank code + 18 alphanumeric
+    account characters (ISO 13616 BBAN 2n,18c), mod-97 checked. Kept for
+    existing callers; the shape used to be digits-only, which refused valid
+    IBANs with letters in the account part."""
+    raw = re.sub(r"[\s-]", "", str(value or "").upper())
+    if not re.fullmatch(r"SA\d{4}[A-Z0-9]{18}", raw):
+        return False
+    return iban_checksum_ok(raw)
 
 
 def sa_iqama_is_valid(value: str) -> bool:
@@ -1450,8 +1464,9 @@ class SAEmployeeValidation(EmployeeValidationStrategy):
             "error": "identity_type must be NATIONAL_ID or IQAMA.",
         },
         "iban": {
-            "pattern": re.compile(r"^SA\d{22}$"),
-            "error": "Saudi IBAN must be SA + 22 digits (e.g. SA1234567890123456789012).",
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^SA\d{4}[A-Z0-9]{18}$"),
+            "error": "Saudi IBAN must be SA, 2 check digits, a 2-digit bank code and 18 letters or digits.",
         },
         # Bank routing for Saudi (bank_routing.ROUTING_FIELDS["SA"]): SAMA
         # clearing code (4 digits) + branch code (3 digits) + account (12-18).
@@ -1465,13 +1480,14 @@ class SAEmployeeValidation(EmployeeValidationStrategy):
         nid = cleaned.get("national_id_iqama")
         id_type = cleaned.get("identity_type")
         if nid and id_type:
-            if id_type == "NATIONAL_ID" and not sa_national_id_is_valid(nid):
-                raise BadRequestException(f"National ID {nid!r} fails the mod-10 check digit.")
+            if id_type == "NATIONAL_ID" and (not nid.startswith("1") or not sa_national_id_is_valid(nid)):
+                raise BadRequestException("National ID must start with 1 and pass the mod-10 check digit "
+                                          "(an Iqama starts with 2 — choose identity_type IQAMA).")
             if id_type == "IQAMA" and not sa_iqama_is_valid(nid):
                 raise BadRequestException(f"Iqama {nid!r} fails the mod-10 check digit (must start with 2).")
         iban = cleaned.get("iban")
         if iban and not sa_iban_mod97_valid(iban):
-            raise BadRequestException(f"IBAN {iban!r} fails the mod-97 validation.")
+            raise BadRequestException("IBAN fails the mod-97 check digits — check it against the bank statement.")
 
 
 def bsn_is_valid(value: str) -> bool:
@@ -1498,9 +1514,9 @@ class NLEmployeeValidation(EmployeeValidationStrategy):
     here: loonheffingskorting is a signed, effective-dated employee
     instruction resolved against the wage-tax tables (NL-006/NL-031), and every
     2026 statutory rate lives on the NL-PAYROLL-2026 canonical pack — never an
-    editable employee field. Bank details (IBAN/BIC) are handled by the
-    bank-routing layer, not this strategy (see the base class note on
-    SENSITIVE_FIELDS)."""
+    editable employee field. The salary IBAN/BIC are kept here too: validate()
+    returns only FIELD_SPECS keys, so without them the IBAN the form collects
+    was silently dropped on save and every SEPA payment saw an empty account."""
     country_code = "NL"
     duplicate_field = "bsn"
     SENSITIVE_FIELDS = ('bsn',)
@@ -1511,6 +1527,17 @@ class NLEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{9}$"),
             "error": "BSN must be the 9-digit Burgerservicenummer.",
         },
+        # Salary bank account (bank_routing.ROUTING_FIELDS["NL"], SEPA).
+        "iban": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^NL\d{2}[A-Z]{4}\d{10}$"),
+            "error": "Dutch IBAN must be NL, 2 check digits, a 4-letter bank code and 10 digits.",
+        },
+        "bic": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "BIC must be 8 or 11 characters.",
+        },
     }
 
     @classmethod
@@ -1519,6 +1546,9 @@ class NLEmployeeValidation(EmployeeValidationStrategy):
         if n and not bsn_is_valid(n):
             raise BadRequestException("BSN fails the elfproef (eleven-test) check — check the "
                                       "number against the employee's identity document.")
+        iban = cleaned.get("iban")
+        if iban and not iban_checksum_ok(iban):
+            raise BadRequestException("IBAN fails the mod-97 check digits — check it against the bank statement.")
 
 
 def _mx_yymmdd_is_a_date(digits: str) -> bool:
@@ -1646,16 +1676,66 @@ def cnpj_is_valid(value) -> bool:
     return char_val(raw[13]) == d2
 
 
+# ── PIX key formats (ZP-BR-ENG-001 Phase 4 / BR-K6) ──────────────────────
+# The five key types Banco Central accepts (Resolução BCEN/BACEN Pix key
+# formats), each with its own syntax. CPF and CNPJ reuse the official
+# check-digit validators; EMAIL, PHONE (E.164) and RANDOM (UUID v4, the
+# "EVP" random key) are format-checked here.
+PIX_KEY_TYPES = ("CPF", "CNPJ", "EMAIL", "PHONE", "RANDOM")
+
+_PIX_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PIX_PHONE_RE = re.compile(r"^\+?[1-9]\d{9,14}$")      # E.164: 10–15 digits, optional +
+_PIX_RANDOM_RE = re.compile(                                    # UUID v4 (EVP random key)
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+
+def pix_key_is_valid(value: str, key_type: Optional[str]) -> bool:
+    """Validate a PIX key against the syntax of its declared type (empty
+    value or unknown/missing type → False)."""
+    if not value:
+        return False
+    kind = (key_type or "").strip().upper()
+    if kind == "CPF":
+        return cpf_is_valid(str(value))
+    if kind == "CNPJ":
+        return cnpj_is_valid(str(value))
+    if kind == "EMAIL":
+        return bool(_PIX_EMAIL_RE.match(value))
+    if kind == "PHONE":
+        return bool(_PIX_PHONE_RE.match(str(value).replace(" ", "")))
+    if kind == "RANDOM":
+        return bool(_PIX_RANDOM_RE.match(value))
+    return False
+
+
+def mask_pix_key(value, key_type=None) -> Optional[str]:
+    """Mask a PIX key by type: the type's own structure stays legible but the
+    identifying value does not. CPF/CNPJ/RANDOM/PHONE keep only the last 4
+    characters; EMAIL keeps the first character and the domain
+    (j•••@bank.com) — a domain is not identifying, the local part is. When
+    `key_type` is not supplied an "@" therefore implies EMAIL."""
+    if value in (None, ""):
+        return None
+    value = str(value)
+    kind = (key_type or "").strip().upper()
+    if (kind == "EMAIL" or (not kind and "@" in value)) and "@" in value:
+        local, _, domain = value.partition("@")
+        return (local[:1] or "*") + "*" * max(len(local) - 1, 0) + "@" + domain
+    return mask_identifier(value)
+
+
 class BREmployeeValidation(EmployeeValidationStrategy):
-    """Brazil (CLT - ZP-BR-ENG-001) — CPF, PIS/NIS and identity validation.
-    
+    """Brazil (CLT - ZP-BR-ENG-001) — CPF, PIS/NIS, PIX and identity validation.
+
     CPF is validated mathematically via Modulo 11 check digits and is the
-    unique duplicate_field key. CPF and PIS/NIS are classified SENSITIVE and
-    masked in standard API outputs.
+    unique duplicate_field key. CPF, PIS/NIS, the PIX key and the bank
+    account number are classified SENSITIVE and masked in standard API
+    outputs (BR-K6).
     """
     country_code = "BR"
     duplicate_field = "cpf"
-    SENSITIVE_FIELDS = ("cpf", "pis_nis")
+    SENSITIVE_FIELDS = ("cpf", "pis_nis", "pix_key", "bank_account")
     FIELD_SPECS = {
         "cpf": {
             "required": True,
@@ -1718,6 +1798,23 @@ class BREmployeeValidation(EmployeeValidationStrategy):
             "choices": ["CORRENTE", "POUPANCA"],
             "upper": True,
         },
+        # Full salary routing for TED / a future CNAB file: the 8-digit ISPB
+        # and the agency / account check digits (a digit or X).
+        "bank_ispb": {
+            "required": False, "strip_chars": " ",
+            "pattern": re.compile(r"^\d{8}$"),
+            "error": "ISPB must be exactly 8 digits.",
+        },
+        "bank_agency_digit": {
+            "required": False, "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[0-9X]$"),
+            "error": "Agency check digit must be one digit or X.",
+        },
+        "bank_account_digit": {
+            "required": False, "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[0-9X]$"),
+            "error": "Account check digit must be one digit or X.",
+        },
     }
 
     @classmethod
@@ -1728,6 +1825,105 @@ class BREmployeeValidation(EmployeeValidationStrategy):
         pis = cleaned.get("pis_nis")
         if pis and not pis_is_valid(pis):
             raise BadRequestException("PIS/NIS fails the official Modulo 11 check digit algorithm.")
+        pix_key = cleaned.get("pix_key")
+        if pix_key:
+            pix_type = cleaned.get("pix_key_type")
+            if not pix_type:
+                raise BadRequestException(
+                    f"pix_key requires pix_key_type (one of {list(PIX_KEY_TYPES)})."
+                )
+            if not pix_key_is_valid(pix_key, pix_type):
+                raise BadRequestException(
+                    f"PIX key {pix_type} is invalid — CPF/CNPJ must pass Modulo 11 "
+                    "check digits, EMAIL/PHONE/RANDOM must match their format."
+                )
+
+
+# -- South Africa (ZP-ZA-ENG-001 Phase 5) -------------------------------------
+
+def _za_yymmdd_is_a_date(digits: str) -> bool:
+    try:
+        yy, mm, dd = int(digits[:2]), int(digits[2:4]), int(digits[4:6])
+    except (TypeError, ValueError):
+        return False
+    for century in (1900, 2000):
+        try:
+            date(century + yy, mm, dd)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def za_national_id_is_valid(value) -> bool:
+    raw = re.sub(r"[\s-]", "", str(value or ""))
+    if not re.fullmatch(r"\d{13}", raw):
+        return False
+    if not _za_yymmdd_is_a_date(raw[:6]):
+        return False
+    total = 0
+    for index, char in enumerate(reversed(raw)):
+        digit = int(char)
+        if index % 2 == 1:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
+class ZAEmployeeValidation(EmployeeValidationStrategy):
+    """South Africa (ZP-ZA-ENG-001 Phase 5) - identity and bank validation.
+
+    DORMANT: consulted only while ZA_TENANT_ONBOARDING_ENABLED is on.
+    Exactly one of national_id / passport_number is required. The 13-digit
+    national ID carries a real YYMMDD date and the standard Luhn check digit.
+    The 10-digit SARS income-tax number is format-checked only: its check
+    digit rule is PENDING_G1 sign-off. Branch code is 6 digits and account
+    number 7-11 digits.
+    """
+
+    country_code = "ZA"
+    duplicate_field = "national_id"
+    SENSITIVE_FIELDS = ("national_id", "passport_number", "tax_number")
+    FIELD_SPECS = {
+        "national_id": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{13}$"),
+            "error": "South African ID number must be 13 digits.",
+        },
+        "passport_number": {
+            "required": False, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{6,20}$"),
+            "error": "Passport number must be 6-20 letters or digits.",
+        },
+        "tax_number": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{10}$"),
+            "error": "SARS income-tax number must be 10 digits (check-digit rule PENDING_G1).",
+        },
+        "branch_code": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{6}$"),
+            "error": "Branch code must be 6 digits.",
+        },
+        "account_number": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{7,11}$"),
+            "error": "Account number must be 7-11 digits.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        national_id = cleaned.get("national_id")
+        passport = cleaned.get("passport_number")
+        if bool(national_id) == bool(passport):
+            raise BadRequestException(
+                "Exactly one of national_id or passport_number is required for ZA employees.")
+        if national_id and not za_national_id_is_valid(national_id):
+            raise BadRequestException(
+                "South African ID number fails the YYMMDD date check or the Luhn check digit.")
 
 
 _STRATEGIES = {
@@ -1754,7 +1950,6 @@ _STRATEGIES = {
     "CH": CHEmployeeValidation,
     "SA": SAEmployeeValidation,
     "NL": NLEmployeeValidation,
-    "BR": BREmployeeValidation,
 }
 
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while
@@ -1762,6 +1957,10 @@ _STRATEGIES = {
 # so the "Supported: …" message every other country sees never changes.
 _DORMANT_STRATEGIES = {
     "MX": MXEmployeeValidation,
+    # Brazil (ZP-BR-ENG-001 Phase 3): dormant until BR_TENANT_ONBOARDING_ENABLED.
+    "BR": BREmployeeValidation,
+    # South Africa (ZP-ZA-ENG-001 Phase 5): dormant until the release gates.
+    "ZA": ZAEmployeeValidation,
 }
 
 
@@ -1769,9 +1968,21 @@ def _dormant_strategy(code: str):
     strategy = _DORMANT_STRATEGIES.get(code)
     if strategy is None:
         return None
+    if code == "BR":
+        from app.modules.payroll import brazil_dormancy
+
+        return strategy if brazil_dormancy.onboarding_enabled() else None
+    if code == "ZA":
+        from app.modules.payroll import south_africa_dormancy
+
+        return strategy if south_africa_dormancy.onboarding_enabled() else None
     from app.modules.payroll import mexico_dormancy
 
-    return strategy if mexico_dormancy.onboarding_enabled() else None
+    # Phase 10e: the kill switch only — no session here. A Mexican employee
+    # matters only inside a Mexican organisation, which the organisation-level
+    # gate (registry AVAILABLE or a pilot grant) decides. (mexico_dormancy.
+    # onboarding_enabled now needs a db session and is False without one.)
+    return strategy if mexico_dormancy.flag_enabled() else None
 
 
 def is_supported_employee_country(country_code: str) -> bool:
@@ -1834,10 +2045,17 @@ def _mask_field(key, value):
     return _FIELD_MASKERS.get(key, mask_identifier)(value)
 
 
+# A personal bank account is masked in every API response whatever the
+# country, as the top-level bank_account column is (SENSITIVE_EMPLOYEE_COLUMNS):
+# compliance_fields "iban" is DE / FR / IE / NL / CH / SA bank routing data.
+# Stated here rather than relying on one strategy (SA) listing it.
+PLATFORM_SENSITIVE_COMPLIANCE_FIELDS = ("iban",)
+
 # Dormant strategies' fields are masked too (whether or not their flag is on),
 # so a Mexican identifier is never returned in clear by any shared path.
-SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in (*_STRATEGIES.values(), *_DORMANT_STRATEGIES.values())
-                                        for f in cls.SENSITIVE_FIELDS)
+SENSITIVE_COMPLIANCE_FIELDS = frozenset(
+    (*PLATFORM_SENSITIVE_COMPLIANCE_FIELDS,
+     *(f for cls in (*_STRATEGIES.values(), *_DORMANT_STRATEGIES.values()) for f in cls.SENSITIVE_FIELDS)))
 
 
 def mask_compliance_fields(compliance_fields):
@@ -1892,8 +2110,21 @@ def restore_masked_employee_columns(values, employee):
 
 def mask_routing(routing):
     """`routing` display rows: bank ROUTING codes stay visible; an entry that
-    is itself an account identifier (IBAN) is masked."""
+    is itself an account identifier is masked. IBAN/CLABE and Brazil's PIX
+    key / bank account are identifiers; PIX is masked by inferred type
+    (BR-K6)."""
     if not isinstance(routing, list):
         return routing
-    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") in ("iban", "clabe") and r.get("value")
-             else r) for r in routing]
+    out = []
+    for r in routing:
+        if not (isinstance(r, dict) and r.get("value")):
+            out.append(r)
+            continue
+        key = r.get("key")
+        if key == "pix_key":
+            out.append({**r, "value": mask_pix_key(r.get("value"))})
+        elif key in ("iban", "clabe", "bank_account", "account_number"):
+            out.append({**r, "value": mask_identifier(r.get("value"))})
+        else:
+            out.append(r)
+    return out

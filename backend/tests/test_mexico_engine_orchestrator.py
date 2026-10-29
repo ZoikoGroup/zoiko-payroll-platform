@@ -98,10 +98,14 @@ def test_no_salary_line_blocks():
     assert "MX_SALARY_LINE_MISSING" in codes
 
 
-@pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION"])
-def test_special_pays_block_without_their_transcribed_rule(kind):
+@pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU", "SEPARATION_SENIORITY_PREMIUM",
+                                  "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY"])
+def test_special_pays_block_without_their_transcribed_rule(kind, monkeypatch):
     """Phase 9b: a special payment is routed to its own rule (never the
     ordinary tariff, MX-009); with no rule transcribed it blocks."""
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {})                  # W1-3a: the real rules are transcribed
     earnings = [{"code": "SALARY", "kind": "ORDINARY_SALARY", "amount": D("9000")},
                 {"code": "X", "kind": kind, "amount": D("100")}]
     assert "MX_SPECIAL_PAY_RULE_MISSING" in {k for k, _ in _block(mx_earnings=earnings).reasons}
@@ -171,3 +175,30 @@ def test_other_countries_are_untouched():
 
     us = replace(h.ctx(), country="US")
     assert mexico.calculate(us) == {}
+
+
+@pytest.mark.parametrize("kind", ["AGUINALDO", "VACATION_PREMIUM", "PTU"])
+def test_transcribed_special_pay_rules_wait_for_the_wage_reference_decision(kind):
+    """W1-3a: with the real LISR Art. 93 rules, the exempt part waits for D-07."""
+    earnings = [{"code": "SALARY", "kind": "ORDINARY_SALARY", "amount": D("9000")},
+                {"code": "X", "kind": kind, "amount": D("100")}]
+    codes = {k for k, _ in _block(mx_earnings=earnings).reasons}
+    assert "MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED" in codes and "MX_SPECIAL_PAY_RULE_MISSING" not in codes
+
+
+def test_a_worker_on_the_area_minimum_wage_only_has_no_isr_withheld():
+    """W3-5 (gap A16, LISR Art. 96 para 1): SYNTHETIC general minimum wage set to
+    100/day. Paid exactly that and nothing else: no withholding — but only once
+    the rule is in the content; above the minimum wage, the tariff applies."""
+    slabs = [dict(s, flat_amount="100") if s.get("filing_status") == "GENERAL" else s for s in h.base_slabs()]
+    profile = dict(h.facts()["mx_profile"], mx_daily_salary=D("100"))
+    salary_only = [{"code": "SALARY", "kind": "ORDINARY_SALARY", "amount": D("1500")}]
+    rates = copy.deepcopy(h.SYN_RATES)
+    rates["mx_subsidy_remainder_rule"] = h.txt("NOT_PAYABLE")              # a low wage reaches the subsidy remainder
+    without = _calc(mx_profile=profile, mx_earnings=salary_only, rates=rates, slabs=slabs)["mx_result"]
+    rates["mx_min_wage_no_withholding_rule"] = h.txt("NO_WITHHOLDING_ZONE_MIN_WAGE_ONLY")
+    out = _calc(mx_profile=profile, mx_earnings=salary_only, rates=rates, slabs=slabs)["mx_result"]
+    assert D(out["isr"]) == 0 and D(without["isr"]) > 0
+    above = dict(profile, mx_daily_salary=D("101"))
+    above_out = _calc(mx_profile=above, mx_earnings=[dict(salary_only[0], amount=D("1515"))], rates=rates, slabs=slabs)
+    assert D(above_out["mx_result"]["isr"]) > 0

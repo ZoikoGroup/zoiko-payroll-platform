@@ -45,6 +45,12 @@ export default function MXRunCalculationTrace({ snapshot }) {
   const comp = sbc.components || {};
   return (
     <div className="mb-3 max-w-3xl rounded-[12px] border border-border p-3" data-testid="mx-trace">
+      {snapshot.pilot && (
+        <p className="mb-2 rounded-md border border-warning bg-warning/10 px-2 py-1 text-[12px] font-semibold text-foreground"
+          data-testid="mx-trace-pilot" role="status">
+          PILOT — parallel run. This payslip is non-binding: never paid, filed or stamped for real.
+        </p>
+      )}
       <p className="mb-2 text-[12px] text-foreground-muted">
         Pay date {r.pay_date} · {r.tariff_period} · {r.days_paid} salary day(s) · {r.contribution_days} contribution
         day(s) · pack {snapshot.pack?.pack_id} v{snapshot.pack?.version} · engine {r.engine_version} · rounding{" "}
@@ -75,6 +81,17 @@ export default function MXRunCalculationTrace({ snapshot }) {
           ["ISR withheld", r.isr_withheld],
         ]} />
       </Section>
+      {r.annual_adjustment && (
+        <Section title={`Annual ISR adjustment ${r.annual_adjustment.fiscal_year} (MX-010 — the year's payslips are not edited)`}>
+          <Rows rows={[
+            ["Difference (annual ISR − withheld)", r.annual_adjustment.difference],
+            ["Period ISR withheld before the adjustment", r.annual_adjustment.period_withheld],
+            ["Applied in this payslip", r.annual_adjustment.change],
+            ["Carried forward", r.annual_adjustment.carry_forward],
+            ["Rule", r.annual_adjustment.rule_source],
+          ]} />
+        </Section>
+      )}
       <Section title="SBC (contribution base — shown apart from pay, MX-037)">
         <Rows rows={[
           ["Daily salary", comp.daily_salary], ["Integration factor", comp.factor],

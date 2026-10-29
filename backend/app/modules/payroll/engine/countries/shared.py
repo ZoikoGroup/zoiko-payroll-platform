@@ -94,7 +94,7 @@ class MissingComplianceConfigurationError(Exception):
 # rates, registry row or payroll runs exist, and every MX calculation is
 # already blocked — flipping MX on now makes an empty or partial pack fail
 # readiness rather than ever be read as configured.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK", "CH", "SA", "NL", "MX", "BR"}
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK", "CH", "SA", "NL", "MX", "BR", "ZA"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import mexico_cfdi_builder as _builder
 from app.modules.payroll import mexico_pac as _pac
-from app.modules.payroll.engine.countries.mexico import MXBlock
+from app.modules.payroll.engine.countries.mexico import MXBlock, MXRefuse
 
 MX = "MX"
 STATUSES = ("GENERATED", "SIGNED", "SUBMITTED", "STAMPED", "REJECTED", "UNKNOWN", "CANCEL_REQUESTED", "CANCELLED",
@@ -72,7 +72,7 @@ def _event(db: Session, doc, event_type: str, actor_id=None, detail=None, from_s
 def _transition(db: Session, doc, to: str, event_type: str, actor_id=None, detail=None):
     frm = doc.status
     if to not in _TRANSITIONS.get(frm, set()):
-        raise MXBlock("MX_CFDI_ILLEGAL_TRANSITION", f"a CFDI document cannot go from {frm} to {to}",
+        raise MXRefuse("MX_CFDI_ILLEGAL_TRANSITION", f"a CFDI document cannot go from {frm} to {to}",
                       doc.organization_id)
     doc.status = to
     if to == "UNKNOWN":
@@ -117,10 +117,10 @@ def _aware(dt):
 def run_guard(db: Session, run) -> None:
     from app.modules.payroll import mexico_dormancy, mexico_run_service
 
-    if not mexico_dormancy.onboarding_enabled():
-        raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, run.organization_id)
+    if not mexico_dormancy.onboarding_enabled(db, run.organization_id):
+        raise MXRefuse("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, run.organization_id)
     if not mexico_run_service._org_runs_mexico(db, run.organization_id):
-        raise MXBlock("MX_ORG_NOT_MEXICAN", "Mexico is not one of the organisation's payroll countries", run.organization_id)
+        raise MXRefuse("MX_ORG_NOT_MEXICAN", "Mexico is not one of the organisation's payroll countries", run.organization_id)
 
 
 def preflight(db: Session, run) -> dict:
@@ -181,21 +181,28 @@ def _live_doc(db: Session, item_id: int):
 def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
     from app.core import object_storage
 
+    from app.modules.payroll import mexico_dormancy, mexico_pilot_service
+
     m = _models()
     version, _root, _cred = _employer_for(db, item, run.pay_date)
+    mexico_pilot_service.refuse_non_sandbox_pac(db, run.organization_id, version.pac_environment)   # Phase 10e
+    pilot = mexico_dormancy.is_pilot_organization(db, run.organization_id)
     refusal = object_storage.durable_storage_refusal("Mexico CFDI XML storage")
     if refusal:
-        raise MXBlock("MX_CFDI_STORAGE_NOT_DURABLE", refusal, run.organization_id)
-    document_input = {"payslipItemId": item.id, "employeeId": item.employee_id, "runId": run.id,
-                      "payDate": run.pay_date.isoformat(), "periodStart": run.period_start.isoformat(),
-                      "periodEnd": run.period_end.isoformat(), "result": (item.mx_calculation_snapshot or {}).get("result"),
-                      "schemaRelease": {"id": release.id, "cfdi": release.cfdi_version, "nomina": release.complement_version},
-                      "replacesUuid": getattr(replaces, "uuid", None)}
-    payload = _builder.active_builder().build(document_input)
+        raise MXRefuse("MX_CFDI_STORAGE_NOT_DURABLE", refusal, run.organization_id)
+    folio = _next_folio(db, run.organization_id)        # Phase 11b: the receipt carries its Folio
+    base = {"payslipItemId": item.id, "employeeId": item.employee_id, "runId": run.id,
+            "payDate": run.pay_date.isoformat(), "periodStart": run.period_start.isoformat(),
+            "periodEnd": run.period_end.isoformat(), "result": (item.mx_calculation_snapshot or {}).get("result"),
+            "schemaRelease": {"id": release.id, "cfdi": release.cfdi_version, "nomina": release.complement_version},
+            "replacesUuid": getattr(replaces, "uuid", None), "folio": folio, "issuedAtUtc": _now()}
+    builder = _builder.active_builder()
+    document_input = builder.prepare(db, run, item, release, base)
+    payload = builder.build(document_input)
+    del document_input                                  # MX-061: identifiers never outlive the build
     signed, cert_no = _builder.active_signer().sign(payload, _pac.CredentialHandle(getattr(_cred, "id", None), "CSD",
                                                                                    getattr(_cred, "fingerprint_sha256", None)))
     payload_hash = _sha(signed)
-    folio = _next_folio(db, run.organization_id)
     # One key per DOCUMENT (folio is unique per organisation): every retry of
     # this document reuses it; a new document (e.g. after a rejection) gets its own.
     key = "mxcfdi-" + _sha(f"{run.organization_id}:{item.id}:{folio}:{payload_hash}".encode())[:56]
@@ -210,7 +217,8 @@ def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
         created_by_id=actor_id)
     db.add(doc)
     db.flush()
-    _event(db, doc, "GENERATED", actor_id, {"folio": folio, "schemaReleaseId": release.id}, None, "GENERATED")
+    _event(db, doc, "GENERATED", actor_id, {"folio": folio, "schemaReleaseId": release.id, "pilot": pilot}, None,
+           "GENERATED")
     _transition(db, doc, "SIGNED", "SIGNED", actor_id, {"certificateNumber": cert_no})
     db.add(m.PayrollMxCfdiOutboxItem(document_id=doc.id, action="STAMP", attempt_no=1, payload_hash=payload_hash,
                                      idempotency_key=key, status="PENDING"))
@@ -223,7 +231,7 @@ def generate(db: Session, run, actor_id: Optional[int]) -> dict:
     pre = preflight(db, run)
     if not pre["ready"]:
         first = pre["reasons"][0]
-        raise MXBlock(first["code"], "; ".join(f"{r['code']}: {r['message']}" for r in pre["reasons"]),
+        raise MXRefuse(first["code"], "; ".join(f"{r['code']}: {r['message']}" for r in pre["reasons"]),
                       run.organization_id, reasons=[(r["code"], r["message"]) for r in pre["reasons"]])
     release = _active_release(db)
     created = []
@@ -251,7 +259,7 @@ def create_replacement(db: Session, original, run, item, actor_id: Optional[int]
         raise BadRequestException("Only a stamped (or cancelling) CFDI can be replaced")
     pre = preflight(db, run)
     if not pre["ready"]:
-        raise MXBlock(pre["reasons"][0]["code"], pre["reasons"][0]["message"], run.organization_id)
+        raise MXRefuse(pre["reasons"][0]["code"], pre["reasons"][0]["message"], run.organization_id)
     doc = _generate_one(db, run, item, _active_release(db), actor_id, replaces=original)
     _event(db, original, "REPLACEMENT_LINKED", actor_id, {"replacementDocumentId": doc.id})
     db.commit()
@@ -293,6 +301,32 @@ def _adopt_uuid(db: Session, doc, uuid: str, result, event_type: str, actor_id=N
     return True
 
 
+def _store_stamped_xml(db: Session, doc, result, actor_id=None) -> None:
+    """W4-3b: keep the PAC's stamped CFDI beside the signed one (no new column:
+    its reference is the STAMPED_XML_STORED event's detail). A stamped XML that
+    does not carry the adopted UUID is not kept — the receipt then refuses."""
+    xml = getattr(result, "stamped_xml", None)
+    if not xml:
+        return
+    if (doc.uuid or "").encode() not in xml:
+        _event(db, doc, "STAMPED_XML_MISMATCH", actor_id, {"uuid": doc.uuid, "sha256": _sha(xml)})
+        return
+    from app.core import object_storage
+
+    ref = object_storage.save_upload(subdir=f"mx_cfdi/{doc.organization_id}/{doc.payroll_run_id}",
+                                     filename=f"{doc.folio}.stamped.xml", data=xml)
+    _event(db, doc, "STAMPED_XML_STORED", actor_id, {"ref": ref, "sha256": _sha(xml)})
+
+
+def stamped_xml_ref(db: Session, doc):
+    """The stored stamped XML's reference, or None (W4-3b)."""
+    m = _models()
+    ev = (db.query(m.PayrollMxCfdiEvent).filter(m.PayrollMxCfdiEvent.document_id == doc.id,
+                                                m.PayrollMxCfdiEvent.event_type == "STAMPED_XML_STORED")
+          .order_by(m.PayrollMxCfdiEvent.id.desc()).first())
+    return (ev.detail or {}).get("ref") if ev is not None else None
+
+
 def _complete_replacement(db: Session, doc, actor_id=None):
     """original CANCELLED + replacement STAMPED -> original REPLACED."""
     m = _models()
@@ -324,7 +358,8 @@ def _process_stamp(db: Session, item, doc, adapter, actor_id):
     except Exception as exc:                      # transport / timeout → UNKNOWN, never REJECTED (MX-062)
         result = _pac.StampResult(outcome=_pac.UNKNOWN, code="TRANSPORT", message=type(exc).__name__)
     if result.outcome == _pac.ACCEPTED and result.uuid:
-        _adopt_uuid(db, doc, result.uuid, result, "STAMPED", actor_id)
+        if _adopt_uuid(db, doc, result.uuid, result, "STAMPED", actor_id):
+            _store_stamped_xml(db, doc, result, actor_id)
         item.status, item.acknowledged_at = "ACKNOWLEDGED", _now()
     elif result.outcome == _pac.REJECTED:
         doc.pac_response_code, doc.pac_message = result.code, (result.message or "")[:500]
@@ -447,6 +482,9 @@ def process_outbox(db: Session, organization_id: int, actor_id: Optional[int], l
             done.append({"outboxItemId": item.id, "skipped": "document is UNKNOWN — query its status first (MX-062)"})
             continue
         try:
+            from app.modules.payroll import mexico_pilot_service
+
+            mexico_pilot_service.refuse_non_sandbox_pac(db, doc.organization_id, doc.pac_environment)   # Phase 10e
             adapter = _pac.get_adapter(doc.pac_provider, doc.pac_environment)
         except MXBlock as exc:
             item.last_error = f"{exc.key}: {exc.reason}"[:500]
@@ -529,7 +567,7 @@ def confirm_retry(db: Session, org_id: int, doc_id: int, actor_id: Optional[int]
         raise BadRequestException("Only an UNKNOWN stamp can be retried")
     state = definitively_not_found(db, doc)
     if state["notFoundQueries"] < 1:
-        raise MXBlock("MX_CFDI_STATUS_QUERY_REQUIRED",
+        raise MXRefuse("MX_CFDI_STATUS_QUERY_REQUIRED",
                       "query the PAC for this document first — a retry is never sent blind (MX-062)", org_id)
     n = db.query(m.PayrollMxCfdiOutboxItem).filter(m.PayrollMxCfdiOutboxItem.document_id == doc.id,
                                                    m.PayrollMxCfdiOutboxItem.action == "STAMP").count() + 1
@@ -581,7 +619,7 @@ def cancel(db: Session, org_id: int, doc_id: int, reason_code: str, replacement_
         raise BadRequestException("Only a STAMPED CFDI can be cancelled")
     entry = _cancel_reason(db, (reason_code or "").strip())
     if entry is None:
-        raise MXBlock("MX_CFDI_CANCEL_REASON_UNAVAILABLE",
+        raise MXRefuse("MX_CFDI_CANCEL_REASON_UNAVAILABLE",
                       f"cancellation reason {reason_code!r} is not in an Active {CANCEL_REASON_CATALOG} catalog "
                       "(S30 not transcribed)", org_id)
     needs_related = bool((entry.attributes or {}).get("requiresRelatedUuid"))

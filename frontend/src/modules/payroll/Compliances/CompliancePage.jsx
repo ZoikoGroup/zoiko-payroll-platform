@@ -16,6 +16,8 @@ import SAComplianceCentreTab from "./SAComplianceCentreTab";
 import NLComplianceCentreTab from "./NLComplianceCentreTab";
 import MXComplianceCentreTab from "./MXComplianceCentreTab";
 import MXSocialSecurityCenter from "../../../components/jurisdiction/mexico/authorities/MXSocialSecurityCenter";
+import BRComplianceCentreTab from "./BRComplianceCentreTab";
+import ZAComplianceCentreTab from "./ZAComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -144,9 +146,19 @@ export default function CompliancePage() {
   // Mexico Phase 8 (spec §14 "Compliance → Mexico → Social Security"): MX organisations only.
   const MX_SS_TAB = "Mexico Social Security";
   const isMexico = normalizeCountryCode(companyDetails.jurisdictionCountry) === "MX";
+  // Brazil (ZP-BR-ENG-001 Phase 3): employer onboarding lives in the BR
+  // Compliance Centre. No base tab is removed for Brazil (Phase 3 plan §2).
+  const BR_TAB = "Brazil Compliance Centre";
+  const isBrazil = normalizeCountryCode(companyDetails.jurisdictionCountry) === "BR";
+  // South Africa (ZP-ZA-ENG-001 Phase 7; "ZA" — "SA" is Saudi Arabia): employer
+  // registrations, tax directives and the ETI ledger live in the ZA Compliance
+  // Centre; PAYE / UIF / SDL are platform pack data, so the generic Tax
+  // Configuration tab (US fallback) is omitted for ZA organisations.
+  const ZA_TAB = "South Africa Compliance Centre";
+  const isSouthAfrica = normalizeCountryCode(companyDetails.jurisdictionCountry) === "ZA";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico
+    : isNetherlands || isMexico || isSouthAfrica
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   // Plan country entitlements — every org, every calculation mode.
@@ -161,6 +173,8 @@ export default function CompliancePage() {
     ...(isSwitzerland ? [CH_EMPLOYER_TAB] : []),
     ...(isNetherlands ? [NL_TAB] : []),
     ...(isMexico ? [MX_TAB, MX_SS_TAB] : []),
+    ...(isBrazil ? [BR_TAB] : []),
+    ...(isSouthAfrica ? [ZA_TAB] : []),
   ];
   const selectedTab = countriesRequested ? tabs.indexOf(COUNTRIES_TAB) : activeTab;
   const currentTab = tabs[selectedTab];
@@ -402,6 +416,8 @@ export default function CompliancePage() {
       {currentTab === NL_TAB && <NLComplianceCentreTab />}
       {currentTab === MX_TAB && <MXComplianceCentreTab />}
       {currentTab === MX_SS_TAB && <MXSocialSecurityCenter />}
+      {currentTab === BR_TAB && <BRComplianceCentreTab />}
+      {currentTab === ZA_TAB && <ZAComplianceCentreTab />}
 
     </div>
   );

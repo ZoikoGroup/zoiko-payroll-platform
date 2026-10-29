@@ -77,6 +77,10 @@ export default function JurisdictionLayout({
   // config/jurisdictions/usaComplianceConfig.jsx, the only place this is
   // ever set to true.
   hideBackButton = false,
+  // Opt-in (Mexico, completion W5-2): the backend refuses hotfix activation
+  // for this country, so the button would only ever produce a refusal.
+  // Default false — every other country's pack header is unchanged.
+  hideHotfixActivate = false,
   // Safe, purely-additive override for the "New Tax Pack" form — defaults
   // to the shared NewPackModal used by every country. Only USA passes its
   // own (USANewPackModal, which hides the India/UK-oriented Tax Regime
@@ -365,7 +369,7 @@ export default function JurisdictionLayout({
                   >
                     <Eye size={13} /> Impact Preview
                   </button>
-                  {selectedPack.status !== "Active" && selectedPack.packType === "tax" && (
+                  {!hideHotfixActivate && selectedPack.status !== "Active" && selectedPack.packType === "tax" && (
                     <button
                       onClick={() => setShowHotfixActivate(true)}
                       title="Emergency activation — bypasses the distinct-approver requirement, flagged for mandatory review"

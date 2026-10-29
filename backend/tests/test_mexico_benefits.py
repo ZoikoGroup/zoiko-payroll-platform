@@ -43,9 +43,13 @@ def _rules(monkeypatch, *, aguinaldo=True, special=True, isn=True):
 
     if aguinaldo:
         monkeypatch.setattr(c, "MX_AGUINALDO_RULE", SynAguinaldoRule())
+    if not special:                                      # W1-3a transcribed the real rules
+        monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {})
     if special:
         monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {"AGUINALDO": SynSpecialPayRule(),
                                                         "VACATION_PREMIUM": SynSpecialPayRule("50")})
+    if not isn:                                          # W1-2 transcribed the real CDMX inclusions
+        monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {})
     if isn:
         monkeypatch.setattr(c, "MX_SPECIAL_PAY_ISN_INCLUSION", {("CDMX", "AGUINALDO"): (True, "S22", "SYNTHETIC"),
                                                                 ("CDMX", "VACATION_PREMIUM"): (True, "S22", "SYNTHETIC")})
@@ -73,6 +77,9 @@ def _aguinaldo(db, w, pay=date(2026, 12, 15)):
 # ── aguinaldo ───────────────────────────────────────────────────────────────
 
 def test_aguinaldo_blocks_without_its_rules(db, monkeypatch):
+    from app.modules.payroll.engine.countries import mexico_content as c
+
+    monkeypatch.setattr(c, "MX_AGUINALDO_RULE", None)                # W1-3a: the real rule is transcribed
     w = ah.committed_world(db, monkeypatch, code="MXAG0")
     run = _aguinaldo(db, w)
     assert run.mx_run_type == "AGUINALDO" and (run.period_start, run.period_end) == (date(2026, 1, 1), date(2026, 12, 31))
@@ -195,7 +202,9 @@ def test_vacation_premium_blocks_the_ordinary_payslip_without_its_rule(db, monke
     B.approve_vacation(db, w.org.id, rec["id"], w.users[1].id)
     run = ah.new_run(db, w)                                               # Jun 16-30 reaches 20 June
     from app.modules.payroll import service
+    from app.modules.payroll.engine.countries import mexico_content as c
 
+    monkeypatch.setattr(c, "MX_SPECIAL_PAY_RULES", {})                  # W1-3a: the real rules are transcribed
     service.generate_payslips_for_run(db, run, w.org.id, [w.employee.id])
     assert "MX_SPECIAL_PAY_RULE_MISSING" in _codes(db, run)
 
@@ -250,3 +259,42 @@ def test_benefit_routes(db, monkeypatch):
     with http(db, principal(w.org.id, w.users[1].id)) as c:
         rid = made.json()["id"]
         assert c.post(f"{ORG_BASE}/vacation/{rid}/approve").json()["status"] == "APPROVED"
+
+
+def test_with_the_transcribed_rules_an_aguinaldo_run_waits_for_the_g1_decisions(db, monkeypatch):
+    """W1-3a: the real LFT Art. 87 rule computes the amount; its LISR Art. 93 exempt
+    part waits for the unit decision (DECISIONS_PENDING D-07) — never a guess."""
+    from app.modules.payroll.engine.countries import mexico_content, mexico_rules
+
+    assert isinstance(mexico_content.MX_AGUINALDO_RULE, mexico_rules.Lft87AguinaldoRule)
+    monkeypatch.setattr(mexico_content, "MX_SPECIAL_PAY_ISN_INCLUSION",
+                        {("CDMX", "AGUINALDO"): (True, "S22", "SYNTHETIC")})
+    w = ah.committed_world(db, monkeypatch, code="MXAGR")
+    run = _aguinaldo(db, w)
+    codes = _codes(db, run)
+    assert "MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED" in codes
+    assert "MX_AGUINALDO_RULE_MISSING" not in codes and "MX_SPECIAL_PAY_RULE_MISSING" not in codes
+
+
+def test_year_to_date_exempt_counts_committed_payslips_of_the_calendar_year_only(db, monkeypatch):
+    """W1-3a: LISR Art. 93 XIV caps each special concept per calendar year, so a
+    later payslip receives the exempt amounts committed earlier that year — and
+    nothing from the run itself, an uncommitted run, or another year."""
+    from app.modules.payroll import mexico_run_service as rs
+
+    _rules(monkeypatch)
+    B = _B()
+    w = ah.committed_world(db, monkeypatch, code="MXYTD")
+    rec = _taken(db, w, days="2", start=date(2026, 6, 20))
+    B.approve_vacation(db, w.org.id, rec["id"], w.users[1].id)
+    run = ah.commit(db, w, ah.new_run(db, w))
+    assert rs._year_to_date_exempt(db, w.employee.id, run, run.pay_date)["VACATION_PREMIUM"] == 0   # itself
+    later = ah.new_run(db, w, "Jul 1-15, 2026", date(2026, 7, 1), date(2026, 7, 15), date(2026, 7, 15))
+    ytd = rs._year_to_date_exempt(db, w.employee.id, later, date(2026, 7, 15))
+    assert ytd["VACATION_PREMIUM"] == D("50") and ytd["AGUINALDO"] == 0     # the synthetic rule exempted 50
+    assert rs._year_to_date_exempt(db, w.employee.id, later, date(2027, 1, 15))["VACATION_PREMIUM"] == 0
+    from app.modules.payroll import service
+
+    service.generate_payslips_for_run(db, later, w.org.id, [w.employee.id])
+    (item,) = ah.rh.mx_items(db, later)
+    assert "yearToDateExempt" in item.mx_calculation_snapshot["components"]   # bound into the input hash

@@ -18,7 +18,7 @@ def test_accrue_links_every_committed_row_once_and_sums_exactly(db, monkeypatch)
     out = s.F.accrue(db, w.org.id, w.users[0].id)
     assert out["sourcesAdded"] > 0 and out["skipped"] == []
     rows = ah.liabilities(db, w)
-    assert {r.authority for r in rows} == {"SAT_ISR", "IMSS", "INFONAVIT", "ISN"}
+    assert {r.authority for r in rows} == {"SAT_ISR", "IMSS", "IMSS_RCV", "INFONAVIT", "ISN"}
     assert {r.period_key for r in rows} == {"2026-06"} and all(r.status == "ACCRUED" for r in rows)
     (item,) = ah.rh.mx_items(db, w.run)
     res = item.mx_calculation_snapshot["result"]
@@ -26,7 +26,11 @@ def test_accrue_links_every_committed_row_once_and_sums_exactly(db, monkeypatch)
     assert by["SAT_ISR"].amount == D(str(res["isr_withheld"])) and by["SAT_ISR"].scope_key == "ORG"
     assert by["ISN"].amount == D(str(res["isn"]["amount"])) and by["ISN"].scope_key == "ST:CDMX"
     imss_total = D(str(res["imss_employee"])) + D(str(res["imss_employer"]))
-    assert by["IMSS"].amount == imss_total and by["IMSS"].registration_id == w.registration.id
+    # A18: retiro and CEAV (paid by bimester, LSS Transitorio XXVII) are their own liability
+    rcv = sum((D(str(b["amount"])) for b in res["imss"] if b.get("branch") in ("RETIRO", "CEAV")), D("0"))
+    assert rcv > 0 and by["IMSS_RCV"].amount == rcv and by["IMSS_RCV"].registration_id == w.registration.id
+    assert by["IMSS"].amount + by["IMSS_RCV"].amount == imss_total and by["IMSS"].registration_id == w.registration.id
+    assert by["IMSS_RCV"].scope_key == by["IMSS"].scope_key == f"REG:{w.registration.id}"
     assert by["INFONAVIT"].amount == D(str(res["infonavit_employer"])) + D(str(res["infonavit_credit"] or 0))
     for liab in rows:                                           # each liability = the sum of its sources
         view = s.F.liability_view(db, liab, with_sources=True)

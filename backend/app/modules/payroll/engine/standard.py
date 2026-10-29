@@ -78,6 +78,7 @@ from app.modules.payroll.engine.countries import saudi_arabia as _saudi_arabia
 from app.modules.payroll.engine.countries import netherlands as _netherlands
 from app.modules.payroll.engine.countries import mexico as _mexico
 from app.modules.payroll.engine.countries import brazil as _brazil
+from app.modules.payroll.engine.countries import south_africa as _south_africa
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -155,6 +156,7 @@ _calc_saudi_arabia = _saudi_arabia.calculate
 _calc_netherlands = _netherlands.calculate
 _calc_mexico = _mexico.calculate
 _calc_brazil = _brazil.calculate
+_calc_south_africa = _south_africa.calculate
 
 
 _COUNTRY_CALC = {
@@ -226,6 +228,11 @@ _COUNTRY_CALC = {
     # the Phase 5 engine is certified, so Brazil can never fall through to
     # _calc_generic; simple mode is blocked in resolver.py.
     "BR": _calc_brazil,
+    # South Africa (ZP-ZA-ENG-001) — PAYE (tds), UIF (employee_esi /
+    # employer_esi), SDL (employer_payroll_tax) on independent bases; ETI is an
+    # employer incentive, never an employee line. Fail-closed:
+    # countries/south_africa.py; simple mode is blocked in resolver.py.
+    "ZA": _calc_south_africa,
 }
 
 
@@ -313,6 +320,10 @@ class StandardStrategy(PayrollStrategy):
             # Employee GOSI arrives via employee_pension/social_security above.
             # Absent -> 0 everywhere else.
             + deductions.get("sa_other_deductions_total", Decimal("0"))
+            # South Africa: validated non-statutory deductions (court order /
+            # consent / collective / damage — authority + evidence enforced by
+            # countries/south_africa.py, ZA-013). Absent -> 0 everywhere else.
+            + deductions.get("za_other_deductions_total", Decimal("0"))
             # Netherlands: Zvw employee contribution + any lawful Whk employee
             # recovery (wage tax arrives as tds, pension as employee_pension).
             # Employer premiums are never in here (NL-035). 0 elsewhere.
@@ -326,6 +337,11 @@ class StandardStrategy(PayrollStrategy):
             # IRRF arrives via tds above. VT is its own statutory deduction line.
             # 0 for every non-BR calculation (key absent from all other calculators).
             + deductions.get("br_vale_transporte_deduction", Decimal("0"))
+            # Brazil CLT: court-ordered alimony (pensão alimentícia, BR-032) is
+            # a lawful deduction from net pay — it is PAID to the beneficiary,
+            # not retained. It also reduces the IRRF legal-deduction base inside
+            # countries/brazil.py. 0 for every non-BR calculation.
+            + deductions.get("br_alimony_deduction", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -596,6 +612,9 @@ class StandardStrategy(PayrollStrategy):
             # the default keeps every other country's result unchanged.
             employer_occupational_hazard=deductions.get("employer_occupational_hazard", Decimal("0")),
             sa_result=deductions.get("sa_result"),
+            # South Africa (ZP-ZA-ENG-001) — the whole ZA dict (bases, PAYE
+            # trace, totals). Absent from every non-ZA calculator dict.
+            za_result=deductions.get("za_result"),
             # Netherlands (ZP-NL-ENG-001) — the whole NL dict (wage tax,
             # employee insurance, employer premiums, Zvw, WKR, car addition,
             # labor pay, net pay, employer cost). Returns under 'nl_result' key.
@@ -664,6 +683,7 @@ class StandardStrategy(PayrollStrategy):
             br_irrf_reduction=deductions.get("br_irrf_reduction", Decimal("0")),
             br_salario_familia=deductions.get("br_salario_familia", Decimal("0")),
             br_vale_transporte_deduction=deductions.get("br_vale_transporte_deduction", Decimal("0")),
+            br_alimony_deduction=deductions.get("br_alimony_deduction", Decimal("0")),
             br_base_fgts=deductions.get("br_base_fgts", Decimal("0")),
             br_fgts_deposit=deductions.get("br_fgts_deposit", Decimal("0")),
             br_cpp_employer=deductions.get("br_cpp_employer", Decimal("0")),

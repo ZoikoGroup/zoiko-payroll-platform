@@ -192,18 +192,25 @@ def test_codeowners_covers_identity_authz_and_migrations():
 
 
 def test_ci_gate_blocks_deploy_on_the_privacy_suite():
+    """The deploy needs the `test` job, and that job runs the WHOLE backend
+    suite — tests/privacy (route registry, PDP, data layer, governance), the
+    identifier scan (test_nonprod_data) and the defect register check — so a
+    privacy failure blocks the deploy. (The separate privacy-isolation job with
+    a Postgres service was removed in 3c9318d; the Postgres RLS tests then run
+    wherever ZP_TEST_POSTGRES_URL is set.) The post-deploy smoke stays."""
     import yaml
 
     for name in ("backend-deploy.yml", "backend-deploy-staging.yml"):
         wf = yaml.safe_load((REPO / ".github" / "workflows" / name).read_text(encoding="utf-8"))
         jobs = wf["jobs"]
-        assert "privacy-isolation" in jobs["deploy"]["needs"], name
-        runs = " ".join(s.get("run", "") for s in jobs["privacy-isolation"]["steps"])
-        for cmd in ("tests/privacy/test_route_registry.py", "pytest -q -p no:cacheprovider tests/privacy",
-                    "scripts.scan_test_data", "scripts.check_privacy_defects"):
-            assert cmd in runs, (name, cmd)
-        assert "postgres" in jobs["privacy-isolation"]["services"]
-        assert jobs["privacy-isolation"]["env"]["ZP_REQUIRE_POSTGRES_TESTS"] == "1"
+        needs = jobs["deploy"]["needs"]
+        assert "test" in ([needs] if isinstance(needs, str) else needs), name
+        suite = [s for s in jobs["test"]["steps"] if "pytest" in s.get("run", "")]
+        assert suite and all(s.get("working-directory") == "backend" for s in suite), name
+        # the whole suite: no path filter narrows it below tests/privacy
+        assert all(s["run"].split("pytest", 1)[1].split()[:1] in ([], ["-q"]) for s in suite), name
+        if "privacy-isolation" in jobs:                     # a dedicated gate, when present, must still gate
+            assert "privacy-isolation" in needs, name
         steps = [s.get("name", "") for s in jobs["deploy"]["steps"]]
         assert "Post-deploy privacy smoke" in steps
 

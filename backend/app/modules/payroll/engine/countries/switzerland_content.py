@@ -181,7 +181,7 @@ CH_CANTON_PARAMETER_LABELS = {
     "ch_qst_tariff_file_id": "Quellensteuer tariff file",
     "ch_fak_child": "Family allowance — child (per month)",
     "ch_fak_education": "Family allowance — education (per month)",
-    "ch_fak_employee_pct": "Family allowance — employer share (%)",
+    "ch_fak_employee_pct": "Family allowance — employee share (%)",   # Valais only (engine reads it as the EE share)
 }
 
 CH_PARAMETER_KEYS = {**CH_FEDERAL_PARAMETER_KEYS, **CH_CANTON_PARAMETER_KEYS}

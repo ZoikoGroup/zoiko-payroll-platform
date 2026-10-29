@@ -304,7 +304,9 @@ def submit_return(
     try:
         result = transport.send(ret.payload_xml, cert_fp, idempotency_key)
     except Exception as e:
-        sub.transport_status = TransportStatus.REJECTED.value
+        # A failure DURING send does not prove the message never arrived:
+        # UNKNOWN forces reconciliation before any resend (NL-052).
+        sub.transport_status = TransportStatus.UNKNOWN.value
         sub.error_codes = [{"code": "TRANSPORT_ERROR", "message": str(e)}]
         db.flush()
         raise

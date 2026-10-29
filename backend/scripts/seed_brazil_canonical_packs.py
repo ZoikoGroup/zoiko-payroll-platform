@@ -168,7 +168,10 @@ def _rows_in_window():
 
 
 def _seed_rows(db, pack, source_ids) -> int:
-    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
+    # Canonical rows only: an org-scoped row (organization_id IS NOT NULL) on
+    # this pack is an organisation's override and is never deleted by a re-seed.
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None)).delete()
     count = 0
     for order, row in enumerate(_rows_in_window(), start=1):
         label = f"{row.label} {content.PENDING_G1}"

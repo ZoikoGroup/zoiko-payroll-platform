@@ -307,7 +307,8 @@ def calculate(ctx) -> dict:
     for attr, value in (("payroll_period_code", table_period),
                         ("nl_table_color", _profile_fact(profile, "nl_table_color")),
                         ("nl_residence_variant", _profile_fact(profile, "nl_residence_variant") or "NL"),
-                        ("nl_with_tax_credit", bool(instruction))):
+                        ("nl_with_tax_credit", bool(instruction)),
+                        ("nl_aow_age_years", _amount(rate_map, "nl_aow_age_years"))):
         setattr(ctx, attr, value)
     extra = _d(_profile_fact(profile, "nl_voluntary_extra_withholding"))
     wage_tax_lines = []

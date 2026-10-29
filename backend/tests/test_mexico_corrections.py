@@ -129,6 +129,26 @@ def test_a_correction_never_changes_an_already_committed_run_but_counts_for_late
     assert own["taxable"] == 0
 
 
+def test_a_special_run_sees_the_month_with_its_withholding(db, monkeypatch):
+    """Completion A17: a special run (here, dated like a finiquito paid on
+    Jun 30) gets the month's committed income AND the ISR withheld on it —
+    with the same payment-order and correction-delta rules; an ordinary run's
+    month-to-date keeps exactly its two keys (no change to its input hash)."""
+    from app.modules.payroll import mexico_run_service as R
+
+    S, w, orig, _, corr_run = _corrected(db, monkeypatch)
+    _approve(db, w, corr_run)
+    jun30 = ah.commit(db, w, ah.new_run(db, w))
+    late = ah.new_run(db, w, "Jun extra", date(2026, 6, 16), date(2026, 6, 30), date(2026, 6, 30))
+    (new,) = ah.rh.mx_items(db, corr_run)
+    (j30,) = ah.rh.mx_items(db, jun30)
+    res = [i.mx_calculation_snapshot["result"] for i in (new, j30)]
+    special = R._special_month_to_date(db, w.employee.id, late, late.pay_date)
+    assert special["taxable"] == sum(D(str(r["isr_taxable"])) for r in res)
+    assert special["isr_withheld"] == sum(D(str(r["isr_withheld"])) for r in res)
+    assert set(R._month_to_date(db, w.employee.id, late, late.pay_date)) == {"taxable", "subsidy_applied"}
+
+
 def test_reset_rules_and_void(db, monkeypatch):
     from app.modules.payroll import mexico_run_service
     from app.modules.payroll.models import PayrollMxIsnLiability, PayrollRun
@@ -197,10 +217,11 @@ def test_a_lower_correction_posts_a_negative_delta(db, monkeypatch):
     _approve(db, w, corr_run)
     s.F.accrue(db, w.org.id, w.users[0].id)
     (imss,) = ah.liabilities(db, w, "IMSS")
+    (rcv,) = ah.liabilities(db, w, "IMSS_RCV")                                 # A18: retiro and CEAV apart
     (new,) = ah.rh.mx_items(db, corr_run)
     o, c = orig.mx_calculation_snapshot["result"], new.mx_calculation_snapshot["result"]
     expected = D(str(c["imss_employee"])) + D(str(c["imss_employer"]))
-    assert imss.amount == expected < D(str(o["imss_employee"])) + D(str(o["imss_employer"]))
+    assert imss.amount + rcv.amount == expected < D(str(o["imss_employee"])) + D(str(o["imss_employer"]))
 
 
 def test_imss_modification_movement_from_a_corrected_sbc(db, monkeypatch):
@@ -213,17 +234,13 @@ def test_imss_modification_movement_from_a_corrected_sbc(db, monkeypatch):
     assert moves[1].payroll_run_id == corr_run.id and moves[1].sbc > moves[0].sbc
 
 
-def test_other_phase9_run_types_are_still_refused(db, monkeypatch):
+def test_every_phase9_run_type_is_built(db, monkeypatch):
+    """9a corrections, 9b aguinaldo, 9c finiquito, 9d PTU: no run type is still
+    refused (Phase 11d: BUILT_RUN_TYPES, which equalled RUN_TYPES, is gone)."""
     from app.modules.payroll import mexico_run_service
-    from app.modules.payroll.engine.countries.mexico import MXBlock
 
-    w = ah.committed_world(db, monkeypatch, code="MXT9")
-    for kind in ("PTU", "FINIQUITO"):                   # AGUINALDO is built in 9b
-        w.run.mx_run_type = kind
-        with pytest.raises(MXBlock) as exc:
-            mexico_run_service.guard(db, w.employee, w.run)
-        assert exc.value.key == "MX_RUN_TYPE_PHASE9"
-    db.rollback()
+    assert set(mexico_run_service.RUN_TYPES) == {"ORDINARY", "CORRECTION", "AGUINALDO", "FINIQUITO", "PTU"}
+    assert not hasattr(mexico_run_service, "BUILT_RUN_TYPES")
 
 
 def test_cfdi_of_a_correction_replaces_the_stamped_original(db, monkeypatch, tmp_path):

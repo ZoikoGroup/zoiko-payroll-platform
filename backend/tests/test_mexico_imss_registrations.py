@@ -70,11 +70,18 @@ def test_establishment_must_share_the_employer_of_its_registration(db):
 def test_min_wage_zone_is_unresolved_while_content_is_empty_and_derived_once_present(db, monkeypatch):
     from app.modules.payroll.engine.countries import mexico_content as c
 
+    real = c.MX_ZLFN_MUNICIPALITIES
+    monkeypatch.setattr(c, "MX_ZLFN_MUNICIPALITIES", ())             # empty content (Batch 2 transcribed S9)
     t = make_org(db)
     emp = new_employer(db, t.org.id)
     est = _svc().create_establishment(db, t.org.id, emp["id"], {"name": "Planta", "state_code": "BCN",
                                                                 "municipality": "Tijuana", "postal_code": "22000"}, 701)
     assert est["minWageZone"]["zone"] == "UNRESOLVED"
+    monkeypatch.setattr(c, "MX_ZLFN_MUNICIPALITIES", real)           # the transcribed S9 list
+    assert _svc().min_wage_zone("BCN", "Tijuana")["zone"] == "ZLFN"
+    assert "S9/" in _svc().min_wage_zone("BCN", "Tijuana")["detail"]
+    assert _svc().min_wage_zone("JAL", "Guadalajara")["zone"] == "GENERAL"
+    assert _svc().min_wage_zone("TAM", "Guerrero")["zone"] == "ZLFN"   # Guerrero, Tamaulipas
     monkeypatch.setattr(c, "MX_ZLFN_MUNICIPALITIES", (c.ZlfnMunicipality("BCN", "Tijuana", "S9", "SYNTHETIC"),))
     assert _svc().min_wage_zone("BCN", "tijuana ")["zone"] == "ZLFN"
     assert _svc().min_wage_zone("CDMX", "Cuauhtémoc")["zone"] == "GENERAL"

@@ -1340,18 +1340,32 @@ def add_company_car(db: Session, *, organization_id: int, employee_id: int, cata
 
 def record_expat_decision(db: Session, *, organization_id: int, employee_id: int, decision_reference: str,
                           decision_date: date, granted_from: date, method: str, threshold_category: str,
-                          allowance_pct: Decimal, granted_to: Optional[date] = None,
+                          allowance_pct: Decimal, actor_id: Optional[int], granted_to: Optional[date] = None,
                           evidence_artifact_id: Optional[int] = None) -> PayrollNlExpatDecision:
-    """Recorded as PENDING — payroll ignores it until verified (NL-026)."""
+    """Recorded as PENDING — payroll ignores it until a SECOND person verifies
+    it against the Belastingdienst decision (NL-026, four-eyes)."""
     _employee(db, employee_id, organization_id)
+    if evidence_artifact_id is not None:
+        _own_evidence(db, evidence_artifact_id, organization_id)
     row = PayrollNlExpatDecision(organization_id=organization_id, employee_id=employee_id,
                                  decision_reference=decision_reference, decision_date=decision_date,
                                  granted_from=granted_from, granted_to=granted_to, method=method,
                                  threshold_category=threshold_category, allowance_pct=allowance_pct,
-                                 evidence_artifact_id=evidence_artifact_id, status="PENDING")
+                                 evidence_artifact_id=evidence_artifact_id, status="PENDING",
+                                 recorded_by=actor_id)
     db.add(row)
     db.flush()
     return row
+
+
+def _own_evidence(db: Session, document_id: int, organization_id: int) -> None:
+    """The decision letter must be one of THIS organisation's own uploaded
+    documents — never another tenant's document id."""
+    from app.modules.payroll.models import ComplianceDocument
+
+    doc = db.query(ComplianceDocument).filter(ComplianceDocument.id == document_id).first()
+    if doc is None or doc.organization_id != organization_id:
+        raise BadRequestException("the evidence must be one of your organisation's uploaded documents")
 
 
 def verify_expat_decision(db: Session, decision_id: int, organization_id: int, actor_id: int) -> PayrollNlExpatDecision:
@@ -1360,8 +1374,17 @@ def verify_expat_decision(db: Session, decision_id: int, organization_id: int, a
                    PayrollNlExpatDecision.organization_id == organization_id).first())
     if row is None:
         raise NotFoundException("PayrollNlExpatDecision", decision_id)
+    if row.status != "PENDING":
+        # A REVOKED or EXPIRED decision must never be brought back into payroll.
+        raise BadRequestException(f"only a PENDING decision can be verified (status {row.status})")
     if row.evidence_artifact_id is None:
         raise BadRequestException("the Belastingdienst decision document must be attached before verification (NL-026)")
+    _own_evidence(db, row.evidence_artifact_id, organization_id)
+    if row.recorded_by is None:
+        raise BadRequestException("this decision has no recorded author — record it again so a second person can "
+                                  "verify it (four-eyes)")
+    if actor_id is None or row.recorded_by == actor_id:
+        raise BadRequestException("the person who recorded a 30% decision cannot verify it (four-eyes)")
     row.status = "VERIFIED"
     row.verified_by = actor_id
     row.verified_at = datetime.utcnow()
@@ -2156,6 +2179,19 @@ def statutory_summary(db: Session) -> dict:
 
 
 def nl_activation_evidence_refusal(db: Session, pack) -> Optional[str]:
+    """An NL pack with no canonical rows is never activated: the empty
+    change-watch pack NL-PAYROLL-2026-07 overlaps NL-PAYROLL-2026 from July, so
+    activating it would make every later NL calculation block on missing
+    content."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    has_rows = (db.query(ContributionRate.id).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                     ContributionRate.organization_id.is_(None)).first()
+                or db.query(TaxSlab.id).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                               TaxSlab.organization_id.is_(None)).first())
+    if not has_rows:
+        return (f"NL pack {pack.pack_id} has no statutory rows — an empty pack "
+                "(such as the 2026-07 change-watch pack) cannot be activated")
     return None
 
 

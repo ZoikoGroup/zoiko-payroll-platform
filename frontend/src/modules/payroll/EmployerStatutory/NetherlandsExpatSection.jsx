@@ -46,7 +46,7 @@ function ExpatForm({ employees, onCancel, onSaved }) {
       evidence_artifact_id: form.evidence_artifact_id ? Number(form.evidence_artifact_id) : null,
     };
     const res = await run(() => createNlExpatDecision(payload));
-    if (res.ok) onSaved("Decision recorded as PENDING — verify it against the decision letter before payroll applies it.");
+    if (res.ok) onSaved("Decision recorded as PENDING — a second person must verify it against the decision letter before payroll applies it.");
   }
 
   return (
@@ -72,7 +72,7 @@ function ExpatForm({ employees, onCancel, onSaved }) {
         </select>
       </Field>
       <Field id="nlx-pct" label="Allowance %" required><input id="nlx-pct" inputMode="decimal" className={inputCls} value={form.allowance_pct} onChange={set("allowance_pct")} /></Field>
-      <Field id="nlx-evidence" label="Evidence document id" hint="The uploaded Belastingdienst decision letter."><input id="nlx-evidence" inputMode="numeric" className={inputCls} value={form.evidence_artifact_id} onChange={set("evidence_artifact_id")} /></Field>
+      <Field id="nlx-evidence" label="Evidence document id" hint="The Belastingdienst decision letter, uploaded to your organisation's documents."><input id="nlx-evidence" inputMode="numeric" className={inputCls} value={form.evidence_artifact_id} onChange={set("evidence_artifact_id")} /></Field>
       <div className="col-span-full"><Messages error={error} /></div>
       <FormActions busy={busy} submitLabel="Record decision" onCancel={onCancel} />
     </form>
@@ -97,7 +97,7 @@ export default function NetherlandsExpatSection({ readOnly }) {
   return (
     <div className={cardCls}>
       <SectionHeader title="30% facility decisions"
-        description="One decision per employee, from the Belastingdienst letter. Payroll applies the facility only after the decision is verified.">
+        description="One decision per employee, from the Belastingdienst letter. Payroll applies the facility only after a second person verifies it against the letter — the person who recorded a decision cannot verify it.">
         {!readOnly && !creating && (
           <button type="button" className={btnPrimary} disabled={employees.initialLoading}
             onClick={() => { setCreating(true); setNotice(null); action.clear(); }}>
@@ -127,6 +127,8 @@ export default function NetherlandsExpatSection({ readOnly }) {
           { key: "allowance_pct", label: "%" },
           { key: "granted", label: "Granted", render: (r) => period(r.granted_from, r.granted_to) },
           { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
+          { key: "recorded_by", label: "Recorded by", render: (r) => (r.recorded_by ? `User #${r.recorded_by}` : "Not recorded — record again") },
+          { key: "verified_by", label: "Verified by", render: (r) => (r.verified_by ? `User #${r.verified_by}` : "—") },
           { key: "actions", label: "", render: (r) => (readOnly ? null : (
             <div className="flex flex-wrap gap-1.5">
               {r.status === "PENDING" && (

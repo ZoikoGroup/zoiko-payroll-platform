@@ -444,3 +444,22 @@ class TestCommittedPayrollOnly:
                                                 actor_id=801)
         assert "123&lt;&amp;&gt;L01" in ret.payload_xml and "not-gegevensspecificaties" in ret.payload_xml
 
+
+
+def test_four_week_period_codes_round_trip_through_dates():
+    """NL-R2: 13 four-week periods from 1 January; the code is the period
+    number (never an ISO week) and code -> dates -> code is the identity."""
+    from datetime import date as _d
+
+    from app.modules.payroll import netherlands_filing_service as f
+
+    starts = []
+    for n in range(1, 14):
+        code = f"2026W{n:02d}"
+        start, end = f.period_dates_for(2026, code, "FOUR_WEEK")
+        assert f.period_code_for(2026, start, "FOUR_WEEK") == code
+        starts.append((start, end))
+    assert starts[0] == (_d(2026, 1, 1), _d(2026, 1, 28))
+    assert starts[-1][1] == _d(2026, 12, 31)                                # period 13 closes the year
+    assert all(b[0] - a[1] == _d(2026, 1, 2) - _d(2026, 1, 1) for a, b in zip(starts, starts[1:]))
+    assert f.period_code_for(2026, _d(2026, 1, 5), "FOUR_WEEK") == "2026W01"  # ISO week 2 is still period 1

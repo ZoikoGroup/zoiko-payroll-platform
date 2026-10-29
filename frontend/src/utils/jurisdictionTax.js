@@ -101,6 +101,19 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "loonheffingennummer", label: "Loonheffingennummer (payroll-tax number)", pattern: "^\\d{9}L\\d{2}$", example: "123456789L01", primary: false },
     ],
   },
+  // South Africa ("ZA"; "SA" is Saudi Arabia) — mirrors backend
+  // core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.ZA exactly. Schema only: ZA
+  // stays out of registration until its release gates G1–G7 are signed.
+  ZA: {
+    label: "PAYE / UIF / SDL / COIDA / CIPC",
+    fields: [
+      { key: "paye_reference", label: "PAYE reference (SARS)", pattern: "^7\\d{9}$", example: "7123456789", primary: true },
+      { key: "uif_reference", label: "UIF reference (Department of Employment and Labour)", pattern: "^U\\d{9}$", example: "U123456789", primary: false },
+      { key: "sdl_reference", label: "SDL reference (SARS)", pattern: "^L\\d{9}$", example: "L123456789", primary: false },
+      { key: "coida_reference", label: "COIDA registration number", pattern: "^[A-Za-z0-9 /.-]{6,30}$", example: "1234567/ABC", primary: false },
+      { key: "cipc_number", label: "CIPC company registration number", pattern: "^\\d{4}/\\d{6}/\\d{2}$", example: "2026/123456/07", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -119,6 +132,9 @@ const COUNTRY_NAME_TO_CODE = {
   ksa: "SA",
   netherlands: "NL",
   "the netherlands": "NL",
+  // South Africa — never "sa", which is Saudi Arabia's code here.
+  "south africa": "ZA",
+  rsa: "ZA",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -132,6 +148,7 @@ const CODE_TO_COUNTRY_NAME = {
   IE: "Ireland",
   SA: "Saudi Arabia",
   NL: "Netherlands",
+  ZA: "South Africa",
 };
 
 export function getJurisdictionCode(country) {

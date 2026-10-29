@@ -1,0 +1,43 @@
+{
+  "description": "F2 - Variable components: base R$5,000 + OT 50% (10h) + OT 100% (5h) + night premium (20h) + DSR (4 Sundays). PROVISIONAL — rubric incidence codes unverified (BR-K3/D6).",
+  "status": "PROVISIONAL",
+  "statusNote": "Engineering control from ZP-BR-ENG-001 v1.0. NOT an official golden vector: the content is DRAFT (every row [PENDING G1]); replace once gate G1 is signed.",
+  "context": {
+    "country": "BR",
+    "gross": "5778.92",
+    "basic": "5000.00",
+    "pay_date": "2026-01-31",
+    "brazil_inputs": {
+      "competence_month": "2026-01-01",
+      "esocial_category": "101",
+      "contract_salary": "5000.00",
+      "rat_pct": "2",
+      "fap_factor": "1.0",
+      "third_party_pct": "0",
+      "cprb_opted": false,
+      "financial_sector": false,
+      "earnings": [
+        {"rubricCode": "BR_SALARIO_BASE", "amount": "5000.00"},
+        {"rubricCode": "BR_HORA_EXTRA_50", "amount": "340.91"},
+        {"rubricCode": "BR_HORA_EXTRA_100", "amount": "227.27"},
+        {"rubricCode": "BR_ADIC_NOTURNO", "amount": "90.91"},
+        {"rubricCode": "BR_DSR", "amount": "119.83"}
+      ]
+    }
+  },
+  "expected": {
+    "br_base_inss": "5778.92",
+    "br_inss_employee": "610.56",
+    "br_base_irrf": "5778.92",
+    "br_irrf": "303.38",
+    "br_irrf_reduction": "209.19",
+    "br_base_fgts": "5778.92",
+    "br_fgts_deposit": "462.31",
+    "br_cpp_employer": "1155.78",
+    "br_rat_adjusted": "115.58",
+    "br_third_parties": "0.00",
+    "tds": "303.38",
+    "total_deductions": "913.94",
+    "net_pay": "4864.98"
+  }
+}

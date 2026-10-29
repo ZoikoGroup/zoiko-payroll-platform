@@ -591,6 +591,9 @@ export default function TaxConfigurationTab(props) {
   // Netherlands: no per-organisation slab/rate rows — wage-tax tables and
   // premium rates are platform data (NL Compliance Centre / Super Admin).
   if (["NL", "NETHERLANDS"].includes(String(props.country || "").toUpperCase())) return null;
+  // South Africa: PAYE bands, UIF / SDL and ETI are platform pack data
+  // (Super Admin → South Africa Compliance); never the US-fallback tab.
+  if (["ZA", "SOUTH AFRICA"].includes(String(props.country || "").toUpperCase())) return null;
   return <GenericTaxConfigurationTab {...props} />;
 }
 

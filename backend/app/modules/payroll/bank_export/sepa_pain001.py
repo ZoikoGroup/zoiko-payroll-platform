@@ -1,38 +1,47 @@
 """
 bank_export/sepa_pain001.py
 ----------------------------
-Generic SEPA Credit Transfer (pain.001.001.09) builder.
+SEPA Credit Transfer initiation (ISO 20022 pain.001.001.09) builder.
 
-Reusable by DE, FR, IE, NL and other SEPA jurisdictions.
-Produces ISO 20022 pain.001.001.09 XML for credit transfers.
+Reusable by every SEPA jurisdiction (NL today; DE / FR / IE can adopt it).
+Every file is validated against the official XSD
+(bank_export/schemas/pain.001.001.09.xsd) before it is returned — a file a
+bank would reject is never produced.
 
-Schema: https://www.iso20022.org/standardsrepository/type/pain.001.001.09
+Phase 4.2 (2026-10-23) rewrite of the earlier builder, which emitted
+CstmrCdtTrfInitn without its Document root, un-namespaced children, a
+CreDtTm fabricated from a hash, ReqdExctnDt inside CdtTrfTxInf, a hard-coded
+instant-payment LclInstrm, no DbtrAgt without a BIC and IBANs with spaces.
+
+Element order follows the pain.001.001.09 XSD (GrpHdr, PmtInf,
+CdtTrfTxInf, PartyIdentification135, PostalAddress24).
 """
 from __future__ import annotations
 
 import hashlib
-import uuid
+import re
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import List, Optional
-from xml.etree import ElementTree as ET
-from xml.dom import minidom
 
+from lxml import etree
 
-# ── Namespace constants ──────────────────────────────────────────────
-NS = {
-    "doc": "urn:iso:std:iso:20022:tech:xsd:pain.001.001.09",
-    "xsi": "http://www.w3.org/2001/XMLSchema-instance",
-}
-SCHEMA_LOCATION = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.09 pain.001.001.09.xsd"
+NAMESPACE = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.09"
+XSD_PATH = Path(__file__).resolve().parent / "schemas" / "pain.001.001.09.xsd"
+NOT_PROVIDED = "NOTPROVIDED"           # agent identification when no BIC is known (pain.001 usage rule)
+
+_MAX_ID = 35                           # Max35Text: MsgId, PmtInfId, EndToEndId, Othr/Id
+_MAX_NAME = 140                        # Max140Text: Nm
+_MAX_USTRD = 140                       # Max140Text: RmtInf/Ustrd
 
 
 @dataclass
 class SepaParty:
-    """Debtor or Creditor party."""
+    """Debtor, creditor or initiating party."""
     name: str
-    iban: str
+    iban: str = ""
     bic: Optional[str] = None
     address_line1: Optional[str] = None
     address_line2: Optional[str] = None
@@ -45,7 +54,9 @@ class SepaParty:
 
 @dataclass
 class SepaPaymentItem:
-    """Individual credit transfer instruction."""
+    """One credit transfer. `requested_execution_date` is accepted for
+    backwards compatibility but the date is a payment-information (batch)
+    element in pain.001.001.09 — the batch date governs."""
     end_to_end_id: str
     amount: Decimal
     currency: str = "EUR"
@@ -53,14 +64,15 @@ class SepaPaymentItem:
     creditor_account_iban: str = None
     creditor_agent_bic: Optional[str] = None
     remittance_info: Optional[str] = None
-    purpose_code: Optional[str] = None  # e.g. "SALA" for salary
+    purpose_code: Optional[str] = None      # e.g. "SALA"
     category_purpose: Optional[str] = None
     requested_execution_date: Optional[date] = None
+    structured_reference: Optional[str] = None   # RmtInf/Strd creditor reference (e.g. betalingskenmerk)
 
 
 @dataclass
 class SepaBatch:
-    """Payment batch (message level)."""
+    """One payment-information block (one debtor account, one execution date)."""
     message_id: str
     initiating_party: SepaParty
     debtor: SepaParty
@@ -69,200 +81,222 @@ class SepaBatch:
     requested_execution_date: Optional[date] = None
     items: List[SepaPaymentItem] = field(default_factory=list)
     batch_booking: bool = True
-    charge_bearer: str = "SLEV"  # Following Service Level
+    charge_bearer: str = "SLEV"
+    service_level: str = "SEPA"
+    local_instrument: Optional[str] = None   # e.g. "INST" only when the debtor bank offers it
+    category_purpose: Optional[str] = None   # e.g. "SALA" (salary) / "TAXS"
+
+
+class SepaValidationError(ValueError):
+    """Raised when SEPA data or the built file fails validation."""
+
+
+def normalise_iban(value: Optional[str]) -> str:
+    return re.sub(r"\s+", "", str(value or "")).upper()
+
+
+def mask_iban(value: Optional[str]) -> str:
+    raw = normalise_iban(value)
+    return f"{raw[:2]}**…{raw[-4:]}" if len(raw) > 6 else "****"
+
+
+def validate_iban(iban: str) -> bool:
+    """ISO 13616 mod-97 check (shape 2 letters + 2 digits + 10-30 alphanumerics)."""
+    raw = normalise_iban(iban)
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", raw):
+        return False
+    return int("".join(str(int(ch, 36)) for ch in raw[4:] + raw[:4])) % 97 == 1
+
+
+def validate_bic(bic: str) -> bool:
+    return bool(re.fullmatch(r"[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?", re.sub(r"\s+", "", str(bic or "")).upper()))
+
+
+def validate_batch(batch: SepaBatch) -> List[str]:
+    """Data errors for one batch (empty = valid). IBANs are masked in messages."""
+    errors = []
+    if not batch.message_id:
+        errors.append("Batch message_id is required")
+    elif len(batch.message_id) > _MAX_ID:
+        errors.append(f"Batch message_id is longer than {_MAX_ID} characters")
+    if not batch.debtor or not batch.debtor.name:
+        errors.append("Debtor name is required")
+    if not batch.debtor_account_iban:
+        errors.append("Debtor IBAN is required")
+    elif not validate_iban(batch.debtor_account_iban):
+        errors.append(f"Invalid debtor IBAN {mask_iban(batch.debtor_account_iban)}")
+    if batch.debtor_agent_bic and not validate_bic(batch.debtor_agent_bic):
+        errors.append("Invalid debtor agent BIC")
+    if not batch.items:
+        errors.append("A batch needs at least one payment")
+    for i, item in enumerate(batch.items):
+        if not item.end_to_end_id:
+            errors.append(f"Item {i}: end_to_end_id is required")
+        elif len(item.end_to_end_id) > _MAX_ID:
+            errors.append(f"Item {i}: end_to_end_id is longer than {_MAX_ID} characters")
+        if item.amount is None or Decimal(item.amount) <= 0:
+            errors.append(f"Item {i}: amount must be positive")
+        if not item.creditor:
+            errors.append(f"Item {i}: creditor is required")
+        elif not item.creditor.name:
+            errors.append(f"Item {i}: creditor name is required")
+        creditor_iban = item.creditor_account_iban or (item.creditor.iban if item.creditor else None)
+        if not creditor_iban:
+            errors.append(f"Item {i}: creditor IBAN is required")
+        elif not validate_iban(creditor_iban):
+            errors.append(f"Item {i}: invalid creditor IBAN {mask_iban(creditor_iban)}")
+        if item.creditor_agent_bic and not validate_bic(item.creditor_agent_bic):
+            errors.append(f"Item {i}: invalid creditor agent BIC")
+    return errors
+
+
+_SCHEMA = None
+
+
+def validate_against_xsd(xml: str) -> None:
+    """Raise SepaValidationError unless `xml` is valid pain.001.001.09."""
+    global _SCHEMA
+    if _SCHEMA is None:
+        _SCHEMA = etree.XMLSchema(etree.parse(str(XSD_PATH)))
+    doc = etree.fromstring(xml.encode("utf-8"))
+    if not _SCHEMA.validate(doc):
+        raise SepaValidationError("pain.001.001.09 schema validation failed: "
+                                  + "; ".join(str(e.message) for e in list(_SCHEMA.error_log)[:5]))
+
+
+def _el(parent, tag: str, text: Optional[str] = None):
+    node = etree.SubElement(parent, f"{{{NAMESPACE}}}{tag}")
+    if text is not None:
+        node.text = str(text)
+    return node
+
+
+def _amount(value) -> str:
+    return f"{Decimal(value):.2f}"
 
 
 class Pain001Builder:
-    """Builds pain.001.001.09 XML from structured data."""
+    """Builds one schema-valid pain.001.001.09 message.
 
-    def __init__(self):
+    `created_at` is the message's CreDtTm. A caller that stores the file (or
+    must rebuild identical bytes) passes its stored creation time; otherwise
+    the current UTC time is used — never a fabricated date."""
+
+    def __init__(self, created_at: Optional[datetime] = None):
         self._batches: List[SepaBatch] = []
+        self._created_at = created_at
 
     def add_batch(self, batch: SepaBatch) -> "Pain001Builder":
         self._batches.append(batch)
         return self
 
+    def message_id(self) -> str:
+        """Deterministic MsgId from the batch ids (max 35 characters)."""
+        digest = hashlib.sha256("|".join(b.message_id for b in self._batches).encode()).hexdigest()
+        return f"MSG-{digest[:31].upper()}"
+
     def build(self, pretty: bool = True) -> str:
-        """Generate the pain.001 XML string."""
-        # Validate all batches
-        for batch in self._batches:
-            errors = validate_batch(batch)
-            if errors:
-                raise SepaValidationError(f"SEPA validation failed: {errors}")
+        if not self._batches:
+            raise SepaValidationError("SEPA validation failed: no payment batch")
+        errors = [e for b in self._batches for e in validate_batch(b)]
+        if errors:
+            raise SepaValidationError(f"SEPA validation failed: {errors}")
+        created = (self._created_at or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
 
-        root = self._create_root()
-        grp_hdr = self._create_group_header(root)
-        for idx, batch in enumerate(self._batches):
-            self._create_payment_info(root, batch, idx + 1)
-        return self._to_string(root, pretty)
+        document = etree.Element(f"{{{NAMESPACE}}}Document", nsmap={None: NAMESPACE})
+        initiation = _el(document, "CstmrCdtTrfInitn")
+        header = _el(initiation, "GrpHdr")
+        _el(header, "MsgId", self.message_id())
+        _el(header, "CreDtTm", created.strftime("%Y-%m-%dT%H:%M:%S"))
+        _el(header, "NbOfTxs", sum(len(b.items) for b in self._batches))
+        _el(header, "CtrlSum", _amount(sum(Decimal(i.amount) for b in self._batches for i in b.items)))
+        self._party(_el(header, "InitgPty"), self._batches[0].initiating_party)
+        for index, batch in enumerate(self._batches, start=1):
+            self._payment_information(initiation, batch, index)
 
-    def _create_root(self) -> ET.Element:
-        root = ET.Element(
-            "{urn:iso:std:iso:20022:tech:xsd:pain.001.001.09}Document",
-            attrib={
-                "xmlns": "urn:iso:std:iso:20022:tech:xsd:pain.001.001.09",
-                "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            },
-        )
-        root.set(
-            "{http://www.w3.org/2001/XMLSchema-instance}schemaLocation",
-            SCHEMA_LOCATION,
-        )
-        cstmr_cdt_trf = ET.SubElement(root, "{urn:iso:std:iso:20022:tech:xsd:pain.001.001.09}CstmrCdtTrfInitn")
-        return cstmr_cdt_trf
-
-    def _create_group_header(self, root: ET.Element) -> ET.Element:
-        grp_hdr = ET.SubElement(root, "GrpHdr")
-        # Use deterministic message ID for reproducible hashes
-        batch_ids = "".join(b.message_id for b in self._batches)
-        msg_id = f"MSG-{hashlib.sha256(batch_ids.encode()).hexdigest()[:30].upper()}"
-        ET.SubElement(grp_hdr, "MsgId").text = msg_id
-        # Use deterministic timestamp based on batch IDs for reproducible hashes
-        timestamp_base = hashlib.sha256(batch_ids.encode()).hexdigest()[:16]
-        # Convert first 12 hex chars to a pseudo-timestamp
-        year = 2020 + int(timestamp_base[:2], 16) % 10
-        month = 1 + int(timestamp_base[2:4], 16) % 12
-        day = 1 + int(timestamp_base[4:6], 16) % 28
-        hour = int(timestamp_base[6:8], 16) % 24
-        minute = int(timestamp_base[8:10], 16) % 60
-        second = int(timestamp_base[10:12], 16) % 60
-        ET.SubElement(grp_hdr, "CreDtTm").text = f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}"
-        ET.SubElement(grp_hdr, "NbOfTxs").text = str(sum(len(b.items) for b in self._batches))
-        total_amount = sum(item.amount for b in self._batches for item in b.items)
-        ET.SubElement(grp_hdr, "CtrlSum").text = f"{total_amount:.2f}"
-        initg_pty = ET.SubElement(grp_hdr, "InitgPty")
-        self._add_party_name(initg_pty, self._batches[0].initiating_party if self._batches else SepaParty(name="", iban=""))
-        return grp_hdr
-
-    def _create_payment_info(self, root: ET.Element, batch: SepaBatch, idx: int) -> ET.Element:
-        pmt_inf = ET.SubElement(root, "PmtInf")
-        # Deterministic PmtInfId based on batch message_id and index
-        pmt_inf_id = f"BATCH-{idx}-{hashlib.sha256(batch.message_id.encode()).hexdigest()[:12].upper()}"
-        ET.SubElement(pmt_inf, "PmtInfId").text = pmt_inf_id
-        ET.SubElement(pmt_inf, "PmtMtd").text = "TRF"
-        ET.SubElement(pmt_inf, "BtchBookg").text = "true" if batch.batch_booking else "false"
-        ET.SubElement(pmt_inf, "NbOfTxs").text = str(len(batch.items))
-        ET.SubElement(pmt_inf, "CtrlSum").text = f"{sum(item.amount for item in batch.items):.2f}"
-        ET.SubElement(pmt_inf, "PmtTpInf").extend(self._payment_type_info(batch))
-        reqd_exctn = ET.SubElement(pmt_inf, "ReqdExctnDt")
-        ET.SubElement(reqd_exctn, "Dt").text = (batch.requested_execution_date or date.today()).isoformat()
-
-        # Debtor
-        dbtr = ET.SubElement(pmt_inf, "Dbtr")
-        self._add_party_name(dbtr, batch.debtor)
-        if batch.debtor.organisation_id or batch.debtor.private_id:
-            self._add_party_id(dbtr, batch.debtor)
-
-        dbtr_acct = ET.SubElement(pmt_inf, "DbtrAcct")
-        dbtr_acct_id = ET.SubElement(dbtr_acct, "Id")
-        ET.SubElement(dbtr_acct_id, "IBAN").text = batch.debtor_account_iban
-
-        if batch.debtor_agent_bic:
-            dbtr_agt = ET.SubElement(pmt_inf, "DbtrAgt")
-            fin_instn = ET.SubElement(dbtr_agt, "FinInstnId")
-            ET.SubElement(fin_instn, "BICFI").text = batch.debtor_agent_bic
-
-        chrg_br = ET.SubElement(pmt_inf, "ChrgBr")
-        chrg_br.text = batch.charge_bearer
-
-        for item in batch.items:
-            cdt_trf = ET.SubElement(pmt_inf, "CdtTrfTxInf")
-            self._add_payment_item(cdt_trf, item, batch)
-
-        return pmt_inf
-
-    def _payment_type_info(self, batch: SepaBatch) -> List[ET.Element]:
-        """Build PmtTpInf element."""
-        elements = []
-        svc_lvl = ET.Element("SvcLvl")
-        ET.SubElement(svc_lvl, "Cd").text = "SEPA"
-        elements.append(svc_lvl)
-
-        lcl_instrm = ET.Element("LclInstrm")
-        ET.SubElement(lcl_instrm, "Cd").text = "INST"  # Instant if supported, else NORM
-        elements.append(lcl_instrm)
-
-        ctgy_purp = ET.Element("CtgyPurp")
-        ET.SubElement(ctgy_purp, "Cd").text = batch.items[0].category_purpose or "SALA" if batch.items else "SALA"
-        elements.append(ctgy_purp)
-
-        return elements
-
-    def _add_payment_item(self, parent: ET.Element, item: SepaPaymentItem, batch: SepaBatch):
-        pmt_id = ET.SubElement(parent, "PmtId")
-        ET.SubElement(pmt_id, "EndToEndId").text = item.end_to_end_id
-
-        amt = ET.SubElement(parent, "Amt")
-        instd_amt = ET.SubElement(amt, "InstdAmt", {"Ccy": item.currency})
-        instd_amt.text = f"{item.amount:.2f}"
-
-        if item.creditor_agent_bic:
-            cdtr_agt = ET.SubElement(parent, "CdtrAgt")
-            fin_instn = ET.SubElement(cdtr_agt, "FinInstnId")
-            ET.SubElement(fin_instn, "BICFI").text = item.creditor_agent_bic
-
-        cdtr = ET.SubElement(parent, "Cdtr")
-        self._add_party_name(cdtr, item.creditor)
-        if item.creditor.organisation_id or item.creditor.private_id:
-            self._add_party_id(cdtr, item.creditor)
-
-        cdtr_acct = ET.SubElement(parent, "CdtrAcct")
-        cdtr_acct_id = ET.SubElement(cdtr_acct, "Id")
-        ET.SubElement(cdtr_acct_id, "IBAN").text = item.creditor_account_iban or item.creditor.iban
-
-        if item.purpose_code:
-            purp = ET.SubElement(parent, "Purp")
-            ET.SubElement(purp, "Cd").text = item.purpose_code
-
-        if item.remittance_info:
-            rmt_inf = ET.SubElement(parent, "RmtInf")
-            ET.SubElement(rmt_inf, "Ustrd").text = item.remittance_info
-
-        if item.requested_execution_date:
-            reqd_exctn = ET.SubElement(parent, "ReqdExctnDt")
-            ET.SubElement(reqd_exctn, "Dt").text = item.requested_execution_date.isoformat()
-
-    def _add_party_name(self, parent: ET.Element, party: SepaParty):
-        ET.SubElement(parent, "Nm").text = party.name[:70]  # Max 70 chars per ISO 20022
-        if party.address_line1 or party.address_line2 or party.city or party.postal_code or party.country:
-            pstl_adr = ET.SubElement(parent, "PstlAdr")
-            if party.address_line1:
-                ET.SubElement(pstl_adr, "AdrLine").text = party.address_line1[:70]
-            if party.address_line2:
-                ET.SubElement(pstl_adr, "AdrLine").text = party.address_line2[:70]
-            if party.postal_code:
-                ET.SubElement(pstl_adr, "PstCd").text = party.postal_code[:16]
-            if party.city:
-                ET.SubElement(pstl_adr, "TwnNm").text = party.city[:35]
-            if party.country:
-                ET.SubElement(pstl_adr, "Ctry").text = party.country
-
-    def _add_party_id(self, parent: ET.Element, party: SepaParty):
-        if party.organisation_id:
-            id_elem = ET.SubElement(parent, "Id")
-            org_id = ET.SubElement(id_elem, "OrgId")
-            othr = ET.SubElement(org_id, "Othr")
-            ET.SubElement(othr, "Id").text = party.organisation_id[:35]
-        elif party.private_id:
-            id_elem = ET.SubElement(parent, "Id")
-            prvt_id = ET.SubElement(id_elem, "PrvtId")
-            othr = ET.SubElement(prvt_id, "Othr")
-            ET.SubElement(othr, "Id").text = party.private_id[:35]
-
-    def _to_string(self, root: ET.Element, pretty: bool = True) -> str:
-        xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-        if pretty:
-            parsed = minidom.parseString(xml_bytes)
-            return parsed.toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
-        return xml_bytes.decode("utf-8")
+        xml = etree.tostring(document, encoding="utf-8", xml_declaration=True, pretty_print=pretty).decode("utf-8")
+        validate_against_xsd(xml)
+        return xml
 
     def sha256(self) -> str:
-        """Compute SHA256 of the canonical XML (without pretty printing)."""
-        xml = self.build(pretty=False)
-        return hashlib.sha256(xml.encode("utf-8")).hexdigest()
+        return hashlib.sha256(self.build(pretty=False).encode("utf-8")).hexdigest()
+
+    # ── blocks (XSD order) ────────────────────────────────────────────
+    def _payment_information(self, parent, batch: SepaBatch, index: int) -> None:
+        info = _el(parent, "PmtInf")
+        digest = hashlib.sha256(batch.message_id.encode()).hexdigest()[:24].upper()
+        _el(info, "PmtInfId", f"PMT-{index}-{digest}"[:_MAX_ID])
+        _el(info, "PmtMtd", "TRF")
+        _el(info, "BtchBookg", "true" if batch.batch_booking else "false")
+        _el(info, "NbOfTxs", len(batch.items))
+        _el(info, "CtrlSum", _amount(sum(Decimal(i.amount) for i in batch.items)))
+        type_info = _el(info, "PmtTpInf")
+        _el(_el(type_info, "SvcLvl"), "Cd", batch.service_level)
+        if batch.local_instrument:
+            _el(_el(type_info, "LclInstrm"), "Cd", batch.local_instrument)
+        category = batch.category_purpose or next((i.category_purpose for i in batch.items if i.category_purpose), None)
+        if category:
+            _el(_el(type_info, "CtgyPurp"), "Cd", category)
+        execution = (batch.requested_execution_date
+                     or next((i.requested_execution_date for i in batch.items if i.requested_execution_date), None))
+        if execution is None:
+            raise SepaValidationError("SEPA validation failed: a requested execution date is required")
+        _el(_el(info, "ReqdExctnDt"), "Dt", execution.isoformat())
+        self._party(_el(info, "Dbtr"), batch.debtor)
+        _el(_el(_el(info, "DbtrAcct"), "Id"), "IBAN", normalise_iban(batch.debtor_account_iban))
+        self._agent(_el(info, "DbtrAgt"), batch.debtor_agent_bic)
+        _el(info, "ChrgBr", batch.charge_bearer)
+        for item in batch.items:
+            self._transfer(_el(info, "CdtTrfTxInf"), item)
+
+    def _transfer(self, tx, item: SepaPaymentItem) -> None:
+        _el(_el(tx, "PmtId"), "EndToEndId", item.end_to_end_id)
+        amount = _el(_el(tx, "Amt"), "InstdAmt", _amount(item.amount))
+        amount.set("Ccy", item.currency)
+        if item.creditor_agent_bic:
+            self._agent(_el(tx, "CdtrAgt"), item.creditor_agent_bic)
+        self._party(_el(tx, "Cdtr"), item.creditor)
+        _el(_el(_el(tx, "CdtrAcct"), "Id"), "IBAN", normalise_iban(item.creditor_account_iban or item.creditor.iban))
+        if item.purpose_code:
+            _el(_el(tx, "Purp"), "Cd", item.purpose_code)
+        if item.remittance_info or item.structured_reference:
+            remittance = _el(tx, "RmtInf")
+            if item.structured_reference:
+                reference = _el(_el(remittance, "Strd"), "CdtrRefInf")
+                _el(_el(_el(reference, "Tp"), "CdOrPrtry"), "Cd", "SCOR")
+                _el(reference, "Ref", item.structured_reference[:_MAX_ID])
+            elif item.remittance_info:
+                _el(remittance, "Ustrd", item.remittance_info[:_MAX_USTRD])
+
+    @staticmethod
+    def _agent(parent, bic: Optional[str]) -> None:
+        institution = _el(parent, "FinInstnId")
+        if bic:
+            _el(institution, "BICFI", re.sub(r"\s+", "", bic).upper())
+        else:
+            _el(_el(institution, "Othr"), "Id", NOT_PROVIDED)
+
+    @staticmethod
+    def _party(parent, party: SepaParty) -> None:
+        _el(parent, "Nm", (party.name or "")[:_MAX_NAME])
+        if party.postal_code or party.city or party.country or party.address_line1 or party.address_line2:
+            address = _el(parent, "PstlAdr")
+            if party.postal_code:
+                _el(address, "PstCd", party.postal_code[:16])
+            if party.city:
+                _el(address, "TwnNm", party.city[:35])
+            if party.country:
+                _el(address, "Ctry", party.country[:2].upper())
+            for line in (party.address_line1, party.address_line2):
+                if line:
+                    _el(address, "AdrLine", line[:70])
+        if party.organisation_id:
+            _el(_el(_el(_el(parent, "Id"), "OrgId"), "Othr"), "Id", party.organisation_id[:_MAX_ID])
+        elif party.private_id:
+            _el(_el(_el(_el(parent, "Id"), "PrvtId"), "Othr"), "Id", party.private_id[:_MAX_ID])
 
 
-# ── Convenience factory functions ────────────────────────────────────
+# ── Convenience factory functions (unchanged signatures) ───────────────
 
 def create_pain001(
     *,
@@ -281,44 +315,23 @@ def create_pain001(
     purpose_code: Optional[str] = "SALA",
     requested_execution_date: Optional[date] = None,
     initiating_party_name: Optional[str] = None,
+    created_at: Optional[datetime] = None,
 ) -> str:
-    """Quick single-payment pain.001 generator."""
-    initiating = SepaParty(
-        name=initiating_party_name or debtor_name,
-        iban=debtor_iban,
-    )
+    """Single-payment pain.001 message."""
     batch = SepaBatch(
         message_id=message_id,
-        initiating_party=initiating,
-        debtor=SepaParty(
-            name=debtor_name,
-            iban=debtor_iban,
-            bic=debtor_bic,
-            **(debtor_address or {}),
-        ),
+        initiating_party=SepaParty(name=initiating_party_name or debtor_name, iban=debtor_iban),
+        debtor=SepaParty(name=debtor_name, iban=debtor_iban, bic=debtor_bic, **(debtor_address or {})),
         debtor_account_iban=debtor_iban,
         debtor_agent_bic=debtor_bic,
         requested_execution_date=requested_execution_date,
-        items=[
-            SepaPaymentItem(
-                end_to_end_id=end_to_end_id,
-                amount=amount,
-                currency=currency,
-                creditor=SepaParty(
-                    name=creditor_name,
-                    iban=creditor_iban,
-                    bic=creditor_bic,
-                ),
-                creditor_account_iban=creditor_iban,
-                creditor_agent_bic=creditor_bic,
-                remittance_info=remittance_info,
-                purpose_code=purpose_code,
-                category_purpose=purpose_code,
-                requested_execution_date=requested_execution_date,
-            )
-        ],
+        category_purpose=purpose_code,
+        items=[SepaPaymentItem(end_to_end_id=end_to_end_id, amount=amount, currency=currency,
+                               creditor=SepaParty(name=creditor_name, iban=creditor_iban, bic=creditor_bic),
+                               creditor_account_iban=creditor_iban, creditor_agent_bic=creditor_bic,
+                               remittance_info=remittance_info, purpose_code=purpose_code)],
     )
-    return Pain001Builder().add_batch(batch).build()
+    return Pain001Builder(created_at=created_at).add_batch(batch).build()
 
 
 def create_pain001_batch(
@@ -332,85 +345,12 @@ def create_pain001_batch(
     requested_execution_date: Optional[date] = None,
     batch_booking: bool = True,
     charge_bearer: str = "SLEV",
+    category_purpose: Optional[str] = None,
+    created_at: Optional[datetime] = None,
 ) -> str:
-    """Multi-item batch pain.001 generator."""
-    batch = SepaBatch(
-        message_id=message_id,
-        initiating_party=initiating_party,
-        debtor=debtor,
-        debtor_account_iban=debtor_account_iban,
-        debtor_agent_bic=debtor_agent_bic,
-        requested_execution_date=requested_execution_date,
-        items=items,
-        batch_booking=batch_booking,
-        charge_bearer=charge_bearer,
-    )
-    return Pain001Builder().add_batch(batch).build()
-
-
-# ── Validation helpers ───────────────────────────────────────────────
-
-def validate_iban(iban: str) -> bool:
-    """Basic IBAN format validation (mod-97 check)."""
-    iban = iban.replace(" ", "").upper()
-    if len(iban) < 15 or len(iban) > 34:
-        return False
-    # Move first 4 chars to end
-    rearranged = iban[4:] + iban[:4]
-    # Convert letters to numbers (A=10, B=11, ...)
-    numeric = ""
-    for ch in rearranged:
-        if ch.isalpha():
-            numeric += str(ord(ch) - ord("A") + 10)
-        else:
-            numeric += ch
-    try:
-        return int(numeric) % 97 == 1
-    except ValueError:
-        return False
-
-
-def validate_bic(bic: str) -> bool:
-    """Basic BIC format validation."""
-    bic = bic.upper().replace(" ", "")
-    return len(bic) in (8, 11) and bic[:6].isalpha() and bic[6:8].isalnum()
-
-
-class SepaValidationError(ValueError):
-    """Raised when SEPA data fails validation."""
-    pass
-
-
-def validate_batch(batch: SepaBatch) -> List[str]:
-    """Validate a SEPA batch, return list of errors (empty if valid)."""
-    errors = []
-    if not batch.message_id:
-        errors.append("Batch message_id is required")
-    if not batch.debtor.name:
-        errors.append("Debtor name is required")
-    if not batch.debtor_account_iban:
-        errors.append("Debtor IBAN is required")
-    elif not validate_iban(batch.debtor_account_iban):
-        errors.append(f"Invalid debtor IBAN: {batch.debtor_account_iban}")
-    if batch.debtor_agent_bic and not validate_bic(batch.debtor_agent_bic):
-        errors.append(f"Invalid debtor agent BIC: {batch.debtor_agent_bic}")
-
-    for i, item in enumerate(batch.items):
-        if not item.end_to_end_id:
-            errors.append(f"Item {i}: end_to_end_id is required")
-        if item.amount <= 0:
-            errors.append(f"Item {i}: amount must be positive")
-        if not item.creditor:
-            errors.append(f"Item {i}: creditor is required")
-        elif not item.creditor.name:
-            errors.append(f"Item {i}: creditor name is required")
-        # Check IBAN - either creditor_account_iban or creditor.iban must be provided
-        creditor_iban = item.creditor_account_iban or (item.creditor.iban if item.creditor else None)
-        if not creditor_iban:
-            errors.append(f"Item {i}: creditor IBAN is required")
-        elif not validate_iban(creditor_iban):
-            errors.append(f"Item {i}: invalid creditor IBAN: {creditor_iban}")
-        if item.creditor_agent_bic and not validate_bic(item.creditor_agent_bic):
-            errors.append(f"Item {i}: invalid creditor agent BIC: {item.creditor_agent_bic}")
-
-    return errors
+    """Multi-payment pain.001 message (one payment-information block)."""
+    batch = SepaBatch(message_id=message_id, initiating_party=initiating_party, debtor=debtor,
+                      debtor_account_iban=debtor_account_iban, debtor_agent_bic=debtor_agent_bic,
+                      requested_execution_date=requested_execution_date, items=items,
+                      batch_booking=batch_booking, charge_bearer=charge_bearer, category_purpose=category_purpose)
+    return Pain001Builder(created_at=created_at).add_batch(batch).build()

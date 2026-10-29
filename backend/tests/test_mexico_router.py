@@ -31,6 +31,10 @@ def seeded(db, monkeypatch):
     from app.modules.payroll.engine.countries import mexico_content as c
     from scripts.seed_mexico_canonical_packs import seed_mexico
 
+    for table in ("MX_ISR_TARIFFS", "MX_MIN_WAGES", "MX_ZLFN_MUNICIPALITIES", "MX_CEAV_SCHEDULE", "MX_WORKWEEK",
+                  "MX_VACATION_DAYS"):                         # synthetic UMA rows only (Batches 1-2 filled these)
+        monkeypatch.setattr(c, table, ())
+    monkeypatch.setattr(c, "MX_ISN_CONTENT", {state: () for state in c.MX_ISN_CONTENT})   # W1-2 filled CDMX
     monkeypatch.setattr(c, "MX_SCALAR_CONTENT", (
         c.ScalarRow("mx_uma_daily", None, None, "1", None, date(2026, 1, 1), date(2026, 1, 31), "S6", "SYNTHETIC"),
         c.ScalarRow("mx_uma_daily", None, None, "2", None, date(2026, 2, 1), date(2026, 12, 31), "S6", "SYNTHETIC"),
@@ -51,10 +55,12 @@ def test_every_route_is_super_admin_only(db, path):
         assert c.get(f"{BASE}{path}").status_code == 403
 
 
-def test_employees_need_an_explicit_existing_organisation(db):
+def test_super_admin_never_lists_mexican_employees(db):
+    # ZP-PRIV: worker-level data needs a live JIT support grant; the route is
+    # retired for platform principals in the route registry.
     with _http(db, SA_A) as c:
-        assert c.get(f"{BASE}/employees").status_code == 422
-        assert c.get(f"{BASE}/employees", params={"org_id": 99999}).status_code == 404
+        assert c.get(f"{BASE}/employees").status_code == 403
+        assert c.get(f"{BASE}/employees", params={"org_id": 99999}).status_code == 403
 
 
 def test_content_defaults_to_the_pack_effective_from_never_today(db, seeded):
@@ -103,7 +109,7 @@ def test_activation_readiness_lists_every_gate(db, seeded):
     with _http(db, SA_A) as c:
         body = c.get(f"{BASE}/packs/{pack_id}/activation-readiness").json()
         assert c.get(f"{BASE}/packs/999999/activation-readiness").status_code == 404
-    assert [ch["key"] for ch in body["checks"]] == ["content", "evidence", "g1_review", "golden"]
+    assert [ch["key"] for ch in body["checks"]] == ["content", "evidence", "sources_verified", "g1_review", "golden"]
     assert body["activatable"] is False
 
 

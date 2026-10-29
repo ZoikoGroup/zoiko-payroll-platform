@@ -118,6 +118,9 @@ NL_PARAMETER_KEYS = {
     "nl_general_tax_credit_phase_end": "amount",
     "nl_employment_tax_credit_max": "amount",
     "nl_employment_tax_credit_phase_end": "amount",
+    # Statutory AOW (state pension) age — selects the wage-tax table cohort
+    # (spec §3); a missing value BLOCKS the cohort selection.
+    "nl_aow_age_years": "amount",
     # Employee-insurance employer premiums (spec §2/§6, S4/S6).
     "nl_awf_low_pct": "employer_pct",
     "nl_awf_high_pct": "employer_pct",
@@ -173,6 +176,7 @@ NL_SCALAR_CONTENT = (
     ("nl_general_tax_credit_phase_end", "General tax credit — zero above this income", None, None, "78426.00", None, "S1", True),
     ("nl_employment_tax_credit_max", "Employment tax credit (arbeidskorting) — maximum", None, None, "5685.00", None, "S1", True),
     ("nl_employment_tax_credit_phase_end", "Employment tax credit — zero above this income", None, None, "132920.00", None, "S1", True),
+    ("nl_aow_age_years", "Statutory AOW (state pension) age in years — wage-tax table cohort", None, None, "67", None, "S1", True),
     # Employer premiums (spec §2/§6). AWf is contract-dependent (NL-015); Aof
     # depends on employer size (2024 premium wage for 2026, NL-017).
     ("nl_awf_low_pct", "AWf low rate (permanent, non-on-call written contract)", None, "2.7400", None, None, "S6", True),

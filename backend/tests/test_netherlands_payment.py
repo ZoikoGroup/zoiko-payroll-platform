@@ -100,7 +100,7 @@ def nlx(db, organization, monkeypatch):
     emp = PayrollEmployee(organization_id=org.id, employee_code="NL-001", name="Test Werknemer", country_code="NL",
                           ctc=D("60000"), basic=D("60000"), hra=D("0"), date_of_birth=date(1990, 5, 15),
                           date_of_joining=date(2025, 1, 1), pay_frequency="Monthly",
-                          compliance_fields={"bsn": "111222333", "iban_token": "NL44RABO0123456789"})
+                          compliance_fields={"bsn": "111222333", "iban": "NL44RABO0123456789"})
     db.add(emp)
     db.flush()
     db.add(EmployeeStatutoryProfile(employee_id=emp.id, organization_id=org.id, country_code="NL",
@@ -149,138 +149,159 @@ def _run_and_approve(db, nlx, month):
     return run
 
 
+TODAY = date(2026, 1, 1)          # the fixture's 2026 pay dates lie after this date
+
+
+def _salary(db, run, **kwargs):
+    return pay.create_salary_payment_batch(db, run.id, 801, today=TODAY, **kwargs)
+
+
+AUTHORITY = [
+    {"payment_reference": "LOONHEFFING-202603", "amount": D("5000.00"), "creditor_name": "Belastingdienst",
+     "creditor_iban": "NL03RABO0000000001", "creditor_bic": "RABONL2U", "structured_reference": "1234567890123456"},
+    {"payment_reference": "AWF-202603", "amount": D("2000.00"), "creditor_name": "UWV",
+     "creditor_iban": "NL98INGB0000000002", "creditor_bic": "INGBNL2A"},
+]
+
+
 class TestSalaryPaymentBatch:
-    def test_create_salary_batch_from_committed_run(self, db, nlx):
-        run = _run_and_approve(db, nlx, 3)
+    def test_created_as_draft_with_the_stored_schema_valid_file(self, db, nlx):
+        import hashlib
 
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
-        assert batch.status == "SUBMITTED"
+        from app.modules.payroll.bank_export.sepa_pain001 import validate_against_xsd
+
+        run = _run_and_approve(db, nlx, 3)
+        batch = _salary(db, run)
+        assert batch.status == "DRAFT" and batch.batch_kind == "SALARY"
         assert batch.payroll_run_id == run.id
-        assert batch.pain001_sha256 is not None
+        validate_against_xsd(batch.pain001_xml)
+        assert batch.pain001_sha256 == hashlib.sha256(batch.pain001_xml.encode("utf-8")).hexdigest()
+        name, xml = pay.get_batch_file(db, batch.id)
+        assert xml == batch.pain001_xml and name.endswith(".xml")
 
-    def test_idempotency_key_prevents_duplicate(self, db, nlx):
+    def test_retry_returns_the_same_batch(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
+        assert _salary(db, run).id == _salary(db, run).id
         key = "test-salary-batch-key-123"
+        other = _run_and_approve(db, nlx, 4)
+        assert _salary(db, other, idempotency_key=key).id == _salary(db, other, idempotency_key=key).id
+        # a NEW key while a batch of the run is still live is a second payment — refused
+        with pytest.raises(pay.PaymentServiceError, match="already has salary batch"):
+            _salary(db, run, idempotency_key="another-attempt")
 
-        batch1 = pay.create_salary_payment_batch(db, run.id, 801, idempotency_key=key)
-        batch2 = pay.create_salary_payment_batch(db, run.id, 801, idempotency_key=key)
-        assert batch1.id == batch2.id
-
-    def test_payment_items_created(self, db, nlx):
+    def test_items_linked_by_employee_id_with_deterministic_end_to_end_id(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
-
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
-        items = db.query(PayrollNlPaymentItem).filter(
-            PayrollNlPaymentItem.batch_id == batch.id).all()
+        batch = _salary(db, run)
+        items = db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id).all()
         assert len(items) == 1
         item = items[0]
-        assert item.employee_id == nlx.emp.id
-        assert item.amount > D("0")
-        assert item.status == "PENDING"
-        assert item.end_to_end_id is not None
+        assert item.employee_id == nlx.emp.id and item.amount > D("0") and item.status == "PENDING"
+        assert item.end_to_end_id == f"PAY-{run.id}-{nlx.emp.id}"
+        assert f"<EndToEndId>PAY-{run.id}-{nlx.emp.id}</EndToEndId>" in batch.pain001_xml
+
+    def test_employee_without_iban_blocks_unless_excluded(self, db, nlx):
+        run = _run_and_approve(db, nlx, 3)
+        nlx.emp.compliance_fields = {"bsn": "111222333"}
+        db.commit()
+        with pytest.raises(pay.PaymentServiceError, match="no IBAN"):
+            _salary(db, run)
+        with pytest.raises(pay.PaymentServiceError, match="No employee to pay"):
+            _salary(db, run, exclusions={nlx.emp.id: "paid by cheque this month"})
+
+    def test_execution_date_in_the_past_is_refused(self, db, nlx):
+        run = _run_and_approve(db, nlx, 3)
+        with pytest.raises(pay.PaymentServiceError, match="in the past"):
+            pay.create_salary_payment_batch(db, run.id, 801, today=date(2026, 6, 1))
 
     def test_batch_requires_committed_run(self, db, nlx):
         from app.modules.payroll import service
-        PREPARER = 801
         end = date(2026, 3, 31)
         run = PayrollRun(organization_id=nlx.org.id, period_label="2026-03", period_start=date(2026, 3, 1),
-                         period_end=end, pay_date=end, created_by=PREPARER,
-                         attendance_override_reason="TEST")
+                         period_end=end, pay_date=end, created_by=801, attendance_override_reason="TEST")
         db.add(run)
         db.commit()
         db.refresh(run)
         service.generate_payslips_for_run(db, run, nlx.org.id)
-        # NOT approved -> not committed
-
         with pytest.raises(pay.PaymentServiceError):
-            pay.create_salary_payment_batch(db, run.id, 801)
+            _salary(db, run)
 
     def test_batch_requires_employer_iban(self, db, nlx):
-        run = _run_and_approve(db, nlx, 3)
-        # Remove employer IBAN
         from app.modules.payroll.models import PayrollNlEmployerProfile
-        profile = db.query(PayrollNlEmployerProfile).filter(
-            PayrollNlEmployerProfile.organization_id == nlx.org.id).one()
-        profile.bank_iban_token = None
+        run = _run_and_approve(db, nlx, 3)
+        db.query(PayrollNlEmployerProfile).filter(
+            PayrollNlEmployerProfile.organization_id == nlx.org.id).one().bank_iban_token = None
         db.commit()
-
         with pytest.raises(pay.PaymentServiceError, match="Employer IBAN"):
-            pay.create_salary_payment_batch(db, run.id, 801)
+            _salary(db, run)
+
+
+class TestPaymentChannel:
+    def test_sepa_then_bank_file_is_refused(self, db, nlx):
+        from app.modules.payroll import service
+        run = _run_and_approve(db, nlx, 3)
+        _salary(db, run)
+        db.commit()
+        with pytest.raises(BadRequestException, match="paid through SEPA"):
+            service.generate_bank_transfer_file(db, run.id, nlx.org.id, actor_id=801, format_override="csv")
+
+    def test_bank_file_then_sepa_is_refused(self, db, nlx):
+        run = _run_and_approve(db, nlx, 3)
+        run.payment_channel = pay.CHANNEL_GENERIC
+        db.commit()
+        with pytest.raises(pay.PaymentServiceError, match="paid through GENERIC_FILE"):
+            _salary(db, run)
 
 
 class TestAuthorityPaymentBatch:
-    def test_create_authority_batch(self, db, nlx):
-        batch = pay.create_authority_payment_batch(
-            db,
-            organization_id=nlx.org.id,
-            authority_payments=[
-                {"payment_reference": "LOONHEFFING-202603", "amount": D("5000.00"),
-                 "creditor_name": "Belastingdienst", "creditor_iban": "NL03RABO0000000001",
-                 "creditor_bic": "RABONL2U"},
-                {"payment_reference": "AWF-202603", "amount": D("2000.00"),
-                 "creditor_name": "UWV", "creditor_iban": "NL98INGB0000000002",
-                 "creditor_bic": "INGBNL2A"},
-            ],
-            actor_id=801,
-        )
-        assert batch.status == "SUBMITTED"
-        assert batch.organization_id == nlx.org.id
-
-    def test_authority_payment_items_created(self, db, nlx):
-        batch = pay.create_authority_payment_batch(
-            db,
-            organization_id=nlx.org.id,
-            authority_payments=[
-                {"payment_reference": "LOONHEFFING-202603", "amount": D("5000.00"),
-                 "creditor_name": "Belastingdienst", "creditor_iban": "NL03RABO0000000001"},
-            ],
-            actor_id=801,
-        )
-        items = db.query(PayrollNlPaymentItem).filter(
-            PayrollNlPaymentItem.batch_id == batch.id).all()
-        assert len(items) == 1
-        item = items[0]
-        assert item.amount == D("5000.00")
-        assert item.end_to_end_id is not None
+    def test_authority_batch_has_no_employee_and_a_structured_reference(self, db, nlx):
+        batch = pay.create_authority_payment_batch(db, organization_id=nlx.org.id,
+                                                   authority_payments=AUTHORITY, actor_id=801)
+        assert batch.status == "DRAFT" and batch.batch_kind == "AUTHORITY"
+        items = db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id).all()
+        assert len(items) == 2 and all(i.employee_id is None for i in items)   # was 0 against a NOT NULL FK
+        assert "<Ref>1234567890123456</Ref>" in batch.pain001_xml and "<Cd>SCOR</Cd>" in batch.pain001_xml
+        again = pay.create_authority_payment_batch(db, organization_id=nlx.org.id, authority_payments=AUTHORITY,
+                                                   actor_id=801)
+        assert again.id == batch.id
 
 
 class TestBatchLifecycle:
-    def test_submit_batch(self, db, nlx):
+    def test_draft_submitted_accepted_settled(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
+        batch = _salary(db, run)
+        with pytest.raises(pay.PaymentServiceError):
+            pay.reconcile_payment_batch(db, batch.id, bank_reference="BANK-1")          # not ACCEPTED yet
         pay.submit_payment_batch(db, batch.id, 801)
-        db.refresh(batch)
-        assert batch.submitted_at is not None
+        assert batch.status == "SUBMITTED" and batch.submitted_at is not None
+        pay.record_bank_result(db, batch.id, "ACCEPTED")
+        with pytest.raises(pay.PaymentServiceError, match="bank statement"):
+            pay.reconcile_payment_batch(db, batch.id, bank_reference="")
+        settled = pay.reconcile_payment_batch(db, batch.id, bank_reference="BANK-123")
+        assert settled.status == "SETTLED" and settled.reconciled_at is not None
+        items = db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id).all()
+        assert {i.status for i in items} == {"SETTLED"}
 
-    def test_reconcile_batch(self, db, nlx):
+    def test_unknown_blocks_a_new_batch_until_resolved(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
-        pay.submit_payment_batch(db, batch.id, 801)
-        reconciled = pay.reconcile_payment_batch(db, batch.id, bank_reference="BANK-123")
-        assert reconciled.status == "SETTLED"
-        assert reconciled.reconciled_at is not None
+        first = _salary(db, run)
+        pay.submit_payment_batch(db, first.id, 801)
+        pay.record_bank_result(db, first.id, "UNKNOWN")
+        with pytest.raises(pay.PaymentServiceError, match="UNKNOWN"):
+            _salary(db, run, idempotency_key="a-new-attempt")
+        pay.record_bank_result(db, first.id, "REJECTED")
+        second = _salary(db, run)
+        assert second.id != first.id and second.status == "DRAFT"
 
     def test_handle_payment_return(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
-        items = db.query(PayrollNlPaymentItem).filter(
-            PayrollNlPaymentItem.batch_id == batch.id).all()
-        item = items[0]
-
+        batch = _salary(db, run)
+        item = db.query(PayrollNlPaymentItem).filter(PayrollNlPaymentItem.batch_id == batch.id).first()
         returned = pay.handle_payment_return(db, batch.id, item.end_to_end_id, "AM04 - Insufficient funds")
-        assert returned.status == "RETURNED"
-        assert returned.return_reason == "AM04 - Insufficient funds"
+        assert returned.status == "RETURNED" and returned.return_reason == "AM04 - Insufficient funds"
 
-    def test_get_batch_with_items(self, db, nlx):
+    def test_get_and_list(self, db, nlx):
         run = _run_and_approve(db, nlx, 3)
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
-        loaded_batch, items = pay.get_batch_with_items(db, batch.id)
-        assert loaded_batch.id == batch.id
-        assert len(items) == 1
-
-    def test_list_payment_batches(self, db, nlx):
-        run = _run_and_approve(db, nlx, 3)
-        batch = pay.create_salary_payment_batch(db, run.id, 801)
-        results = pay.list_payment_batches(db, nlx.org.id)
-        assert len(results) == 1
-        assert results[0].id == batch.id
+        batch = _salary(db, run)
+        loaded, items = pay.get_batch_with_items(db, batch.id)
+        assert loaded.id == batch.id and len(items) == 1
+        assert [b.id for b in pay.list_payment_batches(db, nlx.org.id)] == [batch.id]

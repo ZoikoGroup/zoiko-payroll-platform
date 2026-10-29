@@ -48,9 +48,11 @@ def require_mexico_tenant(current_user=Depends(get_current_payroll_operator), db
     each route (reads: payroll operator; writes: org admin)."""
     from app.modules.payroll import mexico_dormancy, mexico_run_service
 
-    if not mexico_dormancy.onboarding_enabled():
-        raise ForbiddenException(mexico_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
+    # Phase 10e: open only with the kill switch on AND general availability or
+    # this organisation's active pilot grant.
+    if not mexico_dormancy.onboarding_enabled(db, org_id):
+        raise ForbiddenException(mexico_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return                                   # each route's _org_id answers Super Admin with its own 403
     if not mexico_run_service._org_runs_mexico(db, org_id):
@@ -347,7 +349,10 @@ def record_hours(employee_id: int, body: Dict[str, Any] = Body(...), current_use
     data = {"week_start": _date(body.get("weekStart")) if body.get("weekStart") else None,
             "ordinary_hours": body.get("ordinaryHours"), "overtime_hours": body.get("overtimeHours"),
             "sundays_worked": body.get("sundaysWorked"), "rest_days_worked": body.get("restDaysWorked"),
-            "evidence_document_id": body.get("evidenceDocumentId")}
+            "evidence_document_id": body.get("evidenceDocumentId"),
+            "overtime_dates": [_date(d) for d in (body.get("overtimeDates") or [])],   # Phase 11c
+            "overtime_by_date": [{"date": _date(e.get("date")), "double": e.get("double"), "triple": e.get("triple")}
+                                 for e in (body.get("overtimeHoursByDate") or [])]}         # W6-1 (A11)
     return mexico_run_service.record_hours(db, _org_id(current_user), employee_id, data, _actor(current_user))
 
 
@@ -394,6 +399,14 @@ def generate_cfdi(run_id: int, current_user=Depends(get_current_org_admin), db: 
     return mexico_cfdi_service.generate(db, _run(db, current_user, run_id), _actor(current_user))
 
 
+@router.post("/runs/{run_id}/cfdi/validate",
+             summary="Validate-only CFDI preview: build and validate in memory; never signs, stores or returns XML")
+def validate_cfdi(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_preview
+
+    return mexico_cfdi_preview.validate_run(db, _run(db, current_user, run_id), _actor(current_user))
+
+
 @router.post("/cfdi/outbox/process", summary="Process pending PAC actions (explicit, operator-triggered — D5)")
 def process_cfdi_outbox(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
     from app.modules.payroll import mexico_cfdi_service
@@ -434,6 +447,19 @@ def cfdi_cancel(document_id: int, body: Dict[str, Any] = Body(...), current_user
                                       body.get("replacementUuid"), _actor(current_user))
 
 
+@router.get("/cfdi/documents/{document_id}/receipt",
+            summary="The printed CFDI receipt (PDF) rendered on demand from the stored stamped XML — never stored (W4-3b)")
+def mx_cfdi_document_receipt(document_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import mexico_cfdi_receipt
+
+    pdf = mexico_cfdi_receipt.mx_cfdi_receipt_pdf(db, _org_id(current_user), document_id)
+    mexico_cfdi_receipt.record_render(db, _org_id(current_user), document_id, _actor(current_user))   # X3
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store", "Content-Disposition": f'inline; filename="cfdi-{document_id}.pdf"'})
+
+
 @router.post("/cfdi/reconcile", summary="Move every in-flight CFDI action to UNKNOWN (after a timeout / restore, MX-062)")
 def cfdi_reconcile(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
     from app.modules.payroll import mexico_cfdi_service
@@ -472,6 +498,17 @@ def _entity(kind: str) -> str:
     if kind not in _ENTITY_PATHS:
         raise BadRequestException(f"Unknown authority object {kind!r}")
     return _ENTITY_PATHS[kind]
+
+
+@router.post("/reports/{template_id}/generate",
+             summary="Generate a dedicated Mexico report from an Active MX template (W4-2: liabilities, IMSS, SUA, ISN, "
+                     "CFDI status, vacation, PTU, annual-adjustment employer year)")
+def mx_reports_generate(template_id: int, payload: Dict[str, Any] = Body(default_factory=dict),
+                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service.mx_report_generate(db, _org_id(current_user), template_id, payload,
+                                                    _actor(current_user))
 
 
 @router.get("/authorities/summary", summary="Social Security Center — registrations, counts and the blocks (§14)")
@@ -535,7 +572,7 @@ def authorities_movements_export(body: Dict[str, Any] = Body(default={}), curren
 
     out = _imss().export_worklist(db, _org_id(current_user), _actor(current_user), body.get("movementIds"))
     disposition = "attachment; filename=" + '"' + out["filename"] + '"'
-    return Response(content=out["content"], media_type="text/csv",
+    return Response(content=out["content"].encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": disposition, "X-Zoiko-Batch": out["batchRef"],
                              "Cache-Control": "no-store"})
 
@@ -778,3 +815,366 @@ def open_aguinaldo_run(body: Dict[str, Any] = Body(...), current_user=Depends(ge
         raise BadRequestException("year is required")
     return _benefits().create_aguinaldo_run(db, _org_id(current_user), year, _opt_date(body.get("payDate"), "payDate"),
                                             body.get("employeeIds"), _actor(current_user))
+
+
+# ── Termination and finiquito (Phase 9c) ─────────────────────────────────────
+
+def _terminations():
+    from app.modules.payroll import mexico_termination_service
+
+    return mexico_termination_service
+
+
+@router.get("/termination-reasons", summary="The transcribed termination-reason catalog (empty until S26)")
+def termination_reasons(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _terminations().reasons(db, _org_id(current_user))
+
+
+@router.get("/employees/{employee_id}/terminations", summary="The employee's termination records")
+def employee_terminations(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                          db: Session = Depends(get_db)):
+    return _terminations().list_terminations(db, _org_id(current_user), employee_id)
+
+
+@router.post("/employees/{employee_id}/terminations",
+             summary="Record a termination: date, catalog reason, evidence (needs approval)")
+def record_employee_termination(employee_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"termination_date": _opt_date(body.get("terminationDate"), "terminationDate"),
+            "reason_code": body.get("reasonCode"), "evidence_ref": body.get("evidenceRef"), "note": body.get("note")}
+    return _terminations().record_termination(db, _org_id(current_user), employee_id, data, _actor(current_user))
+
+
+@router.post("/terminations/{termination_id}/approve",
+             summary="Approve a termination (a different person) — sets the date of leaving, generates the BAJA")
+def approve_employee_termination(termination_id: int, current_user=Depends(get_current_org_admin),
+                                 db: Session = Depends(get_db)):
+    return _terminations().approve_termination(db, _org_id(current_user), termination_id, _actor(current_user))
+
+
+@router.post("/terminations/{termination_id}/cancel",
+             summary="Cancel a termination before its finiquito run exists (withdraws an unsent BAJA)")
+def cancel_employee_termination(termination_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _terminations().cancel_termination(db, _org_id(current_user), termination_id,
+                                              str(body.get("reason") or ""), _actor(current_user))
+
+
+@router.post("/terminations/{termination_id}/finiquito-run",
+             summary="Open the FINIQUITO run of an approved termination (blocks until S24 / S25 / S26 rules)")
+def open_finiquito_run(termination_id: int, body: Dict[str, Any] = Body(...),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _terminations().create_finiquito_run(db, _org_id(current_user), termination_id,
+                                                _opt_date(body.get("payDate"), "payDate"), _actor(current_user))
+
+
+# ── PTU (Phase 9d) ───────────────────────────────────────────────────────────
+
+def _ptu():
+    from app.modules.payroll import mexico_ptu_service
+
+    return mexico_ptu_service
+
+
+@router.get("/ptu/exclusion-reasons", summary="The transcribed PTU exclusion catalog (empty until S26)")
+def ptu_exclusion_reasons(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().exclusion_reasons(db, _org_id(current_user))
+
+
+@router.get("/ptu/cycles", summary="PTU cycles of the organisation's legal employers")
+def ptu_cycles(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().list_cycles(db, _org_id(current_user))
+
+
+@router.post("/ptu/cycles", summary="Record a PTU cycle: employer, fiscal year, distributable amount, evidence")
+def create_ptu_cycle(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear"),
+            "distributable_amount": body.get("distributableAmount"), "evidence_ref": body.get("evidenceRef"),
+            "note": body.get("note")}
+    return _ptu().create_cycle(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.get("/ptu/cycles/{cycle_id}", summary="One PTU cycle with its allocation")
+def ptu_cycle(cycle_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().get_cycle(db, _org_id(current_user), cycle_id)
+
+
+@router.post("/ptu/cycles/{cycle_id}/approve-amount", summary="Approve the distributable amount (a different person)")
+def approve_ptu_amount(cycle_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _ptu().approve_amount(db, _org_id(current_user), cycle_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/exclusions", summary="Record an operator exclusion (catalog reason + evidence)")
+def record_ptu_exclusion(cycle_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"employee_id": body.get("employeeId"), "reason_code": body.get("reasonCode"),
+            "evidence_ref": body.get("evidenceRef")}
+    return _ptu().record_exclusion(db, _org_id(current_user), cycle_id, data, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/exclusions/{employee_id}/approve",
+             summary="Approve an operator exclusion (a different person)")
+def approve_ptu_exclusion(cycle_id: int, employee_id: int, current_user=Depends(get_current_org_admin),
+                          db: Session = Depends(get_db)):
+    return _ptu().approve_exclusion(db, _org_id(current_user), cycle_id, employee_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/allocate",
+             summary="Allocate the pool by the transcribed rule from committed runs (blocks until S26)")
+def allocate_ptu(cycle_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _ptu().allocate(db, _org_id(current_user), cycle_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/approve-allocation",
+             summary="Approve the allocation (a different person; refused if the inputs changed)")
+def approve_ptu_allocation(cycle_id: int, current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    return _ptu().approve_allocation(db, _org_id(current_user), cycle_id, _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/ptu-run", summary="Open the PTU run of an approved cycle")
+def open_ptu_run(cycle_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                 db: Session = Depends(get_db)):
+    return _ptu().create_ptu_run(db, _org_id(current_user), cycle_id, _opt_date(body.get("payDate"), "payDate"),
+                                 _actor(current_user))
+
+
+@router.post("/ptu/cycles/{cycle_id}/cancel", summary="Cancel a PTU cycle before its PTU run exists")
+def cancel_ptu_cycle(cycle_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    return _ptu().cancel_cycle(db, _org_id(current_user), cycle_id, str(body.get("reason") or ""),
+                               _actor(current_user))
+
+
+@router.get("/employees/{employee_id}/ptu", summary="The employee's PTU allocations by fiscal year")
+def employee_ptu(employee_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _ptu().employee_ptu(db, _org_id(current_user), employee_id)
+
+
+# ── Annual ISR adjustment (Phase 9e) ─────────────────────────────────────────
+
+def _annual():
+    from app.modules.payroll import mexico_annual_service
+
+    return mexico_annual_service
+
+
+@router.get("/annual-adjustments/exclusion-reasons", summary="The transcribed annual-adjustment exclusion catalog")
+def annual_adjustment_exclusion_reasons(current_user=Depends(get_current_payroll_operator),
+                                        db: Session = Depends(get_db)):
+    return _annual().exclusion_reasons(db, _org_id(current_user))
+
+
+@router.get("/annual-adjustments", summary="Annual ISR adjustments by legal employer and fiscal year")
+def annual_adjustments(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _annual().list_adjustments(db, _org_id(current_user))
+
+
+@router.post("/annual-adjustments/compute",
+             summary="Compute an employer's ended fiscal year from committed runs (blocks until S24)")
+def compute_annual_adjustment(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear")}
+    return _annual().compute(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/approve", summary="Approve an employer-year (a different person; refused if stale)")
+def approve_annual_adjustment(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear")}
+    return _annual().approve(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/apply", summary="Apply an approved employer-year in a later open ordinary run")
+def apply_annual_adjustment(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    data = {"employer_profile_id": body.get("employerId"), "fiscal_year": body.get("fiscalYear"),
+            "run_id": body.get("runId")}
+    return _annual().apply_to_run(db, _org_id(current_user), data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/{row_id}/exclusion", summary="Record an operator exclusion (catalog reason + evidence)")
+def record_annual_adjustment_exclusion(row_id: int, body: Dict[str, Any] = Body(...),
+                                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    data = {"reason_code": body.get("reasonCode"), "evidence_ref": body.get("evidenceRef")}
+    return _annual().record_exclusion(db, _org_id(current_user), row_id, data, _actor(current_user))
+
+
+@router.post("/annual-adjustments/{row_id}/exclusion/approve", summary="Approve an exclusion (a different person)")
+def approve_annual_adjustment_exclusion(row_id: int, current_user=Depends(get_current_org_admin),
+                                        db: Session = Depends(get_db)):
+    return _annual().approve_exclusion(db, _org_id(current_user), row_id, _actor(current_user))
+
+
+@router.get("/employees/{employee_id}/annual-adjustments", summary="The employee's annual ISR adjustments")
+def employee_annual_adjustments(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                                db: Session = Depends(get_db)):
+    return _annual().employee_adjustments(db, _org_id(current_user), employee_id)
+
+
+# ── Salary payments (Phase 10a) ──────────────────────────────────────────────
+
+def _payments():
+    from app.modules.payroll import mexico_payment_service
+
+    return mexico_payment_service
+
+
+@router.get("/payments/batches", summary="Salary payment batches (optionally of one run)")
+def payment_batches(run_id: Optional[int] = Query(None), current_user=Depends(get_current_payroll_operator),
+                    db: Session = Depends(get_db)):
+    return _payments().list_batches(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/payment-batch", summary="Build the salary payment batch of a committed run")
+def create_payment_batch(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _payments().create_batch(db, _org_id(current_user), run_id, _actor(current_user))
+
+
+@router.get("/payments/batches/{batch_id}", summary="One payment batch with its items (CLABE last 4 only)")
+def payment_batch(batch_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _payments().get_batch(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payments/batches/{batch_id}/release", summary="Release a batch (a different person)")
+def release_payment_batch(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _payments().release_batch(db, _org_id(current_user), batch_id, _actor(current_user))
+
+
+@router.post("/payments/batches/{batch_id}/cancel", summary="Cancel a DRAFT batch")
+def cancel_payment_batch(batch_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    return _payments().cancel_batch(db, _org_id(current_user), batch_id, str(body.get("reason") or ""),
+                                    _actor(current_user))
+
+
+@router.post("/payments/batches/{batch_id}/worklist",
+             summary="Build the payment worklist of a released batch (NOT a bank file; full CLABE, not stored)")
+def payment_worklist(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    out = _payments().export_worklist(db, _org_id(current_user), batch_id, _actor(current_user))
+    return Response(content=out["content"].encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{out["filename"]}"',
+                             "Cache-Control": "no-store", "X-Zoiko-Worklist-Sha256": out["sha256"]})
+
+
+@router.post("/payments/items/{item_id}/outcome", summary="Record a payment's outcome (with the bank reference)")
+def record_payment_outcome(item_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    data = {"outcome": body.get("outcome"), "reference": body.get("reference"), "reason": body.get("reason")}
+    return _payments().record_item_outcome(db, _org_id(current_user), item_id, data, _actor(current_user))
+
+
+@router.post("/payments/batches/{batch_id}/reissue", summary="Re-issue the failed / returned payments in a new batch")
+def reissue_payments(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _payments().reissue(db, _org_id(current_user), batch_id, _actor(current_user))
+
+
+# ── Payroll journal (Phase 10b) ──────────────────────────────────────────────
+
+def _journal():
+    from app.modules.payroll import mexico_journal_service
+
+    return mexico_journal_service
+
+
+@router.get("/journal/mappings", summary="Journal account mappings (versions) and the line types")
+def journal_mappings(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return {"lineTypes": _journal().line_types(), "mappings": _journal().list_mappings(db, _org_id(current_user))}
+
+
+@router.post("/journal/mappings", summary="Propose a journal account mapping (a new DRAFT version)")
+def create_journal_mapping(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    return _journal().create_mapping(db, _org_id(current_user), body, _actor(current_user))
+
+
+@router.post("/journal/mappings/{mapping_id}/approve", summary="Approve a DRAFT mapping (a different person)")
+def approve_journal_mapping(mapping_id: int, current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    return _journal().approve_mapping(db, _org_id(current_user), mapping_id, _actor(current_user))
+
+
+@router.post("/journal/mappings/{mapping_id}/withdraw", summary="Withdraw a DRAFT mapping")
+def withdraw_journal_mapping(mapping_id: int, current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    return _journal().withdraw_mapping(db, _org_id(current_user), mapping_id, _actor(current_user))
+
+
+@router.get("/runs/{run_id}/journal", summary="The journal of a committed run (preview, with its exports)")
+def run_journal(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _journal().run_journal(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/journal/export", summary="Export the journal CSV of a committed run (nothing is posted)")
+def export_run_journal(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    out = _journal().export_journal(db, _org_id(current_user), run_id, _actor(current_user))
+    return Response(content=out["content"].encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{out["filename"]}"',
+                             "Cache-Control": "no-store", "X-Zoiko-Journal-Sha256": out["sha256"]})
+
+
+@router.post("/journal/exports/{export_id}/void", summary="Void a journal export (reversed or never posted)")
+def void_journal_export(export_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                        db: Session = Depends(get_db)):
+    return _journal().void_export(db, _org_id(current_user), export_id, str(body.get("reason") or ""),
+                                  _actor(current_user))
+
+
+# ── Pilot status (Phase 10e) — the banner on a pilot organisation's screens ──
+
+# ── parallel payroll (final mile X4, spec §22 G8) ──────────────────────────
+
+def _parallel():
+    from app.modules.payroll import mexico_parallel_service
+
+    return mexico_parallel_service
+
+
+@router.get("/parallel/imports", summary="Parallel-payroll imports (legacy cycle vs committed run) with their summary")
+def parallel_imports(run_id: Optional[int] = Query(None), current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    return _parallel().list_parallel_imports(db, _org_id(current_user), run_id)
+
+
+@router.post("/parallel/imports", summary="Import a legacy payroll's results for a committed run (CSV + mapping; "
+                                          "matched by employee code, identifiers refused)")
+def parallel_import(payload: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    return _parallel().import_parallel(db, _org_id(current_user), payload, _actor(current_user))
+
+
+@router.get("/parallel/imports/{import_id}", summary="One parallel import: every difference and the D-25 verdict")
+def parallel_import_detail(import_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    return _parallel().parallel_import_view(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel/imports/{import_id}/withdraw", summary="Withdraw a CURRENT parallel import")
+def parallel_import_withdraw(import_id: int, current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    return _parallel().withdraw_parallel_import(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel/differences/{diff_id}/explain", summary="Explain a parallel difference (reason required)")
+def parallel_difference_explain(diff_id: int, payload: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _parallel().explain_parallel_difference(db, _org_id(current_user), diff_id, payload.get("reason"),
+                                                   _actor(current_user))
+
+
+@router.post("/parallel/differences/{diff_id}/accept", summary="Accept an explained difference (a second reviewer)")
+def parallel_difference_accept(diff_id: int, current_user=Depends(get_current_org_admin),
+                               db: Session = Depends(get_db)):
+    return _parallel().accept_parallel_difference(db, _org_id(current_user), diff_id, _actor(current_user))
+
+
+@router.get("/pilot-status", summary="Whether this organisation is a non-binding Mexico pilot")
+def pilot_status(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_pilot_service
+
+    return mexico_pilot_service.pilot_status(db, _org_id(current_user))

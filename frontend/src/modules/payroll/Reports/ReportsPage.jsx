@@ -17,6 +17,7 @@ import NLLoonaangiftePanel from "./NLLoonaangiftePanel";
 import NLJaaropgaafPanel from "./NLJaaropgaafPanel";
 import { normalizeCountryCode, getCountryNameFromCode, getCurrencyForJurisdiction, createCurrencyFormatterForCode } from "../../../utils/currency";
 import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
+import ZAFilingPanel from "./ZAFilingPanel";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const BASE_TABS = [
@@ -45,6 +46,9 @@ const CH_ELM_TAB = { id: "ch-elm", label: "ELM submissions", icon: Landmark, cou
 // employer-wide, never tied to a single PayrollRun (same reasoning as PD7A).
 const NL_LOONAANGIFTE_TAB = { id: "nl-loonaangifte", label: "Loonaangifte", icon: Landmark, country: "NL" };
 const NL_JAAROPGAAF_TAB = { id: "nl-jaaropgaaf", label: "Jaaropgaaf", icon: FileText, country: "NL" };
+// South Africa (ZP-ZA-ENG-001 Phase 8): EMP201 / EMP501 / IRP5 / COIDA evidence —
+// export-and-evidence, employer-wide like the NL loonaangifte tab.
+const ZA_FILING_TAB = { id: "za-filing", label: "SARS Filing", icon: Landmark, country: "ZA" };
 // Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
 // reasoning as the PD7A tab above.
 const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark, country: "CA" };
@@ -72,6 +76,7 @@ const COUNTRY_TABS = {
   PR: [PR_ASUME_TAB],
   CH: [CH_ELM_TAB],
   NL: [NL_LOONAANGIFTE_TAB, NL_JAAROPGAAF_TAB],
+  ZA: [ZA_FILING_TAB],
 };
 
 const countryLabel = (code) => getCountryNameFromCode(code) || code;
@@ -103,6 +108,7 @@ export default function ReportsPage() {
   const isPr = paysIn("PR");
   const isSwitzerland = paysIn("CH");
   const isNetherlands = paysIn("NL");
+  const isSouthAfrica = paysIn("ZA");
   const employeeCountByCountry = Object.fromEntries(
     (entitlement.countries || []).map((c) => [toEmployeeCountryCode(c.code), c.employeeCount ?? null])
   );
@@ -481,6 +487,7 @@ export default function ReportsPage() {
       {isSwitzerland && activeTab === "ch-elm" && <CHElmSubmissionsPanel />}
       {isNetherlands && activeTab === "nl-loonaangifte" && <NLLoonaangiftePanel />}
       {isNetherlands && activeTab === "nl-jaaropgaaf" && <NLJaaropgaafPanel />}
+      {isSouthAfrica && activeTab === "za-filing" && <ZAFilingPanel />}
       {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
       {isUs && activeTab === "us-941" && <USForm941Panel />}
       {isUs && activeTab === "us-940" && <USForm940Panel />}

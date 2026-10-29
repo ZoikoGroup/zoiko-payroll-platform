@@ -50,18 +50,205 @@ def _employee(db: Session, employee_id: int, organization_id: int) -> PayrollEmp
 
 # ---- Readiness (spec §22) ----
 
+# Phase 10d (plan D10): a gate, or an owner (legal) decision, is SIGNED /
+# RECORDED only by evidence — a source artifact tagged MX-GATE-Gn /
+# MX-DECISION-…, not superseded, with an UPLOADED document, reviewed by a
+# Super Admin other than its creator (mark_source_artifact_reviewed refuses
+# the creator). Created / uploaded but not reviewed is SUBMITTED. Signing is a
+# human act on real evidence; the build signs nothing.
+RELEASE_GATES_DOC = "docs/mexico/release-gates/README.md"
+ACTIVATION_RUNBOOK_DOC = "docs/mexico/MEXICO_PRODUCTION_ACTIVATION_RUNBOOK.md"
+RELEASE_CHECKLIST_DOC = "docs/mexico/MEXICO_RELEASE_CHECKLIST.md"
+UNKNOWN_RUNBOOK_DOC = "docs/mexico/MEXICO_UNKNOWN_STATE_RUNBOOK.md"
+OWNER_DECISIONS = (
+    ("MX-D-RETENTION-PERIOD", "Retention period per record category", "MX-DECISION-RETENTION-PERIOD"),
+    ("MX-D-RETENTION-END", "Deletion vs anonymisation at end of retention", "MX-DECISION-RETENTION-END"),
+    ("MX-D-HOSTING", "Hosting and cross-border transfers (2025 privacy law)", "MX-DECISION-HOSTING"),
+    ("MX-D-Q9", "Q9 — Mexican identifiers (RFC, CURP, NSS, CLABE) at rest", "MX-DECISION-Q9"),     # Phase 10e
+)
+
+
+def _mx_evidence(db: Session, tag: str):
+    """(the accepted artifact or None, whether any live artifact exists)."""
+    from app.modules.payroll.models import SourceArtifact
+
+    rows = (db.query(SourceArtifact).filter(SourceArtifact.form_number == tag, SourceArtifact.superseded_by_id.is_(None))
+            .order_by(SourceArtifact.id.desc()).all())
+    accepted = next((r for r in rows if r.reviewer_id and r.file_path is not None and r.created_by_id is not None
+                     and r.reviewer_id != r.created_by_id), None)
+    return accepted, bool(rows)
+
+
 def gate_states(db: Session) -> list:
-    """G1–G8. Nothing is evidenced at Phase 0, so every gate is OPEN; gate
-    evidence review arrives with Phase 10."""
-    return [{"gate": key, "label": label, "state": "OPEN"} for key, label in GATES]
+    """G1–G8 from their evidence (OPEN / SUBMITTED / SIGNED)."""
+    from app.modules.payroll.mexico_employer_service import GATE_DEFINITIONS
+
+    out = []
+    for key, label in GATES:
+        accepted, submitted = _mx_evidence(db, f"MX-GATE-{key}")
+        out.append({"gate": key, "label": label, "state": "SIGNED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
+                    "evidenceTag": f"MX-GATE-{key}", "artifactId": accepted.id if accepted else None,
+                    "definition": GATE_DEFINITIONS[key], "checklist": f"docs/mexico/release-gates/{key}/CHECKLIST.md"})
+    return out
+
+
+# ── W5-3: per gate, which checklist items code confirms and which await evidence ──
+# Each docs/mexico/release-gates/G*/CHECKLIST.md item ending in
+# `<!-- code: key -->` is evaluated live by _GATE_CODE_CHECKS[key]; every other
+# item can only be met by the gate's signed evidence (a human or an external
+# party). The checklist file stays the one list — nothing is duplicated here.
+import re as _re
+
+_CHECKLIST_ITEM = _re.compile(r"^- \[[ xX]\] (?:\*\*\[(?P<phase>[A-Z -]+)\]\*\* )?(?P<text>.*?)"
+                              r"(?: <!-- code: (?P<code>[a-z0-9_]+) -->)?\s*$")
+
+
+def _plain_markdown(text: str) -> str:
+    return _re.sub(r"\*\*|`", "", text).strip()
+
+
+def _gate_code_checks(db: Session) -> dict:
+    """key -> (met, detail), computed once per call."""
+    from app.modules.payroll import mexico_cfdi_input
+    from app.modules.payroll.models import JurisdictionPack, PayrollMxCfdiSchemaRelease
+
+    out = {}
+    pack = _national_pack(db)
+    checks = {c["key"]: c for c in activation_checks(db, pack)} if pack is not None else {}
+    if pack is None:
+        out["national_pack_approved"] = (False, "no national Mexico pack is seeded")
+    else:
+        unmet = [c["detail"] for k, c in checks.items() if k in ("content", "evidence") and not c["met"]]
+        approved = pack.status in ("Approved", "Active")
+        out["national_pack_approved"] = (
+            approved and not unmet,
+            f"{pack.pack_id} v{pack.version} is {pack.status}" + (f"; {unmet[0]}" if unmet else "; content exact and "
+                                                                    "every row source-linked"))
+    for key, check in (("sources_verified", "sources_verified"), ("golden_pass", "golden")):
+        c = checks.get(check)
+        out[key] = (bool(c and c["met"]), c["detail"] if c else "no national Mexico pack is seeded")
+    active = (db.query(PayrollMxCfdiSchemaRelease).filter(PayrollMxCfdiSchemaRelease.status == "Active").first())
+    out["cfdi_release_active"] = ((True, f"CFDI release #{active.id} is Active") if active
+                                  else (False, "no CFDI schema / catalog release is Active"))
+    period = _content.MX_PAY_FREQUENCY_ISR_PERIOD.get("01")
+    out["pay_frequency_01"] = ((True, f"01 Diario maps to {period}") if period
+                               else (False, "01 Diario is not mapped (MX_PAY_FREQUENCY_MAPPING_MISSING)"))
+    rounding = [r for r in _content.MX_SCALAR_CONTENT if r.key == "mx_rounding_rule" and r.text_value]
+    out["rounding_rule"] = ((True, f"mx_rounding_rule = {rounding[0].text_value}") if rounding
+                            else (False, "mx_rounding_rule is not transcribed (D-01) — every calculation blocks"))
+    sdi = mexico_cfdi_input.SDI_SOURCE
+    out["cfdi_sdi_source"] = ((True, f"SalarioDiarioIntegrado source decided ({sdi}); the concept mappings are "
+                                     "confirmed in the CFDI catalog release") if sdi
+                              else (False, "SDI_SOURCE is undecided — every receipt with an IMSS registration is "
+                                           "refused"))
+    states = (db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == MX,
+                                                JurisdictionPack.pack_type == "tax",
+                                                JurisdictionPack.jurisdiction_state.isnot(None),
+                                                JurisdictionPack.status.in_(("Approved", "Active"))).all())
+    out["isn_pack_approved"] = ((True, "Approved / Active: " + ", ".join(sorted({p.jurisdiction_state for p in states})))
+                                if states else (False, "no state ISN pack is Approved or Active"))
+    entities = isn_states(db)
+    leaking = [s["code"] for s in entities if not s["supported"] and s["payroll"] != "BLOCKED"]
+    out["unsupported_states_blocked"] = (
+        (False, f"payroll is not BLOCKED for unsupported state(s) {leaking}") if leaking
+        else (True, f"payroll is BLOCKED in all {sum(not s['supported'] for s in entities)} state(s) without an "
+                    "Active ISN pack"))
+    missing = [k for k in ("VACATION_PAYOUT", "SEPARATION_PAYMENT", "SEPARATION_INDEMNITY")
+               if ("CDMX", k) not in _content.MX_SPECIAL_PAY_ISN_INCLUSION]
+    out["isn_d06"] = ((False, f"CDMX inclusion undecided for {', '.join(missing)} (D-06)") if missing
+                      else (True, "every CDMX special-pay concept has its inclusion rule"))
+    return out
+
+
+GATE_CODE_CHECK_KEYS = ("national_pack_approved", "sources_verified", "golden_pass", "cfdi_release_active",
+                        "pay_frequency_01", "rounding_rule", "cfdi_sdi_source", "isn_pack_approved",
+                        "unsupported_states_blocked", "isn_d06")
+
+
+def gate_checklists(db: Session) -> dict:
+    """W5-3: each gate's checklist items, split into "code" (evaluated now)
+    and "evidence" (met only by the gate's signed evidence pack)."""
+    from app.modules.payroll import mexico_sources
+
+    from app.modules.payroll import mexico_decision_service
+
+    root = mexico_sources.REPO_ROOT / "docs" / "mexico" / "release-gates"
+    states = {g["gate"]: g["state"] for g in gate_states(db)}
+    open_decisions = mexico_decision_service.open_by_gate(db)          # final mile X1
+    results = None
+    gates = []
+    for key, label in GATES:
+        path = root / key / "CHECKLIST.md"
+        if not path.is_file():
+            gates.append({"gate": key, "label": label, "state": states[key], "available": False, "items": [],
+                          "openDecisions": open_decisions.get(key, 0)})
+            continue
+        items = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = _CHECKLIST_ITEM.match(line)
+            if not line.startswith("- [") or not m:
+                continue
+            item = {"phase": m.group("phase"), "text": _plain_markdown(m.group("text")), "code": m.group("code")}
+            if item["code"]:
+                if results is None:
+                    results = _gate_code_checks(db)
+                met, detail = results.get(item["code"], (False, f"unknown code check {item['code']}"))
+                item.update(kind="code", met=met, detail=detail)
+            else:
+                signed = states[key] == "SIGNED"
+                item.update(kind="evidence", met=signed,
+                            detail="in the signed gate evidence" if signed else "awaits the gate's signed evidence")
+            items.append(item)
+        code = [i for i in items if i["kind"] == "code"]
+        gates.append({"gate": key, "label": label, "state": states[key], "available": True, "items": items,
+                      "codeMet": sum(i["met"] for i in code), "codeTotal": len(code),
+                      "evidenceItems": len(items) - len(code), "openDecisions": open_decisions.get(key, 0)})
+    return {"gates": gates, "note": "Code items are evaluated now; evidence items are met only when the gate is "
+                                    "SIGNED (uploaded evidence reviewed by a second Super Admin). Nothing here signs "
+                                    "a gate."}
+
+
+def owner_decisions(db: Session) -> list:
+    out = []
+    for key, label, tag in OWNER_DECISIONS:
+        accepted, submitted = _mx_evidence(db, tag)
+        out.append({"key": key, "label": label, "evidenceTag": tag,
+                    "state": "RECORDED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
+                    "artifactId": accepted.id if accepted else None})
+    return out
 
 
 def statutory_summary(db: Session) -> dict:
-    return {"jurisdiction": MX, "spec": SPEC, "available": False, "engineVersion": ENGINE_VERSION,
-            "phase": 6, "gates": gate_states(db),
-            "note": "Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22); "
-                    "Mexican payroll runs are wired (Phase 6) but refused while Mexico onboarding is disabled, and "
-                    "the content is not transcribed, so every Mexican calculation is BLOCKED."}
+    gates = gate_states(db)
+    signed = sum(g["state"] == "SIGNED" for g in gates)
+    retention = retention_service.retention_policies(db, MX)
+    from app.modules.payroll import mexico_dormancy, mexico_pilot_service
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == MX).first()
+    registry = row.availability if row is not None else None
+    flag = mexico_dormancy.flag_enabled()
+    available = flag and registry == service.SERVICE_REGISTRY_OPEN
+    grants = mexico_pilot_service.list_grants(db)
+    active = [g for g in grants if g["state"] == "ACTIVE"]
+    level = "AVAILABLE" if available else (f"PILOT ({len(active)} organisation{'s' if len(active) != 1 else ''})"
+                                           if flag and active else "DORMANT")
+    return {"jurisdiction": MX, "spec": SPEC, "available": available, "level": level,
+            "registry": registry, "onboardingEnabled": flag,
+            "pilotGrants": grants, "pilotPreconditions": mexico_pilot_service.pilot_preconditions(db),
+            "onboardingPaused": mexico_dormancy.onboarding_paused(db),                  # Phase 10g
+            "gaPreconditions": mexico_pilot_service.ga_preconditions(db),
+            "engineVersion": ENGINE_VERSION, "phase": 10, "gates": gates, "signedGates": signed,
+            "decisions": owner_decisions(db),
+            "retention": [{"category": c["category"], "label": c["label"], "state": c["state"],
+                           "blocker": c["blocker"]} for c in retention["categories"]],
+            "documents": {"releaseGates": RELEASE_GATES_DOC, "activationRunbook": ACTIVATION_RUNBOOK_DOC,
+                          "releaseChecklist": RELEASE_CHECKLIST_DOC, "unknownRunbook": UNKNOWN_RUNBOOK_DOC},
+            "note": f"Live Mexican payroll stays gated until G1–G8 are signed (ZP-MX-ENG-001 §22) — {signed}/8 signed. "
+                    "A gate is signed only by uploaded evidence reviewed by a second Super Admin. The onboarding flag "
+                    "is a kill switch only: Mexico opens for everyone only when the registry is AVAILABLE (all eight "
+                    "gates, Q9, the identity key), or for one named organisation under an approved, non-binding "
+                    "pilot grant. Every Mexican calculation is BLOCKED until its content is transcribed."}
 
 
 # ---- Governance hooks ----
@@ -71,9 +258,10 @@ def transition_mx_service_registry(db: Session, target: str, reason: str, actor_
     """PLANNED <-> AVAILABLE. AVAILABLE is refused until every gate G1–G8 is
     signed (spec §22: approval of the build is not approval of live payroll)."""
     def readiness():
-        unmet = [{"key": f"mx_gate_{g['gate'].lower()}", "label": f"Gate {g['gate']} — {g['label']}",
-                  "detail": f"gate {g['gate']} is {g['state']}", "met": False}
-                 for g in gate_states(db) if g["state"] != "SIGNED"]
+        # Phase 10e: every gate SIGNED, Q9 RECORDED and the identity key configured.
+        from app.modules.payroll import mexico_pilot_service
+
+        unmet = [c for c in mexico_pilot_service.ga_preconditions(db) if not c["met"]]
         return unmet, {u["key"]: u["detail"] for u in unmet}
 
     return service.transition_service_registry(
@@ -97,12 +285,15 @@ def mx_pack_approval_refusal(db: Session, pack, actor_id: Optional[int] = None) 
     """Approving a Mexico pack (Phase 2, open item 5) requires the pack to be
     in QA — the transition graph's last step before Approved, so the shared
     Draft -> Approved auto-advance can never fire for Mexico — and activation
-    gates 1 (content exact) and 2 (every row source-linked) to hold already."""
+    gates 1 (content exact) and 2 (every row source-linked) to hold already,
+    and (Phase 11d) every cited source to be VERIFIED, not an archive copy."""
     if pack.status != "QA":
         return (f"Mexico pack approval is refused: {pack.pack_id} v{pack.version} is {pack.status} — move it through "
                 "In Review to QA first (Draft → In Review → QA → Approved).")
-    for check in activation_checks(db, pack, actor_id)[:2]:          # gate 1 (content), gate 2 (evidence)
-        if not check["met"]:
+    # Gate 1 (content), gate 2 (evidence) and, Phase 11d, every cited source
+    # VERIFIED: an archive copy backs a Draft pack only, never an Approved one.
+    for check in activation_checks(db, pack, actor_id):
+        if check["key"] in ("content", "evidence", "sources_verified") and not check["met"]:
             return f"Mexico pack approval is refused: {check['detail']}"
     return None
 
@@ -121,8 +312,12 @@ def statutory_editors(db: Session, pack) -> set:
 
 
 def template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
-    return ("Mexico report-template activation is refused: Mexico templates are seeded Draft in Phase 2 and go live "
-            "only with the outputs they describe (Phases 6–10).")
+    """Completion W4-3a (Phase 12c, plan E6 / D3): the real gate in place of the
+    permanent refusal — its release gates SIGNED, its statutory content Active,
+    and its fields proven on a committed Mexican payslip (mexico_report_service)."""
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service.mx_report_activation_refusal(db, template)
 
 
 # ---- Calculation and run hooks ----
@@ -180,15 +375,44 @@ def _mx_payslip_hold_view(item: PayslipItem) -> Optional[dict]:
 
 # ---- Records governance (retention_service) ----
 # retention_service._report_country asks EVERY jurisdiction module for its
-# settings on each report download, so this must answer (never raise). No
-# record category and no owner decision exist yet: retention stays
-# BLOCKED_UNDECIDED for Mexico, and only Mexico's own reports match.
+# settings on each report download, so this must answer (never raise).
+# Phase 10c (plan D8): the Mexican record categories are declared, but the
+# retention periods and the hosting / cross-border stance are legal decisions
+# not taken yet — the owner decision stays OPEN, so every category is
+# BLOCKED_UNDECIDED and NOTHING is purged. Legal holds work now (shared
+# service). A CFDI (stamped XML and its events) is never deleted at all.
+MX_RETENTION_CATEGORIES = (
+    ("PAYROLL_RECORDS", "Payroll runs, payslips and Mexican calculation snapshots (incl. corrections)"),
+    ("CFDI", "CFDI de nómina XML, stamps, cancellations and their events — never deleted"),
+    ("IMSS_INFONAVIT", "IMSS movements, SUA periods, branch ledgers and INFONAVIT notices"),
+    ("AUTHORITY_FILINGS", "SAT ISR, IMSS, INFONAVIT and ISN liabilities, returns and payment evidence"),
+    ("PAYMENTS_AND_JOURNAL", "Salary payment batches and outcomes; payroll journal exports"),
+    ("TERMINATIONS", "Terminations, finiquito / liquidación evidence"),
+    ("PTU_AND_ANNUAL", "PTU allocations and annual ISR adjustments"),
+    ("EMPLOYEE_IDENTITY", "RFC, CURP, NSS, CLABE and the Mexican statutory profile"),
+)
+
 
 def _decision_state(db: Session, key: str) -> str:
-    return "OPEN"
+    """RECORDED only by reviewed evidence (Phase 10d); OPEN until then."""
+    return next((d["state"] for d in owner_decisions(db) if d["key"] == key), "OPEN")
 
 
 def _retained_record_label(db: Session, organization_id: int, employee_id: int) -> Optional[str]:
+    """A statutory record of the employee that must be kept (so the employee is
+    deactivated, never deleted) — the first found, by label."""
+    from app.modules.payroll import models as m
+
+    for model, label in ((m.PayrollMxCfdiDocument, "CFDI documents"),
+                         (m.PayrollMxImssMovement, "IMSS movements"),
+                         (m.PayrollMxTermination, "terminations"),
+                         (m.PayrollMxPtuAllocation, "PTU allocations"),
+                         (m.PayrollMxAnnualIsrAdjustment, "annual ISR adjustments"),
+                         (m.PayrollMxPaymentItem, "salary payments"),
+                         (m.PayrollMxVacationRecord, "vacation records")):
+        if db.query(model.id).filter(model.organization_id == organization_id,
+                                     model.employee_id == employee_id).first():
+            return label
     return None
 
 
@@ -204,7 +428,7 @@ def is_mx_report(report) -> bool:
 
 def retention_settings() -> "retention_service.RetentionJurisdiction":
     return retention_service.RetentionJurisdiction(
-        country=MX, label="Mexico", categories=(),
+        country=MX, label="Mexico", categories=MX_RETENTION_CATEGORIES,
         period_decision="MX-D-RETENTION-PERIOD", end_decision="MX-D-RETENTION-END",
         decision_reference="MX-DECISION-RETENTION", decision_state=_decision_state,
         validate_employee=lambda db, employee_id, organization_id: _employee(db, employee_id, organization_id),
@@ -271,7 +495,8 @@ def _db_signatures(rates, slabs) -> list:
     out = [_content.rate_signature(r.component_key, r.employee_rate_pct, r.employer_rate_pct, r.flat_amount,
                                    r.text_value, r.effective_from, r.effective_to) for r in rates]
     out += [_content.slab_signature(s.rule_type, s.filing_status, s.min_amount, s.max_amount, s.flat_amount,
-                                    s.rate_pct, s.effective_from, s.effective_to, s.tax_table_number) for s in slabs]
+                                    s.rate_pct, s.effective_from, s.effective_to, s.tax_table_number,
+                                    jurisdiction_state=s.jurisdiction_state) for s in slabs]
     return out
 
 
@@ -357,6 +582,28 @@ def activation_checks(db: Session, pack, actor_id: Optional[int] = None) -> list
         ev = (True, f"every row links one of {len(artifacts)} hashed source file(s)")
     checks.append({"key": "evidence", "label": "Every row linked to a hashed source", "met": ev[0], "detail": ev[1]})
 
+    # Phase 11d (gap register A9): an ARCHIVE_COPY_VERIFIED source may back a
+    # Draft pack only — every cited file must be VERIFIED (a direct download)
+    # in docs/mexico/sources/SOURCES_MANIFEST.csv, with its entry in
+    # VERIFICATION_LOG.csv, before the pack goes live.
+    from app.modules.payroll import mexico_sources
+
+    manifest_rows, log_rows = mexico_sources.read_rows(), mexico_sources.read_log()
+    if not artifacts:
+        sv = (False, "no cited source to confirm")
+    elif not manifest_rows:
+        sv = (False, "SOURCES_MANIFEST.csv cannot be read — no source can be confirmed VERIFIED")
+    else:
+        unverified = [a.id for a in artifacts
+                      if not mexico_sources.verified_artifact(manifest_rows, a.source_url, a.checksum_sha256,
+                                                              log_rows)]
+        sv = ((False, f"source artifact(s) {unverified[:5]} are not VERIFIED in SOURCES_MANIFEST.csv with a matching "
+                      "VERIFICATION_LOG.csv entry — an archive copy feeds a Draft pack only; verify a direct "
+                      "download from the official URL with scripts/verify_mexico_sources.py first")
+              if unverified else (True, f"all {len(artifacts)} cited source file(s) are VERIFIED"))
+    checks.append({"key": "sources_verified", "label": "Every cited source VERIFIED (not an archive copy)",
+                   "met": sv[0], "detail": sv[1]})
+
     unreviewed = [a.id for a in artifacts if a.reviewer_approved_at is None or a.reviewer_id is None]
     self_reviewed = [a.id for a in artifacts if actor_id is not None and a.reviewer_id == actor_id]
     if not artifacts:
@@ -440,6 +687,21 @@ def _national_pack(db: Session, pack_row_id: Optional[int] = None):
     return q.order_by(JurisdictionPack.id.desc()).first()
 
 
+def _state_pack(db: Session, pack_row_id: Optional[int]):
+    """W5-1: one state ISN pack (its id is required — 32 entities, no default)."""
+    from app.modules.payroll.models import JurisdictionPack
+
+    if pack_row_id is None:
+        raise BadRequestException("pack_id (a Mexico state ISN pack) is required")
+    pack = (db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id,
+                                              JurisdictionPack.jurisdiction_country == MX,
+                                              JurisdictionPack.pack_type == "tax",
+                                              JurisdictionPack.jurisdiction_state.isnot(None)).first())
+    if pack is None:
+        raise NotFoundException("Mexico state ISN pack", pack_row_id)
+    return pack
+
+
 def _source_view(db: Session, source_document_id) -> Optional[dict]:
     from app.modules.payroll.models import SourceArtifact
 
@@ -460,11 +722,12 @@ _VIEW_RATE_PREFIXES = {
     "benefits": ("mx_aguinaldo_", "mx_vacation_", "mx_sunday_"),
     "isr": (),
     "minwage": (),
+    "isn": ("mx_isn_",),                                         # W5-1: a STATE pack (pack_id required)
 }
 _VIEW_SLAB_RULES = {
     "isr": (_content.MX_ISR_TARIFF_RULE,), "minwage": (_content.MX_MIN_WAGE_RULE,),
     "ceav": (_content.MX_CEAV_BAND_RULE,), "benefits": (_content.MX_WORKWEEK_RULE, _content.MX_VACATION_DAYS_RULE),
-    "uma": (), "imss": (), "infonavit": (),
+    "uma": (), "imss": (), "infonavit": (), "isn": (),
 }
 CONTENT_FAMILIES = tuple(_VIEW_RATE_PREFIXES)
 
@@ -481,7 +744,7 @@ def content_view(db: Session, kind: str, on: Optional[date] = None, pack_row_id:
     governed pack lifecycle."""
     if kind not in _VIEW_RATE_PREFIXES:
         raise NotFoundException("Mexico content family", kind)
-    pack = _national_pack(db, pack_row_id)
+    pack = _state_pack(db, pack_row_id) if kind == "isn" else _national_pack(db, pack_row_id)
     base = {"family": kind, "editable": False, "editVia": "governed pack lifecycle (Draft → review → approve)"}
     if pack is None:
         return {**base, "pack": None, "on": _iso(on), "onSource": "query" if on else None,
@@ -519,6 +782,143 @@ def content_view(db: Session, kind: str, on: Optional[date] = None, pack_row_id:
     return out
 
 
+# W5-1: the module-direct rule switches a gate owner decides (DECISIONS_PENDING).
+# None = undecided: every calculation that needs it BLOCKS with its own code.
+_RULE_SWITCHES = (
+    ("MX_EXEMPTION_WAGE_REFERENCE", "D-07", "Unit of the LISR Art. 93 exempt limits"),
+    ("MX_SPECIAL_PAY_WITHHOLDING_METHOD", "D-08", "Withholding method for a special payment in its own run"),
+    ("MX_MONTHLY_ORDINARY_INCOME_DAYS", "D-09", "Monthly ordinary income from a daily salary"),
+    ("MX_INDEMNITY_SALARY_BASIS", "D-12", "Indemnity salary (LFT Art. 89)"),
+    ("MX_SERVICE_YEARS_COUNT", "D-13", "Part years of service"),
+    ("MX_SENIORITY_PREMIUM_WAGE_REFERENCE", "D-07b", "Seniority premium wage reference"),
+    ("MX_PTU_CAP_EXCESS", "D-14", "PTU cap (LFT Art. 127 VIII): the excess"),
+    ("MX_PTU_HISTORY_AVERAGE", "D-14", "PTU cap: the three-year average"),
+)
+# Content interfaces built with no transcribed rule yet (W3-5): None = BLOCK.
+_RULE_INTERFACES = (
+    ("MX_SBC_FIXED_INTEGRATION_RULE", "D-18", "FIXED SBC items (LSS Art. 30 I)"),
+    ("MX_FIXED_DAYS_TERMINATION_RULE", "D-19", "Fixed salary days at termination"),
+)
+
+
+_CONCEPT_LABELS = {
+    "AGUINALDO": "Aguinaldo", "VACATION_PREMIUM": "Vacation premium (prima vacacional)",
+    "VACATION_PAYOUT": "Vacation paid out at termination", "PTU": "PTU (profit sharing)",
+    "SEPARATION_SENIORITY_PREMIUM": "Seniority premium (prima de antigüedad)",
+    "SEPARATION_PAYMENT": "Separation payment", "SEPARATION_INDEMNITY": "Indemnity",
+    "OVERTIME": "Overtime (horas extra)", "SUNDAY_PREMIUM": "Sunday premium (prima dominical)",
+}
+
+
+def _citations_view(citations, manifest: dict, log: list) -> list:
+    """Each (CODE/file, quoted wording) citation with the manifest row of the
+    cited file (title, url, sha256, verification status)."""
+    from app.modules.payroll import mexico_sources
+
+    out = []
+    for cite, ref in citations:
+        row = manifest.get(cite)
+        out.append({"cite": cite, "ref": ref, "title": row.get("title") if row else None,
+                    "url": row.get("url") if row else None, "sha256": row.get("sha256") if row else None,
+                    "status": mexico_sources.effective_status(row, log) if row else "NOT_IN_MANIFEST"})
+    return out
+
+
+def _cites(obj) -> tuple:
+    return tuple(getattr(obj, "citations", None) or ((obj.source, obj.source_ref),))
+
+
+def statutory_rules_view(db: Session, on: Optional[date] = None) -> dict:
+    """W5-1: every module-direct Mexico rule family (not stored as pack rows),
+    read-only, each with its quoted source wording, the manifest row of the
+    cited file and the [PENDING G1] marker. Year-keyed families (annual ISR
+    tariff, official holidays) show the year of `on`; `on` defaults to the
+    national pack's effective_from, never the server date. Changed only by a
+    code release that passes `verify_mexico_sources.py compare`."""
+    from app.modules.payroll import mexico_sources
+    from app.modules.payroll.engine.countries import mexico_rules as _r
+
+    c = _content
+    pack = _national_pack(db)
+    on_source = "query" if on is not None else ("packEffectiveFrom" if pack is not None else None)
+    on = on or (pack.effective_from if pack is not None else None)
+    year = on.year if on else None
+    manifest = {mexico_sources.cite_key(r): r for r in mexico_sources.read_rows()}
+    log = mexico_sources.read_log()
+
+    def item(key, label, citations, **extra):
+        return {"key": key, "label": label, "pendingG1": True, "citations": _citations_view(citations, manifest, log),
+                **extra}
+
+    families = []
+
+    def family(key, title, items, note=None):
+        families.append({"family": key, "title": title, "items": items, "note": note,
+                         "awaitingTranscription": not items})
+
+    family("annualIsr", f"Annual ISR tariff {year or ''}".strip(), [
+        item(b.lower, f"{b.lower} – {b.upper or 'en adelante'}", ((b.source, b.source_ref),),
+             lower=b.lower, upper=b.upper, fixedQuota=b.fixed_quota, ratePct=b.rate_pct)
+        for b in c.MX_ISR_ANNUAL_TARIFFS.get(year, ())])
+    family("filingCalendar", "Filing calendar", [
+        item(f"{r.report_type}{'/' + r.state if r.state else ''}", r.due_rule, _cites(r), reportType=r.report_type,
+             frequency=r.frequency, dueDay=r.due_day, dueMonth=r.due_month, state=r.state)
+        for r in c.MX_FILING_CALENDAR],
+        note="IMSS quotas are monthly; retiro and CEAV (IMSS_RCV) by bimester (gap A18)")
+    family("specialPay", "Special pay: LISR Art. 93 exemptions and withholding", [
+        item(k, _CONCEPT_LABELS.get(k, k), _cites(o)) for k, o in sorted(c.MX_SPECIAL_PAY_RULES.items())]
+        + ([item("AGUINALDO_RULE", "Aguinaldo amount and payable-by date (LFT Art. 87)", _cites(c.MX_AGUINALDO_RULE))]
+           if c.MX_AGUINALDO_RULE is not None else []))
+    family("isnInclusion", "State ISN: special pay in the base", [
+        item(f"{st}/{concept}", f"{st}: {_CONCEPT_LABELS.get(concept, concept)}", ((src, ref),), state=st,
+             included=inc) for (st, concept), (inc, src, ref) in sorted(c.MX_SPECIAL_PAY_ISN_INCLUSION.items())],
+        note="A concept not listed for a state BLOCKS (MX_ISN_SPECIAL_PAY_RULE_MISSING; D-06)")
+    family("termination", "Termination reasons and the finiquito", [
+        item(k, o.label, _cites(o)) for k, o in sorted(c.MX_TERMINATION_REASONS.items())]
+        + ([item("FINIQUITO_RULE", "Finiquito: vacation owed and withholding", _cites(c.MX_FINIQUITO_RULE))]
+           if c.MX_FINIQUITO_RULE is not None else []))
+    family("ptu", "PTU (profit sharing)", (
+        [item("PTU_RULE", "Distribution and cap (LFT Arts. 122-127)", _cites(c.MX_PTU_RULE))]
+        if c.MX_PTU_RULE is not None else [])
+        + [item(k, o.label, _cites(o), exclusion=True) for k, o in sorted(c.MX_PTU_EXCLUSION_REASONS.items())])
+    family("annualAdjustment", "Annual ISR adjustment (LISR Art. 97)", (
+        [item("ANNUAL_ADJUSTMENT_RULE", "Annual adjustment", _cites(c.MX_ANNUAL_ADJUSTMENT_RULE))]
+        if c.MX_ANNUAL_ADJUSTMENT_RULE is not None else [])
+        + [item(k, o.label, _cites(o), exclusion=True)
+           for k, o in sorted(c.MX_ANNUAL_ADJUSTMENT_EXCLUSION_REASONS.items())])
+    family("ordinaryExemptions", "Ordinary earnings: LISR Art. 93 exemptions", [
+        item(k, _CONCEPT_LABELS.get(o.kind, o.kind), _cites(o))
+        for k, o in sorted(c.MX_ORDINARY_EXEMPTION_RULES.items())])
+    working = []
+    if c.MX_CONTRIBUTION_DAYS_RULE is not None:
+        working.append(item("CONTRIBUTION_DAYS", "Absences and incapacity: contribution days (LSS Art. 31)",
+                            _cites(c.MX_CONTRIBUTION_DAYS_RULE)))
+    if c.MX_RISK_PREMIUM_PERIOD is not None:
+        p = c.MX_RISK_PREMIUM_PERIOD
+        working.append(item("RISK_PREMIUM_PERIOD", f"Risk premium period starts {p.start_day:02d}/{p.start_month:02d}",
+                            _cites(p)))
+    if c.MX_IMSS_MOVEMENT_DEADLINE is not None:
+        m = c.MX_IMSS_MOVEMENT_DEADLINE
+        working.append(item("IMSS_MOVEMENT_DEADLINE", f"IMSS movements: {m.business_days} business days", _cites(m)))
+    working += [item(f"JORNADA_{code}", f"Working day {code}: {hours} hours", ((src, ref),))
+                for code, (hours, src, ref) in sorted(c.MX_JORNADA_DAILY_HOURS.items())]
+    holidays = c.MX_OFFICIAL_HOLIDAYS.get(year)
+    if holidays:
+        dates, src, ref = holidays
+        working.append(item(f"HOLIDAYS_{year}", f"Official holidays {year}: {', '.join(d.isoformat() for d in dates)}",
+                            ((src, ref),)))
+    family("workingTime", "Working time and the IMSS calendar", working,
+           note=None if holidays else f"No official holidays transcribed for {year or 'the year'} (D-16)")
+
+    decisions = [{"name": n, "decision": d, "label": lbl, "value": getattr(_r, n, None),
+                  "decided": getattr(_r, n, None) is not None} for n, d, lbl in _RULE_SWITCHES]
+    decisions += [{"name": n, "decision": d, "label": lbl, "value": None,
+                   "decided": getattr(c, n, None) is not None} for n, d, lbl in _RULE_INTERFACES]
+    return {"editable": False, "editVia": "a code release that passes verify_mexico_sources.py compare",
+            "pack": _pack_view(db, pack) if pack is not None else None, "on": _iso(on), "onSource": on_source,
+            "manifestAvailable": bool(manifest), "families": families, "decisions": decisions}
+
+
 def isn_states(db: Session) -> list:
     """All 32 federal entities with their ISN pack and readiness state. A state
     without an Active pack is unsupported — payroll for it BLOCKS (MX-045)."""
@@ -552,12 +952,11 @@ def list_organizations(db: Session) -> list:
 
     from app.modules.payroll.models import CompanyComplianceDetails, PayrollMxEmployerProfile
 
-    # An organisation is "Mexican" here if it has a Mexico employee, a Mexico
-    # legal employer (Phase 3 onboarding comes before any employee), or Mexico
-    # as its company jurisdiction.
-    org_ids = {row[0] for row in db.query(PayrollEmployee.organization_id)
-               .filter(PayrollEmployee.country_code == MX).distinct().all()}
-    org_ids |= {row[0] for row in db.query(PayrollMxEmployerProfile.organization_id).distinct().all()}
+    # An organisation is "Mexican" here if it has a Mexico legal employer
+    # (Phase 3 onboarding comes before any employee) or Mexico as its company
+    # jurisdiction. ZP-PRIV: a platform principal never reads worker rows, so
+    # employees are not consulted (a Mexican employee needs a Mexican employer).
+    org_ids = {row[0] for row in db.query(PayrollMxEmployerProfile.organization_id).distinct().all()}
     org_ids |= {row[0] for row in db.query(CompanyComplianceDetails.organization_id)
                 .filter(CompanyComplianceDetails.jurisdiction_country.in_((MX, "Mexico"))).all()}
     orgs = db.query(Organization).filter(Organization.id.in_(org_ids or {-1})).order_by(Organization.id).all()
@@ -669,13 +1068,20 @@ def create_classification(db: Session, data: dict, actor_id: Optional[int]) -> d
     return classification_view(row)
 
 
-def _catalog_has_code(db: Session, code: str) -> bool:
-    from app.modules.payroll.models import PayrollMxCfdiCatalogEntry, PayrollMxCfdiSchemaRelease
+# The SAT catalog holding the concept codes of each CFDI node type (S28). A
+# separation payment is a perception (Nómina 1.2 SeparacionIndemnizacion).
+_NODE_CODE_CATALOG = {"PERCEPCION": "c_TipoPercepcion", "SEPARACION": "c_TipoPercepcion",
+                      "DEDUCCION": "c_TipoDeduccion", "OTRO_PAGO": "c_TipoOtroPago"}
 
-    return db.query(PayrollMxCfdiCatalogEntry.id).join(
-        PayrollMxCfdiSchemaRelease, PayrollMxCfdiCatalogEntry.schema_release_id == PayrollMxCfdiSchemaRelease.id
-    ).filter(PayrollMxCfdiSchemaRelease.status.in_(("Approved", "Active")),
-             PayrollMxCfdiCatalogEntry.code == code).first() is not None
+
+def _catalog_has_code(db: Session, node_type: str, code: str) -> bool:
+    """Phase 11a: the code must be in the catalog of the row's OWN node type —
+    before, any catalog of any approved release matched (a deduction could pass
+    with a perception code)."""
+    from app.modules.payroll import mexico_cfdi_catalog_service
+
+    catalog = _NODE_CODE_CATALOG.get(node_type)
+    return bool(catalog) and mexico_cfdi_catalog_service.catalog_has_code(db, catalog, code)
 
 
 def approve_classification(db: Session, classification_id: int, actor_id: Optional[int]) -> dict:
@@ -697,7 +1103,16 @@ def approve_classification(db: Session, classification_id: int, actor_id: Option
     if row.created_by_id == actor_id:
         _refuse(db, et, row.id, "approve", actor_id,
                 "You created this classification — a different Super Admin must approve it (maker-checker).")
-    if row.organization_id is None and not (row.cfdi_concept_code and _catalog_has_code(db, row.cfdi_concept_code)):
+    if row.cfdi_node_type == "SEPARACION":
+        # Completion W5-4 (gap register A13): separation pay is computed only from
+        # the LFT termination reason in a finiquito run (MX_TERMINATION_REASONS),
+        # never from an earning classification — so none is ever approved.
+        _refuse(db, et, row.id, "approve", actor_id,
+                "A SEPARACION classification is never approved: separation pay (seniority premium, indemnity, "
+                "separation payment) is computed from the termination reason in a finiquito run, not from an "
+                "earning classification.")
+    if row.organization_id is None and not (row.cfdi_concept_code
+                                            and _catalog_has_code(db, row.cfdi_node_type, row.cfdi_concept_code)):
         _refuse(db, et, row.id, "approve", actor_id,
                 "A canonical classification needs its SAT concept code in an approved CFDI catalog release — the "
                 "SAT Nómina 1.2 catalog (S28) is not VERIFIED yet, so no canonical row can go live.")
@@ -846,6 +1261,19 @@ def add_catalog_entry(db: Session, release_id: int, data: dict, actor_id: Option
             "description": entry.description, "validFrom": _iso(entry.valid_from), "validTo": _iso(entry.valid_to)}
 
 
+def _catalog_entry_authors(db: Session, release_id: int) -> set:
+    """Every Super Admin who added an entry to this release (from the audit rows
+    add_catalog_entry writes; entries carry no author column)."""
+    from app.modules.payroll.models import PayrollMxCfdiCatalogEntry, TaxConfigurationAudit as A
+
+    ids = [i for (i,) in db.query(PayrollMxCfdiCatalogEntry.id)
+           .filter(PayrollMxCfdiCatalogEntry.schema_release_id == release_id)]
+    if not ids:
+        return set()
+    return {a for (a,) in db.query(A.actor_id).filter(A.entity_type == "mx_cfdi_catalog_entry", A.action == "create",
+                                                      A.entity_id.in_(ids), A.actor_id.isnot(None))}
+
+
 RELEASE_ACTIONS = {"submit": ("Draft", "In Review"), "approve": ("In Review", "Approved"),
                    "activate": ("Approved", "Active"), "supersede": ("Active", "Superseded")}
 
@@ -868,6 +1296,10 @@ def transition_release(db: Session, release_id: int, action: str, actor_id: Opti
     if action == "approve" and release.created_by_id == actor_id:
         _refuse(db, et, release.id, action, actor_id,
                 "You registered this release — a different Super Admin must approve it (maker-checker).")
+    if action == "approve" and actor_id in _catalog_entry_authors(db, release.id):     # final mile X8
+        _refuse(db, et, release.id, action, actor_id,
+                "You added catalog entries to this release — a Super Admin who added none must approve it "
+                "(maker-checker).")
     if action == "activate":
         _refuse(db, et, release.id, action, actor_id,
                 "Pinning a CFDI release live needs the Phase 7 PAC validation (MX-015) — activation is refused in "

@@ -83,23 +83,27 @@ def test_golden_check_is_super_admin_only(db):
 # ── organisation scoping ─────────────────────────────────────────────────────
 
 def test_org_scoping_is_explicit(db):
+    from app.modules.payroll.models import CompanyComplianceDetails
+
     br_org, other = _org(db), _org(db, "Org US", "ORGUS")
-    emp = _employee(db, br_org, "BR-001", "BR")
+    _employee(db, br_org, "BR-001", "BR")
     _employee(db, other, "US-001", "US")
+    db.add(CompanyComplianceDetails(organization_id=br_org.id, name="Org BR", jurisdiction_country="BR"))
+    db.commit()
     with _http(db, SA_A) as c:
-        assert c.get(f"{BASE}/employees").status_code == 422            # no default organisation
-        assert c.get(f"{BASE}/employees", params={"org_id": 99999}).status_code == 404
         assert [o["id"] for o in c.get(f"{BASE}/organizations").json()] == [br_org.id]
-        assert c.get(f"{BASE}/employees", params={"org_id": br_org.id}).json() == [
-            {"id": emp.id, "name": "Emp BR-001", "employee_code": "BR-001"}]
-        assert c.get(f"{BASE}/employees", params={"org_id": other.id}).json() == []
+        # ZP-PRIV: the employee list is worker-level data — retired for Super
+        # Admin in the route registry (a live JIT support grant is needed).
+        for params in ({}, {"org_id": 99999}, {"org_id": br_org.id}):
+            assert c.get(f"{BASE}/employees", params=params).status_code == 403
 
 
 def test_organizations_include_an_employer_profile_without_employees(db):
     from app.modules.payroll.models import PayrollBrEmployerProfile
 
     org = _org(db)
-    db.add(PayrollBrEmployerProfile(organization_id=org.id, cnpj_root="11222333", legal_name="X Ltda",
+    db.add(PayrollBrEmployerProfile(organization_id=org.id, version=1, effective_from=date(2026, 1, 1),
+                                    cnpj_root="11222333", legal_name="X Ltda",
                                     tax_classification="99", cnae_preponderant="6201501", contact_name="A",
                                     contact_cpf="52998224725", contact_email="a@example.com"))
     db.commit()
@@ -183,13 +187,13 @@ def test_gates_and_readiness_report_every_gate_open(db):
     assert readiness["available"] is False and readiness["gates"] == gates
 
 
-def test_golden_check_records_no_real_cases_never_a_pass(db):
-    """br_golden/ holds only a README until Phase 5, so the run is NO_REAL_CASES —
-    which the BR activation gate never treats as a PASS."""
+def test_golden_check_runs_br_fixtures(db):
+    """Phase 5 added real br_golden fixtures, so the run now executes them
+    (they are still PROVISIONAL until G1/D6 sign-off, but must be a PASS)."""
     from app.modules.payroll.models import TestCertificationRun
 
     with _http(db, SA_A) as c:
         body = c.post(f"{BASE}/golden-check").json()
-    assert body["status"] == "NO_REAL_CASES" and body["total_cases"] == 0
+    assert body["status"] == "PASS" and body["total_cases"] == 3
     run = db.query(TestCertificationRun).filter(TestCertificationRun.id == body["run_id"]).one()
     assert run.jurisdiction_country == "BR" and run.triggered_by_id == SA_A.id

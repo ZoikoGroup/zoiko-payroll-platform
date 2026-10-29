@@ -59,10 +59,11 @@ def _payslip(db, org, run, emp, snapshot=None, net="8000"):
     item = PayslipItem(payroll_run_id=run.id, employee_id=emp.id, organization_id=org.id,
                        employee_name=emp.name, country_code="SA", gross_pay=Decimal("10000"),
                        net_pay=Decimal(net), sa_calculation_snapshot=snapshot or {
-                           "gosi": {"employeePension": "950", "employerPension": "1050",
-                                    "employeeSocialSecurity": "75", "employerSocialSecurity": "75",
-                                    "employerOccupationalHazard": "200"},
-                           "calculation": {"contributoryWage": "10000"}})
+                           # The engine's real stored shape (saudi_arabia.calculate()["sa_result"]).
+                           "sa_contribution_month": "2026-03", "sa_contributory_wage": "10000",
+                           "employee_pension": "950", "employer_pension": "1050",
+                           "social_security": "75", "employer_social_security": "75",
+                           "employer_occupational_hazard": "200"})
     db.add(item)
     db.flush()
     return item

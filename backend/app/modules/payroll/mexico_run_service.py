@@ -41,16 +41,16 @@ MX = "MX"
 SPEC = _content.SPEC
 
 # Codes that refuse the WHOLE operation (dormancy / scope), never a sentinel.
-GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_PHASE9",
+GUARD_CODES = ("MX_DORMANT", "MX_ORG_NOT_MEXICAN", "MX_RUN_ORG_MISMATCH", "MX_RUN_TYPE_UNKNOWN",
                "MX_PAY_DATE_MISSING")
 RUN_TYPES = ("ORDINARY", "AGUINALDO", "PTU", "FINIQUITO", "CORRECTION")
-BUILT_RUN_TYPES = ("ORDINARY", "CORRECTION", "AGUINALDO")   # 9a corrections, 9b aguinaldo; PTU / FINIQUITO: 9c–9d
 
 # Platform earning codes of the lines Phase 6 builds (each needs an approved
 # Mexico earning classification, MX-005 — none is assumed).
 SALARY_CODE = "MX_SALARY"
 OVERTIME_CODE = "MX_OVERTIME"
 SUNDAY_PREMIUM_CODE = "MX_SUNDAY_PREMIUM"
+REST_DAY_WORK_CODE = "MX_REST_DAY_WORK"          # W3-2
 
 _FIXED_SALARY_DAYS = {"QUINCENAL_15": Decimal("15"), "MONTHLY": Decimal("30")}   # D13 FIXED convention
 _ZERO = Decimal("0")
@@ -102,7 +102,7 @@ def _org_runs_mexico(db: Session, org_id) -> bool:
 
 def guard(db: Session, employee, run=None) -> None:
     org_id = getattr(employee, "organization_id", None)
-    if not mexico_dormancy.onboarding_enabled():
+    if not mexico_dormancy.onboarding_enabled(db, org_id):
         raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
     # Multi-country orgs: Mexico need not be the org's default country, only
     # one of its countries (billing/jurisdiction_entitlement.py) — each
@@ -111,8 +111,9 @@ def guard(db: Session, employee, run=None) -> None:
         raise MXBlock("MX_ORG_NOT_MEXICAN", "Mexico is not one of the employee's organisation payroll countries", org_id)
     if run is not None and run.organization_id != org_id:
         raise MXBlock("MX_RUN_ORG_MISMATCH", "the run belongs to another organisation", org_id)
-    if run is not None and (run.mx_run_type or "ORDINARY") not in BUILT_RUN_TYPES:
-        raise MXBlock("MX_RUN_TYPE_PHASE9", f"{run.mx_run_type} runs are built in a later Phase 9 sub-phase", org_id)
+    if run is not None and (run.mx_run_type or "ORDINARY") not in RUN_TYPES:
+        # Every run type is built (Phase 9a–9d); what remains is an unknown one.
+        raise MXBlock("MX_RUN_TYPE_UNKNOWN", f"{run.mx_run_type!r} is not a Mexico run type", org_id)
 
 
 # ── 1b. Read-only policy for previews (MX-039, OOS-8) ───────────────────────
@@ -324,14 +325,13 @@ def _hours(db: Session, employee_id: int, start: date, end: date):
     if not rows:
         return None, []
     overtime = sum((_dec(r.overtime_hours) for r in rows), _ZERO)
-    hours = {"weeks": [{"week_start": r.week_start, "overtime_hours": _dec(r.overtime_hours)} for r in rows],
+    hours = {"weeks": [{"week_start": r.week_start, "overtime_hours": _dec(r.overtime_hours),
+                        "overtime_dates": list(r.overtime_dates or [])} for r in rows],
              "sundays_worked": sum(int(r.sundays_worked or 0) for r in rows),
              "holiday_days": sum(int(r.rest_days_worked or 0) for r in rows),
-             "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE}
-    if overtime > 0:
-        # No transcribed rule derives an hourly rate from the daily salary.
-        raise MXBlock("MX_HOURLY_RATE_RULE_MISSING",
-                      "approved overtime needs an hourly-rate rule, which is not transcribed yet (S26)")
+             "overtime_code": OVERTIME_CODE, "sunday_premium_code": SUNDAY_PREMIUM_CODE,
+             "rest_day_code": REST_DAY_WORK_CODE}
+    # W3-5: the hourly rate is the engine's (labor.hourly_rate) — it blocks while no rule is transcribed.
     return hours, [{"id": r.id, "week_start": r.week_start, "ordinary": r.ordinary_hours, "overtime": r.overtime_hours,
                     "sundays": r.sundays_worked, "rest_days": r.rest_days_worked} for r in rows]
 
@@ -377,7 +377,16 @@ def _payment_order(run, on: date) -> tuple:
     return (on, datetime.fromisoformat(committed) if committed else _NOT_COMMITTED, run.id)
 
 
-def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
+def _special_month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
+    """Completion A17: what a special run (aguinaldo, PTU, finiquito) needs of
+    the pay date's calendar month — the same committed payslips, payment
+    order and correction rules as `_month_to_date`, plus the ISR they
+    withheld (LISR Art. 96 taxes "la totalidad de los ingresos obtenidos en
+    un mes de calendario"). Only the finiquito rule reads it today (D-22)."""
+    return _month_to_date(db, employee_id, run, on, with_isr=True)
+
+
+def _month_to_date(db: Session, employee_id: int, run, on: date, with_isr: bool = False) -> dict:
     """Committed Mexican payslips of the same pay-date month that come BEFORE
     this one in `_payment_order` (subsidy, MX-013): an earlier pay date, or the
     same pay date committed earlier (run id breaks an exact tie). A payment
@@ -397,7 +406,7 @@ def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
     my_committed_at = (getattr(run, "mx_approval_fingerprint", None) or {}).get("committedAt") if run is not None else None
     q = (db.query(PayslipItem, PayrollRun).join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
          .filter(PayslipItem.employee_id == employee_id, PayslipItem.mx_calculation_snapshot.isnot(None)))
-    taxable = applied = _ZERO
+    taxable = applied = withheld = _ZERO
     for item, r in q.all():
         if run is not None and r.id == run.id:
             continue
@@ -407,12 +416,49 @@ def _month_to_date(db: Session, employee_id: int, run, on: date) -> dict:
             continue
         if _payment_order(r, r.pay_date) >= me or item.id in replaced:
             continue
-        part = corrections.contribution(db, item, r, run, my_committed_at)
+        part = corrections.contribution(db, item, r, run, my_committed_at, with_isr=with_isr)
         if part is None:
             continue
         taxable += part[0]
         applied += part[1]
-    return {"taxable": taxable, "subsidy_applied": applied}
+        if with_isr:
+            withheld += part[2]
+    out = {"taxable": taxable, "subsidy_applied": applied}
+    if with_isr:
+        out["isr_withheld"] = withheld
+    return out
+
+
+def _year_to_date_exempt(db: Session, employee_id: int, run, on: date) -> dict:
+    """{special concept: ISR-exempt amount already used} by the committed
+    Mexican payslips of the pay date's CALENDAR YEAR that come before this one
+    (W1-3: LISR Art. 93 XIV caps each concept per calendar year). Same payment
+    order, replaced-chain and correction rules as `_month_to_date`, so
+    committing another run cannot change an already committed run's inputs."""
+    from app.modules.payroll import mexico_correction_service as corrections
+    from app.modules.payroll.engine.jurisdictions.mexico import special_pay
+    from app.modules.payroll.models import PayrollRun, PayslipItem
+
+    me = _payment_order(run, on)
+    replaced = corrections.replaced_chain(db, run)
+    my_committed_at = (getattr(run, "mx_approval_fingerprint", None) or {}).get("committedAt") if run is not None else None
+    q = (db.query(PayslipItem, PayrollRun).join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+         .filter(PayslipItem.employee_id == employee_id, PayslipItem.mx_calculation_snapshot.isnot(None)))
+    used = {concept: _ZERO for concept in special_pay.CONCEPTS}
+    for item, r in q.all():
+        if run is not None and r.id == run.id:
+            continue
+        if r.pay_date.year != on.year:
+            continue
+        if not (r.mx_approval_fingerprint or {}).get("committedAt"):
+            continue
+        if _payment_order(r, r.pay_date) >= me or item.id in replaced:
+            continue
+        part = corrections.exempt_contribution(db, item, r, run, my_committed_at)
+        for concept, amount in (part or {}).items():
+            if concept in used:
+                used[concept] += amount
+    return used
 
 
 def _bank(employee) -> dict:
@@ -448,6 +494,10 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     run_type = (run.mx_run_type or "ORDINARY") if run is not None else "ORDINARY"
     if run_type == "AGUINALDO":
         return _aguinaldo_inputs(db, run, employee, pack, pay_rates, pay_slabs)
+    if run_type == "FINIQUITO":
+        return _finiquito_inputs(db, run, employee, pack, pay_rates, pay_slabs)
+    if run_type == "PTU":
+        return _ptu_inputs(db, run, employee, pack, pay_rates, pay_slabs)
 
     prof = _profile(db, employee, on)
     reg = _registration(db, prof, on)
@@ -456,10 +506,36 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     if policy_row is not None and policy_row.floor_check_status != "PASS":
         raise MXBlock("MX_LABOR_POLICY_FLOOR_NOT_PASS", "the employer labour policy has not passed its floor check")
     tariff = payment_period(prof, start, end)
+    # Phase 9c: an approved termination ends the employment — the final period
+    # pays to the termination date; a later period pays nothing.
+    from app.modules.payroll import mexico_termination_service
+
+    ended = mexico_termination_service.settling(db, employee.id)
+    final_period = None
+    if ended is not None and ended.termination_date < end:
+        if ended.termination_date < start:
+            raise MXBlock("MX_EMPLOYEE_TERMINATED",
+                          f"the employment ended on {ended.termination_date.isoformat()}, before this period",
+                          employee.organization_id)
+        fixed_rule = _content.MX_FIXED_DAYS_TERMINATION_RULE                      # W3-5 (D-19)
+        if tariff in _FIXED_SALARY_DAYS and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR" \
+                and fixed_rule is None:
+            raise MXBlock("MX_SALARY_DAYS_PARTIAL_PERIOD",
+                          f"the employment ends on {ended.termination_date.isoformat()}, inside this {tariff} period, "
+                          f"and the labour policy pays fixed salary days — no proration of fixed days is transcribed",
+                          employee.organization_id)
+        final_period = {"terminationId": ended.id, "periodEnd": end, "endsOn": ended.termination_date}
+        end = ended.termination_date
     days_paid = salary_days(tariff, start, end, policy_row.salary_days_convention if policy_row else None)
+    if final_period is not None and tariff in _FIXED_SALARY_DAYS \
+            and (policy_row.salary_days_convention if policy_row else None) != "CALENDAR":
+        days_paid = _dec(_content.MX_FIXED_DAYS_TERMINATION_RULE.days_paid(tariff, start, final_period["periodEnd"],
+                                                                            end))
     counts = _attendance_counts(db, employee.organization_id, employee.id, start, end, attendance_records)
     segs = segments(db, pack, start, end)
     hours, hours_rows = _hours(db, employee.id, start, end)
+    if hours is not None:
+        hours["workday_type_code"] = prof.mx_workday_type_code             # W3-5: LFT Art. 61 length
     zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
 
     daily = _dec(prof.mx_daily_salary)
@@ -491,10 +567,11 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
     isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
     accumulator = _accumulator(db, employee.id, prof.mx_salary_type, end)
     mtd = _month_to_date(db, employee.id, run, on)
+    ytd_exempt = _year_to_date_exempt(db, employee.id, run, on)
     profile_facts = {c: getattr(prof, c) for c in (
         "id", "effective_from", "mx_identifier_validation_status", "mx_daily_salary", "mx_salary_type",
         "mx_work_state", "mx_work_municipality", "mx_seniority_date", "mx_pay_frequency_code",
-        "mx_professional_min_code", "mx_imss_registration_id", "mx_establishment_id")}
+        "mx_professional_min_code", "mx_imss_registration_id", "mx_establishment_id", "mx_workday_type_code")}
 
     components = {
         "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs],
@@ -504,21 +581,31 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
         "infonavitNotices": _hash(notices), "approvedHours": _hash(hours_rows),
         "variableAccumulator": _hash(accumulator), "monthToDate": _hash(mtd), "earnings": _hash(earnings),
         "attendance": _hash(counts), "bankInstruction": _hash(_bank(employee)),
+        "yearToDateExempt": _hash(ytd_exempt),
     }
+    if final_period is not None:
+        components["termination"] = _hash(final_period)
+    # Phase 9e: an approved annual ISR adjustment of an ended year, applied here.
+    from app.modules.payroll import mexico_annual_service
+
+    annual = mexico_annual_service.for_payslip(db, run, employee.id)
+    if annual is not None:
+        components["annualAdjustment"] = _hash(annual)
     return {
         "mx_payroll_date": on, "mx_payment_period": tariff, "mx_profile": prof,
         "mx_registration": registration, "mx_risk_premium": risk, "mx_labor_policy": policy,
         "mx_classifications": classifications, "mx_infonavit_notices": notices, "mx_isn_state_pack": isn_pack,
         "mx_earnings": earnings, "mx_hours": hours, "mx_min_wage_zone": zone,
         "mx_period": {"start": start, "end": end, "days_paid": days_paid, **counts,
+                      **({"final_period": _plain(final_period)} if final_period is not None else {}),
                       "segments": [{"start": s["start"], "end": s["end"], "days": s["days"], "rate_map": s["rate_map"],
                                     "slabs": s["slabs"]} for s in segs]},
         "mx_variable_accumulator": {"total": accumulator["total"], "days": accumulator["days"]},
-        "mx_month_to_date": mtd,
+        "mx_month_to_date": mtd, "mx_year_to_date_exempt": ytd_exempt,
         "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
         "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
         "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
-        "mx_input_components": components, "mx_run_type": run_type,
+        "mx_input_components": components, "mx_run_type": run_type, "mx_annual_adjustment": annual,
     }
 
 
@@ -559,10 +646,13 @@ def _aguinaldo_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
     employment = {"from": employee.date_of_joining, "to": employee.date_of_leaving, "year": year}
     profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
                                                     "mx_seniority_date", "mx_imss_registration_id")}
+    ytd_exempt = _year_to_date_exempt(db, employee.id, run, on)
+    mtd = _special_month_to_date(db, employee.id, run, on)                    # completion A17
     components = {
         "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs]}),
         "isnPack": _hash(isn_pack), "registration": _hash(registration), "laborPolicy": _hash(policy),
         "profile": _hash(profile_facts), "employment": _hash(employment), "earnings": _hash(earnings),
+        "yearToDateExempt": _hash(ytd_exempt), "monthToDate": _hash(mtd),
     }
     special_detail = {"concept": "AGUINALDO", "year": year, "days": days, "statutoryMinDays": statutory_days,
                       "dailySalary": daily, "fraction": detail["fraction"], "unrounded": detail["amount"],
@@ -574,12 +664,144 @@ def _aguinaldo_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
         "mx_isn_state_pack": isn_pack, "mx_earnings": earnings, "mx_hours": None, "mx_min_wage_zone": zone,
         "mx_period": {"start": run.period_start, "end": run.period_end, "days_paid": _ZERO, "segments": []},
         "mx_variable_accumulator": {"total": _ZERO, "days": _ZERO},
-        "mx_month_to_date": {"taxable": _ZERO, "subsidy_applied": _ZERO},
+        "mx_month_to_date": mtd, "mx_year_to_date_exempt": ytd_exempt,
         "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
         "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
         "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
         "mx_input_components": components, "mx_run_type": "AGUINALDO", "mx_special_detail": _plain(special_detail),
     }
+
+
+def _finiquito_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
+    """Phase 9c: the inputs of one FINIQUITO payslip — proportional aguinaldo,
+    the vacation still owed paid out with its premium, and the separation
+    components the termination's reason triggers (all from transcribed rules,
+    mexico_termination_service.finiquito_lines). Profile, registration and
+    labour policy are those in force on the last day employed; the content is
+    the pay date's (MX-004). No ordinary period: the engine's special-run path."""
+    from app.modules.payroll import mexico_employer_service, mexico_termination_service
+    from app.modules.payroll.engine.jurisdictions.mexico import rounding
+    from app.modules.payroll.engine.jurisdictions.mexico.content import Content
+
+    on = run.pay_date
+    row = mexico_termination_service.for_run(db, run)
+    if row.employee_id != employee.id:
+        raise MXBlock("MX_FINIQUITO_TERMINATION_MISSING", f"run {run.id} settles another employee's termination",
+                      employee.organization_id)
+    last_day = row.termination_date
+    prof = _profile(db, employee, last_day)
+    reg = _registration(db, prof, last_day)
+    policy_row = _labor_policy(db, reg, last_day)
+    if policy_row is None:
+        raise MXBlock("MX_LABOR_POLICY_MISSING", "no employer labour policy was in force on the termination date",
+                      employee.organization_id)
+    if policy_row.floor_check_status != "PASS":
+        raise MXBlock("MX_LABOR_POLICY_FLOOR_NOT_PASS", "the employer labour policy has not passed its floor check")
+    content = Content(pay_rates, pay_slabs)
+    rounder = rounding.rounder(content)
+    zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
+    policy = {"id": policy_row.id, "version": policy_row.version, "aguinaldo_days": policy_row.aguinaldo_days,
+              "vacation_policy": policy_row.vacation_policy, "vacation_premium_pct": policy_row.vacation_premium_pct}
+    facts = {"termination_date": last_day, "pay_date": on, "daily_salary": _dec(prof.mx_daily_salary),
+             "seniority_date": prof.mx_seniority_date, "date_of_joining": employee.date_of_joining,
+             "work_state": prof.mx_work_state, "zone": zone, "content": content,
+             # W1-3b: what the transcribed termination reasons read (LFT Arts. 50, 89, 162)
+             "contract_type_code": prof.mx_contract_type_code, "labor_policy": policy}
+    earnings, detail = mexico_termination_service.finiquito_lines(db, row, employee, prof, policy, content, rounder,
+                                                                  facts)
+    isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
+    registration = None if reg is None else {"id": reg.id, "status": reg.status,
+                                             "employer_profile_id": reg.employer_profile_id}
+    profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
+                                                    "mx_seniority_date", "mx_imss_registration_id",
+                                                    "mx_contract_type_code")}      # W1-3b: the reasons read it
+    termination = {"id": row.id, "date": last_day, "reason": row.reason_code, "status": row.status}
+    ytd_exempt = _year_to_date_exempt(db, employee.id, run, on)
+    mtd = _special_month_to_date(db, employee.id, run, on)                    # completion A17
+    components = {
+        "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs]}),
+        "isnPack": _hash(isn_pack), "registration": _hash(registration), "laborPolicy": _hash(policy),
+        "profile": _hash(profile_facts), "termination": _hash(termination),
+        "vacationRecords": _hash(_vacation_facts(db, employee.id)), "earnings": _hash(earnings),
+        "yearToDateExempt": _hash(ytd_exempt), "monthToDate": _hash(mtd),
+    }
+    return {
+        "mx_payroll_date": on, "mx_payment_period": None, "mx_profile": prof, "mx_registration": registration,
+        "mx_risk_premium": None, "mx_labor_policy": policy, "mx_classifications": {}, "mx_infonavit_notices": [],
+        "mx_isn_state_pack": isn_pack, "mx_earnings": earnings, "mx_hours": None, "mx_min_wage_zone": zone,
+        "mx_period": {"start": run.period_start, "end": run.period_end, "days_paid": _ZERO, "segments": []},
+        "mx_variable_accumulator": {"total": _ZERO, "days": _ZERO},
+        "mx_month_to_date": mtd, "mx_year_to_date_exempt": ytd_exempt,
+        "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
+        "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
+        "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
+        "mx_input_components": components, "mx_run_type": "FINIQUITO", "mx_special_detail": _plain(detail),
+        "mx_separation_date": last_day,
+    }
+
+
+def _ptu_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
+    """Phase 9d: the inputs of one PTU payslip — the worker's final amount from
+    the APPROVED allocation of the run's cycle. Profile and registration are
+    those in force on the pay date, or on the last day employed for a leaver;
+    the content is the pay date's (MX-004). No ordinary period: the engine's
+    special-run path (withheld by the special-pay rule, never in ordinary pay
+    or accumulators — MX-056)."""
+    from app.modules.payroll import mexico_employer_service, mexico_ptu_service
+
+    on = run.pay_date
+    cycle, alloc = mexico_ptu_service.allocation_for(db, run, employee.id)
+    if cycle.status not in ("APPROVED", "DISTRIBUTED"):
+        raise MXBlock("MX_PTU_CYCLE_NOT_APPROVED", f"PTU cycle {cycle.id} is {cycle.status}", employee.organization_id)
+    as_of = employee.date_of_leaving if employee.date_of_leaving and employee.date_of_leaving < on else on
+    prof = _profile(db, employee, as_of)
+    reg = _registration(db, prof, as_of)
+    policy_row = _labor_policy(db, reg, as_of)
+    zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
+    isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
+    earnings = [{"code": "MX_PTU", "kind": "PTU", "amount": _dec(alloc.final_amount)}]
+    policy = None if policy_row is None else {"id": policy_row.id, "version": policy_row.version}
+    registration = None if reg is None else {"id": reg.id, "status": reg.status,
+                                             "employer_profile_id": reg.employer_profile_id}
+    profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
+                                                    "mx_seniority_date", "mx_imss_registration_id")}
+    allocation = {"cycle": cycle.id, "fingerprint": cycle.allocation_fingerprint, "final": alloc.final_amount,
+                  "days": alloc.qualifying_days, "salary": alloc.qualifying_salary}
+    ytd_exempt = _year_to_date_exempt(db, employee.id, run, on)
+    mtd = _special_month_to_date(db, employee.id, run, on)                    # completion A17
+    components = {
+        "content": _hash({"pack": [pack.pack_id, pack.version], "pay": [pay_rates, pay_slabs]}),
+        "isnPack": _hash(isn_pack), "registration": _hash(registration), "laborPolicy": _hash(policy),
+        "profile": _hash(profile_facts), "ptuAllocation": _hash(allocation), "earnings": _hash(earnings),
+        "yearToDateExempt": _hash(ytd_exempt), "monthToDate": _hash(mtd),
+    }
+    special_detail = {"concept": "PTU", "cycleId": cycle.id, "fiscalYear": cycle.fiscal_year,
+                      "qualifyingDays": alloc.qualifying_days, "qualifyingSalary": alloc.qualifying_salary,
+                      "daysShare": alloc.days_share, "salaryShare": alloc.salary_share,
+                      "capReference": alloc.cap_reference, "capApplied": alloc.cap_applied,
+                      "finalAmount": alloc.final_amount, "allocationRule": cycle.rule_source,
+                      "paymentDeadline": cycle.payment_deadline, "deadlineRule": cycle.deadline_rule_ref}
+    return {
+        "mx_payroll_date": on, "mx_payment_period": None, "mx_profile": prof, "mx_registration": registration,
+        "mx_risk_premium": None, "mx_labor_policy": policy, "mx_classifications": {}, "mx_infonavit_notices": [],
+        "mx_isn_state_pack": isn_pack, "mx_earnings": earnings, "mx_hours": None, "mx_min_wage_zone": zone,
+        "mx_period": {"start": run.period_start, "end": run.period_end, "days_paid": _ZERO, "segments": []},
+        "mx_variable_accumulator": {"total": _ZERO, "days": _ZERO},
+        "mx_month_to_date": mtd, "mx_year_to_date_exempt": ytd_exempt,
+        "mx_pack": {"pack_id": pack.pack_id, "version": pack.version, "id": pack.id},
+        "mx_pack_rows": {"rate_map": pay_rates, "slabs": pay_slabs},
+        "mx_employee_id": employee.id, "mx_organization_id": employee.organization_id,
+        "mx_input_components": components, "mx_run_type": "PTU", "mx_special_detail": _plain(special_detail),
+    }
+
+
+def _vacation_facts(db: Session, employee_id: int) -> list:
+    """The vacation records a finiquito reads (approval drift: a change after
+    the calculation is seen as stale)."""
+    from app.modules.payroll.models import PayrollMxVacationRecord as V
+
+    return [{"id": r.id, "year": r.service_year, "kind": r.kind, "days": r.days, "status": r.status}
+            for r in db.query(V).filter(V.employee_id == employee_id).order_by(V.id)]
 
 
 def payslip_split(inputs: dict) -> dict:
@@ -627,10 +849,23 @@ def input_hash(components: dict) -> str:
     return _hash(components)
 
 
+def _snapshot_is_pilot(inputs: dict) -> bool:
+    """Phase 10f: was this payslip generated in a pilot organisation? Read from
+    the employee's Mexican statutory profile (its organisation and session) —
+    nothing is added to the calculation context or the input hash."""
+    from sqlalchemy.orm import object_session
+
+    prof = inputs.get("mx_profile")
+    db = object_session(prof) if prof is not None else None
+    return bool(db is not None and mexico_dormancy.is_pilot_organization(db, getattr(prof, "organization_id", None)))
+
+
 def payslip_snapshot(mx_result: dict, inputs: dict) -> dict:
     comps = inputs.get("mx_input_components") or {}
     return {"result": mx_result, "inputHash": input_hash(comps), "components": comps,
-            "pack": _plain(inputs.get("mx_pack")), "engineVersion": (mx_result or {}).get("engine_version")}
+            "pack": _plain(inputs.get("mx_pack")), "engineVersion": (mx_result or {}).get("engine_version"),
+            # Phase 10f: generated in a pilot organisation — non-binding (not part of the input hash)
+            "pilot": _snapshot_is_pilot(inputs)}
 
 
 def preview_block(exc, employee) -> MXBlock:
@@ -832,6 +1067,15 @@ def commit_run(db: Session, run, actor_id: Optional[int]) -> dict:
     from app.modules.payroll import mexico_benefits_service
 
     counts["vacationPremiumsPaid"] = mexico_benefits_service.on_commit(db, run)
+    from app.modules.payroll import mexico_termination_service
+
+    counts["vacationPaidOut"] = mexico_termination_service.on_commit(db, run)
+    from app.modules.payroll import mexico_ptu_service
+
+    counts["ptuAllocationsPaid"] = mexico_ptu_service.on_commit(db, run)
+    from app.modules.payroll import mexico_annual_service
+
+    counts["annualAdjustmentsApplied"] = mexico_annual_service.on_commit(db, run)
     db.flush()
     return {"committed": True, **counts}
 
@@ -890,8 +1134,12 @@ def before_run_transition(db: Session, run, next_status, approver_id) -> None:
                       "regenerate before approval", run.organization_id)
     result = commit_run(db, run, approver_id)          # before committedAt is stamped (its idempotency key)
     now = datetime.utcnow().isoformat()
+    from app.modules.payroll import mexico_dormancy
+
     run.mx_approval_fingerprint = {**fp, "approvedBy": approver_id, "approvedAt": now, "committedAt": now,
-                                   "spec": SPEC}
+                                   "spec": SPEC,
+                                   # Phase 10e: non-binding pilot output, recorded on the run for good
+                                   "pilot": mexico_dormancy.is_pilot_organization(db, run.organization_id)}
     _audit(db, actor_id=approver_id, action="approve", entity_type="mx_run_approval", entity_id=run.id,
            new={"fingerprint": fp["fingerprint"], "ledgers": result})
 
@@ -905,11 +1153,15 @@ def run_downstream_actions(db: Session, run) -> list:
     filed / UNKNOWN, any liability past ACCRUED (or ever sent), any SUA
     period RECONCILED onward and any ISN return past DRAFT that includes it
     (Phase 8 plan §6). Phase 9a: any live correction of one of its payslips.
-    Phase 10 MUST add: any RELEASED bank instruction for it. Each with a test."""
-    from app.modules.payroll import mexico_cfdi_service, mexico_correction_service, mexico_filing_service
+    Phase 10a: any RELEASED (or CLOSED) payment batch for it. Phase 10b: any
+    CURRENT journal export of it. Each with a test."""
+    from app.modules.payroll import (mexico_cfdi_service, mexico_correction_service, mexico_filing_service,
+                                     mexico_journal_service, mexico_payment_service)
 
     return (mexico_cfdi_service.downstream_reasons(db, run) + mexico_filing_service.downstream_reasons(db, run)
-            + mexico_correction_service.downstream_reasons(db, run))
+            + mexico_correction_service.downstream_reasons(db, run)
+            + mexico_payment_service.downstream_reasons(db, run)
+            + mexico_journal_service.downstream_reasons(db, run))
 
 
 def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
@@ -933,6 +1185,18 @@ def reset_run(db: Session, run, actor_id: Optional[int], reason: str) -> dict:
     from app.modules.payroll import mexico_benefits_service
 
     removed["vacationPremiumsReopened"] = mexico_benefits_service.on_reset(db, run)
+    from app.modules.payroll import mexico_termination_service
+
+    removed["vacationPaidOutRemoved"] = mexico_termination_service.on_reset(db, run)
+    from app.modules.payroll import mexico_ptu_service
+
+    removed["ptuAllocationsReopened"] = mexico_ptu_service.on_reset(db, run)
+    from app.modules.payroll import mexico_annual_service
+
+    removed["annualAdjustmentsReopened"] = mexico_annual_service.on_reset(db, run)
+    from app.modules.payroll import mexico_payment_service
+
+    removed["paymentBatchesCancelled"] = mexico_payment_service.withdraw_on_reset(db, run)
     names = ("imssBranchLines", "isnLiabilities", "sbcHistory", "variableAccumulators", "benefitAccruals")
     for name, q in zip(names, _ledger_queries(db, run)):
         removed[name] = q.delete(synchronize_session=False)
@@ -983,7 +1247,9 @@ def run_status(db: Session, run) -> dict:
     drift = approval_drift(db, run) if stored.get("committedAt") else []
     return {"runId": run.id, "runType": run.mx_run_type or "ORDINARY",
             "payroll": {"status": run.status, "committedAt": stored.get("committedAt"),
-                        "approvalInvalidated": bool(drift), "drift": drift},
+                        "approvalInvalidated": bool(drift), "drift": drift,
+                        # Phase 10f: a committed pilot run, or a run of a pilot organisation
+                        "pilot": bool(stored.get("pilot")) or mexico_dormancy.is_pilot_organization(db, run.organization_id)},
             "cfdi": _cfdi_lane(db, run),
             "authorities": _authorities_lane(db, run),
             "bank": {"status": "HELD", "detail": "bank settlement is built in Phase 10; every Mexican payment is held"},
@@ -996,6 +1262,7 @@ def _hours_view(r) -> dict:
     return {"id": r.id, "employeeId": r.employee_id, "weekStart": r.week_start.isoformat(),
             "ordinaryHours": str(r.ordinary_hours), "overtimeHours": str(r.overtime_hours),
             "sundaysWorked": r.sundays_worked, "restDaysWorked": r.rest_days_worked,
+            "overtimeDates": list(r.overtime_dates or []),
             "evidenceDocumentId": r.evidence_document_id, "status": r.status, "recordedById": r.recorded_by_id,
             "approvedById": r.approved_by_id, "approvedAt": r.approved_at.isoformat() if r.approved_at else None}
 
@@ -1016,10 +1283,43 @@ def record_hours(db: Session, org_id: int, employee_id: int, data: dict, actor_i
         if v < 0:
             raise BadRequestException(f"{key} must be zero or more")
         vals[key] = v
+    # Phase 11c: the dates inside the week on which the overtime was worked
+    # (the CFDI HorasExtra node needs them, S4 p. 51). Optional — without
+    # them the receipt of a payslip with overtime is refused.
+    dates = data.get("overtime_dates") or []
+    # Completion W6-1 (gap register A11): or, per date, how many of the hours were
+    # paid at the double and at the triple rate — the employer's own record. The
+    # law (LFT Art. 68) prices the hours beyond the weekly maximum at triple but
+    # does not say which days they fell on, and S4 p. 51 counts days per hour type.
+    by_date = data.get("overtime_by_date") or []
+    if dates and by_date:
+        raise BadRequestException("give either overtimeDates or overtimeHoursByDate, not both")
+    if dates or by_date:
+        if vals["overtime_hours"] <= 0:
+            raise BadRequestException("overtime dates are given only with overtime hours")
+        days = [e["date"] for e in by_date] if by_date else dates
+        if any(not isinstance(d, date) for d in days):
+            raise BadRequestException("overtime dates must be ISO dates")
+        if len(set(days)) != len(days):
+            raise BadRequestException("overtime dates must not repeat a date")
+        if any(not (week <= d <= week + timedelta(days=6)) for d in days):
+            raise BadRequestException("every overtime date must fall inside the recorded week")
+    stored = sorted(d.isoformat() for d in dates) or None
+    if by_date:
+        entries = []
+        for e in by_date:
+            double, triple = _dec(e.get("double")), _dec(e.get("triple"))
+            if double < 0 or triple < 0 or double + triple <= 0:
+                raise BadRequestException(f"{e['date'].isoformat()}: double and triple hours must be zero or more, "
+                                          "and not both zero")
+            entries.append({"date": e["date"].isoformat(), "double": str(double), "triple": str(triple)})
+        if sum((_dec(e["double"]) + _dec(e["triple"]) for e in entries), _ZERO) != vals["overtime_hours"]:
+            raise BadRequestException("the hours per date must add up to the week's overtime hours")
+        stored = sorted(entries, key=lambda e: e["date"])
     row = H(organization_id=org_id, employee_id=employee_id, week_start=week, ordinary_hours=vals["ordinary_hours"],
             overtime_hours=vals["overtime_hours"], sundays_worked=int(vals["sundays_worked"]),
             rest_days_worked=int(vals["rest_days_worked"]), evidence_document_id=data["evidence_document_id"],
-            status="DRAFT", recorded_by_id=actor_id)
+            overtime_dates=stored, status="DRAFT", recorded_by_id=actor_id)
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="create", entity_type="mx_approved_hours", entity_id=row.id,

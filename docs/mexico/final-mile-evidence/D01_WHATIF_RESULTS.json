@@ -1,0 +1,419 @@
+[
+{
+"reading": "(none)",
+"fixture": "F1 Jan (UMA 113.14), 600/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "(none)",
+"fixture": "F1 Feb (UMA 117.31), 600/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "(none)",
+"fixture": "F2 first-year SBC, 600/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "(none)",
+"fixture": "F3 CEAV high band, 1000/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "(none)",
+"fixture": "F4 general zone, 400/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "(none)",
+"fixture": "F4 ZLFN, 400/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "(none)",
+"fixture": "F4 ZLFN, 500/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP"
+],
+"block": "MX_ROUNDING_RULE_MISSING"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F1 Jan (UMA 113.14), 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726.08",
+"imss_employee": "241.69",
+"imss_employer": "1768.80",
+"infonavit_employer": "472.19",
+"employer_total": "2600.99",
+"subsidy_applied": "264.58",
+"isn": "360.00",
+"net": "None"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F1 Feb (UMA 117.31), 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726.36",
+"imss_employee": "240.94",
+"imss_employer": "1779.49",
+"infonavit_employer": "472.19",
+"employer_total": "2611.68",
+"subsidy_applied": "264.30",
+"isn": "360.00",
+"net": "None"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F2 first-year SBC, 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726.36",
+"imss_employee": "240.94",
+"imss_employer": "1779.49",
+"infonavit_employer": "472.19",
+"employer_total": "2611.68",
+"subsidy_applied": "264.30",
+"isn": "360.00",
+"net": "None"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F3 CEAV high band, 1000/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "15000.0000",
+"isr_withheld": "2272.26",
+"imss_employee": "415.65",
+"imss_employer": "2765.21",
+"infonavit_employer": "786.99",
+"employer_total": "4152.20",
+"subsidy_applied": "0.00",
+"isn": "600.00",
+"net": "None"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F4 general zone, 400/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "6000.0000",
+"isr_withheld": "211.41",
+"imss_employee": "153.60",
+"imss_employer": "1229.97",
+"infonavit_employer": "314.79",
+"employer_total": "1784.76",
+"subsidy_applied": "264.30",
+"isn": "240.00",
+"net": "None"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F4 ZLFN, 400/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"block": "MX_BELOW_MINIMUM_WAGE"
+},
+{
+"reading": "HALF_UP:0.01",
+"fixture": "F4 ZLFN, 500/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "7500.0000",
+"isr_withheld": "445.56",
+"imss_employee": "197.27",
+"imss_employer": "1533.05",
+"infonavit_employer": "393.49",
+"employer_total": "2226.54",
+"subsidy_applied": "264.30",
+"isn": "300.00",
+"net": "None"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F1 Jan (UMA 113.14), 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726.08",
+"imss_employee": "241.69",
+"imss_employer": "1768.80",
+"infonavit_employer": "472.19",
+"employer_total": "2600.99",
+"subsidy_applied": "264.58",
+"isn": "360.00",
+"net": "None"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F1 Feb (UMA 117.31), 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726.36",
+"imss_employee": "240.94",
+"imss_employer": "1779.49",
+"infonavit_employer": "472.19",
+"employer_total": "2611.68",
+"subsidy_applied": "264.30",
+"isn": "360.00",
+"net": "None"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F2 first-year SBC, 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726.36",
+"imss_employee": "240.94",
+"imss_employer": "1779.49",
+"infonavit_employer": "472.19",
+"employer_total": "2611.68",
+"subsidy_applied": "264.30",
+"isn": "360.00",
+"net": "None"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F3 CEAV high band, 1000/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "15000.0000",
+"isr_withheld": "2272.26",
+"imss_employee": "415.65",
+"imss_employer": "2765.21",
+"infonavit_employer": "786.99",
+"employer_total": "4152.20",
+"subsidy_applied": "0.00",
+"isn": "600.00",
+"net": "None"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F4 general zone, 400/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "6000.0000",
+"isr_withheld": "211.41",
+"imss_employee": "153.60",
+"imss_employer": "1229.97",
+"infonavit_employer": "314.79",
+"employer_total": "1784.76",
+"subsidy_applied": "264.30",
+"isn": "240.00",
+"net": "None"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F4 ZLFN, 400/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"block": "MX_BELOW_MINIMUM_WAGE"
+},
+{
+"reading": "HALF_EVEN:0.01",
+"fixture": "F4 ZLFN, 500/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "7500.0000",
+"isr_withheld": "445.56",
+"imss_employee": "197.27",
+"imss_employer": "1533.05",
+"infonavit_employer": "393.49",
+"employer_total": "2226.54",
+"subsidy_applied": "264.30",
+"isn": "300.00",
+"net": "None"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F1 Jan (UMA 113.14), 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "726",
+"imss_employee": "241",
+"imss_employer": "1768",
+"infonavit_employer": "472",
+"employer_total": "2600",
+"subsidy_applied": "265",
+"isn": "360",
+"net": "None"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F1 Feb (UMA 117.31), 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "727",
+"imss_employee": "241",
+"imss_employer": "1779",
+"infonavit_employer": "472",
+"employer_total": "2611",
+"subsidy_applied": "264",
+"isn": "360",
+"net": "None"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F2 first-year SBC, 600/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "9000.0000",
+"isr_withheld": "727",
+"imss_employee": "241",
+"imss_employer": "1779",
+"infonavit_employer": "472",
+"employer_total": "2611",
+"subsidy_applied": "264",
+"isn": "360",
+"net": "None"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F3 CEAV high band, 1000/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "15000.0000",
+"isr_withheld": "2272",
+"imss_employee": "415",
+"imss_employer": "2765",
+"infonavit_employer": "787",
+"employer_total": "4152",
+"subsidy_applied": "0",
+"isn": "600",
+"net": "None"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F4 general zone, 400/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "6000.0000",
+"isr_withheld": "212",
+"imss_employee": "154",
+"imss_employer": "1229",
+"infonavit_employer": "315",
+"employer_total": "1784",
+"subsidy_applied": "264",
+"isn": "240",
+"net": "None"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F4 ZLFN, 400/day",
+"outcome": "BLOCKED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"block": "MX_BELOW_MINIMUM_WAGE"
+},
+{
+"reading": "HALF_DOWN:1",
+"fixture": "F4 ZLFN, 500/day",
+"outcome": "CALCULATED",
+"marks": [
+"SANDBOX — SYNTHETIC INPUTS — NOT A PAYSLIP",
+"CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR"
+],
+"gross": "7500.0000",
+"isr_withheld": "446",
+"imss_employee": "198",
+"imss_employer": "1534",
+"infonavit_employer": "393",
+"employer_total": "2227",
+"subsidy_applied": "264",
+"isn": "300",
+"net": "None"
+}
+]

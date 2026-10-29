@@ -73,7 +73,10 @@ def _get_vcr_annual_totals(db: Session, organization_id: int, employee_id: int, 
 
 
 def _aggregate_payslip_totals(db: Session, organization_id: int, employee_id: int, tax_year: int) -> Dict[str, Decimal]:
-    """Aggregate totals from committed payslips in the tax year."""
+    """Aggregate totals from committed payslips in the tax year. A correction
+    payslip carries DELTA totals (create_nl_correction), so summing originals
+    and their deltas gives the corrected annual figure — corrections are
+    included, never skipped."""
     items = (
         db.query(PayslipItem)
         .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
@@ -85,6 +88,7 @@ def _aggregate_payslip_totals(db: Session, organization_id: int, employee_id: in
             PayrollRun.pay_date <= date(tax_year, 12, 31),
             PayrollRun.status.in_(["Approved", "Authorized", "Paid", "Closed"]),
         )
+        .order_by(PayrollRun.pay_date, PayrollRun.id, PayslipItem.id)
         .all()
     )
 
@@ -105,13 +109,11 @@ def _aggregate_payslip_totals(db: Session, organization_id: int, employee_id: in
         totals["zvw_wage"] += Decimal(pos.get("zvwEmployee", "0")) + Decimal(pos.get("zvwEmployer", "0"))
         totals["zvw_contribution"] += Decimal(pos.get("zvwEmployee", "0"))
 
-        # Employment credit (arbeidskorting) - from trace
-        trace = snap.get("trace", [])
-        for t in trace:
-            if t.get("code") == "EMPLOYMENT_CREDIT":
-                totals["applied_employment_credit"] += Decimal(str(t.get("amount", "0")))
-            if t.get("code") == "TAX_CREDIT":
-                totals["tax_credit_applied"] += Decimal(str(t.get("amount", "0")))
+        # Applied arbeidskorting / heffingskorting are NOT derived yet: the
+        # engine withholds from the official white table (credit built into the
+        # "with credit" column) and emits no credit amount. Deriving them needs
+        # the without-credit column lookup plus the statutory AK/AHK split
+        # (G1 sign-off) — until then both stay 0 and the UI says "not derived".
 
     return totals
 
@@ -209,6 +211,12 @@ def generate_annual_statement(
         if supersedes:
             supersedes_id = supersedes.id
 
+    # Deterministic IKV selection: latest start_date, then lowest id
+    ikv = db.query(PayrollNlIncomeRelationship).filter(
+        PayrollNlIncomeRelationship.employee_id == employee_id,
+        PayrollNlIncomeRelationship.organization_id == organization_id,
+    ).order_by(PayrollNlIncomeRelationship.start_date.desc(), PayrollNlIncomeRelationship.id).first()
+
     statement = PayrollNlAnnualStatement(
         organization_id=organization_id,
         employee_id=employee_id,
@@ -216,7 +224,8 @@ def generate_annual_statement(
         tax_year=tax_year,
         version=version,
         supersedes_id=supersedes_id,
-        fiscal_wage=vcr_totals["ei_cumulative_wage"] + payslip_totals.get("fiscal_wage", Decimal("0")),
+        # Fiscal wage from ledger only (payslip totals) — no double-count with VCR
+        fiscal_wage=payslip_totals.get("fiscal_wage", Decimal("0")),
         wage_tax_withheld=payslip_totals["wage_tax_withheld"],
         applied_employment_credit=payslip_totals["applied_employment_credit"],
         tax_credit_applied=payslip_totals["tax_credit_applied"],
@@ -262,7 +271,7 @@ def amend_annual_statement(
     reason: str,
     delivery_channel: str = "PORTAL",
 ) -> PayrollNlAnnualStatement:
-    """Create an amended version of an issued statement."""
+    """Create an amended version of an issued statement — RECOMPUTES from committed data."""
     original = db.query(PayrollNlAnnualStatement).filter(
         PayrollNlAnnualStatement.id == statement_id
     ).one_or_none()
@@ -271,7 +280,17 @@ def amend_annual_statement(
     if original.status != "ISSUED":
         raise AnnualStatementError(f"Can only amend ISSUED statements (status={original.status})")
 
-    # Create new version
+    # Recompute from committed data (NL-R1: amendments recompute)
+    vcr_totals = _get_vcr_annual_totals(db, original.organization_id, original.employee_id, original.tax_year)
+    payslip_totals = _aggregate_payslip_totals(db, original.organization_id, original.employee_id, original.tax_year)
+    source_hash = _compute_source_ledger_sha256(db, original.organization_id, original.employee_id, original.tax_year)
+
+    # Deterministic IKV selection
+    ikv = db.query(PayrollNlIncomeRelationship).filter(
+        PayrollNlIncomeRelationship.employee_id == original.employee_id,
+        PayrollNlIncomeRelationship.organization_id == original.organization_id,
+    ).order_by(PayrollNlIncomeRelationship.start_date.desc(), PayrollNlIncomeRelationship.id).first()
+
     import hashlib
     from datetime import datetime
     idempotency_key = f"jaaropgaaf-amend-{original.organization_id}-{original.employee_id}-{original.tax_year}-{original.version + 1}-{actor_id}-{datetime.utcnow().isoformat()}"
@@ -280,17 +299,17 @@ def amend_annual_statement(
     new_stmt = PayrollNlAnnualStatement(
         organization_id=original.organization_id,
         employee_id=original.employee_id,
-        income_relationship_id=original.income_relationship_id,
+        income_relationship_id=ikv.id if ikv else None,
         tax_year=original.tax_year,
         version=original.version + 1,
         supersedes_id=original.id,
-        fiscal_wage=original.fiscal_wage,
-        wage_tax_withheld=original.wage_tax_withheld,
-        applied_employment_credit=original.applied_employment_credit,
-        tax_credit_applied=original.tax_credit_applied,
-        zvw_wage=original.zvw_wage,
-        zvw_contribution=original.zvw_contribution,
-        source_ledger_sha256=original.source_ledger_sha256,
+        fiscal_wage=payslip_totals.get("fiscal_wage", Decimal("0")),
+        wage_tax_withheld=payslip_totals["wage_tax_withheld"],
+        applied_employment_credit=payslip_totals["applied_employment_credit"],
+        tax_credit_applied=payslip_totals["tax_credit_applied"],
+        zvw_wage=vcr_totals["zvw_cumulative_wage"],
+        zvw_contribution=payslip_totals["zvw_contribution"],
+        source_ledger_sha256=source_hash,
         status="DRAFT",
         idempotency_key=idempotency_key,
     )
