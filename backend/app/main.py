@@ -39,13 +39,7 @@ from app.modules.payroll.engine.countries.shared import MissingComplianceConfigu
 
 logger = logging.getLogger("zoiko_payroll")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(correlation_id)s] %(message)s")
-
-# ZP-PRIV D03/D04: every log line carries the request's correlation id and is
-# scrubbed of secrets and worker personal data before any handler sees it.
-from app.core.redaction import install_log_filters  # noqa: E402
-
-install_log_filters()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # ── Error tracking (Sentry) ──────────────────────────────────────────────
 # Inert until SENTRY_DSN is set (empty by default -- see config.py). No
@@ -53,11 +47,7 @@ install_log_filters()
 if settings.SENTRY_DSN:
     import sentry_sdk
 
-    from app.core.redaction import sentry_before_breadcrumb, sentry_before_send
-
-    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False, max_request_body_size="never",
-                    include_local_variables=False,
-                    before_send=sentry_before_send, before_breadcrumb=sentry_before_breadcrumb)
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False)
 
 # ── Access-log redaction for security tokens in query strings ───────────────
 
@@ -75,28 +65,8 @@ class _RedactSensitiveQueryFilter(logging.Filter):
 
 
 @asynccontextmanager
-def _enforce_nonprod_data_guard() -> None:
-    """ZP-PRIV D09: production stamps its data origin; a named non-production
-    environment refuses to start on production-origin data that was not
-    de-identified (core/nonprod_guard.py)."""
-    from app.core import nonprod_guard
-    from app.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        result = nonprod_guard.enforce(db)
-        logger.info("[startup] non-production data guard: %s", result)
-    finally:
-        db.close()
-
-
 async def lifespan(app: FastAPI):
     initialize_database()
-    install_log_filters()  # uvicorn's own handlers exist by now
-    from app.database import check_row_level_security
-
-    check_row_level_security()
-    _enforce_nonprod_data_guard()
     from app.modules.assisted_access.models import ensure_tables
     from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
     from app.modules.auth.scheduler import start_token_cleanup_scheduler, stop_token_cleanup_scheduler
@@ -105,21 +75,17 @@ async def lifespan(app: FastAPI):
         start_dunning_scheduler, stop_dunning_scheduler,
         start_bwm_aggregation_scheduler, stop_bwm_aggregation_scheduler,
     )
-    from app.modules.support_access.scheduler import (
-        retire_legacy_assisted_access, start_support_access_scheduler, stop_support_access_scheduler,
+    from app.modules.assisted_access.scheduler import (
+        start_assisted_access_scheduler, stop_assisted_access_scheduler,
     )
 
     start_assist_scheduler(run_now=True)
     start_trial_scheduler(run_now=True)
     start_dunning_scheduler(run_now=True)
     start_bwm_aggregation_scheduler(run_now=True)
+    start_assisted_access_scheduler(run_now=True)
     start_token_cleanup_scheduler(run_now=True)
     ensure_tables()
-    # ZP-PRIV Part D supersedes Assisted Access: close any legacy session
-    # still open (its tokens are refused regardless), then run the JIT
-    # Support Access minute sweep.
-    retire_legacy_assisted_access()
-    start_support_access_scheduler(run_now=True)
 
     from app.modules.billing.router import _missing_checkout_config
     missing_checkout_config = _missing_checkout_config()
@@ -137,7 +103,7 @@ async def lifespan(app: FastAPI):
     stop_trial_scheduler()
     stop_dunning_scheduler()
     stop_bwm_aggregation_scheduler()
-    stop_support_access_scheduler()
+    stop_assisted_access_scheduler()
 
 
 from app.modules.communications.service import bind_request_background_tasks  # noqa: E402
@@ -205,9 +171,6 @@ from app.modules.organizations.router import jurisdiction_router
 from app.modules.super_admin.router import router as super_admin_router
 from app.modules.super_admin.command_center_router import router as super_admin_command_center_router
 from app.modules.payroll.router import payroll_router
-from app.modules.payroll.netherlands_router import router as netherlands_router
-from app.modules.payroll.mexico_router import router as mexico_router
-from app.modules.payroll.brazil_router import router as brazil_router
 from app.modules.payroll.forms.router import public_forms_router
 from app.modules.assist.router import assist_router
 from app.modules.assist.public_router import assist_public_router
@@ -221,9 +184,6 @@ app.include_router(auth_user_router, prefix="/api")
 app.include_router(organizations_router, prefix="/api")
 app.include_router(jurisdiction_router, prefix="/api")
 app.include_router(super_admin_router, prefix="/api")
-app.include_router(netherlands_router, prefix="/api")
-app.include_router(mexico_router, prefix="/api")
-app.include_router(brazil_router, prefix="/api")
 app.include_router(super_admin_command_center_router, prefix="/api")
 app.include_router(payroll_router, prefix="/api")
 app.include_router(public_forms_router, prefix="/api/payroll")
@@ -312,7 +272,7 @@ async def correlation_id_middleware(request: Request, call_next):
     cid = correlation.accept(request.headers.get(correlation.HEADER))
     request.state.correlation_id = cid
     token = correlation.set_current(cid)
-    ip_token = correlation.client_ip.set(request.client.host if request.client else None)
+    ip_token = correlation.client_ip.set(correlation.extract_client_ip(request))
     try:
         response = await call_next(request)
     finally:
@@ -334,22 +294,6 @@ async def assisted_access_audit_middleware(request: Request, call_next):
     response = await call_next(request)
     record_request_if_assisted(request, response.status_code)
     return response
-
-
-# Registered last = outermost. When the client disconnects before a response
-# exists (a health probe or browser tab giving up), Starlette's
-# BaseHTTPMiddleware raises "No response returned." That is not an
-# application error: answer 499 quietly instead of logging a traceback.
-@app.middleware("http")
-async def client_disconnect_middleware(request: Request, call_next):
-    from starlette.responses import Response
-
-    try:
-        return await call_next(request)
-    except RuntimeError as exc:
-        if str(exc) == "No response returned." and await request.is_disconnected():
-            return Response(status_code=499)
-        raise
 
 # ── Root health ──────────────────────────────────────────────────────────────
 
@@ -419,12 +363,3 @@ def health_celery():
         "workers": active_workers,
         "worker_count": worker_count,
     }
-
-
-# ── Privacy PDP: default-deny route policy install ──────────────────────────
-# Must run AFTER every include_router (and the health routes above) so the
-# PDP dependency lands in front of every existing route's own gates. Routes
-# with no registry entry get a deny-all policy (fail closed).
-from app.core.authz.policy import install_route_policies  # noqa: E402
-
-install_route_policies(app)

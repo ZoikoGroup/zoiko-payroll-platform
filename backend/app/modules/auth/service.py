@@ -642,9 +642,21 @@ def temporary_access_ended(user) -> bool:
 def _client_fingerprint(request) -> Optional[str]:
     if request is None:
         return None
-    host = getattr(getattr(request, "client", None), "host", None) or ""
+    from app.core.correlation import extract_client_ip
+    host = extract_client_ip(request) or ""
     agent = request.headers.get("user-agent", "") if hasattr(request, "headers") else ""
-    return hashlib.sha256(f"{host}|{agent}".encode("utf-8")).hexdigest()
+    # Subnet-level IP stability (/24 for IPv4, /48 for IPv6) to avoid edge proxy / mobile tower IP jitter
+    ip_prefix = ""
+    if host:
+        if "." in host:
+            ip_prefix = ".".join(host.split(".")[:3])
+        elif ":" in host:
+            ip_prefix = ":".join(host.split(":")[:3])
+        else:
+            ip_prefix = host
+    ua_hash = hashlib.sha256(agent.encode("utf-8")).hexdigest()[:24]
+    ip_hash = hashlib.sha256(ip_prefix.encode("utf-8")).hexdigest()[:24]
+    return f"{ua_hash}:{ip_hash}"
 
 
 def _access_lifetime(user) -> timedelta:
@@ -864,6 +876,31 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
         auth_audit.record(db, auth_audit.REFRESH_FAILED, request=request, reason="UNKNOWN_TOKEN")
         raise UnauthorizedException("Please sign in again.")
     if record.used_at is not None or record.revoked_at is not None or is_token_revoked(db, payload.get("jti")):
+        # Check grace window (RFC 6819 Section 5.2.2.3):
+        # If the token was used recently (within REFRESH_TOKEN_ROTATION_GRACE_SECONDS),
+        # this is likely a concurrent in-flight request or network retry, not token theft.
+        grace_window = getattr(settings, "REFRESH_TOKEN_ROTATION_GRACE_SECONDS", 30)
+        now = datetime.utcnow()
+        if (
+            record.used_at is not None
+            and record.revoked_at is None
+            and not is_token_revoked(db, payload.get("jti"))
+            and (now - record.used_at) <= timedelta(seconds=grace_window)
+        ):
+            user = db.query(User).filter(User.id == payload.get("user_id")).first()
+            if user and user.is_active and not temporary_access_ended(user):
+                logger.info(
+                    "Refresh token retry within grace window (%ss) for user %s; issuing fresh access token",
+                    grace_window,
+                    user.email,
+                )
+                return {
+                    "access_token": issue_access_token(user, record.mfa_at),
+                    "refresh_token": refresh_token,
+                    "token_type": "bearer",
+                    "user": user,
+                }
+
         _revoke_family(db, record.family_id, "REUSE_DETECTED")
         auth_audit.record(db, auth_audit.REFRESH_REUSE_DETECTED, request=request,
                           user=db.query(User).filter(User.id == record.user_id).first(), reason="REUSE")
@@ -891,8 +928,18 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
 
     if is_privileged(user):
         idle = datetime.utcnow() - record.issued_at
-        new_device = (record.client_fingerprint is not None and request is not None
-                      and _client_fingerprint(request) != record.client_fingerprint)
+        current_fp = _client_fingerprint(request)
+        new_device = False
+        if record.client_fingerprint is not None and request is not None and current_fp != record.client_fingerprint:
+            # If both fingerprints use ua:ip format, only flag new_device if the user agent changed
+            if ":" in record.client_fingerprint and ":" in (current_fp or ""):
+                old_ua = record.client_fingerprint.split(":", 1)[0]
+                new_ua = current_fp.split(":", 1)[0]
+                if old_ua != new_ua:
+                    new_device = True
+            else:
+                new_device = True
+
         missing_mfa = mfa.mfa_required_for(user) and not record.mfa_at
         if idle > timedelta(minutes=settings.PRIVILEGED_REFRESH_IDLE_MINUTES) or new_device or missing_mfa:
             reason = "IDLE" if not (new_device or missing_mfa) else ("NEW_DEVICE" if new_device else "MFA_MISSING")

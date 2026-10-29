@@ -32,6 +32,26 @@ _current: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("zp_cor
 client_ip: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("zp_client_ip", default=None)
 
 
+def extract_client_ip(request) -> Optional[str]:
+    """Extract real client IP taking into account Cloudflare, reverse proxies, and forwarders."""
+    if request is None:
+        return None
+    headers = getattr(request, "headers", None)
+    if headers:
+        cf_ip = headers.get("cf-connecting-ip")
+        if cf_ip and cf_ip.strip():
+            return cf_ip.strip()
+        x_real_ip = headers.get("x-real-ip")
+        if x_real_ip and x_real_ip.strip():
+            return x_real_ip.strip()
+        xff = headers.get("x-forwarded-for")
+        if xff and xff.strip():
+            # First IP in comma-separated list is the original client IP
+            return xff.split(",")[0].strip()
+    client = getattr(request, "client", None)
+    return getattr(client, "host", None)
+
+
 def new_id() -> str:
     return uuid.uuid4().hex
 
