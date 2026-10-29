@@ -879,10 +879,11 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
         # Check grace window (RFC 6819 Section 5.2.2.3):
         # If the token was used recently (within REFRESH_TOKEN_ROTATION_GRACE_SECONDS),
         # this is likely a concurrent in-flight request or network retry, not token theft.
-        grace_window = getattr(settings, "REFRESH_TOKEN_ROTATION_GRACE_SECONDS", 30)
+        grace_window = getattr(settings, "REFRESH_TOKEN_ROTATION_GRACE_SECONDS", 0)
         now = datetime.utcnow()
         if (
-            record.used_at is not None
+            grace_window > 0
+            and record.used_at is not None
             and record.revoked_at is None
             and not is_token_revoked(db, payload.get("jti"))
             and (now - record.used_at) <= timedelta(seconds=grace_window)
@@ -890,9 +891,9 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
             user = db.query(User).filter(User.id == payload.get("user_id")).first()
             if user and user.is_active and not temporary_access_ended(user):
                 logger.info(
-                    "Refresh token retry within grace window (%ss) for user %s; issuing fresh access token",
+                    "Refresh token retry within grace window (%ss) for user id %s; issuing fresh access token",
                     grace_window,
-                    user.email,
+                    user.id,
                 )
                 return {
                     "access_token": issue_access_token(user, record.mfa_at),

@@ -77,9 +77,13 @@ class Settings(BaseSettings):
     # ZP-PRIV B08: privileged roles (super_admin, support_operator,
     # platform_security, org_admin) get short access tokens, mandatory TOTP
     # and idle/new-device re-authentication on refresh.
-    PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    PRIVILEGED_REFRESH_IDLE_MINUTES: int = 120
-    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = 30
+    PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    PRIVILEGED_REFRESH_IDLE_MINUTES: int = 30
+    # Refresh-token reuse grace window. 0 = OFF (default): any reuse of a
+    # rotated refresh token revokes the whole family (ZP-PRIV B08 reuse
+    # detection). A positive value lets a retry within that many seconds
+    # succeed instead - a deliberate weakening of B08; enable only with sign-off.
+    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = 0
     MFA_STEP_UP_MAX_AGE_SECONDS: int = 300
     MFA_CHALLENGE_TOKEN_MINUTES: int = 5
     # "enforce": privileged roles must enrol and pass TOTP at login.
