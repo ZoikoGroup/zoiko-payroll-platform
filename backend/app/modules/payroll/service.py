@@ -36483,6 +36483,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
             if code and entering_brazil_refusal(row.jurisdiction_country, code):
                 code = None
+            # Japan (ZP-JP-ENG-001 Phase 1 dormancy): never back-fill INTO Japan.
+            from app.modules.payroll.japan_dormancy import entering_japan_refusal
+            if code and entering_japan_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -36579,6 +36583,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     br_refusal = entering_brazil_refusal(row.jurisdiction_country, incoming_country)
     if br_refusal:
         raise BadRequestException(br_refusal)
+    # Japan (ZP-JP-ENG-001 Phase 1): choosing Japan is refused the same way
+    # while Japan onboarding is disabled.
+    from app.modules.payroll.japan_dormancy import entering_japan_refusal
+    jp_refusal = entering_japan_refusal(row.jurisdiction_country, incoming_country)
+    if jp_refusal:
+        raise BadRequestException(jp_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",

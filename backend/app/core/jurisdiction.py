@@ -651,6 +651,21 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{4}/\d{6}/\d{2}$", "example": "2026/123456/07", "primary": False},
         ],
     },
+    # Japan (ZP-JP-ENG-001 Phase 1) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live Japanese payroll stays disabled until G0-G8
+    # are signed and the registry row leaves PLANNED. Formats only; the
+    # Corporate Number check digit is verified with the employer-registration
+    # service (Phase 5), and My Number is NEVER an organisation identifier.
+    "JP": {
+        "label": "Corporate Number / Labour Insurance Number",
+        "currency": "JPY",
+        "fields": [
+            {"key": "corporate_number", "label": "Corporate Number (NTA, 13 digits)",
+             "pattern": r"^\d{13}$", "example": "1234567890123", "primary": True},
+            {"key": "labour_insurance_number", "label": "Labour insurance number (14 digits)",
+             "pattern": r"^\d{14}$", "example": "13101234567000", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -704,6 +719,9 @@ COUNTRY_NAME_TO_CODE = {
     "republic of south africa": "ZA",
     "za": "ZA",
     "rsa": "ZA",
+    "japan": "JP",
+    "nippon": "JP",
+    "nihon": "JP",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -732,6 +750,7 @@ CODE_TO_COUNTRY_NAME = {
     "MX": "Mexico",
     "BR": "Brazil",
     "ZA": "South Africa",
+    "JP": "Japan",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

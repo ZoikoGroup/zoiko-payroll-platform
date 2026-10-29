@@ -978,6 +978,23 @@ class PayrollContext:
     za_deduction_orders: list = None           # [{id, order_type, authority_type, amount, evidence_ref}]
     za_overrides: list = None                  # APPROVED [{id, field, before, after, reason_code}]
 
+    # ── Japan (ZP-JP-ENG-001; "JP") ───────────────────────────────────────────
+    # Pre-resolved by the service layer; all default to None so non-JP callers unaffected.
+    jp_statutory_profile: object = None        # EmployeeStatutoryProfile | None
+    jp_worker_tax_profile: object = None
+    jp_employer_registration: object = None
+    jp_social_insurance_enrollment: object = None
+    jp_employment_insurance_profile: object = None
+    jp_resident_tax_assessments: list = None
+    jp_organization_id: int = None
+    jp_legal_employer_id: int = None
+    jp_rule_packs: dict = None
+    jp_year_end_context: dict = None
+    jp_bonus_context: dict = None
+    jp_time_records: list = None
+    jp_components: dict = None
+    jp_earning_items: list = None
+
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
     # BLOCKS (NetherlandsCalculationBlockedError) rather than guess any that

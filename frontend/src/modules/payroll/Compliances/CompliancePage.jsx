@@ -19,6 +19,7 @@ import MXComplianceCentreTab from "./MXComplianceCentreTab";
 import MXSocialSecurityCenter from "../../../components/jurisdiction/mexico/authorities/MXSocialSecurityCenter";
 import BRComplianceCentreTab from "./BRComplianceCentreTab";
 import ZAComplianceCentreTab from "./ZAComplianceCentreTab";
+import JPComplianceCentreTab from "./JPComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -145,9 +146,13 @@ export default function CompliancePage() {
   // Configuration tab (US fallback) is omitted for ZA organisations.
   const ZA_TAB = "South Africa Compliance Centre";
   const isSouthAfrica = normalizeCountryCode(companyDetails.jurisdictionCountry) === "ZA";
+  // Japan (ZP-JP-ENG-001): multi-system (NTA/municipal/JPS/insurers) with
+  // separate bases; generic Tax Configuration tab omitted like ZA/NL/MX.
+  const JP_TAB = "Japan Compliance Centre";
+  const isJapan = normalizeCountryCode(companyDetails.jurisdictionCountry) === "JP";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico || isSouthAfrica
+    : isNetherlands || isMexico || isSouthAfrica || isJapan
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   const tabs = [
@@ -161,6 +166,7 @@ export default function CompliancePage() {
     ...(isMexico ? [MX_TAB, MX_SS_TAB] : []),
     ...(isBrazil ? [BR_TAB] : []),
     ...(isSouthAfrica ? [ZA_TAB] : []),
+    ...(isJapan ? [JP_TAB] : []),
   ];
   const currentTab = tabs[activeTab];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
@@ -374,6 +380,7 @@ export default function CompliancePage() {
       {currentTab === MX_SS_TAB && <MXSocialSecurityCenter />}
       {currentTab === BR_TAB && <BRComplianceCentreTab />}
       {currentTab === ZA_TAB && <ZAComplianceCentreTab />}
+      {currentTab === JP_TAB && <JPComplianceCentreTab />}
 
       {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab
