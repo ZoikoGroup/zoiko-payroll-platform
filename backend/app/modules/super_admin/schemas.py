@@ -47,12 +47,100 @@ class SuperAdminUserResponse(BaseModel):
     first_name: str
     last_name: str
     is_active: bool
+    is_verified: bool = False
+    workspace_type: Optional[str] = None
+    # Timezone-aware UTC (serialised with "Z") so the browser converts to the
+    # viewer's local time instead of reading a naive value as local.
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class SuperAdminUserListResponse(BaseModel):
     users: list[SuperAdminUserResponse]
     total: int
+
+
+# ── Platform Users: one user's account, registration and security detail ───
+# Read-only. Never carries a password hash, MFA secret, recovery code or
+# token. Every datetime is timezone-aware UTC.
+
+class SuperAdminTaxIdentifier(BaseModel):
+    key: str
+    label: str
+    value: Optional[str] = None
+
+
+class SuperAdminUserAccount(BaseModel):
+    id: int
+    email: str
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    role: UserRole
+    is_active: bool
+    is_verified: bool
+    is_temporary: bool
+    access_expires_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    # REGISTRATION | TRIAL_SIGNUP | INVITED | ADDED_BY_ADMIN | SUPPORT_ACCESS |
+    # PLATFORM_ACCOUNT — inferred from the organisation, invitation and
+    # account flags (users carry no created_by column).
+    created_via: str
+    invitation_sent_at: Optional[datetime] = None
+    invitation_accepted_at: Optional[datetime] = None
+
+
+class SuperAdminUserPlan(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    status: Optional[str] = None
+    current_period_end: Optional[datetime] = None
+
+
+class SuperAdminUserOrganization(BaseModel):
+    id: int
+    name: str
+    code: str
+    industry: Optional[str] = None
+    company_type: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    tax_no: Optional[str] = None
+    registration_number: Optional[str] = None
+    tax_identifiers: List[SuperAdminTaxIdentifier] = Field(default_factory=list)
+    currency: Optional[str] = None
+    data_region: Optional[str] = None
+    workspace_type: Optional[str] = None
+    billing_onboarding_status: Optional[str] = None
+    billing_classification: Optional[str] = None
+    is_active: bool
+    terms_accepted_at: Optional[datetime] = None
+    created_at: datetime
+    created_by_email: Optional[str] = None
+    plan: Optional[SuperAdminUserPlan] = None
+
+
+class SuperAdminUserSecurity(BaseModel):
+    mfa_required: bool
+    mfa_enrolled_at: Optional[datetime] = None
+    mfa_confirmed_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
+    last_login_ip: Optional[str] = None
+    last_login_user_agent: Optional[str] = None
+    failed_logins_30d: int = 0
+    last_failed_login_at: Optional[datetime] = None
+    last_password_reset_at: Optional[datetime] = None
+
+
+class SuperAdminUserDetailResponse(BaseModel):
+    account: SuperAdminUserAccount
+    organization: Optional[SuperAdminUserOrganization] = None
+    security: SuperAdminUserSecurity
 
 
 class DashboardStats(BaseModel):

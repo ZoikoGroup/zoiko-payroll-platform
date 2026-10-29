@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { KeyRound, RefreshCw, Users as UsersIcon } from "lucide-react";
+import { Eye, KeyRound, RefreshCw, Users as UsersIcon } from "lucide-react";
 
 import { apiFetch } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import SearchInput from "../components/SearchInput";
 import StatusPill from "../components/StatusPill";
+import UserDetailDrawer, { formatDateTime } from "../components/superAdmin/UserDetailDrawer";
 
 const ROLES = ["org_admin", "payroll_admin", "employee"];
 
@@ -31,6 +32,7 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [detailId, setDetailId] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -119,7 +121,7 @@ export default function UsersPage() {
         </p>
       )}
 
-      <div className="bg-surface rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
@@ -134,7 +136,11 @@ export default function UsersPage() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
+              <tr
+                key={u.id}
+                onClick={() => setDetailId(u.id)}
+                className="cursor-pointer border-t border-border-light hover:bg-surface-muted/60 transition-colors"
+              >
                 <td className="px-4 py-3 font-medium text-foreground-secondary">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
@@ -153,11 +159,21 @@ export default function UsersPage() {
                 <td className="px-4 py-3">
                   <StatusPill status={u.is_active ? "active" : "inactive"} />
                 </td>
-                <td className="px-4 py-3 text-foreground-muted">
-                  {new Date(u.created_at).toLocaleDateString()}
+                <td
+                  className="px-4 py-3 whitespace-nowrap text-foreground-muted"
+                  title={u.created_at ? new Date(u.created_at).toISOString().replace("T", " ").slice(0, 19) + " UTC" : undefined}
+                >
+                  {formatDateTime(u.created_at) || "—"}
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <button
+                      onClick={() => setDetailId(u.id)}
+                      className="flex items-center gap-1 rounded-lg bg-primary-light px-2.5 py-1 text-xs font-medium text-primary-hover hover:bg-primary/20"
+                    >
+                      <Eye size={12} />
+                      View
+                    </button>
                     <button
                       disabled={busyId === u.id || (me && me.id === u.id)}
                       title={me && me.id === u.id ? "You can't deactivate your own account" : undefined}
@@ -193,6 +209,7 @@ export default function UsersPage() {
           </div>
         )}
       </div>
+      {detailId !== null && <UserDetailDrawer userId={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
 }

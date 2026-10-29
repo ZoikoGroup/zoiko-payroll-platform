@@ -1284,6 +1284,7 @@ POST,/api/super-admin/support-access/{grant_id}/review,support,create,review,pla
 POST,/api/super-admin/support-access/{grant_id}/revoke,support,create,revoke,platform_security,tenant,,,,no,
 POST,/api/super-admin/support-access/{grant_id}/zoiko-approve,support,create,zoiko-approve,platform_security,tenant,,,,no,
 GET,/api/super-admin/users,platform,read,users,super_admin,platform,,,,no,
+GET,/api/super-admin/users/{user_id},platform,read,users,super_admin,platform,,,,no,
 PUT,/api/super-admin/users/{user_id}/reset-password,platform,update,reset-password,super_admin,platform,,,,no,
 PUT,/api/super-admin/users/{user_id}/status,platform,update,status,super_admin,platform,,,,no,
 GET,/health,public,read,health,,public,,,,no,
