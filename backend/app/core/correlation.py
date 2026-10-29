@@ -19,6 +19,7 @@ notifications.
 from __future__ import annotations
 
 import contextvars
+import ipaddress
 import logging
 import re
 import uuid
@@ -32,24 +33,61 @@ _current: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("zp_cor
 client_ip: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("zp_client_ip", default=None)
 
 
+def _trusted_proxy_networks() -> tuple:
+    from app.config import settings
+
+    networks = []
+    for raw in (getattr(settings, "TRUSTED_PROXY_CIDRS", "") or "").split(","):
+        raw = raw.strip()
+        if raw:
+            try:
+                networks.append(ipaddress.ip_network(raw, strict=False))
+            except ValueError:
+                logging.getLogger(__name__).warning("Ignoring invalid TRUSTED_PROXY_CIDRS entry %r", raw)
+    return tuple(networks)
+
+
+def _parse_ip(value) -> Optional[str]:
+    try:
+        return str(ipaddress.ip_address(str(value).strip()))
+    except ValueError:
+        return None
+
+
+def _is_trusted(ip: Optional[str], networks: tuple) -> bool:
+    if ip is None:
+        return False
+    address = ipaddress.ip_address(ip)
+    return any(address in net for net in networks if net.version == address.version)
+
+
 def extract_client_ip(request) -> Optional[str]:
-    """Extract real client IP taking into account Cloudflare, reverse proxies, and forwarders."""
+    """The client address the request came from (audit rows, machine-client
+    network alerts, session fingerprints).
+
+    Forwarding headers are client-controlled, so they are honoured ONLY when
+    the socket peer is a trusted proxy (settings.TRUSTED_PROXY_CIDRS; empty =
+    trust none, i.e. the peer address). Behind a trusted proxy:
+    CF-Connecting-IP / X-Real-IP are set by that proxy; X-Forwarded-For is
+    walked right to left, skipping trusted hops, so an entry the client
+    prepended itself is never taken as its address."""
     if request is None:
         return None
-    headers = getattr(request, "headers", None)
-    if headers:
-        cf_ip = headers.get("cf-connecting-ip")
-        if cf_ip and cf_ip.strip():
-            return cf_ip.strip()
-        x_real_ip = headers.get("x-real-ip")
-        if x_real_ip and x_real_ip.strip():
-            return x_real_ip.strip()
-        xff = headers.get("x-forwarded-for")
-        if xff and xff.strip():
-            # First IP in comma-separated list is the original client IP
-            return xff.split(",")[0].strip()
     client = getattr(request, "client", None)
-    return getattr(client, "host", None)
+    peer = _parse_ip(getattr(client, "host", None))
+    networks = _trusted_proxy_networks()
+    if peer is None or not _is_trusted(peer, networks):
+        return peer if peer is not None else getattr(client, "host", None)
+    headers = getattr(request, "headers", None) or {}
+    for name in ("cf-connecting-ip", "x-real-ip"):
+        ip = _parse_ip(headers.get(name) or "")
+        if ip is not None:
+            return ip
+    hops = [h for h in (_parse_ip(part) for part in (headers.get("x-forwarded-for") or "").split(",")) if h]
+    for hop in reversed(hops):
+        if not _is_trusted(hop, networks):
+            return hop
+    return peer
 
 
 def new_id() -> str:

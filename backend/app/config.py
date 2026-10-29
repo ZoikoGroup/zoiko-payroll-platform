@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     # detection). A positive value lets a retry within that many seconds
     # succeed instead - a deliberate weakening of B08; enable only with sign-off.
     REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = 0
+    # Comma-separated CIDRs of reverse proxies / load balancers whose
+    # CF-Connecting-IP / X-Real-IP / X-Forwarded-For headers are trusted for
+    # the client address (core/correlation.extract_client_ip). Empty = trust
+    # none: the socket peer is the client address (headers are spoofable).
+    TRUSTED_PROXY_CIDRS: str = ""
     MFA_STEP_UP_MAX_AGE_SECONDS: int = 300
     MFA_CHALLENGE_TOKEN_MINUTES: int = 5
     # "enforce": privileged roles must enrol and pass TOTP at login.
