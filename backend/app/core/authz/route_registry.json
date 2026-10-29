@@ -1677,9 +1677,11 @@
    "scope_level": "tenant",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
+   "note": "reviewed: checkout with country-limit impact check (per-country counts only); no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
   },
   {
    "method": "GET",
@@ -1725,9 +1727,11 @@
    "scope_level": "self",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
+   "note": "reviewed: org subscription + country usage counts; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
   },
   {
    "method": "POST",
@@ -1804,6 +1808,25 @@
    "note": null,
    "scan_worker_tables": [],
    "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/billing/plan-change-impact",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "plan-change-impact",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: countries a plan change would keep/pause/restore (country codes only); no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
   },
   {
    "method": "GET",
@@ -3259,9 +3282,11 @@
    "scope_level": "tenant",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
+   "note": "reviewed: country entitlement reads per-country employee counts only; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
   },
   {
    "method": "GET",
@@ -4367,197 +4392,6 @@
     "payroll_employees",
     "payroll_personal_data_access_events"
    ],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/payroll/enterprise/activate",
-   "data_class": "tenant_config",
-   "action": "create",
-   "resource": "activate",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/payroll/enterprise/dashboard",
-   "data_class": "tenant_config",
-   "action": "read",
-   "resource": "dashboard",
-   "principals": [
-    "org_admin",
-    "payroll_admin",
-    "support_temp"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/payroll/enterprise/deactivate",
-   "data_class": "tenant_config",
-   "action": "create",
-   "resource": "deactivate",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/payroll/enterprise/jurisdictions",
-   "data_class": "tenant_config",
-   "action": "read",
-   "resource": "jurisdictions",
-   "principals": [
-    "org_admin",
-    "payroll_admin",
-    "support_temp"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/payroll/enterprise/jurisdictions",
-   "data_class": "tenant_config",
-   "action": "create",
-   "resource": "jurisdictions",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/payroll/enterprise/jurisdictions/{jurisdiction_id}",
-   "data_class": "tenant_config",
-   "action": "delete",
-   "resource": "jurisdictions",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "PUT",
-   "path": "/api/payroll/enterprise/jurisdictions/{jurisdiction_id}",
-   "data_class": "tenant_config",
-   "action": "update",
-   "resource": "jurisdictions",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/payroll/enterprise/jurisdictions/{jurisdiction_id}/contribution-rates",
-   "data_class": "tenant_config",
-   "action": "read",
-   "resource": "contribution-rates",
-   "principals": [
-    "org_admin",
-    "payroll_admin",
-    "support_temp"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "PUT",
-   "path": "/api/payroll/enterprise/jurisdictions/{jurisdiction_id}/contribution-rates/{component_key}",
-   "data_class": "tenant_config",
-   "action": "update",
-   "resource": "contribution-rates",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/payroll/enterprise/jurisdictions/{jurisdiction_id}/verify",
-   "data_class": "tenant_config",
-   "action": "create",
-   "resource": "verify",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/payroll/enterprise/validation",
-   "data_class": "tenant_config",
-   "action": "read",
-   "resource": "validation",
-   "principals": [
-    "org_admin",
-    "payroll_admin",
-    "support_temp"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
    "overridden": false
   },
   {
@@ -7539,6 +7373,97 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/jurisdictions/entitled",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "entitled",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: country entitlement reads per-country employee counts only; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/jurisdictions/entitled",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "entitled",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: country entitlement reads per-country employee counts only; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/jurisdictions/entitled/replace-primary",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "replace-primary",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: country entitlement reads per-country employee counts only; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/payroll/jurisdictions/entitled/{country_code}",
+   "data_class": "tenant_config",
+   "action": "delete",
+   "resource": "entitled",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: country entitlement reads per-country employee counts only; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/jurisdictions/entitled/{country_code}/primary",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "primary",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: country entitlement reads per-country employee counts only; no worker row returned",
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": true
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/ky/reports/pension-submission",
    "data_class": "worker",
@@ -10093,6 +10018,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_employees",
     "payslip_items"
    ],
    "overridden": false
@@ -10112,6 +10038,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_employees",
     "payroll_personal_data_access_events",
     "payslip_items"
    ],
@@ -10578,9 +10505,11 @@
    "scope_level": "tenant",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
+   "note": "reviewed: runs list with per-country payslip totals (aggregates only); no worker row returned",
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": true
   },
   {
    "method": "POST",
@@ -10695,9 +10624,11 @@
    "scope_level": "tenant",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
+   "note": "reviewed: run detail with per-country payslip totals (aggregates only); no worker row returned",
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": true
   },
   {
    "method": "PUT",
@@ -10816,6 +10747,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_employees",
     "payroll_personal_data_access_events",
     "payslip_items"
    ],
@@ -13951,14 +13883,16 @@
   {
    "method": "GET",
    "path": "/api/super-admin/compliance/brazil/employees",
-   "data_class": "worker",
+   "data_class": "platform",
    "action": "read",
    "resource": "employees",
-   "principals": [],
-   "scope_level": "tenant",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
    "field_classes": [],
-   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
-   "note": "lists Brazilian employees (names, codes) of one organization",
+   "retired_reason": null,
+   "note": "reviewed: Super Admin org-scoped Brazilian employee list; requires an explicit organization_id",
    "scan_worker_tables": [
     "payroll_employees"
    ],
@@ -16830,14 +16764,16 @@
   {
    "method": "GET",
    "path": "/api/super-admin/compliance/mexico/employees",
-   "data_class": "worker",
+   "data_class": "platform",
    "action": "read",
    "resource": "employees",
-   "principals": [],
-   "scope_level": "tenant",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
    "field_classes": [],
-   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
-   "note": "lists Mexican employees (names, codes) of one organization",
+   "retired_reason": null,
+   "note": "reviewed: Super Admin org-scoped Mexican employee list; requires an explicit organization_id",
    "scan_worker_tables": [
     "payroll_employees"
    ],
@@ -16846,14 +16782,16 @@
   {
    "method": "GET",
    "path": "/api/super-admin/compliance/mexico/employees/{employee_id}",
-   "data_class": "worker",
+   "data_class": "platform",
    "action": "read",
    "resource": "employees",
-   "principals": [],
-   "scope_level": "tenant",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
    "field_classes": [],
-   "retired_reason": "worker-level data requires a live JIT support grant (ZP-PRIV A/B)",
-   "note": "one Mexican employee's record and readiness",
+   "retired_reason": null,
+   "note": "reviewed: Super Admin org-scoped Mexican employee record; requires an explicit organization_id",
    "scan_worker_tables": [
     "payroll_employees"
    ],
@@ -16878,7 +16816,7 @@
   {
    "method": "GET",
    "path": "/api/super-admin/compliance/mexico/employer-readiness/summary",
-   "data_class": "platform",
+   "data_class": "aggregate",
    "action": "read",
    "resource": "summary",
    "principals": [
@@ -16887,9 +16825,9 @@
    "scope_level": "platform",
    "field_classes": [],
    "retired_reason": null,
-   "note": null,
+   "note": "reviewed: per-gate employer readiness counts only; no worker row or identity is returned",
    "scan_worker_tables": [],
-   "overridden": false
+   "overridden": true
   },
   {
    "method": "GET",

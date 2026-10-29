@@ -960,6 +960,12 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     db.add(org)
     db.flush()
 
+    # The registered country is the org's first (primary) entitled country —
+    # same transaction as the org itself.
+    from app.modules.billing.jurisdiction_entitlement import create_primary_for_new_org
+
+    create_primary_for_new_org(db, org.id, data.country)
+
     name_parts = data.name.strip().split(" ", 1)
     first_name = name_parts[0]
     last_name = name_parts[1] if len(name_parts) > 1 else "Admin"
@@ -1088,6 +1094,10 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
     )
     db.add(org)
     db.flush()
+
+    from app.modules.billing.jurisdiction_entitlement import create_primary_for_new_org
+
+    create_primary_for_new_org(db, org.id, data.country)
 
     name_parts = data.name.strip().split(" ", 1)
     first_name = name_parts[0]

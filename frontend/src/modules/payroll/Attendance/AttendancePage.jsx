@@ -973,6 +973,19 @@ export default function AttendancePage() {
     return String(h || "").trim().toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
   }
 
+  // The map's own keys go through the same normalization as uploaded
+  // headers — "Date (YYYY-MM-DD)" normalizes to "date (yyyy mm dd)", so the
+  // raw key "date (yyyy-mm-dd)" never matched and the template's own Date
+  // column was silently ignored ("Date is required" on every row). A header
+  // with a bracketed hint ("Break (min)") also matches by its plain name.
+  const ATTENDANCE_HEADER_LOOKUP = Object.fromEntries(
+    Object.entries(ATTENDANCE_HEADER_MAP).map(([k, v]) => [normalizeAttHeader(k), v])
+  );
+  function attHeaderKey(h) {
+    const n = normalizeAttHeader(h);
+    return ATTENDANCE_HEADER_LOOKUP[n] || ATTENDANCE_HEADER_LOOKUP[n.replace(/\s*\(.*?\)\s*/g, " ").trim()];
+  }
+
   function normalizeAttTime(val) {
     if (!val && val !== 0) return "";
     const s = String(val).trim();
@@ -1236,9 +1249,9 @@ export default function AttendancePage() {
 
     function parseMatrixSheet(rawRows, sheetName, monthFromSheet) {
       const headers = Object.keys(rawRows[0] || {});
-      const nameKey = headers.find((h) => ATTENDANCE_HEADER_MAP[normalizeAttHeader(h)] === "name");
-      const idKey = headers.find((h) => ATTENDANCE_HEADER_MAP[normalizeAttHeader(h)] === "employeeId");
-      const deptKey = headers.find((h) => ATTENDANCE_HEADER_MAP[normalizeAttHeader(h)] === "department");
+      const nameKey = headers.find((h) => attHeaderKey(h) === "name");
+      const idKey = headers.find((h) => attHeaderKey(h) === "employeeId");
+      const deptKey = headers.find((h) => attHeaderKey(h) === "department");
       const dayHeaders = headers.filter((h) => /^\d{1,2}$/.test(String(h).trim()) && Number(h) >= 1 && Number(h) <= 31);
 
       const results = [];
@@ -1333,7 +1346,7 @@ export default function AttendancePage() {
             rawRows.forEach((rawRow, idx) => {
               const mapped = {};
               for (const [rawHeader, rawValue] of Object.entries(rawRow)) {
-                const key = ATTENDANCE_HEADER_MAP[normalizeAttHeader(rawHeader)];
+                const key = attHeaderKey(rawHeader);
                 if (key) mapped[key] = rawValue;
               }
               const rawEmployeeVal = mapped.employeeId;

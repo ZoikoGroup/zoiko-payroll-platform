@@ -115,12 +115,12 @@ def _aware(dt):
 
 
 def run_guard(db: Session, run) -> None:
-    from app.modules.payroll import mexico_dormancy, service
+    from app.modules.payroll import mexico_dormancy, mexico_run_service
 
     if not mexico_dormancy.onboarding_enabled():
         raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, run.organization_id)
-    if not mexico_dormancy.is_mexico(service._resolve_org_country(db, run.organization_id)):
-        raise MXBlock("MX_ORG_NOT_MEXICAN", "the organisation's payroll jurisdiction is not Mexico", run.organization_id)
+    if not mexico_run_service._org_runs_mexico(db, run.organization_id):
+        raise MXBlock("MX_ORG_NOT_MEXICAN", "Mexico is not one of the organisation's payroll countries", run.organization_id)
 
 
 def preflight(db: Session, run) -> dict:

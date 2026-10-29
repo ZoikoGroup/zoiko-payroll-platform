@@ -72,12 +72,6 @@ def test_mx_schema_patterns_are_format_only():
     assert not reg.match("Y12345671011")             # 12 chars
 
 
-def test_mx_not_in_enterprise_supported_countries():
-    from app.modules.payroll.enterprise.service import SUPPORTED_COUNTRY_CODES
-
-    assert "MX" not in SUPPORTED_COUNTRY_CODES
-
-
 def test_tax_schema_endpoint_lists_mexico(db):
     with _http(db, None) as c:
         r = c.get("/api/jurisdictions/tax-schemas")

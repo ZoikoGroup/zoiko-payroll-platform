@@ -53,7 +53,7 @@ def test_other_schemes_and_shapes_are_refused(ref):
 
 
 SECRET_LIKE = [
-    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",  # privacy-scan: allow (synthetic negative-test fixture)
     "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKjMzEfYyjiWA4R4",
     "my pac password 123",
     "gcp-sm://projects/zoiko-test-project/secrets/PRIVATE KEY",

@@ -7,8 +7,7 @@ import PackMetadataPanel from "./PackMetadataPanel";
 import ContributionRatesTable from "./ContributionRatesTable";
 import TaxConfigurationTab from "./TaxConfigurationTab";
 import ComplianceDocumentUpload from "./ComplianceDocuments";
-import EnterpriseOnboardingBanner from "./EnterpriseOnboarding/EnterpriseOnboardingBanner";
-import EnterpriseJurisdictionsTab from "./EnterpriseOnboarding/EnterpriseJurisdictionsTab";
+import CountriesTab from "./CountriesTab";
 import SGComplianceCentreTab from "./SGComplianceCentreTab";
 import ITEmployerProfileTab from "./ITEmployerProfileTab";
 import HKComplianceCentreTab from "./HKComplianceCentreTab";
@@ -24,13 +23,17 @@ import {
   getCountryMeta,
   DEFAULT_COUNTRY,
   getActivePolicy,
-  getEnterpriseJurisdictions,
   getPayslips,
 } from "../../../service/payrollService";
 import { getJurisdictionTaxFields } from "../../../utils/jurisdictionTax";
 import { usePayrollSetup } from "../PayrollSetupContext";
+import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
 
 const BASE_TABS = ["Overview", "Company Details", "Contribution Rates", "Tax Configuration", "Documents"];
+// Tabs whose content is per country: a multi-country org picks which of its
+// countries to view (each employee is calculated with their own country's
+// rates and slabs). Company Details stays the organization's own record.
+const PER_COUNTRY_TABS = ["Overview", "Contribution Rates", "Tax Configuration", "Documents"];
 
 const defaultCompany = {
   name: "",
@@ -47,35 +50,48 @@ const defaultCompany = {
   settlementAcc: "",
 };
 
+function regionsLabel(regions = []) {
+  if (regions.length === 0) return "—";
+  if (regions.length === 1) return regions[0];
+  return `${regions.length} regions (${regions.join(", ")})`;
+}
+
 export default function CompliancePage() {
   const { addToast } = useToast();
   const { refresh: refreshPayrollSetup } = usePayrollSetup();
   const location = useLocation();
   const [companyDetails, setCompanyDetails] = useState(defaultCompany);
   const [activeTab, setActiveTab] = useState(0);
+  // Billing pages link straight to Compliance > Countries
+  // (navigate(..., { state: { tab: "Countries" } })); that tab stays selected
+  // until another tab is clicked. Tracked by name, since its index shifts
+  // once the country-specific tabs load.
+  const [countriesRequested, setCountriesRequested] = useState(() => location.state?.tab === "Countries");
   const [documents, setDocuments] = useState([]);
   const [calcMode, setCalcMode] = useState("standard");
-  const [enterpriseStatus, setEnterpriseStatus] = useState("not_configured");
-  const [enterpriseJurisdictions, setEnterpriseJurisdictions] = useState([]);
-  const [resolvedRegions, setResolvedRegions] = useState([]);
+  // Latest payroll run's resolved regions, per country (each payslip carries
+  // its own country) — so a US employee's state never shows under India.
+  const [resolvedRegionsByCountry, setResolvedRegionsByCountry] = useState({});
+  const { countries: entitledCountries } = useEntitledCountries();
+  // Every non-removed country the org pays in (paused ones included —
+  // their rates and filings still apply to payroll already run).
+  const orgCountries = (entitledCountries || []).map((c) => ({ ...c, code: toEmployeeCountryCode(c.code) }));
+  const isMultiCountry = orgCountries.length > 1;
+  const defaultCountry = toEmployeeCountryCode(normalizeCountryCode(companyDetails.jurisdictionCountry) || companyDetails.jurisdictionCountry);
+  const [viewCountry, setViewCountry] = useState(null);
+  const viewedCountry = (isMultiCountry && viewCountry) || defaultCountry;
+  const viewingDefault = viewedCountry === defaultCountry;
+  const viewedMeta = getCountryMeta(viewedCountry);
   const countryMeta = getCountryMeta(companyDetails.jurisdictionCountry);
   const taxIdsDisplay = getJurisdictionTaxFields(companyDetails.jurisdictionCountry)
     .map((f) => (companyDetails.taxIdentifiers?.[f.key] ? `${f.label}: ${companyDetails.taxIdentifiers[f.key]}` : null))
     .filter(Boolean)
     .join(" · ");
 
-  const refreshEnterpriseState = () => {
-    getActivePolicy()
-      .then((p) => {
-        if (p?.calculationMode) setCalcMode(p.calculationMode);
-        if (p?.enterpriseStatus) setEnterpriseStatus(p.enterpriseStatus);
-      })
-      .catch(() => {});
-    getEnterpriseJurisdictions().then(setEnterpriseJurisdictions).catch(() => {});
-  };
-
   useEffect(() => {
-    refreshEnterpriseState();
+    getActivePolicy()
+      .then((p) => { if (p?.calculationMode) setCalcMode(p.calculationMode); })
+      .catch(() => {});
     fetchComplianceData().then((data) => {
       if (data && data.company) {
         setCompanyDetails(data.company);
@@ -86,24 +102,19 @@ export default function CompliancePage() {
     // company's configured jurisdiction, so a state/locality-specific rate
     // (e.g. Maharashtra Professional Tax) is visibly reflected here.
     getPayslips().then((rows) => {
-      if (!rows?.length) { setResolvedRegions([]); return; }
+      if (!rows?.length) { setResolvedRegionsByCountry({}); return; }
       const latestPeriod = rows[0].period;
-      const seen = new Set();
-      const regions = [];
+      const byCountry = {};
       rows.filter((r) => r.period === latestPeriod).forEach((r) => {
         const label = [r.workState, r.workLocality].filter(Boolean).join(" · ");
-        if (label && !seen.has(label)) { seen.add(label); regions.push(label); }
+        const code = toEmployeeCountryCode(r.country) || "";
+        const regions = (byCountry[code] = byCountry[code] || []);
+        if (label && !regions.includes(label)) regions.push(label);
       });
-      setResolvedRegions(regions);
+      setResolvedRegionsByCountry(byCountry);
     }).catch(() => {});
   }, []);
 
-  // "Enterprise Jurisdictions" shows for Enterprise mode, mid-onboarding
-  // (jurisdictions already started, calc mode not switched back yet — so an
-  // admin who navigates away before finishing never loses access to it), or
-  // when arriving fresh via the "Configure Compliance" modal button.
-  const arrivedForOnboarding = Boolean(location.state?.enterpriseOnboarding);
-  const showEnterpriseTab = calcMode === "enterprise" || enterpriseJurisdictions.length > 0 || arrivedForOnboarding;
   // Singapore-only tab (Compliance Centre, with IR21 inside), appended after every positional tab above.
   const IR21_TAB = "Singapore Compliance Centre";
 // Italy-only tab (§17 employer profile), appended the same way.
@@ -138,8 +149,11 @@ export default function CompliancePage() {
     : isNetherlands || isMexico
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
+  // Plan country entitlements — every org, every calculation mode.
+  const COUNTRIES_TAB = "Countries";
   const tabs = [
-    ...(showEnterpriseTab ? [...baseTabs, "Enterprise Jurisdictions"] : baseTabs),
+    ...baseTabs,
+    COUNTRIES_TAB,
     ...(companyDetails.jurisdictionCountry === "SG" ? [IR21_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "IT" ? [IT_EMPLOYER_TAB] : []),
     ...(companyDetails.jurisdictionCountry === "HK" ? [HK_TAB] : []),
@@ -148,12 +162,8 @@ export default function CompliancePage() {
     ...(isNetherlands ? [NL_TAB] : []),
     ...(isMexico ? [MX_TAB, MX_SS_TAB] : []),
   ];
-  const currentTab = tabs[activeTab];
-  const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
-
-  useEffect(() => {
-    if (arrivedForOnboarding) setActiveTab(baseTabs.length);
-  }, [arrivedForOnboarding, baseTabs.length]);
+  const selectedTab = countriesRequested ? tabs.indexOf(COUNTRIES_TAB) : activeTab;
+  const currentTab = tabs[selectedTab];
 
   const handleUpdate = (field, value) => {
     setCompanyDetails((prev) => {
@@ -203,37 +213,26 @@ export default function CompliancePage() {
           </div>
         </div>
         <span className="rounded-full bg-primary/10 border border-primary/20 px-3.5 py-1.5 text-[11px] font-bold text-primary">
-          {countryMeta.name} compliance pack
+          {isMultiCountry ? `${orgCountries.length} countries · ${countryMeta.name} default` : `${countryMeta.name} compliance pack`}
         </span>
       </div>
-
-      {showOnboardingBanner && (
-        <EnterpriseOnboardingBanner jurisdictions={enterpriseJurisdictions} enterpriseStatus={enterpriseStatus} />
-      )}
 
       {calcMode === "simple" && (
         <div className="bg-warning/5 border border-warning/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted flex items-center gap-2">
           <Lock size={14} className="text-warning" />
-          <span>Statutory compliance tabs are locked in <strong>Simple Payroll</strong> mode. Switch to <strong>Standard</strong> or <strong>Enterprise</strong> in Payroll Policy to enable Contribution Rates, Tax Slabs, Documents, and Enterprise Jurisdictions.</span>
-        </div>
-      )}
-
-      {calcMode === "standard" && (
-        <div className="bg-info/5 border border-info/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted flex items-center gap-2">
-          <Lock size={14} className="text-info" />
-          <span>Enterprise Jurisdictions is only available in <strong>Enterprise Payroll</strong> mode.</span>
+          <span>Statutory compliance tabs are locked in <strong>Simple Payroll</strong> mode. Switch to <strong>Standard</strong> in Payroll Policy to enable Contribution Rates, Tax Slabs and Documents.</span>
         </div>
       )}
 
       <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
         {tabs.map((t, i) => {
-          const disabled = (calcMode === "simple" && (t === "Contribution Rates" || t === "Tax Configuration" || t === "Documents" || t === "Jurisdiction Hierarchy" || t === "Enterprise Jurisdictions")) || (calcMode === "standard" && !arrivedForOnboarding && t === "Enterprise Jurisdictions");
+          const disabled = (calcMode === "simple" && (t === "Contribution Rates" || t === "Tax Configuration" || t === "Documents" || t === "Jurisdiction Hierarchy"));
           return (
             <button
               key={t}
-              onClick={() => !disabled && setActiveTab(i)}
+              onClick={() => { if (!disabled) { setActiveTab(i); setCountriesRequested(false); } }}
               className={`px-4 py-2 rounded-[12px] text-[13px] font-semibold transition-all duration-200 ${
-                disabled ? "text-foreground-muted opacity-40 cursor-not-allowed" : activeTab === i ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-foreground-muted hover:text-foreground"
+                disabled ? "text-foreground-muted opacity-40 cursor-not-allowed" : selectedTab === i ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-foreground-muted hover:text-foreground"
               }`}
             >
               <span className="flex items-center gap-1.5">{disabled && <Lock size={12} />}{t}</span>
@@ -241,6 +240,26 @@ export default function CompliancePage() {
           );
         })}
       </div>
+
+      {isMultiCountry && PER_COUNTRY_TABS.includes(currentTab) && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Viewing country</span>
+          <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1 flex-wrap">
+            {orgCountries.map((c) => (
+              <button
+                key={c.code}
+                onClick={() => setViewCountry(c.code)}
+                className={`px-3 py-1.5 rounded-[10px] text-[12px] font-semibold transition-all duration-200 ${
+                  viewedCountry === c.code ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-foreground-muted hover:text-foreground"
+                }`}
+              >
+                {c.name}{c.isPrimary ? " (default)" : ""}{c.status === "OVER_LIMIT" ? " · paused" : ""}
+              </button>
+            ))}
+          </div>
+          <span className="text-[12px] text-foreground-muted">Each employee is calculated with their own country&apos;s rates and tax slabs.</span>
+        </div>
+      )}
 
       {currentTab === "Overview" && (
         <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -253,27 +272,50 @@ export default function CompliancePage() {
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Company</p>
-              <p className="text-[13px] font-bold text-foreground">{companyDetails.name}</p>
-              <p className="text-[13px] text-foreground-muted">{companyDetails.type} · {companyDetails.industry}</p>
-              <p className="text-[13px] text-foreground-muted">{taxIdsDisplay || `Tax ID: ${companyDetails.taxNo}`}</p>
+              <p className="text-[13px] font-bold text-foreground">{companyDetails.name || "—"}</p>
+              {[companyDetails.type, companyDetails.industry].filter(Boolean).length > 0 && (
+                <p className="text-[13px] text-foreground-muted">{[companyDetails.type, companyDetails.industry].filter(Boolean).join(" · ")}</p>
+              )}
+              <p className="text-[13px] text-foreground-muted">
+                {taxIdsDisplay || (companyDetails.taxNo ? `Tax ID: ${companyDetails.taxNo}` : "Tax ID: not set — add it under Company Details")}
+              </p>
               {companyDetails.email && <p className="text-[13px] text-foreground-muted">Email: {companyDetails.email}</p>}
               {companyDetails.phone && <p className="text-[13px] text-foreground-muted">Phone: {companyDetails.phone}</p>}
             </div>
             <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Jurisdiction</p>
-              <p className="text-[13px] font-bold text-foreground">{countryMeta.name}</p>
-              <p className="text-[13px] text-foreground-muted">{companyDetails.jurisdictionState || "All states"}</p>
-              <p className="text-[13px] text-foreground-muted">Pack: {companyDetails.compliancePack}</p>
+              <p className="text-[13px] font-bold text-foreground">
+                {viewedMeta.name}{isMultiCountry && viewingDefault ? " (default country)" : ""}
+              </p>
+              {/* The org's state and compliance pack belong to its default
+                  country; another country's state comes from each employee. */}
+              <p className="text-[13px] text-foreground-muted">
+                {viewingDefault ? companyDetails.jurisdictionState || "All states" : "State / region set per employee"}
+              </p>
+              {viewingDefault && (
+                <p className="text-[13px] text-foreground-muted">Pack: {companyDetails.compliancePack || "Not assigned yet"}</p>
+              )}
               <p className="text-[13px] text-foreground-muted">
                 Resolved region (latest payroll run):{" "}
-                <span className="font-semibold text-foreground">
-                  {resolvedRegions.length === 0
-                    ? "—"
-                    : resolvedRegions.length === 1
-                    ? resolvedRegions[0]
-                    : `${resolvedRegions.length} regions (${resolvedRegions.join(", ")})`}
-                </span>
+                <span className="font-semibold text-foreground">{regionsLabel(resolvedRegionsByCountry[viewedCountry])}</span>
               </p>
+              {isMultiCountry && (
+                <div className="pt-2">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">All payroll countries</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {orgCountries.map((c) => (
+                      <span
+                        key={c.code}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          c.status === "OVER_LIMIT" ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary"
+                        }`}
+                      >
+                        {c.name}{c.isPrimary ? " · default" : ""}{c.status === "OVER_LIMIT" ? " · paused" : ""}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -303,7 +345,7 @@ export default function CompliancePage() {
       )}
 
       {currentTab === "Contribution Rates" && calcMode !== "simple" && (
-        <ContributionRatesTable documents={documents} country={companyDetails.jurisdictionCountry} />
+        <ContributionRatesTable documents={documents} country={viewedCountry} />
       )}
       {currentTab === "Contribution Rates" && calcMode === "simple" && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
@@ -317,9 +359,10 @@ export default function CompliancePage() {
 
       {currentTab === "Tax Configuration" && calcMode !== "simple" && (
         <TaxConfigurationTab
+          key={viewedCountry}
           documents={documents}
-          country={companyDetails.jurisdictionCountry}
-          jurisdictionState={companyDetails.jurisdictionState}
+          country={viewedCountry}
+          jurisdictionState={viewingDefault ? companyDetails.jurisdictionState : ""}
         />
       )}
       {currentTab === "Tax Configuration" && calcMode === "simple" && (
@@ -334,7 +377,7 @@ export default function CompliancePage() {
 
       {currentTab === "Documents" && calcMode !== "simple" && (
         <ComplianceDocumentUpload
-          country={companyDetails.jurisdictionCountry}
+          country={viewedCountry}
           addToast={addToast}
           documents={documents}
           setDocuments={setDocuments}
@@ -350,6 +393,7 @@ export default function CompliancePage() {
         </div>
       )}
 
+      {currentTab === COUNTRIES_TAB && <CountriesTab />}
       {currentTab === IR21_TAB && <SGComplianceCentreTab />}
       {currentTab === IT_EMPLOYER_TAB && <ITEmployerProfileTab />}
       {currentTab === HK_TAB && <HKComplianceCentreTab />}
@@ -359,21 +403,6 @@ export default function CompliancePage() {
       {currentTab === MX_TAB && <MXComplianceCentreTab />}
       {currentTab === MX_SS_TAB && <MXSocialSecurityCenter />}
 
-      {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && (calcMode === "enterprise" || arrivedForOnboarding) && (
-        <EnterpriseJurisdictionsTab
-          enterpriseStatus={enterpriseStatus}
-          onEnterpriseChanged={refreshEnterpriseState}
-        />
-      )}
-      {showEnterpriseTab && currentTab === "Enterprise Jurisdictions" && !(calcMode === "enterprise" || arrivedForOnboarding) && (
-        <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
-          <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
-            <Lock size={24} className="text-foreground-muted" />
-          </div>
-          <h3 className="text-[17px] font-bold text-foreground mb-2">Enterprise Jurisdictions</h3>
-          <p className="text-[13px] text-foreground-muted max-w-md mx-auto">Enterprise jurisdictions are only available in Enterprise Payroll mode.</p>
-        </div>
-      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Check, Clock, ChevronRight, Loader2 } from "lucide-react";
 import { getDashboardRecentRuns } from "../../../service/payrollService";
 import { formatCurrency } from "../../../utils/currency";
+import RunCurrencyAmount from "../../../components/payroll/RunCurrencyAmount";
 
 function fmtCurrency(n, currencyCode) {
   return formatCurrency(n || 0, currencyCode);
@@ -114,10 +115,11 @@ export default function RecentActivity({ onViewAll, filter, refreshTick, currenc
                     {run.employees ?? 0}
                   </td>
                   <td className="whitespace-nowrap px-4 py-4 text-[13px] font-semibold text-info">
-                    {fmtCurrency(run.gross, currencyCode)}
+                    {/* multi-country runs: per-country amounts, each in its own currency */}
+                    <RunCurrencyAmount run={run} runField="gross" countryField="totalGross" fallbackFormat={(n) => fmtCurrency(n, currencyCode)} />
                   </td>
                   <td className="whitespace-nowrap px-4 py-4 text-[13px] font-bold text-primary">
-                    {fmtCurrency(run.net, currencyCode)}
+                    <RunCurrencyAmount run={run} runField="net" countryField="totalNet" fallbackFormat={(n) => fmtCurrency(n, currencyCode)} />
                   </td>
                   <td className="px-4 py-4">
                     <StatusBadge status={run.status} />

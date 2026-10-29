@@ -7,6 +7,7 @@ import RecentActivity from "./RecentActivity";
 import TrialProgressBar from "./TrialProgressBar";
 import { CALCULATION_MODE_LABELS } from "../../../service/payrollService";
 import { usePayrollSetup } from "../PayrollSetupContext";
+import { useEntitledCountries } from "../EntitledCountriesContext";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -42,6 +43,14 @@ export default function DashboardPage({ onNewPayrollRun }) {
   // getActivePolicy() on its own mount. Also handles the focus-refresh that
   // used to be duplicated per-page here.
   const { currencyCode, calculationMode } = usePayrollSetup();
+  // Set by StatCards from the summary's byCountry — the trend/breakdown
+  // charts add currencies together when the org pays in several countries.
+  const [mixedCurrencies, setMixedCurrencies] = useState(false);
+  // The trend chart spans many months whatever month is selected, so it
+  // combines currencies whenever the org pays in more than one country —
+  // not only when the selected month happens to be mixed.
+  const { countries: orgCountries } = useEntitledCountries();
+  const chartsMixCurrencies = mixedCurrencies || (orgCountries?.length || 0) > 1;
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -141,13 +150,13 @@ export default function DashboardPage({ onNewPayrollRun }) {
         <TrialProgressBar />
 
         {/* Stat Cards */}
-        <StatCards filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} />
+        <StatCards filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} onMixedCurrenciesChange={setMixedCurrencies} />
 
         {/* Trend Chart — always Jan → current month */}
-        <CostTrendChart refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} />
+        <CostTrendChart refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} mixedCurrencies={chartsMixCurrencies} />
 
         {/* Breakdowns: Department Donut + Pay Type Bar + Deductions */}
-        <BreakdownsChart filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} />
+        <BreakdownsChart filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} mixedCurrencies={chartsMixCurrencies} />
 
         {/* Recent Activity */}
         <RecentActivity filter={effectiveFilter} refreshTick={refreshTick} currencyCode={currencyCode} />

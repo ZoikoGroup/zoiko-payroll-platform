@@ -77,6 +77,30 @@ function formatDate(iso) {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
 }
 
+// Plan country entitlement: countries_limit null means unlimited (Enterprise
+// negotiated with no cap). Over limit = any OVER_LIMIT country row, or more
+// ACTIVE countries than the plan allows — the same test the backend's
+// country_limit=OVER filter applies.
+function isCountryOverLimit(row) {
+  if ((row.countries_over_limit || 0) > 0) return true;
+  return row.countries_limit != null && (row.countries_used || 0) > row.countries_limit;
+}
+
+function CountriesCell({ row }) {
+  if (row.countries_used == null) return <span className="text-foreground-disabled">—</span>;
+  const over = isCountryOverLimit(row);
+  const limit = row.countries_limit == null ? "∞" : row.countries_limit;
+  return (
+    <span
+      className={over ? "font-semibold text-error" : "text-foreground-secondary"}
+      title={over ? `Over the plan's country limit${row.countries_over_limit ? ` — ${row.countries_over_limit} country(ies) paused` : ""}.` : undefined}
+    >
+      {row.countries_used} / {limit}
+      {over && <span className="ml-2"><StatusPill status="rejected" label="Over limit" /></span>}
+    </span>
+  );
+}
+
 function displayStatus(row) {
   if (row.status === "NONE") return "NONE";
   if (row.trial_stage === "GRACE_READONLY") return "GRACE_READONLY";
@@ -168,6 +192,7 @@ export default function SubscriptionsBillingPage() {
   const [billingClassification, setBillingClassification] = useState(searchParams.get("billing_classification") || "");
   const [chargeEnabled, setChargeEnabled] = useState(searchParams.get("charge_enabled") || "");
   const [dunningStage, setDunningStage] = useState(searchParams.get("dunning_stage") || "");
+  const [countryLimit, setCountryLimit] = useState(searchParams.get("country_limit") || "");
   // Live clock for the Remaining column — without this, computeRemaining's
   // "now" would be frozen at whatever moment the data last loaded, and the
   // countdown would only ever move on a manual refresh.
@@ -191,6 +216,13 @@ export default function SubscriptionsBillingPage() {
     setSearchParams(next, { replace: true });
   };
 
+  const setCountryLimitAndUrl = (value) => {
+    setCountryLimit(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("country_limit", value); else next.delete("country_limit");
+    setSearchParams(next, { replace: true });
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -200,6 +232,7 @@ export default function SubscriptionsBillingPage() {
         billing_classification: billingClassification || undefined,
         charge_enabled: chargeEnabled || undefined,
         dunning_stage: dunningStage || undefined,
+        country_limit: countryLimit || undefined,
       });
       setRows(res.subscriptions || []);
     } catch (err) {
@@ -207,7 +240,7 @@ export default function SubscriptionsBillingPage() {
     } finally {
       setLoading(false);
     }
-  }, [status, workspaceType, billingClassification, chargeEnabled, dunningStage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, workspaceType, billingClassification, chargeEnabled, dunningStage, countryLimit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSummary = useCallback(async () => {
     try {
@@ -309,10 +342,14 @@ export default function SubscriptionsBillingPage() {
           <option value="NONE">No Dunning Row</option>
           {DUNNING_STAGES.map((s) => <option key={s} value={s}>{DUNNING_STAGE_LABEL[s]}</option>)}
         </select>
+        <select value={countryLimit} onChange={(e) => setCountryLimitAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+          <option value="">Countries: Any</option>
+          <option value="OVER">Over Country Limit</option>
+        </select>
       </div>
 
       <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
-        <table className="w-full text-sm min-w-[1250px]">
+        <table className="w-full text-sm min-w-[1350px]">
           <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Organization</th>
@@ -321,6 +358,7 @@ export default function SubscriptionsBillingPage() {
               <th className="px-4 py-3">Charge Enabled</th>
               <th className="px-4 py-3">Commercial Route</th>
               <th className="px-4 py-3">Plan</th>
+              <th className="px-4 py-3">Countries (used / limit)</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Dunning</th>
               <th className="px-4 py-3">Period Start</th>
@@ -368,6 +406,7 @@ export default function SubscriptionsBillingPage() {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3"><CountriesCell row={row} /></td>
                   <td className="px-4 py-3"><StatusPill status={meta.pill} label={meta.label} /></td>
                   <td className="px-4 py-3">
                     {row.dunning_stage ? (

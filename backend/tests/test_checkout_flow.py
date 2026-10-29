@@ -291,6 +291,42 @@ _enterprise_chk_user = User(
 _db.add(_enterprise_chk_user)
 _db.flush()
 
+# BUSINESS plan (own Stripe price) + an org already ACTIVE on PROFESSIONAL
+# through a Stripe subscription — a self-service plan change moves that
+# subscription in place instead of opening a second checkout.
+_business_plan = plan_catalog.create_plan(db=_db, code="BUSINESS", name="Business", actor_user_id=_super.id)
+_business_version = plan_catalog.create_plan_version(
+    db=_db, plan_id=_business_plan.id, feature_set={"features": ["payroll_runs"]},
+    scale_limits={"max_entities": 10}, actor_user_id=_super.id,
+)
+plan_catalog.approve_plan_version(_db, _business_version.id, actor_user_id=_super.id)
+plan_catalog.publish_plan_version(_db, _business_version.id, published_by_user_id=_super.id)
+_db.refresh(_business_version)
+_business_version.stripe_price_id = "price_FAKE_BUSINESS"
+_db.add(BillingPriceCatalogItem(
+    catalog_version="2026-STANDALONE", component_type="BUSINESS", currency="USD",
+    unit_amount=Decimal("150.00"), status=CatalogItemStatus.PUBLISHED.value,
+))
+_paid_org = Organization(
+    organization_name="Paid Corp", organization_code="PAIDCHK", workspace_type="PRODUCTION",
+    country="DE", is_active=True, billing_classification="COMMERCIAL_ACTIVE", charge_enabled=True,
+)
+_db.add(_paid_org)
+_db.flush()
+_db.add(User(
+    email="paid-admin@example.com", hashed_password=hash_password("strong-password"), role=UserRole.ORG_ADMIN,
+    first_name="Paid", last_name="Admin", organization_id=_paid_org.id, is_active=True,
+))
+_paid_sub = BillingSubscription(
+    organization_id=_paid_org.id, plan_version_id=_version.id,
+    billing_authority=BillingAuthority.STANDALONE.value, status=SubscriptionStatus.ACTIVE.value,
+    current_period_start=datetime.utcnow() - timedelta(days=3),
+    current_period_end=datetime.utcnow() + timedelta(days=27),
+    stripe_subscription_id="sub_FAKE_PAID",
+)
+_db.add(_paid_sub)
+_db.flush()
+
 _db.commit()
 
 # Restore pre-purge app modules so other test files don't get class-identity conflicts
@@ -329,10 +365,17 @@ def mock_stripe_pkg():
         yield
 
 
+_TOKENS: dict = {}
+
+
 def _login(client, email, password="strong-password"):
-    r = mfa_login(client, json={"email": email, "password": password})
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
+    """One sign-in per user for the whole module — signing in for every test
+    trips the login rate limit (10/minute) once the file has enough tests."""
+    if email not in _TOKENS:
+        r = mfa_login(client, json={"email": email, "password": password})
+        assert r.status_code == 200, r.text
+        _TOKENS[email] = r.json()["access_token"]
+    return _TOKENS[email]
 
 
 def _auth(token):
@@ -475,6 +518,18 @@ def test_checkout_refuses_org_with_enterprise_order_form(client):
         assert sub.plan_version_id is None
     finally:
         db.close()
+
+
+def test_my_subscription_loads_for_an_enterprise_order_form_org(client):
+    """An Enterprise subscription has no plan version — my-subscription used
+    to 500 on it (the Subscription page showed "Unable to load")."""
+    token = _login(client, "enterprise-admin@example.com")
+    r = client.get("/api/billing/my-subscription", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["subscription"]["plan_version_id"] is None
+    assert body["subscription"]["billing_authority"] == BillingAuthority.ENTERPRISE_ORDER_FORM.value
+    assert body["entitlement_flags"] == {"max_entities": 25, "plan_code": "ENTERPRISE"}
 
 
 # ── Tests: GET /billing/plans (Step 7 — catalog-driven pricing) ─────────────
@@ -695,3 +750,70 @@ def test_require_active_subscription_blocks_production_org_without_active_sub(cl
     token = _login(client, "blocked-admin@example.com")
     r = client.get("/api/payroll/policy/active", headers=_auth(token))
     assert r.status_code == 403, f"Expected 403 for PRODUCTION org with no active sub, got {r.status_code}: {r.text}"
+    # Actionable: the UI shows the message with a "Choose a plan" link off the trace.
+    body = r.json()
+    assert "doesn't have a plan yet" in r.text
+    assert body["trace"] == {"resource": "subscription", "reason": "no_subscription"}
+
+
+# ── Self-service plan change on an ACTIVE Stripe subscription ─────────────
+
+def test_active_subscription_changes_plan_in_place_not_a_second_checkout(client):
+    """An org already paying through Stripe moves to another plan in place:
+    its Stripe subscription item is swapped to the new price (prorated) and
+    the local subscription follows immediately. No checkout URL, no second
+    subscription — previously this was refused with "Contact support"."""
+    stripe_sub = MagicMock()
+    stripe_sub.to_dict.return_value = {"id": "sub_FAKE_PAID", "items": {"data": [{"id": "si_FAKE_ITEM"}]}}
+    with patch.object(stripe.Subscription, "retrieve", return_value=stripe_sub), \
+         patch.object(stripe.Subscription, "modify") as modify, \
+         patch.object(stripe.checkout.Session, "create") as session_create:
+        token = _login(client, "paid-admin@example.com")
+        r = client.post("/api/billing/checkout", json={"plan_code": "BUSINESS"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["plan_changed"] is True and body["checkout_url"] is None and body["plan_code"] == "BUSINESS"
+    session_create.assert_not_called()
+    modify.assert_called_once()
+    assert modify.call_args.args[0] == "sub_FAKE_PAID"
+    assert modify.call_args.kwargs["items"] == [{"id": "si_FAKE_ITEM", "price": "price_FAKE_BUSINESS"}]
+    assert modify.call_args.kwargs["proration_behavior"] == "create_prorations"
+
+    _db.expire_all()
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _paid_org.id).one()
+    assert sub.plan_version_id == _business_version.id
+    assert _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.organization_id == _paid_org.id,
+        BillingCommercialAuditEvent.event_type == "SELF_SERVICE_PLAN_CHANGED",
+    ).count() == 1
+
+
+def test_choosing_the_current_plan_is_refused_not_a_duplicate_subscription(client):
+    with patch.object(stripe.checkout.Session, "create") as session_create:
+        token = _login(client, "paid-admin@example.com")
+        r = client.post("/api/billing/checkout", json={"plan_code": "BUSINESS"}, headers=_auth(token))
+    assert r.status_code == 400, r.text
+    assert "already on the Business plan" in r.text
+    session_create.assert_not_called()
+
+
+def test_checkout_prefills_the_admins_email_on_stripe(client):
+    token = _login(client, "eval-admin@example.com")
+    r = client.post("/api/billing/checkout", json={"plan_code": "PROFESSIONAL"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    assert stripe.checkout.Session.create.call_args.kwargs["customer_email"] == "eval-admin@example.com"
+
+
+def test_webhook_for_another_environments_checkout_is_acknowledged_not_500(client):
+    """A shared Stripe account delivers checkout.session.completed for an
+    organization this database has never heard of. It must be acknowledged
+    (200) and ignored — previously it failed on the subscriptions foreign
+    key with a 500, which Stripe keeps retrying."""
+    count_before = _db.query(BillingSubscription).count()
+    r = _post_webhook(client, "checkout.session.completed", {
+        "metadata": {"organization_id": "987654", "plan_version_id": str(_version.id)},
+        "subscription": "sub_OTHER_ENV",
+    }, event_id="evt_other_environment_001")
+    assert r.status_code == 200, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).count() == count_before

@@ -116,7 +116,7 @@ def test_flag_on_admits_a_mexican_org_and_refuses_any_other(db, monkeypatch):
     for other in (nl, none):
         with http(db, principal(other.org.id, user_id=880)) as c:
             r = c.get(f"{ORG_BASE}/employers")
-        assert r.status_code == 403 and "only available to organisations whose payroll jurisdiction is Mexico" in r.text
+        assert r.status_code == 403 and "only available to organisations that run Mexico payroll" in r.text
 
 
 def test_flag_on_super_admin_and_employee_still_refused(db, monkeypatch):

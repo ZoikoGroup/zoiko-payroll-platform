@@ -9,13 +9,14 @@
  */
 
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { ROLES } from "../../config/roles";
 import {
   getMySubscription,
   listPublishedPlans,
   createCheckoutSession,
+  getPlanChangeImpact,
   cancelMySubscription,
   createBillingPortalSession,
   listMyInvoices,
@@ -39,7 +40,19 @@ import {
   ChevronUp,
   Receipt,
   Percent,
+  Globe,
 } from "lucide-react";
+import { PlanChangeCountryDialog } from "../../components/billing/PlanChangeCountryNotice";
+import { getCountryNameFromCode } from "../../utils/currency";
+import {
+  COUNTRY_LIMIT_KEY,
+  COMPLIANCE_COUNTRIES_ROUTE,
+  COMPLIANCE_COUNTRIES_STATE,
+  formatPlanFeature,
+  getCountryPauseImpact,
+  impactNeedsReview,
+  impactPausesCountries,
+} from "../../utils/planLimits";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -297,6 +310,8 @@ const STATUS_STYLES = {
   // Invoice statuses (Step 3) — reuse this same pill for the Invoices tab.
   PAID: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
   FAILED: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
+  // Country entitlement status (my-subscription country_usage).
+  OVER_LIMIT: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
 };
 
 function StatusPill({ status }) {
@@ -348,12 +363,78 @@ function getPriceLabel(plan) {
   return "Contact";
 }
 
+// Plans in ascending order — anything after the current one is an upgrade.
+const PLAN_ORDER = ["CORE", "PROFESSIONAL", "BUSINESS", "ENTERPRISE"];
+
+// How the subscription is paid for (billing_authority is a route, not an interval).
+function billingLabel(subscription) {
+  if (subscription.status === "TRIALING") return "Free trial";
+  if (subscription.billing_authority === "ENTERPRISE_ORDER_FORM") return "Per contract";
+  if (subscription.billing_authority === "ZOIKO_ONE_BUNDLE") return "Zoiko One";
+  return "Monthly";
+}
+
 const PLAN_ICONS = {
   CORE: Package,
   PROFESSIONAL: Zap,
   BUSINESS: ShieldCheck,
   ENTERPRISE: FileText,
 };
+
+// Countries the plan covers (my-subscription country_usage): "N of L" with
+// each country's status. OVER_LIMIT countries were paused by a plan change —
+// existing employees and history stay readable, new payroll there is blocked.
+function CountryUsagePanel({ usage, onManageCountries, onViewPlans }) {
+  const countries = usage.countries || [];
+  const limitLabel = usage.limit == null ? `${usage.used} · unlimited` : `${usage.used} of ${usage.limit}`;
+  return (
+    <div className="glass rise" style={{ animationDelay: ".18s", marginBottom: 16 }}>
+      <div className="panel-head">
+        <div className="panel-icon icon-success">
+          <Globe size={16} />
+        </div>
+        <div>
+          <p className="panel-title">Countries: {limitLabel}</p>
+          <p className="panel-sub">Countries you can pay employees in on this plan</p>
+        </div>
+      </div>
+      <div className="rows">
+        {countries.length === 0 ? (
+          <DetailRow label="No countries yet" value="—" faint />
+        ) : (
+          countries.map((c) => {
+            const paused = c.status === "OVER_LIMIT";
+            const pill = paused ? STATUS_STYLES.OVER_LIMIT : STATUS_STYLES.ACTIVE;
+            return (
+              <div key={c.code} className="row">
+                <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {c.name || getCountryNameFromCode(c.code) || c.code}
+                  {c.isPrimary && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--accent-deep)", background: "var(--accent-soft)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Primary
+                    </span>
+                  )}
+                </span>
+                <span className="status-pill" style={{ background: pill.bg, color: pill.color, borderColor: pill.border }}>
+                  <span className="dot" />
+                  {paused ? "Paused (over plan limit)" : "Active"}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div style={{ padding: "0 24px 20px", display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button className="btn btn-ghost" onClick={onManageCountries}>
+          <Globe className="w-3.5 h-3.5" /> Manage countries
+        </button>
+        <button className="btn btn-ghost" onClick={onViewPlans}>
+          <ExternalLink className="w-3.5 h-3.5" /> Compare plans
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Step 3 — Invoices tab. Kept self-contained (own loading/error/expand
 // state) rather than threading it through the parent's state, since it's
@@ -486,12 +567,23 @@ export default function SubscriptionPage() {
   const canManage = role === ROLES.ORG_ADMIN;
   const [subscription, setSubscription] = useState(null);
   const [entitlements, setEntitlements] = useState({});
+  const [countryUsage, setCountryUsage] = useState(null);
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [checkoutLoading, setCheckoutLoading] = useState(null);
-  const [toast, setToast] = useState({ msg: null, type: "success" });
+  const location = useLocation();
+  // The plan pages land here after an in-place plan change (no Stripe
+  // redirect) and pass the confirmation along.
+  const [toast, setToast] = useState(() => (
+    location.state?.planChangedMessage
+      ? { msg: location.state.planChangedMessage, type: "success" }
+      : { msg: null, type: "success" }
+  ));
   const [billingActionLoading, setBillingActionLoading] = useState(false);
+  // { planCode, planName, impact } while the country-impact dialog is open.
+  const [pendingChange, setPendingChange] = useState(null);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   const fetchAll = () => {
     setLoading(true);
@@ -507,6 +599,7 @@ export default function SubscriptionPage() {
           setSubscription(subData.subscription);
           setEntitlements(subData.entitlement_flags || {});
         }
+        setCountryUsage(subData?.country_usage || null);
         setPlans(plansData || []);
       })
       .catch((err) => setError(err.message || "Failed to load subscription data."))
@@ -515,18 +608,54 @@ export default function SubscriptionPage() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  const handleUpgrade = async (planCode) => {
+  const reviewCountryImpact = (planCode, planName, impact) => {
+    setAcknowledged(false);
+    setPendingChange({ planCode, planName, impact });
+    setCheckoutLoading(null);
+  };
+
+  const startCheckout = async (planCode, planName, acknowledgeCountryPause) => {
     setCheckoutLoading(planCode);
     try {
-      const { checkout_url } = await createCheckoutSession(planCode);
-      window.location.href = checkout_url;
+      const result = await createCheckoutSession(planCode, { acknowledgeCountryPause });
+      if (result?.plan_changed) {
+        // An active Stripe subscription was moved to the new plan in place
+        // (prorated) — nothing to pay here, just show the new plan.
+        setPendingChange(null);
+        setCheckoutLoading(null);
+        setToast({ msg: result.message || `You're now on the ${planName} plan.`, type: "success" });
+        fetchAll();
+        return;
+      }
+      window.location.href = result.checkout_url;
     } catch (err) {
+      // An unacknowledged change that pauses countries comes back as a 409 —
+      // show the confirmation instead of a raw error toast.
+      const impact = getCountryPauseImpact(err);
+      if (impact) {
+        reviewCountryImpact(planCode, planName, impact);
+        return;
+      }
+      setPendingChange(null);
       setToast({
         msg: err.response?.data?.detail || err.message || "Could not start checkout.",
         type: "error",
       });
       setCheckoutLoading(null);
     }
+  };
+
+  const handleUpgrade = async (plan) => {
+    const planName = plan.name || plan.code;
+    setCheckoutLoading(plan.code);
+    // Best effort: if the impact lookup fails, checkout's own 409 still
+    // catches a change that would pause countries.
+    const impact = await getPlanChangeImpact(plan.code).catch(() => null);
+    if (impactNeedsReview(impact)) {
+      reviewCountryImpact(plan.code, planName, impact);
+      return;
+    }
+    await startCheckout(plan.code, planName, false);
   };
 
   const handleBillingPortal = async () => {
@@ -598,10 +727,22 @@ export default function SubscriptionPage() {
   const currentPlan = hasSubscription
     ? plans.find((p) => p.plan_version_id === subscription.plan_version_id) || null
     : null;
-  const currentPlanCode = currentPlan?.code || null;
+  // Enterprise has no published plan version — its signed contract is the plan.
+  const isEnterprise = subscription?.billing_authority === "ENTERPRISE_ORDER_FORM";
+  const currentPlanCode = currentPlan?.code || (isEnterprise ? "ENTERPRISE" : null);
   const daysLeft = daysUntil(subscription?.current_period_end);
+  const isTrial = subscription?.status === "TRIALING";
+  const cancelScheduled = !!subscription?.cancel_requested_at;
+  const periodEnd = formatDate(subscription?.current_period_end);
+  // Only a Stripe-billed subscription has a card to manage or a Stripe
+  // subscription to cancel (the cancel endpoint 404s without one).
+  const hasStripe = !!subscription?.stripe_subscription_id;
+  const currentRank = PLAN_ORDER.indexOf(currentPlanCode);
+  const hasHigherPlan = plans.some((p) => PLAN_ORDER.indexOf(p.code) > currentRank);
+  const showPlanActions = isTrial || hasHigherPlan || hasStripe;
+  // A null country limit means unlimited, so it stays in the list.
   const entitlementList = Object.entries(entitlements).filter(
-    ([key, val]) => key !== "plan_code" && val !== undefined && val !== null && val !== 0
+    ([key, val]) => key !== "plan_code" && val !== undefined && (val !== null || key === COUNTRY_LIMIT_KEY) && val !== 0
   );
 
   return (
@@ -625,7 +766,8 @@ export default function SubscriptionPage() {
           <div className="head-actions">
             {canManage && (
               <>
-                <button className="btn btn-ghost" onClick={handleBillingPortal} disabled={billingActionLoading || !subscription?.stripe_subscription_id}>
+                <button className="btn btn-ghost" onClick={handleBillingPortal} disabled={billingActionLoading || !hasStripe}
+                  title={hasStripe ? undefined : "Available once a plan is paid for by card"}>
                   <CreditCard className="w-3.5 h-3.5" /> Manage Payment Method
                 </button>
                 <button className="btn btn-ghost" onClick={() => navigate("/billing/plans")}>
@@ -649,15 +791,21 @@ export default function SubscriptionPage() {
               />
               <StatTile
                 glowColor="var(--success)"
-                label="Days Remaining"
+                label={isTrial ? "Trial Days Left" : "Days Remaining"}
                 value={daysLeft !== null ? Math.max(0, daysLeft) : "—"}
-                sub={subscription.current_period_end ? `Until ${formatDate(subscription.current_period_end)}` : "No end date"}
+                sub={
+                  !subscription.current_period_end ? "No end date"
+                    : isTrial ? `Trial ends ${periodEnd}`
+                    : cancelScheduled ? `Plan ends ${periodEnd}`
+                    : hasStripe ? `Renews ${periodEnd}`
+                    : `Until ${periodEnd}`
+                }
               />
               <StatTile
                 glowColor="var(--amber)"
-                label="Billing Period"
-                value={subscription.billing_authority === "STANDALONE" ? "Monthly" : subscription.billing_authority}
-                sub="Subscription interval"
+                label="Billing"
+                value={billingLabel(subscription)}
+                sub={isTrial ? "No card needed during the evaluation" : hasStripe ? "Charged to your card" : "How this plan is billed"}
               />
             </div>
 
@@ -679,17 +827,29 @@ export default function SubscriptionPage() {
                   {currentPlanCode || "UNKNOWN"} Plan
                 </div>
                 <h2 className="plan-name">
-                  {currentPlan?.name || currentPlanCode || "No Plan"}
+                  {currentPlan?.name || (isEnterprise ? "Enterprise" : currentPlanCode || "No Plan")}
                 </h2>
                 <p className="plan-price">
-                  {currentPlan ? getPriceLabel(currentPlan) : "—"}
-                  <span>/month</span>
+                  {isEnterprise ? "Per contract" : (
+                    <>
+                      {currentPlan ? getPriceLabel(currentPlan) : "—"}
+                      <span>/month</span>
+                    </>
+                  )}
                 </p>
                 <p className="plan-period">
                   {subscription.current_period_start && subscription.current_period_end
                     ? `${formatDate(subscription.current_period_start)} — ${formatDate(subscription.current_period_end)}`
                     : "Billing period details unavailable"}
                 </p>
+                {isTrial && (
+                  <p className="plan-period">
+                    Free during your evaluation. Choose a plan before {periodEnd} to keep running payroll.
+                  </p>
+                )}
+                {cancelScheduled && (
+                  <p className="plan-period">Cancellation scheduled: this plan ends on {periodEnd}.</p>
+                )}
               </div>
 
               {/* Feature Grid */}
@@ -700,15 +860,20 @@ export default function SubscriptionPage() {
                       <div className="icon">
                         <CheckCircle size={14} />
                       </div>
-                      <span>
-                        {key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                        {typeof val === "number" && val > 0 ? `: ${val}` : ""}
-                      </span>
+                      <span>{formatPlanFeature(key, val)}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+
+            {countryUsage && (
+              <CountryUsagePanel
+                usage={countryUsage}
+                onManageCountries={() => navigate(COMPLIANCE_COUNTRIES_ROUTE, { state: COMPLIANCE_COUNTRIES_STATE })}
+                onViewPlans={() => navigate("/billing/plans")}
+              />
+            )}
 
             {/* Subscription Details Grid */}
             <div className="grid rise" style={{ animationDelay: ".2s" }}>
@@ -759,26 +924,36 @@ export default function SubscriptionPage() {
             <InvoicesPanel />
 
             {/* Upgrade CTA — org_admin only */}
-            {canManage && !isCancelled && (
+            {canManage && !isCancelled && showPlanActions && (
               <div className="glass rise" style={{ animationDelay: ".25s", marginBottom: 16 }}>
                 <div className="panel-head">
                   <div className="panel-icon icon-amber">
                     <ArrowRight size={16} />
                   </div>
                   <div>
-                    <p className="panel-title">Need more power?</p>
-                    <p className="panel-sub">Upgrade your plan to unlock additional features</p>
+                    <p className="panel-title">{isTrial ? "Keep payroll running" : hasHigherPlan ? "Need more power?" : "Manage your plan"}</p>
+                    <p className="panel-sub">
+                      {isTrial
+                        ? "Choose a plan before your evaluation ends"
+                        : hasHigherPlan
+                          ? "Upgrade your plan for more countries, entities and features"
+                          : "You're on our highest self-service plan"}
+                    </p>
                   </div>
                 </div>
                 <div style={{ padding: "16px 24px 20px" }}>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <button className="btn btn-primary" onClick={() => navigate("/billing/plans")}>
-                      <Zap className="w-3.5 h-3.5" /> Upgrade Plan
-                    </button>
-                    <button className="btn btn-danger" onClick={handleCancel} disabled={billingActionLoading || !!subscription.cancel_requested_at}>
-                      <X className="w-3.5 h-3.5" />
-                      {subscription.cancel_requested_at ? "Cancellation Scheduled" : "Cancel Subscription"}
-                    </button>
+                    {(isTrial || hasHigherPlan) && (
+                      <button className="btn btn-primary" onClick={() => navigate("/billing/plans")}>
+                        <Zap className="w-3.5 h-3.5" /> {isTrial ? "Choose a Plan" : "Upgrade Plan"}
+                      </button>
+                    )}
+                    {hasStripe && (
+                      <button className="btn btn-danger" onClick={handleCancel} disabled={billingActionLoading || cancelScheduled}>
+                        <X className="w-3.5 h-3.5" />
+                        {cancelScheduled ? "Cancellation Scheduled" : "Cancel Subscription"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -883,7 +1058,7 @@ export default function SubscriptionPage() {
                         return list
                           .filter((f) => f.limit_value !== 0)
                           .slice(0, 3)
-                          .map((f) => f.feature_key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))
+                          .map((f) => formatPlanFeature(f.feature_key, f.limit_value))
                           .join(" · ") || "Contact us for details";
                       })()}
                     </div>
@@ -891,7 +1066,7 @@ export default function SubscriptionPage() {
                       <button
                         className="btn btn-primary"
                         style={{ width: "100%", marginTop: 8, padding: "10px 16px" }}
-                        onClick={() => handleUpgrade(plan.code)}
+                        onClick={() => handleUpgrade(plan)}
                         disabled={checkoutLoading !== null}
                       >
                         {isLoading ? (
@@ -911,9 +1086,35 @@ export default function SubscriptionPage() {
                 );
               })}
             </div>
+            {!plans.some((p) => p.code === "ENTERPRISE") && (
+              <p style={{ padding: "0 24px 20px", fontSize: 13, color: "var(--ink-faint)" }}>
+                Need more than 10 countries or a custom contract? Enterprise is priced per contract —{" "}
+                <a
+                  href="mailto:sales@zoikogroup.com?subject=Zoiko%20Payroll%20Enterprise%20inquiry"
+                  style={{ color: "var(--accent)", fontWeight: 600 }}
+                >
+                  contact sales
+                </a>
+                .
+              </p>
+            )}
           </div>
         )}
       </div>
+
+      {pendingChange && (
+        <PlanChangeCountryDialog
+          impact={pendingChange.impact}
+          planName={pendingChange.planName}
+          acknowledged={acknowledged}
+          onAcknowledgedChange={setAcknowledged}
+          busy={checkoutLoading === pendingChange.planCode}
+          onClose={() => setPendingChange(null)}
+          onConfirm={() =>
+            startCheckout(pendingChange.planCode, pendingChange.planName, impactPausesCountries(pendingChange.impact))
+          }
+        />
+      )}
 
       {toast.msg && (
         <div className={`toast ${toast.type === "success" ? "toast-success" : "toast-danger"}`}>

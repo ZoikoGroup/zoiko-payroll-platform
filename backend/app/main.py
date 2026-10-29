@@ -283,7 +283,7 @@ async def no_store_middleware(request: Request, call_next):
     policy = getattr(request.state, "authz_policy", None)
     credentialed = "authorization" in request.headers or "cookie" in request.headers
     if credentialed or (policy is not None and policy.data_class != "public"):
-        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
         vary = response.headers.get("Vary")
         response.headers["Vary"] = f"{vary}, Authorization" if vary and "Authorization" not in vary else (vary or "Authorization")

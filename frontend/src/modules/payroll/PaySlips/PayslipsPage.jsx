@@ -5,7 +5,7 @@ import PayslipFilters from "./PayslipFilters";
 import PayslipStub from "./PayslipStub";
 import PayslipDownloadButton from "./PayslipDownloadButton";
 import { getPayslips, getEmployees, deletePayslip } from "../../../service/payrollService";
-import { formatCurrency } from "../../../utils/currency";
+import { formatCurrency, getCurrencyForJurisdiction, normalizeCountryCode } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const statusConfig = {
@@ -41,6 +41,18 @@ export default function PayslipsPage() {
   // Sourced from the shared, once-per-session PayrollSetupContext instead of
   // this page's own independent getCompanyProfile() call.
   const { company: companyProfile, currencyCode } = usePayrollSetup();
+  // Each payslip is paid in its own country's currency — the org currency
+  // (which may carry an explicit override) only applies to payslips in the
+  // org's own jurisdiction country.
+  const orgCountry = companyProfile?.jurisdictionCountry || companyProfile?.jurisdiction_country || "";
+  const payslipCurrency = useCallback((p) => {
+    const country = p?.country || p?.countryCode;
+    if (!country) return currencyCode;
+    const sameAsOrg = (normalizeCountryCode(country) || country.toUpperCase())
+      === (normalizeCountryCode(orgCountry) || orgCountry.toUpperCase());
+    if (sameAsOrg) return currencyCode;
+    return getCurrencyForJurisdiction(country)?.code || currencyCode;
+  }, [currencyCode, orgCountry]);
   const [deletingId, setDeletingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -277,7 +289,7 @@ export default function PayslipsPage() {
                         <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
                         <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
                         <td className="px-5 py-4 text-foreground-muted">{p.payDate}</td>
-                        <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, currencyCode)}</td>
+                        <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, payslipCurrency(p))}</td>
                         <td className="px-5 py-4">
                           <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
                             <Icon size={11} /> {p.status}
@@ -307,7 +319,7 @@ export default function PayslipsPage() {
           </div>
 
           {selectedPayslip && activeTab !== "payslip-detail" && (
-            <PayslipStub payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} currencyCode={currencyCode} company={companyProfile} />
+            <PayslipStub payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} currencyCode={payslipCurrency(selectedPayslip)} company={companyProfile} />
           )}
         </>
       )}
@@ -315,7 +327,7 @@ export default function PayslipsPage() {
       {activeTab === "payslip-detail" && (
         <>
           {selectedPayslip ? (
-            <PayslipStub payslip={selectedPayslip} onClose={() => { setSelectedPayslip(null); setActiveTab("payslips"); }} currencyCode={currencyCode} company={companyProfile} />
+            <PayslipStub payslip={selectedPayslip} onClose={() => { setSelectedPayslip(null); setActiveTab("payslips"); }} currencyCode={payslipCurrency(selectedPayslip)} company={companyProfile} />
           ) : (
             <div className="text-center py-16">
               <Receipt size={40} className="mx-auto mb-3 text-foreground-muted/40" />
@@ -434,7 +446,7 @@ export default function PayslipsPage() {
                           <td className="px-5 py-4 font-semibold text-foreground">{p.employee}</td>
                           <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
                           <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
-                          <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, currencyCode)}</td>
+                          <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, payslipCurrency(p))}</td>
                           <td className="px-5 py-4">
                             <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
                               <Icon size={11} /> {p.status}

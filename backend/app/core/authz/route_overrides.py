@@ -364,9 +364,16 @@ for _m, _p in (
 # Zoiko staff only through an approved Support Access grant.
 _MX = "/api/super-admin/compliance/mexico"
 _BR = "/api/super-admin/compliance/brazil"
-_retire("GET", f"{_MX}/employees", R_JIT, "lists Mexican employees (names, codes) of one organization")
-_retire("GET", f"{_MX}/employees/{{employee_id}}", R_JIT, "one Mexican employee's record and readiness")
-_retire("GET", f"{_BR}/employees", R_JIT, "lists Brazilian employees (names, codes) of one organization")
+# Super Admin org-scoped employee reads. The route handler requires an explicit
+# organization_id (422 when missing, 404 when unknown) and scopes every
+# worker-table query to that organisation, so a platform principal never does
+# an unscoped cross-tenant read (ZP-PRIV B02).
+_set("GET", f"{_MX}/employees", data_class="platform", principals={"super_admin"},
+     note="reviewed: Super Admin org-scoped Mexican employee list; requires an explicit organization_id")
+_set("GET", f"{_MX}/employees/{{employee_id}}", data_class="platform", principals={"super_admin"},
+     note="reviewed: Super Admin org-scoped Mexican employee record; requires an explicit organization_id")
+_set("GET", f"{_BR}/employees", data_class="platform", principals={"super_admin"},
+     note="reviewed: Super Admin org-scoped Brazilian employee list; requires an explicit organization_id")
 # Registry and counts only - no identity, pay or per-person row.
 _set("GET", f"{_MX}/organizations", data_class="aggregate",
      note="reviewed: organization id + name of tenants with Mexico payroll (registry metadata)")
@@ -376,4 +383,42 @@ _set("GET", f"{_MX}/cfdi", data_class="aggregate",
      note="reviewed: CFDI counts by status + schema release; UNKNOWN documents reduced to a count")
 _set("GET", f"{_MX}/authorities", data_class="aggregate",
      note="reviewed: IMSS / SUA / ISN counts by status and platform blocks; no movement rows")
+# Super Admin cross-tenant readiness summary returns per-gate counts only, so
+# it is a reviewed aggregate over worker tables rather than an identity leak.
+_set("GET", f"{_MX}/employer-readiness/summary", data_class="aggregate",
+     note="reviewed: per-gate employer readiness counts only; no worker row or identity is returned")
 
+
+# ── Country entitlement (billing/jurisdiction_entitlement.py) ───────────────
+# These reach payroll_employees only for per-country employee COUNTS (ledger
+# seeding from countries already in use, the "N employees" figure, the
+# remove/replace guard). No worker row, identity or pay value is read out or
+# returned, so they stay tenant configuration.
+_ENTITLED = "/api/payroll/jurisdictions/entitled"
+_COUNTRY_COUNTS_NOTE = "reviewed: country entitlement reads per-country employee counts only; no worker row returned"
+for _method, _path in (
+    ("GET", _ENTITLED),
+    ("POST", _ENTITLED),
+    ("POST", f"{_ENTITLED}/replace-primary"),
+    ("POST", f"{_ENTITLED}/{{country_code}}/primary"),
+    ("DELETE", f"{_ENTITLED}/{{country_code}}"),
+    ("PUT", "/api/payroll/compliance/company-details"),
+):
+    _set(_method, _path, data_class="tenant_config", note=_COUNTRY_COUNTS_NOTE)
+# Run detail adds per-country totals (service.run_totals_by_country): sums of
+# payslip amounts per country, the same aggregate kind as the run's own stored
+# totals — no payslip row, identity or per-person figure is returned.
+_set("GET", "/api/payroll/runs/{run_id}", data_class="tenant_config",
+     note="reviewed: run detail with per-country payslip totals (aggregates only); no worker row returned")
+# Billing pages that read the country ledger (country usage, plan-change
+# impact, the checkout downgrade guard): the ledger's first read may seed it
+# from per-country employee COUNTS — no worker row is read out or returned.
+_set("GET", "/api/billing/my-subscription", data_class="self",
+     note="reviewed: org subscription + country usage counts; no worker row returned")
+_set("POST", "/api/billing/checkout", data_class="tenant_config",
+     note="reviewed: checkout with country-limit impact check (per-country counts only); no worker row returned")
+_set("GET", "/api/billing/plan-change-impact", data_class="tenant_config", principals={"org_admin", "payroll_admin"},
+     note="reviewed: countries a plan change would keep/pause/restore (country codes only); no worker row returned")
+# Runs list adds per-country payslip totals (service.attach_run_country_totals).
+_set("GET", "/api/payroll/runs", data_class="tenant_config",
+     note="reviewed: runs list with per-country payslip totals (aggregates only); no worker row returned")

@@ -41,19 +41,21 @@ from app.modules.payroll.mexico_schemas import (
 
 def require_mexico_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     """Phase 4a dormancy guard on EVERY route here: refused unless Mexico
-    onboarding is enabled on this platform AND the caller's organisation is
-    Mexican (its payroll jurisdiction resolves to MX). Role checks stay on
+    onboarding is enabled on this platform AND the caller's organisation runs
+    Mexico payroll (Mexico is its default country or one of its entitled
+    countries — a multi-country org sets up its Mexican employer here too).
+    Role checks stay on
     each route (reads: payroll operator; writes: org admin)."""
-    from app.modules.payroll import mexico_dormancy, service
+    from app.modules.payroll import mexico_dormancy, mexico_run_service
 
     if not mexico_dormancy.onboarding_enabled():
         raise ForbiddenException(mexico_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
     if org_id is None:
         return                                   # each route's _org_id answers Super Admin with its own 403
-    if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
-        raise ForbiddenException("The Mexico API is only available to organisations whose payroll jurisdiction "
-                                 "is Mexico.")
+    if not mexico_run_service._org_runs_mexico(db, org_id):
+        raise ForbiddenException("The Mexico API is only available to organisations that run Mexico payroll "
+                                 "(Mexico is their default country or one of their countries).")
 
 
 router = APIRouter(prefix="/mexico", tags=["Mexico (Organisation)"], dependencies=[Depends(require_mexico_tenant)])

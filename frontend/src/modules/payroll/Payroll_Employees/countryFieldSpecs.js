@@ -64,6 +64,17 @@ function bsnPassesElfproef(value) {
   return total % 11 === 0;
 }
 
+// W-4 form vintage from a year ("2024") or a plain word — mirrors
+// employee_validation.py's _w4_vintage_alias.
+function w4VintageAlias(raw) {
+  const text = String(raw).trim().toLowerCase();
+  const year = text.match(/(19|20)\d{2}/);
+  if (year) return Number(year[0]) >= 2020 ? "2020 or later (current form)" : "Pre-2020 (legacy form)";
+  if (["current", "new", "2020+", "post-2020", "post 2020", "latest"].includes(text)) return "2020 or later (current form)";
+  if (["legacy", "old", "pre-2020", "pre 2020", "before 2020"].includes(text)) return "Pre-2020 (legacy form)";
+  return null;
+}
+
 export const COUNTRY_FIELD_SPECS = {
   IN: [
     { key: "esi_number", label: "ESI number", type: "text", pattern: /^\d{10}(\d{7})?$/, error: "ESI number must be 10 or 17 digits." },
@@ -72,7 +83,8 @@ export const COUNTRY_FIELD_SPECS = {
   US: [
     { key: "ssn", label: "SSN", type: "text", placeholder: "123-45-6789", required: true, strip: " ", pattern: /^\d{3}-\d{2}-\d{4}$/, error: "SSN must be in the format 123-45-6789." },
     { key: "flsa_status", label: "FLSA status", type: "select", required: true, choices: ["Exempt", "Non-Exempt"] },
-    { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"] },
+    { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"],
+      aliases: { s: "Single", mfj: "Married Filing Jointly", "married jointly": "Married Filing Jointly", mfs: "Married Filing Separately", "married separately": "Married Filing Separately", hoh: "Head of Household", married: "Married Filing Jointly" } },
     // Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox — a real,
     // higher-withholding bracket table (backend: hardcoded_defaults.py's
     // "_STEP2"-tagged federal TaxSlab rows), not cosmetic. Optional:
@@ -85,7 +97,7 @@ export const COUNTRY_FIELD_SPECS = {
     // UI path at all until this fix (2026-09-15 onboarding-guidance
     // audit). Unset defaults to the current post-2020 form, same as
     // before this field had a UI.
-    { key: "w4_form_vintage", label: "W-4 form vintage", type: "select", choices: ["2020 or later (current form)", "Pre-2020 (legacy form)"] },
+    { key: "w4_form_vintage", label: "W-4 form vintage", type: "select", choices: ["2020 or later (current form)", "Pre-2020 (legacy form)"], aliases: w4VintageAlias },
     // Federal W-4 §3.4 controls — all optional, each a no-op until set.
     // w4_allowances_claimed only matters on the legacy (pre-2020) form path.
     { key: "w4_allowances_claimed", label: "W-4 allowances claimed (pre-2020 form only)", type: "number", min: 0 },
@@ -344,6 +356,15 @@ export const COUNTRY_FIELD_SPECS = {
   ],
 };
 
+// The one identifier per country that must be unique across employees —
+// mirrors each strategy's duplicate_field in employee_validation.py (India's
+// PAN is its own column, checked the same way server-side).
+export const DUPLICATE_ID_FIELDS = {
+  US: "ssn", UK: "nino", AU: "tfn", CA: "sin", DE: "steuer_id", IE: "ppsn", SG: "nric_fin",
+  HK: "hkid", SE: "swedish_id_number", IT: "codice_fiscale", CH: "ahv_number", SA: "national_id_iqama",
+  NL: "bsn", MX: "curp", BR: "cpf",
+};
+
 // Every jurisdiction's compliance field, flattened into one list — used to
 // build the wide bulk-import template/export sheet (one column per field,
 // across every country) so the two never drift out of sync.
@@ -364,13 +385,62 @@ export function complianceColumnHeader(spec) {
 // API would return. Order of checks matches the server exactly: clean →
 // strip_chars → uppercase → choices → pattern. Returns a list of messages;
 // empty means valid. The server remains authoritative and re-validates.
+// Spreadsheet values people actually type, mapped onto each field's allowed
+// values — mirrors employee_validation.py's _normalize_spec_value exactly
+// (the server applies the same rules, so the preview and the import agree).
+// Returns "" for a "no value" placeholder (N/A, -, nil …).
+const BLANK_WORDS = new Set(["n/a", "na", "n.a.", "-", "--", "nil", "not applicable", "not applicable.", "null"]);
+const TRUE_WORDS = new Set(["true", "yes", "y", "1", "checked", "x", "on"]);
+const FALSE_WORDS = new Set(["false", "no", "n", "0", "unchecked", "off"]);
+const choiceKey = (v) => String(v).trim().toLowerCase().replace(/[\s_-]+/g, " ");
+
+export function normalizeComplianceValue(spec, value) {
+  if (value === undefined || value === null) return "";
+  if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+  let raw = String(value).trim();
+  if (!raw) return "";
+  const choices = spec.choices || null;
+  const lowered = raw.toLowerCase();
+  if (BLANK_WORDS.has(lowered) || (lowered === "none" && !(choices || []).some((c) => c.toLowerCase() === "none"))) return "";
+  const isExactChoice = Boolean(choices && choices.includes(raw));
+  if (!isExactChoice && typeof spec.aliases === "function") {
+    const mapped = spec.aliases(raw);
+    if (mapped != null) raw = mapped;
+  } else if (!isExactChoice && spec.aliases) {
+    raw = spec.aliases[choiceKey(raw)] || raw;
+  }
+  if (choices && choices.every((c) => ["true", "false"].includes(c.toLowerCase()))) {
+    if (TRUE_WORDS.has(lowered)) return "true";
+    if (FALSE_WORDS.has(lowered)) return "false";
+  }
+  if (choices && !choices.includes(raw)) {
+    const match = choices.find((c) => choiceKey(c) === choiceKey(raw));
+    if (match) return match;
+  }
+  if (spec.type === "date") {
+    const m = raw.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/) || raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/);
+    if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  }
+  return raw;
+}
+
+// A country's compliance fields with every value normalized; placeholders dropped.
+export function normalizeComplianceFields(countryCode, complianceFields) {
+  const out = { ...(complianceFields || {}) };
+  for (const spec of COUNTRY_FIELD_SPECS[countryCode] || []) {
+    if (!(spec.key in out)) continue;
+    const value = normalizeComplianceValue(spec, out[spec.key]);
+    if (value === "") delete out[spec.key];
+    else out[spec.key] = value;
+  }
+  return out;
+}
+
 export function validateComplianceFields(countryCode, complianceFields) {
   const countryName = COUNTRIES.find((c) => c.code === countryCode)?.name || countryCode;
   const errors = [];
   for (const spec of COUNTRY_FIELD_SPECS[countryCode] || []) {
-    let raw = complianceFields?.[spec.key];
-    if (raw === undefined || raw === null) raw = "";
-    raw = String(raw).trim();
+    let raw = normalizeComplianceValue(spec, complianceFields?.[spec.key]);
     if (!raw) {
       if (spec.required) errors.push(`${spec.label} is required for ${countryName} employees.`);
       continue;

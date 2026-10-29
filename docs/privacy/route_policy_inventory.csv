@@ -93,13 +93,14 @@ POST,/api/auth/register-trial,public,create,register-trial,,public,,,,no,
 GET,/api/auth/reset-password,public,read,reset-password,,public,,,,no,
 POST,/api/auth/reset-password,public,create,reset-password,,public,,,,no,
 POST,/api/billing/cancel,tenant_config,create,cancel,org_admin,tenant,,,,no,
-POST,/api/billing/checkout,tenant_config,create,checkout,org_admin,tenant,,,,no,
+POST,/api/billing/checkout,tenant_config,create,checkout,org_admin,tenant,,,payroll_employees,yes,reviewed: checkout with country-limit impact check (per-country counts only); no worker row returned
 GET,/api/billing/dunning-status,self,read,dunning-status,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,,no,
-GET,/api/billing/my-subscription,self,read,my-subscription,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,,no,
+GET,/api/billing/my-subscription,self,read,my-subscription,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,payroll_employees,yes,reviewed: org subscription + country usage counts; no worker row returned
 POST,/api/billing/my-subscription/billing-portal,tenant_config,create,billing-portal,org_admin,tenant,,,,no,
 GET,/api/billing/my-subscription/invoice-explanation,worker,read,invoice-explanation,org_admin,tenant,,,billing_worker_month_records,yes,org-scoped invoice explanation lists worker ids for the caller's own org only
 GET,/api/billing/my-subscription/invoice-explanation/{invoice_id},worker,read,invoice-explanation,org_admin,tenant,,,billing_worker_month_records,yes,org-scoped invoice explanation lists worker ids for the caller's own org only
 GET,/api/billing/my-subscription/invoices,self,read,invoices,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,,no,
+GET,/api/billing/plan-change-impact,tenant_config,read,plan-change-impact,org_admin|payroll_admin,tenant,,,payroll_employees,yes,reviewed: countries a plan change would keep/pause/restore (country codes only); no worker row returned
 GET,/api/billing/plans,public,read,plans,,public,,,,no,
 POST,/api/billing/start-trial,tenant_config,create,start-trial,org_admin,tenant,,,,no,
 GET,/api/billing/trial-status,self,read,trial-status,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,,no,
@@ -179,7 +180,7 @@ POST,/api/payroll/compliance/apply-extracted-rate,tenant_config,create,apply-ext
 GET,/api/payroll/compliance/collective-agreements,tenant_config,read,collective-agreements,org_admin|payroll_admin|support_temp,tenant,,,,no,
 POST,/api/payroll/compliance/collective-agreements,tenant_config,create,collective-agreements,org_admin|payroll_admin,tenant,,,,no,
 POST,/api/payroll/compliance/collective-agreements/{agreement_id}/status,tenant_config,create,status,org_admin|payroll_admin,tenant,,,,no,
-PUT,/api/payroll/compliance/company-details,tenant_config,update,company-details,org_admin|payroll_admin,tenant,,,,no,
+PUT,/api/payroll/compliance/company-details,tenant_config,update,company-details,org_admin|payroll_admin,tenant,,,payroll_employees,yes,reviewed: country entitlement reads per-country employee counts only; no worker row returned
 GET,/api/payroll/compliance/contribution-rates,tenant_config,read,contribution-rates,org_admin|payroll_admin|support_temp,tenant,,,,no,
 GET,/api/payroll/compliance/documents,tenant_config,read,documents,org_admin|payroll_admin|support_temp,tenant,,,,no,
 POST,/api/payroll/compliance/documents,tenant_config,create,documents,org_admin|payroll_admin,tenant,,,,no,
@@ -236,17 +237,6 @@ POST,/api/payroll/employees/{employee_id}/germany-overtime-work-records/{record_
 GET,/api/payroll/employees/{employee_id}/statutory-profile,worker,read,statutory-profile,employee|org_admin|payroll_admin|support_temp,tenant,,,payroll_employee_statutory_profiles|payroll_employees|payroll_personal_data_access_events,no,
 POST,/api/payroll/employees/{employee_id}/statutory-profile,worker,create,statutory-profile,org_admin|payroll_admin,tenant,,,payroll_employee_statutory_profiles|payroll_employees,no,
 GET,/api/payroll/employees/{employee_id}/statutory-profile/history,worker,read,history,employee|org_admin|payroll_admin|support_temp,tenant,,,payroll_employee_statutory_profiles|payroll_employees|payroll_personal_data_access_events,no,
-POST,/api/payroll/enterprise/activate,tenant_config,create,activate,org_admin|payroll_admin,tenant,,,,no,
-GET,/api/payroll/enterprise/dashboard,tenant_config,read,dashboard,org_admin|payroll_admin|support_temp,tenant,,,,no,
-POST,/api/payroll/enterprise/deactivate,tenant_config,create,deactivate,org_admin|payroll_admin,tenant,,,,no,
-GET,/api/payroll/enterprise/jurisdictions,tenant_config,read,jurisdictions,org_admin|payroll_admin|support_temp,tenant,,,,no,
-POST,/api/payroll/enterprise/jurisdictions,tenant_config,create,jurisdictions,org_admin|payroll_admin,tenant,,,,no,
-DELETE,/api/payroll/enterprise/jurisdictions/{jurisdiction_id},tenant_config,delete,jurisdictions,org_admin|payroll_admin,tenant,,,,no,
-PUT,/api/payroll/enterprise/jurisdictions/{jurisdiction_id},tenant_config,update,jurisdictions,org_admin|payroll_admin,tenant,,,,no,
-GET,/api/payroll/enterprise/jurisdictions/{jurisdiction_id}/contribution-rates,tenant_config,read,contribution-rates,org_admin|payroll_admin|support_temp,tenant,,,,no,
-PUT,/api/payroll/enterprise/jurisdictions/{jurisdiction_id}/contribution-rates/{component_key},tenant_config,update,contribution-rates,org_admin|payroll_admin,tenant,,,,no,
-POST,/api/payroll/enterprise/jurisdictions/{jurisdiction_id}/verify,tenant_config,create,verify,org_admin|payroll_admin,tenant,,,,no,
-GET,/api/payroll/enterprise/validation,tenant_config,read,validation,org_admin|payroll_admin|support_temp,tenant,,,,no,
 GET,/api/payroll/filings,tenant_config,read,filings,org_admin|payroll_admin|support_temp,tenant,,,,no,
 GET,/api/payroll/filings/records,tenant_config,read,records,org_admin|payroll_admin|support_temp,tenant,,,,no,
 PUT,/api/payroll/filings/records,tenant_config,update,records,org_admin|payroll_admin,tenant,,,,no,
@@ -398,6 +388,11 @@ GET,/api/payroll/italy/tfr/ledger,worker,read,ledger,org_admin|payroll_admin|sup
 POST,/api/payroll/italy/tfr/revaluation,worker,create,revaluation,org_admin|payroll_admin,tenant,,,payroll_it_tfr_ledger_entries,no,
 POST,/api/payroll/jamaica/reports/s01,worker,create,s01,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_generated_reports|payslip_items,no,
 POST,/api/payroll/jamaica/reports/s02,worker,create,s02,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_generated_reports|payslip_items,no,
+GET,/api/payroll/jurisdictions/entitled,tenant_config,read,entitled,org_admin|payroll_admin,tenant,,,payroll_employees,yes,reviewed: country entitlement reads per-country employee counts only; no worker row returned
+POST,/api/payroll/jurisdictions/entitled,tenant_config,create,entitled,org_admin,tenant,,,payroll_employees,yes,reviewed: country entitlement reads per-country employee counts only; no worker row returned
+POST,/api/payroll/jurisdictions/entitled/replace-primary,tenant_config,create,replace-primary,org_admin,tenant,,,payroll_employees,yes,reviewed: country entitlement reads per-country employee counts only; no worker row returned
+DELETE,/api/payroll/jurisdictions/entitled/{country_code},tenant_config,delete,entitled,org_admin,tenant,,,payroll_employees,yes,reviewed: country entitlement reads per-country employee counts only; no worker row returned
+POST,/api/payroll/jurisdictions/entitled/{country_code}/primary,tenant_config,create,primary,org_admin,tenant,,,payroll_employees,yes,reviewed: country entitlement reads per-country employee counts only; no worker row returned
 POST,/api/payroll/ky/reports/pension-submission,worker,create,pension-submission,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_generated_reports|payslip_items,no,
 GET,/api/payroll/leave-requests,worker,read,leave-requests,org_admin|payroll_admin|support_temp,tenant,,,payroll_attendance_records|payroll_employees|payroll_ie_statutory_sick_leave_records|payroll_leave_allocations|payroll_leave_requests,no,
 POST,/api/payroll/leave-requests,worker,create,leave-requests,org_admin|payroll_admin,tenant,,,payroll_attendance_records|payroll_employees|payroll_ie_statutory_sick_leave_records|payroll_leave_requests,no,
@@ -530,8 +525,8 @@ PUT,/api/payroll/netherlands/termination-settlements/{settlement_id}/approve,wor
 GET,/api/payroll/netherlands/wkr,tenant_config,read,wkr,org_admin|payroll_admin,tenant,,,,no,
 GET,/api/payroll/payslips,worker,read,payslips,org_admin|payroll_admin|support_temp,tenant,,,payslip_items,no,
 DELETE,/api/payroll/payslips/{payslip_id},worker,delete,payslips,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_employees|payroll_ytd_accumulators|payslip_allowance_items|payslip_items|sgp_ir21_cases,no,
-GET,/api/payroll/payslips/{payslip_id},worker,read,payslips,org_admin|payroll_admin|support_temp,tenant,,,payslip_items,no,
-GET,/api/payroll/payslips/{payslip_id}/download,worker,export,download,org_admin|payroll_admin,tenant,,,payroll_personal_data_access_events|payslip_items,no,
+GET,/api/payroll/payslips/{payslip_id},worker,read,payslips,org_admin|payroll_admin|support_temp,tenant,,,payroll_employees|payslip_items,no,
+GET,/api/payroll/payslips/{payslip_id}/download,worker,export,download,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_personal_data_access_events|payslip_items,no,
 GET,/api/payroll/policy/active,tenant_config,read,active,org_admin|payroll_admin|support_temp,tenant,,,,no,
 PUT,/api/payroll/policy/{policy_id},tenant_config,update,policy,org_admin|payroll_admin,tenant,,,,no,
 POST,/api/payroll/policy/{policy_id}/integrations/{category}/{provider_key}/disable,tenant_config,create,disable,org_admin|payroll_admin,tenant,,,,no,
@@ -556,16 +551,16 @@ GET,/api/payroll/report-templates/available,tenant_config,read,available,org_adm
 GET,/api/payroll/report-templates/filing-calendar,tenant_config,read,filing-calendar,org_admin|payroll_admin|support_temp,tenant,,,,no,
 GET,/api/payroll/reports,tenant_config,read,reports,org_admin|payroll_admin|support_temp,tenant,,,,no,
 GET,/api/payroll/reports/{report_id}/download,worker,export,download,org_admin|payroll_admin,tenant,,,,no,
-GET,/api/payroll/runs,tenant_config,read,runs,org_admin|payroll_admin|support_temp,tenant,,,,no,
+GET,/api/payroll/runs,tenant_config,read,runs,org_admin|payroll_admin|support_temp,tenant,,,payslip_items,yes,reviewed: runs list with per-country payslip totals (aggregates only); no worker row returned
 POST,/api/payroll/runs,worker,create,runs,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_attendance_records|payroll_ch_absence_benefit_events|payroll_ch_family_allowance_entitlements|payroll_court_ordered_deductions|payroll_employee_benefit_valuations|payroll_employee_establishments|payroll_employee_statutory_profiles|payroll_employees|payroll_fr_pas_rates|payroll_hk_work_hours|payroll_ie_myfuturefund_statuses|payroll_ie_rpn_snapshots|payroll_leave_requests|payroll_ni_relief_facts|payroll_pr_withholding_certificates|payroll_salary_tds_claims|payroll_salary_tds_declarations|payroll_super_guarantee_liabilities|payroll_ytd_accumulators|payslip_allowance_items|payslip_items,no,
 POST,/api/payroll/runs/preview,worker,create,preview,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_attendance_records|payroll_ch_absence_benefit_events|payroll_ch_family_allowance_entitlements|payroll_court_ordered_deductions|payroll_employee_benefit_valuations|payroll_employee_establishments|payroll_employee_statutory_profiles|payroll_employees|payroll_fr_pas_rates|payroll_ie_myfuturefund_statuses|payroll_ie_rpn_snapshots|payroll_leave_requests|payroll_ni_relief_facts|payroll_pr_withholding_certificates|payroll_salary_tds_claims|payroll_salary_tds_declarations|payroll_ytd_accumulators|payslip_items,no,
 DELETE,/api/payroll/runs/{run_id},worker,delete,runs,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_mx_run_corrections|payroll_ytd_accumulators|payslip_items,no,
-GET,/api/payroll/runs/{run_id},tenant_config,read,runs,org_admin|payroll_admin|support_temp,tenant,,,,no,
+GET,/api/payroll/runs/{run_id},tenant_config,read,runs,org_admin|payroll_admin|support_temp,tenant,,,payslip_items,yes,reviewed: run detail with per-country payslip totals (aggregates only); no worker row returned
 PUT,/api/payroll/runs/{run_id},tenant_config,update,runs,org_admin|payroll_admin,tenant,,,,no,
 PUT,/api/payroll/runs/{run_id}/approve,worker,update,approve,org_admin|payroll_admin,tenant,,,payroll_attendance_records|payroll_ch_absence_benefit_events|payroll_ch_family_allowance_entitlements|payroll_court_ordered_deductions|payroll_employee_benefit_valuations|payroll_employee_establishments|payroll_employee_statutory_profiles|payroll_employees|payroll_fr_pas_rates|payroll_hk_work_hours|payroll_ie_myfuturefund_statuses|payroll_ie_rpn_snapshots|payroll_leave_requests|payroll_ni_relief_facts|payroll_pr_withholding_certificates|payroll_salary_tds_claims|payroll_salary_tds_declarations|payroll_ytd_accumulators|payslip_allowance_items|payslip_items|sgp_ir21_cases,no,
 GET,/api/payroll/runs/{run_id}/bank-transfer-file,worker,export,bank-transfer-file,org_admin|payroll_admin,tenant,,,payroll_attendance_records|payroll_employees|payroll_mx_cfdi_documents|payroll_mx_run_corrections|payroll_mx_vacation_records|payroll_personal_data_access_events|payslip_allowance_items|payslip_items|sgp_ir21_cases,no,
 GET,/api/payroll/runs/{run_id}/bank-transfer-summary,worker,read,bank-transfer-summary,org_admin|payroll_admin,tenant,,,payslip_items,no,
-GET,/api/payroll/runs/{run_id}/download,worker,export,download,org_admin|payroll_admin,tenant,,,payroll_personal_data_access_events|payslip_items,no,
+GET,/api/payroll/runs/{run_id}/download,worker,export,download,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_personal_data_access_events|payslip_items,no,
 PUT,/api/payroll/runs/{run_id}/employees/{employee_id}/recalculate,worker,update,recalculate,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_attendance_records|payroll_ch_absence_benefit_events|payroll_ch_family_allowance_entitlements|payroll_court_ordered_deductions|payroll_employee_benefit_valuations|payroll_employee_establishments|payroll_employee_statutory_profiles|payroll_employees|payroll_fr_pas_rates|payroll_hk_work_hours|payroll_ie_myfuturefund_statuses|payroll_ie_rpn_snapshots|payroll_leave_requests|payroll_ni_relief_facts|payroll_pr_withholding_certificates|payroll_salary_tds_claims|payroll_salary_tds_declarations|payroll_ytd_accumulators|payslip_allowance_items|payslip_items|sgp_ir21_cases,no,
 POST,/api/payroll/runs/{run_id}/generate-payslips,worker,create,generate-payslips,org_admin|payroll_admin,tenant,,,organization_ytd_accumulators|payroll_attendance_records|payroll_ch_absence_benefit_events|payroll_ch_family_allowance_entitlements|payroll_court_ordered_deductions|payroll_employee_benefit_valuations|payroll_employee_establishments|payroll_employee_statutory_profiles|payroll_employees|payroll_fr_pas_rates|payroll_hk_work_hours|payroll_ie_myfuturefund_statuses|payroll_ie_rpn_snapshots|payroll_leave_requests|payroll_ni_relief_facts|payroll_pr_withholding_certificates|payroll_salary_tds_claims|payroll_salary_tds_declarations|payroll_super_guarantee_liabilities|payroll_ytd_accumulators|payslip_allowance_items|payslip_items|support_grant_employees,no,
 GET,/api/payroll/runs/{run_id}/items,worker,read,items,org_admin|payroll_admin|support_temp,tenant,,,payslip_items,no,
@@ -727,7 +722,7 @@ GET,/api/super-admin/billing/subscriptions,platform,read,subscriptions,super_adm
 POST,/api/super-admin/billing/trial-expiry-run,platform,create,trial-expiry-run,super_admin,platform,,,,no,
 GET,/api/super-admin/commercial/revenue-collections,platform,read,revenue-collections,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/active-tax-configuration,platform,read,active-tax-configuration,super_admin,platform,,,,no,
-GET,/api/super-admin/compliance/brazil/employees,worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"lists Brazilian employees (names, codes) of one organization"
+GET,/api/super-admin/compliance/brazil/employees,platform,read,employees,super_admin,platform,,,payroll_employees,yes,reviewed: Super Admin org-scoped Brazilian employee list; requires an explicit organization_id
 GET,/api/super-admin/compliance/brazil/fpas-table,platform,read,fpas-table,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/gates,platform,read,gates,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/brazil/golden-check,platform,create,golden-check,super_admin,platform,,,,no,
@@ -908,10 +903,10 @@ GET,/api/super-admin/compliance/mexico/earning-classifications,platform,read,ear
 POST,/api/super-admin/compliance/mexico/earning-classifications,platform,create,earning-classifications,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/mexico/earning-classifications/{classification_id}/approve,platform,approve,approve,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/mexico/earning-classifications/{classification_id}/archive,platform,create,archive,super_admin,platform,,,,no,
-GET,/api/super-admin/compliance/mexico/employees,worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"lists Mexican employees (names, codes) of one organization"
-GET,/api/super-admin/compliance/mexico/employees/{employee_id},worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,one Mexican employee's record and readiness
+GET,/api/super-admin/compliance/mexico/employees,platform,read,employees,super_admin,platform,,,payroll_employees,yes,reviewed: Super Admin org-scoped Mexican employee list; requires an explicit organization_id
+GET,/api/super-admin/compliance/mexico/employees/{employee_id},platform,read,employees,super_admin,platform,,,payroll_employees,yes,reviewed: Super Admin org-scoped Mexican employee record; requires an explicit organization_id
 GET,/api/super-admin/compliance/mexico/employer-readiness,platform,read,employer-readiness,super_admin,platform,,,,no,
-GET,/api/super-admin/compliance/mexico/employer-readiness/summary,platform,read,summary,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/mexico/employer-readiness/summary,aggregate,read,summary,super_admin,platform,,,,yes,reviewed: per-gate employer readiness counts only; no worker row or identity is returned
 GET,/api/super-admin/compliance/mexico/employers,platform,read,employers,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/employers/{employer_id},platform,read,employers,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/mexico/imss-branches,platform,read,imss-branches,super_admin,platform,,,,no,

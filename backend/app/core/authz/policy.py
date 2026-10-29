@@ -383,6 +383,7 @@ def _record_denial(request: Request, decision: Decision, policy: RoutePolicy,
 
     from app.modules.auth.models import AuthzDecisionEvent
 
+    print(f"[DEBUG] _record_denial called: path={policy.path} method={request.method} reason={decision.reason} status={decision.status_code} principal_role={getattr(principal,'role',None)}", flush=True)
     try:
         audit_db = _Session(bind=db.get_bind())
     except Exception:  # noqa: BLE001
@@ -469,16 +470,26 @@ def _record_support_denial(request: Request, decision: Decision, policy: RoutePo
 
 # ── FastAPI dependencies ─────────────────────────────────────────────────────
 
-def build_data_context(principal: Principal, policy: RoutePolicy, db: Session):
+def build_data_context(principal: Principal, policy: RoutePolicy, db: Session,
+                       organization_id: Optional[int] = None):
     """The data-layer scope for an ALLOWED request (tenant_context.py).
 
     Platform principals get a platform context: any ORM statement touching a
     worker-level table raises, except on reviewed aggregate / lifecycle
     routes. Tenant principals get their organization plus object scope.
+
+    A platform principal reading a *specific* organisation's data (the route
+    supplies an explicit ``organization_id``) runs under a tenant context
+    scoped to that organisation, so worker-table reads are org-scoped and
+    allowed instead of being rejected as a cross-tenant platform access
+    (ZP-PRIV B02). Platform reads without an explicit organisation stay on
+    the platform plane (org-level tables or k-suppressed aggregates only).
     Fails closed: an error here propagates and the request is denied."""
     from app.core.authz import scopes, tenant_context as tc
 
     if principal.role in PLATFORM_ROLES:
+        if organization_id is not None:
+            return tc.TenantContext(tc.KIND_TENANT, organization_id=organization_id)
         return tc.TenantContext(
             tc.KIND_PLATFORM,
             allow_worker_aggregate=policy.data_class in (DC_AGGREGATE, DC_TENANT_LIFECYCLE),
@@ -506,7 +517,16 @@ async def _enforce(request: Request, policy: RoutePolicy, principal: Optional[Pr
         decision = evaluate(principal, policy, path_params=request.path_params, db=db)
     if decision.allowed:
         try:
-            ctx = build_data_context(principal, policy, db)
+            organization_id = None
+            for name in _TENANT_PARAM_NAMES:
+                value = request.query_params.get(name)
+                if value not in (None, ""):
+                    try:
+                        organization_id = int(value)
+                    except (TypeError, ValueError):
+                        organization_id = None
+                    break
+            ctx = build_data_context(principal, policy, db, organization_id=organization_id)
         except Exception:  # noqa: BLE001 - scope we cannot compute = deny
             logger.exception("[authz] data scope error on %s %s", policy.method, policy.path)
             decision = Decision.deny(PDP_ERROR, detail="data scope computation failed")
@@ -719,7 +739,12 @@ def install_route_policies(app) -> Dict[Tuple[str, str], RoutePolicy]:
             depends=Depends(_route_policy_dependency(route.path_format, by_method)),
             path=route.path_format,
         )
-        route.dependant.dependencies.insert(0, sub)
+        # Router-level dependencies (e.g. per-router dormancy guards such as
+        # require_mexico_tenant) must run BEFORE the PDP so a router-level
+        # refusal (403 "not open for onboarding" for a dormant Mexico org)
+        # wins over the PDP's object-scope denial (404). Keep the PDP after
+        # those router deps but before the endpoint's own signature deps.
+        route.dependant.dependencies.insert(len(route.dependencies or []), sub)
         installed.update({(m, route.path_format): p for m, p in by_method.items()})
 
     app.state.authz_route_policies = installed

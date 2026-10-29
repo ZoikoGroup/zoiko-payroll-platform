@@ -239,14 +239,29 @@ def _compose_email_html(template: str, context: dict) -> str:
     """Render a template. Full standalone documents render as-is; body-only
     fragments are first rendered, then slotted into the shared wrapper."""
     if re.match(r"(?is)^\s*<!doctype\s+html", template):
-        return _render_template(template, context)
+        return _strip_unresolved(_render_template(template, context))
     wrapper = _load_template(_BASE_WRAPPER_NAME)
     if not wrapper:
         logger.warning(f"Shared email wrapper not found: {_BASE_WRAPPER_NAME}; rendering template body alone")
         return _render_template(template, context)
     rendered_body = _render_template(template, context)
     composed = wrapper.replace("{{body_slot}}", rendered_body)
-    return _render_template(composed, context)
+    return _strip_unresolved(_render_template(composed, context))
+
+
+# Any {{placeholder}} (or stray {{#if}}/{{/if}} marker) still present after
+# rendering is a value the sender didn't supply. It must never reach an
+# inbox as literal text — e.g. "{{heading}}" printed as a payroll email's
+# title — so it is removed and logged for the developer to fix.
+_UNRESOLVED_RE = re.compile(r"\{\{[#/]?\s*[\w .]*\}\}")
+
+
+def _strip_unresolved(html: str) -> str:
+    leftovers = sorted(set(_UNRESOLVED_RE.findall(html)))
+    if leftovers:
+        logger.warning(f"Email rendered with unresolved placeholders removed: {', '.join(leftovers)}")
+        html = _UNRESOLVED_RE.sub("", html)
+    return html
 
 
 def _details_rows(rows) -> str:
@@ -618,6 +633,9 @@ def send_payroll_run_approved_email(
     from_email, from_display_name = _resolve_payroll_send_identity(organization_id, db=db)
     return send_approval_email(email, "payroll_run_approved.html", {
         "subject": f"Payroll Approved — {pay_period} | Zoiko Payroll",
+        # Inbox preview line. No "heading" on purpose: this email opens with
+        # the greeting (the shared wrapper only renders a heading if given).
+        "preheader": f"Payroll for {pay_period} has been approved.",
         "employee_name": employee_name,
         "pay_period": pay_period,
         "accent_bar": PALETTE["success"],
@@ -678,6 +696,7 @@ def _send_leave_request_status_email(
     action = "Approved" if approved else "Rejected"
     return send_approval_email(email, template_name, {
         "subject": f"Leave Request {action} — {request_code} | Zoiko Payroll",
+        "preheader": f"Your leave request {request_code} has been {action.lower()}.",
         "employee_name": employee_name,
         "leave_type": _LEAVE_TYPE_LABELS.get(str(leave_type).lower(), str(leave_type) or "Leave"),
         "start_date": start_date,
@@ -747,9 +766,9 @@ def send_employee_created_email(
     designation: str = "", date_of_joining: str = "", organization_id=None, db=None,
 ) -> bool:
     return _payroll_send(email, "employee_created.html", {
-        "subject": "You have been onboarded to payroll | Zoiko Payroll",
+        "subject": "Welcome to Zoiko Payroll | Zoiko Payroll",
         "preheader": "Your employee record is active in Zoiko Payroll.",
-        "heading": "Welcome to payroll",
+        "heading": "Welcome to Zoiko Payroll",
         "employee_name": employee_name,
         "details_panel": _details_rows([
             ("Employee code", employee_code),

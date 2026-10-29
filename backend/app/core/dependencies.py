@@ -282,6 +282,7 @@ def get_current_user(
     serialize or depend on full User ORM fields."""
     if token and token.startswith("zpmc_"):
         return _resolve_machine(token, db)
+    print(f"[DEBUG-GCU] token present={bool(token)} role=super_admin?", flush=True)
     payload, _is_assisted = _decode_required(token, db)
     return _resolve_access_user(db, payload)
 

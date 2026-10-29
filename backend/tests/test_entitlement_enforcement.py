@@ -3,7 +3,7 @@ tests/test_entitlement_enforcement.py
 ----------------------------------------
 Integration tests for real plan-limit enforcement (billing/entitlements.py
 require_entitlement()/require_scope_limit(), now actually wired into
-organizations/router.py, payroll/router.py, payroll/enterprise/router.py,
+organizations/router.py, payroll/router.py, payroll/jurisdictions_router.py,
 and assist/router.py — previously these were defined but called from
 nowhere).
 
@@ -64,7 +64,6 @@ from app.modules.billing.models import (  # noqa: E402
     BillingAuthority, BillingCommercialAuditEvent, BillingSubscription, SubscriptionStatus,
 )
 from app.modules.organizations.models import LegalEntity, Organization  # noqa: E402
-from app.modules.payroll.enterprise.models import EnterpriseJurisdiction  # noqa: E402
 from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayrollStatus  # noqa: E402
 
 from sqlalchemy.engine import make_url as _make_url  # noqa: E402
@@ -209,24 +208,28 @@ def test_professional_org_blocked_from_fourth_legal_entity(client, pro_headers):
 
 # ── Jurisdictions (MAX_JURISDICTIONS) ──────────────────────────────────────
 
-def test_core_org_can_add_its_first_jurisdiction(client, core_headers):
-    r = client.post("/api/payroll/enterprise/jurisdictions", headers=core_headers, json={"countryCode": "IN"})
+_ENTITLED = "/api/payroll/jurisdictions/entitled"
+
+
+def test_core_org_has_its_registered_country_as_its_one_jurisdiction(client, core_headers):
+    r = client.get(_ENTITLED, headers=core_headers)
     assert r.status_code == 200, r.text
+    assert [c["code"] for c in r.json()["countries"] if c["status"] == "ACTIVE"] == ["IN"]
 
 
 def test_core_org_blocked_from_second_jurisdiction(client, core_headers):
-    r = client.post("/api/payroll/enterprise/jurisdictions", headers=core_headers, json={"countryCode": "US"})
+    r = client.post(_ENTITLED, headers=core_headers, json={"countryCode": "US"})
     assert r.status_code == 403, r.text
 
 
 def test_professional_org_can_reach_its_cap_of_three_jurisdictions(client, pro_headers):
-    for country in ["IN", "US", "UK"]:
-        r = client.post("/api/payroll/enterprise/jurisdictions", headers=pro_headers, json={"countryCode": country})
+    for country in ["US", "UK"]:  # + its registered country (IN) = 3
+        r = client.post(_ENTITLED, headers=pro_headers, json={"countryCode": country})
         assert r.status_code == 200, r.text
 
 
 def test_professional_org_blocked_from_fourth_jurisdiction(client, pro_headers):
-    r = client.post("/api/payroll/enterprise/jurisdictions", headers=pro_headers, json={"countryCode": "AU"})
+    r = client.post(_ENTITLED, headers=pro_headers, json={"countryCode": "AU"})
     assert r.status_code == 403, r.text
 
 

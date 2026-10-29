@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Users } from "lucide-react";
+import { COUNTRIES } from "./countryFieldSpecs";
+import { currencyInfoForCountry } from "../../../utils/currency";
 
 const DEPARTMENT_STYLES = {
   Engineering: "bg-info/10 text-info",
@@ -52,11 +54,12 @@ const COLUMNS = [
   { key: "name", label: "Name" },
   { key: "department", label: "Department" },
   { key: "designation", label: "Designation" },
+  { key: "countryCode", label: "Country" },
   { key: "ctc", label: "Annual CTC" },
   { key: "status", label: "Status" },
 ];
 
-export default function EmployeeTable({ employees, loading, onRowClick, selectedEmployeeId, selectedIds, onSelectionChange, currencyInfo }) {
+export default function EmployeeTable({ employees, loading, onRowClick, selectedEmployeeId, selectedIds, onSelectionChange, currencyInfo, orgCountryCode }) {
   const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
 
@@ -203,7 +206,12 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                   <DepartmentBadge dept={emp.department} />
                 </td>
                 <td className="whitespace-nowrap px-4 py-3.5 text-[13px] text-foreground-muted">{emp.designation}</td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] font-semibold text-foreground">{formatCurrency(emp.ctc, currencyInfo)}</td>
+                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] text-foreground-muted">
+                  {COUNTRIES.find((c) => c.code === emp.countryCode)?.name || emp.countryCode || "—"}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] font-semibold text-foreground">
+                  {formatCurrency(emp.ctc, currencyInfoForCountry(emp.countryCode, currencyInfo, orgCountryCode))}
+                </td>
                 <td className="whitespace-nowrap px-4 py-3.5">
                   <StatusBadge status={emp.status} />
                 </td>

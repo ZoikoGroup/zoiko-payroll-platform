@@ -155,7 +155,39 @@ export function PTSlabsTable({ rows, caption }) {
 // Exported for the same reason as ContributionRatesTable's RatesTable —
 // TaxConfigurationTab.jsx re-presents already-fetched rows under
 // jurisdiction-specific labels without a second fetch or API change.
+// India keeps two complete bracket tables (New and Old regime); running them
+// together in one list reads as one nonsensical table, so rows that carry a
+// taxRegime are shown under a heading per regime.
+const TAX_REGIME_LABELS = {
+  New: "New tax regime (default)",
+  Old: "Old tax regime (if the employee opts in)",
+};
+
+// Rows with no regime are the default table. Where an "Old" regime table
+// exists alongside them (India), the default IS the New regime — the engine
+// calculates an employee with no declared regime under it.
+function regimeLabel(key, groups) {
+  if (!key && groups.some((g) => g.key === "Old")) return TAX_REGIME_LABELS.New;
+  return TAX_REGIME_LABELS[key] || (key ? `${key} regime` : "All employees");
+}
+
+function groupByRegime(rows) {
+  const groups = [];
+  rows.forEach((row) => {
+    const key = row.taxRegime || "";
+    let group = groups.find((g) => g.key === key);
+    if (!group) {
+      group = { key, rows: [] };
+      groups.push(group);
+    }
+    group.rows.push(row);
+  });
+  return groups;
+}
+
 export function SlabsTable({ rows, caption }) {
+  const groups = groupByRegime(rows);
+  const showRegimeHeadings = groups.length > 1;
   return (
     <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
       <div className="px-6 py-3 border-b border-border">
@@ -171,18 +203,27 @@ export function SlabsTable({ rows, caption }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((s, i) => (
-            <tr key={s.id ?? i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
-              <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.min}</td>
-              <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.max}</td>
-              <td className="px-5 py-3.5">
-                <span className="rounded-full px-3 py-1 text-[11px] font-bold bg-warning/10 text-warning">
-                  {s.rate}
-                </span>
-              </td>
-              <td className="px-5 py-3.5 text-[13px] text-foreground-muted">{s.tax}</td>
-            </tr>
-          ))}
+          {groups.map((group) => [
+            showRegimeHeadings && (
+              <tr key={`regime-${group.key}`} className="bg-surface-muted">
+                <td colSpan={4} className="px-5 py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                  {regimeLabel(group.key, groups)}
+                </td>
+              </tr>
+            ),
+            ...group.rows.map((s, i) => (
+              <tr key={s.id ?? `${group.key}-${i}`} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.min}</td>
+                <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.max}</td>
+                <td className="px-5 py-3.5">
+                  <span className="rounded-full px-3 py-1 text-[11px] font-bold bg-warning/10 text-warning">
+                    {s.rate}
+                  </span>
+                </td>
+                <td className="px-5 py-3.5 text-[13px] text-foreground-muted">{s.tax}</td>
+              </tr>
+            )),
+          ])}
         </tbody>
       </table>
     </div>

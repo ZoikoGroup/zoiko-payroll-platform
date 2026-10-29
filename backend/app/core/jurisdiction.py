@@ -64,6 +64,17 @@ REGISTRATION_COUNTRIES = [
     # in turn requires the §16/§37 readiness gates (evidence, certification,
     # four-eyes) — adding the name here never activates Sweden by itself.
     "Sweden",
+    # Owner decision 2026-10-29: every configured payroll country is offered
+    # at registration. Listing a country here still never opens it by
+    # itself — onboarding also needs its registry row AVAILABLE and an
+    # Active canonical pack (get_jurisdiction_onboarding_block_reason).
+    "Brazil",
+    "Hong Kong",
+    "Italy",
+    "Netherlands",
+    "Saudi Arabia",
+    "Singapore",
+    "Switzerland",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses

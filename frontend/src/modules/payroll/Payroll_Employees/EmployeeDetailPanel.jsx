@@ -2,6 +2,7 @@ import { MpfAccountReveal } from "../Compliances/HKMpfAccessControls";
 import React, { useEffect, useState } from "react";
 import { X, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
+import { currencyInfoForCountry } from "../../../utils/currency";
 import UKStatutoryPayCalculatorModal from "./UKStatutoryPayCalculatorModal";
 import UKCourtOrdersModal from "./UKCourtOrdersModal";
 import UKNiReliefFactsModal from "./UKNiReliefFactsModal";
@@ -86,7 +87,7 @@ function DetailRow({ label, value }) {
   );
 }
 
-export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDeleted, currencyInfo }) {
+export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDeleted, currencyInfo, orgCountryCode }) {
   const [mode, setMode] = useState("view");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -157,6 +158,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
             <EmployeeForm
               employee={employee}
               currencyInfo={currencyInfo}
+              orgCountryCode={orgCountryCode}
               onCancel={() => setMode("view")}
               onSaved={(updated) => {
                 setMode("view");
@@ -194,7 +196,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
               <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                 <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">Salary structure</h4>
                 <dl className="divide-y divide-border">
-                  <DetailRow label="Annual CTC" value={formatCurrency(employee.ctc, currencyInfo)} />
+                  <DetailRow label="Annual CTC" value={formatCurrency(employee.ctc, currencyInfoForCountry(employee.countryCode, currencyInfo, orgCountryCode))} />
                 </dl>
               </div>
 

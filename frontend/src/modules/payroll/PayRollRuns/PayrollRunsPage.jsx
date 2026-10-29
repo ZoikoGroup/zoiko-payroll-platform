@@ -14,6 +14,7 @@ import {
 } from "../../../service/payrollService";
 import { getCurrencyForJurisdiction, formatCurrency } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
+import { useEntitledCountries } from "../EntitledCountriesContext";
 import { ATTENDANCE_OVERRIDE_MIN_REASON } from "./AttendanceReadinessPanel";
 
 const WIZARD_STEPS = [
@@ -72,6 +73,13 @@ export default function PayrollRunsPage() {
   const { company, calculationMode: contextCalculationMode } = usePayrollSetup();
   const jurisdictionCountry = company?.jurisdictionCountry || "IN";
   const jurisdictionState = company?.jurisdictionState || "";
+  // A multi-country org's run covers every active country — each employee is
+  // calculated by their own country — so label the run with all of them.
+  const { countries: entitledCountries } = useEntitledCountries();
+  const activeCountries = (entitledCountries || []).filter((c) => c.status === "ACTIVE");
+  const runCountriesLabel = activeCountries.length > 1
+    ? activeCountries.map((c) => c.code).join(", ")
+    : jurisdictionCountry;
   // loadPreview() below can override this per-preview if the backend's
   // resolved mode differs from the context's — starts from the shared value.
   const [calculationModeOverride, setCalculationModeOverride] = useState(null);
@@ -272,12 +280,12 @@ export default function PayrollRunsPage() {
     );
   };
 
-  const toggleAllEmployees = () => {
-    if (selectedEmployees.length === employees.length) {
-      setSelectedEmployees([]);
-    } else {
-      setSelectedEmployees(employees.map((e) => e.id));
-    }
+  const toggleAllEmployees = (employeeIds = employees.map((e) => e.id)) => {
+    setSelectedEmployees((prev) => {
+      const allSelected = employeeIds.every((id) => prev.includes(id));
+      if (allSelected) return prev.filter((id) => !employeeIds.includes(id));
+      return [...new Set([...prev, ...employeeIds])];
+    });
   };
 
   const isWizard = view === "wizard";
@@ -322,9 +330,22 @@ export default function PayrollRunsPage() {
         </div>
         {jurisdictionCountry && (
           <div className="mt-4 rounded-[12px] bg-surface-muted border border-border p-3">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">Jurisdiction</p>
-            <p className="text-xs font-bold text-foreground">{jurisdictionCountry}</p>
-            {jurisdictionState && <p className="text-[10px] text-foreground-muted mt-0.5">{jurisdictionState}</p>}
+            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">
+              {activeCountries.length > 1 ? "Countries" : "Jurisdiction"}
+            </p>
+            {activeCountries.length > 1 ? (
+              <>
+                {activeCountries.map((c) => (
+                  <p key={c.code} className="text-xs font-bold text-foreground">{c.name}</p>
+                ))}
+                <p className="text-[10px] text-foreground-muted mt-0.5">Each employee is paid under their own country&apos;s rules</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-bold text-foreground">{jurisdictionCountry}</p>
+                {jurisdictionState && <p className="text-[10px] text-foreground-muted mt-0.5">{jurisdictionState}</p>}
+              </>
+            )}
           </div>
         )}
         <div className="mt-3 rounded-[12px] bg-surface-muted border border-border p-3">
@@ -340,7 +361,7 @@ export default function PayrollRunsPage() {
           <div>
             <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payroll Runs</h1>
             <p className="text-[13px] text-foreground-muted mt-0.5">
-              {isWizard ? `Processing payroll for ${jurisdictionCountry}` : "View and manage existing payroll runs"}
+              {isWizard ? `Processing payroll for ${runCountriesLabel}` : "View and manage existing payroll runs"}
             </p>
           </div>
           <div className="flex items-center gap-4">

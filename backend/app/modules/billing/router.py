@@ -26,20 +26,21 @@ from decimal import Decimal
 from typing import List, Optional
 
 import stripe
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.dependencies import get_current_org_admin, get_current_user
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.database import get_db
-from app.modules.billing import entitlements, plan_catalog
+from app.modules.billing import entitlements, jurisdiction_entitlement, plan_catalog
 from app.modules.billing.models import (
     BillingAuthority,
     BillingCommercialAuditEvent,
     BillingPlan,
     BillingPlanVersion,
     BillingSubscription,
+    EnterpriseOrderForm,
     SubscriptionStatus,
 )
 from app.modules.billing.schemas import (
@@ -130,10 +131,50 @@ def get_my_subscription(
     if subscription is None:
         raise NotFoundException("Subscription")
 
+    rows = jurisdiction_entitlement.ensure_ledger(db, current_user.organization_id)
+    db.commit()  # the read may have seeded or reconciled the country ledger
+    if subscription.billing_authority == BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+        # No plan version — the signed Order Form's negotiated limits are the plan.
+        order_form = (
+            db.query(EnterpriseOrderForm)
+            .filter(EnterpriseOrderForm.organization_id == current_user.organization_id)
+            .first()
+        )
+        flags = dict((order_form.negotiated_scale_limits or {}) if order_form else {})
+        flags["plan_code"] = "ENTERPRISE"
+    else:
+        flags = plan_catalog.list_entitlement_flags(db, subscription.plan_version_id)
     return BillingMySubscriptionResponse(
         subscription=subscription,
-        entitlement_flags=plan_catalog.list_entitlement_flags(db, subscription.plan_version_id),
+        entitlement_flags=flags,
+        country_usage={
+            "used": sum(1 for r in rows if r.status == jurisdiction_entitlement.ACTIVE),
+            "limit": jurisdiction_entitlement.resolve_country_limit(db, current_user.organization_id),
+            "countries": [
+                {"code": r.country_code, "name": jurisdiction_entitlement.country_name(r.country_code),
+                 "status": r.status, "isPrimary": bool(r.is_primary)}
+                for r in rows
+            ],
+        },
     )
+
+
+@router.get("/plan-change-impact", summary="What switching to a plan would do to this organization's countries")
+def get_plan_change_impact(
+    plan_code: str = Query(..., min_length=1, max_length=30),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """{planCode, newLimit, currentLimit, countries, keep, pause, restore}:
+    countries that would stay active, be paused (OVER_LIMIT — existing
+    employees stay readable, new employees and payroll there stop) or be
+    restored on that plan. Read-only apart from seeding the org's ledger."""
+    plan = db.query(BillingPlan).filter(BillingPlan.code == plan_code.upper()).first()
+    if plan is None:
+        raise NotFoundException("Billing Plan", plan_code)
+    impact = jurisdiction_entitlement.plan_change_impact(db, current_user.organization_id, plan.code)
+    db.commit()
+    return impact
 
 
 @router.get(
@@ -360,28 +401,53 @@ def create_checkout_session(
     if version is None:
         raise NotFoundException("Published Plan Version for code", body.plan_code)
 
+    # Country entitlement: a plan with fewer countries than the org uses
+    # pauses the extra ones (OVER_LIMIT) once the subscription changes —
+    # never silently. Checked before any Stripe call.
+    impact = jurisdiction_entitlement.plan_change_impact(db, organization_id, plan.code)
+    if impact["pause"] and not body.acknowledge_country_pause:
+        names = ", ".join(jurisdiction_entitlement.country_name(c) for c in impact["pause"])
+        raise jurisdiction_entitlement.ConflictException(
+            f"The {plan.name} plan includes {impact['newLimit']} "
+            f"{'country' if impact['newLimit'] == 1 else 'countries'}, but your organization uses "
+            f"{len(impact['countries'])}. Switching would pause payroll and new employees in: {names}. "
+            f"Existing employees and payroll history stay readable. Confirm to continue, or remove those "
+            f"countries under Compliance > Countries first.",
+            trace={"resource": "max_jurisdictions", "reason": "plan_change_pauses_countries", **impact},
+        )
+
     # Ensure Stripe price exists (creates on-the-fly if missing)
     stripe_price_id = _ensure_stripe_price(db, version, plan)
 
     # Check 2: Jurisdiction onboarding block check
     block_reason = get_jurisdiction_onboarding_block_reason(db, org.country)
     if block_reason:
-        raise BadRequestException(f"Jurisdiction onboarding blocked: {block_reason}")
+        raise BadRequestException(
+            f"Paid plans aren't available yet for organizations registered in {org.country or 'your country'} — "
+            f"Zoiko is still completing that country's statutory set-up. Contact support to be notified when "
+            f"it's ready. ({block_reason})"
+        )
 
-    # Check 3: Prevent duplicate checkout if ALREADY on an ACTIVE paid subscription for a different plan
+    # Check 3: an org already on an ACTIVE paid subscription changes plan
+    # in place (no second subscription, no second checkout); choosing the
+    # plan it is already on is refused rather than opening a duplicate.
     active_sub = entitlements.get_active_subscription(db, organization_id)
-    if active_sub and active_sub.status == SubscriptionStatus.ACTIVE.value:
-        if active_sub.plan_version_id:
-            sub_plan_version = (
-                db.query(BillingPlanVersion)
-                .filter(BillingPlanVersion.id == active_sub.plan_version_id)
-                .first()
-            )
-            if sub_plan_version and sub_plan_version.plan_id != plan.id:
+    if active_sub and active_sub.status == SubscriptionStatus.ACTIVE.value and active_sub.plan_version_id:
+        sub_plan_version = (
+            db.query(BillingPlanVersion)
+            .filter(BillingPlanVersion.id == active_sub.plan_version_id)
+            .first()
+        )
+        if sub_plan_version and sub_plan_version.plan_id == plan.id:
+            raise BadRequestException(f"Your organization is already on the {plan.name} plan.")
+        if sub_plan_version:
+            if not active_sub.stripe_subscription_id:
                 raise ForbiddenException(
-                    "Organization already has an active paid subscription for a different plan. "
+                    "This organization's subscription isn't managed through Stripe self-service. "
                     "Contact support to change plans."
                 )
+            return _change_subscription_plan(db, org, active_sub, plan, version, stripe_price_id,
+                                             actor_user_id=current_user.id, impact=impact)
 
     # Nonce prevents duplicate Checkout Sessions from double-clicks
     idempotency_key = f"checkout:{organization_id}:{version.id}:{uuid.uuid4()}"
@@ -405,6 +471,8 @@ def create_checkout_session(
     session_kwargs = dict(
         mode="subscription",
         client_reference_id=str(organization_id),
+        # Prefill Stripe's email field with the admin who is subscribing.
+        customer_email=getattr(current_user, "email", None) or None,
         line_items=[{
             "price": stripe_price_id,
             "quantity": 1,
@@ -573,6 +641,66 @@ def _infer_component_type(price) -> str:
     if usage_type == "metered":
         return "BWM"
     return "RECURRING_BASE"
+
+
+def _change_subscription_plan(db: Session, org, sub: BillingSubscription, plan: BillingPlan,
+                              version: BillingPlanVersion, stripe_price_id: str, actor_user_id: int,
+                              impact: dict) -> BillingCheckoutResponse:
+    """Move an ACTIVE Stripe subscription to another plan in place: swap its
+    single price item (Stripe prorates the difference on the next invoice),
+    then update the local subscription right away so limits change now — the
+    customer.subscription.updated webhook re-applies the same version
+    idempotently. Country limits are reconciled (a downgrade pauses extra
+    countries; checkout already required the admin to acknowledge that)."""
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        # StripeObjects aren't dicts in stripe-python 15+; work on a plain dict.
+        stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id).to_dict()
+        items = (stripe_sub.get("items") or {}).get("data") or []
+        if not items:
+            raise BadRequestException("The Stripe subscription has no price item to change.")
+        stripe.Subscription.modify(
+            sub.stripe_subscription_id,
+            items=[{"id": items[0]["id"], "price": stripe_price_id}],
+            proration_behavior="create_prorations",
+            metadata={"organization_id": str(org.id), "plan_version_id": str(version.id)},
+        )
+    except stripe.error.StripeError as e:
+        raise BadRequestException(f"Stripe could not change the plan: {str(e)}")
+
+    old_version_id = sub.plan_version_id
+    sub.plan_version_id = version.id
+    db.flush()
+    _sync_subscription_price_item(db, sub, plan.code)
+    db.add(BillingCommercialAuditEvent(
+        organization_id=org.id,
+        actor_user_id=actor_user_id,
+        event_type="SELF_SERVICE_PLAN_CHANGED",
+        payload={"from_plan_version_id": old_version_id, "to_plan_version_id": version.id,
+                 "stripe_subscription_id": sub.stripe_subscription_id,
+                 "countries_paused": impact.get("pause") or [], "countries_restored": impact.get("restore") or []},
+    ))
+    jurisdiction_entitlement.safe_reconcile(db, org.id, actor_user_id=actor_user_id, reason="plan_changed")
+    db.commit()
+    return BillingCheckoutResponse(
+        plan_changed=True, plan_code=plan.code,
+        message=f"Your organization is now on the {plan.name} plan. Any price difference is prorated on your next invoice.",
+    )
+
+
+def _webhook_target_exists(db: Session, org_id_str: str, version_id_str: str) -> bool:
+    """True when a checkout's metadata names an organization and plan
+    version that exist in THIS database."""
+    from app.modules.organizations.models import Organization
+
+    try:
+        org_id, version_id = int(org_id_str), int(version_id_str)
+    except (TypeError, ValueError):
+        return False
+    return (
+        db.query(Organization.id).filter(Organization.id == org_id).first() is not None
+        and db.query(BillingPlanVersion.id).filter(BillingPlanVersion.id == version_id).first() is not None
+    )
 
 
 def _sync_subscription_price_item(db: Session, sub: BillingSubscription, plan_code: str) -> None:
@@ -795,7 +923,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         version_id_str = (data_object.get("metadata") or {}).get("plan_version_id")
         commencement_str = (data_object.get("metadata") or {}).get("service_commencement_at")
 
-        if org_id_str and version_id_str:
+        if org_id_str and version_id_str and not _webhook_target_exists(db, org_id_str, version_id_str):
+            # A Stripe account is often shared by several environments (and
+            # `stripe listen` forwards every event on it): a checkout created
+            # by another environment names an organization/plan version this
+            # database doesn't have. Acknowledge it (200) instead of failing
+            # on a foreign key — a 500 makes Stripe retry it for days.
+            logger.warning(
+                "[stripe-webhook] %s for unknown organization %s / plan version %s ignored (event %s)",
+                event_type, org_id_str, version_id_str, event_id,
+            )
+        elif org_id_str and version_id_str:
             org_id = int(org_id_str)
             version_id = int(version_id_str)
             stripe_sub_id = data_object.get("subscription")
@@ -916,6 +1054,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 payload={"stripe_subscription_id": stripe_sub_id, "plan_version_id": version_id},
                 stripe_event_id=event_id,
             ))
+            # The plan may have changed max_jurisdictions — pause or restore
+            # entitled countries to match (never deletes anything).
+            jurisdiction_entitlement.safe_reconcile(db, org_id, reason="checkout_completed")
             db.commit()
 
     elif event_type == "customer.subscription.updated":
@@ -963,6 +1104,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 payload={"stripe_status": data_object.get("status"), "plan_version_id": sub.plan_version_id},
                 stripe_event_id=event_id,
             ))
+            if version:
+                jurisdiction_entitlement.safe_reconcile(db, sub.organization_id, reason="subscription_updated")
             db.commit()
 
     elif event_type == "invoice.paid":

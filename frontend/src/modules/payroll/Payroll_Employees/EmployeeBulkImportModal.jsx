@@ -1,8 +1,12 @@
 import React, { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Upload, Download, X, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react";
 import * as XLSX from "xlsx";
 import { bulkCreateEmployees, EMPLOYMENT_TYPES, EMPLOYEE_STATUSES, DEPARTMENTS } from "../../../service/payrollService";
-import { COUNTRIES, COUNTRY_FIELD_SPECS, COMPLIANCE_SPECS, complianceColumnHeader, validateComplianceFields } from "./countryFieldSpecs";
+import { COUNTRIES, COUNTRY_FIELD_SPECS, COMPLIANCE_SPECS, DUPLICATE_ID_FIELDS, complianceColumnHeader, normalizeComplianceFields, validateComplianceFields } from "./countryFieldSpecs";
+import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
+import { getCurrencyForJurisdiction } from "../../../utils/currency";
+import PlanLimitMessage, { isPlanLimitError, PLAN_SELECTION_ROUTE } from "../../../components/PlanLimitMessage";
 
 const COLUMN_MAP = {
   "ID": "_existingId",
@@ -48,17 +52,42 @@ const HEADER_ALIASES = {
   "employee code": "_existingId",
 };
 
-// The template carries the org's own jurisdiction statutory columns only —
-// no cross-country noise. The parser still recognises every country's
-// headers (COMPLIANCE_HEADER_LOOKUP) so a hand-edited mixed sheet keeps
-// working for rows whose Country differs from the org's default.
+// Employees are imported one country at a time: the admin picks the
+// country, downloads that country's template (its own statutory columns
+// only), and every row in the file is an employee of that country. The
+// template has no Country column — the import itself names the country —
+// but a Country column in an older or exported sheet is still read, and a
+// row for another country is flagged instead of imported.
 //
-// IFSC/PAN/UAN are India's dedicated columns, so they are dropped from the
-// template whenever the org's jurisdiction is not India.
+// IFSC/PAN/UAN are India's dedicated columns, so only India's template has them.
 const IN_DEDICATED_HEADERS = ["IFSC Code", "PAN Number", "UAN"];
 const BASE_TEMPLATE_HEADERS = Object.keys(COLUMN_MAP)
-  .filter((h) => h !== "ID")
+  .filter((h) => h !== "ID" && h !== "Country")
   .filter((h) => !IN_DEDICATED_HEADERS.includes(h));
+const REQUIRED_BASE_HEADERS = ["Employee Name", "Email", "Designation", "Date of Joining (YYYY-MM-DD)", "CTC"];
+
+// A sample employee per country, so each template reads like that
+// country's own payroll (salary in its currency, a local bank).
+const COUNTRY_SAMPLES = {
+  IN: { name: "Asha Rao", email: "asha.rao@example.com", phone: "9876543210", bank: "HDFC Bank", account: "123456789012", ctc: 1200000 },
+  US: { name: "Jordan Lee", email: "jordan.lee@example.com", phone: "4155550123", bank: "Chase", account: "000123456789", ctc: 85000 },
+  UK: { name: "Oliver Smith", email: "oliver.smith@example.com", phone: "07700900123", bank: "Barclays", account: "12345678", ctc: 45000 },
+};
+const GENERIC_SAMPLE = { name: "Alex Morgan", email: "alex.morgan@example.com", phone: "5550123", bank: "Example Bank", account: "12345678", ctc: 60000 };
+
+function countryName(countryCode) {
+  return COUNTRIES.find((c) => c.code === countryCode)?.name || countryCode;
+}
+
+function currencyCode(countryCode) {
+  return getCurrencyForJurisdiction(countryCode)?.code || "";
+}
+
+// "CTC (annual, GBP)" — the parser strips the parenthetical, so it still maps to CTC.
+function ctcHeader(countryCode) {
+  const currency = currencyCode(countryCode);
+  return currency ? `CTC (annual, ${currency})` : "CTC";
+}
 
 // Sample values per statutory field, so each jurisdiction's template shows
 // exactly how its own columns are meant to be filled.
@@ -102,53 +131,82 @@ const COMPLIANCE_SAMPLE_VALUES = {
   nibtt_number: "A1234567",
 };
 
+function countrySpecs(countryCode) {
+  return (COUNTRY_FIELD_SPECS[countryCode] || []).map((spec) => ({ ...spec, country: countryCode }));
+}
+
 function templateHeadersFor(countryCode) {
-  const base =
-    countryCode === "IN"
-      ? [...BASE_TEMPLATE_HEADERS, ...IN_DEDICATED_HEADERS]
-      : BASE_TEMPLATE_HEADERS;
-  const jurisdiction = (COUNTRY_FIELD_SPECS[countryCode] || []).map((spec) => ({
-    ...spec,
-    country: countryCode,
-  }));
-  return [...base, ...jurisdiction.map(complianceColumnHeader)];
+  const base = (countryCode === "IN" ? [...BASE_TEMPLATE_HEADERS, ...IN_DEDICATED_HEADERS] : BASE_TEMPLATE_HEADERS)
+    .map((h) => (h === "CTC" ? ctcHeader(countryCode) : h));
+  return [...base, ...countrySpecs(countryCode).map(complianceColumnHeader)];
 }
 
 function sampleRowFor(countryCode) {
+  const sample = COUNTRY_SAMPLES[countryCode] || GENERIC_SAMPLE;
   const row = {
-    "Employee Name": "Asha Rao",
-    "Email": "asha.rao@example.com",
-    "Phone": "9876543210",
+    "Employee Name": sample.name,
+    "Email": sample.email,
+    "Phone": sample.phone,
     "Department": DEPARTMENTS[0],
     "Designation": "Software Engineer",
     "Employment Type": EMPLOYMENT_TYPES[0],
     "Status": "Active",
     "Date of Joining (YYYY-MM-DD)": "2026-01-15",
-    "CTC": 1200000,
-    "Bank Name": "HDFC Bank",
-    "Bank Account Number": "123456789012",
-    "Country": countryCode,
+    [ctcHeader(countryCode)]: sample.ctc,
+    "Bank Name": sample.bank,
+    "Bank Account Number": sample.account,
   };
   if (countryCode === "IN") {
     row["IFSC Code"] = "HDFC0001234";
     row["PAN Number"] = "ABCDE1234F";
     row["UAN"] = "101234567890";
   }
-  for (const spec of COUNTRY_FIELD_SPECS[countryCode] || []) {
+  for (const spec of countrySpecs(countryCode)) {
     const sample = COMPLIANCE_SAMPLE_VALUES[spec.key];
     if (sample) row[complianceColumnHeader(spec)] = sample;
   }
   return row;
 }
 
-function downloadTemplate(defaultCountryCode) {
-  const countryCode = normalizeCountryCode(defaultCountryCode) || "IN";
+// One row per template column: whether it's required and what it accepts.
+function instructionRowsFor(countryCode) {
+  const rows = templateHeadersFor(countryCode).map((header) => {
+    const base = header.startsWith("CTC") ? "CTC" : header;
+    const spec = countrySpecs(countryCode).find((sp) => complianceColumnHeader(sp) === header);
+    let accepts = "";
+    if (base === "CTC") accepts = `Annual cost to company in ${currencyCode(countryCode) || "local currency"}`;
+    else if (base === "Employment Type") accepts = EMPLOYMENT_TYPES.join(", ");
+    else if (base === "Status") accepts = EMPLOYEE_STATUSES.join(", ");
+    else if (base === "Date of Joining (YYYY-MM-DD)") accepts = "Date, e.g. 2026-01-15";
+    else if (spec?.choices && spec.choices.every((c) => ["true", "false"].includes(c.toLowerCase()))) accepts = "Yes or No";
+    else if (spec?.choices) accepts = `${[...new Set(spec.choices)].join(", ")} (any capitalisation)`;
+    else if (spec?.type === "date") accepts = "Date, e.g. 2026-01-15";
+    else if (spec?.placeholder) accepts = `e.g. ${spec.placeholder}`;
+    else if (spec?.showWhen) accepts = "Only when it applies (see column name)";
+    const required = REQUIRED_BASE_HEADERS.includes(base) || spec?.required;
+    return { Column: header, Required: required ? "Yes" : "No", "Accepted values": accepts };
+  });
+  return [
+    { Column: `Every employee in this file is paid in ${countryName(countryCode)} (${countryCode}).`, Required: "", "Accepted values": "" },
+    { Column: "Import other countries' employees separately, each with its own template.", Required: "", "Accepted values": "" },
+    { Column: "Leave a column that doesn't apply blank (N/A is fine too).", Required: "", "Accepted values": "" },
+    { Column: "", Required: "", "Accepted values": "" },
+    ...rows,
+  ];
+}
+
+// The template for one country: its own statutory columns, a sample
+// employee from that country, and an Instructions sheet.
+function downloadTemplate(countryCode) {
   const headers = templateHeadersFor(countryCode);
   const ws = XLSX.utils.json_to_sheet([sampleRowFor(countryCode)], { header: headers });
   ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length, 18) }));
+  const help = XLSX.utils.json_to_sheet(instructionRowsFor(countryCode), { header: ["Column", "Required", "Accepted values"] });
+  help["!cols"] = [{ wch: 60 }, { wch: 10 }, { wch: 70 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Employees");
-  XLSX.writeFile(wb, `employee_bulk_import_template_${countryCode}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, `${countryCode} employees`);
+  XLSX.utils.book_append_sheet(wb, help, "Instructions");
+  XLSX.writeFile(wb, `employee_import_template_${countryCode}.xlsx`);
 }
 
 function normalizeHeader(header) {
@@ -187,7 +245,8 @@ function normalizeCountryCode(value) {
   const match = COUNTRIES.find(
     (c) => c.code.toLowerCase() === raw.toLowerCase() || c.name.toLowerCase() === raw.toLowerCase()
   );
-  return match ? match.code : raw.toUpperCase();
+  // "GB" (ISO) is spelled "UK" on employee records.
+  return match ? match.code : toEmployeeCountryCode(raw);
 }
 
 // Matches an uploaded value against an allowed list case/whitespace-
@@ -215,9 +274,9 @@ function normalizeDate(value) {
   return asString;
 }
 
-function toRowObject(rawRow, defaultCountryCode) {
+function toRowObject(rawRow, importCountry) {
   const row = {};
-  const complianceFields = {};
+  const filledSpecs = [];
   for (const [rawHeader, rawValue] of Object.entries(rawRow)) {
     const normalized = normalizeHeader(rawHeader);
     const field = NORMALIZED_FIELD_LOOKUP[normalized];
@@ -227,7 +286,7 @@ function toRowObject(rawRow, defaultCountryCode) {
     }
     const complianceSpec = COMPLIANCE_HEADER_LOOKUP[normalized];
     if (complianceSpec && String(rawValue ?? "").trim() !== "") {
-      complianceFields[complianceSpec.key] = rawValue;
+      filledSpecs.push([complianceSpec, rawValue]);
     }
   }
   for (const field of Object.values(COLUMN_MAP)) {
@@ -239,7 +298,9 @@ function toRowObject(rawRow, defaultCountryCode) {
   row.department = row.department || DEPARTMENTS[0];
   row.employmentType = normalizeAgainstAllowedList(row.employmentType, EMPLOYMENT_TYPES) || EMPLOYMENT_TYPES[0];
   row.status = normalizeAgainstAllowedList(row.status, EMPLOYEE_STATUSES) || "Active";
-  row.countryCode = normalizeCountryCode(row.countryCode) || defaultCountryCode || "IN";
+  // A blank Country is the import's country; one naming another country is
+  // flagged by validateRow (each country is imported separately).
+  row.countryCode = normalizeCountryCode(row.countryCode) || importCountry || "";
   row.bankName = row.bankName ? String(row.bankName).trim() : "";
   row.bankAccountNumber = row.bankAccountNumber ? String(row.bankAccountNumber).trim() : "";
   row.ctc = row.ctc === "" ? "" : Number(row.ctc);
@@ -251,20 +312,61 @@ function toRowObject(rawRow, defaultCountryCode) {
   row.panNumber = isIndia && row.panNumber ? String(row.panNumber).toUpperCase().trim() : "";
   row.ifscCode = isIndia && row.ifscCode ? String(row.ifscCode).toUpperCase().trim() : "";
   row.uan = isIndia ? row.uan : "";
-  row.complianceFields = complianceFields;
+  // Statutory columns belong to one country; another country's filled-in
+  // columns mean the row (or file) is for that country, not this import.
+  row.complianceFields = {};
+  row.foreignColumns = [];
+  for (const [spec, value] of filledSpecs) {
+    if (spec.country === row.countryCode) row.complianceFields[spec.key] = value;
+    else row.foreignColumns.push(spec);
+  }
+  // "No" -> "false", "Non-exempt" -> "Non-Exempt", "N/A" -> dropped, …
+  row.complianceFields = normalizeComplianceFields(row.countryCode, row.complianceFields);
   return row;
 }
 
-function validateRow(row) {
+// True when the entitlement list has loaded and the row's (otherwise valid)
+// country isn't one of the org's ACTIVE entitled countries — the server
+// would reject it with a plan-limit block, so it is flagged before upload.
+function isRowCountryNotEntitled(row, entitlement) {
+  return (
+    entitlement.loaded &&
+    COUNTRIES.some((c) => c.code === row.countryCode) &&
+    !entitlement.isEntitled(row.countryCode)
+  );
+}
+
+function validateRow(row, entitlement, importCountry) {
   const errors = [];
+  if (importCountry && row.countryCode && row.countryCode !== importCountry) {
+    errors.push(
+      `This row is for ${countryName(row.countryCode)} (${row.countryCode}), but you are importing ${countryName(importCountry)} employees — import it separately with the ${row.countryCode} template`
+    );
+    return errors;
+  }
+  if (row.foreignColumns?.length > 0) {
+    const other = row.foreignColumns[0].country;
+    errors.push(
+      `Has ${countryName(other)} columns filled in (${row.foreignColumns.map((sp) => sp.label).slice(0, 3).join(", ")}) — this looks like a ${other} employee. Use the ${countryName(importCountry)} template, or import ${other} employees separately`
+    );
+    return errors;
+  }
   if (!String(row.name || "").trim()) errors.push("Employee name is required");
   if (!String(row.email || "").trim()) errors.push("Email is required");
   else if (!/^\S+@\S+\.\S+$/.test(row.email)) errors.push("Email format looks incorrect");
   if (!String(row.designation || "").trim()) errors.push("Designation is required");
   if (!row.dateOfJoining || isNaN(new Date(row.dateOfJoining))) errors.push("Date of joining is missing or invalid");
   if (!row.ctc || Number(row.ctc) <= 0) errors.push("CTC must be a positive number");
-  if (!COUNTRIES.some((c) => c.code === row.countryCode)) {
-    errors.push(`Country "${row.countryCode || "(blank)"}" is not valid — must be exactly one of: ${COUNTRIES.map((c) => c.code).join(", ")}`);
+  if (!row.countryCode) {
+    errors.push("Country is required — it decides which country's payroll engine calculates this employee");
+  } else if (!COUNTRIES.some((c) => c.code === row.countryCode)) {
+    errors.push(`Country "${row.countryCode}" has no payroll engine — must be exactly one of: ${COUNTRIES.map((c) => c.code).join(", ")}`);
+  } else if (isRowCountryNotEntitled(row, entitlement)) {
+    errors.push(
+      entitlement.entitledEmployeeCodes.length > 0
+        ? `Country "${row.countryCode}" is not included in your plan — your organization can add employees in: ${entitlement.entitledEmployeeCodes.join(", ")}`
+        : `Country "${row.countryCode}" is not included in your plan — your organization has no active countries yet`
+    );
   }
   if (row.countryCode === "IN" && row.panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(row.panNumber)) {
     errors.push("PAN format looks incorrect (e.g. ABCDE1234F)");
@@ -283,11 +385,61 @@ function validateRow(row) {
   return errors;
 }
 
-export default function EmployeeBulkImportModal({ onClose, onImported, defaultCountryCode }) {
+// Each employee's email and national ID must be unique: a second row with the
+// same value would be refused by the server ("already exists") after the
+// first one is created. Flag it in the preview instead, naming the row it
+// repeats. Emails already on file are flagged too. (National IDs come back
+// masked from the API, so only the server can check those against existing
+// employees.)
+function flagDuplicates(rows, existingEmails) {
+  const idKey = (v) => String(v ?? "").replace(/[\s-]/g, "").toUpperCase();
+  const seenEmail = new Map();
+  const seenId = new Map();
+  rows.forEach(({ row, errors }, i) => {
+    if (row._existingId) return;
+    const rowLabel = `row ${i + 2}${row.name ? ` (${row.name})` : ""}`;
+    const email = String(row.email || "").trim().toLowerCase();
+    if (email) {
+      if (seenEmail.has(email)) errors.push(`Same email as ${seenEmail.get(email)} — every employee needs their own email`);
+      else if (existingEmails.has(email)) errors.push(`An employee with this email already exists`);
+      else seenEmail.set(email, rowLabel);
+    }
+    const idField = row.countryCode === "IN" ? "panNumber" : DUPLICATE_ID_FIELDS[row.countryCode];
+    const idValue = idField === "panNumber" ? row.panNumber : row.complianceFields?.[idField];
+    const key = idKey(idValue);
+    if (idField && key && !key.includes("*")) {
+      const label = COUNTRY_FIELD_SPECS[row.countryCode]?.find((sp) => sp.key === idField)?.label || (idField === "panNumber" ? "PAN" : idField);
+      const scoped = `${row.countryCode}:${key}`;
+      if (seenId.has(scoped)) {
+        errors.push(`Same ${label} as ${seenId.get(scoped)} — each employee needs their own ${label} (a placeholder like ${idValue} can only be used once)`);
+      } else {
+        seenId.set(scoped, rowLabel);
+      }
+    }
+  });
+  return rows;
+}
+
+export default function EmployeeBulkImportModal({ onClose, onImported, defaultCountryCode, existingEmployees = [] }) {
+  const entitlement = useEntitledCountries();
+  const primaryCountry = entitlement.primaryEmployeeCode || toEmployeeCountryCode(defaultCountryCode) || "";
+  // The countries this org can import into (its ACTIVE plan countries),
+  // primary first; before the list loads, just the primary country.
+  const countryChoices = (() => {
+    const codes = entitlement.loaded && entitlement.entitledEmployeeCodes.length > 0
+      ? entitlement.entitledEmployeeCodes
+      : [primaryCountry].filter(Boolean);
+    const known = codes.filter((code) => COUNTRIES.some((c) => c.code === code));
+    return [...new Set(known)].sort((a, b) => (a === primaryCountry ? -1 : b === primaryCountry ? 1 : 0));
+  })();
+  const [chosenCountry, setChosenCountry] = useState("");
+  const importCountry = countryChoices.includes(chosenCountry) ? chosenCountry : countryChoices[0] || "";
+  const importCountryName = countryName(importCountry);
   const fileInputRef = useRef(null);
   const [fileName, setFileName] = useState("");
   const [parsedRows, setParsedRows] = useState([]);
   const [parseError, setParseError] = useState("");
+  const [planError, setPlanError] = useState(null);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -320,11 +472,12 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
         }
 
         const rows = rawRows.map((rawRow) => {
-          const row = toRowObject(rawRow, defaultCountryCode);
-          const errors = row._existingId ? [] : validateRow(row);
+          const row = toRowObject(rawRow, importCountry);
+          const errors = row._existingId ? [] : validateRow(row, entitlement, importCountry);
           return { row, errors };
         });
-        setParsedRows(rows);
+        const existingEmails = new Set(existingEmployees.map((e) => String(e.email || "").trim().toLowerCase()).filter(Boolean));
+        setParsedRows(flagDuplicates(rows, existingEmails));
       } catch (err) {
         setParseError(err.message || "Could not read this file. Please check it's a valid .xlsx or .csv file.");
       }
@@ -335,19 +488,21 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
 
   async function handleImport() {
     const rowsToImport = parsedRows.filter((r) => r.errors.length === 0 && !r.row._existingId).map((r) => {
-      const { _existingId, ...rest } = r.row;
+      // eslint-disable-next-line no-unused-vars
+      const { _existingId, foreignColumns, ...rest } = r.row;
       return rest;
     });
     if (rowsToImport.length === 0) return;
 
     setImporting(true);
     setParseError("");
+    setPlanError(null);
     try {
       const payload = rowsToImport.map((row) => ({
         ...row,
         panNumber: row.panNumber || "",
       }));
-      const response = await bulkCreateEmployees(payload);
+      const response = await bulkCreateEmployees(payload, importCountry);
       // response.created is a COUNT; the actual created employee records
       // (needed to add them to the list instantly, without waiting for a
       // refetch) are under response.employees.
@@ -356,7 +511,9 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
       setResult({ importedCount: response?.created ?? createdEmployees.length, skippedCount: existingCount, failed });
       if (createdEmployees.length > 0) onImported?.(createdEmployees);
     } catch (err) {
-      setParseError(err.message || "Import failed. No employees were added. Please try again.");
+      // No plan / plan-limit refusals get the "Choose a plan" link.
+      if (isPlanLimitError(err)) setPlanError(err);
+      else setParseError(err.message || "Import failed. No employees were added. Please try again.");
     } finally {
       setImporting(false);
     }
@@ -366,6 +523,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
     setFileName("");
     setParsedRows([]);
     setParseError("");
+    setPlanError(null);
     setResult(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -377,8 +535,17 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
     setFileName("");
     setParsedRows([]);
     setParseError("");
+    setPlanError(null);
     setResult(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  // A parsed file belongs to the country it was checked against — switching
+  // country asks for the file again.
+  function chooseCountry(code) {
+    if (code === importCountry) return;
+    setChosenCountry(code);
+    reset();
   }
 
   function handleDragOver(e) {
@@ -421,7 +588,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
           <div>
             <div className="flex items-center gap-3 rounded-[12px] bg-primary/10 px-4 py-3.5 text-[13px] font-semibold text-primary border border-primary/20">
               <CheckCircle size={18} />
-              {`Successfully imported ${result.importedCount} new employee${result.importedCount === 1 ? "" : "s"}.`}
+              {`Successfully imported ${result.importedCount} new ${importCountryName} employee${result.importedCount === 1 ? "" : "s"}.`}
               {result.skippedCount > 0 && (
                 <span className="ml-1.5 text-info">Skipped {result.skippedCount} existing.</span>
               )}
@@ -449,7 +616,9 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                           <td className="px-4 py-2 font-mono text-[12px]">{i + 1}</td>
                           <td className="px-4 py-2">{f.row?.name || "—"}</td>
                           <td className="px-4 py-2">{f.row?.email || "—"}</td>
-                          <td className="px-4 py-2">{f.reason}</td>
+                          <td className="px-4 py-2">
+                            {isPlanLimitError(f) ? <PlanLimitMessage compact message={f.reason} trace={f.trace} /> : f.reason}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -479,6 +648,32 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
           </div>
         ) : (
           <>
+            <div className="mb-4">
+              <label htmlFor="import-country" className="mb-2 block text-[13px] font-bold text-foreground">1. Country template — which country are these employees paid in?</label>
+              {countryChoices.length === 0 ? (
+                <p className="text-[13px] text-foreground-muted">
+                  {entitlement.loaded ? "Your organization has no active countries yet — add one under Compliance → Countries." : "Loading your countries…"}
+                </p>
+              ) : (
+                <select
+                  id="import-country"
+                  aria-label="Import country"
+                  value={importCountry}
+                  onChange={(e) => chooseCountry(e.target.value)}
+                  className="w-full sm:w-96 rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {countryChoices.map((code) => (
+                    <option key={code} value={code}>
+                      {countryName(code)} ({code}{currencyCode(code) ? ` · ${currencyCode(code)}` : ""}){code === primaryCountry ? " — primary" : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="mt-2 text-[12px] text-foreground-muted">
+                Only the countries selected in Compliance → Countries are listed. Each country is imported separately with its own template — its payroll engine, statutory fields and currency differ.
+              </p>
+            </div>
+
             <div
               className="border-2 border-dashed border-border rounded-[18px] p-8 text-center transition-all duration-200 hover:border-primary hover:bg-primary/5"
               onDragOver={handleDragOver}
@@ -486,13 +681,17 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
             >
               <Upload size={36} className="mx-auto mb-3 text-primary" />
               <p className="text-[13px] text-foreground-muted mb-4">
-                Upload a spreadsheet with one employee per row. Existing employees (with an ID) are automatically skipped.
+                {importCountry
+                  ? <>2. Upload your <b className="text-foreground">{importCountryName}</b> employees — one per row. Existing employees (with an ID) are skipped.</>
+                  : "Choose a country first."}
               </p>
               <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".xlsx,.xls,.csv"
+                  disabled={!importCountry}
+                  aria-label={`Upload ${importCountryName} employees file`}
                   onChange={handleFileChange}
                   className="block w-full text-[13px] text-foreground-muted file:mr-3 file:rounded-[12px] file:border-0 file:bg-primary file:px-4 file:py-2 file:text-[13px] file:font-bold file:text-white file:cursor-pointer file:transition-all duration-200 hover:file:bg-primary-hover sm:w-auto"
                 />
@@ -504,17 +703,24 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                 </div>
               )}
               <div className="mt-4 pt-4 border-t border-border">
-                <p className="text-[11px] text-foreground-muted mb-2">Tip: Use &quot;Export&quot; on the employee list to download all existing employees. Add new rows without IDs, then re-upload — existing rows are auto-skipped. The statutory columns in this template match your organization&apos;s jurisdiction ({defaultCountryCode || "IN"}); set the &quot;Country&quot; column per row to place an employee under a different jurisdiction.</p>
+                <p className="text-[11px] text-foreground-muted mb-2">
+                  The {importCountryName || "country"} template has {importCountryName || "that country"}&apos;s own statutory columns
+                  {currencyCode(importCountry) ? ` and salaries in ${currencyCode(importCountry)}` : ""}; its Instructions sheet lists
+                  what each column accepts. Every row is calculated by the {importCountryName || "chosen country"} payroll engine.
+                </p>
                 <button
                   type="button"
-                  onClick={() => downloadTemplate(defaultCountryCode)}
-                  className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary hover:text-primary-hover transition-colors duration-200"
+                  disabled={!importCountry}
+                  onClick={() => downloadTemplate(importCountry)}
+                  className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary hover:text-primary-hover transition-colors duration-200 disabled:opacity-50"
                 >
                   <Download size={14} />
-                  Download template
+                  Download {importCountryName ? `${importCountryName} (${importCountry})` : ""} template
                 </button>
               </div>
             </div>
+
+            {planError && <PlanLimitMessage error={planError} className="mt-4" />}
 
             {parseError && (
               <div className="mt-4 rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
@@ -550,7 +756,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Name</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Email</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Department</th>
-                        <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Country</th>
+                        <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Country (payroll engine)</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">CTC</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
                       </tr>
@@ -574,10 +780,22 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                                 ))}
                               </ul>
                             )}
+                            {!row._existingId && isRowCountryNotEntitled(row, entitlement) && (
+                              <Link to={PLAN_SELECTION_ROUTE} className="mt-0.5 inline-block text-[11px] font-bold text-primary hover:text-primary-hover hover:underline">
+                                Upgrade plan to add this country →
+                              </Link>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-[13px] text-foreground-muted">{row.email}</td>
                           <td className="px-3 py-2.5 text-[13px] text-foreground-muted">{row.department}</td>
-                          <td className="px-3 py-2.5 text-[13px] text-foreground-muted">{row.countryCode}</td>
+                          <td className="px-3 py-2.5 text-[13px] text-foreground-muted">
+                            {row.countryCode ? (
+                              <span title="Payroll engine this employee will be calculated with">
+                                {COUNTRIES.find((c) => c.code === row.countryCode)?.name || row.countryCode}
+                                <span className="ml-1 text-[11px] opacity-70">({row.countryCode})</span>
+                              </span>
+                            ) : "—"}
+                          </td>
                           <td className="px-3 py-2.5 text-[13px] text-foreground-muted">{row.ctc || "—"}</td>
                           <td className="px-3 py-2.5">
                             <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold ${
@@ -608,7 +826,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                 disabled={validCount === 0 || importing}
                 className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-60 disabled:hover:translate-y-0"
               >
-                {importing ? "Importing…" : `Import ${validCount || ""} new employee${validCount === 1 ? "" : "s"}`}
+                {importing ? "Importing…" : `Import ${validCount || ""} ${importCountryName} employee${validCount === 1 ? "" : "s"}`.replace(/\s+/g, " ")}
               </button>
             </div>
           </>
