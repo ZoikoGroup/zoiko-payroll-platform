@@ -739,12 +739,10 @@ def install_route_policies(app) -> Dict[Tuple[str, str], RoutePolicy]:
             depends=Depends(_route_policy_dependency(route.path_format, by_method)),
             path=route.path_format,
         )
-        # Router-level dependencies (e.g. per-router dormancy guards such as
-        # require_mexico_tenant) must run BEFORE the PDP so a router-level
-        # refusal (403 "not open for onboarding" for a dormant Mexico org)
-        # wins over the PDP's object-scope denial (404). Keep the PDP after
-        # those router deps but before the endpoint's own signature deps.
-        route.dependant.dependencies.insert(len(route.dependencies or []), sub)
+        # The policy decision must be the first route dependency. Router-level
+        # subscription, jurisdiction, and role guards can otherwise hide a
+        # privacy denial and skip its audit/security event.
+        route.dependant.dependencies.insert(0, sub)
         installed.update({(m, route.path_format): p for m, p in by_method.items()})
 
     app.state.authz_route_policies = installed

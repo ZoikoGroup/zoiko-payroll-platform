@@ -59,7 +59,11 @@ def _normalize_spec_value(spec: dict, raw: str):
     or None when it is a "no value" placeholder (N/A, -, nil …)."""
     choices = spec.get("choices")
     lowered = raw.strip().lower()
-    if lowered in _BLANK_WORDS or (lowered == "none" and not any(c.lower() == "none" for c in (choices or []))):
+    if lowered in _BLANK_WORDS or (
+        lowered == "none"
+        and not spec.get("none_is_value")
+        and not any(c.lower() == "none" for c in (choices or []))
+    ):
         return None
     aliases = spec.get("aliases") if not (choices and raw in choices) else None
     if callable(aliases):
@@ -1063,6 +1067,7 @@ class SGEmployeeValidation(EmployeeValidationStrategy):
         # Authority/HR-derived fund codes only (SG-015) — never race/religion.
         "shg_funds": {
             "upper": True, "strip_chars": " ",
+            "none_is_value": True,
             "pattern": re.compile(r"^(NONE|(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?(,(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?)*)$"),
             "error": "SHG funds must be NONE or a comma-separated list of CDAC, ECF, MBMF, SINDA — optionally with the "
                      "employee's SHG-instructed monthly amount, e.g. MBMF=10.00.",

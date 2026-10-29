@@ -434,7 +434,11 @@ def test_mexico_payroll_follows_entitlement_not_the_default_country(monkeypatch)
     org = _org("CEMXMIX", _professional_version, country="United States")
     _set_rows(org, ["US", "MX"])
     emp = _employee(org, "MX-1", "MX")
-    monkeypatch.setattr(mexico_run_service.mexico_dormancy, "onboarding_enabled", lambda: True)
+    monkeypatch.setattr(
+        mexico_run_service.mexico_dormancy,
+        "onboarding_enabled",
+        lambda *_args, **_kwargs: True,
+    )
 
     assert je.org_runs_country(_db, org.id, "MX") is True
     mexico_run_service.guard(_db, emp, None)  # no MX_ORG_NOT_MEXICAN

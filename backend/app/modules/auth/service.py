@@ -1082,6 +1082,17 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
             "please select a supported country."
         )
 
+    # Brazil is listed in the registration picker, but remains closed until
+    # its release gates are complete. Evaluation signup must not bypass the
+    # same registry and canonical-pack readiness check used for production.
+    from app.core.jurisdiction import get_jurisdiction_code
+    if get_jurisdiction_code(data.country) == "BR":
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+        block_reason = get_jurisdiction_onboarding_block_reason(db, data.country)
+        if block_reason:
+            raise BadRequestException(block_reason)
+
     org_code = generate_organization_code(data.organization, db)
 
     org = Organization(

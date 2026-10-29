@@ -265,7 +265,7 @@ def _decode_required(token: str, db: Session):
         return payload, False
     if decode_assisted_access_token(token) is not None:
         raise UnauthorizedException(
-            "Assisted-access tokens can only be used on organization-scoped endpoints."
+            "Assisted access has been replaced by Support Access. Request access from the Support Access page."
         )
     raise UnauthorizedException("Invalid or expired token. Please log in again.")
 
@@ -282,7 +282,6 @@ def get_current_user(
     serialize or depend on full User ORM fields."""
     if token and token.startswith("zpmc_"):
         return _resolve_machine(token, db)
-    print(f"[DEBUG-GCU] token present={bool(token)} role=super_admin?", flush=True)
     payload, _is_assisted = _decode_required(token, db)
     return _resolve_access_user(db, payload)
 

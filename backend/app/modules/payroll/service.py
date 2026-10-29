@@ -30940,7 +30940,13 @@ _SG_STATUTORY_FACTS = (      # (compliance_fields key, PayrollEmployee column or
 
 
 def _sg_fact_value(employee, key, column):
-    return getattr(employee, column, None) if column else (employee.compliance_fields or {}).get(key)
+    compliance = employee.compliance_fields or {}
+    if key in compliance and compliance[key] is not None:
+        return compliance[key]
+    value = getattr(employee, column, None) if column else None
+    if value is not None:
+        return value
+    return None
 
 
 def _sg_statutory_fact_changes(employee, updates: dict) -> tuple:
