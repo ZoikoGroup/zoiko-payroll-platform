@@ -113,10 +113,10 @@ check("Earning classification uses the governed ZA_EARNING_CLASS slab shape", ()
 check("Readiness renders server counts and never fabricates signed gates", () =>
   readiness.includes("getZaSummary") &&
   readiness.includes("data.activeEmployerRegistrations") &&
-  readiness.includes("data.approvedDirectives") &&
-  readiness.includes("data.liveEtiEntries") &&
-  readiness.includes("does not expose gate evidence") &&
-  !/gate\s*[:=]\s*(true|"PASS"|'PASS')/i.test(readiness));
+  readiness.includes("data.signedGates") &&
+  // Phase 10: gate state now comes from the API (evidence reviewed by a second Super Admin).
+  readiness.includes("<Badge state={gate.state} />") &&
+  !/gate\s*[:=]\s*(true|"PASS"|'PASS'|"SIGNED"|'SIGNED')/i.test(readiness));
 
 check("Overview does not hardcode statutory amounts", () => {
   const statutoryLiterals = ["12.50", "27.50", "155.00", "7500", "2500", "2700"];
@@ -205,6 +205,40 @@ check("Labour findings and overrides are disclosed on the payslip breakdown", ()
 
 check("A blocked journal is surfaced, never hidden", () =>
   runChecks.includes('data-testid="za-journal-blocked"'));
+
+// ── Phase 10: release gates G0-G7 and G6 parallel cycles ──
+const readinessTab = read("components/jurisdiction/southAfrica/ZAReadinessTab.jsx");
+const parallelSection = read("modules/payroll/Reports/ZAParallelCyclesSection.jsx");
+const filingPanelP10 = read("modules/payroll/Reports/ZAFilingPanel.jsx");
+const superAdminSvc = read("service/superAdminService.js");
+
+check("South Africa readiness speaks of gates G0-G7, never G8", () =>
+  /G0[–-]G7/.test(readinessTab) && !/G1[–-]G8|\bG8\b/.test(readinessTab) && !/G1[–-]G8/.test(parallelSection));
+
+check("Gate and decision state is read from the API only - nothing on the tab signs or records", () =>
+  readinessTab.includes("getZaSummary") && !/state\s*:\s*["']SIGNED["']|["']RECORDED["']\s*\}/.test(readinessTab) &&
+  !/\b(post|put|patch)\b/i.test(readinessTab.replace(/import[^;]+;/g, "")));
+
+check("The readiness tab shows gates, preconditions, code checks, decisions, NO-GO and open points", () =>
+  ["data.gates", "data.gaPreconditions", "data.codeChecks", "data.decisions", "data.noGo", "data.openPoints"]
+    .every((k) => readinessTab.includes(k)));
+
+check("Readiness and parallel calls go to their South Africa routes", () =>
+  superAdminSvc.includes("${ZA_SA}/readiness") &&
+  ["/parallel-imports", "/parallel-imports/${importId}/accept", "/parallel-differences/${diffId}/explain",
+   "/parallel-differences/${diffId}/accept"].every((p) => payrollService.includes("${ZA}" + p)));
+
+check("The parallel-cycles section is mounted in the SARS filing panel", () =>
+  filingPanelP10.includes('import ZAParallelCyclesSection from "./ZAParallelCyclesSection"') &&
+  filingPanelP10.includes("<ZAParallelCyclesSection />"));
+
+check("No materiality tolerance is hard-coded and ETI is not a compared concept", () =>
+  !/materiality\s*[:=]\s*\d|tolerance\s*[:=]\s*\d/i.test(parallelSection) &&
+  !/\[\s*["']eti["']/i.test(parallelSection));
+
+check("A cycle is accepted only when the server says it is clean", () =>
+  parallelSection.includes("disabled={state.busy || !data.clean}") &&
+  parallelSection.includes('data-testid="za-parallel-clean"'));
 
 console.log(`za-compliance-ui-validation: ${passed} passed, ${failures.length} failed`);
 for (const failure of failures) console.log(`  FAIL ${failure}`);

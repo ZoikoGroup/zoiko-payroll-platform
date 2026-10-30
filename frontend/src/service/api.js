@@ -23,17 +23,94 @@ export function getStoredUser() {
   return raw ? JSON.parse(raw) : null;
 }
 
-export function setSession({ accessToken, refreshToken, user } = {}) {
+export function setStoredUser(user) {
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+  else localStorage.removeItem(USER_KEY);
+}
+
+function getTokenExpMs(token) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+let proactiveTimer = null;
+
+export function scheduleProactiveRefresh() {
+  if (typeof window === "undefined") return;
+  if (proactiveTimer) {
+    clearTimeout(proactiveTimer);
+    proactiveTimer = null;
+  }
+
+  const token = getAccessToken();
+  const refreshToken = getRefreshToken();
+  if (!token || !refreshToken) return;
+
+  const expMs = getTokenExpMs(token);
+  if (!expMs) return;
+
+  const now = Date.now();
+  // Target refresh 2 minutes before access token expiry
+  const refreshDelay = Math.max(expMs - now - 2 * 60 * 1000, 1000);
+
+  // If token is already expired, let normal request handling or focus take care of it
+  if (now >= expMs) return;
+
+  proactiveTimer = setTimeout(async () => {
+    if (getAccessToken() && getRefreshToken()) {
+      await tryRefreshToken();
+    }
+  }, refreshDelay);
+}
+
+export function setSession(data = {}) {
+  const accessToken = data.accessToken || data.access_token;
+  const refreshToken = data.refreshToken || data.refresh_token;
+  const user = data.user || data.employee;
+
   if (accessToken) localStorage.setItem(TOKEN_KEY, accessToken);
   if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
   if (accessToken || refreshToken || user) sessionInvalidNotified = false;
+  scheduleProactiveRefresh();
 }
 
 export function clearSession() {
+  if (proactiveTimer) {
+    clearTimeout(proactiveTimer);
+    proactiveTimer = null;
+  }
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
+}
+
+if (typeof window !== "undefined") {
+  scheduleProactiveRefresh();
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === TOKEN_KEY && event.newValue) {
+      scheduleProactiveRefresh();
+    } else if (event.key === TOKEN_KEY && !event.newValue) {
+      notifySessionInvalid("cross_tab_logout");
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      const token = getAccessToken();
+      const expMs = token ? getTokenExpMs(token) : null;
+      if (expMs && (expMs - Date.now() < 3 * 60 * 1000)) {
+        tryRefreshToken();
+      }
+    }
+  });
 }
 
 function notifySessionInvalid(reason) {
@@ -170,7 +247,7 @@ async function refreshAccessToken() {
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
 
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       return {
         ok: false,
         invalidSession: true,

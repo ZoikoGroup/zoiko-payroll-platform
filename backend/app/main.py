@@ -74,7 +74,6 @@ class _RedactSensitiveQueryFilter(logging.Filter):
         return True
 
 
-@asynccontextmanager
 def _enforce_nonprod_data_guard() -> None:
     """ZP-PRIV D09: production stamps its data origin; a named non-production
     environment refuses to start on production-origin data that was not
@@ -90,6 +89,7 @@ def _enforce_nonprod_data_guard() -> None:
         db.close()
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
     install_log_filters()  # uvicorn's own handlers exist by now
@@ -312,7 +312,7 @@ async def correlation_id_middleware(request: Request, call_next):
     cid = correlation.accept(request.headers.get(correlation.HEADER))
     request.state.correlation_id = cid
     token = correlation.set_current(cid)
-    ip_token = correlation.client_ip.set(request.client.host if request.client else None)
+    ip_token = correlation.client_ip.set(correlation.extract_client_ip(request))
     try:
         response = await call_next(request)
     finally:

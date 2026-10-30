@@ -143,6 +143,17 @@ def calculate_payroll(
             "South Africa payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "JP" and key == "simple":
+        # Japan (ZP-JP-ENG-001): simple mode would silently skip national
+        # withholding, resident tax, social insurance, employment insurance
+        # and labour premiums — all statutory, no fallback. Fail-closed.
+        from app.modules.payroll.engine.countries.japan import JPCalculationBlockedError
+
+        raise JPCalculationBlockedError(
+            "JP_SIMPLE_MODE_UNSUPPORTED",
+            "Japan payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)

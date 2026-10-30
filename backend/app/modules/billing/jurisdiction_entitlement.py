@@ -35,10 +35,13 @@ from app.modules.billing.entitlements import (
     _enforcement_mode,
     _resolve_entitlement,
     get_active_subscription,
+    require_not_dunning_restricted,
+    require_scope_limit,
 )
 from app.modules.billing.feature_keys import MAX_JURISDICTIONS
 from app.modules.billing.models import (
     BillingCommercialAuditEvent,
+    DunningStage,
     OrganizationJurisdiction,
     OrganizationJurisdictionStatus,
 )
@@ -707,9 +710,6 @@ def add_entitled_country(db: Session, current_user, country_code) -> dict:
     restricts expansion. A country whose statutory set-up isn't complete
     (the onboarding check) is still added — recorded with that note and
     shown as "set-up pending"; its payroll uses the default rates."""
-    from app.modules.billing.entitlements import require_not_dunning_restricted, require_scope_limit
-    from app.modules.billing.models import DunningStage
-
     organization_id = current_user.organization_id
     code = _require_code(country_code)
     require_not_dunning_restricted(DunningStage.RESTRICT_EXPANSION.value)(current_user=current_user, db=db)

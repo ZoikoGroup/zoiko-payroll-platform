@@ -79,6 +79,7 @@ from app.modules.payroll.engine.countries import netherlands as _netherlands
 from app.modules.payroll.engine.countries import mexico as _mexico
 from app.modules.payroll.engine.countries import brazil as _brazil
 from app.modules.payroll.engine.countries import south_africa as _south_africa
+from app.modules.payroll.engine.countries import japan as _japan
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -157,6 +158,7 @@ _calc_netherlands = _netherlands.calculate
 _calc_mexico = _mexico.calculate
 _calc_brazil = _brazil.calculate
 _calc_south_africa = _south_africa.calculate
+_calc_japan = _japan.calculate
 
 
 _COUNTRY_CALC = {
@@ -233,6 +235,11 @@ _COUNTRY_CALC = {
     # employer incentive, never an employee line. Fail-closed:
     # countries/south_africa.py; simple mode is blocked in resolver.py.
     "ZA": _calc_south_africa,
+    # Japan (ZP-JP-ENG-001) — fail-closed scaffold: countries/japan.py BLOCKS
+    # every calculation until certified NTA/JPS/insurer content is wired, so
+    # Japan can never fall through to _calc_generic; simple mode is blocked
+    # in resolver.py.
+    "JP": _calc_japan,
 }
 
 

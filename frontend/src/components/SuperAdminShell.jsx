@@ -332,10 +332,10 @@ function Header({ onOpenSidebar, onToggleCollapse, collapsed }) {
         >
           {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
         </button>
-        <div className="hidden sm:block">
-          <span className="text-sm font-semibold text-foreground">Zoiko Payroll</span>
-          <span className="mx-2 text-border-strong">·</span>
-          <span className="text-sm text-foreground-muted">{pageLabel}</span>
+        <div className="flex items-center min-w-0">
+          <span className="hidden sm:inline text-sm font-semibold text-foreground">Zoiko Payroll</span>
+          <span className="hidden sm:inline mx-2 text-border-strong">&middot;</span>
+          <span className="truncate text-sm font-semibold sm:font-normal text-foreground sm:text-foreground-muted">{pageLabel}</span>
         </div>
       </div>
       <div className="flex items-center gap-2">

@@ -285,7 +285,7 @@ function NotificationBell() {
             role="menu"
             className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-border bg-surface py-4 px-4 text-center shadow-lg"
           >
-            <p className="text-sm text-foreground-muted">You&apos;re all caught up — no new notifications.</p>
+            <p className="text-sm text-foreground-muted">You&apos;re all caught up &mdash; no new notifications.</p>
           </div>
         </>
       )}
@@ -337,11 +337,13 @@ function Header({ onOpenMobileSidebar, onToggleCollapse, collapsed, menuButtonRe
           <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-muted text-foreground-muted">
             {logo ? <img src={logo} alt="" className="h-full w-full object-cover" /> : <Building2 size={16} />}
           </span>
-          {companyName && (
+          {companyName ? (
             <span className="hidden truncate text-sm font-semibold text-foreground sm:inline">{companyName}</span>
-          )}
+          ) : null}
         </Link>
-        <ChevronRight size={14} className="hidden shrink-0 text-border-strong sm:inline" />
+        {companyName ? (
+          <ChevronRight size={14} className="hidden shrink-0 text-border-strong sm:inline" />
+        ) : null}
         <span className="truncate text-sm font-semibold text-foreground">{pageLabel}</span>
       </div>
 

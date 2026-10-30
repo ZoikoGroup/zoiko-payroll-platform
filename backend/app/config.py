@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # organisation can become South African and the ZA APIs refuse. Leave
     # UNSET in production until the ZA release gates are signed.
     ZA_TENANT_ONBOARDING_ENABLED: bool = False
+    # Japan dormancy switch (ZP-JP-ENG-001 Phase 1, japan_dormancy). False = no
+    # organisation can become Japanese. Leave UNSET in production until the
+    # JP release gates G0-G8 are signed.
+    JP_TENANT_ONBOARDING_ENABLED: bool = False
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.
@@ -75,6 +79,16 @@ class Settings(BaseSettings):
     # and idle/new-device re-authentication on refresh.
     PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     PRIVILEGED_REFRESH_IDLE_MINUTES: int = 30
+    # Refresh-token reuse grace window. 0 = OFF (default): any reuse of a
+    # rotated refresh token revokes the whole family (ZP-PRIV B08 reuse
+    # detection). A positive value lets a retry within that many seconds
+    # succeed instead - a deliberate weakening of B08; enable only with sign-off.
+    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = 0
+    # Comma-separated CIDRs of reverse proxies / load balancers whose
+    # CF-Connecting-IP / X-Real-IP / X-Forwarded-For headers are trusted for
+    # the client address (core/correlation.extract_client_ip). Empty = trust
+    # none: the socket peer is the client address (headers are spoofable).
+    TRUSTED_PROXY_CIDRS: str = ""
     MFA_STEP_UP_MAX_AGE_SECONDS: int = 300
     MFA_CHALLENGE_TOKEN_MINUTES: int = 5
     # "enforce": privileged roles must enrol and pass TOTP at login.

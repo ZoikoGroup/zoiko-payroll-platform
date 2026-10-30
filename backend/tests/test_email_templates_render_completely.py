@@ -13,6 +13,7 @@ it still fails here.
 """
 
 import inspect
+import sys
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -74,7 +75,15 @@ def rendered():
         return html
 
     smtp_off = {"host": "", "from_email": "noreply@example.com", "port": 587}
-    with patch.object(es, "_strip_unresolved", recording_strip), \
+    # Internal-ops senders (Assist kill switch, support handoff, new-org alert)
+    # read their recipient from the live settings / Super Admin lookup and skip
+    # silently without one — give them one regardless of what earlier tests
+    # left in the environment.
+    live_settings = sys.modules["app.config"].settings
+    with patch.object(live_settings, "ASSIST_SUPPORT_EMAIL", "support@example.com"), \
+         patch.object(live_settings, "SMTP_FROM_EMAIL", "noreply@example.com"), \
+         patch.object(es, "resolve_super_admin_alert_recipients", lambda db=None: ["ops@example.com"]), \
+         patch.object(es, "_strip_unresolved", recording_strip), \
          patch.object(es, "_compose_email_html", recording_compose), \
          patch.object(es, "_get_smtp_settings", lambda db=None: smtp_off), \
          patch.object(es, "_resolve_payroll_send_identity", lambda organization_id=None, db=None: ("noreply@example.com", "Org")):
