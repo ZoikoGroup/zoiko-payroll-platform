@@ -38,6 +38,7 @@ _GUARDED = [
     "c15d5b87d6f5",  # South Africa Phase 8 SARS payments / variances (guarded, lock_timeout)
     "3880223bfaa0",  # South Africa Phase 9 overrides / deduction authority (guarded, lock_timeout)
     "67c8d7454716",  # South Africa Phase 10 parallel cycles (guarded, lock_timeout)
+    "f686d5128f8a",  # Japan Phase 2 jp_foundation (guarded from day one, lock_timeout)
 ]
 
 

@@ -39,6 +39,11 @@ P10_WORKER = ("payroll_za_parallel_differences",)
 P10_TABLES = P10_TENANT + P10_WORKER
 P9_COLUMNS = {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
               "payroll_za_employer_registrations": {"za_journal_accounts"}}
+# Japan foundation (f686d5128f8a) is also pending from c7d2e9a4f1b6.
+JP_TABLES = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
+             "payroll_jp_my_number_access_events", "payroll_jp_worker_tax_profiles",
+             "payroll_jp_social_insurance_enrollments", "payroll_jp_social_insurance_events",
+             "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments"}
 
 
 def _load(prefix):
@@ -202,14 +207,14 @@ def test_deploy_drift_filter_explains_every_za_object():
         os.chdir(here)
     # Mexico m20 (d3f8b2a6c1e9) also grows from c7d2e9a4f1b6 (joined by merge 92c67cab49fc).
     mexico_m20 = {"payroll_mx_decisions", "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"}
-    # The country entitlement ledger (b4d6f8a0c2e3) is pending from here too.
-    assert tables == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES) | mexico_m20 | {
-        "organization_jurisdictions"}
+    # The country entitlement ledger (b4d6f8a0c2e3) and Japan Phase 2 are pending from here too.
+    assert tables == (set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
+                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES)
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
-    assert columns["payslip_items"] == {"za_calculation_snapshot"}
-    assert columns["payroll_runs"] == {"za_approval_fingerprint"}
+    assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot"}
+    assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

@@ -408,7 +408,8 @@ def test_validation_switch_adds_only_mexico():
 
     # + Brazil (ZP-BR-ENG-001), opted in alongside Mexico at the venu/main merge.
     # + South Africa (ZP-ZA-ENG-001 Phase 3), fail-closed from its first engine.
-    assert set(_VALIDATION_ENABLED_COUNTRIES) == _VALIDATION_SET_BEFORE_MX | {"MX", "BR", "ZA"}
+    # + Japan (ZP-JP-ENG-001 Phase 3), fail-closed from its first engine.
+    assert set(_VALIDATION_ENABLED_COUNTRIES) == _VALIDATION_SET_BEFORE_MX | {"MX", "BR", "ZA", "JP"}
 
 
 def test_validation_behaviour_is_unchanged_for_every_other_country():
@@ -425,6 +426,8 @@ def test_validation_behaviour_is_unchanged_for_every_other_country():
             service._assert_jurisdiction_ready({}, [], country, None)
     with pytest.raises(MissingComplianceConfigurationError):
         service._assert_jurisdiction_ready({}, [], "MX", None)
+    with pytest.raises(MissingComplianceConfigurationError):
+        service._assert_jurisdiction_ready({}, [], "JP", None)
 
 
 def test_mexico_registry_rows_are_value_free_and_complete():
