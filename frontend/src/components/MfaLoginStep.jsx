@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Loader2, ShieldCheck, Copy, Check } from "lucide-react";
+import { Check, Copy, KeyRound, ShieldCheck } from "lucide-react";
 import { mfaService } from "../service/mfaService";
+import { AuthAlert, AuthPrimaryButton } from "./auth/authUi";
 
 // The second sign-in step (ZP-PRIV B08), used by login and registration.
 //   mode="challenge": enter a TOTP or recovery code.
@@ -70,67 +71,64 @@ export default function MfaLoginStep({ mode, mfaToken, onComplete, onCancel }) {
     }
   }
 
-  const box = "w-full rounded-lg border border-slate-300 px-3 py-2.5 text-center text-lg tracking-widest";
+  const header = (Icon, title, subtitle) => (
+    <div className="mb-5">
+      <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+        <Icon size={24} aria-hidden="true" />
+      </span>
+      <h2 className="text-[28px] font-extrabold leading-tight tracking-[-0.02em] text-slate-900">{title}</h2>
+      {subtitle && <p className="mt-2 text-[15px] leading-relaxed text-slate-600">{subtitle}</p>}
+    </div>
+  );
 
   if (recoveryCodes) {
     return (
-      <div className="space-y-4 text-sm text-slate-700">
-        <h2 className="text-xl font-bold text-slate-900">Save your recovery codes</h2>
-        <p>
-          Each code works once if you lose your authenticator. They will not be shown again —
-          store them somewhere safe.
-        </p>
-        <ul className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 font-mono text-sm">
+      <div className="text-[14px] text-slate-700">
+        {header(KeyRound, "Save your recovery codes",
+          "Each code works once if you lose your authenticator. They will not be shown again — store them somewhere safe.")}
+        <ul className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-[14px] text-slate-900">
           {recoveryCodes.map((c) => (
             <li key={c}>{c}</li>
           ))}
         </ul>
-        <button type="button" onClick={copyCodes} className="inline-flex items-center gap-1 text-blue-600 hover:underline">
+        <button type="button" onClick={copyCodes}
+          className="mt-3 inline-flex items-center gap-1.5 font-medium text-blue-700 hover:text-blue-800">
           {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
           {copied ? "Copied" : "Copy codes"}
         </button>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
+        <label className="my-5 flex cursor-pointer items-center gap-2">
+          <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
           I have saved my recovery codes
         </label>
-        <button
-          type="button"
-          disabled={!saved}
-          onClick={() => onComplete(session)}
-          className="w-full rounded-lg bg-blue-600 py-2.5 font-semibold text-white disabled:opacity-50"
-        >
+        <AuthPrimaryButton type="button" disabled={!saved} onClick={() => onComplete(session)}>
           Continue
-        </button>
+        </AuthPrimaryButton>
       </div>
     );
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4 text-sm text-slate-700">
-      <div className="flex items-center gap-2">
-        <ShieldCheck className="h-6 w-6 text-blue-600" aria-hidden="true" />
-        <h2 className="text-xl font-bold text-slate-900">
-          {mode === "enroll" ? "Set up two-step verification" : "Two-step verification"}
-        </h2>
-      </div>
-      {mode === "enroll" ? (
-        <>
-          <p>
-            Your role requires an authenticator app. Scan the code with Google Authenticator, Microsoft
-            Authenticator or similar, then enter the 6-digit code it shows.
-          </p>
-          {qr && <img src={qr} alt="Authenticator QR code" className="mx-auto h-44 w-44" />}
+    <form onSubmit={submit} className="text-[14px] text-slate-700">
+      {mode === "enroll"
+        ? header(ShieldCheck, "Set up two-step verification",
+          "Your role requires an authenticator app. Scan the code with Google Authenticator, Microsoft Authenticator or similar, then enter the 6-digit code it shows.")
+        : header(ShieldCheck, "Two-step verification",
+          `Enter the ${useRecovery ? "recovery code" : "6-digit code from your authenticator app"}.`)}
+
+      {mode === "enroll" && (
+        <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          {qr && <img src={qr} alt="Authenticator QR code" className="mx-auto h-44 w-44 rounded-lg bg-white p-2" />}
           {setup && (
-            <p className="break-all rounded bg-slate-50 p-2 text-center font-mono text-xs">
+            <p className="mt-3 break-all text-center font-mono text-xs text-slate-700">
               Key: {setup.secret}
             </p>
           )}
-        </>
-      ) : (
-        <p>
-          Enter the {useRecovery ? "recovery code" : "6-digit code from your authenticator app"}.
-        </p>
+        </div>
       )}
+
+      {error && <AuthAlert>{error}</AuthAlert>}
+
       <input
         autoFocus
         inputMode={useRecovery ? "text" : "numeric"}
@@ -139,25 +137,20 @@ export default function MfaLoginStep({ mode, mfaToken, onComplete, onCancel }) {
         onChange={(e) => setCode(e.target.value.trim())}
         aria-label="Authentication code"
         placeholder={useRecovery ? "xxxxx-xxxxx" : "123456"}
-        className={box}
+        className="mb-5 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-center text-[22px] font-semibold tracking-[0.35em] text-slate-900 placeholder:tracking-[0.2em] placeholder:text-slate-300 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
       />
-      {error && <p role="alert" className="text-red-600">{error}</p>}
-      <button
-        type="submit"
-        disabled={busy || !code || (mode === "enroll" && !setup)}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-2.5 font-semibold text-white disabled:opacity-50"
-      >
-        {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />} Verify
-      </button>
-      <div className="flex justify-between text-xs">
+      <AuthPrimaryButton type="submit" busy={busy} disabled={!code || (mode === "enroll" && !setup)}>
+        Verify
+      </AuthPrimaryButton>
+      <div className="mt-5 flex justify-between text-[14px]">
         {mode === "challenge" ? (
-          <button type="button" onClick={() => setUseRecovery((v) => !v)} className="text-blue-600 hover:underline">
+          <button type="button" onClick={() => setUseRecovery((v) => !v)} className="font-medium text-blue-700 hover:text-blue-800">
             {useRecovery ? "Use authenticator code" : "Use a recovery code"}
           </button>
         ) : (
           <span />
         )}
-        <button type="button" onClick={onCancel} className="text-slate-500 hover:underline">
+        <button type="button" onClick={onCancel} className="font-medium text-slate-600 hover:text-slate-900">
           Back to sign in
         </button>
       </div>
