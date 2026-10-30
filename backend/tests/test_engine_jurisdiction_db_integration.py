@@ -858,6 +858,47 @@ def test_multi_region_resolution_across_employees_in_one_run(db, organization, m
     assert by_employee[emp_ka.id].work_state == "Karnataka"
 
 
+def test_mixed_country_run_calculates_each_employee_with_their_own_country(db, organization, monkeypatch):
+    """A multi-country org (default India) with an India and a US employee in
+    one run: each payslip is calculated by — and stamped with — the
+    employee's own country, never the org's default. India's state
+    Professional Tax must not leak onto the US payslip."""
+    _stub_business_code_generation(monkeypatch)
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN",
+                                    jurisdiction_state="Maharashtra"))
+    db.add(_make_rate("IN", "pt", organization_id=None, state="Maharashtra", flat_amount=Decimal("200")))
+    db.commit()
+
+    emp_in = _make_employee(db, organization.id, "E-IN", country="IN", work_state="Maharashtra")
+    emp_us = _make_employee(db, organization.id, "E-US", country="US", work_state=None)
+
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    by_employee = {i.employee_id: i for i in db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id)}
+    assert by_employee[emp_in.id].country_code == "IN"
+    assert by_employee[emp_in.id].professional_tax == Decimal("200")
+    assert by_employee[emp_us.id].country_code == "US"
+    assert not by_employee[emp_us.id].professional_tax  # no India PT on a US payslip
+    # The org's India state is not handed to the US employee either.
+    assert by_employee[emp_us.id].work_state in (None, "")
+
+
+def test_singapore_run_safeguards_apply_when_sg_is_not_the_default_country(db, organization):
+    """SG-043 sequential generation applies whenever the org pays someone in
+    Singapore, not only when Singapore is the org's default country."""
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN"))
+    db.commit()
+    emp_in = _make_employee(db, organization.id, "E-IN-SG", country="IN")
+    assert service._sg_org_has_singapore_payroll(db, organization.id) is False
+    assert service.parallel_payslip_generation_blocker(db, organization.id, [emp_in]) is None or \
+        "Singapore" not in service.parallel_payslip_generation_blocker(db, organization.id, [emp_in])
+
+    emp_sg = _make_employee(db, organization.id, "E-SG", country="SG")
+    assert service._sg_org_has_singapore_payroll(db, organization.id) is True
+    assert "Singapore" in service.parallel_payslip_generation_blocker(db, organization.id, [emp_in, emp_sg])
+
+
 # ── Historical reproducibility ──────────────────────────────────────────
 
 def test_editing_a_rate_after_generation_does_not_change_the_old_payslip(db, organization, monkeypatch):

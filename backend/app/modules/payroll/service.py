@@ -11675,24 +11675,31 @@ def delete_statutory_filing(db: Session, filing_id: int, actor_id: Optional[int]
 
 
 def get_upcoming_filing_dates_for_org(db: Session, organization_id: int, limit: int = 10) -> List[StatutoryFilingCalendar]:
-    """Org-facing: this org's own jurisdiction's upcoming Active filing
-    obligations, soonest first. Never guessed/hardcoded client-side — the
-    frontend just renders whatever this returns."""
+    """Org-facing: upcoming Active filing obligations for every country the
+    org pays employees in (its default country plus its entitled countries),
+    soonest first. Never guessed/hardcoded client-side — the frontend just
+    renders whatever this returns. The org's jurisdiction state belongs to
+    its default country only; other countries get their country-level
+    obligations."""
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
-    # None (not "IN") when nothing is configured anywhere — the query
-    # below naturally returns an empty list for a None country rather than
-    # showing India's filing calendar to an org that hasn't set one up yet.
-    country = _resolve_org_country(db, organization_id)
+    # Empty (not ["IN"]) when nothing is configured anywhere — the query
+    # below then returns an empty list rather than showing India's filing
+    # calendar to an org that hasn't set one up yet.
+    default_country, countries = _org_report_countries(db, organization_id)
     state = getattr(company, "jurisdiction_state", None) or None
 
     query = (
         db.query(StatutoryFilingCalendar)
         .filter(
-            StatutoryFilingCalendar.jurisdiction_country == country,
+            StatutoryFilingCalendar.jurisdiction_country.in_(countries),
             StatutoryFilingCalendar.status == "Active",
             StatutoryFilingCalendar.due_date >= date.today(),
         )
-        .filter(or_(StatutoryFilingCalendar.jurisdiction_state.is_(None), StatutoryFilingCalendar.jurisdiction_state == state))
+        .filter(or_(
+            StatutoryFilingCalendar.jurisdiction_state.is_(None),
+            and_(StatutoryFilingCalendar.jurisdiction_country == default_country,
+                 StatutoryFilingCalendar.jurisdiction_state == state),
+        ))
     )
     return query.order_by(StatutoryFilingCalendar.due_date.asc()).limit(limit).all()
 
@@ -11746,33 +11753,50 @@ def get_applicable_report_template(
 
 
 def list_available_reports_for_org(db: Session, organization_id: int, reporting_year: str) -> List[dict]:
-    """Distinct (reportType, name) combinations with a Published/Active
-    template covering this org's jurisdiction + reporting year — the real,
-    backend-owned list the Org's "Report" dropdown must populate from
-    (never a hardcoded frontend list of report names)."""
+    """Distinct (country, reportType, name) combinations with a
+    Published/Active template for the reporting year, across every country
+    the org pays employees in — the real, backend-owned list the Org's
+    "Report" dropdown must populate from (never a hardcoded frontend list
+    of report names). `country` says which country's statutory report it
+    is; the org's jurisdiction state applies to its default country only."""
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
-    # None when nothing is configured anywhere — correctly yields an empty
+    # Empty when nothing is configured anywhere — correctly yields an empty
     # report list rather than offering an unconfigured org India's reports.
-    country = _resolve_org_country(db, organization_id)
+    default_country, countries = _org_report_countries(db, organization_id)
     state = getattr(company, "jurisdiction_state", None) or None
 
     query = (
         db.query(ReportTemplate)
         .filter(
-            ReportTemplate.jurisdiction_country == country,
+            ReportTemplate.jurisdiction_country.in_(countries),
             ReportTemplate.reporting_year == reporting_year,
             ReportTemplate.status.in_(["Published", "Active"]),
         )
-        .filter(or_(ReportTemplate.jurisdiction_state.is_(None), ReportTemplate.jurisdiction_state == state))
+        .filter(or_(
+            ReportTemplate.jurisdiction_state.is_(None),
+            and_(ReportTemplate.jurisdiction_country == default_country, ReportTemplate.jurisdiction_state == state),
+        ))
     )
     seen = {}
     for row in query.all():
-        seen.setdefault(row.report_type, row.name)
-    return [{"reportType": rt, "name": name} for rt, name in seen.items()]
+        seen.setdefault((row.jurisdiction_country, row.report_type), row.name)
+    ordered = sorted(seen.items(), key=lambda kv: (countries.index(kv[0][0]) if kv[0][0] in countries else 99, kv[0][1]))
+    return [{"reportType": rt, "name": name, "country": country} for (country, rt), name in ordered]
+
+
+def _org_report_countries(db: Session, organization_id: int) -> Tuple[Optional[str], List[str]]:
+    """(default country, every country the org pays employees in — default
+    first). Reports, filing calendars and report validation cover all of
+    them, not just the default country."""
+    from app.modules.billing.jurisdiction_entitlement import org_payroll_countries
+
+    countries = [_normalize_country(c) for c in org_payroll_countries(db, organization_id)]
+    return (countries[0] if countries else None), countries
 
 
 def get_applicable_report_template_for_org(
     db: Session, organization_id: int, reporting_year: str, report_type: str, payroll_run_id: Optional[int] = None,
+    country: Optional[str] = None,
 ) -> dict:
     """Org-facing wrapper: resolves the org's own jurisdiction from
     CompanyComplianceDetails (the same lookup every other org-scoped
@@ -11784,8 +11808,17 @@ def get_applicable_report_template_for_org(
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
     # None when nothing is configured anywhere — get_applicable_report_template
     # correctly resolves to no template (rather than India's) for a None country.
-    country = _resolve_org_country(db, organization_id)
-    state = getattr(company, "jurisdiction_state", None) or None
+    # `country` picks one of the org's other payroll countries; the org's
+    # jurisdiction state only applies to its default country.
+    default_country, countries = _org_report_countries(db, organization_id)
+    if country:
+        country = _normalize_country(country)
+        if country not in countries:
+            raise BadRequestException(f"{country} is not one of this organization's payroll countries "
+                                      f"({', '.join(countries) or 'none'}).")
+    else:
+        country = default_country
+    state = (getattr(company, "jurisdiction_state", None) or None) if country == default_country else None
 
     template = get_applicable_report_template(db, country, state, reporting_year, report_type)
     validation = None
@@ -11807,22 +11840,33 @@ def validate_report_generation_context(
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
     # None when nothing is configured anywhere — reported as its own clear
     # reason below rather than silently comparing against an assumed "IN".
-    org_country = _resolve_org_country(db, organization_id)
+    org_country, org_countries = _org_report_countries(db, organization_id)
     org_state = getattr(company, "jurisdiction_state", None) or None
+    template_country = _normalize_country(template.jurisdiction_country)
 
     if org_country is None:
         reasons.append("This organization hasn't configured a jurisdiction yet — set it under Compliance > Company Details.")
         jurisdiction_match = False
     else:
-        jurisdiction_match = (org_country == template.jurisdiction_country) and (
-            template.jurisdiction_state is None or template.jurisdiction_state == org_state
+        # Any of the org's payroll countries; the org's state belongs to its
+        # default country, so a state-scoped template only matches there.
+        jurisdiction_match = (template_country in org_countries) and (
+            template.jurisdiction_state is None
+            or (template_country == org_country and template.jurisdiction_state == org_state)
         )
         if not jurisdiction_match:
             reasons.append(
                 f"Organization jurisdiction ({org_country}{'/' + org_state if org_state else ''}) does not "
                 f"match this template's jurisdiction ({template.jurisdiction_country}"
-                f"{'/' + template.jurisdiction_state if template.jurisdiction_state else ''})."
+                f"{'/' + template.jurisdiction_state if template.jurisdiction_state else ''}); the organization's "
+                f"payroll countries are {', '.join(org_countries)}."
             )
+        elif len(org_countries) > 1 and not any(
+                _normalize_country(i.country_code or org_country) == template_country
+                for i in (run.payslip_items or [])):
+            jurisdiction_match = False
+            reasons.append(f"Payroll run {run.run_code or run.id} has no payslips for {template_country} — "
+                           f"a {template_country} statutory report needs that country's employees.")
 
     try:
         run_status_index = PAYROLL_STATUS_ORDER.index(PayrollStatus(run.status))
@@ -12204,6 +12248,11 @@ def generate_report_from_template(
         raise BadRequestException(
             "; ".join(validation["reasons"]) or "This run/template combination is not valid for report generation."
         )
+    # A country's statutory report covers that country's employees only: in a
+    # mixed-country run, read the run through a view holding just the
+    # template country's payslips and their totals (rows, SUM_RUN fields and
+    # reconciliation all agree, and no other currency is summed in).
+    run = _country_run_view(db, run, template.jurisdiction_country, organization_id)
 
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
     components = (
@@ -18267,6 +18316,21 @@ def _sg_org_is_singapore(db: Session, organization_id: Optional[int]) -> bool:
     return bool(row) and _normalize_country(row[0]) == "SG"
 
 
+def _sg_org_has_singapore_payroll(db: Session, organization_id: Optional[int]) -> bool:
+    """Singapore's run-level safeguards (SG-043 generation lock, sequential
+    generation) apply whenever the org pays anyone in Singapore — its
+    default country, or a Singapore employee in a multi-country org —
+    because each employee is calculated by their own country's engine."""
+    if _sg_org_is_singapore(db, organization_id):
+        return True
+    if not organization_id:
+        return False
+    from app.core.authz.scopes import organization_scoped
+
+    return organization_scoped(db, PayrollEmployee, organization_id).filter(
+        PayrollEmployee.country_code == "SG").first() is not None
+
+
 def _sg_lock_run(db: Session, run: PayrollRun) -> None:
     """SG-043 / Phase 5.1 WS2: serialise concurrent operations on one
     Singapore payroll run (generate / approve / correct) — a second caller
@@ -20178,6 +20242,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             attendance_by_employee.setdefault(rec.employee_id, []).append(rec)
 
     results = []
+    by_country: Dict[str, dict] = {}
     totals = {
         "count": 0,
         "totalGross": Decimal("0"),
@@ -20566,6 +20631,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             # employee never aborts the whole preview (FR-027 reason shown).
             results.append({
                 "employeeId": emp.id,
+                "country": emp_country,
                 "employeeName": employee_name,
                 "department": getattr(emp, "department", None),
                 "attendanceStatus": "active" if is_active else "inactive",
@@ -20587,6 +20653,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             # a queryable record behind.)
             results.append({
                 "employeeId": emp.id,
+                "country": emp_country,
                 "employeeName": employee_name,
                 "department": getattr(emp, "department", None),
                 "attendanceStatus": "active" if is_active else "inactive",
@@ -20599,6 +20666,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
 
         results.append({
             "employeeId": emp.id,
+            "country": emp_country,
             "employeeName": employee_name,
             "department": getattr(emp, "department", None),
             "attendanceStatus": "active" if is_active else "inactive",
@@ -20672,7 +20740,18 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         totals["totalTax"] += calc.tds
         totals["totalContributions"] += calc.total_deductions - calc.tds
         totals["totalNet"] += calc.net_pay
+        # Same figures per employee country — each in its own currency.
+        country_totals = by_country.setdefault(emp_country, {
+            "count": 0, "totalGross": Decimal("0"), "totalTax": Decimal("0"),
+            "totalContributions": Decimal("0"), "totalNet": Decimal("0"),
+        })
+        country_totals["count"] += 1
+        country_totals["totalGross"] += calc.gross
+        country_totals["totalTax"] += calc.tds
+        country_totals["totalContributions"] += calc.total_deductions - calc.tds
+        country_totals["totalNet"] += calc.net_pay
 
+    default_country = _resolve_org_country(db, organization_id)
     return {
         "employees": results,
         "totals": {
@@ -20682,6 +20761,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "totalContributions": float(totals["totalContributions"]),
             "totalNet": float(totals["totalNet"]),
         },
+        # Mixed-country preview: `totals` adds currencies together; these
+        # are the per-country figures, each in that country's currency.
+        "totalsByCountry": [
+            {"country": code, "currency": _country_currency_code(db, organization_id, code, default_country),
+             "count": t["count"], "totalGross": float(t["totalGross"]), "totalTax": float(t["totalTax"]),
+             "totalContributions": float(t["totalContributions"]), "totalNet": float(t["totalNet"])}
+            for code, t in ((c, by_country[c]) for c in _sort_org_countries(db, organization_id, by_country))
+        ],
         "calculationMode": calculation_mode,
     }
 
@@ -20878,6 +20965,33 @@ _SG_GAZETTED_PUBLIC_HOLIDAYS = {
 
 
 
+def ensure_holidays_seeded(db: Session, organization_id: int, year: int, countries: Optional[List[str]] = None) -> None:
+    """Seed default public holidays for `year` for every country the org
+    pays employees in (or just `countries`), skipping any (country, year)
+    that already has rows — so an employee is never expected at work on a
+    public holiday of their own country just because it isn't the org's
+    default country."""
+    if countries is None:
+        from app.modules.billing.jurisdiction_entitlement import org_payroll_countries
+
+        countries = org_payroll_countries(db, organization_id)
+        if not countries:
+            company = db.query(CompanyComplianceDetails).filter(
+                CompanyComplianceDetails.organization_id == organization_id
+            ).first()
+            countries = [getattr(company, "jurisdiction_country", None)]
+    for raw in countries:
+        country = _normalize_country(raw)
+        existing_for_year = db.query(PayrollHoliday).filter(
+            PayrollHoliday.organization_id == organization_id,
+            PayrollHoliday.country == country,
+            PayrollHoliday.date >= date(year, 1, 1),
+            PayrollHoliday.date <= date(year, 12, 31),
+        ).first()
+        if not existing_for_year:
+            _seed_holidays_for_country(db, organization_id, country, year)
+
+
 def _seed_holidays_for_country(db: Session, organization_id: int, country: str, year: int) -> List[PayrollHoliday]:
     if country == "SG":
         # Gazetted dates (see _SG_GAZETTED_PUBLIC_HOLIDAYS): a year MOM has
@@ -20924,24 +21038,13 @@ def _seed_holidays_for_country(db: Session, organization_id: int, country: str, 
 
 def list_holidays(db: Session, organization_id: int, year: int = None) -> List[PayrollHoliday]:
     """Returns every holiday saved for this org (all jurisdictions it has —
-    relevant for Enterprise orgs with more than one onboarded country).
-    Lazily seeds the org's currently-active jurisdiction's defaults for
-    `year` (or the current year if not given) the first time that
-    (organization, country, year) combination has no rows yet."""
+    an org pays employees in its default country plus its entitled
+    countries, and each employee's working days follow their own country's
+    calendar). Lazily seeds each of those countries' defaults for `year` (or
+    the current year if not given) the first time that (organization,
+    country, year) combination has no rows yet."""
     target_year = year or date.today().year
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first()
-    country = _normalize_country(getattr(company, "jurisdiction_country", None))
-
-    existing_for_year = db.query(PayrollHoliday).filter(
-        PayrollHoliday.organization_id == organization_id,
-        PayrollHoliday.country == country,
-        PayrollHoliday.date >= date(target_year, 1, 1),
-        PayrollHoliday.date <= date(target_year, 12, 31),
-    ).first()
-    if not existing_for_year:
-        _seed_holidays_for_country(db, organization_id, country, target_year)
+    ensure_holidays_seeded(db, organization_id, target_year)
 
     query = db.query(PayrollHoliday).filter(PayrollHoliday.organization_id == organization_id)
     if year:
@@ -26445,6 +26548,26 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
 
 
 def _recompute_run_aggregates(db: Session, run: PayrollRun):
+    items = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.status != PayslipStatus.FAILED,
+    ).all()
+    totals = _aggregate_payslip_totals(items)
+    run.employee_count = totals["employee_count"]
+    run.total_gross = totals["total_gross"]
+    run.total_deductions = totals["total_deductions"]
+    run.total_taxes = totals["total_taxes"]
+    run.total_employer_contribution = totals["total_employer_contribution"]
+    run.total_net = totals["total_net"]
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def _aggregate_payslip_totals(items) -> dict:
+    """Run-level totals over non-FAILED payslip items — shared by the run's
+    stored aggregates and the per-country breakdown (run_totals_by_country),
+    so a country subtotal is computed by exactly the same rules as the
+    run total."""
     # Phase 8BI: a FAILED item (a statutorily-blocked employee, e.g.
     # Germany PAP unavailable — see generate_payslips_for_run) carries
     # zero fabricated monetary figures by construction, but is excluded
@@ -26460,9 +26583,7 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
     # (see engine/standard.py's override), never a real figure, so it is
     # excluded from total_net specifically to avoid silently understating
     # the run's aggregate net pay with a number that was never computed.
-    items = db.query(PayslipItem).filter(
-        PayslipItem.payroll_run_id == run.id, PayslipItem.status != PayslipStatus.FAILED,
-    ).all()
+    items = [i for i in items if i.status != PayslipStatus.FAILED]
     net_pay_known_items = [i for i in items if i.status != PayslipStatus.PARTIAL]
     # total_taxes sums `tds` specifically — for a PARTIAL item whose own
     # unavailableComponents names "wage_tax", tds is the SAME kind of
@@ -26473,11 +26594,13 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
         i for i in items
         if "wage_tax" not in ((i.germany_calculation_snapshot or {}).get("unavailableComponents") or [])
     ]
-    run.employee_count = len(items)
-    run.total_gross = sum((i.gross_pay for i in items), Decimal("0"))
-    run.total_deductions = sum((i.total_deductions for i in items), Decimal("0"))
-    run.total_taxes = sum((i.tds for i in tax_known_items), Decimal("0"))
-    run.total_employer_contribution = sum(
+    z = Decimal("0")
+    return {
+        "employee_count": len(items),
+        "total_gross": sum((i.gross_pay or z for i in items), z),
+        "total_deductions": sum((i.total_deductions or z for i in items), z),
+        "total_taxes": sum((i.tds or z for i in tax_known_items), z),
+        "total_employer_contribution": sum(
         (i.employer_pf + i.employer_esi + i.employer_social_security + i.employer_medicare + i.employer_pension
          + i.employer_ni + i.employer_futa + i.employer_sui + i.employer_state_program_contributions
          + i.employer_cpp2 + i.employer_eht
@@ -26489,11 +26612,109 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
          # above, already counted once; summing them too would double-count.
          + i.employer_edli + (i.employer_nps or Decimal("0")) + i.employer_lwf + i.employer_apprenticeship_levy for i in items),
         Decimal("0"),
+        ),
+        "total_net": sum((i.net_pay or z for i in net_pay_known_items), z),
+    }
+
+
+def run_totals_by_country(db: Session, run: PayrollRun, organization_id: Optional[int] = None) -> List[dict]:
+    """Per-country totals for a run: each payslip counts under its own
+    snapshotted country (PayslipItem.country_code — the employee's country
+    at generation), in that country's currency. Org default country first.
+    A mixed-country run's amounts are never summed across currencies here;
+    the run's stored total_* columns remain the raw arithmetic total."""
+    organization_id = organization_id or run.organization_id
+    default_country = _resolve_org_country(db, organization_id)
+    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
+    groups: Dict[str, list] = {}
+    for item in items:
+        groups.setdefault(_normalize_country(item.country_code or default_country or ""), []).append(item)
+    order = _sort_org_countries(db, organization_id, groups)
+    result = []
+    for country in order:
+        totals = _aggregate_payslip_totals(groups[country])
+        result.append({
+            "country": country,
+            "currency": _country_currency_code(db, organization_id, country, default_country),
+            "employeeCount": totals["employee_count"],
+            "blockedCount": sum(1 for i in groups[country] if i.status == PayslipStatus.FAILED),
+            "totalGross": totals["total_gross"],
+            "totalDeductions": totals["total_deductions"],
+            "totalTaxes": totals["total_taxes"],
+            "totalEmployerContribution": totals["total_employer_contribution"],
+            "totalNet": totals["total_net"],
+        })
+    return result
+
+
+def attach_run_country_totals(db: Session, runs: list, organization_id: Optional[int]) -> None:
+    """Set run.totals_by_country on every run in `runs` from ONE grouped
+    query (runs list). Same exclusions as _aggregate_payslip_totals: FAILED
+    payslips carry no figures; a PARTIAL payslip's placeholder net pay is
+    left out of totalNet."""
+    if not runs:
+        return
+    default_country = _resolve_org_country(db, organization_id)
+    run_ids = [r.id for r in runs]
+    rows = (
+        db.query(
+            PayslipItem.payroll_run_id, PayslipItem.country_code,
+            sa_func.count(PayslipItem.id),
+            sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.total_deductions), 0),
+            sa_func.coalesce(sa_func.sum(sa_case(
+                (PayslipItem.status == PayslipStatus.PARTIAL, 0), else_=PayslipItem.net_pay)), 0),
+        )
+        .filter(PayslipItem.payroll_run_id.in_(run_ids), PayslipItem.status != PayslipStatus.FAILED)
+        .group_by(PayslipItem.payroll_run_id, PayslipItem.country_code)
+        .all()
     )
-    run.total_net = sum((i.net_pay for i in net_pay_known_items), Decimal("0"))
-    db.commit()
-    db.refresh(run)
-    return run
+    per_run: Dict[int, Dict[str, dict]] = {}
+    for run_id, code, count, gross, deductions, net in rows:
+        country = _normalize_country(code or default_country or "")
+        entry = per_run.setdefault(run_id, {}).setdefault(country, {
+            "country": country, "employeeCount": 0, "totalGross": Decimal("0"),
+            "totalDeductions": Decimal("0"), "totalNet": Decimal("0"),
+        })
+        entry["employeeCount"] += int(count)
+        entry["totalGross"] += Decimal(str(gross))
+        entry["totalDeductions"] += Decimal(str(deductions))
+        entry["totalNet"] += Decimal(str(net))
+    currencies: Dict[str, str] = {}
+    for run in runs:
+        groups = per_run.get(run.id, {})
+        result = []
+        for country in _sort_org_countries(db, organization_id, groups):
+            if country not in currencies:
+                currencies[country] = _country_currency_code(db, organization_id, country, default_country)
+            result.append({**groups[country], "currency": currencies[country]})
+        run.totals_by_country = result
+
+
+def _sort_org_countries(db: Session, organization_id: Optional[int], codes) -> List[str]:
+    """`codes` in the org's own country order — default country first, then
+    its entitled countries in the order they were added (the Compliance >
+    Countries list) — with any other code after them, alphabetically."""
+    from app.modules.billing.jurisdiction_entitlement import org_payroll_countries
+
+    order = [_normalize_country(c) for c in org_payroll_countries(db, organization_id)]
+    return sorted(codes, key=lambda c: (order.index(c) if c in order else len(order), c))
+
+
+def _country_currency_code(db: Session, organization_id: Optional[int], country: Optional[str],
+                           default_country: Optional[str] = None) -> str:
+    """Currency an amount for `country` is paid/shown in: the org's explicit
+    currency override (Organization.currency) applies to its default
+    country only; every other country uses its own currency."""
+    if default_country is None:
+        default_country = _resolve_org_country(db, organization_id)
+    if organization_id and country == default_country:
+        from app.modules.organizations.models import Organization
+
+        org_row = db.query(Organization).filter(Organization.id == organization_id).first()
+        if org_row is not None and org_row.currency:
+            return org_row.currency
+    return _get_currency_code(country)
 
 
 def _resolve_run_calc_inputs(db: Session, run: PayrollRun, organization_id: int = None) -> str:
@@ -26823,6 +27044,13 @@ def generate_payslip_for_employee(
         if existing:
             return {"status": "exists", "employee_id": employee_id, "payslip_id": existing.id}
 
+    from app.modules.billing.jurisdiction_entitlement import payroll_run_country_gate
+    country_gate = payroll_run_country_gate(db, organization_id or run.organization_id)
+    block_reason = country_gate(employee.country_code) if country_gate is not None else None
+    if block_reason:
+        _record_country_not_entitled_item(db, run, employee, organization_id, block_reason)
+        return {"status": "blocked", "employee_id": employee_id, "payslip_id": None}
+
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     allowance_components = _resolve_allowance_components(db, organization_id)
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
@@ -26858,6 +27086,27 @@ def generate_payslip_for_employee(
         return {"status": "blocked", "employee_id": employee_id, "payslip_id": None}
 
     return {"status": "generated", "employee_id": employee_id, "payslip_id": item.id}
+
+
+def _record_country_not_entitled_item(db: Session, run: PayrollRun, emp: PayrollEmployee,
+                                      organization_id: Optional[int], reason: str) -> None:
+    """FAILED sentinel for an employee whose country the org isn't entitled
+    to (billing/jurisdiction_entitlement.py) — same shape as the Germany
+    statutory-block sentinel: zero fabricated figures, no payslip_number
+    consumed, retried by the next generation once the country is entitled
+    again (FAILED items don't count as already generated)."""
+    employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
+    db.add(PayslipItem(
+        payroll_run_id=run.id, employee_id=emp.id, organization_id=run.organization_id,
+        employee_name=employee_name, country_code=emp.country_code, status=PayslipStatus.FAILED,
+        notes=f"[COUNTRY_NOT_ENTITLED] {reason}"[:2000],
+    ))
+    db.flush()
+    log_activity(
+        db, organization_id or run.organization_id,
+        f"Payroll for {employee_name} in run '{run.period_label}' was skipped: {reason}",
+        ActivityStatus.INFO, actor_id=run.created_by,
+    )
 
 
 def parallel_payslip_generation_blocker(
@@ -26898,8 +27147,8 @@ def parallel_payslip_generation_blocker(
     # advisory lock held by generate_payslips_for_run (SG-043), and it adds
     # mid-period joiners the chord's pending list never sees. Per-employee
     # workers would bypass both, so a Singapore org is always sequential.
-    if organization_id and _sg_org_is_singapore(db, organization_id):
-        return ("this is a Singapore organization — Singapore payroll generation is "
+    if organization_id and _sg_org_has_singapore_payroll(db, organization_id):
+        return ("this organization pays employees in Singapore — Singapore payroll generation is "
                 "serialised per run (SG-043) and must not be split across workers")
     enabled = set(_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES)
     if not enabled:
@@ -26923,7 +27172,7 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     lock — generation commits internally (policy get-or-create, activity
     log), which would release a transaction-scoped row lock half-way. Every
     other country goes straight to the unchanged implementation."""
-    if organization_id and dialect_is_postgres(db) and _sg_org_is_singapore(db, organization_id):
+    if organization_id and dialect_is_postgres(db) and _sg_org_has_singapore_payroll(db, organization_id):
         from sqlalchemy import text as _sql_text
 
         # A session-level advisory lock is owned by ONE connection; the ORM
@@ -27092,9 +27341,19 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
     # re-query/re-resolve — only distinct jurisdictions actually present in
     # this batch pay that cost.
     calc_cache: dict = {}
+    # Country entitlement (resolved once per run): an employee whose country
+    # is OVER_LIMIT after a downgrade, or not entitled at all, gets a FAILED
+    # item instead of a calculation — the rest of the run carries on.
+    from app.modules.billing.jurisdiction_entitlement import payroll_run_country_gate
+    country_gate = payroll_run_country_gate(db, organization_id or run.organization_id)
     for emp in employees:
         if emp.id in existing_ids:
             continue
+        if country_gate is not None:
+            block_reason = country_gate(emp.country_code)
+            if block_reason:
+                _record_country_not_entitled_item(db, run, emp, organization_id, block_reason)
+                continue
         payslip_number = f"{base_payslip_code}{seq:05d}" if base_payslip_code else None
         # Phase 2.2: the batch loop no longer resolves these inputs inline.
         # _resolve_payslip_generation_inputs is the single implementation
@@ -30424,6 +30683,26 @@ def _fill_missing_basic_hra(fields: dict, db: Session = None, organization_id: O
             fields["hra"] = default_hra
 
 
+def _assert_employee_country_entitled(db: Session, organization_id: int, country_code: str) -> None:
+    """Country entitlement gate (billing/jurisdiction_entitlement.py) for
+    employee WRITE paths only — deliberately not inside
+    _resolve_employee_country, which also serves many read-only callers."""
+    from app.modules.billing.jurisdiction_entitlement import assert_country_allowed
+
+    assert_country_allowed(db, organization_id, country_code)
+
+
+def _bulk_row_failure(row_ref: dict, exc: Exception) -> dict:
+    """Per-row failure entry for the bulk create/update results; carries the
+    exception's `trace` (e.g. a plan-limit block) so the import UI can
+    render an upgrade prompt for that row."""
+    failure = {"row": row_ref, "reason": getattr(exc, "detail", None) or str(exc)}
+    trace = getattr(exc, "trace", None)
+    if trace:
+        failure["trace"] = trace
+    return failure
+
+
 def _resolve_employee_country(db: Session, organization_id: int, explicit_country_code: Optional[str]) -> str:
     """Per-employee jurisdiction override if given, else the org's default —
     same fallback pattern _resolve_employee_calc_inputs uses for payroll
@@ -30498,6 +30777,7 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
     employee_data = data.model_dump()
 
     country_code = _resolve_employee_country(db, organization_id, employee_data.get("country_code"))
+    _assert_employee_country_entitled(db, organization_id, country_code)
     employee_data["country_code"] = country_code
     _fill_missing_basic_hra(employee_data, db, organization_id)
     strategy = get_employee_validation_strategy(country_code)
@@ -30573,6 +30853,8 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
     country_code = _resolve_employee_country(
         db, organization_id, updates.get("country_code", employee.country_code)
     )
+    if "country_code" in updates and country_code != employee.country_code:
+        _assert_employee_country_entitled(db, organization_id, country_code)
     if "compliance_fields" in updates or "country_code" in updates:
         strategy = get_employee_validation_strategy(country_code)
         # A masked identifier round-tripped by the edit form is not an edit.
@@ -30658,7 +30940,13 @@ _SG_STATUTORY_FACTS = (      # (compliance_fields key, PayrollEmployee column or
 
 
 def _sg_fact_value(employee, key, column):
-    return getattr(employee, column, None) if column else (employee.compliance_fields or {}).get(key)
+    compliance = employee.compliance_fields or {}
+    if key in compliance and compliance[key] is not None:
+        return compliance[key]
+    value = getattr(employee, column, None) if column else None
+    if value is not None:
+        return value
+    return None
 
 
 def _sg_statutory_fact_changes(employee, updates: dict) -> tuple:
@@ -30873,6 +31161,9 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
 
     created_employees = []
     failed = []
+    import_country = str(data.countryCode or "").strip().upper() or None
+    if import_country and not is_supported_employee_country(_normalize_country(import_country)):
+        raise BadRequestException(f"Country '{import_country}' has no payroll engine.")
 
     # Pre-generate employee codes for this whole batch — mirrors
     # generate_payslips_for_run's "call the code generator once up front,
@@ -30903,6 +31194,39 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
 
         mapped = _map_employee_row(row)
 
+        # A per-country import: the whole file belongs to one country.
+        if import_country:
+            row_country = str(mapped.get("country_code") or "").strip()
+            if not row_country:
+                mapped["country_code"] = import_country
+            elif _normalize_country(row_country) != _normalize_country(import_country):
+                failed.append({
+                    "row": {"email": row.email, "name": row.name},
+                    "reason": f"This import is for {import_country} employees, but this row is for "
+                              f"{row_country}. Import it with the {row_country} template instead.",
+                })
+                continue
+
+        # An imported employee names its own country: the country decides
+        # which payroll engine calculates them, so a blank or engine-less
+        # country is a row error — never a silent fallback to the org's
+        # default country.
+        raw_country = str(mapped.get("country_code") or "").strip()
+        if not raw_country:
+            failed.append({
+                "row": {"email": row.email, "name": row.name},
+                "reason": "Country is required for every imported employee — it decides which "
+                          "country's payroll engine calculates them.",
+            })
+            continue
+        if not is_supported_employee_country(_normalize_country(raw_country)):
+            failed.append({
+                "row": {"email": row.email, "name": row.name},
+                "reason": f"Country '{raw_country}' has no payroll engine. Use a 2-letter country code "
+                          f"supported by the platform (e.g. IN, US, UK, DE).",
+            })
+            continue
+
         # Same jurisdiction resolution/validation/duplicate-check the
         # single-employee create_employee() runs — previously this bulk
         # path skipped it entirely, so every bulk-imported employee landed
@@ -30911,6 +31235,7 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
         mapped["country_code"] = country_code
         _fill_missing_basic_hra(mapped, db, organization_id)
         try:
+            _assert_employee_country_entitled(db, organization_id, country_code)
             strategy = get_employee_validation_strategy(country_code)
             mapped["compliance_fields"] = strategy.validate(row.complianceFields or {})
             mapped.update(strategy.sync_to_columns(mapped["compliance_fields"]))
@@ -30919,10 +31244,7 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
                 mapped.get("pan"), mapped["compliance_fields"],
             )
         except Exception as exc:
-            failed.append({
-                "row": {"email": row.email, "name": row.name},
-                "reason": getattr(exc, "detail", None) or str(exc),
-            })
+            failed.append(_bulk_row_failure({"email": row.email, "name": row.name}, exc))
             continue
 
         if next_seq is not None:
@@ -31027,6 +31349,8 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
                 country_code = _resolve_employee_country(
                     db, organization_id, mapped.get("country_code", employee.country_code)
                 )
+                if country_code != employee.country_code:
+                    _assert_employee_country_entitled(db, organization_id, country_code)
                 strategy = get_employee_validation_strategy(country_code)
                 incoming_cf = restore_masked_compliance_fields(row.complianceFields or {}, employee.compliance_fields or {})
                 merged_compliance = {**(employee.compliance_fields or {}), **incoming_cf}
@@ -31042,10 +31366,7 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
                 exclude_employee_id=employee.id,
             )
         except Exception as exc:
-            failed.append({
-                "row": {"id": row.id, "name": row.name},
-                "reason": getattr(exc, "detail", None) or str(exc),
-            })
+            failed.append(_bulk_row_failure({"id": row.id, "name": row.name}, exc))
             continue
 
         sensitive_snapshots[employee.id] = _snapshot_sensitive_fields(employee)
@@ -31553,6 +31874,9 @@ def get_payroll_run_detail(db: Session, run_id: int, organization_id: int = None
     run.approved_by_name = _resolve_user_name(db, run.approved_by)
     run.authorized_by_name = _resolve_user_name(db, run.authorized_by)
     run.paid_by_name = _resolve_user_name(db, run.paid_by)
+    # Mixed-country runs: each country's totals in its own currency (the
+    # stored total_* columns sum every payslip regardless of currency).
+    run.totals_by_country = run_totals_by_country(db, run, organization_id)
     return run
 
 
@@ -32886,6 +33210,15 @@ def get_bank_transfer_summary(db: Session, run_id: int, organization_id: int = N
         "paymentDate": run.pay_date,
         "bankFormat": policy.bank_export_format,
         "companyName": getattr(company, "name", None) or "",
+        # Mixed-country run: one bank file per country, each in its own
+        # currency (generate_bank_transfer_file's `country`). The single
+        # gross/net figures above are only meaningful when this has one row.
+        "countries": [
+            {**row, "totalGross": float(row["totalGross"]), "totalDeductions": float(row["totalDeductions"]),
+             "totalTaxes": float(row["totalTaxes"]), "totalEmployerContribution": float(row["totalEmployerContribution"]),
+             "totalNet": float(row["totalNet"])}
+            for row in run_totals_by_country(db, run, organization_id)
+        ],
     }
 
 
@@ -32957,7 +33290,9 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
             reference_number=item.payslip_number or f"RUN{run.id}-{item.employee_id}",
             narration=f"IR21 release {run.period_label}" if treatment == "RELEASE" else f"Salary {run.period_label}",
             payment_date=run.pay_date.isoformat(),
-            currency=currency_code,
+            # Mixed-country run: the org's currency (and its override) applies to
+            # default-country rows only; a secondary-country row pays in its own.
+            currency=currency_code if row_country == country else _get_currency_code(row_country),
             company_name=company_name,
             routing_label=bank_routing.btf_routing_label(row_country),
             routing_value=bank_routing.btf_routing_value(item, row_country),
@@ -32966,18 +33301,39 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
 
 
 def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int = None, actor_id: int = None,
-                                 format_override: Optional[str] = None):
+                                 format_override: Optional[str] = None, country: Optional[str] = None):
     """Returns (file_bytes, content_type, file_extension, filename) for the
     run's bank transfer file. Defaults to the format configured on the org's
     active Banking Policy (PayrollPolicy.bank_export_format); pass
     format_override to download the same run's data in a different format
-    (csv/xlsx/txt/pdf) without changing that policy setting."""
+    (csv/xlsx/txt/pdf) without changing that policy setting.
+
+    A run that pays employees in more than one country produces one file
+    per country (`country`, required for such a run): each file holds only
+    that country's payslips, in that country's currency and bank routing —
+    a single payment file never mixes currencies."""
     from app.modules.payroll.bank_export import get_exporter
     from app.modules.payroll.policy.service import get_active_policy
 
     run = get_payroll_run_by_id(db, run_id, organization_id)
     items = get_payslips_for_run(db, run_id, organization_id)
     policy = get_active_policy(db, organization_id)
+
+    default_country = _resolve_org_country(db, organization_id)
+    countries = _sort_org_countries(
+        db, organization_id, {_normalize_country(i.country_code or default_country or "") for i in items})
+    if country:
+        selected = _normalize_country(country)
+        if selected not in countries:
+            raise BadRequestException(
+                f"This run has no payslips in {selected}. Countries in this run: {', '.join(countries) or 'none'}."
+            )
+        items = [i for i in items if _normalize_country(i.country_code or default_country or "") == selected]
+    elif len(countries) > 1:
+        raise BadRequestException(
+            f"This run pays employees in {len(countries)} countries ({', '.join(countries)}). Download one bank "
+            f"file per country — each is paid in its own currency."
+        )
 
     # Resolve the org's explicit currency override for bank exports.
     from app.modules.organizations.models import Organization
@@ -33011,7 +33367,8 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
         f"Bank transfer file ({export_format.upper()}) generated for run '{run.period_label}'.",
         ActivityStatus.SUCCESS, actor_id=actor_id,
     )
-    filename = f"bank-transfer_{run.run_code or run.id}.{exporter.file_extension}"
+    suffix = f"_{_normalize_country(country)}" if country else ""
+    filename = f"bank-transfer_{run.run_code or run.id}{suffix}.{exporter.file_extension}"
     return file_bytes, exporter.content_type, exporter.file_extension, filename
 
 
@@ -33607,6 +33964,9 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # non-default-jurisdiction employee's PDF showed the wrong currency,
     # income-tax label, and statutory terminology.
     country = _normalize_country(data.get("country") or "IN")
+    if country == "UK":
+        return _render_uk_payslip_pdf_bytes(db, data, item, run, company_name, company_address,
+                                            evaluation=evaluation)
     sym = _get_currency_symbol(country)
 
     def fmt(val):
@@ -34141,6 +34501,353 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
 
         _draw_evaluation_watermark(c, width, height, F, text=PILOT_WATERMARK)
 
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+_UK_YTD_RUN_STATUSES = (
+    PayrollStatus.APPROVED.value, PayrollStatus.AUTHORIZED.value,
+    PayrollStatus.PAID.value, PayrollStatus.CLOSED.value,
+)
+
+
+def _uk_tax_year_start(pay_date: date) -> date:
+    """HMRC tax years run 6 April – 5 April."""
+    start = date(pay_date.year, 4, 6)
+    return start if pay_date >= start else date(pay_date.year - 1, 4, 6)
+
+
+def _uk_tax_month(pay_date: date) -> int:
+    """HMRC tax month: month 1 is 6 April – 5 May."""
+    start = _uk_tax_year_start(pay_date)
+    months = (pay_date.year - start.year) * 12 + pay_date.month - start.month
+    if pay_date.day < 6:
+        months -= 1
+    return months + 1
+
+
+def _uk_tax_basis(tax_code: str) -> str:
+    """A code suffixed W1/M1/X is operated non-cumulatively."""
+    code = (tax_code or "").upper().replace(" ", "")
+    if code.endswith(("W1", "M1", "X")):
+        return "Week 1/Month 1"
+    return "Cumulative"
+
+
+def _uk_year_to_date(db: Session, item: PayslipItem, run: PayrollRun) -> dict:
+    """This employee's UK totals for the tax year up to and including this
+    payslip: approved-or-later runs paid earlier in the same tax year, plus
+    this payslip itself (whatever its run's status)."""
+    ty_start = _uk_tax_year_start(run.pay_date)
+    earlier = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.employee_id == item.employee_id,
+            PayslipItem.organization_id == item.organization_id,
+            PayslipItem.id != item.id,
+            PayslipItem.status != PayslipStatus.FAILED.value,
+            PayrollRun.status.in_(_UK_YTD_RUN_STATUSES),
+            PayrollRun.pay_date >= ty_start,
+            PayrollRun.pay_date <= run.pay_date,
+            sa_func.upper(sa_func.coalesce(PayslipItem.country_code, "")).in_(("UK", "GB")),
+        )
+        .all()
+    )
+    fields = {
+        "gross": "gross_pay", "tax": "tds", "ni": "ni_employee", "pension": "employee_pension",
+        "student_loan": "study_loan_deduction", "postgrad_loan": "postgrad_loan_deduction",
+        "employer_ni": "employer_ni", "employer_pension": "employer_pension", "net": "net_pay",
+    }
+    totals = {}
+    for key, column in fields.items():
+        totals[key] = sum(float(getattr(p, column, None) or 0) for p in [*earlier, item])
+    totals["tax_year"] = f"{ty_start.year}/{str(ty_start.year + 1)[-2:]}"
+    return totals
+
+
+def uk_payslip_details(db: Session, item: PayslipItem, run: PayrollRun) -> dict:
+    """What a UK payslip shows beyond the generic figures — shared by the
+    PDF and the single-payslip API (so the on-screen payslip matches)."""
+    employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == item.employee_id).first()
+    # The payslip's own snapshot (as generated) first, then the employee record.
+    cf = {**((getattr(employee, "compliance_fields", None) or {}) if employee else {}),
+          **(getattr(item, "compliance_fields", None) or {})}
+    company = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == item.organization_id
+    ).first()
+    tax_code = (getattr(employee, "tax_code", None) or cf.get("paye_tax_code") or "").strip() or "1257L"
+    ytd = _uk_year_to_date(db, item, run)
+    return {
+        "taxCode": tax_code,
+        "taxBasis": _uk_tax_basis(tax_code),
+        "niCategory": (getattr(employee, "ni_category", None) or cf.get("ni_category") or "A").strip().upper(),
+        "nino": cf.get("nino"),
+        "sortCode": cf.get("sort_code"),
+        "taxMonth": item.tax_month or _uk_tax_month(run.pay_date),
+        "taxYear": ytd.pop("tax_year"),
+        "periodStart": run.period_start.isoformat(),
+        "periodEnd": run.period_end.isoformat(),
+        "payDate": run.pay_date.isoformat(),
+        "payeReference": getattr(company, "paye_reference", None),
+        "accountsOfficeReference": getattr(company, "accounts_office_reference", None),
+        "ytd": {
+            "gross": ytd["gross"], "tax": ytd["tax"], "ni": ytd["ni"], "pension": ytd["pension"],
+            "studentLoan": ytd["student_loan"], "postgradLoan": ytd["postgrad_loan"],
+            "employerNi": ytd["employer_ni"], "employerPension": ytd["employer_pension"], "net": ytd["net"],
+        },
+    }
+
+
+def _render_uk_payslip_pdf_bytes(db: Session, data: dict, item: PayslipItem, run: PayrollRun,
+                                 company_name: str, company_address: str,
+                                 *, evaluation: bool = False) -> bytes:
+    """A UK payslip in the layout UK employees expect (Employment Rights Act
+    1996 s.8 itemised pay statement plus the details HMRC and employees rely
+    on): employer PAYE and Accounts Office references, NI number and NI
+    category letter, tax code and basis, tax period, pay period and pay
+    date, payments and deductions in UK terms, year-to-date totals for the
+    tax year, and the employer's NI and pension contributions (shown for
+    information — they are not deducted from pay). No India-specific
+    content (HRA, NEFT, amount in words)."""
+    import io
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+
+    uk = uk_payslip_details(db, item, run)
+    tax_code, ni_category, tax_month = uk["taxCode"], uk["niCategory"], uk["taxMonth"]
+    nino = uk["nino"] or "-"
+    sort_code = uk["sortCode"] or "-"
+    paye_ref = uk["payeReference"] or "-"
+    accounts_office_ref = uk["accountsOfficeReference"] or "-"
+    ytd = {
+        "tax_year": uk["taxYear"], "gross": uk["ytd"]["gross"], "tax": uk["ytd"]["tax"], "ni": uk["ytd"]["ni"],
+        "pension": uk["ytd"]["pension"], "student_loan": uk["ytd"]["studentLoan"],
+        "postgrad_loan": uk["ytd"]["postgradLoan"], "employer_ni": uk["ytd"]["employerNi"],
+        "employer_pension": uk["ytd"]["employerPension"], "net": uk["ytd"]["net"],
+    }
+
+    def money(val):
+        return f"£{float(val or 0):,.2f}"
+
+    def day(v):
+        if not v:
+            return "-"
+        if isinstance(v, str):
+            try:
+                v = datetime.strptime(v[:10], "%Y-%m-%d").date()
+            except ValueError:
+                return v
+        return v.strftime("%d %b %Y")
+
+    def masked(acc):
+        s = str(acc or "")
+        return ("****" + s[-4:]) if len(s) > 4 else (s or "-")
+
+    # Payments: basic pay, any named allowances, and the remaining fixed
+    # salary components as one "Fixed allowance" line (the UK has no HRA).
+    payments = [("Basic pay", float(data["basicPay"] or 0))]
+    for allowance in data.get("allowanceItems") or []:
+        payments.append((allowance["label"], float(allowance["amount"] or 0)))
+    fixed_allowance = float(data.get("hra") or 0) + float(data.get("specialAllowance") or 0)
+    if fixed_allowance:
+        payments.append(("Fixed allowance", fixed_allowance))
+    if float(data.get("overtime") or 0):
+        payments.append(("Overtime", float(data["overtime"])))
+    if float(data.get("additionalCompensation") or 0):
+        payments.append(("Bonus / additional pay", float(data["additionalCompensation"])))
+
+    deductions = [
+        ("Income tax (PAYE)", float(data.get("tds") or 0)),
+        ("National Insurance", float(data.get("niEmployee") or 0)),
+    ]
+    for label, key in [
+        ("Workplace pension", "employeePension"),
+        ("Student loan", "studyLoanDeduction"),
+        ("Postgraduate loan", "postgradLoanDeduction"),
+    ]:
+        if float(data.get(key) or 0):
+            deductions.append((label, float(data[key])))
+    if float(data.get("attendanceDeduction") or 0):
+        days = data.get("unpaidLeaveDays")
+        label = "Unpaid leave" + (f" ({float(days):g} day{'s' if float(days) != 1 else ''})" if days else "")
+        deductions.append((label, float(data["attendanceDeduction"])))
+
+    gross = float(data["salary"] or 0)
+    total_deductions = float(data["totalDeductions"] or 0)
+    net = float(data["netPay"] or 0)
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    base_font = _register_rupee_font(c)
+    F = base_font or "Helvetica"
+    FB = f"{base_font}-Bold" if base_font else "Helvetica-Bold"
+    try:
+        c.setFont(FB, 9)
+    except Exception:  # noqa: BLE001 — no bold face registered
+        FB = F
+
+    navy = colors.HexColor("#1e3a8a")
+    gray_100 = colors.HexColor("#F3F4F6")
+    gray_300 = colors.HexColor("#D1D5DB")
+    gray_500 = colors.HexColor("#6B7280")
+    gray_900 = colors.HexColor("#111827")
+    green_600 = colors.HexColor("#16A34A")
+    green_bg = colors.HexColor("#ECFDF5")
+
+    left, right = 14 * mm, width - 14 * mm
+    page_w = right - left
+    y = height - 6 * mm
+
+    # Header: employer and its HMRC references.
+    header_h = 26 * mm
+    c.setFillColor(navy)
+    c.rect(6 * mm, y - header_h, width - 12 * mm, header_h, fill=True, stroke=False)
+    c.setFillColor(colors.white)
+    c.setFont(FB, 18)
+    c.drawString(left + 3 * mm, y - 10 * mm, company_name.upper())
+    c.setFont(F, 9.5)
+    if company_address:
+        c.drawString(left + 3 * mm, y - 16 * mm, company_address[:90])
+    c.drawString(left + 3 * mm, y - 21.5 * mm, f"Employer PAYE ref: {paye_ref}    Accounts Office ref: {accounts_office_ref}")
+    c.setFont(FB, 20)
+    c.drawRightString(right - 3 * mm, y - 11 * mm, "PAYSLIP")
+    c.setFont(F, 9.5)
+    c.drawRightString(right - 3 * mm, y - 17 * mm, f"Tax year {ytd['tax_year']}  ·  Month {tax_month}")
+    y -= header_h + 6 * mm
+
+    def detail_grid(rows, y_top):
+        row_h = 7.5 * mm
+        cols = [left, left + page_w * 0.18, left + page_w * 0.5, left + page_w * 0.68, right]
+        for cells in rows:
+            c.setStrokeColor(gray_300)
+            c.setLineWidth(0.4)
+            c.rect(left, y_top - row_h, page_w, row_h, fill=False, stroke=True)
+            for cx in cols[1:-1]:
+                c.line(cx, y_top, cx, y_top - row_h)
+            base = y_top - row_h + 2.6 * mm
+            for i, (label, value) in enumerate(cells):
+                c.setFillColor(gray_500)
+                c.setFont(FB, 8.5)
+                c.drawString(cols[i * 2] + 2.5 * mm, base, label)
+                c.setFillColor(gray_900)
+                c.setFont(F, 9.5)
+                c.drawString(cols[i * 2 + 1] + 2.5 * mm, base, str(value)[:40])
+            y_top -= row_h
+        return y_top
+
+    def heading(text, x, y_pos):
+        c.setFillColor(gray_900)
+        c.setFont(FB, 11.5)
+        c.drawString(x, y_pos, text)
+
+    heading("Employee", left, y)
+    y = detail_grid([
+        [("Name", data["employee"]), ("Employee ID", data["employeeId"])],
+        [("NI number", nino), ("NI category", ni_category)],
+        [("Tax code", tax_code), ("Tax basis", uk["taxBasis"])],
+        [("Department", data.get("department") or "-"), ("Job title", data.get("designation") or "-")],
+        [("Pay period", f"{day(run.period_start)} – {day(run.period_end)}"), ("Pay date", day(run.pay_date))],
+        [("Tax period", f"Month {tax_month} ({ytd['tax_year']})"), ("Payment method", "BACS")],
+        [("Bank account", masked(data.get("bankAccount"))), ("Sort code", sort_code)],
+    ], y - 3 * mm)
+    y -= 8 * mm
+
+    def amount_table(title, rows, total_label, total, x, y_top, w):
+        hdr_h, cell_h = 8 * mm, 7.5 * mm
+        heading(title, x, y_top)
+        y_top -= 3 * mm
+        c.setFillColor(navy)
+        c.rect(x, y_top - hdr_h, w, hdr_h, fill=True, stroke=False)
+        c.setFillColor(colors.white)
+        c.setFont(FB, 9)
+        c.drawString(x + 2.5 * mm, y_top - hdr_h + 2.8 * mm, "Description")
+        c.drawRightString(x + w - 2.5 * mm, y_top - hdr_h + 2.8 * mm, "Amount")
+        y_top -= hdr_h
+        for label, value in rows:
+            c.setStrokeColor(gray_300)
+            c.setLineWidth(0.3)
+            c.rect(x, y_top - cell_h, w, cell_h, fill=False, stroke=True)
+            c.setFillColor(gray_900)
+            c.setFont(F, 9.5)
+            c.drawString(x + 2.5 * mm, y_top - cell_h + 2.6 * mm, label)
+            c.drawRightString(x + w - 2.5 * mm, y_top - cell_h + 2.6 * mm, money(value))
+            y_top -= cell_h
+        c.setFillColor(gray_100)
+        c.rect(x, y_top - cell_h, w, cell_h, fill=True, stroke=False)
+        c.setFillColor(gray_900)
+        c.setFont(FB, 9.5)
+        c.drawString(x + 2.5 * mm, y_top - cell_h + 2.6 * mm, total_label)
+        c.drawRightString(x + w - 2.5 * mm, y_top - cell_h + 2.6 * mm, money(total))
+        return y_top - cell_h
+
+    half = page_w / 2 - 2 * mm
+    y_pay = amount_table("Payments", payments, "Total payments", gross, left, y, half)
+    y_ded = amount_table("Deductions", deductions, "Total deductions", total_deductions, left + half + 4 * mm, y, half)
+    y = min(y_pay, y_ded) - 5 * mm
+
+    # Net pay.
+    net_h = 11 * mm
+    c.setFillColor(green_bg)
+    c.rect(left, y - net_h, page_w, net_h, fill=True, stroke=False)
+    c.setStrokeColor(green_600)
+    c.setLineWidth(0.8)
+    c.rect(left, y - net_h, page_w, net_h, fill=False, stroke=True)
+    c.setFillColor(green_600)
+    c.setFont(FB, 13)
+    c.drawString(left + 3 * mm, y - net_h + 3.6 * mm, "NET PAY")
+    c.drawRightString(right - 3 * mm, y - net_h + 3.6 * mm, money(net))
+    y -= net_h + 8 * mm
+
+    # Year to date and employer contributions, side by side.
+    ytd_rows = [
+        ("Gross pay", ytd["gross"]),
+        ("Income tax (PAYE)", ytd["tax"]),
+        ("National Insurance", ytd["ni"]),
+        ("Workplace pension", ytd["pension"]),
+    ]
+    if ytd["student_loan"]:
+        ytd_rows.append(("Student loan", ytd["student_loan"]))
+    if ytd["postgrad_loan"]:
+        ytd_rows.append(("Postgraduate loan", ytd["postgrad_loan"]))
+    ytd_rows.append(("Net pay", ytd["net"]))
+    y_ytd = amount_table(f"Year to date ({ytd['tax_year']})", ytd_rows[:-1], "Net pay", ytd_rows[-1][1], left, y, half)
+
+    employer_rows = [
+        ("Employer National Insurance", float(data.get("employerNi") or 0)),
+        ("Employer pension", float(data.get("employerPension") or 0)),
+    ]
+    y_emp = amount_table("Employer contributions", employer_rows, "Employer NI to date",
+                         ytd["employer_ni"], left + half + 4 * mm, y, half)
+    c.setFillColor(gray_500)
+    c.setFont(F, 8)
+    c.drawString(left + half + 4 * mm, y_emp - 4.5 * mm, f"Employer pension to date: {money(ytd['employer_pension'])}")
+    c.drawString(left + half + 4 * mm, y_emp - 8.5 * mm, "Paid by your employer — not deducted from your pay.")
+    status = data.get("autoEnrolmentStatus")
+    if status:
+        c.drawString(left + half + 4 * mm, y_emp - 12.5 * mm,
+                     f"Pension auto-enrolment: {str(status).replace('_', ' ').title()}")
+    y = min(y_ytd, y_emp - 14 * mm)
+
+    # Footer.
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.4)
+    c.line(left, 12 * mm, right, 12 * mm)
+    c.setFont(F, 8.5)
+    c.setFillColor(gray_500)
+    c.drawCentredString(width / 2, 8 * mm,
+                        "Keep this payslip — you may need it as proof of income. Questions about your tax code: HMRC, gov.uk/tax-codes.")
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.8)
+    c.rect(6 * mm, 6 * mm, width - 12 * mm, height - 12 * mm, fill=0, stroke=1)
+
+    if evaluation:
+        _draw_evaluation_watermark(c, width, height, F)
     c.showPage()
     c.save()
     return buf.getvalue()
@@ -36615,6 +37322,11 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
         column = field_map.get(camel_field)
         if column:
             setattr(row, column, value)
+    # The default country and the entitlement ledger's primary row stay equal.
+    if payload.get("jurisdictionCountry"):
+        from app.modules.billing.jurisdiction_entitlement import sync_primary_with_default_country
+
+        sync_primary_with_default_country(db, organization_id, payload["jurisdictionCountry"])
 
     # Edit / Override support for the jurisdiction tax/registration IDs.
     # Values are validated against the org's jurisdiction schema, then stored
@@ -36689,6 +37401,11 @@ def get_payroll_reports(db: Session, organization_id: int = None, **_) -> List[d
             # this used to only recognize Approved/Paid, so an Authorized or
             # Closed run incorrectly showed as "pending" here.
             "status": "available" if PAYROLL_STATUS_ORDER.index(run.status) >= PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED) else "pending",
+            # Each country the run pays, with its own employee count and totals
+            # in its own currency — never summed across currencies.
+            "countries": [{**c, **{k: float(c[k] or 0) for k in ("totalGross", "totalDeductions", "totalTaxes",
+                                                                  "totalEmployerContribution", "totalNet")}}
+                          for c in run_totals_by_country(db, run, organization_id)],
         })
     return reports
 
@@ -37015,6 +37732,104 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
       3. Employee breakdown table (16 columns) with totals row
       4. Sign-off block – HR Manager & Finance Director signature lines
     """
+    run = _get_report_run(db, report_id, organization_id)
+    items = run.payslip_items or []
+    sections = _register_country_sections(db, run, items, organization_id)
+    if len(sections) <= 1:
+        # One country (or no payslips yet): the register exactly as before.
+        # None when nothing is configured anywhere — _get_currency_symbol
+        # falls back to a neutral "$" for an unrecognized country.
+        country = sections[0]["country"] if sections else _resolve_org_country(db, organization_id)
+        currency = _country_currency_code(db, organization_id, country)
+        return _render_register_pdf(db, run, items, country, currency, organization_id)
+
+    # Mixed-country run: one register section per country — that country's
+    # employees, statutory columns, currency and totals — in one document.
+    # Amounts in different currencies are never added together.
+    from pypdf import PdfReader, PdfWriter
+    import io
+
+    writer = PdfWriter()
+    for section in sections:
+        part = _render_register_pdf(
+            db, section["run_view"], section["items"], section["country"], section["currency"], organization_id,
+            section_label=f"{_country_display_name(section['country'])} — amounts in {section['currency']}",
+        )
+        for page in PdfReader(io.BytesIO(part)).pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+class _CountryRunView:
+    """A PayrollRun seen through one country: payslip_items holds only that
+    country's payslips and total_*/employee_count are recomputed over them
+    (_aggregate_payslip_totals). Every other attribute is the real run's."""
+
+    def __init__(self, run: PayrollRun, items: list):
+        self._run = run
+        self.payslip_items = items
+        totals = _aggregate_payslip_totals(items)
+        self.employee_count = totals["employee_count"]
+        self.total_gross = totals["total_gross"]
+        self.total_deductions = totals["total_deductions"]
+        self.total_taxes = totals["total_taxes"]
+        self.total_employer_contribution = totals["total_employer_contribution"]
+        self.total_net = totals["total_net"]
+
+    def __getattr__(self, name):
+        return getattr(self._run, name)
+
+
+def _country_run_view(db: Session, run: PayrollRun, country: Optional[str], organization_id: Optional[int]):
+    """The run itself when every payslip is in `country`; else a
+    _CountryRunView restricted to `country`'s payslips."""
+    default_country = _resolve_org_country(db, organization_id or run.organization_id)
+    code = _normalize_country(country or default_country or "")
+    items = list(run.payslip_items or [])
+    mine = [i for i in items if _normalize_country(i.country_code or default_country or "") == code]
+    return run if len(mine) == len(items) else _CountryRunView(run, mine)
+
+
+def _country_display_name(code: Optional[str]) -> str:
+    from app.core.jurisdiction import ALL_CODE_TO_COUNTRY_NAME
+
+    return ALL_CODE_TO_COUNTRY_NAME.get(code or "", code or "Unknown")
+
+
+def _register_country_sections(db: Session, run: PayrollRun, items: list, organization_id: Optional[int]) -> List[dict]:
+    """Payslip items of a run grouped by each payslip's own country (default
+    country first), with a run-shaped view whose total_* reflect only that
+    country's payslips — so a register section's KPI cards and totals row
+    are computed by the same rules as the whole run's."""
+    from types import SimpleNamespace
+
+    default_country = _resolve_org_country(db, organization_id or run.organization_id)
+    groups: Dict[str, list] = {}
+    for item in items:
+        groups.setdefault(_normalize_country(item.country_code or default_country or ""), []).append(item)
+    sections = []
+    for country in _sort_org_countries(db, organization_id or run.organization_id, groups):
+        totals = _aggregate_payslip_totals(groups[country])
+        run_view = SimpleNamespace(
+            id=run.id, period_label=run.period_label, pay_date=run.pay_date, status=run.status,
+            run_code=getattr(run, "run_code", None), employee_count=totals["employee_count"],
+            total_gross=totals["total_gross"], total_deductions=totals["total_deductions"],
+            total_taxes=totals["total_taxes"], total_employer_contribution=totals["total_employer_contribution"],
+            total_net=totals["total_net"],
+        )
+        sections.append({
+            "country": country, "items": groups[country], "run_view": run_view,
+            "currency": _country_currency_code(db, organization_id, country, default_country),
+        })
+    return sections
+
+
+def _render_register_pdf(db: Session, run, items: list, country: Optional[str], currency: Optional[str],
+                         organization_id: Optional[int], section_label: Optional[str] = None) -> bytes:
+    """One payroll register document for `items`, all in one `country` /
+    `currency`. `run` is the PayrollRun or a per-country view of it."""
     from reportlab.lib.pagesizes import landscape, A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
@@ -37022,22 +37837,7 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
 
     import io
 
-    run = _get_report_run(db, report_id, organization_id)
-    items = run.payslip_items or []
-
-    # ── Currency helpers ──
-    # None when nothing is configured anywhere — _get_currency_symbol below
-    # already falls back to a neutral "$" for an unrecognized (including
-    # None) country, rather than assuming India.
-    country = _resolve_org_country(db, organization_id)
-    # Use the org's explicit currency override if set, otherwise derive
-    # from the jurisdiction.
-    org_currency_code = None
-    if organization_id:
-        from app.modules.organizations.models import Organization
-        org_row = db.query(Organization).filter(Organization.id == organization_id).first()
-        org_currency_code = org_row.currency if org_row else None
-    sym = _get_currency_symbol(org_currency_code or country)
+    sym = _get_currency_symbol(currency or country)
     evaluation = _is_evaluation_workspace(db, organization_id)
 
     def fmt(val):
@@ -37108,7 +37908,9 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
     c.setFont(FB, 20)
     c.drawString(margin_l + 7 * mm, y + 9 * mm, "PAYROLL REGISTER")
     c.setFont(F, 8.5)
-    c.drawString(margin_l + 7 * mm, y + 3.5 * mm, "Employee-wise Salary & Statutory Breakdown")
+    c.drawString(margin_l + 7 * mm, y + 3.5 * mm,
+                 f"Employee-wise Salary & Statutory Breakdown — {section_label}" if section_label
+                 else "Employee-wise Salary & Statutory Breakdown")
 
     c.setFont(FB, 9.5)
     c.drawRightString(margin_r - 7 * mm, y + 12 * mm, org_name)
@@ -37404,13 +38206,7 @@ def generate_report_csv_bytes(db: Session, report_id: int, organization_id: int 
 
     run = _get_report_run(db, report_id, organization_id)
     items = run.payslip_items or []
-
-    # None when nothing is configured anywhere — .get() below already
-    # falls back to the generic statutory-column set for any unrecognized
-    # (including None) key, so this correctly avoids showing India-specific
-    # columns (PF/ESI/PT) on an unconfigured org's compliance export.
-    country = _resolve_org_country(db, organization_id)
-    statutory_cols = _STATUTORY_COLUMNS_BY_COUNTRY.get(country, _DEFAULT_STATUTORY_COLUMNS)
+    sections = _register_country_sections(db, run, items, organization_id)
 
     def _other_deductions(it):
         total_ded = Decimal(str(it.total_deductions or 0))
@@ -37429,19 +38225,42 @@ def generate_report_csv_bytes(db: Session, report_id: int, organization_id: int 
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(
-        ["Employee", "Department", "Gross Pay"]
-        + [label for label, _field, _width in statutory_cols]
-        + ["Other Deductions", "Net Pay", "Status"]
-    )
     csv_fmt = lambda v: float(v)
-    for item in items:
+
+    def _write_block(block_items, country):
+        # None when nothing is configured anywhere — .get() falls back to the
+        # generic statutory-column set for any unrecognized (including None)
+        # key, so an unconfigured org never gets India's PF/ESI/PT columns.
+        statutory_cols = _STATUTORY_COLUMNS_BY_COUNTRY.get(country, _DEFAULT_STATUTORY_COLUMNS)
         writer.writerow(
-            [item.employee_name, item.department or "", float(item.gross_pay or 0)]
-            + [_statutory_cell_text(item, field, csv_fmt) for _label, field, _width in statutory_cols]
-            + [float(_other_deductions(item)), _net_salary_cell_text(item, csv_fmt),
-               {"Failed": "BLOCKED", "Partial": "PARTIAL"}.get(item.status, "")]
+            ["Employee", "Department", "Gross Pay"]
+            + [label for label, _field, _width in statutory_cols]
+            + ["Other Deductions", "Net Pay", "Status"]
         )
+        for item in block_items:
+            writer.writerow(
+                [item.employee_name, item.department or "", float(item.gross_pay or 0)]
+                + [_statutory_cell_text(item, field, csv_fmt) for _label, field, _width in statutory_cols]
+                + [float(_other_deductions(item)), _net_salary_cell_text(item, csv_fmt),
+                   {"Failed": "BLOCKED", "Partial": "PARTIAL"}.get(item.status, "")]
+            )
+
+    if len(sections) <= 1:
+        country = sections[0]["country"] if sections else _resolve_org_country(db, organization_id)
+        _write_block(items, country)
+        return buf.getvalue().encode("utf-8")
+
+    # Mixed-country run: one block per country — its own statutory columns,
+    # currency and totals. Amounts in different currencies are never summed.
+    for index, section in enumerate(sections):
+        if index:
+            writer.writerow([])
+        view = section["run_view"]
+        writer.writerow([f"Country: {_country_display_name(section['country'])} ({section['country']})",
+                         f"Currency: {section['currency']}", f"Employees: {view.employee_count}"])
+        _write_block(section["items"], section["country"])
+        writer.writerow(["Total", "", float(view.total_gross or 0), f"Net: {float(view.total_net or 0)}",
+                         f"Deductions: {float(view.total_deductions or 0)}"])
     return buf.getvalue().encode("utf-8")
 
 
@@ -37490,6 +38309,7 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         total_taxes = _month_sum(PayrollRun.total_taxes, this_month_start, this_month_end)
         prev_net = _month_sum(PayrollRun.total_net, prev_month_start, this_month_start)
         pending_approvals = _pending_count(this_month_start, this_month_end)
+        window = (this_month_start, this_month_end)
 
         change_pct = None
         if prev_net and prev_net > 0:
@@ -37511,6 +38331,7 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         total_taxes = _month_sum(PayrollRun.total_taxes, all_start, all_end)
         pending_approvals = _pending_count(all_start, all_end)
         change_pct = None
+        window = (all_start, all_end)
 
     return {
         "totalPayrollCost": total_net,
@@ -37524,7 +38345,53 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         "onLeaveCount": on_leave_count,
         "inactiveCount": inactive_count,
         "pendingApprovals": pending_approvals,
+        # Multi-country orgs: the totals above add every currency together;
+        # this is the same period per country, each in its own currency.
+        "byCountry": _dashboard_country_breakdown(db, organization_id, *window),
     }
+
+
+def _dashboard_country_breakdown(db: Session, organization_id: Optional[int], start, end) -> List[dict]:
+    """Per-country payroll totals over runs whose period starts in
+    [start, end): each payslip counted under its own country, in that
+    country's currency. FAILED payslips carry no figures and are excluded."""
+    if organization_id is None:
+        return []
+    default_country = _resolve_org_country(db, organization_id)
+    rows = (
+        db.query(
+            PayslipItem.country_code,
+            sa_func.count(PayslipItem.id),
+            sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.net_pay), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.tds), 0),
+        )
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayrollRun.organization_id == organization_id,
+            PayrollRun.period_start >= start, PayrollRun.period_start < end,
+            PayslipItem.status != PayslipStatus.FAILED,
+        )
+        .group_by(PayslipItem.country_code)
+        .all()
+    )
+    merged: Dict[str, dict] = {}
+    for code, count, gross, net, taxes in rows:
+        country = _normalize_country(code or default_country or "")
+        entry = merged.setdefault(country, {"country": country, "payslips": 0, "totalGross": Decimal("0"),
+                                            "totalNet": Decimal("0"), "totalTaxes": Decimal("0")})
+        entry["payslips"] += int(count)
+        entry["totalGross"] += Decimal(str(gross))
+        entry["totalNet"] += Decimal(str(net))
+        entry["totalTaxes"] += Decimal(str(taxes))
+    result = []
+    for country in _sort_org_countries(db, organization_id, merged):
+        entry = merged[country]
+        entry["currency"] = _country_currency_code(db, organization_id, country, default_country)
+        for key in ("totalGross", "totalNet", "totalTaxes"):
+            entry[key] = _round2(entry[key])
+        result.append(entry)
+    return result
 
 
 def _compute_attendance_deductions(db: Session, organization_id: int = None, year: int = None, month: int = None) -> Decimal:

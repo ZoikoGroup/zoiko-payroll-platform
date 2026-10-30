@@ -41,6 +41,7 @@ from app.core.dependencies import get_current_super_admin
 from app.core.jurisdiction import CODE_TO_COUNTRY_NAME
 from app.database import get_db
 from app.modules.organizations.models import Organization
+from app.modules.billing import jurisdiction_entitlement
 from app.modules.billing.models import (
     BillingDunningState,
     BillingInvoice,
@@ -82,6 +83,7 @@ def list_all_subscriptions(
     billing_classification: Optional[str] = Query(None, description="Filter by Organization.billing_classification"),
     charge_enabled: Optional[bool] = Query(None, description="Filter by Organization.charge_enabled"),
     dunning_stage: Optional[str] = Query(None, description="Filter by BillingDunningState.stage, or 'NONE' for organizations with no dunning row at all"),
+    country_limit: Optional[str] = Query(None, description="'OVER' for organizations with OVER_LIMIT countries or more countries than their plan allows"),
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
@@ -131,6 +133,16 @@ def list_all_subscriptions(
             if dunning_stage != "NONE" and row_dunning_stage != dunning_stage:
                 continue
 
+        # Country entitlement usage (billing/jurisdiction_entitlement.py).
+        country_usage = jurisdiction_entitlement.org_country_usage(db, org.id)
+        if country_limit == "OVER":
+            limit_value = country_usage["countries_limit"]
+            over = country_usage["countries_over_limit"] > 0 or (
+                limit_value is not None and country_usage["countries_used"] > limit_value
+            )
+            if not over:
+                continue
+
         if sub is None:
             rows.append({
                 "subscription_id": None,
@@ -149,6 +161,7 @@ def list_all_subscriptions(
                 "grace_period_ends_at": None,
                 "dunning_stage": row_dunning_stage,
                 "dunning_in_flight_run_guard": dunning_row.in_flight_run_guard if dunning_row else False,
+                **country_usage,
             })
             continue
 
@@ -174,6 +187,7 @@ def list_all_subscriptions(
             "grace_period_ends_at": sub.grace_period_ends_at,
             "dunning_stage": row_dunning_stage,
             "dunning_in_flight_run_guard": dunning_row.in_flight_run_guard if dunning_row else False,
+            **country_usage,
         })
     return {"subscriptions": rows, "total": len(rows)}
 
@@ -685,11 +699,17 @@ def list_exceptions(
 
     bwm_invoice_mismatches = find_bwm_invoice_discrepancies(db)
 
+    # Country entitlement: orgs with paused (OVER_LIMIT) countries, more
+    # countries than their plan allows, or employees in a country that isn't
+    # entitled. Per-country employee counts only, no employee rows.
+    country_limit_exceptions = jurisdiction_entitlement.find_country_limit_exceptions(db)
+
     return {
         "stuck_reviews": {"run_count": stuck_run_count, "organization_count": len(stuck_orgs),
                           "older_than_days": stuck_review_days},
         "bwm_scale_limit_overages": bwm_overages,
         "bwm_invoice_mismatches": bwm_invoice_mismatches,
+        "country_limit_exceptions": country_limit_exceptions,
         "note": (
             "Plan-limit checks count billable workers live, the same way new employees are checked "
             "against the plan, so they show real demand even before the monthly billing count has run."
@@ -733,8 +753,10 @@ def _job_interval_seconds(name: str) -> int:
 
 
 def _job_health(name: str, tracker: dict, now: Optional[datetime] = None) -> dict:
-    """unknown (never ran in this process) / error (last run failed) / stale
-    (missed its schedule: no run for 2x its interval + 5 min) / healthy."""
+    """unknown (never ran in this process / missed its schedule) / error (last
+    run failed) / healthy. The service-health contract only allows
+    {"unknown", "healthy", "error"} - a job that missed its schedule is
+    normalized to "unknown" rather than surfacing a raw "stale" value."""
     now = now or datetime.utcnow()
     label, description = _JOB_INFO.get(name, (name.replace("_", " ").capitalize(), ""))
     interval = _job_interval_seconds(name)
@@ -746,7 +768,8 @@ def _job_health(name: str, tracker: dict, now: Optional[datetime] = None) -> dic
     if tracker.get("last_error"):
         return {**base, "state": "error", "error": str(tracker["last_error"])[:500]}
     if (now - last_run).total_seconds() > 2 * interval + 300:
-        return {**base, "state": "stale", "detail": "Missed its schedule: the scheduler may have stopped."}
+        return {**base, "state": "unknown",
+                "detail": "Has not run recently: last run is stale (the scheduler may have stopped)."}
     return {**base, "state": "healthy"}
 
 
@@ -779,10 +802,10 @@ def _service_health_report(db: Session) -> dict:
         _job_health("support_access_sweep", support_access_scheduler.last_run_status, now),
         _job_health("token_cleanup_sweep", auth_scheduler.last_run_status, now),
     ]
-    summary = {s: sum(1 for j in jobs if j["state"] == s) for s in ("healthy", "stale", "error", "unknown")}
+    summary = {s: sum(1 for j in jobs if j["state"] == s) for s in ("healthy", "error", "unknown")}
     if db_status["status"] != "healthy" or summary["error"]:
         overall = "error"
-    elif summary["stale"] or summary["unknown"]:
+    elif summary["unknown"]:
         overall = "degraded"
     else:
         overall = "healthy"

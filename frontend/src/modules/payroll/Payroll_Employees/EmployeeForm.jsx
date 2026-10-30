@@ -4,7 +4,10 @@ import {
   getGermanyStatutoryConfigurationReadiness,
 } from "../../../service/payrollService";
 import { COUNTRIES, COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
+import { currencyInfoForCountry } from "../../../utils/currency";
 import { bankFieldsFor, bankComplianceKeys, ifscWarning } from "./bankFieldsFor";
+import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
+import PlanLimitMessage, { isPlanLimitError } from "../../../components/PlanLimitMessage";
 
 function emptyCompliance() {
   return {};
@@ -30,7 +33,9 @@ const EMPTY_FORM = {
   ifscCode: "",
   panNumber: "",
   uan: "",
-  countryCode: "IN",
+  // Filled from the org's primary entitled country (EntitledCountriesContext)
+  // when the form opens — no hardcoded jurisdiction default.
+  countryCode: "",
   complianceFields: emptyCompliance(),
   // UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09) —
   // real top-level PayrollEmployee columns, NOT complianceFields entries
@@ -69,8 +74,10 @@ const inputClass =
 const selectClass =
   "w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200";
 
-function validate(form) {
+function validate(form, countryAllowed) {
   const errors = {};
+  if (!form.countryCode) errors.countryCode = "Country is required";
+  else if (!countryAllowed) errors.countryCode = "Your plan does not include this country";
   if (!form.name.trim()) errors.name = "Employee name is required";
   if (!form.email.trim()) errors.email = "Email is required";
   else if (!/^\S+@\S+\.\S+$/.test(form.email)) errors.email = "Enter a valid email";
@@ -88,23 +95,56 @@ function validate(form) {
   return errors;
 }
 
-export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo, defaultCountryCode }) {
-  const symbol = currencyInfo?.symbol || "";
+export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo, orgCountryCode, defaultCountryCode }) {
   const isEdit = Boolean(employee?.id);
+  const entitlement = useEntitledCountries();
+  // Country choices: only the org's ACTIVE entitled countries once the
+  // entitlement list has loaded. Until then (or if it failed to load) the
+  // full list is offered, exactly as before entitlements existed — the
+  // server enforces the entitlement either way.
+  const countryOptions = entitlement.loaded
+    ? entitlement.entitledEmployeeCodes.map((code) => ({
+        code,
+        name:
+          COUNTRIES.find((c) => c.code === code)?.name ||
+          entitlement.countries.find((c) => toEmployeeCountryCode(c.code) === code)?.name ||
+          code,
+      }))
+    : COUNTRIES;
+  const fallbackCountry = entitlement.loaded
+    ? (entitlement.isEntitled(entitlement.primaryEmployeeCode) ? entitlement.primaryEmployeeCode : countryOptions[0]?.code) || ""
+    : defaultCountryCode || "";
   const [form, setForm] = useState(() => {
     if (employee) {
       return {
         ...EMPTY_FORM,
         ...employee,
-        countryCode: employee.countryCode || defaultCountryCode || "IN",
+        countryCode: employee.countryCode || fallbackCountry,
         complianceFields: employee.complianceFields || {},
       };
     }
-    return { ...EMPTY_FORM, countryCode: defaultCountryCode || "IN" };
+    return { ...EMPTY_FORM, countryCode: fallbackCountry };
   });
+  // The entitlement list can arrive after the form opened — adopt the
+  // primary country then (React's "adjust state during render" pattern).
+  if (!form.countryCode && fallbackCountry) {
+    setForm((prev) => ({ ...prev, countryCode: fallbackCountry }));
+  }
+  // An existing employee whose country is no longer ACTIVE-entitled
+  // (OVER_LIMIT after a downgrade, or not in the list) keeps it, read-only —
+  // the country can't be switched here until the plan allows it.
+  const originalCountry = employee?.countryCode || "";
+  const countryLocked = isEdit && entitlement.loaded && Boolean(originalCountry) && !entitlement.isEntitled(originalCountry);
+  const lockedStatus = countryLocked
+    ? entitlement.countries.find((c) => toEmployeeCountryCode(c.code) === toEmployeeCountryCode(originalCountry))?.status
+    : null;
+  const countryName = (code) =>
+    COUNTRIES.find((c) => c.code === code)?.name || countryOptions.find((c) => c.code === code)?.name || code;
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [submitError, setSubmitError] = useState("");
+  // { message, trace } of the last failed save — trace lets a plan-limit
+  // block render with an upgrade link instead of a bare string.
+  const [submitError, setSubmitError] = useState(null);
   // Phase 8BF — disclosed onboarding gap closure: warn during Germany
   // employee creation if the GLOBAL statutory registries aren't published
   // yet, instead of the only prior signal being a fail-closed error at
@@ -143,12 +183,13 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
 
   async function handleSubmit(e) {
     e.preventDefault();
-    const validationErrors = validate(form);
+    const countryAllowed = countryLocked || !entitlement.loaded || entitlement.isEntitled(form.countryCode);
+    const validationErrors = validate(form, countryAllowed);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
 
     setSaving(true);
-    setSubmitError("");
+    setSubmitError(null);
     try {
       const isIndia = form.countryCode === "IN";
       const isUk = form.countryCode === "UK";
@@ -185,7 +226,10 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
       const saved = isEdit ? await updateEmployee(employee.id, payload) : await createEmployee(payload);
       onSaved?.(saved);
     } catch (err) {
-      setSubmitError(err.message || "Something went wrong while saving. Please try again.");
+      setSubmitError({
+        message: err.message || "Something went wrong while saving. Please try again.",
+        trace: err.trace || null,
+      });
     } finally {
       setSaving(false);
     }
@@ -249,12 +293,30 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
           <Field label="Date of joining" error={errors.dateOfJoining}>
             <input type="date" className={`${inputClass} ${errors.dateOfJoining ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.dateOfJoining} onChange={(e) => update("dateOfJoining", e.target.value)} />
           </Field>
-          <Field label="Country / jurisdiction">
-            <select className={selectClass} value={form.countryCode} onChange={(e) => handleCountryChange(e.target.value)}>
-              {COUNTRIES.map((c) => (
-                <option key={c.code} value={c.code}>{c.name}</option>
-              ))}
-            </select>
+          <Field label="Country / jurisdiction" error={errors.countryCode}>
+            {countryLocked ? (
+              <>
+                <div className={`${inputClass} bg-surface-muted`}>{countryName(form.countryCode)}</div>
+                <span className="mt-1.5 block text-[11px] font-medium text-warning">
+                  {lockedStatus === "OVER_LIMIT"
+                    ? "This country is over your plan's country limit. The employee's other details can still be edited, but the country can't be changed here, and new employees and payroll in this country are paused until you upgrade."
+                    : "This country isn't one of your organization's entitled countries, so it can't be changed here. Add it under Compliance > Countries (or upgrade your plan) to manage it."}
+                </span>
+              </>
+            ) : entitlement.loaded && countryOptions.length === 1 ? (
+              <div className={`${inputClass} bg-surface-muted`}>{countryOptions[0].name}</div>
+            ) : entitlement.loaded && countryOptions.length === 0 ? (
+              <span className="block text-[12px] text-warning">
+                Your organization has no active countries. Add one under Compliance &gt; Countries before adding employees.
+              </span>
+            ) : (
+              <select className={selectClass} value={form.countryCode} onChange={(e) => handleCountryChange(e.target.value)}>
+                {!form.countryCode && <option value="">Select&hellip;</option>}
+                {countryOptions.map((c) => (
+                  <option key={c.code} value={c.code}>{c.name}</option>
+                ))}
+              </select>
+            )}
           </Field>
         </div>
       </div>
@@ -262,7 +324,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
       <div className="border-t border-border pt-6">
         <h3 className="text-[15px] font-bold text-foreground">Salary structure (annual)</h3>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label={`CTC (${symbol})`} error={errors.ctc}>
+          <Field label={`CTC (${currencyInfoForCountry(form.countryCode, currencyInfo, orgCountryCode)?.symbol || ""})`} error={errors.ctc}>
             <input type="number" min="0" className={`${inputClass} ${errors.ctc ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.ctc} onChange={(e) => update("ctc", e.target.value)} />
           </Field>
         </div>
@@ -311,7 +373,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
 
       <div className="border-t border-border pt-6">
         <h3 className="text-[15px] font-bold text-foreground">
-          Statutory details &mdash; {COUNTRIES.find((c) => c.code === form.countryCode)?.name}
+          Statutory details &mdash; {countryName(form.countryCode)}
         </h3>
         {form.countryCode === "DE" && germanyReadinessError && (
           <div className="mt-3 rounded-[10px] border border-warning/20 bg-warning/10 px-3.5 py-2.5 text-[12px] text-warning">
@@ -439,11 +501,13 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         </div>
       )}
 
-      {submitError && (
+      {submitError && (isPlanLimitError(submitError) ? (
+        <PlanLimitMessage message={submitError.message} trace={submitError.trace} />
+      ) : (
         <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
-          {submitError}
+          {submitError.message}
         </div>
-      )}
+      ))}
 
       <div className="flex justify-end gap-3 border-t border-border pt-6">
         <button

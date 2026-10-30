@@ -294,12 +294,15 @@ export const getDashboardBreakdowns = async ({ year, month } = {}) => {
 };
 
 // ── Employees ──────────────────────────────────────────
-export const getEmployees = async (params) => {
+// Errors come back as an empty list unless `throwOnError` — the employee
+// list page needs the real error to explain a no-plan (403) refusal.
+export const getEmployees = async (params, { throwOnError = false } = {}) => {
   try {
     const res = await api.get("/api/payroll/employees", { params });
     const list = res?.items || res?.data || res || [];
     return Array.isArray(list) ? list : [];
-  } catch {
+  } catch (err) {
+    if (throwOnError) throw err;
     return [];
   }
 };
@@ -602,9 +605,11 @@ export const calculateUkClass1A1BCharge = async (chargeType, amount) => {
   });
 };
 
-export const bulkCreateEmployees = async (employees) => {
+// countryCode: a per-country import — every row is an employee of that
+// country (the server refuses rows for another country).
+export const bulkCreateEmployees = async (employees, countryCode) => {
   // Expected response shape: { created: [...employees], failed: [{ row, reason }] }
-  return await api.post("/api/payroll/employees/bulk", { employees });
+  return await api.post("/api/payroll/employees/bulk", countryCode ? { employees, countryCode } : { employees });
 };
 
 export const bulkDeleteEmployees = async (employeeIds) => {
@@ -663,21 +668,32 @@ export const getBankTransferSummary = async (runId) => {
   return await api.get(`/api/payroll/runs/${runId}/bank-transfer-summary`);
 };
 
-export const downloadBankTransferFile = async (runId, format) => {
+// `country` is required by the backend when the run pays employees in more
+// than one country (one bank file per country, each in its own currency);
+// single-country runs omit it exactly as before.
+export const downloadBankTransferFile = async (runId, format, country) => {
   const token = getAccessToken();
-  const requestUrl = `${API_BASE_URL}/api/payroll/runs/${runId}/bank-transfer-file${format ? `?format=${format}` : ""}`;
+  const query = new URLSearchParams();
+  if (format) query.set("format", format);
+  if (country) query.set("country", country);
+  const qs = query.toString();
+  const requestUrl = `${API_BASE_URL}/api/payroll/runs/${runId}/bank-transfer-file${qs ? `?${qs}` : ""}`;
   const res = await fetch(requestUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) {
     // Show the server's reason (e.g. "already paid through SEPA") — not a generic failure.
-    const detail = await res.json().then((b) => b?.detail).catch(() => null);
+    let detail = "Failed to generate bank transfer file";
+    try { detail = (await res.json())?.detail || detail; } catch { /* non-JSON error body */ }
     throw new Error(typeof detail === "string" ? detail : "Failed to generate bank transfer file");
   }
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : `bank-transfer_${runId}`;
+  // Content-Disposition isn't a CORS-exposed header, so the browser usually
+  // can't read the server's name; build the same one (per-country files must
+  // not all download under one name).
+  const filename = match ? match[1] : `bank-transfer_${runId}${country ? `_${country}` : ""}${format ? `.${format}` : ""}`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1301,90 +1317,6 @@ export const disablePolicyIntegration = async (policyId, category, providerKey) 
   );
 };
 
-// ── Enterprise Policy Onboarding ─────────────────────────────────────
-// Financial-year ranges are each country's real fiscal year, not a placeholder.
-export const ENTERPRISE_JURISDICTIONS = [
-  { code: "IN", name: "India", flag: "🇮🇳", currency: "INR", financialYear: "Apr 1 – Mar 31" },
-  { code: "US", name: "United States", flag: "🇺🇸", currency: "USD", financialYear: "Jan 1 – Dec 31" },
-  { code: "UK", name: "United Kingdom", flag: "🇬🇧", currency: "GBP", financialYear: "Apr 6 – Apr 5" },
-  { code: "AU", name: "Australia", flag: "🇦🇺", currency: "AUD", financialYear: "Jul 1 – Jun 30" },
-  { code: "DE", name: "Germany", flag: "🇩🇪", currency: "EUR", financialYear: "Jan 1 – Dec 31" },
-  { code: "CA", name: "Canada", flag: "🇨🇦", currency: "CAD", financialYear: "Jan 1 – Dec 31" },
-{ code: "FR", name: "France", flag: "FR", currency: "EUR", financialYear: "Jan 1 - Dec 31" },
-];
-
-export const ENTERPRISE_STATUS_LABELS = {
-  not_configured: "Not Configured",
-  in_progress: "In Progress",
-  configured: "Configured",
-  active: "Active",
-};
-
-export const getEnterpriseJurisdictions = async () => {
-  try {
-    const res = await api.get("/api/payroll/enterprise/jurisdictions");
-    return Array.isArray(res) ? res : res?.data || [];
-  } catch {
-    return [];
-  }
-};
-
-export const addEnterpriseJurisdiction = async (countryCode) => {
-  return await api.post("/api/payroll/enterprise/jurisdictions", { countryCode });
-};
-
-export const updateEnterpriseJurisdiction = async (jurisdictionId, payload) => {
-  return await api.put(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`, payload);
-};
-
-export const verifyEnterpriseJurisdiction = async (jurisdictionId) => {
-  return await api.post(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}/verify`, {});
-};
-
-export const removeEnterpriseJurisdiction = async (jurisdictionId) => {
-  return await api.delete(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`);
-};
-
-export const getEnterpriseContributionRates = async (jurisdictionId) => {
-  try {
-    const res = await api.get(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}/contribution-rates`);
-    return Array.isArray(res) ? res : res?.data || [];
-  } catch {
-    return [];
-  }
-};
-
-export const updateEnterpriseContributionRate = async (jurisdictionId, componentKey, payload) => {
-  return await api.put(
-    `/api/payroll/enterprise/jurisdictions/${jurisdictionId}/contribution-rates/${componentKey}`,
-    payload
-  );
-};
-
-export const getEnterpriseValidation = async () => {
-  try {
-    return await api.get("/api/payroll/enterprise/validation");
-  } catch {
-    return { canActivate: false, blockingReasons: ["Could not check activation readiness."], configuredJurisdictions: [] };
-  }
-};
-
-export const activateEnterprise = async () => {
-  return await api.post("/api/payroll/enterprise/activate", {});
-};
-
-export const deactivateEnterprise = async () => {
-  return await api.post("/api/payroll/enterprise/deactivate", {});
-};
-
-export const getEnterpriseDashboard = async () => {
-  try {
-    return await api.get("/api/payroll/enterprise/dashboard");
-  } catch {
-    return { configuredCount: 0, pendingCount: 0, activeCountries: [], completionPct: 0, upcomingFilings: [], recentChanges: [] };
-  }
-};
-
 // Internal provider keys -> what Payroll Policy Management shows the user.
 // Never render category/provider_key strings directly in the UI — always
 // go through these maps, per the spec's "do not expose internal
@@ -1392,7 +1324,6 @@ export const getEnterpriseDashboard = async () => {
 export const CALCULATION_MODE_LABELS = {
   simple: "Simple Payroll",
   standard: "Standard Payroll",
-  enterprise: "Enterprise Payroll",
 };
 
 // Mirrors backend/app/modules/payroll/engine/standard.py's per-country
@@ -1550,8 +1481,9 @@ export const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized"
 export const isRunFinalized = (run) => PAYROLL_STATUS_ORDER.indexOf(run?.status) >= PAYROLL_STATUS_ORDER.indexOf("Approved");
 
 export const getAvailableReports = async (params = {}) => {
-  // { reportingYear } -> [{ reportType, name }] — real, backend-owned list
-  // of reports with a Published/Active template for this org's jurisdiction+year.
+  // { reportingYear } -> [{ reportType, name, country }] — real, backend-owned
+  // list of reports with a Published/Active template for each of this org's
+  // payroll countries for the year.
   try {
     const res = await api.get("/api/payroll/report-templates/available", { params });
     return Array.isArray(res) ? res : res?.data || res?.items || [];
@@ -1561,7 +1493,9 @@ export const getAvailableReports = async (params = {}) => {
 };
 
 export const getApplicableReportTemplate = async (params = {}) => {
-  // { reportingYear, reportType, payrollRunId? } — returns { template, validation }.
+  // { reportingYear, reportType, payrollRunId?, country? } — returns { template, validation }.
+  // country picks which of the org's payroll countries the report is for
+  // (backend defaults to the org's default country when omitted).
   // validation is only populated when payrollRunId is passed.
   return await api.get("/api/payroll/report-templates/applicable", { params });
 };

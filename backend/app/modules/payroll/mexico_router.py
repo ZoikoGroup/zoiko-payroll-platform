@@ -77,6 +77,39 @@ def get_activation_readiness(pack_row_id: int, current_user=Depends(get_current_
     return _mx().activation_readiness(db, pack_row_id, actor_id=_actor(current_user))
 
 
+# ── configuration versions (Hong Kong parity) ──────────────────────────────
+
+def _cv():
+    from app.modules.payroll import mexico_config_versions
+
+    return mexico_config_versions
+
+
+@router.get("/configuration/versions", summary="Every Mexico pack version (national and state ISN) with its state")
+def mx_configuration_versions(on: Optional[date] = Query(None), current_user=Depends(get_current_super_admin),
+                              db: Session = Depends(get_db)):
+    return _cv().mx_config_versions(db, on)
+
+
+@router.get("/configuration/packs/{pack_row_id}", summary="One Mexico pack version's rows with values, dates and sources")
+def mx_configuration_pack(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    return _cv().mx_config_pack_rows(db, pack_row_id)
+
+
+@router.get("/configuration/compare", summary="Row-level diff of two versions of the same Mexico pack scope")
+def mx_configuration_compare(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
+                             current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _cv().mx_config_compare(db, from_id, to_id)
+
+
+@router.post("/configuration/packs/{pack_row_id}/new-version",
+             summary="A Draft copy of one Mexico pack version (the rollback path — never an edit)")
+def mx_configuration_new_version(pack_row_id: int, payload: Dict[str, Any] = Body(...),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _cv().mx_config_new_version(db, pack_row_id, payload.get("version"), payload.get("reason"), _actor(current_user))
+
+
 # ── read-only statutory content (date-selected) ──────────────────────────────
 
 def _view(db, family, on, pack_id):
@@ -196,6 +229,20 @@ def mx_template_sandbox_preview(template_id: int, body: Dict[str, Any] = Body(..
         return _reports().mx_template_sandbox_preview(db, template_id, body)
     finally:
         db.rollback()
+
+
+@router.get("/report-templates/versions", summary="Every Mexico report template version with its activation-gate "
+                                                  "answer and content hash")
+def mx_template_versions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _reports().mx_template_versions(db)
+
+
+@router.post("/report-templates/{template_id}/new-version",
+             summary="A Draft copy of one Mexico report template version (the rollback path)")
+def mx_template_new_version(template_id: int, payload: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    return _reports().mx_template_new_version(db, template_id, payload.get("version"), payload.get("reason"),
+                                              _actor(current_user))
 
 
 @router.get("/report-templates/compare", summary="Diff two Mexico report templates (fields and metadata)")

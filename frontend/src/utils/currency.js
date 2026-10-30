@@ -83,6 +83,15 @@ export function getCurrencyForJurisdiction(jurisdictionCountry) {
   return getCurrencyForCountry(jurisdictionCountry);
 }
 
+// An employee's own currency: the org's currency (including any org currency
+// override) when the employee is in the org's default country, otherwise the
+// currency of the employee's own country — multi-country orgs pay each
+// employee in their own country's currency.
+export function currencyInfoForCountry(countryCode, orgCurrencyInfo, orgCountryCode) {
+  if (!countryCode || countryCode === orgCountryCode) return orgCurrencyInfo;
+  return getCurrencyForJurisdiction(countryCode) || orgCurrencyInfo;
+}
+
 export function getCurrencyInfo(code) {
   return CURRENCY_MASTER[code] || null;
 }
@@ -113,6 +122,26 @@ export function formatCurrency(amount, code, position = 'before') {
     return `${formatted}${symbol}`;
   }
   return `${symbol}${formatted}`;
+}
+
+// Locale-aware formatter for one explicit ISO currency code — used where a
+// screen shows several currencies side by side (multi-country runs), so each
+// amount is formatted in its own row's currency rather than the org default.
+export function createCurrencyFormatterForCode(code) {
+  if (!code) return (n) => (n == null ? "—" : formatCurrency(n));
+  const info = CURRENCY_MASTER[code];
+  return (n) => {
+    if (n == null || n === "" || isNaN(n)) return "—";
+    try {
+      return new Intl.NumberFormat(info?.locale || "en-US", {
+        style: "currency",
+        currency: code,
+        maximumFractionDigits: info?.decimalDigits ?? 2,
+      }).format(Number(n));
+    } catch {
+      return formatCurrency(n, code);
+    }
+  };
 }
 
 const SORTED_CURRENCY_CODES = Object.keys(CURRENCY_MASTER);

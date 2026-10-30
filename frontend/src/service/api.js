@@ -217,9 +217,20 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
 // session, so every caller must go through this one promise.
 export async function tryRefreshToken() {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = refreshAccessToken().finally(() => {
-    refreshPromise = null;
-  });
+  refreshPromise = refreshAccessToken()
+    .then((result) => {
+      // A rejected refresh means the session is over (expired, revoked, or
+      // issued by another server): clear it and tell the app once, so the
+      // user is taken to sign in instead of every request failing in place.
+      if (!result.ok && result.invalidSession) {
+        clearSession();
+        notifySessionInvalid(result.reason);
+      }
+      return result;
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
   return refreshPromise;
 }
 
@@ -278,3 +289,8 @@ export const api = {
 };
 
 export { API_BASE_URL, AUTH_INVALID_EVENT };
+
+// Reset after a successful sign-in so a later expiry is announced again.
+export function resetSessionInvalidNotice() {
+  sessionInvalidNotified = false;
+}

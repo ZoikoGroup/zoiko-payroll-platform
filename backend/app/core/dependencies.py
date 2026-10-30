@@ -265,7 +265,7 @@ def _decode_required(token: str, db: Session):
         return payload, False
     if decode_assisted_access_token(token) is not None:
         raise UnauthorizedException(
-            "Assisted-access tokens can only be used on organization-scoped endpoints."
+            "Assisted access has been replaced by Support Access. Request access from the Support Access page."
         )
     raise UnauthorizedException("Invalid or expired token. Please log in again.")
 

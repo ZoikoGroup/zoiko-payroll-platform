@@ -559,3 +559,94 @@ Screenshots inspected.
   - seven contradictions found.
 
 **Production effect:** none (documents only).
+
+---
+
+## Configuration versions (after the final mile, requested 2026-10-28)
+
+**Review required: Rugvedh (ZP-PRIV) before merge.** **Do not merge until reviewed — branch protection does not enforce this (C17).** Four new Super Admin routes; one of them writes (a Draft pack copy).
+
+Hong Kong parity for Mexico's statutory packs. A new **Versions** tab in Super Admin → Compliance → Mexico (`MXConfigVersionsTab.jsx`; `mexico_config_versions.py`):
+- **Versions:** every version of the national pack and of each state ISN pack, with:
+  - its state (CURRENT_ACTIVE / NEXT_ACTIVE / PAST_ACTIVE / DRAFT / FUTURE_DRAFT / SUPERSEDED / RETIRED);
+  - status, effective window, row count and rows with a source;
+  - approver and change summary.
+- **Rows:** one version's rows (read-only), each with its value, dates and source (id and SHA-256).
+- **Compare:** row-level differences between two versions of the same scope (national with national, a state with the same state). It covers values, labels, end dates and source SHA-256.
+- **New version:** a **Draft copy of the chosen version**, with a reason. This is the rollback path. Every row, every row source, the pack source and the window are copied exactly; it is audited (`new_version`), and the version must be unique.
+  - It is copied from the version chosen, **not** from the latest. The shared `upsert_jurisdiction_pack` pre-populates from the latest by creation time, so it is not used.
+  - Rows stay non-editable (W5-2). A copy goes live only through four-eyes approval and the activation checks.
+
+**Routes** (all `platform` / `super_admin`; the registry diff is exactly these four):
+- `GET …/configuration/versions`
+- `GET …/configuration/packs/{id}`
+- `GET …/configuration/compare?from&to`
+- `POST …/configuration/packs/{id}/new-version`
+
+The service functions have unique names, avoiding the registry name-collision gotcha.
+
+**Checked and ruled out:** whether Hong Kong's `new_version` copies the latest version instead of the chosen one. A probe (raw row values, v1 → v2 modified → v3 from v1) showed v3 equal to v1, so there is no Hong Kong defect. Nothing was committed from the probe.
+
+**Tests:** `test_mexico_config_versions.py` (6):
+- versions listed with states and sources (national and CDMX);
+- rows are read-only and sourced;
+- **a copy of v1.0 made after v1.1 changed is identical to v1.0** (the rollback);
+- audit, reason required, duplicate version refused;
+- different scopes and other countries refused;
+- the routes are Super Admin only.
+
+- **Full suite** (5 sequential chunks, with both the configuration and template versions): **7,915 passed**. The only failures are the known local-only ones: the three `/health` route-registry tests, the HK configuration docs test, and the intermittent communications dispatch test, which passed 3/3 alone.
+- Frontend: ESLint is clean; `check:undefined` reports 603 files; the build passes.
+
+**Browser: 7/7 PASS** (`final-mile-evidence/RESULTS-VERSIONS.md`, harness `acceptance_versions.py` on the real seeded Draft packs):
+- the national and CDMX packs are listed;
+- the rule text;
+- rows with sources;
+- New version → v1.1 Draft with 241 rows;
+- compare v1.0 / v1.1 is identical;
+- an org admin is refused;
+- no 5xx and no page errors.
+
+Screenshots inspected. The rows screenshot is capped to its first screenful; the in-force column says "pack window" for rows that follow the pack's dates.
+
+### Report-template versions (same request)
+
+A **Template versions** panel on Super Admin → Report templates → Mexico (`MXTemplateVersionsPanel.jsx`; `mexico_report_service.mx_template_versions` / `mx_template_new_version`):
+- **Versions:** every version of every Mexico template, with:
+  - status, field count and content hash;
+  - change summary;
+  - the **activation gate's answer on platform data**: gates SIGNED, content pack Active, fields present.
+- **New version:** a **Draft copy of the chosen version** (metadata, components and fields), with a reason and an audit row, the version unique per template. This is the rollback path: the shared `upsert_report_template` also copies only the latest version. Editing, approval (no editor may approve, X8) and activation stay in the shared lifecycle. The copy is still behind `mx_report_activation_refusal`.
+- **Compare:** the existing X3 tool shows the copy identical apart from its version.
+
+**Found and fixed while building it:** `mx_report_activation_refusal` proves a template's fields on **real committed tenant payslips**. A platform Super Admin view that called it was classified `worker` / tenant by the route registry. The gate is now split:
+- `_mx_activation_platform_reasons` covers gates, pack and fields, and is the only part the versions view runs;
+- the full gate adds the payslip proof, with the same conditions in the same order, so activation behaviour is unchanged.
+
+All six new routes are `platform` / `super_admin`.
+
+**Tests:** `test_mexico_template_versions.py` (4):
+- every template is listed with its gate answer;
+- **a copy of v1 made after v2 was corrected has v1's fields**, and is still refused activation;
+- reason and unique version, audit, other countries refused;
+- the routes are Super Admin only.
+
+The template, X3, activation-gate and shared snapshot suites pass (154/154 with both new files).
+
+**Browser: 5/5 PASS** (`final-mile-evidence/RESULTS-TEMPLATE-VERSIONS.md`, harness `acceptance_template_versions.py`):
+- the payroll register's versions with the gate answer;
+- New version → v1.1 Draft;
+- compare: added 0, removed 0, changed 0 (only the version differs);
+- an org admin is refused;
+- no 5xx and no page errors.
+
+Screenshots inspected.
+
+**Production effect:**
+
+| Area | Effect when merged |
+|---|---|
+| Database / Alembic | None |
+| Super Admin | A Versions tab for packs and a Template versions panel. A Super Admin can create **Draft** copies of a Mexico pack or template; nothing goes live without the existing four-eyes approval and activation gates |
+| Activation | Unchanged (the gate was split, not changed) |
+| Other jurisdictions | None |

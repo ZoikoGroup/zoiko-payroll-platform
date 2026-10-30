@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Loader2, Sparkles } from "lucide-react";
 import { apiFetch } from "../api/client";
@@ -6,6 +6,9 @@ import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
 import DelayedBillingBanner from "../components/DelayedBillingBanner";
 import { PlanCapabilityRow, planCardStyle, badgeStyle } from "./RegisterPage";
+import { getPlanChangeImpact } from "../service/billingService";
+import PlanChangeCountryNotice from "../components/billing/PlanChangeCountryNotice";
+import { getCountryPauseImpact, impactPausesCountries } from "../utils/planLimits";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -24,6 +27,20 @@ export default function PlanReviewPage() {
   // buttons don't fight over one shared "submitting" flag.
   const [submittingAction, setSubmittingAction] = useState(null); // null | "pay" | "trial"
   const [error, setError] = useState(null);
+  // What this plan does to the org's countries (the account is already
+  // logged in here). Usually nothing for a brand-new org, but a plan below
+  // the countries already set up must be acknowledged before checkout.
+  const [countryImpact, setCountryImpact] = useState(null);
+  const [countryPauseAcknowledged, setCountryPauseAcknowledged] = useState(false);
+
+  useEffect(() => {
+    if (!planCode) return undefined;
+    let cancelled = false;
+    getPlanChangeImpact(planCode)
+      .then((impact) => { if (!cancelled) setCountryImpact(impact); })
+      .catch(() => {}); // best effort — checkout's own 409 still guards a pause
+    return () => { cancelled = true; };
+  }, [planCode]);
 
   // Computed once per page load, not recomputed on every render — this
   // exact value is what both the banner displays AND what gets sent to
@@ -51,22 +68,39 @@ export default function PlanReviewPage() {
   const trialAvailable = planCode === "PROFESSIONAL" || planCode === "CORE";
 
   const busy = submittingAction !== null;
+  const pausesCountries = impactPausesCountries(countryImpact);
+  const payBlocked = pausesCountries && !countryPauseAcknowledged;
 
   async function handlePay() {
     setError(null);
     setSubmittingAction("pay");
     try {
-      const body = { plan_code: planCode };
+      const body = { plan_code: planCode, acknowledge_country_pause: pausesCountries && countryPauseAcknowledged };
       if (isPaidPlan) {
         body.service_commencement_at = commencementDate.toISOString();
       }
-      const { checkout_url } = await apiFetch("/api/billing/checkout", {
+      const result = await apiFetch("/api/billing/checkout", {
         method: "POST",
         body,
       });
-      window.location.href = checkout_url;
+      if (result?.plan_changed) {
+        navigate("/organization-admin/subscription", {
+          replace: true,
+          state: { planChangedMessage: result.message },
+        });
+        return;
+      }
+      window.location.href = result.checkout_url;
     } catch (err) {
-      setError(err.message || "Could not start checkout. Please try again.");
+      // An unacknowledged plan that pauses countries — show the warning and
+      // confirmation checkbox rather than the raw 409 message.
+      const impact = getCountryPauseImpact(err);
+      if (impact) {
+        setCountryImpact(impact);
+        setCountryPauseAcknowledged(false);
+      } else {
+        setError(err.message || "Could not start checkout. Please try again.");
+      }
       setSubmittingAction(null);
     }
   }
@@ -149,6 +183,14 @@ export default function PlanReviewPage() {
 
           {isPaidPlan && <DelayedBillingBanner commencementDate={commencementDate} />}
 
+          <PlanChangeCountryNotice
+            impact={countryImpact}
+            planName={plan.name}
+            acknowledged={countryPauseAcknowledged}
+            onAcknowledgedChange={setCountryPauseAcknowledged}
+            className="mt-4"
+          />
+
           {error && (
             <p style={{ fontSize: "13px", color: "#DC2626", margin: "16px 0 0 0", textAlign: "center" }}>{error}</p>
           )}
@@ -156,12 +198,12 @@ export default function PlanReviewPage() {
           <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: "10px" }}>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || payBlocked}
               onClick={handlePay}
               style={{
                 padding: "13px", borderRadius: "10px", border: "none", fontSize: "15px", fontWeight: "700",
-                color: "white", cursor: busy ? "not-allowed" : "pointer",
-                background: busy ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
+                color: "white", cursor: busy || payBlocked ? "not-allowed" : "pointer",
+                background: busy || payBlocked ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               }}
             >

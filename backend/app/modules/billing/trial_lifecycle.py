@@ -220,6 +220,12 @@ def convert_trial_to_paid(
             "billing_authority": subscription.billing_authority,
         },
     )
+    # Converting off the Professional trial onto e.g. Core lowers
+    # max_jurisdictions: countries beyond the new limit become OVER_LIMIT.
+    from app.modules.billing.jurisdiction_entitlement import safe_reconcile
+
+    db.flush()
+    safe_reconcile(db, organization_id, actor_user_id=actor_user_id, reason="trial_converted")
     db.commit()
     db.refresh(subscription)
     return subscription

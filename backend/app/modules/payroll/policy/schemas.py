@@ -11,7 +11,7 @@ that returns these models.
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ── Employee Category ────────────────────────────────────────────────────
@@ -100,6 +100,14 @@ class PayrollPolicyResponse(BaseModel):
     effective_date: date = Field(..., alias="effectiveDate")
     is_default: bool = Field(..., alias="isDefault")
     calculation_mode: str = Field(..., alias="calculationMode")
+
+    # Enterprise Payroll was removed (2026-10-29); it always calculated
+    # exactly like Standard, so a stored "enterprise" reads as "standard".
+    @field_validator("calculation_mode")
+    @classmethod
+    def _enterprise_reads_as_standard(cls, value):
+        return "standard" if value == "enterprise" else value
+
     basic_pct: Decimal = Field(Decimal("40"), alias="basicPct")
     hra_pct: Decimal = Field(Decimal("20"), alias="hraPct")
     bank_export_format: str = Field("csv", alias="bankExportFormat")
@@ -141,6 +149,15 @@ class PayrollPolicyUpdate(BaseModel):
     status: Optional[str] = None
     effective_date: Optional[date] = Field(None, alias="effectiveDate")
     calculation_mode: Optional[str] = Field(None, alias="calculationMode")
+
+    @field_validator("calculation_mode")
+    @classmethod
+    def _no_enterprise_mode(cls, value):
+        if value == "enterprise":
+            raise ValueError("Enterprise Payroll is no longer available — use Standard (every employee is "
+                             "calculated by their own country's payroll engine).")
+        return value
+
     basic_pct: Optional[Decimal] = Field(None, alias="basicPct")
     hra_pct: Optional[Decimal] = Field(None, alias="hraPct")
     bank_export_format: Optional[str] = Field(None, alias="bankExportFormat")

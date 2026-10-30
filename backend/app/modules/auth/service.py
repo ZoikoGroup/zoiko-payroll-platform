@@ -1008,6 +1008,12 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     db.add(org)
     db.flush()
 
+    # The registered country is the org's first (primary) entitled country —
+    # same transaction as the org itself.
+    from app.modules.billing.jurisdiction_entitlement import create_primary_for_new_org
+
+    create_primary_for_new_org(db, org.id, data.country)
+
     name_parts = data.name.strip().split(" ", 1)
     first_name = name_parts[0]
     last_name = name_parts[1] if len(name_parts) > 1 else "Admin"
@@ -1124,6 +1130,17 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
             "please select a supported country."
         )
 
+    # Brazil is listed in the registration picker, but remains closed until
+    # its release gates are complete. Evaluation signup must not bypass the
+    # same registry and canonical-pack readiness check used for production.
+    from app.core.jurisdiction import get_jurisdiction_code
+    if get_jurisdiction_code(data.country) == "BR":
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+        block_reason = get_jurisdiction_onboarding_block_reason(db, data.country)
+        if block_reason:
+            raise BadRequestException(block_reason)
+
     org_code = generate_organization_code(data.organization, db)
 
     org = Organization(
@@ -1136,6 +1153,10 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
     )
     db.add(org)
     db.flush()
+
+    from app.modules.billing.jurisdiction_entitlement import create_primary_for_new_org
+
+    create_primary_for_new_org(db, org.id, data.country)
 
     name_parts = data.name.strip().split(" ", 1)
     first_name = name_parts[0]

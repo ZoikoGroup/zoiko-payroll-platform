@@ -191,7 +191,8 @@ def test_ch_uid_pattern_accepts_real_format_only():
 
 
 def test_ch_stays_out_of_registration_countries():
-    assert all(c.lower() != "switzerland" for c in REGISTRATION_COUNTRIES)
+    # Offered at registration (owner decision 2026-10-29), by name.
+    assert "Switzerland" in REGISTRATION_COUNTRIES
     assert "CH" not in REGISTRATION_COUNTRIES
 
 

@@ -389,8 +389,48 @@ _set("GET", f"{_MX}/cfdi", data_class="aggregate",
      note="reviewed: CFDI counts by status + schema release; UNKNOWN documents reduced to a count")
 _set("GET", f"{_MX}/authorities", data_class="aggregate",
      note="reviewed: IMSS / SUA / ISN counts by status and platform blocks; no movement rows")
+# Super Admin cross-tenant readiness summary returns per-gate counts only, so
+# it is a reviewed aggregate over worker tables rather than an identity leak.
+_set("GET", f"{_MX}/employer-readiness/summary", data_class="aggregate",
+     note="reviewed: per-gate employer readiness counts only; no worker row or identity is returned")
 
 
+# ── Country entitlement (billing/jurisdiction_entitlement.py) ───────────────
+# These reach payroll_employees only for per-country employee COUNTS (ledger
+# seeding from countries already in use, the "N employees" figure, the
+# remove/replace guard). No worker row, identity or pay value is read out or
+# returned, so they stay tenant configuration.
+_ENTITLED = "/api/payroll/jurisdictions/entitled"
+_COUNTRY_COUNTS_NOTE = "reviewed: country entitlement reads per-country employee counts only; no worker row returned"
+for _method, _path in (
+    ("GET", _ENTITLED),
+    ("POST", _ENTITLED),
+    ("POST", f"{_ENTITLED}/replace-primary"),
+    ("POST", f"{_ENTITLED}/{{country_code}}/primary"),
+    ("DELETE", f"{_ENTITLED}/{{country_code}}"),
+    ("PUT", "/api/payroll/compliance/company-details"),
+):
+    _set(_method, _path, data_class="tenant_config", note=_COUNTRY_COUNTS_NOTE)
+# Run detail adds per-country totals (service.run_totals_by_country): sums of
+# payslip amounts per country, the same aggregate kind as the run's own stored
+# totals — no payslip row, identity or per-person figure is returned.
+_set("GET", "/api/payroll/runs/{run_id}", data_class="tenant_config",
+     note="reviewed: run detail with per-country payslip totals (aggregates only); no worker row returned")
+# Reports now include per-country totals, not individual payslip rows.
+_set("GET", "/api/payroll/reports", data_class="tenant_config",
+     note="reviewed: reports list with per-country payslip totals (aggregates only); no worker row returned")
+# Billing pages that read the country ledger (country usage, plan-change
+# impact, the checkout downgrade guard): the ledger's first read may seed it
+# from per-country employee COUNTS — no worker row is read out or returned.
+_set("GET", "/api/billing/my-subscription", data_class="self",
+     note="reviewed: org subscription + country usage counts; no worker row returned")
+_set("POST", "/api/billing/checkout", data_class="tenant_config",
+     note="reviewed: checkout with country-limit impact check (per-country counts only); no worker row returned")
+_set("GET", "/api/billing/plan-change-impact", data_class="tenant_config", principals={"org_admin", "payroll_admin"},
+     note="reviewed: countries a plan change would keep/pause/restore (country codes only); no worker row returned")
+# Runs list adds per-country payslip totals (service.attach_run_country_totals).
+_set("GET", "/api/payroll/runs", data_class="tenant_config",
+     note="reviewed: runs list with per-country payslip totals (aggregates only); no worker row returned")
 # South Africa compliance summary: readiness/status counts only - no worker row.
 _set("GET", "/api/super-admin/compliance/south-africa/summary", data_class="aggregate",
      note="reviewed: ZA readiness and gate status counts; no per-employee rows")

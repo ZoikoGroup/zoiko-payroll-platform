@@ -147,11 +147,13 @@ const filingPanel = read("modules/payroll/Reports/ZAFilingPanel.jsx");
 const reportsPage = read("modules/payroll/Reports/ReportsPage.jsx");
 const payrollService = read("service/payrollService.js");
 
+// Multi-country Reports (7bdbb04): tabs come from a per-country map, so the
+// SARS tab exists only under ZA and renders only for organisations paying in ZA.
 check("The SARS filing tab is shown for ZA organisations only", () =>
   reportsPage.includes('import ZAFilingPanel from "./ZAFilingPanel"') &&
-  reportsPage.includes("isSouthAfrica ? [ZA_FILING_TAB]") &&
-  reportsPage.includes('isSouthAfrica && activeTab === "za-filing"') &&
-  reportsPage.includes('normalizeCountryCode(jurisdictionCountry) === "ZA"'));
+  reportsPage.includes("ZA: [ZA_FILING_TAB]") &&
+  reportsPage.includes('isSouthAfrica = paysIn("ZA")') &&
+  reportsPage.includes('isSouthAfrica && activeTab === "za-filing"'));
 
 check("Every filing call goes to the South Africa tenant routes", () =>
   ["/emp201/", "/reconciliation/", "/certificates/", "/artifacts", "/sars-payments", "/coida-evidence/"]

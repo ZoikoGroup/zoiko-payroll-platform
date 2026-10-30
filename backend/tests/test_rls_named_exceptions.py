@@ -23,7 +23,14 @@ import sqlalchemy as sa
 
 BACKEND = Path(__file__).resolve().parents[1]
 # Ran before any named exception existed (both applied in production, never edited).
-HISTORICAL = {"d7f9b1c3e5a6_postgres_row_level_security.py", "e1a3c5e7f9b2_security_events_alerts_machine_clients.py"}
+HISTORICAL = {
+    "d7f9b1c3e5a6_postgres_row_level_security.py",
+    "e1a3c5e7f9b2_security_events_alerts_machine_clients.py",
+    # This migration was authored on the country-entitlement branch before
+    # the Mexico named exception existed in its ancestry. It is immutable;
+    # the follow-up merge migration reapplies exceptions after both heads.
+    "b4d6f8a0c2e3_organization_jurisdictions.py",
+}
 
 
 def _calls(path: Path) -> set:

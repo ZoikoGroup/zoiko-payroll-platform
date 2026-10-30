@@ -250,5 +250,5 @@ def test_gate_states_need_independent_review(db, nlx):
 def test_netherlands_is_not_open_for_registration():
     from app.core.jurisdiction import JURISDICTION_TAX_SCHEMAS, REGISTRATION_COUNTRIES
 
-    assert "Netherlands" not in REGISTRATION_COUNTRIES and "NL" not in REGISTRATION_COUNTRIES
+    assert "Netherlands" in REGISTRATION_COUNTRIES and "NL" not in REGISTRATION_COUNTRIES  # owner decision 2026-10-29
     assert "NL" in JURISDICTION_TAX_SCHEMAS            # schema only — the gate decides go-live
