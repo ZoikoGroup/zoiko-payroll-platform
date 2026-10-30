@@ -5,6 +5,7 @@
  *   GET  /billing/plans           → published plan versions
  *   GET  /billing/my-subscription → current subscription
  *   GET  /billing/trial-status    → banner payload
+ *   GET  /billing/plan-change-impact → countries a plan change keeps/pauses/restores
  *   POST /billing/checkout        → create Stripe Checkout Session
  */
 import { api } from "./api";
@@ -19,14 +20,29 @@ export const getMySubscription = () => api.get("/api/billing/my-subscription");
 export const getTrialStatus = () => api.get("/api/billing/trial-status");
 
 /**
+ * What switching to planCode would do to the org's countries:
+ * { planCode, newLimit (null = unlimited), currentLimit, countries, keep, pause, restore }.
+ */
+export const getPlanChangeImpact = (planCode) =>
+  api.get("/api/billing/plan-change-impact", { params: { plan_code: planCode } });
+
+/**
  * Create a Stripe Checkout Session for plan_code.
- * Returns { checkout_url } — caller should redirect to it.
+ * Returns { checkout_url } — caller should redirect to it — or, for an org
+ * already on an active paid subscription, { plan_changed: true, message }:
+ * the plan was changed in place (prorated), there is nothing to redirect to.
+ * A plan that would pause countries returns 409 (trace.reason
+ * "plan_change_pauses_countries") unless acknowledgeCountryPause is true.
  *
  * @param {string} planCode  e.g. "PROFESSIONAL"
+ * @param {{acknowledgeCountryPause?: boolean}} [options]
  * @returns {Promise<{checkout_url: string}>}
  */
-export const createCheckoutSession = (planCode) =>
-  api.post("/api/billing/checkout", { plan_code: planCode });
+export const createCheckoutSession = (planCode, { acknowledgeCountryPause = false } = {}) =>
+  api.post("/api/billing/checkout", {
+    plan_code: planCode,
+    acknowledge_country_pause: acknowledgeCountryPause,
+  });
 
 /** Fetch the calling org's own invoices, newest first (Step 3). */
 export const listMyInvoices = () => api.get("/api/billing/my-subscription/invoices");

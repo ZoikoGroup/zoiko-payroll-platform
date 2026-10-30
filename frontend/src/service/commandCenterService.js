@@ -9,6 +9,9 @@ import { apiFetch } from "../api/client";
 
 // ── Zoiko Commercial ────────────────────────────────────────────────────
 
+// Rows carry countries_used / countries_limit (null = unlimited) /
+// countries_over_limit; params.country_limit = "OVER" narrows to orgs over
+// their plan's country cap.
 export const listAllSubscriptions = (params) =>
   apiFetch("/api/super-admin/billing/subscriptions", { params });
 
@@ -85,7 +88,8 @@ export const listFilingsRemittances = () =>
 
 // Stuck-in-review runs as counts only ({run_count, organization_count,
 // older_than_days}), plus platform billing reconciliation rows (BWM plan
-// overages and BWM/invoice mismatches).
+// overages and BWM/invoice mismatches) and country_limit_exceptions
+// (orgs over their plan's country cap or with employees in unentitled countries).
 export const listExceptions = (params) =>
   apiFetch("/api/super-admin/compliance/exceptions", { params });
 

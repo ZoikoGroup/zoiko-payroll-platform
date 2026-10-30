@@ -3,7 +3,8 @@ import { X, ChevronDown, Loader2, RotateCcw, ListTree, Sparkles } from "lucide-r
 import { getRunById, getRunItems, getRunLeaveSummary, recalculateEmployeePayslip } from "../../../service/payrollService";
 import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
-import { formatCurrency } from "../../../utils/currency";
+import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
+import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
 import RunStatusTimeline from "./RunStatusTimeline";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
@@ -23,6 +24,16 @@ import ZAPayslipBreakdown from "./ZAPayslipBreakdown";
 import ZARunExceptionsPanel from "./ZARunExceptionsPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
+
+// Columns of the per-country totals table shown for a run that pays
+// employees in more than one country (detail.totalsByCountry).
+const COUNTRY_TOTAL_COLUMNS = [
+  { key: "employeeCount", label: "Employees" },
+  { key: "totalGross", label: "Gross", money: true },
+  { key: "totalDeductions", label: "Deductions", money: true, accent: "text-error" },
+  { key: "totalEmployerContribution", label: "Employer Contributions", money: true, accent: "text-category-teal" },
+  { key: "totalNet", label: "Net", money: true, accent: "text-primary" },
+];
 
 function fmtCurrencyLocal(n, fmtCurrency) {
   if (fmtCurrency) return fmtCurrency(n);
@@ -295,7 +306,7 @@ function AttendanceLeaveBlock({ item, leave }) {
   );
 }
 
-function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculated }) {
+function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCountry, runId, runStatus, onRecalculated }) {
   const [open, setOpen] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -307,6 +318,10 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
   const nlSnapshot = (item.country || item.countryCode) === "NL" ? item.nlCalculationSnapshot : null;
   // Mexico: the frozen engine result + input hashes (MX-063 trace)
   const mxSnapshot = (item.country || item.countryCode) === "MX" ? item.mxCalculationSnapshot : null;
+  // Each payslip is paid in its own country's currency (from the run's
+  // totalsByCountry); the org-currency formatter is only the fallback.
+  const rowCurrency = currencyByCountry?.[String(item.country || item.countryCode || "").toUpperCase()];
+  const fmtCurrency = rowCurrency ? createCurrencyFormatterForCode(rowCurrency) : orgFmtCurrency;
 
   async function handleRecalculate(e) {
     e.stopPropagation();
@@ -429,6 +444,19 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
     load();
   }, [load]);
 
+  const totalsByCountry = detail?.totalsByCountry || [];
+  const isMultiCountry = totalsByCountry.length > 1;
+  const currencyByCountry = Object.fromEntries(
+    totalsByCountry.filter((r) => r.country && r.currency).map((r) => [String(r.country).toUpperCase(), r.currency]),
+  );
+  const showBlockedColumn = totalsByCountry.some((r) => Number(r.blockedCount) > 0);
+  const itemsByCountry = items.reduce((groups, item) => {
+    const country = String(item.country || item.countryCode || "Other").toUpperCase();
+    if (!groups.has(country)) groups.set(country, []);
+    groups.get(country).push(item);
+    return groups;
+  }, new Map());
+
   if (!run) return null;
 
   return (
@@ -530,6 +558,23 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </div>
               </div>
 
+              {/* Mixed-country run: the run's own gross/net are a raw sum
+                  across currencies, so totals are shown per country only. */}
+              {isMultiCountry && (
+                <div className="mb-5">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">Totals by Country</h4>
+                  <p className="text-[12px] text-foreground-muted mb-3">
+                    This run pays employees in {totalsByCountry.length} countries — each total is in that country&apos;s own currency and they are not added together.
+                  </p>
+                  <CountryTotalsTable
+                    rows={totalsByCountry}
+                    columns={showBlockedColumn
+                      ? [...COUNTRY_TOTAL_COLUMNS.slice(0, 1), { key: "blockedCount", label: "Blocked", accent: "text-error" }, ...COUNTRY_TOTAL_COLUMNS.slice(1)]
+                      : COUNTRY_TOTAL_COLUMNS}
+                  />
+                </div>
+              )}
+
               {showAssist && (
                 <div className="mb-6 rounded-[18px] border border-primary/20 bg-surface shadow-md overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-primary/5 border-b border-primary/10">
@@ -574,47 +619,68 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">
                 Employee Payroll Details
               </h4>
-              <div className="rounded-[14px] border border-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-surface-muted border-b border-border">
-                        {BREAKDOWN_COLUMNS.map((col) => (
-                          <th
-                            key={col.key}
-                            className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap ${
-                              ["gross", "deductions", "net"].includes(col.key) ? "text-right" : "text-left"
-                            }`}
-                          >
-                            {col.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {items.length === 0 ? (
-                        <tr>
-                          <td colSpan={BREAKDOWN_COLUMNS.length} className="px-5 py-10 text-center text-[13px] text-foreground-muted">
-                            No employee payslips in this run yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        items.map((item) => (
-                          <EmployeeRow
-                            key={item.id}
-                            item={item}
-                            leave={leaveSummary?.[item.employeeId]}
-                            fmtCurrency={fmtCurrency}
-                            runId={run.id}
-                            runStatus={detail?.status || run.status}
-                            onRecalculated={load}
-                          />
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+              {items.length === 0 ? (
+                <div className="rounded-[14px] border border-border px-5 py-10 text-center text-[13px] text-foreground-muted">
+                  No employee payslips in this run yet.
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-5">
+                  {[...itemsByCountry.entries()].map(([country, countryItems]) => {
+                    const countryName = getCountryNameFromCode(country) || country;
+                    const currency = currencyByCountry[country] || getCurrencyForJurisdiction(country)?.code;
+                    const countryFormatter = currency ? createCurrencyFormatterForCode(currency) : fmtCurrency;
+
+                    return (
+                      <section key={country} className="overflow-hidden rounded-[16px] border border-border">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-muted px-4 py-3">
+                          <div>
+                            <h5 className="text-sm font-bold text-foreground">{countryName}</h5>
+                            <p className="text-[11px] text-foreground-muted">
+                              {countryItems.length} {countryItems.length === 1 ? "employee" : "employees"}
+                              {currency ? ` · ${currency}` : ""}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary">
+                            Country payroll
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-surface-muted/60 border-b border-border">
+                                {BREAKDOWN_COLUMNS.map((col) => (
+                                  <th
+                                    key={col.key}
+                                    className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap ${
+                                      ["gross", "deductions", "net"].includes(col.key) ? "text-right" : "text-left"
+                                    }`}
+                                  >
+                                    {col.label}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                              {countryItems.map((item) => (
+                                <EmployeeRow
+                                  key={item.id}
+                                  item={item}
+                                  leave={leaveSummary?.[item.employeeId]}
+                                  fmtCurrency={countryFormatter}
+                                  currencyByCountry={currencyByCountry}
+                                  runId={run.id}
+                                  runStatus={detail?.status || run.status}
+                                  onRecalculated={load}
+                                />
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>

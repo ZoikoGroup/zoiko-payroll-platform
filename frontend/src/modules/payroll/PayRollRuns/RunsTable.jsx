@@ -3,7 +3,8 @@ import { Eye, CheckCircle2, Trash2, Loader2 } from "lucide-react";
 import { approveRun, deletePayRun } from "../../../service/payrollService";
 import ApprovalDialog from "./ApprovalDialog";
 import { useToast } from "../ToastContext";
-import { formatCurrency } from "../../../utils/currency";
+import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
+import RunCurrencyAmount from "../../../components/payroll/RunCurrencyAmount";
 import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
 
 // Mirrors backend PAYROLL_STATUS_ORDER (models.py) — a run can advance one
@@ -111,11 +112,6 @@ export default function RunsTable({
   if (!isWizardMode && runs.length === 0) return <EmptyState />;
   if (isWizardMode && employees.length === 0) return <EmptyState />;
 
-  const allSelected =
-    isWizardMode &&
-    employees.length > 0 &&
-    selectedEmployees.length === employees.length;
-
   const handleApprove = async (e, run) => {
     e.stopPropagation();
     if (approvingId) return;
@@ -164,124 +160,149 @@ export default function RunsTable({
 
   if (isWizardMode) {
     const isSimple = calculationMode === "simple";
-    // All employees in a run share the same jurisdiction, so the first
-    // employee's contribComponents (built country-aware in RunDetailPage)
-    // defines the column set for every row — no hardcoded PF/ESI/PT here.
-    const contributionColumns = employees[0]?.contribComponents || [];
-    // Same reasoning applies to the income-tax column header itself —
-    // "Tax" alone was the one static label left (TDS/PAYE/PAYG/
-    // Lohnsteuer/Federal Withholding/Federal Tax all being genuinely
-    // different terms), reusing the exact label map the payslip detail
-    // view already uses so the two never disagree on wording.
-    const incomeTaxLabel = getPayrollLabels(jurisdictionCountry).incomeTax;
+    const employeesByCountry = employees.reduce((groups, emp) => {
+      const country = String(emp.country || emp.countryCode || emp.country_code || jurisdictionCountry || "Other").toUpperCase();
+      if (!groups.has(country)) groups.set(country, []);
+      groups.get(country).push(emp);
+      return groups;
+    }, new Map());
+
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-surface-muted border-b border-border">
-              <th className="px-3 py-2.5 w-8">
-                <input type="checkbox" checked={allSelected} onChange={toggleAllEmployees} className="rounded border-border h-3.5 w-3.5 text-primary focus:ring-primary" />
-              </th>
-              <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee</th>
-              <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Department</th>
-              <th className="px-3 py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Payable Days</th>
-              <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Pay</th>
-              {!isSimple && contributionColumns.map((col) => (
-                <th key={col.id} className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{col.label}</th>
-              ))}
-              {!isSimple && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{incomeTaxLabel}</th>}
-              <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{isSimple ? "LOP Deduction" : "Extra / Benefits"}</th>
-              <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Net Pay</th>
-              <th className="px-3 py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {employees.map((emp) => {
-              const dept = DEPT_COLORS[emp.department] || { bg: "bg-surface-muted", text: "text-foreground-muted" };
-              const isSelected = selectedEmployees.includes(emp.id);
-              const extraBenefits = emp.monthlyExtra ?? ((Number(emp.rewards) || 0) + (Number(emp.bonus) || 0) + (Number(emp.otherCompensation) || 0));
-              const empContribs = Object.fromEntries(
-                (emp.contribComponents || []).map((c) => [c.id, c.value])
-              );
-              return (
-                <tr key={emp.id} className={`transition-colors ${isSelected ? "bg-primary/5 dark:bg-primary/10" : "hover:bg-background dark:hover:bg-surface-muted"}`}>
-                  <td className="px-3 py-2.5">
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleEmployee(emp.id)} className="rounded border-border h-3.5 w-3.5 text-primary focus:ring-primary" />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <Avatar name={emp.name} />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-foreground text-xs whitespace-nowrap">{emp.name}</span>
-                        {emp.attendanceStatus && emp.attendanceStatus !== "unknown" && (
-                          <span className={`text-[9px] font-bold ${
-                            emp.attendanceStatus === "present" ? "text-primary" :
-                            emp.attendanceStatus === "absent" ? "text-error" :
-                            emp.attendanceStatus === "leave" ? "text-warning" :
-                            "text-foreground-muted"
-                          }`}>
-                            {emp.attendanceStatus === "present" ? "\u25cf Present" :
-                             emp.attendanceStatus === "absent" ? "\u25cf Absent" :
-                             emp.attendanceStatus === "leave" ? "\u25cf On Leave" : ""}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${dept.bg} ${dept.text}`}>
-                      {emp.department || "\u2014"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                    {emp.payableDays != null && emp.totalWorkingDays != null ? (
-                      <span className={`text-xs font-semibold ${emp.prorated ? "text-amber-500" : "text-foreground-muted"}`}>
-                        {emp.payableDays}/{emp.totalWorkingDays}{emp.prorated ? " \u26a0" : ""}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-foreground-muted">\u2014</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-foreground whitespace-nowrap">
-                    {fmtCurrencyLocal(emp.monthlyGross, fmtCurrency)}
-                  </td>
-                  {!isSimple && contributionColumns.map((col) => (
-                    <td key={col.id} className="px-3 py-2.5 text-right text-xs font-semibold text-category-teal whitespace-nowrap">
-                      {fmtCurrencyLocal(empContribs[col.id] ?? 0, fmtCurrency)}
-                    </td>
-                  ))}
-                  {!isSimple && (
-                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                      <span className="text-xs font-semibold text-error">{fmtCurrencyLocal(emp.monthlyTax, fmtCurrency)}</span>
-                      {emp.taxSlabRate && emp.taxSlabRate !== "\u2014" && emp.taxSlabRate !== "Nil" && (
-                        <span className={`ml-1 text-[9px] font-bold rounded px-1 py-px ${
-                          emp.taxSlabRate.includes("87A rebate")
-                            ? "text-primary bg-primary/10"
-                            : "text-foreground-muted bg-surface-muted"
-                        }`}>{emp.taxSlabRate}</span>
-                      )}
-                    </td>
-                  )}
-                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-category-teal whitespace-nowrap">
-                    {isSimple
-                      ? fmtCurrencyLocal((emp.monthlyGross || 0) - (emp.monthlyNet || 0), fmtCurrency)
-                      : fmtCurrencyLocal(extraBenefits, fmtCurrency)
-                    }
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs font-bold text-info whitespace-nowrap">
-                    {fmtCurrencyLocal(emp.monthlyNet, fmtCurrency)}
-                  </td>
-                  <td className="px-3 py-2.5 text-center">
-                    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold bg-primary/10 text-primary">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                      Ready
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="space-y-5">
+        {[...employeesByCountry.entries()].map(([country, countryEmployees]) => {
+          const contributionColumns = countryEmployees[0]?.contribComponents || [];
+          const incomeTaxLabel = getPayrollLabels(country).incomeTax;
+          const selectedIds = countryEmployees.map((emp) => emp.id);
+          const allCountrySelected = selectedIds.every((id) => selectedEmployees.includes(id));
+          const currency = countryEmployees.find((emp) => emp.currency)?.currency
+            || getCurrencyForJurisdiction(country)?.code;
+          const countryLabel = getCountryNameFromCode(country) || country;
+
+          return (
+            <section key={country} className="overflow-hidden rounded-[16px] border border-border bg-surface">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-muted px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">{countryLabel}</h3>
+                  <p className="text-[11px] text-foreground-muted">
+                    {countryEmployees.length} {countryEmployees.length === 1 ? "employee" : "employees"}
+                    {currency ? ` · ${currency}` : ""}
+                  </p>
+                </div>
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary">
+                  Country payroll
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-surface-muted/60 border-b border-border">
+                      <th className="px-3 py-2.5 w-8">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select all ${countryLabel} employees`}
+                          checked={allCountrySelected}
+                          onChange={() => toggleAllEmployees?.(selectedIds)}
+                          className="rounded border-border h-3.5 w-3.5 text-primary focus:ring-primary"
+                        />
+                      </th>
+                      <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee</th>
+                      <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Department</th>
+                      <th className="px-3 py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Payable Days</th>
+                      <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Pay</th>
+                      {!isSimple && contributionColumns.map((col) => (
+                        <th key={col.id} className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{col.label}</th>
+                      ))}
+                      {!isSimple && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{incomeTaxLabel}</th>}
+                      <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{isSimple ? "LOP Deduction" : "Extra / Benefits"}</th>
+                      <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Net Pay</th>
+                      <th className="px-3 py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {countryEmployees.map((emp) => {
+                      const dept = DEPT_COLORS[emp.department] || { bg: "bg-surface-muted", text: "text-foreground-muted" };
+                      const isSelected = selectedEmployees.includes(emp.id);
+                      const extraBenefits = emp.monthlyExtra ?? ((Number(emp.rewards) || 0) + (Number(emp.bonus) || 0) + (Number(emp.otherCompensation) || 0));
+                      const empContribs = Object.fromEntries((emp.contribComponents || []).map((c) => [c.id, c.value]));
+                      const empFmt = emp.currency ? createCurrencyFormatterForCode(emp.currency) : fmtCurrency;
+                      return (
+                        <tr key={emp.id} className={`transition-colors ${isSelected ? "bg-primary/5 dark:bg-primary/10" : "hover:bg-background dark:hover:bg-surface-muted"}`}>
+                          <td className="px-3 py-2.5">
+                            <input type="checkbox" checked={isSelected} onChange={() => toggleEmployee(emp.id)} className="rounded border-border h-3.5 w-3.5 text-primary focus:ring-primary" />
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <Avatar name={emp.name} />
+                              <div className="flex flex-col">
+                                <span className="font-semibold text-foreground text-xs whitespace-nowrap">{emp.name}</span>
+                                {emp.attendanceStatus && emp.attendanceStatus !== "unknown" && (
+                                  <span className={`text-[9px] font-bold ${
+                                    emp.attendanceStatus === "present" ? "text-primary" :
+                                    emp.attendanceStatus === "absent" ? "text-error" :
+                                    emp.attendanceStatus === "leave" ? "text-warning" :
+                                    "text-foreground-muted"
+                                  }`}>
+                                    {emp.attendanceStatus === "present" ? "\u25cf Present" :
+                                     emp.attendanceStatus === "absent" ? "\u25cf Absent" :
+                                     emp.attendanceStatus === "leave" ? "\u25cf On Leave" : ""}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${dept.bg} ${dept.text}`}>
+                              {emp.department || "\u2014"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                            {emp.payableDays != null && emp.totalWorkingDays != null ? (
+                              <span className={`text-xs font-semibold ${emp.prorated ? "text-amber-500" : "text-foreground-muted"}`}>
+                                {emp.payableDays}/{emp.totalWorkingDays}{emp.prorated ? " \u26a0" : ""}
+                              </span>
+                            ) : <span className="text-xs text-foreground-muted">\u2014</span>}
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-xs font-semibold text-foreground whitespace-nowrap">
+                            {fmtCurrencyLocal(emp.monthlyGross, empFmt)}
+                          </td>
+                          {!isSimple && contributionColumns.map((col) => (
+                            <td key={col.id} className="px-3 py-2.5 text-right text-xs font-semibold text-category-teal whitespace-nowrap">
+                              {fmtCurrencyLocal(empContribs[col.id] ?? 0, empFmt)}
+                            </td>
+                          ))}
+                          {!isSimple && (
+                            <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                              <span className="text-xs font-semibold text-error">{fmtCurrencyLocal(emp.monthlyTax, empFmt)}</span>
+                              {emp.taxSlabRate && emp.taxSlabRate !== "\u2014" && emp.taxSlabRate !== "Nil" && (
+                                <span className={`ml-1 text-[9px] font-bold rounded px-1 py-px ${
+                                  emp.taxSlabRate.includes("87A rebate") ? "text-primary bg-primary/10" : "text-foreground-muted bg-surface-muted"
+                                }`}>{emp.taxSlabRate}</span>
+                              )}
+                            </td>
+                          )}
+                          <td className="px-3 py-2.5 text-right text-xs font-semibold text-category-teal whitespace-nowrap">
+                            {isSimple
+                              ? fmtCurrencyLocal((emp.monthlyGross || 0) - (emp.monthlyNet || 0), empFmt)
+                              : fmtCurrencyLocal(extraBenefits, empFmt)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-xs font-bold text-info whitespace-nowrap">
+                            {fmtCurrencyLocal(emp.monthlyNet, empFmt)}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold bg-primary/10 text-primary">
+                              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                              Ready
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          );
+        })}
       </div>
     );
   }
@@ -306,9 +327,15 @@ export default function RunsTable({
               <tr key={run.id} className="cursor-pointer transition-colors hover:bg-background dark:hover:bg-surface-muted" onClick={() => onSelect?.(run)}>
                 <td className="px-5 py-4 text-xs font-semibold text-foreground">{run.period}</td>
                 <td className="px-5 py-4 text-xs text-foreground-muted">{run.employees?.toLocaleString()}</td>
-                <td className="px-5 py-4 text-xs font-semibold text-foreground text-right">{fmtCurrencyLocal(run.gross, fmtCurrency)}</td>
-                <td className="px-5 py-4 text-xs font-semibold text-error text-right">{run.deductions ? fmtCurrencyLocal(run.deductions, fmtCurrency) : "\u2014"}</td>
-                <td className="px-5 py-4 text-xs font-bold text-primary text-right">{fmtCurrencyLocal(run.net, fmtCurrency)}</td>
+                <td className="px-5 py-4 text-xs font-semibold text-foreground text-right">
+                  <RunCurrencyAmount run={run} runField="gross" countryField="totalGross" fallbackFormat={(n) => fmtCurrencyLocal(n, fmtCurrency)} />
+                </td>
+                <td className="px-5 py-4 text-xs font-semibold text-error text-right">
+                  <RunCurrencyAmount run={run} runField="deductions" countryField="totalDeductions" fallbackFormat={(n) => fmtCurrencyLocal(n, fmtCurrency)} hideZero />
+                </td>
+                <td className="px-5 py-4 text-xs font-bold text-primary text-right">
+                  <RunCurrencyAmount run={run} runField="net" countryField="totalNet" fallbackFormat={(n) => fmtCurrencyLocal(n, fmtCurrency)} />
+                </td>
                 <td className="px-5 py-4">
                   <StatusBadge status={run.status} />
                 </td>

@@ -30,9 +30,10 @@ const DEDUCTION_MAX_PCT = 30;
 // Lakh/Crore abbreviations are an India-specific numbering convention \u2014
 // kept exactly as-is for INR, but every other currency uses the more
 // universal K/M (thousand/million) abbreviation instead.
+// A null currencyCode (mixed-currency totals) formats the bare number.
 function fmt(n, currencyCode) {
   const v = Number(n || 0);
-  const symbol = getCurrencySymbol(currencyCode);
+  const symbol = currencyCode ? getCurrencySymbol(currencyCode) : "";
   if (currencyCode === "INR") {
     if (v >= 10000000) return `${symbol}${(v / 10000000).toFixed(1)}Cr`;
     if (v >= 100000) return `${symbol}${(v / 100000).toFixed(1)}L`;
@@ -61,7 +62,11 @@ function ChartTooltip({ active, payload, label, currencyCode }) {
   );
 }
 
-export default function BreakdownsChart({ filter, refreshTick, currencyCode }) {
+// `mixedCurrencies` (dashboard summary byCountry.length > 1): the breakdown
+// endpoint adds amounts across currencies, so no currency symbol is shown
+// and a note says the figures are combined.
+export default function BreakdownsChart({ filter, refreshTick, currencyCode: orgCurrencyCode, mixedCurrencies = false }) {
+  const currencyCode = mixedCurrencies ? null : orgCurrencyCode;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -115,6 +120,12 @@ export default function BreakdownsChart({ filter, refreshTick, currencyCode }) {
   const gridCols = panels.length >= 3 ? "md:grid-cols-3" : panels.length === 2 ? "md:grid-cols-2" : "";
 
   return (
+    <div className="space-y-3">
+      {mixedCurrencies && (
+        <p className="text-[12px] font-medium text-foreground-muted">
+          These breakdowns combine amounts paid in different currencies — use the by-country totals above for exact figures.
+        </p>
+      )}
       <div className={`grid grid-cols-1 gap-6 ${gridCols}`}>
       {/* Department Donut */}
       {deptData.length > 0 && (
@@ -173,7 +184,7 @@ export default function BreakdownsChart({ filter, refreshTick, currencyCode }) {
                 tick={{ fontSize: 11, fill: "var(--color-foreground-muted)", fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(v) => `${getCurrencySymbol(currencyCode)}${(v / 1000).toFixed(0)}k`}
+                tickFormatter={(v) => `${currencyCode ? getCurrencySymbol(currencyCode) : ""}${(v / 1000).toFixed(0)}k`}
                 width={50}
               />
               <Tooltip content={<ChartTooltip currencyCode={currencyCode} />} cursor={{ fill: "rgba(0,0,0,0.02)" }} />
@@ -217,6 +228,7 @@ export default function BreakdownsChart({ filter, refreshTick, currencyCode }) {
           <p className="text-[13px] text-foreground-muted text-center py-4 font-medium">No deduction data for this period.</p>
         )}
       </div>
+    </div>
     </div>
   );
 }

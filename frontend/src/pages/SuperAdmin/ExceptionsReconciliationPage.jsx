@@ -19,6 +19,10 @@ const EXCEPTION_SEVERITY = {
   stuck: "high",
   overLimit: "medium",
   mismatch: "high",
+  // Over the plan's country cap: new employees/payroll in the excess
+  // countries are already paused for the tenant, so nothing is mis-paid —
+  // a commercial follow-up (upgrade or remove), not a payroll blocker.
+  countryLimit: "medium",
 };
 const SEVERITY_PILL = { high: "rejected", medium: "pending", low: "inactive" };
 
@@ -26,8 +30,11 @@ const EMPTY_DATA = {
   stuck_reviews: { run_count: 0, organization_count: 0, older_than_days: 3 },
   bwm_scale_limit_overages: [],
   bwm_invoice_mismatches: [],
+  country_limit_exceptions: [],
   note: "",
 };
+
+const PLAN_LABEL = { CORE: "Core", PROFESSIONAL: "Professional", BUSINESS: "Business", ENTERPRISE: "Enterprise" };
 
 // "2026-10-01" / "2026-10" -> "Oct 2026" (UTC, never shifted by the viewer's zone).
 function formatMonth(value) {
@@ -66,7 +73,7 @@ export default function ExceptionsReconciliationPage() {
     setError("");
     try {
       const res = await listExceptions();
-      setData({ ...EMPTY_DATA, ...res, stuck_reviews: { ...EMPTY_DATA.stuck_reviews, ...(res?.stuck_reviews || {}) } });
+      setData({ ...EMPTY_DATA, ...res, country_limit_exceptions: res?.country_limit_exceptions || [], stuck_reviews: { ...EMPTY_DATA.stuck_reviews, ...(res?.stuck_reviews || {}) } });
       setLoaded(true);
     } catch (err) {
       setError(err?.message || "Exceptions could not be loaded.");
@@ -104,12 +111,13 @@ export default function ExceptionsReconciliationPage() {
       <LoadError message={error} onRetry={load} />
       {!loaded && !error && <LoadingBlocks count={3} />}
       {loaded && <>
-      {/* Count-first: which of the 3 problem types need a look, before
+      {/* Count-first: which of the problem types need a look, before
           reading a single row. */}
       <div className="flex flex-wrap gap-4 mb-6">
         <ExceptionCountBadge label="Runs Stuck in Review" count={stuckRuns} severityKey="stuck" />
         <ExceptionCountBadge label="Over Plan Limit" count={data.bwm_scale_limit_overages.length} severityKey="overLimit" />
         <ExceptionCountBadge label="BWM/Invoice Mismatches" count={data.bwm_invoice_mismatches.length} severityKey="mismatch" />
+        <ExceptionCountBadge label="Over Country Limit" count={data.country_limit_exceptions.length} severityKey="countryLimit" />
       </div>
 
       <div className="mb-6">
@@ -215,6 +223,54 @@ export default function ExceptionsReconciliationPage() {
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
               <ShieldCheck size={22} className="text-success" />
               <p className="text-sm text-foreground-disabled">No invoices whose billed worker-months differ from the counted records.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <h2 className={`${SECTION_LABEL_CLS} mb-3`}>Over Country Limit ({data.country_limit_exceptions.length})</h2>
+        <p className="text-xs text-foreground-disabled mb-3">
+          Organizations using more countries than their plan includes, or with employees in a country they are not entitled to.
+          New employees and payroll in the excess countries are paused until the organization upgrades or removes a country.
+        </p>
+        <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[800px]">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Organization</th>
+                <th className="px-4 py-3">Plan</th>
+                <th className="px-4 py-3 text-right">Countries (used / limit)</th>
+                <th className="px-4 py-3">Over-Limit Countries</th>
+                <th className="px-4 py-3">Employees in Unentitled Countries</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.country_limit_exceptions.map((row) => (
+                <tr key={row.organization_id} className="border-t border-border-light border-l-4 border-l-warning bg-warning-light/30">
+                  <td className="px-4 py-3 font-medium text-foreground">{row.organization_name || `Org #${row.organization_id}`}</td>
+                  <td className="px-4 py-3 text-foreground-muted">{PLAN_LABEL[row.plan_code] || row.plan_code || "—"}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-error">
+                    {row.countries_used} / {row.countries_limit == null ? "∞" : row.countries_limit}
+                  </td>
+                  <td className="px-4 py-3 text-foreground-secondary">
+                    {(row.over_limit_countries || []).length > 0 ? row.over_limit_countries.join(", ") : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-foreground-secondary">
+                    {(row.unentitled_employee_countries || []).length > 0
+                      ? row.unentitled_employee_countries
+                          .map((c) => `${c.country_code} (${c.employee_count})`)
+                          .join(", ")
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.country_limit_exceptions.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+              <ShieldCheck size={22} className="text-success" />
+              <p className="text-sm text-foreground-disabled">No organizations currently over their plan&apos;s country limit.</p>
             </div>
           )}
         </div>

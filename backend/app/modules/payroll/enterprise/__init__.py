@@ -1,10 +1,8 @@
 from app.modules.payroll.enterprise.models import EnterpriseJurisdiction
 
-# Router deliberately NOT imported here (see payroll/policy/__init__.py for
-# the full rationale): app.database imports this package's .models for table
-# registration while payroll.models may still be partially initialized, and
-# the eager router import drags in enterprise.service which imports names
-# from payroll.models too early. enterprise_router is mounted explicitly by
-# payroll/router.py.
+# Enterprise Payroll setup was removed (2026-10-29) — superseded by the
+# per-country entitlement ledger (billing/jurisdiction_entitlement.py) and
+# per-employee country engines. Only the table model remains, so existing
+# payroll_enterprise_jurisdictions rows and migrations stay consistent.
 
 __all__ = ["EnterpriseJurisdiction"]

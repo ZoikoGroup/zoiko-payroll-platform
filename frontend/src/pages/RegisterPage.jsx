@@ -19,6 +19,7 @@ import {
 import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
 import MfaLoginStep from "../components/MfaLoginStep";
+import { COUNTRY_LIMIT_KEY, formatCountryLimit } from "../utils/planLimits";
 
 const fieldStyle = {
   width: "100%", padding: "11px 14px", borderRadius: "10px",
@@ -48,11 +49,11 @@ const labelStyle = {
 // as local presentation data, since GET /billing/plans has no such field.
 const PLAN_PRESENTATION = {
   CORE: {
-    tagline: "Deliberately simple — for single-entity, single-jurisdiction payroll.",
+    tagline: "Deliberately simple — for single-entity payroll in one country.",
     recommended: false,
   },
   PROFESSIONAL: {
-    tagline: "For businesses that have grown past one entity or jurisdiction.",
+    tagline: "For businesses that have grown past one entity or country.",
     recommended: true,
   },
   BUSINESS: {
@@ -71,7 +72,7 @@ const CAPABILITY_LABELS = [
 
 const SCALE_LABELS = [
   ["max_entities", (n) => `${n === 1 ? "1 legal entity" : `Up to ${n} legal entities`}`],
-  ["max_jurisdictions", (n) => `${n === 1 ? "1 production jurisdiction" : `Up to ${n} production jurisdictions`}`],
+  [COUNTRY_LIMIT_KEY, formatCountryLimit],
   ["max_schedules", (n) => `Up to ${n} payroll schedules`],
   ["max_billable_worker_months", (n) => `Up to ${n} billable worker-months`],
 ];
@@ -92,7 +93,11 @@ function buildPlanCard(apiPlan) {
     tagline: presentation.tagline || "",
     recommended: Boolean(presentation.recommended),
     capabilities: CAPABILITY_LABELS.map(([key, label]) => [label, key in flags && flags[key] !== 0]),
-    scale: SCALE_LABELS.filter(([key]) => flags[key] != null).map(([key, format]) => format(flags[key])),
+    // A present-but-null country limit means unlimited (Enterprise), so it
+    // is still listed; other null scale limits are skipped as before.
+    scale: SCALE_LABELS
+      .filter(([key]) => flags[key] != null || (key === COUNTRY_LIMIT_KEY && key in flags))
+      .map(([key, format]) => format(flags[key])),
   };
 }
 

@@ -35,7 +35,12 @@ def test_has_postgrad_loan_accepts_true_false_choices():
 
 def test_has_postgrad_loan_rejects_invalid_choice():
     with pytest.raises(BadRequestException):
-        UKEmployeeValidation.validate(_payload(has_postgrad_loan="yes"))
+        UKEmployeeValidation.validate(_payload(has_postgrad_loan="maybe"))
+
+
+def test_has_postgrad_loan_reads_yes_no_as_true_false():
+    assert UKEmployeeValidation.validate(_payload(has_postgrad_loan="Yes"))["has_postgrad_loan"] == "true"
+    assert UKEmployeeValidation.validate(_payload(has_postgrad_loan="no"))["has_postgrad_loan"] == "false"
 
 
 def test_has_postgrad_loan_syncs_to_real_boolean_column():

@@ -160,6 +160,19 @@ export default function LoginPage() {
               Sign in to Zoiko Payroll.
             </h1>
 
+            {location.state?.sessionExpired && !localError && (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: "8px",
+                background: "#FFFBEB", border: "1px solid #FDE68A",
+                borderRadius: "8px", padding: "12px 14px", marginBottom: "20px"
+              }}>
+                <AlertCircle size={15} color="#B45309" style={{ marginTop: "1px", flexShrink: 0 }} />
+                <span style={{ fontSize: "13px", color: "#B45309" }}>
+                  Your session has expired. Sign in again to continue where you left off.
+                </span>
+              </div>
+            )}
+
             {(localError) && (
               <div style={{
                 display: "flex", alignItems: "flex-start", gap: "8px",

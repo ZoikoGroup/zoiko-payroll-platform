@@ -1099,6 +1099,10 @@ class BulkEmployeeItem(BaseModel):
 
 class BulkEmployeeRequest(BaseModel):
     employees: List[BulkEmployeeItem]
+    # A per-country import (bulk create): every row is an employee of this
+    # country — a row without a country takes it, a row naming another
+    # country is refused. None keeps the per-row Country behavior.
+    countryCode: Optional[str] = None
 
 
 class BulkDeleteRequest(BaseModel):
@@ -1191,6 +1195,8 @@ class PayrollRunPreviewRequest(BaseModel):
 class PayrollRunPreviewEmployee(BaseModel):
     employeeId: int
     employeeName: str
+    # The employee's own country — the engine this row was calculated with.
+    country: Optional[str] = None
     department: Optional[str] = None
     attendanceStatus: str = "active"
     monthlyGross: float
@@ -1254,6 +1260,8 @@ class PayrollRunPreviewTotals(BaseModel):
 class PayrollRunPreviewResponse(BaseModel):
     employees: List[PayrollRunPreviewEmployee]
     totals: PayrollRunPreviewTotals
+    # Per employee country, each in its own currency (mixed-country preview).
+    totalsByCountry: List[dict] = []
     calculationMode: Optional[str] = Field(None, alias="calculationMode")
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1285,6 +1293,9 @@ class PayrollRunResponse(BaseModel):
     attendanceOverrideReason: Optional[str] = Field(None, validation_alias="attendance_override_reason", serialization_alias="attendanceOverrideReason")
     attendanceOverrideAt:  Optional[datetime] = Field(None, validation_alias="attendance_override_at", serialization_alias="attendanceOverrideAt")
     approvalStatus:        str = ""
+    # Run detail only (service.get_payroll_run_detail): per-country totals,
+    # each in that country's currency — see service.run_totals_by_country.
+    totalsByCountry:       Optional[List[dict]] = Field(None, validation_alias="totals_by_country", serialization_alias="totalsByCountry")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -1501,6 +1512,10 @@ class PayslipItemResponse(BaseModel):
     # reporting, never affects any calculation.
     taxWeek: Optional[int] = None
     taxMonth: Optional[int] = None
+    # UK payslip details (single-payslip GET only): tax code + basis, NI
+    # category, tax period/year, employer PAYE/Accounts Office refs and
+    # tax-year-to-date totals — see service.uk_payslip_details.
+    ukPayslip: Optional[dict] = None
     netPay:             Decimal
     bankName:           Optional[str] = None
     bankAccount:        Optional[str] = None
@@ -2334,6 +2349,10 @@ class TaxSlabResponse(BaseModel):
     # country-level row (e.g. US Federal, India Central), same convention
     # as the model column itself.
     jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    # Which tax regime the bracket belongs to (India: "New" | "Old"; None when
+    # the country has one regime) — so a table can label each regime's
+    # brackets instead of running two complete tables together.
+    taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
     # Raw numeric bounds, additive alongside the pre-formatted min/max/rate
     # strings above. Needed so PT_FLAT rows (state Professional Tax — a
     # fixed monthly amount per gross-income bracket, not a percentage) can
@@ -4346,6 +4365,9 @@ class DashboardSummaryResponse(BaseModel):
     activeCount:                 Optional[int] = None
     onLeaveCount:                Optional[int] = None
     pendingApprovals:            int
+    # Per-country totals for the same period, each in its own currency
+    # (service._dashboard_country_breakdown).
+    byCountry:                   List[dict] = []
 
     model_config = ConfigDict(populate_by_name=True)
 

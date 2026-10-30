@@ -82,7 +82,7 @@ def test_hk_registered_in_the_shared_strategy_and_every_country_registry():
     assert JURISDICTION_TAX_SCHEMAS["HK"]["currency"] == "HKD" and CODE_TO_COUNTRY_NAME["HK"] == "Hong Kong"
     assert get_jurisdiction_code("Hong Kong") == get_jurisdiction_code("hong kong sar") == "HK"
     assert _normalize_country("Hong Kong") == "HK"          # previously truncated to "HO"
-    assert "Hong Kong" not in REGISTRATION_COUNTRIES          # live payroll gated (§16)
+    assert "Hong Kong" in REGISTRATION_COUNTRIES              # offered at registration (owner decision 2026-10-29)
     assert "HK" in _VALIDATION_ENABLED_COUNTRIES and "HK" in _CANONICAL_PACK_ONLY_COUNTRIES
     assert "HK" in _REGISTRY_ROW_REQUIRED_COUNTRIES and "HK" in _STRATEGIES
 

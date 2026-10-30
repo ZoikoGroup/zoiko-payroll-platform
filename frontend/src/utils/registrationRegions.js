@@ -33,6 +33,9 @@ export const REGISTRATION_COUNTRIES = [
   // the worker's residence municipality (a worker fact, SE-002), never the
   // county, so Sweden deliberately has no STATES_BY_COUNTRY entry below.
   "Sweden",
+  // Owner decision 2026-10-29 — every configured payroll country is offered
+  // at registration (mirrors backend REGISTRATION_COUNTRIES).
+  "Brazil", "Hong Kong", "Italy", "Netherlands", "Saudi Arabia", "Singapore", "Switzerland",
 ];
 
 const STATES_BY_COUNTRY = {

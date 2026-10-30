@@ -9,13 +9,23 @@
  * Flow:
  *  1. Load published plans via GET /billing/plans
  *  2. Show plan cards with pricing, features, and a "Choose Plan" button
- *  3. On button click → POST /billing/checkout → redirect window to checkout_url
+ *  3. On button click → GET /billing/plan-change-impact; if the plan would
+ *     pause or restore countries, confirm in a dialog first (a pause needs
+ *     the acknowledgement checkbox) → POST /billing/checkout → redirect
+ *     window to checkout_url
  */
 
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Check, AlertCircle, Zap, ArrowLeft, ShieldX } from "lucide-react";
-import { listPublishedPlans, createCheckoutSession } from "../service/billingService";
+import { listPublishedPlans, createCheckoutSession, getPlanChangeImpact } from "../service/billingService";
+import { PlanChangeCountryDialog } from "../components/billing/PlanChangeCountryNotice";
+import {
+  formatPlanFeature,
+  getCountryPauseImpact,
+  impactNeedsReview,
+  impactPausesCountries,
+} from "../utils/planLimits";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
@@ -199,6 +209,9 @@ export default function PlanSelectionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [checkingOut, setCheckingOut] = useState(null); // plan_code being checked out
+  // { planCode, planName, impact } while the country-impact dialog is open.
+  const [pendingChange, setPendingChange] = useState(null);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -208,17 +221,54 @@ export default function PlanSelectionPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleChoosePlan(planCode) {
+  function reviewCountryImpact(planCode, planName, impact) {
+    setAcknowledged(false);
+    setPendingChange({ planCode, planName, impact });
+    setCheckingOut(null);
+  }
+
+  async function startCheckout(planCode, planName, acknowledgeCountryPause) {
     setError(null);
     setCheckingOut(planCode);
     try {
-      const { checkout_url } = await createCheckoutSession(planCode);
+      const result = await createCheckoutSession(planCode, { acknowledgeCountryPause });
+      if (result?.plan_changed) {
+        // Existing paid subscription changed in place (prorated by Stripe) —
+        // show it on the subscription page instead of redirecting to Stripe.
+        navigate("/organization-admin/subscription", {
+          replace: true,
+          state: { planChangedMessage: result.message || `You're now on the ${planName} plan.` },
+        });
+        return;
+      }
       // Hard redirect to Stripe — not a client-side navigation
-      window.location.href = checkout_url;
+      window.location.href = result.checkout_url;
     } catch (err) {
+      // The backend refuses an unacknowledged change that pauses countries —
+      // show the same confirmation instead of the raw error.
+      const impact = getCountryPauseImpact(err);
+      if (impact) {
+        reviewCountryImpact(planCode, planName, impact);
+        return;
+      }
+      setPendingChange(null);
       setError(err.message || "Could not start checkout. Please try again.");
       setCheckingOut(null);
     }
+  }
+
+  async function handleChoosePlan(plan) {
+    const planName = plan.name || plan.code;
+    setError(null);
+    setCheckingOut(plan.code);
+    // Best effort: if the impact lookup fails, checkout's own 409 still
+    // catches a change that would pause countries.
+    const impact = await getPlanChangeImpact(plan.code).catch(() => null);
+    if (impactNeedsReview(impact)) {
+      reviewCountryImpact(plan.code, planName, impact);
+      return;
+    }
+    await startCheckout(plan.code, planName, false);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -283,7 +333,7 @@ export default function PlanSelectionPage() {
               : Object.entries(flags).map(([feature_key, limit_value]) => ({ feature_key, limit_value }))
             )
               .filter((f) => f.limit_value !== 0)
-              .map((f) => f.feature_key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
+              .map((f) => formatPlanFeature(f.feature_key, f.limit_value));
 
             return (
               <div
@@ -342,7 +392,7 @@ export default function PlanSelectionPage() {
                   <button
                     style={anyLoading ? disabledButtonStyle : buttonStyle}
                     disabled={anyLoading}
-                    onClick={() => handleChoosePlan(plan.code)}
+                    onClick={() => handleChoosePlan(plan)}
                   >
                     {isLoadingThis ? (
                       <>
@@ -363,6 +413,20 @@ export default function PlanSelectionPage() {
             );
           })}
         </div>
+      )}
+
+      {pendingChange && (
+        <PlanChangeCountryDialog
+          impact={pendingChange.impact}
+          planName={pendingChange.planName}
+          acknowledged={acknowledged}
+          onAcknowledgedChange={setAcknowledged}
+          busy={checkingOut === pendingChange.planCode}
+          onClose={() => setPendingChange(null)}
+          onConfirm={() =>
+            startCheckout(pendingChange.planCode, pendingChange.planName, impactPausesCountries(pendingChange.impact))
+          }
+        />
       )}
 
       <p style={{ marginTop: 40, fontSize: 13, color: "#94A3B8", textAlign: "center" }}>

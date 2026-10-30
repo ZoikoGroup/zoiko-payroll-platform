@@ -6,6 +6,7 @@ import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
 import { nlEmployeeLines, nlEmployerLines } from "../PayRollRuns/nlPayslipLines";
+import { getPayslipById } from "../../../service/payrollService";
 
 const printStyles = `
 @media print {
@@ -66,8 +67,28 @@ const CH_EMPLOYEE_LINES = [
   ["ch_qst_total", "Source tax (QST)"],
 ];
 
+const isUkCountry = (c) => ["UK", "GB"].includes((c || "").toUpperCase());
+
+const ukDate = (iso) => {
+  if (!iso) return "\u2014";
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00`);
+  return isNaN(d) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+};
+
 export default function PayslipStub({ payslip, onClose, currencyCode = "INR", company = null }) {
   const [traceOpen, setTraceOpen] = useState(false);
+  // UK: tax code/basis, NI category, tax period, employer refs and
+  // year-to-date totals come from the single-payslip API (ukPayslip).
+  const [ukDetails, setUkDetails] = useState(null);
+  const isUk = isUkCountry(payslip?.country || payslip?.countryCode);
+  useEffect(() => {
+    if (!payslip?.id || !isUk) return undefined;
+    let cancelled = false;
+    getPayslipById(payslip.id)
+      .then((d) => { if (!cancelled) setUkDetails(d?.ukPayslip || null); })
+      .catch(() => { if (!cancelled) setUkDetails(null); });
+    return () => { cancelled = true; };
+  }, [payslip?.id, isUk]);
   useEffect(() => {
     if (!payslip) return;
     const prev = document.body.style.overflow;
@@ -92,7 +113,13 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     { label: "Absence benefit allowances", amount: chTotals.ch_absence_earnings_total || chSnapshot.totals?.ch_absence_earnings_total || 0 },
   ].filter((r) => Number(r.amount) > 0) : [];
 
-  const earningsRows = [
+  const earningsRows = isUk ? [
+    { label: "Basic pay", amount: payslip.basicPay },
+    ...(payslip.allowanceItems || []).map((a) => ({ label: a.label, amount: a.amount })),
+    { label: "Fixed allowance", amount: (Number(payslip.hra) || 0) + (Number(payslip.specialAllowance) || 0) },
+    { label: "Overtime", amount: payslip.overtime || 0 },
+    { label: "Bonus / additional pay", amount: payslip.additionalCompensation || 0 },
+  ].filter((r) => Number(r.amount) > 0) : [
     { label: "Basic Pay", amount: payslip.basicPay },
     { label: "HRA", amount: payslip.hra },
     ...(payslip.allowanceItems || []).map((a) => ({ label: a.label, amount: a.amount })),
@@ -167,7 +194,18 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const netPay = payslip.netPay != null ? Number(payslip.netPay) : totalEarnings - totalDeductions;
   const netInWords = amountToWords(netPay, (payslip.country || "IN").toUpperCase() === "IN");
 
-  const employeeFields = [
+  const employeeFields = isUk ? [
+    ["Employee", payslip.employee],
+    ["Employee ID", payslip.employeeId],
+    ["NI number", identity.value || ukDetails?.nino || null],
+    ["NI category", ukDetails?.niCategory || null],
+    ["Tax code", ukDetails?.taxCode || null],
+    ["Tax basis", ukDetails?.taxBasis || null],
+    ["Department", payslip.department],
+    ["Pay date", ukDetails ? ukDate(ukDetails.payDate) : payslip.payDate],
+    ["Bank account", payslip.bankAccount],
+    ["Sort code", ukDetails?.sortCode || null],
+  ].filter(([, val]) => val !== null) : [
     ["Employee", payslip.employee],
     ["Employee ID", payslip.employeeId],
     ["Payslip No.", payslip.payslipNumber || null],
@@ -228,6 +266,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
             <div>
               <p className="text-2xl font-extrabold tracking-tight">{companyName}</p>
               <p className="text-[13px] opacity-80 mt-1">{companyAddress}</p>
+              {isUk && (
+                <p className="text-[12px] opacity-80 mt-1">
+                  Employer PAYE ref: {ukDetails?.payeReference || "\u2014"} · Accounts Office ref: {ukDetails?.accountsOfficeReference || "\u2014"}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {chSnapshot?.trace && (
@@ -247,7 +290,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
             {/* PAYSLIP TITLE */}
             <div className="text-center mb-6">
               <p className="text-lg font-extrabold text-foreground tracking-wide">PAYSLIP</p>
-              <p className="text-[13px] font-semibold text-foreground-muted mt-1">Salary Month : {payslip.period}</p>
+              <p className="text-[13px] font-semibold text-foreground-muted mt-1">
+                {isUk && ukDetails
+                  ? `Pay period: ${ukDate(ukDetails.periodStart)} – ${ukDate(ukDetails.periodEnd)} · Tax year ${ukDetails.taxYear}, Month ${ukDetails.taxMonth}`
+                  : `Salary Month : ${payslip.period}`}
+              </p>
             </div>
 
             {/* EMPLOYEE DETAILS */}
@@ -308,7 +355,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 <p className="text-[12px] text-amber-700 dark:text-amber-400">
                   Prorated for <strong>{payslip.payableDays} of {payslip.totalWorkingDays}</strong> payable working days
                   this period ({Math.round((payslip.payableDays / payslip.totalWorkingDays) * 100)}% of full pay) —
-                  basic, HRA, and special allowance below are already scaled down for recorded absence/unpaid leave.
+                  {isUk ? "basic pay and fixed allowance" : "basic, HRA, and special allowance"} below are already scaled down for recorded absence/unpaid leave.
                 </p>
               </div>
             )}
@@ -445,8 +492,56 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
             </div>
             )}
 
+            {/* UK: tax-year-to-date totals and the employer's contributions */}
+            {!isBlocked && isUk && ukDetails && (
+            <div className="mb-5 grid grid-cols-2 gap-6" data-testid="uk-payslip-ytd">
+              <div className="rounded-[8px] border border-border p-4">
+                <p className="mb-2 text-[12px] font-bold uppercase tracking-wider text-foreground-muted">Year to date ({ukDetails.taxYear})</p>
+                <dl className="space-y-1 text-[13px]">
+                  {[
+                    ["Gross pay", ukDetails.ytd.gross],
+                    ["Income tax (PAYE)", ukDetails.ytd.tax],
+                    ["National Insurance", ukDetails.ytd.ni],
+                    ["Workplace pension", ukDetails.ytd.pension],
+                    ...(ukDetails.ytd.studentLoan ? [["Student loan", ukDetails.ytd.studentLoan]] : []),
+                    ...(ukDetails.ytd.postgradLoan ? [["Postgraduate loan", ukDetails.ytd.postgradLoan]] : []),
+                  ].map(([label, amount]) => (
+                    <div key={label} className="flex justify-between gap-3">
+                      <dt className="text-foreground-muted">{label}</dt><dd className="text-foreground">{fmt(amount)}</dd>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
+                    <dt className="text-foreground">Net pay</dt><dd className="text-foreground">{fmt(ukDetails.ytd.net)}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div className="rounded-[8px] border border-border p-4">
+                <p className="mb-2 text-[12px] font-bold uppercase tracking-wider text-foreground-muted">
+                  Employer contributions — not deducted from your pay
+                </p>
+                <dl className="space-y-1 text-[13px]">
+                  {[
+                    ["Employer National Insurance", payslip.employerNi],
+                    ["Employer pension", payslip.employerPension],
+                    ["Employer NI to date", ukDetails.ytd.employerNi],
+                    ["Employer pension to date", ukDetails.ytd.employerPension],
+                  ].map(([label, amount]) => (
+                    <div key={label} className="flex justify-between gap-3">
+                      <dt className="text-foreground-muted">{label}</dt><dd className="text-foreground">{fmt(amount)}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {payslip.autoEnrolmentStatus && (
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Pension auto-enrolment: {String(payslip.autoEnrolmentStatus).replace(/_/g, " ").toLowerCase()}
+                  </p>
+                )}
+              </div>
+            </div>
+            )}
+
             {/* NET SALARY IN WORDS */}
-            {!isBlocked && (
+            {!isBlocked && !isUk && (
             <div className="mb-5">
               <p className="text-[13px] font-bold text-foreground mb-2">Net Salary in Words</p>
               <p className="text-[13px] text-foreground-muted">{netInWords} Only.</p>
@@ -458,11 +553,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
             <div className="border border-border rounded-[8px] overflow-hidden mb-6">
               <div className="grid grid-cols-2 border-b border-border">
                 <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider border-r border-border">Payment Mode</div>
-                <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider">Salary Credit Date</div>
+                <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider">{isUk ? "Pay Date" : "Salary Credit Date"}</div>
               </div>
               <div className="grid grid-cols-2">
-                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">Bank Transfer ({bankPaymentModeLabel(payslip.country)})</div>
-                <div className="px-4 py-3 text-[13px] font-medium text-foreground">{payslip.payDate || "\u2014"}</div>
+                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">{isUk ? "BACS" : `Bank Transfer (${bankPaymentModeLabel(payslip.country)})`}</div>
+                <div className="px-4 py-3 text-[13px] font-medium text-foreground">{isUk && ukDetails ? ukDate(ukDetails.payDate) : payslip.payDate || "\u2014"}</div>
               </div>
             </div>
             )}
