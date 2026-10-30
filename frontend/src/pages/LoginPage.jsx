@@ -14,6 +14,12 @@ import { AUTH_LABEL, AuthAlert, AuthPrimaryButton, authInputClass } from "../com
 // password or token, and it never skips the second factor (ZP-PRIV B08).
 const REMEMBERED_EMAIL_KEY = "zoiko_payroll_remembered_email";
 
+// A developer may prefill the email on the local dev server only. In a
+// production build import.meta.env.DEV is false, so the value is dropped and
+// never reaches the public bundle (vite.config.js also fails any build that
+// would contain it). A password is never prefilled, in any mode.
+const DEV_DEFAULT_EMAIL = import.meta.env.DEV ? (import.meta.env.VITE_DEFAULT_EMAIL || "") : "";
+
 function readRememberedEmail() {
   try {
     return localStorage.getItem(REMEMBERED_EMAIL_KEY) || "";
@@ -36,8 +42,8 @@ export default function LoginPage() {
   const location = useLocation();
   const { login } = useAuth();
 
-  const [email, setEmail] = useState(import.meta.env.VITE_DEFAULT_EMAIL || readRememberedEmail());
-  const [password, setPassword] = useState(import.meta.env.VITE_DEFAULT_PASSWORD || "");
+  const [email, setEmail] = useState(DEV_DEFAULT_EMAIL || readRememberedEmail());
+  const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
