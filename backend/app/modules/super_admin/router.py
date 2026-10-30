@@ -13,7 +13,7 @@ import uuid
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Body, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, Query, Body, File, Form, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -50,6 +50,7 @@ from app.modules.super_admin.schemas import (
     SettingCreate,
     SettingResponse,
     SettingUpdate,
+    SuperAdminUserDetailResponse,
     SuperAdminUserListResponse,
     SuperAdminUserResponse,
 )
@@ -202,11 +203,147 @@ def list_platform_users(
             first_name=u.first_name,
             last_name=u.last_name,
             is_active=u.is_active,
-            created_at=u.created_at,
+            is_verified=bool(u.is_verified),
+            workspace_type=o.workspace_type if o else None,
+            created_at=_as_utc(u.created_at),
+            updated_at=_as_utc(u.updated_at),
         )
         for u, o in rows
     ]
     return SuperAdminUserListResponse(users=users, total=total)
+
+
+def _as_utc(value):
+    """Stored datetimes are naive UTC; mark them so they serialise with "Z"."""
+    from datetime import timezone
+
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+@router.get("/users/{user_id}", response_model=SuperAdminUserDetailResponse)
+def get_platform_user_detail(
+    user_id: int,
+    request: Request,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """One user's account, the organisation details captured at registration,
+    and sign-in security activity - read-only, for the Platform Users panel.
+    Each view is recorded as a PRIVILEGED_READ security event."""
+    from datetime import datetime, timedelta
+
+    from app.core.exceptions import NotFoundException
+    from app.core.jurisdiction import get_jurisdiction_schema
+    from app.modules.auth import audit as auth_audit
+    from app.modules.auth.models import AuthAuditEvent, MfaCredential, SecurityActionPurpose, SecurityActionToken
+    from app.modules.auth.service import is_privileged
+    from app.modules.billing.models import BillingPlan, BillingPlanVersion, BillingSubscription
+    from app.modules.security import events as security_events
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise NotFoundException("User", "id")
+    org = (db.query(Organization).filter(Organization.id == user.organization_id).first()
+           if user.organization_id else None)
+
+    invite = (db.query(SecurityActionToken)
+              .filter(SecurityActionToken.email == user.email,
+                      SecurityActionToken.purpose == SecurityActionPurpose.INVITE)
+              .order_by(SecurityActionToken.created_at.asc()).first())
+    accepted = (db.query(AuthAuditEvent)
+                .filter(AuthAuditEvent.user_id == user.id,
+                        AuthAuditEvent.event_type == auth_audit.INVITATION_ACCEPTED)
+                .order_by(AuthAuditEvent.occurred_at.asc()).first())
+
+    # Users carry no created_by column: the channel is inferred from the
+    # account flags, the invitation and the organisation's own origin.
+    if user.is_temporary:
+        created_via = "SUPPORT_ACCESS"
+    elif invite is not None:
+        created_via = "INVITED"
+    elif org is None:
+        created_via = "PLATFORM_ACCOUNT"
+    else:
+        first_user_id = (db.query(User.id).filter(User.organization_id == org.id)
+                         .order_by(User.id.asc()).limit(1).scalar())
+        if org.created_by_user_id is None and first_user_id == user.id:
+            created_via = "TRIAL_SIGNUP" if org.workspace_type == "EVALUATION" else "REGISTRATION"
+        else:
+            created_via = "ADDED_BY_ADMIN"
+
+    accepted_at = accepted.occurred_at if accepted else (invite.used_at if invite else None)
+    account = {
+        "id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name,
+        "phone": user.phone or None, "role": user.role, "is_active": user.is_active,
+        "is_verified": bool(user.is_verified), "is_temporary": bool(user.is_temporary),
+        "access_expires_at": _as_utc(user.access_expires_at), "created_at": _as_utc(user.created_at),
+        "updated_at": _as_utc(user.updated_at), "created_via": created_via,
+        "invitation_sent_at": _as_utc(invite.created_at) if invite else None,
+        "invitation_accepted_at": _as_utc(accepted_at),
+    }
+
+    organization = None
+    if org is not None:
+        schema = get_jurisdiction_schema(org.country) or {}
+        labels = {f["key"]: f["label"] for f in schema.get("fields", [])}
+        identifiers = [{"key": str(k), "label": labels.get(k, str(k)), "value": None if v is None else str(v)}
+                       for k, v in (org.tax_identifiers or {}).items()]
+        creator = (db.query(User.email).filter(User.id == org.created_by_user_id).scalar()
+                   if org.created_by_user_id else None)
+        plan = None
+        sub = (db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id)
+               .order_by(BillingSubscription.created_at.desc()).first())
+        if sub is not None:
+            row = (db.query(BillingPlan.code, BillingPlan.name)
+                   .join(BillingPlanVersion, BillingPlanVersion.plan_id == BillingPlan.id)
+                   .filter(BillingPlanVersion.id == sub.plan_version_id).first()
+                   if sub.plan_version_id else None)
+            plan = {"code": row[0] if row else None, "name": row[1] if row else None, "status": sub.status,
+                    "current_period_end": _as_utc(sub.current_period_end)}
+        organization = {
+            "id": org.id, "name": org.organization_name, "code": org.organization_code,
+            "industry": org.industry, "company_type": org.company_type, "address": org.address,
+            "city": org.city, "state": org.state, "country": org.country, "email": org.email,
+            "phone": org.phone, "tax_no": org.tax_no, "registration_number": org.registration_number,
+            "tax_identifiers": identifiers, "currency": org.currency, "data_region": org.data_region,
+            "workspace_type": org.workspace_type, "billing_onboarding_status": org.billing_onboarding_status,
+            "billing_classification": org.billing_classification, "is_active": org.is_active,
+            "terms_accepted_at": _as_utc(org.terms_accepted_at), "created_at": _as_utc(org.created_at),
+            "created_by_email": creator, "plan": plan,
+        }
+
+    def _latest(event_type):
+        return (db.query(AuthAuditEvent)
+                .filter(AuthAuditEvent.user_id == user.id, AuthAuditEvent.event_type == event_type)
+                .order_by(AuthAuditEvent.occurred_at.desc()).first())
+
+    last_login = _latest(auth_audit.LOGIN_SUCCESS)
+    last_failed = _latest(auth_audit.LOGIN_FAILED)
+    last_reset = _latest(auth_audit.PASSWORD_RESET)
+    failed_30d = (db.query(AuthAuditEvent)
+                  .filter(AuthAuditEvent.user_id == user.id,
+                          AuthAuditEvent.event_type == auth_audit.LOGIN_FAILED,
+                          AuthAuditEvent.occurred_at >= datetime.utcnow() - timedelta(days=30)).count())
+    mfa = db.query(MfaCredential).filter(MfaCredential.user_id == user.id).first()
+    security = {
+        "mfa_required": is_privileged(user),
+        "mfa_enrolled_at": _as_utc(mfa.enrolled_at) if mfa else None,
+        "mfa_confirmed_at": _as_utc(mfa.confirmed_at) if mfa else None,
+        "last_login_at": _as_utc(last_login.occurred_at) if last_login else None,
+        "last_login_ip": last_login.client_address if last_login else None,
+        "last_login_user_agent": last_login.user_agent if last_login else None,
+        "failed_logins_30d": failed_30d,
+        "last_failed_login_at": _as_utc(last_failed.occurred_at) if last_failed else None,
+        "last_password_reset_at": _as_utc(last_reset.occurred_at) if last_reset else None,
+    }
+
+    security_events.emit(db, "PRIVILEGED_READ", result="allow", actor_user_id=current_user.id,
+                         actor_role="super_admin", organization_id=user.organization_id,
+                         target_type="user", target_id=f"user:{user.id}", action="read",
+                         reason_code="PLATFORM_USER_DETAIL", request=request)
+    return SuperAdminUserDetailResponse(account=account, organization=organization, security=security)
 
 
 @router.put("/users/{user_id}/status", response_model=SuccessResponse)

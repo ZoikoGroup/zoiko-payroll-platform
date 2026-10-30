@@ -16,8 +16,7 @@ import {
   validateJurisdictionTaxIds,
   primaryTaxValue,
 } from "../utils/jurisdictionTax";
-import LandingHeader from "../landing/LandingHeader";
-import Footer from "../landing/Footer";
+import AuthLayout from "../components/auth/AuthLayout";
 import MfaLoginStep from "../components/MfaLoginStep";
 import { COUNTRY_LIMIT_KEY, formatCountryLimit } from "../utils/planLimits";
 
@@ -395,16 +394,10 @@ export default function RegisterPage() {
   }
 
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", flexDirection: "column",
-      background: "linear-gradient(135deg, #eef6fb 0%, #ffffff 50%, #eef6fb 100%)",
-      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif"
-    }}>
-      <LandingHeader />
+    <AuthLayout wide>
       <div style={{
-        flex: 1, display: "flex", flexDirection: "column",
+        display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
-        padding: "40px 24px"
       }}>
         {stage === "plan" && (
           <PlanPickerStage
@@ -820,7 +813,6 @@ export default function RegisterPage() {
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
-      <Footer />
-    </div>
+    </AuthLayout>
   );
 }

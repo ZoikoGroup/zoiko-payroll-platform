@@ -170,6 +170,29 @@ def test_authority_tables_are_empty():
             "smr_grades_pension", "kyokai_health_rates", "minimum_wage"} <= set(content.JP_EMPTY_TABLES)
 
 
+def test_authority_tables_point_at_their_taxslab_rule_types():
+    assert set(content.JP_TABLE_RULE_TYPES) == {
+        "JP_WHT_MONTHLY", "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
+        "JP_HEALTH_RATE", "JP_SMR_GRADE",
+    }
+    assert all(len(rule_type) <= 30 for rule_type in content.JP_TABLE_RULE_TYPES)
+    assert content.JP_EMPTY_TABLES["wht_monthly_table"]["rule_type"] == "JP_WHT_MONTHLY"
+    assert set(content.JP_EMPTY_TABLES["wht_computer_method"]["rule_types"]) == {
+        "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
+    }
+    assert content.JP_EMPTY_TABLES["kyokai_health_rates"]["rule_type"] == "JP_HEALTH_RATE"
+    assert content.JP_EMPTY_TABLES["smr_grades_health"]["rule_type"] == "JP_SMR_GRADE"
+    assert content.JP_EMPTY_TABLES["smr_grades_pension"]["rule_type"] == "JP_SMR_GRADE"
+
+
+def test_computer_method_scalars_are_present_and_empty_until_g1():
+    for key in ("jp_wht_cmp_basic_deduction", "jp_wht_cmp_dependant_deduction"):
+        assert key in content.JP_PARAMETER_KEYS
+        assert key in content.JP_EMPTY_BY_DESIGN
+        row = _scalar(key)
+        assert row[4] is None and row[5] is None
+
+
 def test_prefectures_are_the_47_jis_codes():
     codes = [code for code, _ in content.JP_PREFECTURES]
     assert codes == [f"{i:02d}" for i in range(1, 48)]

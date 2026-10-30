@@ -23346,6 +23346,22 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/super-admin/users/{user_id}",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "users",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "PUT",
    "path": "/api/super-admin/users/{user_id}/reset-password",
    "data_class": "platform",

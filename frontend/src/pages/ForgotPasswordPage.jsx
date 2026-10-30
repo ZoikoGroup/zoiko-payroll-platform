@@ -2,8 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react";
 import { apiFetch } from "../api/client";
-import LandingHeader from "../landing/LandingHeader";
-import Footer from "../landing/Footer";
+import AuthLayout from "../components/auth/AuthLayout";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -42,15 +41,8 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      display: "flex",
-      flexDirection: "column",
-      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-      background: "#ffffff",
-    }}>
-      <LandingHeader />
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px" }}>
+    <AuthLayout>
+      <div style={{ display: "flex", justifyContent: "center" }}>
         <div style={{ width: "100%", maxWidth: "420px" }}>
           {!sent ? (
             <>
@@ -139,7 +131,6 @@ export default function ForgotPasswordPage() {
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
-      <Footer />
-    </div>
+    </AuthLayout>
   );
 }
