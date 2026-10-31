@@ -9,13 +9,12 @@ import AuthHero from "./AuthHero";
 // Register plan picker keeps its room. Always light: the public auth pages do
 // not follow the in-app dark theme.
 
-// Fill these with the published policy pages; until then they point at the
-// Zoiko One site, the only public URL the app already links to.
+// These point at the published policy pages on the public Zoiko Payroll site.
 export const AUTH_FOOTER_LINKS = [
-  { label: "Privacy", href: "https://zoikoone.com" },
-  { label: "Terms", href: "https://zoikoone.com" },
-  { label: "Accessibility", href: "https://zoikoone.com" },
-  { label: "Help", href: "https://zoikoone.com" },
+  { label: "Privacy", href: "https://zoikopayroll.com/legal/privacy-notice" },
+  { label: "Terms", href: "https://zoikopayroll.com/legal/service-terms" },
+  { label: "Accessibility", href: "https://zoikopayroll.com/legal/accessibility-statement" },
+  { label: "Help", href: "https://zoikopayroll.com/zoiko-payroll-help-center" },
 ];
 
 // `also` lists other routes that belong to the same tab (the emailed

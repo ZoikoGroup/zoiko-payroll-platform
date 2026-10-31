@@ -17,7 +17,8 @@
 
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Check, AlertCircle, Zap, ArrowLeft, ShieldX } from "lucide-react";
+import { Loader2, AlertCircle, ArrowLeft, ShieldX } from "lucide-react";
+import PlanCard from "../components/billing/PlanCard";
 import { listPublishedPlans, createCheckoutSession, getPlanChangeImpact } from "../service/billingService";
 import { PlanChangeCountryDialog } from "../components/billing/PlanChangeCountryNotice";
 import {
@@ -64,75 +65,6 @@ const gridStyle = {
   maxWidth: "960px",
 };
 
-const cardBase = {
-  background: "#FFFFFF",
-  borderRadius: "16px",
-  padding: "32px",
-  boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
-  display: "flex",
-  flexDirection: "column",
-  gap: "16px",
-  border: "2px solid transparent",
-  transition: "border-color 0.2s, box-shadow 0.2s",
-  position: "relative",
-};
-
-const cardHighlightedStyle = {
-  ...cardBase,
-  border: "2px solid #0EA5E9",
-  boxShadow: "0 8px 32px rgba(14,165,233,0.20)",
-};
-
-const planNameStyle = {
-  fontSize: "20px",
-  fontWeight: "700",
-  color: "#0F172A",
-};
-
-const breakdownStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "4px",
-  marginTop: "8px",
-  paddingTop: "8px",
-  borderTop: "1px solid #E2E8F0",
-  fontSize: "13px",
-  color: "#64748B",
-};
-
-const breakdownRowStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-};
-
-const breakdownComponentStyle = {
-  textTransform: "capitalize",
-};
-
-const breakdownAmountStyle = {
-  fontWeight: "600",
-  color: "#0EA5E9",
-};
-
-const featureListStyle = {
-  listStyle: "none",
-  padding: 0,
-  margin: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: "8px",
-  flexGrow: 1,
-};
-
-const featureItemStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  fontSize: "14px",
-  color: "#374151",
-};
-
 const buttonStyle = {
   display: "flex",
   alignItems: "center",
@@ -156,20 +88,6 @@ const disabledButtonStyle = {
   background: "#E2E8F0",
   color: "#94A3B8",
   cursor: "not-allowed",
-};
-
-const badgeStyle = {
-  position: "absolute",
-  top: "-12px",
-  left: "50%",
-  transform: "translateX(-50%)",
-  background: "linear-gradient(135deg, #0EA5E9, #0369A1)",
-  color: "#FFFFFF",
-  fontSize: "12px",
-  fontWeight: "700",
-  padding: "4px 14px",
-  borderRadius: "20px",
-  whiteSpace: "nowrap",
 };
 
 const errorBoxStyle = {
@@ -209,12 +127,12 @@ export default function PlanSelectionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [checkingOut, setCheckingOut] = useState(null); // plan_code being checked out
+  const [selectedPlanCode, setSelectedPlanCode] = useState(null);
   // { planCode, planName, impact } while the country-impact dialog is open.
   const [pendingChange, setPendingChange] = useState(null);
   const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
     listPublishedPlans()
       .then(setPlans)
       .catch((err) => setError(err.message || "Failed to load plans."))
@@ -271,6 +189,12 @@ export default function PlanSelectionPage() {
     await startCheckout(plan.code, planName, false);
   }
 
+  const selectedPlan = selectedPlanCode ? plans.find((p) => p.code === selectedPlanCode) : null;
+
+  function handleContinue() {
+    if (selectedPlan) handleChoosePlan(selectedPlan);
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
@@ -318,101 +242,73 @@ export default function PlanSelectionPage() {
           No plans are available at the moment. Please contact support.
         </p>
       ) : (
-        <div style={gridStyle}>
-          {plans.map((plan) => {
-            const isHighlighted = HIGHLIGHTED_PLANS.includes(plan.code);
-            const isLoadingThis = checkingOut === plan.code;
-            const anyLoading = checkingOut !== null;
+        <>
+          <div style={gridStyle}>
+            {plans.map((plan) => {
+              const isHighlighted = HIGHLIGHTED_PLANS.includes(plan.code);
 
-            // Extract feature names from entitlement_flags. Backend shape is a
-            // dict {feature_key: limit_value} — normalize to entries so the
-            // rendering below never assumes an array.
-            const flags = plan.entitlement_flags || {};
-            const features = (Array.isArray(flags)
-              ? flags
-              : Object.entries(flags).map(([feature_key, limit_value]) => ({ feature_key, limit_value }))
-            )
-              .filter((f) => f.limit_value !== 0)
-              .map((f) => formatPlanFeature(f.feature_key, f.limit_value));
+              // Extract feature names from entitlement_flags. Backend shape is a
+              // dict {feature_key: limit_value} — normalize to entries so the
+              // rendering below never assumes an array.
+              const flags = plan.entitlement_flags || {};
+              const features = (Array.isArray(flags)
+                ? flags
+                : Object.entries(flags).map(([feature_key, limit_value]) => ({ feature_key, limit_value }))
+              )
+                .filter((f) => f.limit_value !== 0)
+                .map((f) => formatPlanFeature(f.feature_key, f.limit_value));
 
-            return (
-              <div
-                key={plan.plan_id}
-                style={isHighlighted ? cardHighlightedStyle : cardBase}
-              >
-                {isHighlighted && (
-                  <div style={badgeStyle}>
-                    <Zap size={12} style={{ display: "inline", marginRight: 4 }} />
-                    Most Popular
-                  </div>
-                )}
+              const planCode = plan.code;
 
-                <div>
-                  <div style={planNameStyle}>{plan.name || plan.code}</div>
-                  <div style={{ fontSize: "24px", fontWeight: "800", color: "#0EA5E9", marginTop: 4 }}>
-                    {getPriceLabel(plan)}
-                  </div>
-
-                  {/* Step 7 — catalog-driven pricing breakdown. Only shows for
-                      plans with more than one priced component, so flat
-                      single-component plans keep the current one-line card. */}
-                  {plan.price_components && plan.price_components.length > 1 && (
-                    <div style={breakdownStyle}>
-                      {plan.price_components.map((comp) => (
-                        <div key={comp.component_type} style={breakdownRowStyle}>
-                          <span style={breakdownComponentStyle}>
-                            {String(comp.component_type)
-                              .replace(/_/g, " ")
-                              .replace(/\b\w/g, (c) => c.toUpperCase())}
-                          </span>
-                          <span style={breakdownAmountStyle}>
-                            ${Number(comp.unit_amount).toFixed(2)}/mo
-                          </span>
-                        </div>
-                      ))}
+              return (
+                <PlanCard
+                  key={plan.plan_id}
+                  name={plan.name || plan.code}
+                  priceLabel={getPriceLabel(plan)}
+                  priceComponents={plan.price_components}
+                  features={features}
+                  recommended={isHighlighted}
+                  badgeLabel="Most Popular"
+                  selected={selectedPlanCode === planCode}
+                  disabled={checkingOut !== null}
+                  onSelect={canManage ? () => { setSelectedPlanCode(planCode); setError(null); } : undefined}
+                  footer={!canManage ? (
+                    <div style={{ ...buttonStyle, background: "#F1F5F9", color: "#64748B", cursor: "not-allowed", opacity: 1 }}>
+                      <ShieldX size={16} />
+                      Org Admin can subscribe
                     </div>
-                  )}
-                </div>
+                  ) : null}
+                />
+              );
+            })}
+          </div>
 
-                <ul style={featureListStyle}>
-                  {features.slice(0, 8).map((feat) => (
-                    <li key={feat} style={featureItemStyle}>
-                      <Check size={15} style={{ color: "#10B981", flexShrink: 0 }} />
-                      {feat}
-                    </li>
-                  ))}
-                  {features.length === 0 && (
-                    <li style={{ ...featureItemStyle, color: "#94A3B8" }}>
-                      Contact us for details
-                    </li>
-                  )}
-                </ul>
-
-                {canManage ? (
-                  <button
-                    style={anyLoading ? disabledButtonStyle : buttonStyle}
-                    disabled={anyLoading}
-                    onClick={() => handleChoosePlan(plan)}
-                  >
-                    {isLoadingThis ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin" />
-                        Redirecting to Stripe…
-                      </>
-                    ) : (
-                      `Choose ${plan.name || plan.code}`
-                    )}
-                  </button>
+          {canManage && (
+            <div style={{ width: "100%", maxWidth: "960px", marginTop: "28px", display: "flex", justifyContent: "center" }}>
+              <button
+                style={{
+                  ...(selectedPlan && checkingOut === null ? buttonStyle : disabledButtonStyle),
+                  width: "auto",
+                  minWidth: "260px",
+                  marginTop: 0,
+                }}
+                disabled={!selectedPlan || checkingOut !== null}
+                onClick={handleContinue}
+              >
+                {checkingOut !== null ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Redirecting to Stripe…
+                  </>
+                ) : selectedPlan ? (
+                  `Continue with ${selectedPlan.name || selectedPlan.code}`
                 ) : (
-                  <div style={{ ...buttonStyle, background: "#F1F5F9", color: "#64748B", cursor: "not-allowed", opacity: 1 }}>
-                    <ShieldX size={16} />
-                    Org Admin can subscribe
-                  </div>
+                  "Select a plan to continue"
                 )}
-              </div>
-            );
-          })}
-        </div>
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {pendingChange && (

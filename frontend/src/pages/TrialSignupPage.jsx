@@ -249,7 +249,7 @@ export default function TrialSignupPage() {
                 />
                 <label htmlFor="trial-termsAccepted" style={{ fontSize: "13px", color: "#374151", cursor: "pointer", lineHeight: "1.4" }}>
                   I accept the{" "}
-                  <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
+                  <a href="https://zoikopayroll.com/legal/service-terms" target="_blank" rel="noopener noreferrer" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
                     Terms & Conditions
                   </a>
                 </label>

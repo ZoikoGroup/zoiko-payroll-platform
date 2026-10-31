@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Building, Building2, Check, ChevronDown, ClipboardCheck, Clock, Eye, EyeOff, Factory,
-  FileText, Globe2, Info, Landmark, Loader2, Lock, Mail, MapPin, Settings, Sparkles, UserRound, X,
+  FileText, Globe2, Info, Landmark, Loader2, Lock, Mail, MapPin, Settings, UserRound,
 } from "lucide-react";
 import { apiFetch, setSession } from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -19,8 +19,9 @@ import {
   validateJurisdictionTaxIds,
   primaryTaxValue,
 } from "../utils/jurisdictionTax";
-import AuthLayout, { AUTH_FOOTER_LINKS } from "../components/auth/AuthLayout";
+import { AUTH_FOOTER_LINKS } from "../components/auth/AuthLayout";
 import SignupLayout from "../components/auth/SignupLayout";
+import PlanCard, { planCardStyle } from "../components/billing/PlanCard";
 import StepIndicator from "../components/auth/StepIndicator";
 import PhoneInput, { dialCodeForCountry } from "../components/auth/PhoneInput";
 import { AuthAlert, AuthPrimaryButton, authInputClass } from "../components/auth/authUi";
@@ -91,72 +92,6 @@ function buildPlanCard(apiPlan) {
   };
 }
 
-export const planCardStyle = (recommended) => ({
-  background: "#FFFFFF",
-  borderRadius: "16px",
-  padding: "28px 24px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "14px",
-  border: recommended ? "2px solid #087CC1" : "1.5px solid #E5E7EB",
-  boxShadow: recommended ? "0 8px 32px rgba(8,124,193,0.18)" : "0 2px 12px rgba(0,0,0,0.05)",
-  position: "relative",
-});
-
-export const badgeStyle = {
-  position: "absolute", top: "-12px", left: "50%", transform: "translateX(-50%)",
-  background: "linear-gradient(135deg, #087CC1, #1596D1)", color: "#FFFFFF",
-  fontSize: "11px", fontWeight: "700", padding: "4px 14px", borderRadius: "20px",
-  whiteSpace: "nowrap", letterSpacing: "0.03em",
-};
-
-export function PlanCapabilityRow({ label, on }) {
-  return (
-    <li style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: on ? "#374151" : "#B0B7C3" }}>
-      {on ? (
-        <Check size={15} style={{ color: "#10B981", flexShrink: 0 }} />
-      ) : (
-        <X size={15} style={{ color: "#D1D5DB", flexShrink: 0 }} />
-      )}
-      <span style={on ? {} : { textDecoration: "line-through" }}>{label}</span>
-    </li>
-  );
-}
-
-function ChoosablePlanCard({ plan, onChoose }) {
-  return (
-    <div style={planCardStyle(plan.recommended)}>
-      {plan.recommended && <div style={badgeStyle}><Sparkles size={11} style={{ display: "inline", marginRight: 4, marginBottom: -1 }} />Recommended plan</div>}
-      <div>
-        <div style={{ fontSize: "18px", fontWeight: "700", color: "#111827" }}>{plan.name}</div>
-        <div style={{ fontSize: "22px", fontWeight: "800", color: "#087CC1", marginTop: 2 }}>{plan.priceLabel}</div>
-        <p style={{ fontSize: "12px", color: "#6B7280", marginTop: 6, minHeight: "32px" }}>{plan.tagline}</p>
-      </div>
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
-        {plan.capabilities.map(([label, on]) => (
-          <PlanCapabilityRow key={label} label={label} on={on} />
-        ))}
-      </ul>
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "4px", borderTop: "1px solid #F3F4F6", paddingTop: "10px" }}>
-        {plan.scale.map((s) => (
-          <li key={s} style={{ fontSize: "12px", color: "#4B5563", fontWeight: 500 }}>{s}</li>
-        ))}
-      </ul>
-      <button
-        type="button"
-        onClick={() => onChoose(plan.code)}
-        style={{
-          marginTop: "auto", width: "100%", padding: "11px", borderRadius: "10px", border: "none",
-          fontSize: "14px", fontWeight: "700", color: "white", cursor: "pointer",
-          background: plan.recommended ? "linear-gradient(135deg, #087CC1, #1596D1)" : "#111827",
-        }}
-      >
-        Choose {plan.name}
-      </button>
-    </div>
-  );
-}
-
 function ContactSalesPlanCard() {
   return (
     <div style={planCardStyle(false)}>
@@ -182,36 +117,101 @@ function ContactSalesPlanCard() {
   );
 }
 
-function PlanPickerStage({ plans, plansLoading, plansError, onChoosePlan }) {
+function PlanPickerStage({
+  plans,
+  plansLoading,
+  plansError,
+  selectedCode,
+  onSelectPlan,
+  onContinue,
+  onBack,
+  submitting,
+  localError,
+}) {
+  const selectedPlan = selectedCode ? plans[selectedCode] : null;
   return (
-    <div style={{ width: "100%", maxWidth: "980px" }}>
-      <div style={{ textAlign: "center", marginBottom: "32px" }}>
-        <h1 style={{ fontSize: "26px", fontWeight: "800", color: "#111827", margin: "0 0 8px 0", letterSpacing: "-0.5px" }}>
+    <div style={{ width: "100%" }}>
+      <div style={{ marginBottom: "24px" }}>
+        <h1 style={{ fontSize: "22px", fontWeight: "800", color: "#111827", margin: "0 0 6px 0", letterSpacing: "-0.5px" }}>
           Choose your plan
         </h1>
         <p style={{ fontSize: "14px", color: "#6B7280", margin: 0 }}>
-          Pick a plan to get started. You can change plans later from your dashboard.
+          Pick a plan to finish setting up your account. You can change plans later from your dashboard.
         </p>
       </div>
 
       {plansError && (
-        <p style={{ textAlign: "center", fontSize: "13px", color: "#DC2626", marginBottom: "16px" }}>{plansError}</p>
+        <p style={{ fontSize: "13px", color: "#DC2626", marginBottom: "16px" }}>{plansError}</p>
       )}
 
       {plansLoading ? (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
-          <Loader2 size={28} style={{ animation: "spin 1s linear infinite", color: "#087CC1" }} />
+          <Loader2 size={28} className="animate-spin" style={{ color: "#087CC1" }} />
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px" }}>
-          {plans.CORE && <ChoosablePlanCard plan={plans.CORE} onChoose={onChoosePlan} />}
-          {plans.PROFESSIONAL && <ChoosablePlanCard plan={plans.PROFESSIONAL} onChoose={onChoosePlan} />}
-          {plans.BUSINESS && <ChoosablePlanCard plan={plans.BUSINESS} onChoose={onChoosePlan} />}
+          {plans.CORE && (
+            <PlanCard
+              name={plans.CORE.name}
+              priceLabel={plans.CORE.priceLabel}
+              tagline={plans.CORE.tagline}
+              recommended={plans.CORE.recommended}
+              capabilities={plans.CORE.capabilities}
+              scale={plans.CORE.scale}
+              selected={selectedCode === "CORE"}
+              onSelect={() => onSelectPlan("CORE")}
+            />
+          )}
+          {plans.PROFESSIONAL && (
+            <PlanCard
+              name={plans.PROFESSIONAL.name}
+              priceLabel={plans.PROFESSIONAL.priceLabel}
+              tagline={plans.PROFESSIONAL.tagline}
+              recommended={plans.PROFESSIONAL.recommended}
+              capabilities={plans.PROFESSIONAL.capabilities}
+              scale={plans.PROFESSIONAL.scale}
+              selected={selectedCode === "PROFESSIONAL"}
+              onSelect={() => onSelectPlan("PROFESSIONAL")}
+            />
+          )}
+          {plans.BUSINESS && (
+            <PlanCard
+              name={plans.BUSINESS.name}
+              priceLabel={plans.BUSINESS.priceLabel}
+              tagline={plans.BUSINESS.tagline}
+              recommended={plans.BUSINESS.recommended}
+              capabilities={plans.BUSINESS.capabilities}
+              scale={plans.BUSINESS.scale}
+              selected={selectedCode === "BUSINESS"}
+              onSelect={() => onSelectPlan("BUSINESS")}
+            />
+          )}
           <ContactSalesPlanCard />
         </div>
       )}
 
-      <p style={{ textAlign: "center", fontSize: "13px", color: "#6B7280", marginTop: "28px" }}>
+      {localError && <AuthAlert>{localError}</AuthAlert>}
+
+      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-lg border border-slate-300 px-5 py-3 text-[15px] font-semibold text-slate-700 hover:bg-slate-50 sm:w-44"
+        >
+          Back to review
+        </button>
+        <AuthPrimaryButton
+          type="button"
+          disabled={!selectedPlan}
+          busy={submitting}
+          busyLabel="Creating account…"
+          onClick={onContinue}
+        >
+          {selectedPlan ? `Continue with ${selectedPlan.name}` : "Select a plan to continue"}
+        </AuthPrimaryButton>
+      </div>
+
+      <p style={{ textAlign: "center", fontSize: "13px", color: "#6B7280", marginTop: "20px" }}>
         Not ready to commit?{" "}
         <Link to="/trial-register" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
           Try Zoiko Payroll free for 30 days
@@ -230,7 +230,7 @@ const INDUSTRIES = [
   "Retail & E-commerce", "Professional Services", "Education", "Construction", "Hospitality",
   "Transport & Logistics", "Energy & Utilities", "Media & Entertainment", "Non-profit", "Other",
 ];
-const STEPS = ["Organization", "Administrator", "Review & confirm"];
+const STEPS = ["Organization", "Administrator", "Review & confirm", "Choose plan"];
 
 // Mirrors the API's registration rule (backend auth/schemas.py).
 const PASSWORD_CHECKS = [
@@ -308,7 +308,8 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const [stage, setStage] = useState("plan"); // "plan" | "details"
+  // Registration comes first; choosing a plan is the final wizard step.
+  const [stage, setStage] = useState("details"); // "details" | "plan"
   const [selectedPlanCode, setSelectedPlanCode] = useState(null);
 
   const [plans, setPlans] = useState({});
@@ -384,7 +385,19 @@ export default function RegisterPage() {
 
   function handleChoosePlan(code) {
     setSelectedPlanCode(code);
+  }
+
+  function handleContinueToPlan() {
+    setLocalError(null);
+    setReviewing(false);
+    setStage("plan");
+    window.scrollTo?.({ top: 0, behavior: "smooth" });
+  }
+
+  function handleBackToReview() {
+    setLocalError(null);
     setStage("details");
+    setReviewing(true);
   }
 
   const countryStates = getStatesForCountryName(form.country);
@@ -396,7 +409,7 @@ export default function RegisterPage() {
   const phone = form.phoneNumber.trim() ? `${dialCodeForCountry(form.phoneCountry)} ${form.phoneNumber.trim()}` : "";
   const orgComplete = Boolean(form.orgName.trim() && form.companyType && form.industry && form.country
     && form.address.trim());
-  const currentStep = reviewing ? 3 : orgComplete ? 2 : 1;
+  const currentStep = stage === "plan" ? 4 : reviewing ? 3 : orgComplete ? 2 : 1;
 
   function handleContinue(e) {
     e.preventDefault();
@@ -416,6 +429,11 @@ export default function RegisterPage() {
 
   async function handleCreate() {
     setLocalError(null);
+    if (!selectedPlanCode) {
+      setLocalError("Please choose a plan before creating your account.");
+      setStage("plan");
+      return;
+    }
     setSubmitting(true);
     try {
       const hasTaxIdentifiers = jurisdictionTaxFields.length > 0;
@@ -485,44 +503,28 @@ export default function RegisterPage() {
     );
   }
 
-  if (stage === "plan") {
-    return (
-      <AuthLayout wide>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-          <PlanPickerStage
-            plans={plans}
-            plansLoading={plansLoading}
-            plansError={plansError}
-            onChoosePlan={handleChoosePlan}
-          />
-        </div>
-        <style>{`
-          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        `}</style>
-      </AuthLayout>
-    );
-  }
-
   const termsLink = AUTH_FOOTER_LINKS.find((l) => l.label === "Terms")?.href;
   const privacyLink = AUTH_FOOTER_LINKS.find((l) => l.label === "Privacy")?.href;
 
   return (
     <SignupLayout>
-      <div className="mb-4 flex items-start gap-4">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-          <Building2 size={26} aria-hidden="true" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="text-[26px] font-extrabold leading-tight tracking-[-0.02em] text-slate-900">
-            Create your Zoiko Payroll account
-          </h2>
-          <p className="mt-1 text-[15px] text-slate-600">
-            Set up your organization to start running global payroll in minutes.
-          </p>
+      {stage !== "plan" && (
+        <div className="mb-4 flex items-start gap-4">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+            <Building2 size={26} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-[26px] font-extrabold leading-tight tracking-[-0.02em] text-slate-900">
+              Create your Zoiko Payroll account
+            </h2>
+            <p className="mt-1 text-[15px] text-slate-600">
+              Set up your organization to start running global payroll in minutes.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
-      {selectedPlan && (
+      {selectedPlan && stage !== "plan" && (
         <button
           type="button"
           onClick={() => { setReviewing(false); setStage("plan"); }}
@@ -533,15 +535,27 @@ export default function RegisterPage() {
         </button>
       )}
 
-      <div className="mb-5 sm:pl-[4.5rem]">
+      <div className={stage === "plan" ? "mb-5" : "mb-5 sm:pl-[4.5rem]"}>
         <StepIndicator steps={STEPS} current={currentStep} />
       </div>
 
-      {localError && <AuthAlert>{localError}</AuthAlert>}
+      {stage !== "plan" && localError && <AuthAlert>{localError}</AuthAlert>}
 
-      {reviewing ? (
+      {stage === "plan" ? (
+        <PlanPickerStage
+          plans={plans}
+          plansLoading={plansLoading}
+          plansError={plansError}
+          selectedCode={selectedPlanCode}
+          onSelectPlan={handleChoosePlan}
+          onContinue={handleCreate}
+          onBack={handleBackToReview}
+          submitting={submitting}
+          localError={localError}
+        />
+      ) : reviewing ? (
         <div className="space-y-4">
-          <Section icon={ClipboardCheck} title="Review & confirm" subtitle="Check your details before we create the account.">
+          <Section icon={ClipboardCheck} title="Review & confirm" subtitle="Check your details, then choose a plan to create the account.">
             <dl className="divide-y divide-slate-100">
               <ReviewRow label="Organization" value={form.orgName} />
               <ReviewRow label="Company type" value={form.companyType} />
@@ -557,7 +571,7 @@ export default function RegisterPage() {
               <ReviewRow label="Password" value="••••••••••••" />
               <ReviewRow label="Timezone" value={form.timezone} />
               <ReviewRow label="Product" value="Zoiko Payroll" />
-              <ReviewRow label="Plan" value={selectedPlan ? `${selectedPlan.name} (${selectedPlan.priceLabel})` : ""} />
+              <ReviewRow label="Plan" value={selectedPlan ? `${selectedPlan.name} (${selectedPlan.priceLabel})` : "Choose in the next step"} />
             </dl>
           </Section>
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
@@ -568,8 +582,8 @@ export default function RegisterPage() {
             >
               Edit details
             </button>
-            <AuthPrimaryButton type="button" busy={submitting} busyLabel="Creating account…" onClick={handleCreate}>
-              Create account &amp; continue <ArrowRight size={18} aria-hidden="true" />
+            <AuthPrimaryButton type="button" onClick={handleContinueToPlan}>
+              Continue to choose plan <ArrowRight size={18} aria-hidden="true" />
             </AuthPrimaryButton>
           </div>
         </div>
