@@ -596,7 +596,7 @@ export default function RegisterPage() {
                 </IconSelect>
               </Field>
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div className="mt-4 grid gap-4 sm:grid-cols-[1.25fr_1.25fr_1fr]">
               <Field id="country" label="Country" required>
                 <IconSelect icon={Globe2} id="country" required value={form.country}
                   onChange={(e) => handleCountryChange(e.target.value)}>

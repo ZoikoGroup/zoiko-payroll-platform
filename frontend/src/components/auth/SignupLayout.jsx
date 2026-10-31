@@ -8,7 +8,7 @@ import SignupHero from "./SignupHero";
 export default function SignupLayout({ children }) {
   return (
     <div className="min-h-screen bg-[#eef3f9] font-[Inter,-apple-system,BlinkMacSystemFont,sans-serif] text-slate-900">
-      <header className="mx-auto flex max-w-[1360px] items-center justify-between px-4 py-4 sm:px-6">
+      <header className="mx-auto flex max-w-[1440px] items-center justify-between px-4 py-4 sm:px-6">
         <Link to="/" aria-label="Zoiko Payroll home">
           <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-11 w-auto" />
         </Link>
@@ -22,7 +22,7 @@ export default function SignupLayout({ children }) {
           </Link>
         </div>
       </header>
-      <div className="mx-auto flex max-w-[1360px] gap-5 px-4 pb-8 sm:px-6">
+      <div className="mx-auto flex max-w-[1440px] gap-5 px-4 pb-8 sm:px-6">
         <SignupHero />
         <main className="w-full min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_60px_-28px_rgba(15,23,42,0.35)] sm:p-7 lg:w-[53%]">
           {children}
