@@ -133,6 +133,19 @@ const modal = read("components/StepUpAuthModal.jsx");
 const settings = read("pages/SecuritySettingsPage.jsx");
 check("login handles the MFA challenge and enrolment", () =>
   login.includes("data.mfa_required || data.mfa_enrollment_required") && login.includes("<MfaLoginStep"));
+// Everything in a frontend build is public: the login form must never be
+// prefilled with a password, and the developer email prefill must stay behind
+// import.meta.env.DEV so production builds drop it (vite.config.js also fails
+// any build whose output contains either value).
+check("login never prefills a password; dev-only email prefill", () =>
+  !login.includes("VITE_DEFAULT_PASSWORD") &&
+  login.includes('const [password, setPassword] = useState("")') &&
+  login.includes("import.meta.env.DEV ? (import.meta.env.VITE_DEFAULT_EMAIL"));
+check("the production build refuses bundled login prefill values", () => {
+  const viteConfig = readFileSync(join(SRC, "..", "vite.config.js"), "utf8");
+  return viteConfig.includes("noDefaultCredentialsInBundle(env)") &&
+    viteConfig.includes('"VITE_DEFAULT_EMAIL", "VITE_DEFAULT_PASSWORD"');
+});
 check("MFA setup shows a QR code and a manual key; recovery codes once", () =>
   mfaStep.includes("QRCode.toDataURL") && mfaStep.includes("Key:") && mfaStep.includes("will not be shown again"));
 check("step-up modal registers itself and retries via the bridge", () =>

@@ -308,6 +308,7 @@ def get_platform_user_detail(
             "city": org.city, "state": org.state, "country": org.country, "email": org.email,
             "phone": org.phone, "tax_no": org.tax_no, "registration_number": org.registration_number,
             "tax_identifiers": identifiers, "currency": org.currency, "data_region": org.data_region,
+            "timezone": org.timezone,
             "workspace_type": org.workspace_type, "billing_onboarding_status": org.billing_onboarding_status,
             "billing_classification": org.billing_classification, "is_active": org.is_active,
             "terms_accepted_at": _as_utc(org.terms_accepted_at), "created_at": _as_utc(org.created_at),

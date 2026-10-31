@@ -1,42 +1,46 @@
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 import AuthHero from "./AuthHero";
 
-// Shared sign-in shell for /login, /register and /forgot-password: one card
+// Shared sign-in shell for /login, /register, /forgot-password and
+// /reset-password: one card
 // with the brand hero on the left and the tabbed form panel on the right.
 // The hero hides below the lg breakpoint, and `wide` drops it entirely so the
 // Register plan picker keeps its room. Always light: the public auth pages do
 // not follow the in-app dark theme.
 
-// Fill these with the published policy pages; until then they point at the
-// Zoiko One site, the only public URL the app already links to.
+// These point at the published policy pages on the public Zoiko Payroll site.
 export const AUTH_FOOTER_LINKS = [
-  { label: "Privacy", href: "https://zoikoone.com" },
-  { label: "Terms", href: "https://zoikoone.com" },
-  { label: "Accessibility", href: "https://zoikoone.com" },
-  { label: "Help", href: "https://zoikoone.com" },
+  { label: "Privacy", href: "https://zoikopayroll.com/legal/privacy-notice" },
+  { label: "Terms", href: "https://zoikopayroll.com/legal/service-terms" },
+  { label: "Accessibility", href: "https://zoikopayroll.com/legal/accessibility-statement" },
+  { label: "Help", href: "https://zoikopayroll.com/zoiko-payroll-help-center" },
 ];
 
+// `also` lists other routes that belong to the same tab (the emailed
+// set-new-password link lives under Reset Password).
 const TABS = [
   { to: "/login", label: "Login" },
   { to: "/register", label: "Register" },
-  { to: "/forgot-password", label: "Reset Password" },
+  { to: "/forgot-password", label: "Reset Password", also: ["/reset-password"] },
 ];
 
 function Tabs() {
+  const { pathname } = useLocation();
   return (
     <nav className="grid grid-cols-3 border-b border-slate-200" aria-label="Account">
       {TABS.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}
-          className={({ isActive }) =>
-            `relative px-2 py-3.5 text-center text-[15px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600 ${
+          className={({ isActive: exact }) => {
+            const isActive = exact || (tab.also || []).includes(pathname);
+            return `relative px-2 py-3.5 text-center text-[15px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600 ${
               isActive
                 ? "text-slate-900 after:absolute after:inset-x-4 after:bottom-[-1px] after:h-[3px] after:rounded-full after:bg-blue-600"
                 : "text-slate-600 hover:text-slate-900"
-            }`
-          }
+            }`;
+          }}
         >
           {tab.label}
         </NavLink>

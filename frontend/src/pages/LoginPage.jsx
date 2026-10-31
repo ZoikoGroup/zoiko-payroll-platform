@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { apiFetch, setSession } from "../api/client";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "../config/roles";
 import { useAuth } from "../context/AuthContext";
@@ -8,10 +8,17 @@ import PublicAssistWidget from "../modules/assist/PublicAssistWidget";
 import MfaLoginStep from "../components/MfaLoginStep";
 import AuthLayout from "../components/auth/AuthLayout";
 import SocialSignInButtons from "../components/auth/SocialSignInButtons";
+import { AUTH_LABEL, AuthAlert, AuthPrimaryButton, authInputClass } from "../components/auth/authUi";
 
 // "Remember this device" keeps only the work email on this browser — never a
 // password or token, and it never skips the second factor (ZP-PRIV B08).
 const REMEMBERED_EMAIL_KEY = "zoiko_payroll_remembered_email";
+
+// A developer may prefill the email on the local dev server only. In a
+// production build import.meta.env.DEV is false, so the value is dropped and
+// never reaches the public bundle (vite.config.js also fails any build that
+// would contain it). A password is never prefilled, in any mode.
+const DEV_DEFAULT_EMAIL = import.meta.env.DEV ? (import.meta.env.VITE_DEFAULT_EMAIL || "") : "";
 
 function readRememberedEmail() {
   try {
@@ -30,16 +37,13 @@ function storeRememberedEmail(email, remember) {
   }
 }
 
-const INPUT =
-  "w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-11 pr-4 text-[15px] text-slate-900 placeholder:text-slate-400 outline-none transition-colors focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15";
-
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
 
-  const [email, setEmail] = useState(import.meta.env.VITE_DEFAULT_EMAIL || readRememberedEmail());
-  const [password, setPassword] = useState(import.meta.env.VITE_DEFAULT_PASSWORD || "");
+  const [email, setEmail] = useState(DEV_DEFAULT_EMAIL || readRememberedEmail());
+  const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -112,21 +116,13 @@ export default function LoginPage() {
             </div>
 
             {location.state?.sessionExpired && !localError && (
-              <div role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>Your session has expired. Sign in again to continue where you left off.</span>
-              </div>
+              <AuthAlert tone="warning">Your session has expired. Sign in again to continue where you left off.</AuthAlert>
             )}
 
-            {localError && (
-              <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{localError}</span>
-              </div>
-            )}
+            {localError && <AuthAlert>{localError}</AuthAlert>}
 
             <form onSubmit={handleSubmit}>
-              <label htmlFor="email" className="mb-2 block text-[14px] font-semibold text-slate-800">
+              <label htmlFor="email" className={AUTH_LABEL}>
                 Work email address
               </label>
               <div className="relative mb-4">
@@ -134,11 +130,11 @@ export default function LoginPage() {
                 <input
                   id="email" type="email" required autoComplete="email"
                   value={email} onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@company.com" className={INPUT}
+                  placeholder="name@company.com" className={authInputClass({ withIcon: true })}
                 />
               </div>
 
-              <label htmlFor="password" className="mb-2 block text-[14px] font-semibold text-slate-800">
+              <label htmlFor="password" className={AUTH_LABEL}>
                 Password
               </label>
               <div className="relative mb-3">
@@ -146,7 +142,7 @@ export default function LoginPage() {
                 <input
                   id="password" type={showPassword ? "text" : "password"} required autoComplete="current-password"
                   value={password} onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password" className={`${INPUT} pr-12`}
+                  placeholder="Enter your password" className={authInputClass({ withIcon: true, withTrailing: true })}
                 />
                 <button
                   type="button"
@@ -171,13 +167,9 @@ export default function LoginPage() {
                 </Link>
               </div>
 
-              <button
-                type="submit" disabled={submitting}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#1260e6] py-3 text-[16px] font-semibold text-white shadow-[0_8px_20px_-8px_rgba(18,96,230,0.7)] transition-colors hover:bg-[#0e52c7] disabled:cursor-not-allowed disabled:bg-blue-300"
-              >
-                {submitting && <Loader2 size={18} className="animate-spin" />}
-                {submitting ? "Signing in…" : "Log In"}
-              </button>
+              <AuthPrimaryButton type="submit" busy={submitting} busyLabel="Signing in…">
+                Log In
+              </AuthPrimaryButton>
             </form>
 
             <p className="mt-5 text-center text-[15px] text-slate-700">
