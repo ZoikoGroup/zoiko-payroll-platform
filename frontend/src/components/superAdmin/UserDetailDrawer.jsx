@@ -141,6 +141,7 @@ export default function UserDetailDrawer({ userId, onClose }) {
               <Row label="Billing status" value={org.billing_onboarding_status} />
               <Row label="Currency" value={org.currency} />
               <Row label="Data region" value={org.data_region} />
+              <Row label="Timezone" value={org.timezone} />
               <Row label="Organization active" value={yesNo(org.is_active)} />
               <Row label="Terms accepted" value={org.terms_accepted_at} time />
               <Row label="Organization created" value={org.created_at} time />

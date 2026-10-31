@@ -115,6 +115,7 @@ class SuperAdminUserOrganization(BaseModel):
     tax_identifiers: List[SuperAdminTaxIdentifier] = Field(default_factory=list)
     currency: Optional[str] = None
     data_region: Optional[str] = None
+    timezone: Optional[str] = None
     workspace_type: Optional[str] = None
     billing_onboarding_status: Optional[str] = None
     billing_classification: Optional[str] = None

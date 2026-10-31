@@ -56,6 +56,9 @@ class Organization(Base):
     # before; this column only exists for the cases where an org's actual
     # payroll currency doesn't match its jurisdiction's default.
     currency = Column(String(3), nullable=True)
+    # IANA zone chosen at registration (e.g. "Asia/Kolkata"); null for
+    # organisations created before it was stored.
+    timezone = Column(String(64), nullable=True)
 
     # Workspace flavor: "PRODUCTION" (regular tenant onboarded via
     # /auth/register) or "EVALUATION" (30-day free evaluation onboarded via

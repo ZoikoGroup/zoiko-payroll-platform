@@ -112,6 +112,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments"}
         jp_columns = {"payslip_items": {"jp_calculation_snapshot"},
                       "payroll_runs": {"jp_approval_fingerprint"}}
+        # 668472e4eb72 (2026-10-30): organizations.timezone, on top of Japan Phase 2.
+        tz_columns = {"organizations": {"timezone"}}
         mx_final_mile = {"payroll_mx_decisions", *MX_X4_TABLES}     # Mexico m20 (d3f8b2a6c1e9)
         # Country entitlement ledger (b4d6f8a0c2e3, joined at d4c8f1a7b2e9 / c2e7a4f9b1d8):
         # pending on top of every production revision below.
@@ -156,14 +158,18 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                                       "payroll_za_parallel_imports",
                                                       "payroll_za_parallel_differences"}
         assert columns == {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
-                           "payroll_za_employer_registrations": {"za_journal_accounts"}, **jp_columns}
+                           "payroll_za_employer_registrations": {"za_journal_accounts"}, **jp_columns,
+                           **tz_columns}
         tables, columns = pending_objects("d3f8b2a6c1e9")      # a database at Mexico m20
         assert tables == za_tables | country | jp_tables
         # Production since PR #140 (South Africa P9): Phase 10, the country
         # entitlement ledger and Japan Phase 2 are pending.
         tables, columns = pending_objects("3880223bfaa0")
         assert tables == {"payroll_za_parallel_imports", "payroll_za_parallel_differences"} | country | jp_tables
-        assert columns == jp_columns
+        assert columns == {**jp_columns, **tz_columns}
+        # A database already at Japan Phase 2 has only the registration timezone pending.
+        tables, columns = pending_objects("f686d5128f8a")
+        assert tables == set() and columns == tz_columns
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

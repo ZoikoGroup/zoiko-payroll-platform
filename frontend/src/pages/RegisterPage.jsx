@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Eye, EyeOff, AlertCircle, Check, X, Sparkles, Mail, ArrowLeft } from "lucide-react";
+import {
+  ArrowLeft, ArrowRight, Building, Building2, Check, ChevronDown, ClipboardCheck, Clock, Eye, EyeOff, Factory,
+  FileText, Globe2, Info, Landmark, Loader2, Lock, Mail, MapPin, Settings, Sparkles, UserRound, X,
+} from "lucide-react";
 import { apiFetch, setSession } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { listPublishedPlans } from "../service/billingService";
@@ -16,25 +19,13 @@ import {
   validateJurisdictionTaxIds,
   primaryTaxValue,
 } from "../utils/jurisdictionTax";
-import AuthLayout from "../components/auth/AuthLayout";
+import AuthLayout, { AUTH_FOOTER_LINKS } from "../components/auth/AuthLayout";
+import SignupLayout from "../components/auth/SignupLayout";
+import StepIndicator from "../components/auth/StepIndicator";
+import PhoneInput, { dialCodeForCountry } from "../components/auth/PhoneInput";
+import { AuthAlert, AuthPrimaryButton, authInputClass } from "../components/auth/authUi";
 import MfaLoginStep from "../components/MfaLoginStep";
 import { COUNTRY_LIMIT_KEY, formatCountryLimit } from "../utils/planLimits";
-
-const fieldStyle = {
-  width: "100%", padding: "11px 14px", borderRadius: "10px",
-  border: "1.5px solid #E5E7EB", fontSize: "14px", color: "#111827",
-  outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
-  background: "#F9FAFB",
-};
-
-const selectStyle = {
-  ...fieldStyle,
-  appearance: "auto",
-};
-
-const labelStyle = {
-  display: "block", fontSize: "13px", fontWeight: "600", color: "#374151", marginBottom: "6px",
-};
 
 // ── Plan catalog (Stage 1) ──────────────────────────────────────────────────
 //
@@ -230,6 +221,89 @@ function PlanPickerStage({ plans, plansLoading, plansError, onChoosePlan }) {
   );
 }
 
+const COMPANY_TYPES = [
+  "Private Limited", "Public Limited", "Limited Liability Company (LLC)", "Sole Proprietorship",
+  "Partnership", "Corporation", "Non-profit", "Government / Public sector", "Other",
+];
+const INDUSTRIES = [
+  "Technology", "Telecommunications", "Financial Services", "Healthcare", "Manufacturing",
+  "Retail & E-commerce", "Professional Services", "Education", "Construction", "Hospitality",
+  "Transport & Logistics", "Energy & Utilities", "Media & Entertainment", "Non-profit", "Other",
+];
+const STEPS = ["Organization", "Administrator", "Review & confirm"];
+
+// Mirrors the API's registration rule (backend auth/schemas.py).
+const PASSWORD_CHECKS = [
+  ["At least 12 characters", (p) => p.length >= 12],
+  ["A letter", (p) => /[A-Za-z]/.test(p)],
+  ["A number", (p) => /[0-9]/.test(p)],
+  ["A symbol", (p) => /[^A-Za-z0-9]/.test(p)],
+];
+const passwordOk = (p) => PASSWORD_CHECKS.every(([, test]) => test(p));
+
+const INPUT = authInputClass({ withIcon: true });
+const SELECT = `${authInputClass({ withIcon: true, withTrailing: true })} appearance-none disabled:cursor-not-allowed disabled:bg-slate-50`;
+
+function Section({ icon: Icon, title, subtitle, children }) {
+  return (
+    <section className="rounded-xl border border-slate-200 p-4 sm:p-5">
+      <div className="mb-4 flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <Icon size={20} aria-hidden="true" />
+        </span>
+        <div>
+          <h3 className="text-[17px] font-bold text-slate-900">{title}</h3>
+          <p className="text-[13px] text-slate-500">{subtitle}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Field({ id, label, required, info, hint, className = "", children }) {
+  return (
+    <div className={className}>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <label htmlFor={id} className="text-[13px] font-semibold text-slate-800">
+          {label}{required && <span className="text-red-600"> *</span>}
+        </label>
+        {info && <Info size={15} className="shrink-0 text-slate-500" aria-label={info} title={info} />}
+      </div>
+      {children}
+      {hint && <div className="mt-1.5 text-[12px] text-slate-500">{hint}</div>}
+    </div>
+  );
+}
+
+function IconInput({ icon: Icon, ...props }) {
+  return (
+    <div className="relative">
+      <Icon size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+      <input {...props} className={INPUT} />
+    </div>
+  );
+}
+
+function IconSelect({ icon: Icon, children, ...props }) {
+  return (
+    <div className="relative">
+      <Icon size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+      <select {...props} className={SELECT}>{children}</select>
+      <ChevronDown size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+    </div>
+  );
+}
+
+function ReviewRow({ label, value }) {
+  return (
+    <div className="grid grid-cols-[150px_1fr] gap-3 py-1.5 text-[14px]">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="break-words text-slate-900">{value || <span className="text-slate-400">—</span>}</dd>
+    </div>
+  );
+}
+
 export default function RegisterPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -261,22 +335,25 @@ export default function RegisterPage() {
 
   const [form, setForm] = useState({
     orgName: "",
-    adminName: "",
-    adminEmail: "",
-    password: "",
-    phone: "",
-    address: "",
-    city: "",
-    state: "",
-    country: "",
-    timezone: "",
-    industry: "",
     companyType: "",
+    industry: "",
+    country: "",
+    state: "",
+    city: "",
+    address: "",
     taxNo: "",
     taxIdentifiers: {},
+    firstName: "",
+    lastName: "",
+    adminEmail: "",
+    phoneCountry: "United States",
+    phoneNumber: "",
+    password: "",
+    timezone: "",
     termsAccepted: false,
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState(null);
   // ZP-PRIV B08: a new organization admin sets up MFA before the first session.
@@ -300,6 +377,8 @@ export default function RegisterPage() {
       state: "",
       timezone: getDefaultTimezoneForCountry(value),
       taxIdentifiers: {},
+      // Follow the organisation's country until the admin types a number.
+      phoneCountry: f.phoneNumber ? f.phoneCountry : (value || f.phoneCountry),
     }));
   }
 
@@ -313,17 +392,30 @@ export default function RegisterPage() {
   const jurisdictionSchema = getJurisdictionTaxSchema(form.country);
   const jurisdictionTaxFields = getJurisdictionTaxFields(form.country);
   const selectedPlan = selectedPlanCode ? plans[selectedPlanCode] : null;
+  const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
+  const phone = form.phoneNumber.trim() ? `${dialCodeForCountry(form.phoneCountry)} ${form.phoneNumber.trim()}` : "";
+  const orgComplete = Boolean(form.orgName.trim() && form.companyType && form.industry && form.country
+    && form.address.trim());
+  const currentStep = reviewing ? 3 : orgComplete ? 2 : 1;
 
-  async function handleSubmit(e) {
+  function handleContinue(e) {
     e.preventDefault();
     setLocalError(null);
-
     const taxValidationErrors = validateJurisdictionTaxIds(form.country, form.taxIdentifiers);
     if (taxValidationErrors.length) {
       setLocalError(taxValidationErrors[0].message);
       return;
     }
+    if (!passwordOk(form.password)) {
+      setLocalError("Password must be at least 12 characters and include a letter, a number and a symbol.");
+      return;
+    }
+    setReviewing(true);
+    window.scrollTo?.({ top: 0, behavior: "smooth" });
+  }
 
+  async function handleCreate() {
+    setLocalError(null);
     setSubmitting(true);
     try {
       const hasTaxIdentifiers = jurisdictionTaxFields.length > 0;
@@ -331,10 +423,10 @@ export default function RegisterPage() {
         method: "POST",
         body: {
           organization: form.orgName,
-          name: form.adminName,
+          name: fullName,
           email: form.adminEmail,
           password: form.password,
-          phone: form.phone,
+          phone,
           address: form.address,
           city: form.city,
           state: form.state,
@@ -380,8 +472,8 @@ export default function RegisterPage() {
 
   if (mfaStep) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white p-6">
-        <div className="w-full max-w-md">
+      <SignupLayout>
+        <div className="mx-auto w-full max-w-md py-4">
           <MfaLoginStep
             mode="enroll"
             mfaToken={mfaStep.mfaToken}
@@ -389,430 +481,270 @@ export default function RegisterPage() {
             onCancel={() => navigate("/login")}
           />
         </div>
-      </div>
+      </SignupLayout>
     );
   }
 
-  return (
-    <AuthLayout wide>
-      <div style={{
-        display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-      }}>
-        {stage === "plan" && (
+  if (stage === "plan") {
+    return (
+      <AuthLayout wide>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
           <PlanPickerStage
             plans={plans}
             plansLoading={plansLoading}
             plansError={plansError}
             onChoosePlan={handleChoosePlan}
           />
-        )}
+        </div>
+        <style>{`
+          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+      </AuthLayout>
+    );
+  }
 
-        {stage === "details" && (
-        <div style={{ width: "100%", maxWidth: "680px" }}>
-          <div style={{ textAlign: "center", marginBottom: "24px" }}>
-            <h1 style={{ fontSize: "26px", fontWeight: "800", color: "#111827", margin: "0 0 8px 0", letterSpacing: "-0.5px" }}>
-              Create your account
-            </h1>
-            <p style={{ fontSize: "14px", color: "#6B7280", margin: 0 }}>
-              Register your organization for Zoiko Payroll. Connect people and money. Scale with Zoiko One.
-            </p>
-          </div>
+  const termsLink = AUTH_FOOTER_LINKS.find((l) => l.label === "Terms")?.href;
+  const privacyLink = AUTH_FOOTER_LINKS.find((l) => l.label === "Privacy")?.href;
 
-          <button
-            type="button"
-            onClick={() => setStage("plan")}
-            style={{
-              display: "flex", alignItems: "center", gap: "8px", margin: "0 auto 18px", padding: "8px 14px",
-              borderRadius: "999px", border: "1.5px solid #E5E7EB", background: "white", cursor: "pointer",
-              fontSize: "13px", color: "#374151", fontWeight: 600,
-            }}
-          >
-            <ArrowLeft size={13} />
-            Signing up for <strong style={{ color: "#087CC1" }}>{selectedPlan?.name}</strong> ({selectedPlan?.priceLabel}) — change plan
-          </button>
-
-          <div style={{
-            background: "white", borderRadius: "20px",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.10)",
-            border: "1px solid #F3F4F6", padding: "36px"
-          }}>
-            {localError && (
-              <div style={{
-                display: "flex", alignItems: "flex-start", gap: "8px",
-                background: "#FEF2F2", border: "1px solid #FECACA",
-                borderRadius: "10px", padding: "12px 14px", marginBottom: "20px"
-              }}>
-                <AlertCircle size={16} color="#DC2626" style={{ marginTop: "1px", flexShrink: 0 }} />
-                <span style={{ fontSize: "13px", color: "#DC2626" }}>{localError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px" }}>
-                <div>
-                  <label htmlFor="orgName" style={labelStyle}>
-                    Organization Name
-                  </label>
-                  <input
-                    id="orgName"
-                    type="text"
-                    required
-                    autoComplete="organization"
-                    value={form.orgName}
-                    onChange={(e) => update("orgName", e.target.value)}
-                    placeholder="Acme Inc."
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="adminName" style={labelStyle}>
-                    Admin Name
-                  </label>
-                  <input
-                    id="adminName"
-                    type="text"
-                    required
-                    autoComplete="name"
-                    value={form.adminName}
-                    onChange={(e) => update("adminName", e.target.value)}
-                    placeholder="Jane Doe"
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="adminEmail" style={labelStyle}>
-                    Admin Email
-                  </label>
-                  <input
-                    id="adminEmail"
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={form.adminEmail}
-                    onChange={(e) => update("adminEmail", e.target.value)}
-                    placeholder="admin@company.com"
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="password" style={labelStyle}>
-                    Password
-                  </label>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      required
-                      minLength={8}
-                      autoComplete="new-password"
-                      value={form.password}
-                      onChange={(e) => update("password", e.target.value)}
-                      placeholder="At least 8 characters"
-                      style={{ ...fieldStyle, padding: "11px 44px 11px 14px" }}
-                      onFocus={e => e.target.style.borderColor = "#087CC1"}
-                      onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(v => !v)}
-                      style={{
-                        position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
-                        background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", padding: 0
-                      }}
-                      aria-label={showPassword ? "Hide password" : "Show password"}
-                    >
-                      {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="phone" style={labelStyle}>
-                    Phone Number
-                  </label>
-                  <input
-                    id="phone"
-                    type="tel"
-                    required
-                    autoComplete="tel"
-                    value={form.phone}
-                    onChange={(e) => update("phone", e.target.value)}
-                    placeholder="+1 (555) 123-4567"
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="industry" style={labelStyle}>
-                    Industry
-                  </label>
-                  <input
-                    id="industry"
-                    type="text"
-                    value={form.industry}
-                    onChange={(e) => update("industry", e.target.value)}
-                    placeholder="Technology"
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="companyType" style={labelStyle}>
-                    Company Type
-                  </label>
-                  <input
-                    id="companyType"
-                    type="text"
-                    value={form.companyType}
-                    onChange={(e) => update("companyType", e.target.value)}
-                    placeholder="Private Limited"
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "18px" }}>
-                <div>
-                  <label htmlFor="country" style={labelStyle}>
-                    Country
-                  </label>
-                  <select
-                    id="country"
-                    required
-                    value={form.country}
-                    onChange={(e) => handleCountryChange(e.target.value)}
-                    style={selectStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  >
-                    <option value="">Select country</option>
-                    {REGISTRATION_COUNTRIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="state" style={labelStyle}>
-                    State / Province
-                  </label>
-                  <select
-                    id="state"
-                    value={form.state}
-                    onChange={(e) => update("state", e.target.value)}
-                    disabled={countryStates.length === 0}
-                    style={{ ...selectStyle, cursor: countryStates.length === 0 ? "not-allowed" : "default" }}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  >
-                    <option value="">
-                      {countryStates.length === 0 ? "Select country first" : "Select state"}
-                    </option>
-                    {countryStates.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="city" style={labelStyle}>
-                    City
-                  </label>
-                  <input
-                    id="city"
-                    type="text"
-                    value={form.city}
-                    onChange={(e) => update("city", e.target.value)}
-                    placeholder="New York"
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-              </div>
-
-              {jurisdictionTaxFields.length > 0 ? (
-                <div>
-                  <div style={{ marginBottom: "12px" }}>
-                    <p style={{ margin: "0 0 2px 0", fontSize: "14px", fontWeight: "600", color: "#111827" }}>
-                      Business Registration & Tax Identification
-                    </p>
-                    <p style={{ margin: 0, fontSize: "12px", color: "#6B7280" }}>
-                      {jurisdictionSchema.label} for payroll in {form.country}. Format is validated as you enter.
-                    </p>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px" }}>
-                    {jurisdictionTaxFields.map((f) => (
-                      <div key={f.key}>
-                        <label htmlFor={`reg-${f.key}`} style={labelStyle}>
-                          {f.label} {f.primary && <span style={{ color: "#DC2626" }}>*</span>}
-                        </label>
-                        <input
-                          id={`reg-${f.key}`}
-                          type="text"
-                          value={form.taxIdentifiers[f.key] || ""}
-                          onChange={(e) => updateTaxIdentifier(f.key, e.target.value)}
-                          placeholder={`e.g. ${f.example}`}
-                          style={fieldStyle}
-                          onFocus={e => e.target.style.borderColor = "#087CC1"}
-                          onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <label htmlFor="taxNo" style={labelStyle}>
-                    Tax Registration Number
-                  </label>
-                  <input
-                    id="taxNo"
-                    type="text"
-                    value={form.taxNo}
-                    onChange={(e) => update("taxNo", e.target.value)}
-                    placeholder="e.g. GSTIN, EIN, VAT No."
-                    style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                </div>
-              )}
-
-              <div>
-                <label htmlFor="address" style={labelStyle}>
-                  Address
-                </label>
-                <textarea
-                  id="address"
-                  required
-                  value={form.address}
-                  onChange={(e) => update("address", e.target.value)}
-                  placeholder="123 Main St, Suite 100"
-                  rows={2}
-                  style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }}
-                  onFocus={e => e.target.style.borderColor = "#087CC1"}
-                  onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px" }}>
-                <div>
-                  <label htmlFor="timezone" style={labelStyle}>
-                    Timezone
-                  </label>
-                  <select
-                    id="timezone"
-                    value={form.timezone}
-                    onChange={(e) => update("timezone", e.target.value)}
-                    disabled={countryTimezones.length === 0}
-                    style={{ ...selectStyle, cursor: countryTimezones.length === 0 ? "not-allowed" : "default" }}
-                    onFocus={e => e.target.style.borderColor = "#087CC1"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  >
-                    {countryTimezones.length === 0 ? (
-                      <option value="">Select a country first</option>
-                    ) : (
-                      countryTimezones.map((tz) => (
-                        <option key={tz} value={tz}>{tz}</option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={labelStyle}>
-                    Product <span style={{ color: "#DC2626" }}>*</span>
-                  </label>
-                  <div
-                    style={{
-                      padding: "12px", borderRadius: "12px", textAlign: "center",
-                      border: "2px solid #087CC1", background: "#EEF6FB",
-                      boxShadow: "0 4px 12px rgba(8,124,193,0.15)",
-                      boxSizing: "border-box", height: "calc(100% - 26px)", marginTop: "26px",
-                    }}
-                  >
-                    <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: "700", color: "#087CC1" }}>
-                      Zoiko Payroll
-                    </p>
-                    <p style={{ margin: 0, fontSize: "11px", color: "#6B7280", lineHeight: "1.3" }}>
-                      Pay runs, statutory rates & payslips
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-                <input
-                  id="termsAccepted"
-                  type="checkbox"
-                  required
-                  checked={form.termsAccepted}
-                  onChange={(e) => update("termsAccepted", e.target.checked)}
-                  style={{
-                    marginTop: "2px", width: "16px", height: "16px", flexShrink: 0,
-                    accentColor: "#087CC1", cursor: "pointer"
-                  }}
-                />
-                <label htmlFor="termsAccepted" style={{ fontSize: "13px", color: "#374151", cursor: "pointer", lineHeight: "1.4" }}>
-                  I accept the{" "}
-                  <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
-                    Terms & Conditions
-                  </a>
-                </label>
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                style={{
-                  width: "100%", padding: "13px", borderRadius: "10px", border: "none",
-                  fontSize: "15px", fontWeight: "700", color: "white", cursor: submitting ? "not-allowed" : "pointer",
-                  background: submitting ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
-                  boxShadow: "0 6px 20px rgba(8,124,193,0.35)",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                  transition: "all 0.2s", marginTop: "8px"
-                }}
-              >
-                {submitting && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
-                {submitting ? "Creating account…" : `Create account & continue to payment`}
-              </button>
-            </form>
-
-            <p style={{ textAlign: "center", fontSize: "13px", color: "#6B7280", marginTop: "20px", marginBottom: 0 }}>
-              Not ready to commit?{" "}
-              <Link to="/trial-register" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
-                Try Zoiko Payroll free for 30 days
-              </Link>
-            </p>
-          </div>
-
-          <p style={{ textAlign: "center", marginTop: "20px" }}>
-            <Link to="/login" style={{ fontSize: "13px", color: "#9CA3AF", textDecoration: "none" }}>
-              ← Back to sign in
-            </Link>
+  return (
+    <SignupLayout>
+      <div className="mb-4 flex items-start gap-4">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+          <Building2 size={26} aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-[26px] font-extrabold leading-tight tracking-[-0.02em] text-slate-900">
+            Create your Zoiko Payroll account
+          </h2>
+          <p className="mt-1 text-[15px] text-slate-600">
+            Set up your organization to start running global payroll in minutes.
           </p>
         </div>
-        )}
       </div>
 
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
-    </AuthLayout>
+      {selectedPlan && (
+        <button
+          type="button"
+          onClick={() => { setReviewing(false); setStage("plan"); }}
+          className="mb-4 inline-flex items-center gap-2 rounded-full border border-slate-200 px-3.5 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50"
+        >
+          <ArrowLeft size={13} aria-hidden="true" />
+          Plan: <strong className="text-blue-700">{selectedPlan.name}</strong> ({selectedPlan.priceLabel}) · change
+        </button>
+      )}
+
+      <div className="mb-5 sm:pl-[4.5rem]">
+        <StepIndicator steps={STEPS} current={currentStep} />
+      </div>
+
+      {localError && <AuthAlert>{localError}</AuthAlert>}
+
+      {reviewing ? (
+        <div className="space-y-4">
+          <Section icon={ClipboardCheck} title="Review & confirm" subtitle="Check your details before we create the account.">
+            <dl className="divide-y divide-slate-100">
+              <ReviewRow label="Organization" value={form.orgName} />
+              <ReviewRow label="Company type" value={form.companyType} />
+              <ReviewRow label="Industry" value={form.industry} />
+              <ReviewRow label="Location" value={[form.address, form.city, form.state, form.country].filter(Boolean).join(", ")} />
+              {jurisdictionTaxFields.length > 0
+                ? jurisdictionTaxFields.map((f) => (
+                  <ReviewRow key={f.key} label={f.label} value={form.taxIdentifiers[f.key]} />))
+                : <ReviewRow label="Tax registration" value={form.taxNo} />}
+              <ReviewRow label="Administrator" value={fullName} />
+              <ReviewRow label="Work email" value={form.adminEmail} />
+              <ReviewRow label="Phone" value={phone} />
+              <ReviewRow label="Password" value="••••••••••••" />
+              <ReviewRow label="Timezone" value={form.timezone} />
+              <ReviewRow label="Product" value="Zoiko Payroll" />
+              <ReviewRow label="Plan" value={selectedPlan ? `${selectedPlan.name} (${selectedPlan.priceLabel})` : ""} />
+            </dl>
+          </Section>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => setReviewing(false)}
+              className="rounded-lg border border-slate-300 px-5 py-3 text-[15px] font-semibold text-slate-700 hover:bg-slate-50 sm:w-40"
+            >
+              Edit details
+            </button>
+            <AuthPrimaryButton type="button" busy={submitting} busyLabel="Creating account…" onClick={handleCreate}>
+              Create account &amp; continue <ArrowRight size={18} aria-hidden="true" />
+            </AuthPrimaryButton>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleContinue} className="space-y-4">
+          <Section icon={Building2} title="Organization details" subtitle="Tell us about your company.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field id="orgName" label="Organization name" required>
+                <IconInput icon={Building} id="orgName" required autoComplete="organization"
+                  value={form.orgName} onChange={(e) => update("orgName", e.target.value)} placeholder="e.g. Zoiko Telecom" />
+              </Field>
+              <Field id="companyType" label="Company type" required>
+                <IconSelect icon={FileText} id="companyType" required value={form.companyType}
+                  onChange={(e) => update("companyType", e.target.value)}>
+                  <option value="">Select company type</option>
+                  {COMPANY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </IconSelect>
+              </Field>
+              <Field id="industry" label="Industry" required>
+                <IconSelect icon={Factory} id="industry" required value={form.industry}
+                  onChange={(e) => update("industry", e.target.value)}>
+                  <option value="">Select industry</option>
+                  {INDUSTRIES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </IconSelect>
+              </Field>
+            </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <Field id="country" label="Country" required>
+                <IconSelect icon={Globe2} id="country" required value={form.country}
+                  onChange={(e) => handleCountryChange(e.target.value)}>
+                  <option value="">Select a country</option>
+                  {REGISTRATION_COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </IconSelect>
+              </Field>
+              <Field id="state" label="State / Province">
+                <IconSelect icon={MapPin} id="state" value={form.state} disabled={countryStates.length === 0}
+                  onChange={(e) => update("state", e.target.value)}>
+                  <option value="">{countryStates.length === 0 ? (form.country ? "Not applicable" : "Select a country first") : "Select a state"}</option>
+                  {countryStates.map((s) => <option key={s} value={s}>{s}</option>)}
+                </IconSelect>
+              </Field>
+              <Field id="city" label="City">
+                <IconInput icon={Landmark} id="city" value={form.city} autoComplete="address-level2"
+                  onChange={(e) => update("city", e.target.value)} placeholder="e.g. New York" />
+              </Field>
+            </div>
+            <Field id="address" label="Address" required className="mt-4">
+              <IconInput icon={MapPin} id="address" required autoComplete="street-address" value={form.address}
+                onChange={(e) => update("address", e.target.value)} placeholder="e.g. 123 Main St, Suite 100" />
+            </Field>
+            {jurisdictionTaxFields.length > 0 ? (
+              <div className="mt-4">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-semibold text-slate-800">Tax registration</span>
+                  <Info size={15} className="text-slate-500"
+                    aria-label={`${jurisdictionSchema.label} for payroll in ${form.country}. Format is checked as you type.`}
+                    title={`${jurisdictionSchema.label} for payroll in ${form.country}. Format is checked as you type.`} />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {jurisdictionTaxFields.map((f) => (
+                    <Field key={f.key} id={`reg-${f.key}`} label={f.label} required={f.primary}>
+                      <IconInput icon={FileText} id={`reg-${f.key}`} value={form.taxIdentifiers[f.key] || ""}
+                        onChange={(e) => updateTaxIdentifier(f.key, e.target.value)} placeholder={`e.g. ${f.example}`} />
+                    </Field>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Field id="taxNo" label="Tax registration number" className="mt-4"
+                info="Your company's tax or business registration number for payroll filings.">
+                <IconInput icon={FileText} id="taxNo" value={form.taxNo} onChange={(e) => update("taxNo", e.target.value)}
+                  placeholder="e.g. GSTIN, EIN, VAT No." />
+              </Field>
+            )}
+          </Section>
+
+          <Section icon={UserRound} title="Administrator details" subtitle="This will be your primary administrator account.">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field id="firstName" label="First name" required>
+                <IconInput icon={UserRound} id="firstName" required autoComplete="given-name" value={form.firstName}
+                  onChange={(e) => update("firstName", e.target.value)} placeholder="e.g. Lennox" />
+              </Field>
+              <Field id="lastName" label="Last name" required>
+                <IconInput icon={UserRound} id="lastName" required autoComplete="family-name" value={form.lastName}
+                  onChange={(e) => update("lastName", e.target.value)} placeholder="e.g. Green" />
+              </Field>
+              <Field id="adminEmail" label="Work email" required>
+                <IconInput icon={Mail} id="adminEmail" type="email" required autoComplete="email" value={form.adminEmail}
+                  onChange={(e) => update("adminEmail", e.target.value)} placeholder="e.g. lennox@company.com" />
+              </Field>
+            </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <Field id="phone" label="Phone number" required>
+                <PhoneInput id="phone" country={form.phoneCountry} onCountryChange={(v) => update("phoneCountry", v)}
+                  number={form.phoneNumber} onNumberChange={(v) => update("phoneNumber", v)} />
+              </Field>
+              <Field id="password" label="Password" required
+                hint={
+                  <ul className="flex flex-wrap gap-x-3 gap-y-1">
+                    {PASSWORD_CHECKS.map(([label, test]) => {
+                      const ok = test(form.password);
+                      return (
+                        <li key={label} className={`inline-flex items-center gap-1 ${ok ? "text-emerald-700" : ""}`}>
+                          {ok ? <Check size={13} aria-hidden="true" /> : <span aria-hidden="true">•</span>} {label}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                }>
+                <div className="relative">
+                  <Lock size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input id="password" type={showPassword ? "text" : "password"} required minLength={12}
+                    autoComplete="new-password" value={form.password} onChange={(e) => update("password", e.target.value)}
+                    placeholder="Create a strong password" className={authInputClass({ withIcon: true, withTrailing: true })} />
+                  <button type="button" onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 hover:text-slate-800">
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </Field>
+            </div>
+          </Section>
+
+          <Section icon={Settings} title="Setup preferences" subtitle="Tailor your account to your needs.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field id="timezone" label="Timezone" required={countryTimezones.length > 0}>
+                <IconSelect icon={Clock} id="timezone" value={form.timezone} required={countryTimezones.length > 0}
+                  disabled={countryTimezones.length === 0} onChange={(e) => update("timezone", e.target.value)}>
+                  {countryTimezones.length === 0
+                    ? <option value="">Select a country first</option>
+                    : countryTimezones.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+                </IconSelect>
+              </Field>
+              <Field id="product" label="Product" required>
+                <div id="product" role="radio" aria-checked="true" tabIndex={0}
+                  className="flex items-center gap-3 rounded-lg border-2 border-blue-600 bg-blue-50 px-4 py-2.5">
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-blue-600">
+                    <span className="h-2 w-2 rounded-full bg-blue-600" />
+                  </span>
+                  <span>
+                    <span className="block text-[14px] font-semibold text-blue-800">Zoiko Payroll</span>
+                    <span className="block text-[12px] text-slate-600">Pay runs, statutory rates &amp; payslips</span>
+                  </span>
+                </div>
+              </Field>
+            </div>
+            <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-[14px] text-slate-700">
+              <input type="checkbox" required checked={form.termsAccepted}
+                onChange={(e) => update("termsAccepted", e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 accent-blue-600" />
+              <span>
+                I agree to the{" "}
+                <a href={termsLink} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-700 hover:underline">Terms of Service</a>
+                {" "}and{" "}
+                <a href={privacyLink} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-700 hover:underline">Privacy Policy</a>.
+                <span className="text-red-600"> *</span>
+              </span>
+            </label>
+          </Section>
+
+          <AuthPrimaryButton type="submit">
+            Continue to review <ArrowRight size={18} aria-hidden="true" />
+          </AuthPrimaryButton>
+        </form>
+      )}
+
+      <p className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-center text-[12px] text-slate-500">
+        <Lock size={13} aria-hidden="true" />
+        Your information is sent over an encrypted connection and kept secure.
+        <span>
+          Prefer to try first?{" "}
+          <Link to="/trial-register" className="font-medium text-blue-700 hover:underline">Start a 30-day evaluation</Link>.
+        </span>
+      </p>
+    </SignupLayout>
   );
 }
