@@ -173,9 +173,10 @@ def test_authority_tables_are_empty():
 def test_authority_tables_point_at_their_taxslab_rule_types():
     assert set(content.JP_TABLE_RULE_TYPES) == {
         "JP_WHT_MONTHLY", "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
-        "JP_HEALTH_RATE", "JP_SMR_GRADE",
+        "JP_HEALTH_RATE", "JP_SMR_GRADE", "JP_WHT_BONUS",
     }
     assert all(len(rule_type) <= 30 for rule_type in content.JP_TABLE_RULE_TYPES)
+    assert content.JP_EMPTY_TABLES["wht_bonus_rate_table"]["rule_type"] == "JP_WHT_BONUS"
     assert content.JP_EMPTY_TABLES["wht_monthly_table"]["rule_type"] == "JP_WHT_MONTHLY"
     assert set(content.JP_EMPTY_TABLES["wht_computer_method"]["rule_types"]) == {
         "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
@@ -191,6 +192,14 @@ def test_computer_method_scalars_are_present_and_empty_until_g1():
         assert key in content.JP_EMPTY_BY_DESIGN
         row = _scalar(key)
         assert row[4] is None and row[5] is None
+
+
+def test_p4_rules_the_spec_does_not_state_are_present_and_empty():
+    for key in ("jp_wht_bonus_special_multiple", "jp_smr_min_payment_base_days", "jp_smr_adhoc_grade_gap"):
+        assert content.JP_PARAMETER_KEYS[key] == "amount"
+        assert key in content.JP_EMPTY_BY_DESIGN
+        row = _scalar(key)
+        assert row[4] is None and row[5] is None and row[7] is True
 
 
 def test_prefectures_are_the_47_jis_codes():

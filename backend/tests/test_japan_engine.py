@@ -208,11 +208,13 @@ def test_non_resident_blocks():
     assert exc.value.key == "JP_NON_RESIDENT_UNSUPPORTED"
 
 
-def test_bonus_blocks_on_the_p4_path():
-    ctx = _context(gross=D(300000), jp_components={"BONUS": D(10000)})
+def test_bonus_blocks_while_its_employment_insurance_class_is_review():
+    # Shipped content: EI on BONUS is REVIEW (no signed evidence), so any
+    # bonus BLOCKS. The bonus path itself is covered in test_japan_bonus.py.
+    ctx = _context(gross=D(310000), jp_components={"BONUS": D(10000)})
     with pytest.raises(MissingComplianceConfigurationError) as exc:
         japan.calculate(ctx)
-    assert exc.value.key == "JP_BONUS_PATH_PENDING_P4"
+    assert exc.value.key == "jp_earning_class:EI:BONUS"
 
 
 def test_review_component_blocks():

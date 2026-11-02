@@ -6,8 +6,10 @@ from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_
 
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries import japan_content as content
+from app.modules.payroll.engine.jurisdictions.japan import bonus as _bonus
 from app.modules.payroll.engine.jurisdictions.japan import employment_insurance as _ei
 from app.modules.payroll.engine.jurisdictions.japan import resident_tax as _resident_tax
+from app.modules.payroll.engine.jurisdictions.japan import smr_lifecycle as _lifecycle
 from app.modules.payroll.engine.jurisdictions.japan import social_insurance as _si
 from app.modules.payroll.engine.jurisdictions.japan import withholding as _wht
 from app.modules.payroll.engine.jurisdictions.japan.errors import JapanCalculationBlockedError
@@ -271,9 +273,11 @@ def obligation_base(obligation: str, components: list, classes: dict, pack: _Pac
                            f"pay component {component} ({amount}) is REVIEW for {obligation}")
             counted = ZERO
         elif treatment == TREATMENT_BONUS:
+            # The bonus itself never reaches a monthly base (calculate() takes
+            # it out first); any other component routed here is misconfigured.
             if amount != ZERO:
-                pack.block("JP_BONUS_PATH_PENDING_P4",
-                           f"pay component {component} requires the bonus path (P4)")
+                pack.block(f"jp_earning_class:{obligation}:{component}",
+                           f"only BONUS may use the bonus path, not {component}")
             counted = ZERO
         elif treatment == TREATMENT_INCLUDED:
             counted = amount
@@ -301,59 +305,198 @@ def _row_ref(row):
     return data
 
 
+PAYMENT_SALARY = "SALARY"
+PAYMENT_BONUS = "BONUS"
+PAYMENT_KINDS = (PAYMENT_SALARY, PAYMENT_BONUS)
+# Treatments the bonus path supports for each obligation. WHT and SI always
+# take the bonus path; EI charges the bonus itself once its class is signed.
+_BONUS_TREATMENTS = {
+    "WHT": (TREATMENT_BONUS,),
+    "SI": (TREATMENT_BONUS,),
+    "EI": (TREATMENT_INCLUDED, TREATMENT_EXCLUDED),
+}
+
+
+def _bonus_treatments(classes: dict, pack: _Pack) -> dict:
+    out = {}
+    for obligation, allowed in _BONUS_TREATMENTS.items():
+        treatment = classes.get((obligation, "BONUS"))
+        if treatment not in allowed:
+            pack.block(f"jp_earning_class:{obligation}:BONUS",
+                       f"bonus treatment {treatment!r} is not supported for {obligation}")
+        out[obligation] = treatment
+    return out
+
+
+def _bonus_payment(ctx: PayrollContext, applicability: dict, classes: dict, pack: _Pack,
+                   amount: Decimal, date_of_birth) -> dict:
+    """Social insurance, employment insurance and withholding on a bonus
+    (S1/S8), each on its own base and with its own trace."""
+    treatments = _bonus_treatments(classes, pack)
+    enrollment = applicability["enrollment"]
+    si = _si.bonus_contributions(
+        amount, enrollment, applicability["registration"], pack, as_of=ctx.pay_date,
+        date_of_birth=date_of_birth, slabs=getattr(ctx, "slabs", None),
+        ytd_health_sba=getattr(ctx, "jp_ytd_health_sba", None),
+        month_pension_sba=getattr(ctx, "jp_month_pension_sba", None))
+    if treatments["EI"] == TREATMENT_INCLUDED:
+        ei = _ei.monthly_employment_insurance(applicability["eiProfile"], amount, pack,
+                                              as_of=ctx.pay_date)
+    else:
+        ei = _ei.EIResult(employee=ZERO, employer=ZERO, rate_row=None,
+                          trace={"treatment": TREATMENT_EXCLUDED, "roundingEvents": []})
+    wht_base = amount - si.employee_total - ei.employee
+    wht = _bonus.bonus_withholding(
+        wht_base, getattr(ctx, "jp_prior_month_pay_after_si", None),
+        applicability["declarationClass"], applicability["dependants"],
+        getattr(ctx, "slabs", None), pack, as_of=ctx.pay_date)
+    insured = (_field(enrollment, "health_eligible") is True
+               or _field(enrollment, "pension_eligible") is True)
+    report_due = _bonus.bonus_report_due(ctx.pay_date, pack) if insured else None
+    return {"amount": amount, "si": si, "ei": ei, "whtBase": wht_base, "wht": wht,
+            "reportDue": report_due, "treatments": treatments}
+
+
+def _no_monthly_obligations():
+    """A bonus-only payment: the monthly SMR contributions, monthly withholding
+    and resident tax belong to the salary payment of the month, never here."""
+    skipped = {"skipped": "bonus payment", "roundingEvents": []}
+    si = _si.SIResult(epi_employee=ZERO, epi_employer=ZERO, health_employee=ZERO,
+                      health_employer=ZERO, care_employee=ZERO, care_employer=ZERO,
+                      child_support_employee=ZERO, child_support_employer=ZERO,
+                      employee_total=ZERO, employer_total=ZERO, smr=ZERO, smr_health=ZERO,
+                      smr_pension=ZERO, trace=dict(skipped))
+    ei = _ei.EIResult(employee=ZERO, employer=ZERO, rate_row=None, trace=dict(skipped))
+    wht = _wht.WithholdingResult(tax=ZERO, branch="NONE", row=None, rounding_events=[])
+    resident = _resident_tax.RTResult(amount=ZERO, municipality=None, notice_year=None,
+                                      version=None, notice_id=None, trace=dict(skipped))
+    return si, ei, wht, resident
+
+
 def calculate(ctx: PayrollContext) -> dict:
     org_id = getattr(ctx, "jp_organization_id", None) or getattr(ctx, "organization_id", None)
     pack = _Pack(getattr(ctx, "rate_map", {}) or {}, org_id, as_of=ctx.pay_date)
     applicability = resolve_applicability(ctx, pack)
-    named_bonus = _dec(next((value for key, value in
-                             (getattr(ctx, "jp_components", None) or {}).items()
-                             if _upper(key) == "BONUS"), ZERO))
-    if named_bonus != ZERO:
-        pack.block("JP_BONUS_PATH_PENDING_P4",
-                   f"bonus amount {named_bonus} belongs to the P4 bonus path")
+    payment_kind = _upper(getattr(ctx, "jp_payment_kind", None)) or PAYMENT_SALARY
+    if payment_kind not in PAYMENT_KINDS:
+        pack.block("jp_payment_kind", f"payment kind {payment_kind!r} is not SALARY or BONUS")
+
     components = pay_components(ctx, pack)
-    bonus = next(((name, amount) for name, amount in components if name == "BONUS"), None)
-    if bonus is not None:
-        pack.block("JP_BONUS_PATH_PENDING_P4",
-                   f"bonus amount {bonus[1]} belongs to the P4 bonus path")
+    bonus_amount = sum((amount for name, amount in components if name == "BONUS"), ZERO)
+    salary_components = [(name, amount) for name, amount in components if name != "BONUS"]
+    if payment_kind == PAYMENT_BONUS:
+        if salary_components:
+            pack.block("jp_payment_kind",
+                       "a bonus payment carries salary components "
+                       f"({', '.join(name for name, _amount in salary_components)})")
+        if bonus_amount == ZERO:
+            pack.block("jp_payment_kind", "a bonus payment has no bonus amount")
+
+    exemptions = _lifecycle.exemption_events_in_month(
+        getattr(ctx, "jp_social_insurance_events", None), ctx.pay_date)
+    if exemptions:
+        # Maternity / childcare exemptions waive both shares by month; the
+        # month rules are not certified, so the case is never charged or
+        # waived by assumption.
+        pack.block("JP_SI_EXEMPTION_PENDING",
+                   f"a social-insurance exemption event ({', '.join(exemptions)}) covers the pay month")
 
     classes = _classes(getattr(ctx, "slabs", None))
-    bases = {name: obligation_base(name, components, classes, pack)
+    bases = {name: obligation_base(name, salary_components, classes, pack)
              for name in ("WHT", "SI", "EI")}
 
     date_of_birth = getattr(ctx, "jp_date_of_birth", None) or getattr(ctx, "date_of_birth", None)
-    si = _si.monthly_contributions(
-        applicability["enrollment"], applicability["registration"], pack, as_of=ctx.pay_date,
-        date_of_birth=date_of_birth, slabs=getattr(ctx, "slabs", None))
-    ei = _ei.monthly_employment_insurance(
-        applicability["eiProfile"], bases["EI"]["base"], pack, as_of=ctx.pay_date)
+    method = None
+    if payment_kind == PAYMENT_SALARY:
+        si = _si.monthly_contributions(
+            applicability["enrollment"], applicability["registration"], pack, as_of=ctx.pay_date,
+            date_of_birth=date_of_birth, slabs=getattr(ctx, "slabs", None))
+        ei = _ei.monthly_employment_insurance(
+            applicability["eiProfile"], bases["EI"]["base"], pack, as_of=ctx.pay_date)
+        wht_base = bases["WHT"]["base"] - si.employee_total - ei.employee
+        if wht_base < ZERO:
+            pack.block("jp_wht_base",
+                       f"the withholding base is negative ({wht_base}) after social insurance")
+        method = pack.require_text("jp_withholding_method",
+                                   allowed=content.WITHHOLDING_METHODS)
+        wht = _wht.monthly_withholding(
+            wht_base, applicability["declarationClass"], applicability["dependants"], method,
+            getattr(ctx, "slabs", None), pack)
+        resident = _resident_tax.resident_tax_for_month(
+            getattr(ctx, "jp_resident_tax_assessments", None), ctx.pay_date,
+            collection=_field(applicability["profile"], "resident_tax_collection") or "SPECIAL")
+    else:
+        si, ei, wht, resident = _no_monthly_obligations()
+        wht_base = ZERO
 
-    wht_base = bases["WHT"]["base"] - si.employee_total - ei.employee
-    if wht_base < ZERO:
-        pack.block("jp_wht_base",
-                   f"the withholding base is negative ({wht_base}) after social insurance")
-    method = pack.require_text("jp_withholding_method",
-                               allowed=content.WITHHOLDING_METHODS)
-    wht = _wht.monthly_withholding(
-        wht_base, applicability["declarationClass"], applicability["dependants"], method,
-        getattr(ctx, "slabs", None), pack)
+    bonus = None
+    if bonus_amount > ZERO:
+        bonus = _bonus_payment(ctx, applicability, classes, pack, bonus_amount, date_of_birth)
 
-    resident = _resident_tax.resident_tax_for_month(
-        getattr(ctx, "jp_resident_tax_assessments", None), ctx.pay_date,
-        collection=_field(applicability["profile"], "resident_tax_collection") or "SPECIAL")
+    bonus_si_employee = bonus["si"].employee_total if bonus else ZERO
+    bonus_si_employer = bonus["si"].employer_total if bonus else ZERO
+    bonus_ei_employee = bonus["ei"].employee if bonus else ZERO
+    bonus_ei_employer = bonus["ei"].employer if bonus else ZERO
+    bonus_wht = bonus["wht"].tax if bonus else ZERO
 
-    jp_employee_total = si.employee_total + ei.employee + resident.amount
-    net = _dec(ctx.gross) - wht.tax - jp_employee_total
+    tds = wht.tax + bonus_wht
+    jp_employee_total = (si.employee_total + ei.employee + resident.amount
+                         + bonus_si_employee + bonus_ei_employee)
+    jp_employer_total = si.employer_total + ei.employer + bonus_si_employer + bonus_ei_employer
+    net = _dec(ctx.gross) - tds - jp_employee_total
     if net < ZERO:
         pack.block("JP_NEGATIVE_NET",
                    f"net pay would be negative ({net}) after statutory deductions")
 
     rounding_events = list(wht.rounding_events) + list(si.trace.get("roundingEvents") or []) \
         + list(ei.trace.get("roundingEvents") or [])
+    bonus_trace = None
+    bonus_result = None
+    if bonus:
+        rounding_events += list(bonus["si"].trace.get("roundingEvents") or []) \
+            + list(bonus["ei"].trace.get("roundingEvents") or []) \
+            + list(bonus["wht"].rounding_events)
+        bonus_trace = {
+            "amount": str(bonus["amount"]),
+            "treatments": bonus["treatments"],
+            "priorMonthPayAfterSi": str(_dec(getattr(ctx, "jp_prior_month_pay_after_si", None))),
+            "socialInsurance": bonus["si"].trace,
+            "employmentInsurance": bonus["ei"].trace,
+            "withholding": {"base": str(bonus["whtBase"]),
+                            "ratePct": str(bonus["wht"].rate_pct),
+                            "row": _row_ref(bonus["wht"].row),
+                            "roundingEvents": bonus["wht"].rounding_events},
+            "reportDue": bonus["reportDue"].isoformat() if bonus["reportDue"] else None,
+        }
+        bsi = bonus["si"]
+        bonus_result = {
+            "jp_bonus": str(bonus["amount"]),
+            "jp_bonus_sba": str(bsi.sba),
+            "jp_bonus_health_sba_base": str(bsi.health_sba_base),
+            "jp_bonus_pension_sba_base": str(bsi.pension_sba_base),
+            "jp_bonus_epi_employee": str(bsi.epi_employee),
+            "jp_bonus_epi_employer": str(bsi.epi_employer),
+            "jp_bonus_health_employee": str(bsi.health_employee),
+            "jp_bonus_health_employer": str(bsi.health_employer),
+            "jp_bonus_care_employee": str(bsi.care_employee),
+            "jp_bonus_care_employer": str(bsi.care_employer),
+            "jp_bonus_child_support_employee": str(bsi.child_support_employee),
+            "jp_bonus_child_support_employer": str(bsi.child_support_employer),
+            "jp_bonus_si_employee_total": str(bsi.employee_total),
+            "jp_bonus_si_employer_total": str(bsi.employer_total),
+            "jp_bonus_ei_employee": str(bonus["ei"].employee),
+            "jp_bonus_ei_employer": str(bonus["ei"].employer),
+            "jp_bonus_wht_base": str(bonus["whtBase"]),
+            "jp_bonus_wht_rate_pct": str(bonus["wht"].rate_pct),
+            "jp_bonus_wht": str(bonus["wht"].tax),
+            "jp_bonus_report_due": bonus["reportDue"].isoformat() if bonus["reportDue"] else None,
+        }
+
     trace = {
         "jurisdiction": _COUNTRY,
         "payDate": ctx.pay_date.isoformat(),
         "payFrequency": applicability["frequency"],
+        "paymentKind": payment_kind,
         "residency": applicability["residency"],
         "table_pack_id": content.JP_2026[0],
         "tablePackId": content.JP_2026[0],
@@ -367,9 +510,11 @@ def calculate(ctx: PayrollContext) -> dict:
         "socialInsurance": si.trace,
         "employmentInsurance": ei.trace,
         "residentTax": resident.trace,
+        "bonus": bonus_trace,
         "roundingEvents": rounding_events,
         "rateRowsUsed": {
             "withholding": _row_ref(wht.row),
+            "bonusWithholding": _row_ref(bonus["wht"].row) if bonus else None,
             "health": si.trace.get("healthRate"),
             "employmentInsurance": _row_ref(ei.rate_row),
         },
@@ -377,12 +522,14 @@ def calculate(ctx: PayrollContext) -> dict:
     }
 
     return {
-        "tds": wht.tax,
+        "tds": tds,
         "jp_employee_total": jp_employee_total,
         "jp_result": {
+            "jp_payment_kind": payment_kind,
             "jp_wht": str(wht.tax),
             "jp_wht_base": str(wht_base),
             "jp_wht_branch": wht.branch,
+            "jp_wht_total": str(tds),
             "jp_declaration_class": applicability["declarationClass"],
             "jp_dependants": applicability["dependants"],
             "jp_epi_employee": str(si.epi_employee),
@@ -406,8 +553,9 @@ def calculate(ctx: PayrollContext) -> dict:
                 "noticeYear": resident.notice_year,
                 "version": resident.version,
             },
+            "jp_bonus": bonus_result,
             "jp_employee_total": str(jp_employee_total),
-            "jp_employer_total": str(si.employer_total + ei.employer),
+            "jp_employer_total": str(jp_employer_total),
             "trace": trace,
         },
     }

@@ -137,9 +137,10 @@ JP_WHT_CMP_EID_RULE = "JP_WHT_CMP_EID"
 JP_WHT_CMP_RATE_RULE = "JP_WHT_CMP_RATE"
 JP_HEALTH_RATE_RULE = "JP_HEALTH_RATE"
 JP_SMR_GRADE_RULE = "JP_SMR_GRADE"
+JP_WHT_BONUS_RULE = "JP_WHT_BONUS"
 JP_TABLE_RULE_TYPES = (
     JP_WHT_MONTHLY_RULE, JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE,
-    JP_HEALTH_RATE_RULE, JP_SMR_GRADE_RULE,
+    JP_HEALTH_RATE_RULE, JP_SMR_GRADE_RULE, JP_WHT_BONUS_RULE,
 )
 JP_AUTHORITY_TABLE_RULE_TYPES = JP_TABLE_RULE_TYPES
 
@@ -179,6 +180,7 @@ JP_PARAMETER_KEYS = {
     "jp_withholding_method": "text",
     "jp_wht_cmp_basic_deduction": "amount",
     "jp_wht_cmp_dependant_deduction": "amount",
+    "jp_wht_bonus_special_multiple": "amount",
     "jp_correction_policy": "text",
     # Rounding — one row per statutory amount, no global helper (JP-002)
     "jp_wht_rounding": "text",
@@ -209,6 +211,8 @@ JP_PARAMETER_KEYS = {
     "jp_smr_report_month": "text",
     "jp_smr_application_months": "text",
     "jp_smr_adhoc_revision_from_month": "amount",
+    "jp_smr_min_payment_base_days": "amount",
+    "jp_smr_adhoc_grade_gap": "amount",
     # Employment insurance FY2026 (spec §6, S13)
     "jp_ei_general": "pct_pair",
     "jp_ei_agriculture_sake_total": "pct_total",
@@ -252,6 +256,11 @@ JP_SCALAR_CONTENT = (
     ("jp_wht_cmp_basic_deduction", "NTA computer method — basic employment-income deduction (JPY)",
      None, None, None, None, "S1", True, None, None),
     ("jp_wht_cmp_dependant_deduction", "NTA computer method — deduction per dependant (JPY)",
+     None, None, None, None, "S1", True, None, None),
+    # NTA bonus method (S1): above this multiple of the prior month's pay, or
+    # with no prior-month pay, the bonus-rate table is not used. Empty until
+    # G1 signs it, so every bonus BLOCKS before the rate table is consulted.
+    ("jp_wht_bonus_special_multiple", "NTA bonus method — prior-month pay multiple for the special calculation",
      None, None, None, None, "S1", True, None, None),
 
     # JP-002: each statutory amount has its own truncation/rounding stage.
@@ -306,6 +315,13 @@ JP_SCALAR_CONTENT = (
      None, None, None, "09-08", "S7", True, None, None),
     ("jp_smr_adhoc_revision_from_month", "SMR ad hoc revision applies from this month after the pay change",
      None, None, "4", None, "S7", True, None, None),
+    # Not stated by the specification: a determination month counts only with
+    # at least this many payment base days; an ad hoc revision needs at least
+    # this grade gap. Empty → the determination / candidate BLOCKS.
+    ("jp_smr_min_payment_base_days", "SMR — minimum payment base days for a month to count",
+     None, None, None, None, "S7", True, None, None),
+    ("jp_smr_adhoc_grade_gap", "SMR ad hoc revision — minimum grade difference",
+     None, None, None, None, "S7", True, None, None),
 
     ("jp_ei_general", "Employment insurance FY2026 — general business (employee / employer)",
      "0.5000", "0.8500", None, None, "S13", True, _FY2026_FROM, _FY2026_TO),
@@ -358,6 +374,7 @@ JP_SCALAR_CONTENT = (
 JP_EMPTY_BY_DESIGN = frozenset({
     "jp_ei_agriculture_sake", "jp_ei_construction",
     "jp_wht_cmp_basic_deduction", "jp_wht_cmp_dependant_deduction",
+    "jp_wht_bonus_special_multiple", "jp_smr_min_payment_base_days", "jp_smr_adhoc_grade_gap",
 })
 
 # ── Authority tables not reproduced by the specification ──────────────────
@@ -375,7 +392,11 @@ JP_EMPTY_TABLES = {
                             "rule_type": (JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE),
                             "rule_types": (JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE)},
     # NTA 2026 bonus rate table (S1): rate by prior-month pay band.
-    "wht_bonus_rate_table": {"source": "S1", "gate": "G1", "rows": ()},
+    # Rows: tax_column PRIMARY / SECONDARY, tax_table_number = dependants
+    # (PRIMARY only), band on the prior month's pay after social insurance,
+    # rate_pct applied to the bonus after its own social insurance.
+    "wht_bonus_rate_table": {"source": "S1", "gate": "G1", "rows": (),
+                             "rule_type": JP_WHT_BONUS_RULE},
     # NTA 2026 year-end adjustment pack (S3) — separate from monthly content.
     "year_end_adjustment": {"source": "S3", "gate": "G1", "rows": ()},
     # Health and pension SMR grade tables (S6/S7).
