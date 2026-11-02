@@ -44,6 +44,7 @@ _GUARDED = [
     "a7c4e9d1b2f8",  # Japan work conditions (guarded, lock_timeout)
     "a1a748b50902",  # Japan work calendar + attendance approvals (guarded, lock_timeout)
     "41a1fafbbfdc",  # Japan P8 lifecycle and filings (guarded, lock_timeout)
+    "b8bd939fffca",  # Japan P9 parallel cycles (guarded, lock_timeout)
 ]
 
 

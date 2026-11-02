@@ -48,7 +48,9 @@ JP_TABLES = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
              "payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
              # Japan P8 (41a1fafbbfdc).
              "payroll_jp_run_exceptions", "payroll_jp_obligations",
-             "payroll_jp_yea_declarations", "payroll_jp_yea_cases"}
+             "payroll_jp_yea_declarations", "payroll_jp_yea_cases",
+             # Japan P9 (b8bd939fffca).
+             "payroll_jp_parallel_imports", "payroll_jp_parallel_differences"}
 
 
 def _load(prefix):

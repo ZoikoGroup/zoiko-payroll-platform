@@ -11955,6 +11955,63 @@ class PayrollJpYeaDeclaration(Base):
     )
 
 
+class PayrollJpParallelImport(Base):
+    """One incumbent payroll file compared with a committed Japan run (release
+    gate G7). Accepted by a second person once every difference is accepted
+    and every row matched (b8bd939fffca)."""
+    __tablename__ = "payroll_jp_parallel_imports"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payroll_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    period          = Column(String(7), nullable=False)
+    source_label    = Column(String(120), nullable=False)
+    file_sha256     = Column(String(64), nullable=False)
+    column_mapping  = Column(_JP_JSON, nullable=False)
+    row_count       = Column(Integer, nullable=False)
+    matched_count   = Column(Integer, nullable=False)
+    unmatched_count = Column(Integer, nullable=False)
+    status          = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+    created_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_jp_parallel_import_status"),
+        Index("ix_jp_parallel_import_org_period", "organization_id", "period"),
+        Index("uq_jp_parallel_import_run_file", "payroll_run_id", "file_sha256", unique=True),
+    )
+
+
+class PayrollJpParallelDifference(Base):
+    """One employee / concept whose incumbent and Zoiko amounts differ
+    (tolerance zero): explained with a reason, accepted by a different person."""
+    __tablename__ = "payroll_jp_parallel_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    import_id        = Column(Integer, ForeignKey("payroll_jp_parallel_imports.id", ondelete="CASCADE"), nullable=False)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="SET NULL"), nullable=True)
+    concept          = Column(String(40), nullable=False)
+    zoiko_amount     = Column(Numeric(14, 0), nullable=False)
+    incumbent_amount = Column(Numeric(14, 0), nullable=False)
+    delta            = Column(Numeric(14, 0), nullable=False)
+    status           = Column(String(12), nullable=False, default="UNEXPLAINED", server_default="UNEXPLAINED")
+    reason           = Column(String(1000), nullable=True)
+    explained_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    explained_at     = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('UNEXPLAINED', 'EXPLAINED', 'ACCEPTED')",
+                           name="ck_jp_parallel_difference_status"),
+        Index("ix_jp_parallel_difference_import", "import_id"),
+    )
+
+
 class PayrollJpYeaCase(Base):
     """One year-end adjustment per employee and year (S3):
     OPEN -> CALCULATED -> REVIEWED (second person) -> APPLIED -> LOCKED, or

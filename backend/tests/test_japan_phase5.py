@@ -334,7 +334,7 @@ def test_run_preflight_accepts_its_own_frozen_snapshot(db, organization, employe
                        country_code="JP", jp_calculation_snapshot=_snapshot(employee.id)["jp_calculation_snapshot"]))
     db.commit()
 
-    result = japan_org_router.run_preflight(
+    result = japan_org_router.jp_run_preflight(
         run.id, current_user=SimpleNamespace(id=1, organization_id=organization.id), db=db)
     assert result["status"] == "OK"
     assert result["checks"] == [{"severity": "INFO", "code": "JP_NOT_APPROVED",

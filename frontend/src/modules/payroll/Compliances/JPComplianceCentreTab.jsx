@@ -9,6 +9,7 @@ import { formatJpyAuto } from "../../../components/jurisdiction/japan/jpComponen
 import JPRecordSection, { WEEKDAYS, isDraft, periodCol, statusCol } from "../../../components/jurisdiction/japan/JPRecordSection";
 import { JapanEmployeeRecords } from "../Payroll_Employees/JapanStatutoryProfilePanel";
 import JPObligationsPanel from "./JPObligationsPanel";
+import JPParallelCyclesSection from "./JPParallelCyclesSection";
 import JPYearEndPanel from "./JPYearEndPanel";
 
 // Japan Compliance Centre (ZP-JP-ENG-001). Organisation-level setup (employer
@@ -145,6 +146,7 @@ export default function JPComplianceCentreTab() {
       <BonusReports />
       <JPObligationsPanel />
       <JPYearEndPanel />
+      <JPParallelCyclesSection />
       <EmployeeRecords />
     </div>
   );

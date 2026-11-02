@@ -116,7 +116,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         jp_p6_tables = {"payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
                         # Japan P8 (41a1fafbbfdc)
                         "payroll_jp_run_exceptions", "payroll_jp_obligations",
-                        "payroll_jp_yea_declarations", "payroll_jp_yea_cases"}
+                        "payroll_jp_yea_declarations", "payroll_jp_yea_cases",
+                        # Japan P9 (b8bd939fffca)
+                        "payroll_jp_parallel_imports", "payroll_jp_parallel_differences"}
         jp_p6_columns = {"payroll_runs": {"jp_payment_kind"},
                          "payroll_jp_work_conditions": {"scheduled_weekdays", "statutory_day_off_weekday",
                                                         "public_holidays_off"}}

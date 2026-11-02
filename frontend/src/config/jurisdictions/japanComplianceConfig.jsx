@@ -1,6 +1,7 @@
-import { Banknote, Calculator, Clock, FileCheck2, Landmark, ListChecks, ShieldCheck } from "lucide-react";
+import { Banknote, Calculator, Clock, FileCheck2, Gauge, Landmark, ListChecks, ShieldCheck } from "lucide-react";
 import JPOverviewDashboard from "../../components/jurisdiction/japan/JPOverviewDashboard";
 import JPPackRowsTab from "../../components/jurisdiction/japan/JPPackRowsTab";
+import JPReadinessTab from "../../components/jurisdiction/japan/JPReadinessTab";
 import EarningClassMatrix from "../../components/jurisdiction/EarningClassMatrix";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 
@@ -84,7 +85,8 @@ export function japanExtraTabs() {
         componentOrder={["SALARY", "OVERTIME", "ALLOWANCE", "COMMUTING_ALLOWANCE", "BONUS", "OTHER_EARNINGS"]}
       />
     )),
-    tab("sources", "Sources", FileCheck2, "jp-earning", () => <SourceEvidencePanel />),
+    tab("jp-readiness", "Readiness", Gauge, "jp-earning", () => <JPReadinessTab />),
+    tab("sources", "Sources", FileCheck2, "jp-readiness", () => <SourceEvidencePanel />),
   ];
 }
 

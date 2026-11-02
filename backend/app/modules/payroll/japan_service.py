@@ -1007,6 +1007,7 @@ def statutory_summary(db: Session) -> dict:
         "approvedResidentTaxNotices": notices,
         "pendingSocialInsuranceEvents": pending_events,
         "decisions": owner_decisions(db),
+        "readiness": _jp_readiness_overview(db),
         "note": ("Japan remains PLANNED; the official values and JP-1 evidence "
                  "decisions are not yet recorded."),
     }
@@ -1018,9 +1019,13 @@ def _jp_service_registry_transition(db: Session, target: str, reason: str,
     from app.modules.payroll import service
 
     def readiness():
-        unmet = [{"key": "JP-1", "label": "Japan official-values decision",
-                  "detail": "JP-1 has not been recorded; every value stays PENDING G1"}]
-        return unmet, {"decision": "JP-1", "recorded": False}
+        # Re-derived at this moment: every release gate G0-G8 and every owner
+        # decision must be met before Japan opens (japan_readiness).
+        from app.modules.payroll import japan_readiness
+
+        unmet = japan_readiness.jp_unmet_requirements(db)
+        return unmet, {"gates": [{"gate": g["gate"], "passed": g["passed"]}
+                                 for g in japan_readiness.jp_readiness(db)["gates"]]}
 
     return service.transition_service_registry(
         db, JP, target, reason, actor_id, label="Japan", readiness=readiness,
@@ -1563,6 +1568,56 @@ def _jp_vault_event(db: Session, organization_id: int, row, action: str, actor_i
     _jp_audit(db, actor_id, action.lower(), "jp_my_number_access_event", event.id,
               new={"employee_id": row.employee_id, "vault_id": row.id})
     return event
+
+
+def rotate_my_number_keys(db: Session, *, dry_run: bool = True) -> dict:
+    """Re-encrypt every ACTIVE vault row that is not under the newest keyring
+    version, keeping its owner binding. The duplicate-detection fingerprint
+    uses its own non-rotating key, so it must still match after rotation; a
+    row that does not is reported and left untouched. Returns counts and row
+    ids only - never a number."""
+    from app.modules.payroll import japan_my_number as my
+
+    m = _jp_models()
+    keyring = my._keyring()
+    if not keyring:
+        raise BadRequestException("JP_MY_NUMBER_KEYRING is not configured.")
+    newest = max(keyring)
+    out = {"newestKeyVersion": newest, "examined": 0, "current": 0, "rotated": 0,
+           "failed": [], "dryRun": dry_run}
+    for row in (db.query(m.PayrollJpMyNumberVault)
+                .filter(m.PayrollJpMyNumberVault.status == "ACTIVE").order_by(m.PayrollJpMyNumberVault.id)):
+        out["examined"] += 1
+        if row.key_version == newest:
+            out["current"] += 1
+            continue
+        owner = my.vault_owner(row.organization_id, row.employee_id, row.id)
+        try:
+            number = my.decrypt(row.ciphertext, row.key_version, owner=owner)
+        except my.MyNumberError:
+            out["failed"].append({"id": row.id, "reason": "does not decrypt with its owner binding"})
+            continue
+        if my.fingerprint(number) != row.fingerprint:
+            out["failed"].append({"id": row.id, "reason": "fingerprint mismatch"})
+            continue
+        if not dry_run:
+            row.ciphertext, row.key_version = my.encrypt(number, owner=owner)
+        number = None
+        out["rotated"] += 1
+    if not dry_run:
+        db.flush()
+        from app.modules.payroll.service import record_tax_audit
+
+        record_tax_audit(db, actor_id=None, action="rotated", entity_type="jp_my_number_vault", entity_id=0,
+                         new_value={k: v for k, v in out.items() if k != "dryRun"}, auto_commit=False)
+    return out
+
+
+def _jp_readiness_overview(db: Session) -> dict:
+    from app.modules.payroll import japan_readiness
+
+    state = japan_readiness.jp_readiness(db)
+    return {"allPassed": state["allPassed"], "gates": state["gates"]}
 
 
 def list_my_numbers(db: Session, organization_id: int, employee_id: Optional[int] = None):

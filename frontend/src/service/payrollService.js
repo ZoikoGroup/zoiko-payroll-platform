@@ -2973,3 +2973,13 @@ export const getJpSalaryPaymentReports = async (taxYear) =>
   jpOne(await api.get(`${JP}/filings/salary-payment-reports/${taxYear}`));
 export const getJpBonusReport = async (paidOn) => jpOne(await api.get(`${JP}/filings/bonus-report/${paidOn}`));
 export const getJpAnnualDetermination = async (year) => jpOne(await api.get(`${JP}/filings/annual-determination/${year}`));
+// Japan Phase 9 — release gates and parallel cycles (G7).
+export const getJpReadiness = async () => jpOne(await api.get(`${JP}/readiness`));
+export const listJpParallelImports = async () => jpList(await api.get(`${JP}/parallel-imports`));
+export const createJpParallelImport = (payload) => api.post(`${JP}/parallel-imports`, payload);
+export const getJpParallelImport = async (id) => jpOne(await api.get(`${JP}/parallel-imports/${id}`));
+export const acceptJpParallelImport = (id) => api.post(`${JP}/parallel-imports/${id}/accept`, {});
+export const withdrawJpParallelImport = (id) => api.post(`${JP}/parallel-imports/${id}/withdraw`, {});
+export const explainJpParallelDifference = (id, reason) =>
+  api.post(`${JP}/parallel-differences/${id}/explain`, { reason });
+export const acceptJpParallelDifference = (id) => api.post(`${JP}/parallel-differences/${id}/accept`, {});
