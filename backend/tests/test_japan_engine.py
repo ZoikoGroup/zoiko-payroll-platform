@@ -82,6 +82,14 @@ def _slabs(**overrides):
         rate_pct=D("10"), flat_amount=None, filing_status=None,
         effective_from=None, effective_to=None,
     ))
+    # Synthetic minimum-wage fixture - not a statutory figure.
+    rows.append(SimpleNamespace(
+        rule_type=content.JP_MIN_WAGE_RULE, tax_regime=None, tax_column=None,
+        jurisdiction_state="13", min_amount=D(0), max_amount=None,
+        rate_pct=D(0), flat_amount=D("1000"), filing_status=None,
+        rate_label="Synthetic test minimum wage", tax_formula="test",
+        effective_from=date(2026, 1, 1), effective_to=None,
+    ))
     if overrides.get("with_ei_pair") is False:
         pass
     return rows
@@ -116,6 +124,12 @@ def _context(**overrides):
         fiscal_notice_year=2026, version=1, first_deduction_month=date(2026, 6, 1),
         monthly_amounts={"2026-06": "10000", "2026-07": "10000"},
     )]
+    work_conditions = SimpleNamespace(
+        status="ACTIVE", effective_from=date(2026, 1, 1), effective_to=None,
+        working_time_system="STANDARD", week_start_day=0,
+        scheduled_daily_minutes=480, scheduled_monthly_hours=D(240),
+        workplace_prefecture="13", specific_minimum_wage_applies=False,
+    )
     ctx_kwargs = dict(
         gross=D(300000), basic=D(300000), overtime=D(0), country="JP",
         pay_frequency="MONTHLY", pay_date=date(2026, 6, 15), calendar_days=30,
@@ -127,6 +141,9 @@ def _context(**overrides):
         jp_employment_insurance_profile=ei_profile,
         jp_resident_tax_assessments=assessments,
         jp_components={},
+        jp_work_conditions=work_conditions,
+        jp_hours=[],
+        jp_hours_approved=False,
     )
     ctx_kwargs.update(overrides)
     return PayrollContext(**ctx_kwargs)
@@ -163,7 +180,11 @@ def test_result_is_deterministic_and_json_serialisable():
 
 
 def test_negative_net_pay_blocks():
-    ctx = _context(gross=D(50000), basic=D(50000))
+    notice = SimpleNamespace(
+        status="APPROVED", notice_id="LARGE", municipality_code="131016",
+        fiscal_notice_year=2026, version=1, first_deduction_month=date(2026, 6, 1),
+        monthly_amounts={"2026-06": "400000", "2026-07": "400000"})
+    ctx = _context(jp_resident_tax_assessments=[notice])
     with pytest.raises(MissingComplianceConfigurationError) as exc:
         japan.calculate(ctx)
     assert exc.value.key == "JP_NEGATIVE_NET"

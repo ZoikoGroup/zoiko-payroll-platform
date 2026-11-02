@@ -1156,8 +1156,20 @@ class PayrollRunCreate(BaseModel):
     # Proceed despite incomplete attendance — recorded on the run and in the
     # activity log. Ignored when attendance is complete.
     attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
+    jp_payment_kind: Optional[str] = Field(None, alias="jpPaymentKind",
+        description="Japan run payment kind: SALARY or BONUS (default SALARY).")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("jp_payment_kind")
+    @classmethod
+    def _validate_jp_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("SALARY", "BONUS"):
+            raise ValueError("jpPaymentKind must be SALARY or BONUS")
+        return value
 
     @model_validator(mode="after")
     def _auto_label(self) -> "PayrollRunCreate":
@@ -1177,6 +1189,19 @@ class PayrollRunUpdate(BaseModel):
     period_end:   Optional[date] = None
     pay_date:     Optional[date] = None
     notes:        Optional[str] = None
+    jp_payment_kind: Optional[str] = Field(None, alias="jpPaymentKind")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("jp_payment_kind")
+    @classmethod
+    def _validate_jp_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("SALARY", "BONUS"):
+            raise ValueError("jpPaymentKind must be SALARY or BONUS")
+        return value
 
 
 class PayrollRunPreviewRequest(BaseModel):
@@ -1296,6 +1321,7 @@ class PayrollRunResponse(BaseModel):
     # Run detail only (service.get_payroll_run_detail): per-country totals,
     # each in that country's currency — see service.run_totals_by_country.
     totalsByCountry:       Optional[List[dict]] = Field(None, validation_alias="totals_by_country", serialization_alias="totalsByCountry")
+    jpPaymentKind:         Optional[str] = Field(None, validation_alias="jp_payment_kind", serialization_alias="jpPaymentKind")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

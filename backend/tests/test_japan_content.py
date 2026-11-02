@@ -174,6 +174,7 @@ def test_authority_tables_point_at_their_taxslab_rule_types():
     assert set(content.JP_TABLE_RULE_TYPES) == {
         "JP_WHT_MONTHLY", "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
         "JP_HEALTH_RATE", "JP_SMR_GRADE", "JP_WHT_BONUS",
+        "JP_MIN_WAGE", "JP_HOLIDAY",
     }
     assert all(len(rule_type) <= 30 for rule_type in content.JP_TABLE_RULE_TYPES)
     assert content.JP_EMPTY_TABLES["wht_bonus_rate_table"]["rule_type"] == "JP_WHT_BONUS"
@@ -184,6 +185,8 @@ def test_authority_tables_point_at_their_taxslab_rule_types():
     assert content.JP_EMPTY_TABLES["kyokai_health_rates"]["rule_type"] == "JP_HEALTH_RATE"
     assert content.JP_EMPTY_TABLES["smr_grades_health"]["rule_type"] == "JP_SMR_GRADE"
     assert content.JP_EMPTY_TABLES["smr_grades_pension"]["rule_type"] == "JP_SMR_GRADE"
+    assert content.JP_EMPTY_TABLES["minimum_wage"]["rule_type"] == "JP_MIN_WAGE"
+    assert content.JP_EMPTY_TABLES["public_holidays"]["rule_type"] == "JP_HOLIDAY"
 
 
 def test_computer_method_scalars_are_present_and_empty_until_g1():

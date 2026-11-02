@@ -12,7 +12,7 @@ in jurisdiction_hooks._MODULES only then — registering a module that lacks a
 hook the platform calls would make every Japan code path raise (fail-closed).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -209,18 +209,27 @@ def _jp_insurance_year_start(on: date) -> date:
 
 
 def _jp_prior_payslips(db: Session, organization_id: int, employee_id: int, as_of: date,
-                       *, since: Optional[date] = None, current_run_id: Optional[int] = None):
-    from app.modules.payroll.models import PayrollRun, PayslipItem
+                       *, since: Optional[date] = None, until: Optional[date] = None,
+                       current_run_id: Optional[int] = None):
+    """Paid or closed JP payslips on or before ``as_of``.
+
+    Draft/review/approved runs are not statutory history: they can still be
+    discarded, so counting them would double-charge caps and prior-pay bands.
+    Same-day runs are included; the caller excludes the current run by id.
+    """
+    from app.modules.payroll.models import PayrollRun, PayrollStatus, PayslipItem
 
     q = (db.query(PayslipItem, PayrollRun.pay_date)
          .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
          .filter(PayslipItem.organization_id == organization_id,
                  PayslipItem.employee_id == employee_id,
                  PayslipItem.country_code == JP,
-                 PayslipItem.status != "FAILED",
-                 PayrollRun.pay_date < as_of))
+                 PayrollRun.status.in_((PayrollStatus.PAID.value, PayrollStatus.CLOSED.value)),
+                 PayrollRun.pay_date <= as_of))
     if since is not None:
         q = q.filter(PayrollRun.pay_date >= since)
+    if until is not None:
+        q = q.filter(PayrollRun.pay_date < until)
     if current_run_id is not None:
         q = q.filter(PayrollRun.id != current_run_id)
     return q.order_by(PayrollRun.pay_date, PayslipItem.id).all()
@@ -232,36 +241,118 @@ def _jp_snapshot_result(item):
 
 def _jp_bonus_priors(db: Session, organization_id: int, employee_id: int, as_of: date,
                      current_run_id: Optional[int] = None) -> dict:
-    """The two prior bonus figures the engine requires, never guessed.
+    """The two prior bonus figures and the prior-month pay, never guessed.
 
     Health SBA is cumulative from 1 April; pension SBA is per calendar month.
-    The prior-month salary-after-social-insurance is the frozen withholding base
-    of the most recent earlier salary payment in the previous month.
+    The engine stores both cap-consumed bases under ``jp_bonus``. The prior-month
+    salary base is the previous calendar month's latest paid/closed salary
+    payslip only; an absent month stays None (the engine blocks instead of
+    treating it as zero).
     """
     year_start = _jp_insurance_year_start(as_of)
     month_start = date(as_of.year, as_of.month, 1)
+    previous_month_start = (date(as_of.year - 1, 12, 1) if as_of.month == 1
+                            else date(as_of.year, as_of.month - 1, 1))
     health = Decimal("0")
     pension_month = Decimal("0")
-    prior_salary_base = None
     for item, pay_date in _jp_prior_payslips(
             db, organization_id, employee_id, as_of, since=year_start,
             current_run_id=current_run_id):
         snap = _jp_snapshot_result(item)
         kind = str(snap.get("jp_payment_kind") or "SALARY").upper()
-        if kind == "BONUS":
-            if snap.get("jp_bonus_sba") not in (None, ""):
-                health += Decimal(str(snap["jp_bonus_sba"]))
-            if pay_date.year == as_of.year and pay_date.month == as_of.month:
-                if snap.get("jp_bonus_sba") not in (None, ""):
-                    pension_month += Decimal(str(snap["jp_bonus_sba"]))
-        elif pay_date < month_start and snap.get("jp_wht_base") not in (None, ""):
+        if kind != "BONUS":
+            continue
+        bonus = snap.get("jp_bonus") or {}
+        if not isinstance(bonus, dict):
+            continue
+        health_base = bonus.get("jp_bonus_health_sba_base")
+        pension_base = bonus.get("jp_bonus_pension_sba_base")
+        if health_base not in (None, ""):
+            health += Decimal(str(health_base))
+        if pay_date.year == as_of.year and pay_date.month == as_of.month:
+            if pension_base not in (None, ""):
+                pension_month += Decimal(str(pension_base))
+
+    prior_salary_base = None
+    for item, _pay_date in reversed(_jp_prior_payslips(
+            db, organization_id, employee_id, as_of, since=previous_month_start,
+            until=month_start, current_run_id=current_run_id)):
+        snap = _jp_snapshot_result(item)
+        kind = str(snap.get("jp_payment_kind") or "SALARY").upper()
+        if kind == "SALARY" and snap.get("jp_wht_base") not in (None, ""):
             prior_salary_base = Decimal(str(snap["jp_wht_base"]))
+            break
     return {"ytd_health_sba": health, "month_pension_sba": pension_month,
             "prior_month_pay_after_si": prior_salary_base}
 
 
+def _jp_period(run, period, as_of: date):
+    if period is not None:
+        return period
+    if run is not None:
+        start = getattr(run, "period_start", None)
+        end = getattr(run, "period_end", None)
+        if start and end:
+            return start, end
+    start = date(as_of.year, as_of.month, 1)
+    end = (date(as_of.year + 1, 1, 1) if as_of.month == 12
+           else date(as_of.year, as_of.month + 1, 1)) - timedelta(days=1)
+    return start, end
+
+
+def _jp_holiday_dates(db: Session, start: date, end: date) -> set:
+    from app.modules.payroll.engine.jurisdictions.japan import labour
+
+    out = set()
+    for year in range(start.year, end.year + 1):
+        for holiday in _jp_pack_holidays(db, year):
+            day = holiday.get("date") if isinstance(holiday, dict) else None
+            if day and start.isoformat() <= day <= end.isoformat():
+                out.add(day)
+    return out
+
+
+def _jp_hours_for_period(db: Session, organization_id: int, employee_id: int,
+                         start: date, end: date, conditions) -> list:
+    """Attendance hours for the period, without inventing missing hours.
+
+    Only ``present`` rows are facts. The approved flag is simply whether such
+    rows exist: this platform has no separate attendance-approval column yet,
+    and a paid overtime component without rows is blocked by the engine.
+    """
+    from app.modules.payroll.models import PayrollAttendanceRecord
+
+    if conditions is None or start is None or end is None:
+        return []
+    records = (db.query(PayrollAttendanceRecord)
+               .filter(PayrollAttendanceRecord.organization_id == organization_id,
+                       PayrollAttendanceRecord.employee_id == employee_id,
+                       PayrollAttendanceRecord.date >= start,
+                       PayrollAttendanceRecord.date <= end)
+               .order_by(PayrollAttendanceRecord.date, PayrollAttendanceRecord.id).all())
+    holidays = _jp_holiday_dates(db, start, end)
+    daily = int(getattr(conditions, "scheduled_daily_minutes", 0) or 0)
+    out = []
+    for record in records:
+        if str(getattr(record, "status", "") or "").lower() != "present":
+            continue
+        raw_hours = getattr(record, "hours", None)
+        try:
+            minutes = int(Decimal(str(raw_hours or 0)) * 60)
+        except (InvalidOperation, ValueError):
+            raise BadRequestException(
+                f"Japan attendance hours on {record.date} are not a number.")
+        day = record.date.isoformat()
+        out.append({"date": day, "worked_minutes": minutes,
+                    "scheduled_minutes": daily,
+                    "check_in": getattr(record, "check_in", None),
+                    "check_out": getattr(record, "check_out", None),
+                    "is_holiday": day in holidays})
+    return out
+
+
 def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: date,
-                           run=None) -> dict:
+                           run=None, period=None) -> dict:
     """Resolve every Japan input effective at ``as_of``. No value is inferred:
     a missing row stays missing so the engine's own BLOCK is the one surfaced.
     """
@@ -278,6 +369,12 @@ def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: d
     ei_profile = _jp_one_active(
         db, m.PayrollJpEmploymentInsuranceProfile, organization_id, employee.id, as_of,
         "employment-insurance profile")
+    work_conditions = _jp_one_active(
+        db, m.PayrollJpWorkConditions, organization_id, None, as_of,
+        "work conditions")
+    period_start, period_end = _jp_period(run, period, as_of)
+    hours = _jp_hours_for_period(
+        db, organization_id, employee.id, period_start, period_end, work_conditions)
 
     assessments = (db.query(m.PayrollJpResidentTaxAssessment)
                    .filter(m.PayrollJpResidentTaxAssessment.organization_id == organization_id,
@@ -291,11 +388,13 @@ def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: d
     if not isinstance(components, dict):
         components = None
     payment_kind = _jp_value(run, "jp_payment_kind") if run is not None else None
-    payment_kind = (payment_kind or _jp_value(employee, "jp_payment_kind")
-                    or "SALARY")
+    payment_kind = str(payment_kind or "SALARY").strip().upper()
+    if payment_kind not in ("SALARY", "BONUS"):
+        raise BadRequestException("jp_payment_kind must be SALARY or BONUS.")
+    has_bonus = any(str(name).upper() == "BONUS" for name in (components or {}))
     priors = (_jp_bonus_priors(db, organization_id, employee.id, as_of,
                                current_run_id=getattr(run, "id", None))
-              if str(payment_kind).upper() == "BONUS" else {})
+              if payment_kind == "BONUS" or has_bonus else {})
 
     return {
         "jp_worker_tax_profile": profile,
@@ -313,12 +412,17 @@ def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: d
         "jp_month_pension_sba": priors.get("month_pension_sba"),
         "jp_social_insurance_events": _jp_events_for_month(
             db, organization_id, employee.id, as_of),
+        "jp_work_conditions": work_conditions,
+        "jp_hours": hours,
+        "jp_hours_approved": bool(hours),
     }
 
 
-def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of: Optional[date] = None) -> dict:
+def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of: Optional[date] = None,
+                period=None) -> dict:
     on = as_of or getattr(run, "pay_date", None) or date.today()
-    return resolve_jp_calc_inputs(db, employee.organization_id, employee, on, run=run)
+    return resolve_jp_calc_inputs(db, employee.organization_id, employee, on, run=run,
+                                  period=period)
 
 
 # ---------------------------------------------------------------------
@@ -344,6 +448,11 @@ _JP_CTX_PLAIN = ("pay_frequency", "jp_organization_id", "jp_employee_id",
                  "date_of_joining")
 _JP_CTX_DATES = ("pay_date", "period_start", "period_end", "jp_date_of_birth",
                  "date_of_birth")
+_JP_WORK_CONDITION_FIELDS = (
+    "id", "effective_from", "effective_to", "working_time_system", "week_start_day",
+    "scheduled_daily_minutes", "scheduled_monthly_hours", "workplace_prefecture",
+    "specific_minimum_wage_applies", "status", "evidence_ref",
+)
 _JP_RATE_FIELDS = ("employee_rate_pct", "employer_rate_pct", "flat_amount",
                    "text_value", "effective_from", "effective_to")
 _JP_SLAB_FIELDS = ("rule_type", "filing_status", "tax_regime", "assessment_basis",
@@ -405,6 +514,12 @@ def jp_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
         "socialInsuranceEvents": [
             _jp_facts(row, _JP_EVENT_FIELDS)
             for row in (getattr(ctx, "jp_social_insurance_events", None) or [])],
+        "workConditions": _jp_facts(getattr(ctx, "jp_work_conditions", None),
+                                    _JP_WORK_CONDITION_FIELDS),
+        "attendance": {
+            "approved": bool(getattr(ctx, "jp_hours_approved", None)),
+            "days": list(getattr(ctx, "jp_hours", None) or []),
+        },
         "rateMap": {k: {f: getattr(r, f, None) for f in _JP_RATE_FIELDS}
                     for k, r in (getattr(ctx, "rate_map", None) or {}).items()},
         "slabs": [{f: getattr(s, f, None) for f in _JP_SLAB_FIELDS}
@@ -556,7 +671,20 @@ def _jp_pack_activation_refusal(db: Session, pack, actor_id: Optional[int]) -> O
 
 
 def _jp_pack_holidays(db: Session, year: int) -> list:
-    return []
+    """The year's statutory holidays from the in-force JP pack's own calendar
+    rows. No pack / no rows means nothing is seeded, never a guessed date."""
+    from app.modules.payroll.engine.countries.japan import JapanCalculationBlockedError
+    from app.modules.payroll.engine.jurisdictions.japan import labour
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    try:
+        _rates, slabs, pack = resolve_tax_configuration(
+            db, JP, payroll_date=date(year, 12, 31))
+        if pack is None:
+            return []
+        return labour.holidays_for_year(slabs, year)
+    except (BadRequestException, JapanCalculationBlockedError):
+        return []
 
 
 def _jp_template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
@@ -771,10 +899,18 @@ JP_ASSESSMENT_FIELDS = (
     "first_deduction_month", "monthly_amounts", "total_amount", "source_hash",
     "replaces_id", "legal_entity_id", "evidence_ref",
 )
+JP_WORK_CONDITION_FIELDS = (
+    "effective_from", "effective_to", "working_time_system", "week_start_day",
+    "scheduled_daily_minutes", "scheduled_monthly_hours", "workplace_prefecture",
+    "specific_minimum_wage_applies", "legal_entity_id", "evidence_ref",
+)
 _JP_INT_FIELDS = {"dependants_count", "smr_health_grade", "smr_pension_grade",
                   "fiscal_notice_year", "version", "legal_entity_id",
-                  "source_document_id", "my_number_vault_id", "replaces_id"}
-_JP_DECIMAL_FIELDS = {"smr_health_amount", "smr_pension_amount", "total_amount"}
+                  "source_document_id", "my_number_vault_id", "replaces_id",
+                  "week_start_day", "scheduled_daily_minutes"}
+_JP_DECIMAL_FIELDS = {"smr_health_amount", "smr_pension_amount", "total_amount",
+                      "scheduled_monthly_hours"}
+_JP_BOOL_FIELDS = {"municipality_reporting_enabled", "specific_minimum_wage_applies"}
 _JP_DATE_FIELDS = {"effective_from", "effective_to", "declaration_received_on",
                    "qualification_date", "loss_date", "received_on",
                    "first_deduction_month"}
@@ -810,7 +946,7 @@ def _jp_clean(payload: dict, fields, *, required=()) -> dict:
                 raise BadRequestException(f"{key} must be a whole number.")
         elif key in _JP_DECIMAL_FIELDS:
             data[key] = _money(value, key)
-        elif key == "municipality_reporting_enabled":
+        elif key in _JP_BOOL_FIELDS:
             data[key] = bool(value)
         else:
             data[key] = value
@@ -853,6 +989,18 @@ def record_employer_registration(db: Session, organization_id: int, payload: dic
                                "ei_industry_class"))
     return _jp_create_version(db, m.PayrollJpEmployerRegistration, organization_id, None,
                               data, actor_id, "jp_employer_registration")
+
+
+def record_work_conditions(db: Session, organization_id: int, payload: dict,
+                           actor_id: Optional[int]):
+    m = _jp_models()
+    data = _jp_clean(
+        payload, JP_WORK_CONDITION_FIELDS,
+        required=("effective_from", "working_time_system", "week_start_day",
+                  "scheduled_daily_minutes", "scheduled_monthly_hours",
+                  "workplace_prefecture"))
+    return _jp_create_version(db, m.PayrollJpWorkConditions, organization_id, None,
+                              data, actor_id, "jp_work_conditions")
 
 
 def record_worker_tax_profile(db: Session, organization_id: int, employee_id: int,
@@ -928,6 +1076,12 @@ def approve_employer_registration(db: Session, organization_id: int, row_id: int
                                organization_id, row_id, actor_id, "jp_employer_registration")
 
 
+def approve_work_conditions(db: Session, organization_id: int, row_id: int,
+                            actor_id: Optional[int]):
+    return _jp_approve_version(db, _jp_models().PayrollJpWorkConditions,
+                               organization_id, row_id, actor_id, "jp_work_conditions")
+
+
 def approve_worker_tax_profile(db: Session, organization_id: int, row_id: int,
                                actor_id: Optional[int]):
     return _jp_approve_version(db, _jp_models().PayrollJpWorkerTaxProfile,
@@ -961,9 +1115,14 @@ def record_resident_tax_assessment(db: Session, organization_id: int, employee_i
         raise BadRequestException("monthly_amounts must be an object of exactly twelve amounts.")
     cleaned = {}
     for key, value in amounts.items():
-        if not isinstance(key, str) or len(key) != 7 or key[4] != "-":
+        if (not isinstance(key, str) or len(key) != 7 or key[4] != "-"
+                or not key[:4].isdigit() or not key[5:].isdigit()
+                or not 1 <= int(key[5:]) <= 12):
             raise BadRequestException("monthly_amounts keys must be YYYY-MM.")
-        cleaned[key] = str(_money(value, f"monthly_amounts.{key}"))
+        amount = _money(value, f"monthly_amounts.{key}")
+        if amount is None:
+            raise BadRequestException(f"monthly_amounts.{key} must be an amount.")
+        cleaned[key] = str(amount)
     data["monthly_amounts"] = cleaned
     latest = (db.query(m.PayrollJpResidentTaxAssessment)
               .filter(m.PayrollJpResidentTaxAssessment.organization_id == organization_id,
@@ -1180,8 +1339,13 @@ def reveal_my_number(db: Session, organization_id: int, vault_id: int, actor_id:
     try:
         number = my.decrypt(row.ciphertext, row.key_version,
                             owner=my.vault_owner(organization_id, row.employee_id, row.id))
-    except my.MyNumberError as exc:
-        raise BadRequestException(str(exc))
+    except my.MyNumberError as bound_error:
+        # Rows collected before Phase 5 carry the legacy unbound AAD. They stay
+        # readable; the next collection writes the owner-bound format.
+        try:
+            number = my.decrypt(row.ciphertext, row.key_version)
+        except my.MyNumberError:
+            raise BadRequestException(str(bound_error))
     _jp_vault_event(db, organization_id, row, "REVEALED", actor_id,
                     reason=request.reason, purpose="REVEAL")
     return {"myNumber": number, "employeeId": row.employee_id,

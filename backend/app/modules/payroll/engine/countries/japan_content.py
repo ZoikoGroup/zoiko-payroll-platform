@@ -138,9 +138,12 @@ JP_WHT_CMP_RATE_RULE = "JP_WHT_CMP_RATE"
 JP_HEALTH_RATE_RULE = "JP_HEALTH_RATE"
 JP_SMR_GRADE_RULE = "JP_SMR_GRADE"
 JP_WHT_BONUS_RULE = "JP_WHT_BONUS"
+JP_MIN_WAGE_RULE = "JP_MIN_WAGE"
+JP_HOLIDAY_RULE = "JP_HOLIDAY"
 JP_TABLE_RULE_TYPES = (
     JP_WHT_MONTHLY_RULE, JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE,
     JP_HEALTH_RATE_RULE, JP_SMR_GRADE_RULE, JP_WHT_BONUS_RULE,
+    JP_MIN_WAGE_RULE, JP_HOLIDAY_RULE,
 )
 JP_AUTHORITY_TABLE_RULE_TYPES = JP_TABLE_RULE_TYPES
 
@@ -228,6 +231,8 @@ JP_PARAMETER_KEYS = {
     "jp_statutory_holiday_premium_pct": "amount",
     "jp_night_premium_pct": "amount",
     "jp_night_window": "text",
+    "jp_premium_combination_rule": "text",
+    "jp_holiday_substitute_rule": "text",
     # Resident tax special collection (spec §4, S16)
     "jp_resident_tax_collection_months": "text",
     # Obligations and due dates (spec §2, §5, §8)
@@ -351,6 +356,13 @@ JP_SCALAR_CONTENT = (
      None, None),
     ("jp_night_window", "Night work window (HH:MM-HH:MM)", None, None, None, "22:00-05:00", "S14", True,
      None, None),
+    # The specification states the individual premiums but not how they
+    # combine when more than one applies, nor when a statutory holiday is
+    # substituted. Both are policy choices signed at G1/G4, never inferred.
+    ("jp_premium_combination_rule", "How overtime, holiday and night premiums combine",
+     None, None, None, PENDING, "S14", True, None, None),
+    ("jp_holiday_substitute_rule", "When a statutory holiday is substituted for another day",
+     None, None, None, PENDING, "S14", True, None, None),
 
     # JP-007: amounts come from the municipality notice, never a formula.
     ("jp_resident_tax_collection_months", "Resident tax special collection months (MM-MM, June–May)",
@@ -408,8 +420,14 @@ JP_EMPTY_TABLES = {
     "kyokai_health_rates": {"source": "S10", "gate": "G3", "rows": (),
                             "rule_type": JP_HEALTH_RATE_RULE},
     # Prefectural minimum wage per effective interval (S15) — an announced
-    # future rate is never selected before its date (JP-004).
-    "minimum_wage": {"source": "S15", "gate": "G4", "rows": ()},
+    # future rate is never selected before its date (JP-004). Rows carry the
+    # prefecture in jurisdiction_state and the hourly amount in flat_amount.
+    "minimum_wage": {"source": "S15", "gate": "G4", "rows": (),
+                     "rule_type": JP_MIN_WAGE_RULE},
+    # Statutory public holidays (S14), one dated row per holiday. No date is
+    # guessed; an empty table means no holiday premium can be classified.
+    "public_holidays": {"source": "S14", "gate": "G4", "rows": (),
+                        "rule_type": JP_HOLIDAY_RULE},
     # Workers' compensation employer rates by industry (spec §6: separately
     # sourced/certified — no evidence entry yet).
     "workers_comp_rates": {"source": None, "gate": "G4", "rows": ()},

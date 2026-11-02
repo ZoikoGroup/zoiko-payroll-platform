@@ -995,6 +995,10 @@ class PayrollContext:
     jp_ytd_health_sba: Decimal = None          # health SBA already counted this insurance year
     jp_month_pension_sba: Decimal = None       # pension SBA already counted this month
     jp_social_insurance_events: list = None    # lifecycle events touching the pay month
+    # Phase 6 - working time, premiums and minimum wage (spec §6, S14).
+    jp_work_conditions: object = None          # PayrollJpWorkConditions in force
+    jp_hours: list = None                      # [{date, worked_minutes, scheduled_minutes, night_minutes, is_holiday}]
+    jp_hours_approved: bool = None             # attendance rows for this period are approved facts
 
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine

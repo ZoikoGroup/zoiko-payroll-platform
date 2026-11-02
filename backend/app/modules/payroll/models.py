@@ -1556,6 +1556,10 @@ class PayrollRun(Base):
     # Japan (ZP-JP-ENG-001): approval bound to the frozen JP snapshots + rule
     # pack + engine build; NULL for non-JP runs (f686d5128f8a).
     jp_approval_fingerprint = Column(JSON, nullable=True)
+    # Japan run-level payment kind: SALARY or BONUS. NULL = SALARY. This is
+    # deliberately on the run, not the employee: a worker is not permanently
+    # "a bonus employee" and must return to monthly SI after a bonus run.
+    jp_payment_kind = Column(String(10), nullable=True)
     # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
     # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
     # so one run is never paid twice. Migration 8f90dde5f7b5.
@@ -11780,6 +11784,50 @@ class PayrollJpEmployerRegistration(Base):
 
     def __repr__(self):
         return f"<PayrollJpEmployerRegistration org={self.organization_id} {self.status}>"
+
+
+class PayrollJpWorkConditions(Base):
+    """Effective-dated organisation work conditions (spec §6, JP-012/JP-014):
+    the working-time system, scheduled hours, week start, workplace prefecture
+    and whether the specific minimum wage applies. The engine uses these facts
+    to classify hours and compare the minimum wage; it never infers them."""
+    __tablename__ = "payroll_jp_work_conditions"
+
+    id                             = Column(Integer, primary_key=True, index=True)
+    organization_id                = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id                = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref                   = Column(String(300), nullable=True)
+    previous_version_id            = Column(Integer, ForeignKey("payroll_jp_work_conditions.id", ondelete="SET NULL"), nullable=True)
+    created_by_id                  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id                 = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at                    = Column(DateTime(timezone=True), nullable=True)
+    created_at                     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                     = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+    effective_from                 = Column(Date, nullable=False)
+    effective_to                   = Column(Date, nullable=True)
+    working_time_system            = Column(String(20), nullable=False, default="STANDARD", server_default="STANDARD")
+    week_start_day                 = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    scheduled_daily_minutes        = Column(Integer, nullable=False)
+    scheduled_monthly_hours        = Column(Numeric(6, 2), nullable=False)
+    workplace_prefecture           = Column(String(2), nullable=False)
+    specific_minimum_wage_applies  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status                         = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("working_time_system IN ('STANDARD')", name="ck_jp_work_conditions_system"),
+        sa.CheckConstraint("week_start_day BETWEEN 0 AND 6", name="ck_jp_work_conditions_week_start"),
+        sa.CheckConstraint("scheduled_daily_minutes > 0", name="ck_jp_work_conditions_daily_minutes"),
+        sa.CheckConstraint("scheduled_monthly_hours > 0", name="ck_jp_work_conditions_monthly_hours"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_jp_work_conditions_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_work_conditions_dates"),
+        Index("ix_jp_work_conditions_org_period", "organization_id", "effective_from"),
+        Index("uq_jp_work_conditions_one_active", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpWorkConditions org={self.organization_id} {self.status}>"
 
 
 class PayrollJpMyNumberVault(Base):

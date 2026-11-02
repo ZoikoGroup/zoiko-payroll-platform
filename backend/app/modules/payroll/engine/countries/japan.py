@@ -8,6 +8,7 @@ from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries import japan_content as content
 from app.modules.payroll.engine.jurisdictions.japan import bonus as _bonus
 from app.modules.payroll.engine.jurisdictions.japan import employment_insurance as _ei
+from app.modules.payroll.engine.jurisdictions.japan import labour as _labour
 from app.modules.payroll.engine.jurisdictions.japan import resident_tax as _resident_tax
 from app.modules.payroll.engine.jurisdictions.japan import smr_lifecycle as _lifecycle
 from app.modules.payroll.engine.jurisdictions.japan import social_insurance as _si
@@ -292,6 +293,133 @@ def obligation_base(obligation: str, components: list, classes: dict, pack: _Pac
     return {"base": base, "lines": lines}
 
 
+def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list) -> dict:
+    """Working time, premium floor and minimum wage for a salary payment.
+
+    The facts come only from the active work-conditions row, the approved
+    attendance hours and the signed prefectural minimum-wage row. A missing
+    fact blocks; nothing is inferred from gross pay.
+    """
+    conditions = getattr(ctx, "jp_work_conditions", None)
+    if conditions is None:
+        pack.block("jp_work_conditions", "no Japan work conditions are in force")
+    _status_active(conditions, "jp_work_conditions", pack, ctx.pay_date)
+
+    system = _upper(_field(conditions, "working_time_system"))
+    if system != "STANDARD":
+        pack.block("jp_working_time_system", f"working-time system {system!r} is not certified")
+    week_start = _field(conditions, "week_start_day")
+    if not isinstance(week_start, int) or not 0 <= week_start <= 6:
+        pack.block("jp_week_start_day", f"week start {week_start!r} is not 0..6")
+    prefecture = _upper(_field(conditions, "workplace_prefecture"))
+    if not prefecture:
+        pack.block("jp_workplace_prefecture", "the workplace prefecture is not recorded")
+    scheduled_monthly = _field(conditions, "scheduled_monthly_hours")
+    scheduled_daily = _field(conditions, "scheduled_daily_minutes")
+    if scheduled_daily is None or int(scheduled_daily) <= 0:
+        pack.block("jp_scheduled_daily_minutes", "scheduled daily minutes are not configured")
+
+    daily_hours = pack.require_amount("jp_statutory_hours_per_day")
+    weekly_hours = pack.require_amount("jp_statutory_hours_per_week")
+    threshold_hours = pack.require_amount("jp_overtime_60h_threshold_hours")
+    if min(daily_hours, weekly_hours, threshold_hours) <= ZERO:
+        pack.block("jp_statutory_hours", "statutory hour baselines must be positive")
+    window = pack.require_text("jp_night_window")
+    window_parts = window.split("-", 1)
+    if len(window_parts) != 2 or not all(part.strip() for part in window_parts):
+        pack.block("jp_night_window", f"night window {window!r} is not HH:MM-HH:MM")
+    window_start, window_end = (part.strip() for part in window_parts)
+    rates = {
+        "within_schedule": pack.require_pct_total("jp_overtime_premium_pct") / 100,
+        "statutory": pack.require_pct_total("jp_overtime_premium_pct") / 100,
+        "over60": pack.require_pct_total("jp_overtime_over_60h_premium_pct") / 100,
+        "holiday": pack.require_pct_total("jp_statutory_holiday_premium_pct") / 100,
+        "night": pack.require_pct_total("jp_night_premium_pct") / 100,
+    }
+
+    salary_base = sum((amount for name, amount in salary_components if name == "SALARY"), ZERO)
+    try:
+        hourly = _labour.premium_base_hourly(salary_base, scheduled_monthly)
+    except _labour.JapanLabourBlockedError as exc:
+        pack.block(exc.key, exc.reason)
+
+    min_row = None
+    try:
+        min_row = _labour.minimum_wage_row(
+            getattr(ctx, "slabs", None), prefecture, ctx.pay_date)
+        minimum = _labour.minimum_wage_check(
+            hourly, None if min_row is None else _field(min_row, "flat_amount"), prefecture)
+    except _labour.JapanLabourBlockedError as exc:
+        pack.block(exc.key, exc.reason)
+
+    days = getattr(ctx, "jp_hours", None) or []
+    approved = bool(getattr(ctx, "jp_hours_approved", None))
+    if days and not approved:
+        pack.block("jp_hours_approved",
+                   "attendance hours for this period are not approved facts")
+    prepared = []
+    for raw in days:
+        if isinstance(raw, dict):
+            row = dict(raw)
+            if "night_minutes" not in row and (row.get("check_in") or row.get("check_out")):
+                row["night_minutes"] = _labour.night_minutes(
+                    row.get("check_in"), row.get("check_out"), window_start, window_end)
+            prepared.append(row)
+        else:
+            prepared.append(raw)
+    try:
+        breakdown = _labour.classify_hours(
+            prepared, week_start, daily_minutes=int(daily_hours * 60),
+            weekly_minutes=int(weekly_hours * 60),
+            over60_minutes=int(threshold_hours * 60))
+    except _labour.JapanLabourBlockedError as exc:
+        pack.block(exc.key, exc.reason)
+
+    paid_premium = sum((amount for name, amount in salary_components if name == "OVERTIME"), ZERO)
+    if paid_premium and not days:
+        pack.block("jp_hours_approved",
+                   "overtime is paid but no approved attendance hours are supplied")
+    if breakdown.total_overtime_minutes and not approved:
+        pack.block("jp_hours_approved",
+                   "the attendance hours contain overtime that is not approved")
+    categories = (
+        bool(breakdown.within_schedule_extra_minutes or breakdown.statutory_overtime_minutes
+             or breakdown.over_60_minutes),
+        bool(breakdown.statutory_holiday_minutes),
+        bool(breakdown.night_minutes),
+    )
+    if sum(categories) > 1:
+        pack.block("jp_premium_combination_rule",
+                   "overtime, holiday and night premiums combine but the signed "
+                   "combination rule is not configured")
+    try:
+        floor = _labour.premium_floor(hourly, breakdown, rates)
+        _labour.check_premium(paid_premium, floor)
+    except _labour.JapanLabourBlockedError as exc:
+        pack.block(exc.key, exc.reason)
+
+    return {
+        "prefecture": prefecture,
+        "weekStartDay": week_start,
+        "scheduledDailyMinutes": int(scheduled_daily),
+        "scheduledMonthlyHours": str(scheduled_monthly),
+        "hourlyBase": str(hourly),
+        "minimumWage": str(minimum),
+        "minimumWageRow": _row_ref(min_row),
+        "statutoryLimits": {
+            "dailyMinutes": int(daily_hours * 60),
+            "weeklyMinutes": int(weekly_hours * 60),
+            "over60Minutes": int(threshold_hours * 60),
+        },
+        "premiumRates": {key: str(value) for key, value in rates.items()},
+        "nightWindow": window,
+        "hours": breakdown.as_dict(),
+        "premiumPaid": str(paid_premium),
+        "premiumFloor": str(floor),
+        "hoursApproved": approved,
+    }
+
+
 def _row_ref(row):
     if row is None:
         return None
@@ -407,7 +535,9 @@ def calculate(ctx: PayrollContext) -> dict:
 
     date_of_birth = getattr(ctx, "jp_date_of_birth", None) or getattr(ctx, "date_of_birth", None)
     method = None
+    labour_trace = None
     if payment_kind == PAYMENT_SALARY:
+        labour_trace = _labour_check(ctx, pack, salary_components)
         si = _si.monthly_contributions(
             applicability["enrollment"], applicability["registration"], pack, as_of=ctx.pay_date,
             date_of_birth=date_of_birth, slabs=getattr(ctx, "slabs", None))
@@ -510,6 +640,7 @@ def calculate(ctx: PayrollContext) -> dict:
         "socialInsurance": si.trace,
         "employmentInsurance": ei.trace,
         "residentTax": resident.trace,
+        "labour": labour_trace,
         "bonus": bonus_trace,
         "roundingEvents": rounding_events,
         "rateRowsUsed": {

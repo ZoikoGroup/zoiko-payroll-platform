@@ -20414,11 +20414,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     as_of=period_end or date.today())
             if emp_country == "NL" else None
         )
-        # Japan (ZP-JP-ENG-001 Phase 5): effective-dated employer/worker/SI/EI
-        # rows, notices and prior-bonus figures. Read-only.
+        # Japan (ZP-JP-ENG-001 Phase 5/6): effective-dated employer/worker/SI/EI
+        # rows, notices, prior-bonus figures, work conditions and hours. Read-only.
         japan_inputs = (
             jurisdiction_hooks.call("JP", "calc_inputs", db, None, emp, None,
-                                    as_of=period_end or date.today())
+                                    as_of=period_end or date.today(),
+                                    period=(period_start, period_end)
+                                    if period_start and period_end else None)
             if emp_country == "JP" else None
         )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
@@ -25638,10 +25640,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "NL" else None
     )
-    # Japan (ZP-JP-ENG-001 Phase 5): effective-dated statutory inputs plus the
-    # prior-bonus bases the engine requires. No value is inferred.
+    # Japan (ZP-JP-ENG-001 Phase 5/6): effective-dated statutory inputs, the
+    # prior-bonus bases, work conditions and approved attendance hours. No
+    # value is inferred.
     japan_inputs = (
-        jurisdiction_hooks.call("JP", "calc_inputs", db, run, employee, resolved_pack)
+        jurisdiction_hooks.call(
+            "JP", "calc_inputs", db, run, employee, resolved_pack,
+            period=(run.period_start, run.period_end)
+            if getattr(run, "period_start", None) and getattr(run, "period_end", None)
+            else None)
         if country == "JP" else None
     )
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's

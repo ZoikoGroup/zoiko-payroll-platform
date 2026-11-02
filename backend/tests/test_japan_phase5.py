@@ -1,7 +1,7 @@
 """Japan Phase 5: organisation writers, approvals, run binding and My Number
 vault boundary (ZP-JP-ENG-001)."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 import json
 from types import SimpleNamespace
@@ -206,3 +206,159 @@ def test_assessment_money_is_stored_verbatim_not_derived():
     assert jp._money("12000", "total") == Decimal("12000")
     with pytest.raises(BadRequestException):
         jp._money("12,000", "total")
+
+def _prior_run(db, organization, employee, pay_date, *, status=PayrollStatus.PAID.value,
+               kind="BONUS", health_base=None, pension_base=None, wht_base=None):
+    run = PayrollRun(organization_id=organization.id, period_label=str(pay_date),
+                     period_start=pay_date.replace(day=1), period_end=pay_date,
+                     pay_date=pay_date, status=status)
+    db.add(run)
+    db.flush()
+    snapshot = {"jp_payment_kind": kind}
+    if kind == "BONUS":
+        snapshot["jp_bonus"] = {
+            "jp_bonus_health_sba_base": health_base or "0",
+            "jp_bonus_pension_sba_base": pension_base or "0",
+        }
+    if wht_base is not None:
+        snapshot["jp_wht_base"] = wht_base
+    db.add(PayslipItem(payroll_run_id=run.id, employee_id=employee.id,
+                       organization_id=organization.id, employee_name=employee.name,
+                       country_code="JP", jp_calculation_snapshot=snapshot))
+    db.commit()
+    return run
+
+
+def test_bonus_priors_read_nested_cap_bases(db, organization, employee):
+    _prior_run(db, organization, employee, date(2026, 5, 25),
+               health_base="230000", pension_base="300000")
+    _prior_run(db, organization, employee, date(2026, 6, 10),
+               health_base="100000", pension_base="200000")
+
+    priors = jp._jp_bonus_priors(db, organization.id, employee.id, date(2026, 6, 25))
+    assert priors["ytd_health_sba"] == Decimal("330000")
+    assert priors["month_pension_sba"] == Decimal("200000")
+
+
+def test_salary_plus_bonus_loads_prior_bonus_figures(db, organization, employee, monkeypatch):
+    employee.compliance_fields = {"jp_components": {"BONUS": "500000"}}
+    db.commit()
+    called = []
+    monkeypatch.setattr(jp, "_jp_one_active", lambda *_a, **_k: None)
+    monkeypatch.setattr(jp, "_jp_events_for_month", lambda *_a, **_k: [])
+    monkeypatch.setattr(jp, "_jp_bonus_priors", lambda *_a, **_k: called.append(True) or {
+        "ytd_health_sba": Decimal("1"), "month_pension_sba": Decimal("2"),
+        "prior_month_pay_after_si": Decimal("3"),
+    })
+
+    inputs = jp.resolve_jp_calc_inputs(db, organization.id, employee, date(2026, 6, 25))
+    assert called
+    assert inputs["jp_payment_kind"] == "SALARY"
+    assert inputs["jp_prior_month_pay_after_si"] == Decimal("3")
+
+
+def test_prior_salary_is_previous_calendar_month_only(db, organization, employee):
+    _prior_run(db, organization, employee, date(2026, 2, 25), kind="SALARY", wht_base="999999")
+    _prior_run(db, organization, employee, date(2026, 3, 25), kind="SALARY", wht_base="300000")
+
+    priors = jp._jp_bonus_priors(db, organization.id, employee.id, date(2026, 4, 25))
+    assert priors["prior_month_pay_after_si"] == Decimal("300000")
+
+    assert jp._jp_bonus_priors(
+        db, organization.id, employee.id, date(2026, 5, 25))["prior_month_pay_after_si"] is None
+
+
+def test_bonus_priors_ignore_draft_and_include_same_day_earlier_run(db, organization, employee):
+    first = _prior_run(db, organization, employee, date(2026, 6, 25),
+                       health_base="100000", pension_base="100000")
+    current = _prior_run(db, organization, employee, date(2026, 6, 25),
+                         health_base="0", pension_base="0")
+    _prior_run(db, organization, employee, date(2026, 6, 25), status=PayrollStatus.DRAFT.value,
+               health_base="999999", pension_base="999999")
+
+    priors = jp._jp_bonus_priors(db, organization.id, employee.id, date(2026, 6, 25),
+                                 current_run_id=current.id)
+    assert priors["ytd_health_sba"] == Decimal("100000")
+    assert priors["month_pension_sba"] == Decimal("100000")
+    assert first.id != current.id
+
+
+def test_payment_kind_is_run_level_not_employee_level(db, organization, employee, monkeypatch):
+    employee.compliance_fields = {"jp_components": {"BONUS": "500000"},
+                                  "jp_payment_kind": "BONUS"}
+    db.commit()
+    monkeypatch.setattr(jp, "_jp_one_active", lambda *_a, **_k: None)
+    monkeypatch.setattr(jp, "_jp_events_for_month", lambda *_a, **_k: [])
+    monkeypatch.setattr(jp, "_jp_bonus_priors", lambda *_a, **_k: {})
+
+    plain = PayrollRun(organization_id=organization.id, period_label="Jul 2026",
+                       period_start=date(2026, 7, 1), period_end=date(2026, 7, 31),
+                       pay_date=date(2026, 7, 25), status="Draft", jp_payment_kind=None)
+    bonus = PayrollRun(organization_id=organization.id, period_label="Jul 2026 bonus",
+                       period_start=date(2026, 7, 1), period_end=date(2026, 7, 31),
+                       pay_date=date(2026, 7, 25), status="Draft", jp_payment_kind="BONUS")
+
+    assert jp.resolve_jp_calc_inputs(
+        db, organization.id, employee, date(2026, 7, 25), run=plain)["jp_payment_kind"] == "SALARY"
+    assert jp.resolve_jp_calc_inputs(
+        db, organization.id, employee, date(2026, 7, 25), run=bonus)["jp_payment_kind"] == "BONUS"
+
+def test_run_preflight_accepts_its_own_frozen_snapshot(db, organization, employee):
+    from app.modules.payroll import japan_org_router
+
+    run = PayrollRun(organization_id=organization.id, period_label="Jun 2026",
+                     period_start=date(2026, 6, 1), period_end=date(2026, 6, 30),
+                     pay_date=date(2026, 6, 25), status="Review")
+    db.add(run)
+    db.flush()
+    db.add(PayslipItem(payroll_run_id=run.id, employee_id=employee.id,
+                       organization_id=organization.id, employee_name=employee.name,
+                       country_code="JP", jp_calculation_snapshot=_snapshot(employee.id)["jp_calculation_snapshot"]))
+    db.commit()
+
+    result = japan_org_router.run_preflight(
+        run.id, current_user=SimpleNamespace(id=1, organization_id=organization.id), db=db)
+    assert result["status"] == "OK"
+    assert result["checks"] == [{"severity": "INFO", "code": "JP_NOT_APPROVED",
+                                 "message": "The run has no stored Japan approval fingerprint yet."}]
+
+def test_resident_tax_notice_rejects_null_or_impossible_month(db, organization, employee):
+    amounts = {f"2026-{month:02d}": "1000" for month in range(1, 13)}
+    body = {
+        "municipality_code": "131016", "fiscal_notice_year": 2026, "notice_id": "N-1",
+        "received_on": date(2026, 5, 20), "first_deduction_month": date(2026, 6, 1),
+        "monthly_amounts": amounts, "total_amount": "12000", "source_hash": "a" * 64,
+    }
+    with pytest.raises(BadRequestException, match="must be an amount"):
+        jp.record_resident_tax_assessment(
+            db, organization.id, employee.id,
+            {**body, "monthly_amounts": {**amounts, "2026-01": None}}, 1)
+    bad_month = dict(amounts)
+    bad_month.pop("2026-12")
+    bad_month["2026-13"] = "1000"
+    with pytest.raises(BadRequestException, match="YYYY-MM"):
+        jp.record_resident_tax_assessment(
+            db, organization.id, employee.id,
+            {**body, "monthly_amounts": bad_month}, 1)
+
+
+def test_legacy_unbound_my_number_still_reveals(db, organization, employee, monkeypatch):
+    monkeypatch.setattr(settings, "JP_MY_NUMBER_KEYRING", json.dumps({"1": KEY}))
+    monkeypatch.setattr(settings, "JP_MY_NUMBER_FINGERPRINT_KEY", FINGERPRINT_KEY)
+    from app.modules.payroll.models import PayrollJpMyNumberVault
+
+    number = _number()
+    ciphertext, version = mn.encrypt(number)
+    row = PayrollJpMyNumberVault(
+        organization_id=organization.id, employee_id=employee.id,
+        subject_type="EMPLOYEE", subject_ref="self", ciphertext=ciphertext,
+        key_version=version, fingerprint=mn.fingerprint(number),
+        purpose="TAX_SOCIAL_INSURANCE", collected_at=datetime.utcnow(),
+        status="ACTIVE", created_by_id=1)
+    db.add(row)
+    db.commit()
+    jp.request_my_number_reveal(db, organization.id, row.id, "Legacy row", 1)
+    db.commit()
+    jp.approve_my_number_reveal(db, organization.id, row.id, 2)
+    db.commit()
+    assert jp.reveal_my_number(db, organization.id, row.id, 2)["myNumber"] == number

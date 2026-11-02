@@ -118,6 +118,32 @@ def approve_employer_registration(registration_id: int,
     return _commit(db, row)
 
 
+# ── work conditions ────────────────────────────────────────────────────────
+
+@router.get("/work-conditions", summary="Every version of your Japan work conditions")
+def list_work_conditions(current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    return _list(db, jp._jp_models().PayrollJpWorkConditions, _org_id(current_user))
+
+
+@router.post("/work-conditions", summary="Record DRAFT Japan work conditions (org admin)")
+def create_work_conditions(body: Dict[str, Any] = Body(...),
+                           current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    row = jp.record_work_conditions(db, _org_id(current_user), body, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/work-conditions/{conditions_id}/approve",
+             summary="Approve DRAFT Japan work conditions (second person)")
+def approve_work_conditions(conditions_id: int,
+                            current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    row = jp.approve_work_conditions(db, _org_id(current_user), conditions_id,
+                                     _actor(current_user))
+    return _commit(db, row)
+
+
 # ── worker tax profile ──────────────────────────────────────────────────────
 
 @router.get("/employees/{employee_id}/tax-profiles",
@@ -314,10 +340,12 @@ def run_preflight(run_id: int, current_user=Depends(get_current_payroll_operator
                                       PayrollRun.organization_id == org_id).first()
     if run is None:
         raise NotFoundException(f"Run #{run_id} not found in this organisation.")
-    payslips = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
+    payslips = (db.query(PayslipItem)
+                .filter(PayslipItem.payroll_run_id == run.id,
+                        PayslipItem.country_code == "JP").all())
     checks = []
     for item in payslips:
-        if not (item.jp_calculation_snapshot or {}).get("jp_calculation_snapshot"):
+        if not item.jp_calculation_snapshot:
             checks.append({"severity": "BLOCK", "code": "JP_SNAPSHOT_MISSING",
                            "message": f"Payslip #{item.id} has no frozen Japan calculation snapshot."})
     stored = getattr(run, "jp_approval_fingerprint", None)
