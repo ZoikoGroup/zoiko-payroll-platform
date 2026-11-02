@@ -45,7 +45,10 @@ JP_TABLES = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
              "payroll_jp_social_insurance_enrollments", "payroll_jp_social_insurance_events",
              "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments",
              # Japan P6 (a7c4e9d1b2f8, a1a748b50902).
-             "payroll_jp_work_conditions", "payroll_jp_attendance_approvals"}
+             "payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
+             # Japan P8 (41a1fafbbfdc).
+             "payroll_jp_run_exceptions", "payroll_jp_obligations",
+             "payroll_jp_yea_declarations", "payroll_jp_yea_cases"}
 
 
 def _load(prefix):

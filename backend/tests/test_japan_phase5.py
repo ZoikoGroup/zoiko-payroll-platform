@@ -149,6 +149,13 @@ def test_run_approval_binds_every_frozen_japan_snapshot(db, organization, employ
     db.add(slip)
     db.commit()
 
+    # Phase 8: the run's exceptions need a second person's approval first.
+    from app.modules.payroll import japan_lifecycle
+    with pytest.raises(HTTPException):
+        jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
+    for exception in japan_lifecycle.jp_run_exceptions(db, run):
+        japan_lifecycle.approve_jp_run_exception(
+            db, organization_id=organization.id, run_id=run.id, key=exception["key"], approver_id=2)
     jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
     assert run.jp_approval_fingerprint
 

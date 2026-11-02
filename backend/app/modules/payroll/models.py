@@ -11866,6 +11866,133 @@ class PayrollJpAttendanceApproval(Base):
         return f"<PayrollJpAttendanceApproval employee={self.employee_id} {self.period_start} {self.status}>"
 
 
+class PayrollJpRunException(Base):
+    """A second person's approval of one computed Japan run exception
+    (ZP-JP-ENG-001 §8). Bound to the run's payload fingerprint at approval:
+    if the payslips change, the approval no longer covers them (41a1fafbbfdc)."""
+    __tablename__ = "payroll_jp_run_exceptions"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    run_id              = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    exception_key       = Column(String(120), nullable=False)
+    code                = Column(String(40), nullable=False)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="SET NULL"), nullable=True)
+    detail              = Column(Text, nullable=True)
+    payload_fingerprint = Column(String(64), nullable=False)
+    note                = Column(String(500), nullable=True)
+    approved_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at         = Column(DateTime(timezone=True), nullable=False)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uq_jp_run_exception_approval", "run_id", "exception_key", "payload_fingerprint", unique=True),
+    )
+
+
+class PayrollJpObligation(Base):
+    """A remittance a PAID Japan run creates, written once per run and key:
+    withholding (10th of the next month), social insurance (end of the next
+    month), resident tax per municipality (10th of the next month)."""
+    __tablename__ = "payroll_jp_obligations"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    obligation_type  = Column(String(30), nullable=False)
+    obligation_key   = Column(String(80), nullable=False)
+    period           = Column(String(7), nullable=False)
+    municipality_code = Column(String(6), nullable=True)
+    due_on           = Column(Date, nullable=True)        # NULL: the due-date rule is not signed
+    amount           = Column(Numeric(14, 0), nullable=False)
+    source_run_id    = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    status           = Column(String(12), nullable=False, default="CREATED", server_default="CREATED")
+    channel          = Column(String(40), nullable=True)
+    receipt_ref      = Column(String(100), nullable=True)
+    detail           = Column(_JP_JSON, nullable=True)
+    created_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at      = Column(DateTime(timezone=True), nullable=True)
+    submitted_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("obligation_type IN ('WHT_REMITTANCE', 'SI_REMITTANCE', 'RESIDENT_TAX_REMITTANCE')",
+                           name="ck_jp_obligation_type"),
+        sa.CheckConstraint("status IN ('CREATED', 'APPROVED', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'CORRECTED')",
+                           name="ck_jp_obligation_status"),
+        sa.CheckConstraint("amount >= 0", name="ck_jp_obligation_amount"),
+        Index("uq_jp_obligation_run_key", "source_run_id", "obligation_key", unique=True),
+        Index("ix_jp_obligation_org_due", "organization_id", "due_on"),
+    )
+
+
+class PayrollJpYeaDeclaration(Base):
+    """An employee's year-end adjustment declaration (S3): versioned, approved
+    by a second person; only APPROVED declarations reach the calculation."""
+    __tablename__ = "payroll_jp_yea_declarations"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False)
+    tax_year            = Column(SmallInteger, nullable=False)
+    declaration_type    = Column(String(30), nullable=False)
+    payload             = Column(_JP_JSON, nullable=False)
+    evidence_ref        = Column(String(300), nullable=True)
+    status              = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    previous_version_id = Column(Integer, ForeignKey("payroll_jp_yea_declarations.id", ondelete="SET NULL"), nullable=True)
+    created_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("declaration_type IN ('SPOUSE', 'DEPENDANTS', 'INSURANCE_PREMIUMS', 'HOUSING_LOAN', "
+                           "'PREVIOUS_EMPLOYER', 'SMALL_ENTERPRISE_MUTUAL_AID')",
+                           name="ck_jp_yea_declaration_type"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_jp_yea_declaration_status"),
+        sa.CheckConstraint("tax_year >= 2000", name="ck_jp_yea_declaration_year"),
+        Index("ix_jp_yea_declaration_employee_year", "organization_id", "employee_id", "tax_year"),
+    )
+
+
+class PayrollJpYeaCase(Base):
+    """One year-end adjustment per employee and year (S3):
+    OPEN -> CALCULATED -> REVIEWED (second person) -> APPLIED -> LOCKED, or
+    EXCLUDED with the reason. VOID frees the year for a correction case."""
+    __tablename__ = "payroll_jp_yea_cases"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False)
+    tax_year        = Column(SmallInteger, nullable=False)
+    state           = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+    excluded_reason = Column(String(300), nullable=True)
+    annual_income   = Column(Numeric(14, 0), nullable=True)
+    tax_withheld    = Column(Numeric(14, 0), nullable=True)
+    si_withheld     = Column(Numeric(14, 0), nullable=True)
+    annual_tax      = Column(Numeric(14, 0), nullable=True)
+    difference      = Column(Numeric(14, 0), nullable=True)
+    facts           = Column(_JP_JSON, nullable=True)
+    result          = Column(_JP_JSON, nullable=True)
+    applied_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    created_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    calculated_at   = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at     = Column(DateTime(timezone=True), nullable=True)
+    applied_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    applied_at      = Column(DateTime(timezone=True), nullable=True)
+    locked_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("state IN ('OPEN', 'CALCULATED', 'REVIEWED', 'APPLIED', 'LOCKED', 'EXCLUDED', 'VOID')",
+                           name="ck_jp_yea_case_state"),
+        sa.CheckConstraint("tax_year >= 2000", name="ck_jp_yea_case_year"),
+        Index("uq_jp_yea_case_one_live", "organization_id", "employee_id", "tax_year", unique=True,
+              postgresql_where=text("state <> 'VOID'"), sqlite_where=text("state <> 'VOID'")),
+    )
+
+
 class PayrollJpMyNumberVault(Base):
     """The My Number boundary (spec §7/§12): one encrypted 12-digit My Number
     per employee or dependant subject, with its key version, a keyed HMAC

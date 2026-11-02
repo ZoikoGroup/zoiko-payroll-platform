@@ -481,3 +481,183 @@ def delete_my_number(vault_id: int,
     row = jp.delete_my_number(db, _org_id(current_user), vault_id, _actor(current_user))
     db.commit()
     return {"id": row.id, "status": row.status, "deletedAt": row.deleted_at}
+
+
+# ── Phase 8: run exceptions, corrections, journal ───────────────────────────
+
+@router.get("/runs/{run_id}/exceptions", summary="Japan run exceptions and their approvals")
+def list_run_exceptions(run_id: int, current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_lifecycle
+    return japan_lifecycle.list_jp_run_exceptions(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/exceptions/approve",
+             summary="Approve one Japan run exception (a second person, never the run's preparer)")
+def approve_run_exception(run_id: int, body: Dict[str, Any] = Body(...),
+                          current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_lifecycle
+    result = japan_lifecycle.approve_jp_run_exception(
+        db, organization_id=_org_id(current_user), run_id=run_id, key=str(body.get("key") or ""),
+        approver_id=_actor(current_user), note=body.get("note"))
+    db.commit()
+    return result
+
+
+@router.post("/payslips/{payslip_id}/corrections",
+             summary="Correct a committed Japan payslip (blocked until jp_correction_policy is signed)")
+def create_correction(payslip_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_lifecycle
+    result = japan_lifecycle.create_jp_correction(
+        db, organization_id=_org_id(current_user), payslip_item_id=payslip_id,
+        reason=body.get("reason") or "", changes=body.get("changes") or {}, actor_id=_actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/runs/{run_id}/journal", summary="Journal lines for a committed Japan run (account map in the body)")
+def run_journal(run_id: int, body: Dict[str, Any] = Body(default={}),
+                current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_journal
+    return japan_journal.build_jp_journal(db, _org_id(current_user), run_id, body.get("accounts"))
+
+
+# ── Phase 8: year-end adjustment ────────────────────────────────────────────
+
+@router.get("/employees/{employee_id}/year-end/declarations", summary="Year-end declarations of an employee")
+def list_yea_declarations(employee_id: int, tax_year: Optional[int] = None,
+                          current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    return japan_year_end.list_declarations(db, _org_id(current_user), employee_id, tax_year)
+
+
+@router.post("/employees/{employee_id}/year-end/declarations", summary="Record a DRAFT year-end declaration")
+def create_yea_declaration(employee_id: int, body: Dict[str, Any] = Body(...),
+                           current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    row = japan_year_end.record_declaration(db, _org_id(current_user), employee_id, body, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/year-end/declarations/{declaration_id}/approve",
+             summary="Approve a year-end declaration (second person)")
+def approve_yea_declaration(declaration_id: int, current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    row = japan_year_end.approve_declaration(db, _org_id(current_user), declaration_id, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.get("/year-end/{tax_year}/cases", summary="Year-end adjustment cases for a tax year")
+def list_yea_cases(tax_year: int, current_user=Depends(get_current_payroll_operator),
+                   db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    return japan_year_end.list_cases(db, _org_id(current_user), tax_year)
+
+
+@router.post("/employees/{employee_id}/year-end/{tax_year}/cases", summary="Open a year-end adjustment case")
+def open_yea_case(employee_id: int, tax_year: int, current_user=Depends(get_current_org_admin),
+                  db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    row = japan_year_end.open_case(db, _org_id(current_user), employee_id, tax_year, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/year-end/cases/{case_id}/calculate", summary="Calculate a year-end case (blocks until G1 tables)")
+def calculate_yea_case(case_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    row = japan_year_end.calculate_case(db, _org_id(current_user), case_id, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/year-end/cases/{case_id}/review", summary="Review a calculated year-end case (second person)")
+def review_yea_case(case_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    row = japan_year_end.review_case(db, _org_id(current_user), case_id, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/year-end/cases/{case_id}/apply", summary="Apply a reviewed year-end case to an open salary run")
+def apply_yea_case(case_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                   db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    try:
+        run_id = int(body.get("runId") or body.get("run_id"))
+    except (TypeError, ValueError):
+        raise BadRequestException("runId is required.")
+    row = japan_year_end.apply_case(db, _org_id(current_user), case_id, run_id, _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/year-end/cases/{case_id}/void", summary="Void a year-end case that is not locked")
+def void_yea_case(case_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_year_end
+    row = japan_year_end.void_case(db, _org_id(current_user), case_id, _actor(current_user))
+    return _commit(db, row)
+
+
+# ── Phase 8: remittance obligations and filing previews ─────────────────────
+
+@router.get("/obligations", summary="Japan remittance obligations (withholding, social insurance, resident tax)")
+def list_obligations(status: Optional[str] = None, current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    return japan_filing.list_obligations(db, _org_id(current_user), status)
+
+
+@router.post("/obligations/{obligation_id}/approve", summary="Approve a remittance (second person)")
+def approve_obligation(obligation_id: int, current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    result = japan_filing.approve_obligation(db, _org_id(current_user), obligation_id, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/obligations/{obligation_id}/submit", summary="Record that an approved remittance was made")
+def submit_obligation(obligation_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    result = japan_filing.submit_obligation(db, _org_id(current_user), obligation_id, body.get("channel") or "")
+    db.commit()
+    return result
+
+
+@router.post("/obligations/{obligation_id}/receipt", summary="Record the receipt of a submitted remittance")
+def obligation_receipt(obligation_id: int, body: Dict[str, Any] = Body(...),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    result = japan_filing.record_obligation_receipt(
+        db, _org_id(current_user), obligation_id, accepted=bool(body.get("accepted")),
+        receipt_ref=body.get("receiptRef") or body.get("receipt_ref"))
+    db.commit()
+    return result
+
+
+@router.get("/filings/withholding-certificate/{case_id}", summary="Withholding certificate preview (JSON)")
+def withholding_certificate(case_id: int, current_user=Depends(get_current_payroll_operator),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    return japan_filing.withholding_certificate(db, _org_id(current_user), case_id)
+
+
+@router.get("/filings/salary-payment-reports/{tax_year}",
+            summary="Salary payment reports by municipality (JSON preview)")
+def salary_payment_reports(tax_year: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    return japan_filing.salary_payment_reports(db, _org_id(current_user), tax_year)
+
+
+@router.get("/filings/bonus-report/{paid_on}", summary="JPS bonus payment report preview (JSON)")
+def bonus_report(paid_on: str, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    return japan_filing.bonus_payment_report(db, _org_id(current_user), paid_on)
+
+
+@router.get("/filings/annual-determination/{year}", summary="Annual determination report preview (JSON)")
+def annual_determination(year: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import japan_filing
+    return japan_filing.annual_determination_report(db, _org_id(current_user), year)

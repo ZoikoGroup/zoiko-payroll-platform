@@ -411,6 +411,22 @@ def _jp_hours_for_period(db: Session, organization_id: int, employee_id: int,
     return out
 
 
+def _jp_year_end_inputs(db: Session, organization_id: int, employee_id: int, run) -> dict:
+    """The REVIEWED-and-APPLIED year-end case targeted at this run, if any."""
+    run_id = getattr(run, "id", None)
+    if run_id is None:
+        return {"jp_year_end_difference": None, "jp_yea_case_id": None}
+    m = _jp_models()
+    case = (db.query(m.PayrollJpYeaCase)
+            .filter(m.PayrollJpYeaCase.organization_id == organization_id,
+                    m.PayrollJpYeaCase.employee_id == employee_id,
+                    m.PayrollJpYeaCase.applied_run_id == run_id,
+                    m.PayrollJpYeaCase.state.in_(("APPLIED", "LOCKED"))).first())
+    if case is None:
+        return {"jp_year_end_difference": None, "jp_yea_case_id": None}
+    return {"jp_year_end_difference": case.difference, "jp_yea_case_id": case.id}
+
+
 def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: date,
                            run=None, period=None) -> dict:
     """Resolve every Japan input effective at ``as_of``. No value is inferred:
@@ -472,6 +488,7 @@ def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: d
         "jp_month_pension_sba": priors.get("month_pension_sba"),
         "jp_social_insurance_events": _jp_events_for_month(
             db, organization_id, employee.id, as_of),
+        **_jp_year_end_inputs(db, organization_id, employee.id, run),
         "jp_work_conditions": work_conditions,
         "jp_hours": hours,
         "jp_hours_approved": (bool(hours) and _jp_hours_approved(
@@ -503,10 +520,10 @@ def _json_safe(value):
 
 _JP_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime",
                     "additional_compensation", "jp_prior_month_pay_after_si",
-                    "jp_ytd_health_sba", "jp_month_pension_sba")
+                    "jp_ytd_health_sba", "jp_month_pension_sba", "jp_year_end_difference")
 _JP_CTX_PLAIN = ("pay_frequency", "jp_organization_id", "jp_employee_id",
                  "jp_components", "jp_payment_kind", "unpaid_leave_days",
-                 "date_of_joining")
+                 "date_of_joining", "jp_yea_case_id")
 _JP_CTX_DATES = ("pay_date", "period_start", "period_end", "jp_date_of_birth",
                  "date_of_birth")
 _JP_WORK_CONDITION_FIELDS = (
@@ -517,10 +534,13 @@ _JP_WORK_CONDITION_FIELDS = (
 )
 _JP_RATE_FIELDS = ("employee_rate_pct", "employer_rate_pct", "flat_amount",
                    "text_value", "effective_from", "effective_to")
+# Every TaxSlab field an engine module reads: a replay (correction, year-end)
+# must select the same rows - the withholding column, the prefecture of a
+# health or minimum-wage row and any formula included.
 _JP_SLAB_FIELDS = ("rule_type", "filing_status", "tax_regime", "assessment_basis",
-                   "tax_table_number", "rate_pct", "employer_rate_pct", "min_amount",
-                   "max_amount", "flat_amount", "rate_label", "effective_from",
-                   "effective_to")
+                   "tax_column", "tax_table_number", "jurisdiction_state", "rate_pct",
+                   "employer_rate_pct", "min_amount", "max_amount", "flat_amount",
+                   "formula_expression", "rate_label", "effective_from", "effective_to")
 _JP_PROFILE_FIELDS = ("id", "residency_status", "declaration_class",
                       "declaration_received_on", "dependants_count", "dependant_facts",
                       "municipality_code", "residence_prefecture",
@@ -608,6 +628,78 @@ def jp_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]
     return _json_safe(snap)
 
 
+# Frozen values are JSON-safe strings; the engine needs dates and Decimals back.
+_JP_THAW_DATE_KEYS = {"effective_from", "effective_to", "declaration_received_on",
+                      "qualification_date", "loss_date", "received_on",
+                      "first_deduction_month", "bonus_paid_on", "report_due_on", "date"}
+_JP_THAW_DECIMAL_KEYS = {"employee_rate_pct", "employer_rate_pct", "flat_amount", "rate_pct",
+                         "min_amount", "max_amount", "smr_health_amount", "smr_pension_amount",
+                         "total_amount", "scheduled_monthly_hours", "sba_amount"}
+
+
+def _jp_thaw_value(key, value):
+    if value is None or value == "":
+        return value
+    if key in _JP_THAW_DATE_KEYS and isinstance(value, str):
+        return date.fromisoformat(value[:10])
+    if key in _JP_THAW_DECIMAL_KEYS and not isinstance(value, Decimal):
+        return Decimal(str(value))
+    return value
+
+
+def _jp_thaw_row(facts):
+    from types import SimpleNamespace
+
+    if facts is None:
+        return None
+    return SimpleNamespace(**{k: _jp_thaw_value(k, v) for k, v in facts.items()})
+
+
+def jp_thaw_context(frozen: dict):
+    """Rebuild the PayrollContext a payslip was calculated with, from its
+    frozen snapshot (jp_freeze_context). Used by corrections and the
+    year-end adjustment; nothing is re-read from the live tables."""
+    from types import SimpleNamespace
+
+    from app.modules.payroll.engine.base import PayrollContext
+
+    if not frozen or frozen.get("version") != 1:
+        raise BadRequestException("This payslip has no replayable Japan calculation context.")
+    raw = dict(frozen.get("ctx") or {})
+    ctx = {}
+    for key, value in raw.items():
+        if key in _JP_CTX_DECIMALS:
+            ctx[key] = None if value in (None, "") else Decimal(str(value))
+        elif key in _JP_CTX_DATES:
+            ctx[key] = None if value in (None, "") else date.fromisoformat(str(value)[:10])
+        else:
+            ctx[key] = value
+    attendance = frozen.get("attendance") or {}
+    return PayrollContext(
+        **ctx, country=JP,
+        jp_worker_tax_profile=_jp_thaw_row(frozen.get("profile")),
+        jp_employer_registration=_jp_thaw_row(frozen.get("registration")),
+        jp_social_insurance_enrollment=_jp_thaw_row(frozen.get("enrollment")),
+        jp_employment_insurance_profile=_jp_thaw_row(frozen.get("employmentInsurance")),
+        jp_resident_tax_assessments=[_jp_thaw_row(r) for r in frozen.get("residentTaxAssessments") or []],
+        jp_social_insurance_events=[_jp_thaw_row(r) for r in frozen.get("socialInsuranceEvents") or []],
+        jp_work_conditions=_jp_thaw_row(frozen.get("workConditions")),
+        jp_hours=list(attendance.get("days") or []),
+        jp_hours_approved=bool(attendance.get("approved")),
+        rate_map={k: SimpleNamespace(**{f: _jp_thaw_value(f, v) for f, v in row.items()})
+                  for k, row in (frozen.get("rateMap") or {}).items()},
+        slabs=[SimpleNamespace(**{f: _jp_thaw_value(f, v) for f, v in row.items()})
+               for row in frozen.get("slabs") or []],
+    )
+
+
+def jp_replay(frozen: dict):
+    """Recalculate a frozen Japan payslip exactly as it was calculated."""
+    from app.modules.payroll.engine.resolver import calculate_payroll
+
+    return calculate_payroll(jp_thaw_context(frozen), frozen.get("calculationMode") or "standard")
+
+
 def jp_approval_fingerprint(db: Session, run) -> Optional[str]:
     import hashlib
     import json
@@ -654,6 +746,19 @@ def before_run_transition(db: Session, run, next_status, actor_id: Optional[int]
             raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
                 f"Japan: {missing} payslip(s) have no frozen JP calculation snapshot - "
                 "recalculate the run before approval."))
+        from app.modules.payroll import japan_filing, japan_lifecycle as lifecycle
+
+        japan_filing.refuse_uncertified_remittance_scheme(db, run)
+        from app.modules.payroll import japan_year_end
+
+        japan_year_end.require_cases_reflected(db, run)
+        open_items = [e for e in lifecycle.jp_run_exceptions(db, run) if not e["approved"]]
+        if open_items:
+            listing = "; ".join(f"{e['code']} ({'employee #' + str(e['employeeId']) if e['employeeId'] else 'run'})"
+                                for e in open_items)
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                f"Japan: {len(open_items)} exception(s) need a second person's approval "
+                f"before the run is approved: {listing}"))
         run.jp_approval_fingerprint = jp_approval_fingerprint(db, run)
         return
     if next_status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
@@ -675,6 +780,11 @@ def before_run_transition(db: Session, run, next_status, actor_id: Optional[int]
             lifecycle.record_bonus_obligation(
                 db, organization_id=run.organization_id, employee_id=item.employee_id,
                 jp_result=snap, paid_on=run.pay_date, actor_id=actor_id)
+    from app.modules.payroll import japan_filing, japan_year_end
+
+    japan_filing.refuse_uncertified_remittance_scheme(db, run)
+    japan_filing.record_run_obligations(db, run, actor_id)
+    japan_year_end.lock_cases_for_run(db, run)
 
 
 # ---------------------------------------------------------------------

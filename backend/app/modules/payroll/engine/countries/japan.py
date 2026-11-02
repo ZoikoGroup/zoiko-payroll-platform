@@ -583,7 +583,17 @@ def calculate(ctx: PayrollContext) -> dict:
     bonus_ei_employer = bonus["ei"].employer if bonus else ZERO
     bonus_wht = bonus["wht"].tax if bonus else ZERO
 
-    tds = wht.tax + bonus_wht
+    yea_difference = None
+    if getattr(ctx, "jp_year_end_difference", None) is not None:
+        if payment_kind != PAYMENT_SALARY:
+            pack.block("jp_year_end_difference",
+                       "a year-end adjustment is applied with a salary payment, never a bonus payment")
+        if getattr(ctx, "jp_yea_case_id", None) is None:
+            pack.block("jp_yea_case_id", "a year-end difference needs its reviewed case")
+        yea_difference = _dec(ctx.jp_year_end_difference)
+    # The year-end difference is settled through withholding: a refund lowers
+    # this payment's tax, an under-withholding raises it (S3).
+    tds = wht.tax + bonus_wht - (yea_difference or ZERO)
     jp_employee_total = (si.employee_total + ei.employee + resident.amount
                          + bonus_si_employee + bonus_ei_employee)
     jp_employer_total = si.employer_total + ei.employer + bonus_si_employer + bonus_ei_employer
@@ -656,6 +666,9 @@ def calculate(ctx: PayrollContext) -> dict:
         "residentTax": resident.trace,
         "labour": labour_trace,
         "bonus": bonus_trace,
+        "yearEnd": None if yea_difference is None else {
+            "caseId": ctx.jp_yea_case_id, "difference": str(yea_difference),
+            "direction": "REFUND" if yea_difference > ZERO else ("COLLECT" if yea_difference < ZERO else "NONE")},
         "roundingEvents": rounding_events,
         "rateRowsUsed": {
             "withholding": _row_ref(wht.row),
@@ -699,6 +712,8 @@ def calculate(ctx: PayrollContext) -> dict:
                 "version": resident.version,
             },
             "jp_bonus": bonus_result,
+            "jp_yea_difference": None if yea_difference is None else str(yea_difference),
+            "jp_yea_case_id": None if yea_difference is None else ctx.jp_yea_case_id,
             "jp_employee_total": str(jp_employee_total),
             "jp_employer_total": str(jp_employer_total),
             "trace": trace,

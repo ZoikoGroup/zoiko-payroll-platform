@@ -1,14 +1,62 @@
+import { useState } from "react";
 import { X } from "lucide-react";
 import {
   applyJpSocialInsuranceEvent, approveJpAttendanceApproval, approveJpEmploymentInsurance,
   approveJpResidentTaxNotice, approveJpSocialInsurance, approveJpSocialInsuranceEvent, approveJpTaxProfile,
+  approveJpYeaDeclaration, createJpYeaDeclaration, listJpYeaDeclarations, openJpYeaCase,
   createJpEmploymentInsurance, createJpResidentTaxNotice, createJpSocialInsurance, createJpSocialInsuranceEvent,
   createJpTaxProfile, listJpAttendanceApprovals, listJpEmploymentInsurance, listJpResidentTaxNotices,
   listJpSocialInsurance, listJpSocialInsuranceEvents, listJpTaxProfiles, requestJpAttendanceApproval,
 } from "../../../service/payrollService";
-import JPRecordSection, { isDraft, periodCol, statusCol } from "../../../components/jurisdiction/japan/JPRecordSection";
+import JPRecordSection, { btn, isDraft, periodCol, statusCol } from "../../../components/jurisdiction/japan/JPRecordSection";
 import { formatJpyAuto } from "../../../components/jurisdiction/japan/jpComponentConfig";
 import JPMyNumberField from "./JPMyNumberField";
+
+// Year-end declaration fields by type; the backend accepts only these.
+const YEA_FIELDS = {
+  SPOUSE: { spouse_income: "spouse_income" },
+  DEPENDANTS: {},
+  INSURANCE_PREMIUMS: { life_premium: "life", earthquake_premium: "earthquake", social_insurance_paid: "social_insurance_paid" },
+  HOUSING_LOAN: { housing_loan_credit: "credit" },
+  PREVIOUS_EMPLOYER: { previous_income: "income", previous_withheld: "withheld", previous_social_insurance: "social_insurance" },
+  SMALL_ENTERPRISE_MUTUAL_AID: { mutual_aid: "amount" },
+};
+
+function declarationPayload(values) {
+  const kind = values.declaration_type;
+  const payload = {};
+  for (const [input, field] of Object.entries(YEA_FIELDS[kind] || {})) {
+    if (values[input] !== undefined) payload[field] = values[input];
+  }
+  if (kind === "DEPENDANTS" && values.dependant_categories) {
+    // "GENERAL:2, SPECIFIED:1" -> {GENERAL: 2, SPECIFIED: 1}
+    payload.categories = Object.fromEntries(String(values.dependant_categories).split(",")
+      .map((part) => part.split(":").map((s) => s.trim())).filter(([k, v]) => k && v)
+      .map(([k, v]) => [k.toUpperCase(), Number.parseInt(v, 10)]));
+  }
+  return { tax_year: values.tax_year, declaration_type: kind, payload, evidence_ref: values.evidence_ref };
+}
+
+function OpenYearEndCase({ employeeId }) {
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [message, setMessage] = useState(null);
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[12px]" data-testid="jp-open-yea-case">
+      <input className="w-20 rounded-lg border border-border bg-surface px-2 py-1" value={year}
+        onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))} aria-label="Year-end tax year" />
+      <button type="button" className={btn} disabled={year.length !== 4} onClick={async () => {
+        try {
+          await openJpYeaCase(employeeId, year);
+          setMessage("Year-end case opened — calculate it in the Compliance Centre.");
+        } catch (e) {
+          const detail = e?.response?.data?.detail;
+          setMessage(typeof detail === "string" ? detail : "Could not open the case.");
+        }
+      }}>Open year-end case</button>
+      {message && <span className="text-foreground-muted">{message}</span>}
+    </div>
+  );
+}
 
 // Every Japan record for one employee (ZP-JP-ENG-001 §3-§6). Each version is
 // captured as DRAFT and counts only after a second user approves it; the
@@ -195,6 +243,36 @@ export function JapanEmployeeRecords({ employeeId }) {
           { key: "period_end", label: "Period end", type: "date", required: true },
           { key: "evidence_ref", label: "Evidence reference" },
         ]} />
+
+      <JPRecordSection
+        title="Year-end declarations" testId="jp-yea-declarations"
+        description="Spouse, dependants, insurance premiums, housing-loan credit, previous employer. Only declarations a second user approves reach the year-end calculation."
+        load={() => listJpYeaDeclarations(id)} create={(p) => createJpYeaDeclaration(id, p)}
+        transform={declarationPayload} createLabel="Record declaration"
+        empty="No year-end declarations."
+        columns={[
+          { label: "Year", key: "tax_year" },
+          { label: "Type", key: "declaration_type" },
+          { label: "Amounts", render: (r) => JSON.stringify(r.payload) },
+          statusCol]}
+        actions={[{ label: "Approve", show: isDraft, run: (r) => approveJpYeaDeclaration(r.id), ok: "Declaration approved." }]}
+        fields={[
+          { key: "tax_year", label: "Tax year", type: "number", required: true },
+          { key: "declaration_type", label: "Declaration", type: "select", required: true,
+            options: Object.keys(YEA_FIELDS) },
+          { key: "spouse_income", label: "Spouse income", type: "number" },
+          { key: "dependant_categories", label: "Dependants (CATEGORY:count, …)" },
+          { key: "life_premium", label: "Life insurance premiums", type: "number" },
+          { key: "earthquake_premium", label: "Earthquake insurance premiums", type: "number" },
+          { key: "social_insurance_paid", label: "Social insurance paid personally", type: "number" },
+          { key: "housing_loan_credit", label: "Housing-loan credit", type: "number" },
+          { key: "previous_income", label: "Previous employer: pay", type: "number" },
+          { key: "previous_withheld", label: "Previous employer: tax withheld", type: "number" },
+          { key: "previous_social_insurance", label: "Previous employer: social insurance", type: "number" },
+          { key: "mutual_aid", label: "Small-enterprise mutual aid", type: "number" },
+          { key: "evidence_ref", label: "Evidence reference" },
+        ]} />
+      <OpenYearEndCase employeeId={id} />
 
       <JPMyNumberField employeeId={id} />
     </div>

@@ -51,6 +51,9 @@ const JAPAN_FILES = [
   "modules/payroll/Payroll_Employees/JPMyNumberField.jsx",
   "modules/payroll/PayRollRuns/JPPayslipBreakdown.jsx",
   "modules/payroll/PayRollRuns/JPRunPreflightPanel.jsx",
+  "modules/payroll/PayRollRuns/JPRunExceptionsPanel.jsx",
+  "modules/payroll/Compliances/JPYearEndPanel.jsx",
+  "modules/payroll/Compliances/JPObligationsPanel.jsx",
 ];
 const files = Object.fromEntries(JAPAN_FILES.map((f) => [f, read(f)]));
 const service = read("service/payrollService.js");
@@ -76,9 +79,12 @@ check("Every Japan client call matches a route the backend declares", () => {
   assert(clientCalls.length >= 30, `only ${clientCalls.length} client calls found`);
   assert(unknown.length === 0, `no backend route for: ${unknown.join(", ")}`);
 });
+// An exception approval names the exception (its key + note) and a year-end
+// apply names the target run; every other approve / apply sends only the id.
+const DECISION_ARGS = { approveJpRunException: 3, applyJpYeaCase: 2 };
 check("Approve / apply calls send only the id, never a form", () => {
   const bad = [...jpBlock.matchAll(/export const (approveJp\w+|applyJp\w+) = \(([^)]*)\)/g)]
-    .filter(([, , args]) => args.split(",").length !== 1);
+    .filter(([, name, args]) => args.split(",").length !== (DECISION_ARGS[name] || 1));
   assert(bad.length === 0, bad.map(([, name]) => name).join(", "));
 });
 
@@ -140,6 +146,18 @@ check("The run detail mounts the JP breakdown and preflight", () => {
   return run.includes("<JPPayslipBreakdown snapshot={item.jpCalculationSnapshot}")
     && run.includes("<JPRunPreflightPanel runId={run.id} />");
 });
+check("The run detail mounts the JP exceptions panel; the Compliance Centre the year-end and remittance panels", () => {
+  const run = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  const centre = files["modules/payroll/Compliances/JPComplianceCentreTab.jsx"];
+  return run.includes("<JPRunExceptionsPanel runId={run.id}")
+    && centre.includes("<JPObligationsPanel />") && centre.includes("<JPYearEndPanel />");
+});
+check("Year-end declarations and filing previews never carry a My Number", () =>
+  !/my_?number/i.test(files["modules/payroll/Compliances/JPYearEndPanel.jsx"])
+  && !/my_?number/i.test(files["modules/payroll/Compliances/JPObligationsPanel.jsx"]));
+check("Every submission is recorded as made elsewhere: no Japan panel builds a filing file", () =>
+  !/download|Blob\(|createObjectURL|\.xml|\.csv/i.test(files["modules/payroll/Compliances/JPObligationsPanel.jsx"]
+    + files["modules/payroll/Compliances/JPYearEndPanel.jsx"]));
 check("The employee detail opens the Japan statutory records for JP employees", () => {
   const employee = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
   return employee.includes('employee.countryCode === "JP"') && employee.includes("<JapanStatutoryProfilePanel");

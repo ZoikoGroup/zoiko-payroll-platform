@@ -2942,3 +2942,34 @@ export const requestJpMyNumberReveal = (vaultId, reason) =>
   api.post(`${JP}/my-numbers/${vaultId}/reveal-request`, { reason });
 export const approveJpMyNumberReveal = (vaultId) => api.post(`${JP}/my-numbers/${vaultId}/reveal-approve`, {});
 export const revealJpMyNumber = async (vaultId) => jpOne(await api.post(`${JP}/my-numbers/${vaultId}/reveal`, {}));
+// Japan Phase 8 — run exceptions, corrections, journal, year-end adjustment,
+// remittance obligations and filing previews (JSON only until G5).
+export const listJpRunExceptions = async (runId) => jpList(await api.get(`${JP}/runs/${runId}/exceptions`));
+export const approveJpRunException = (runId, key, note) =>
+  api.post(`${JP}/runs/${runId}/exceptions/approve`, { key, note });
+export const createJpCorrection = (payslipId, payload) => api.post(`${JP}/payslips/${payslipId}/corrections`, payload);
+export const getJpRunJournal = async (runId, accounts) =>
+  jpOne(await api.post(`${JP}/runs/${runId}/journal`, { accounts }));
+export const listJpYeaDeclarations = async (employeeId, taxYear) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/year-end/declarations`, { params: taxYear ? { tax_year: taxYear } : {} }));
+export const createJpYeaDeclaration = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/year-end/declarations`, payload);
+export const approveJpYeaDeclaration = (id) => api.post(`${JP}/year-end/declarations/${id}/approve`, {});
+export const listJpYeaCases = async (taxYear) => jpList(await api.get(`${JP}/year-end/${taxYear}/cases`));
+export const openJpYeaCase = (employeeId, taxYear) => api.post(`${JP}/employees/${employeeId}/year-end/${taxYear}/cases`, {});
+export const calculateJpYeaCase = (id) => api.post(`${JP}/year-end/cases/${id}/calculate`, {});
+export const reviewJpYeaCase = (id) => api.post(`${JP}/year-end/cases/${id}/review`, {});
+export const applyJpYeaCase = (id, runId) => api.post(`${JP}/year-end/cases/${id}/apply`, { runId });
+export const voidJpYeaCase = (id) => api.post(`${JP}/year-end/cases/${id}/void`, {});
+export const listJpObligations = async (status) =>
+  jpList(await api.get(`${JP}/obligations`, { params: status ? { status } : {} }));
+export const approveJpObligation = (id) => api.post(`${JP}/obligations/${id}/approve`, {});
+export const submitJpObligation = (id, channel) => api.post(`${JP}/obligations/${id}/submit`, { channel });
+export const recordJpObligationReceipt = (id, accepted, receiptRef) =>
+  api.post(`${JP}/obligations/${id}/receipt`, { accepted, receiptRef });
+export const getJpWithholdingCertificate = async (caseId) =>
+  jpOne(await api.get(`${JP}/filings/withholding-certificate/${caseId}`));
+export const getJpSalaryPaymentReports = async (taxYear) =>
+  jpOne(await api.get(`${JP}/filings/salary-payment-reports/${taxYear}`));
+export const getJpBonusReport = async (paidOn) => jpOne(await api.get(`${JP}/filings/bonus-report/${paidOn}`));
+export const getJpAnnualDetermination = async (year) => jpOne(await api.get(`${JP}/filings/annual-determination/${year}`));

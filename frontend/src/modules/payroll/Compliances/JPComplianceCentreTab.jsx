@@ -8,6 +8,8 @@ import { Table } from "../../../components/jurisdiction/japan/jpShared";
 import { formatJpyAuto } from "../../../components/jurisdiction/japan/jpComponentConfig";
 import JPRecordSection, { WEEKDAYS, isDraft, periodCol, statusCol } from "../../../components/jurisdiction/japan/JPRecordSection";
 import { JapanEmployeeRecords } from "../Payroll_Employees/JapanStatutoryProfilePanel";
+import JPObligationsPanel from "./JPObligationsPanel";
+import JPYearEndPanel from "./JPYearEndPanel";
 
 // Japan Compliance Centre (ZP-JP-ENG-001). Organisation-level setup (employer
 // registration, work calendar), the JPS bonus report list, and every
@@ -141,6 +143,8 @@ export default function JPComplianceCentreTab() {
           { key: "evidence_ref", label: "Evidence reference" },
         ]} />
       <BonusReports />
+      <JPObligationsPanel />
+      <JPYearEndPanel />
       <EmployeeRecords />
     </div>
   );

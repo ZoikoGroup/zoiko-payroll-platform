@@ -995,6 +995,10 @@ class PayrollContext:
     jp_ytd_health_sba: Decimal = None          # health SBA already counted this insurance year
     jp_month_pension_sba: Decimal = None       # pension SBA already counted this month
     jp_social_insurance_events: list = None    # lifecycle events touching the pay month
+    # Phase 8 — an APPLIED year-end adjustment for THIS run (S3): withheld minus
+    # the annual tax; positive refunds, negative collects. None = no adjustment.
+    jp_year_end_difference: Decimal = None
+    jp_yea_case_id: int = None
     # Phase 6 - working time, premiums and minimum wage (spec §6, S14).
     jp_work_conditions: object = None          # PayrollJpWorkConditions in force
     jp_hours: list = None                      # [{date, worked_minutes, scheduled_minutes, night_minutes, is_holiday}]

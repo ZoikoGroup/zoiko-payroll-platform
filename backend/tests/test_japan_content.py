@@ -84,7 +84,8 @@ def test_there_is_no_global_rounding_row():
     assert not {"jp_rounding_mode", "jp_rounding_precision"} & keys
     rounding = {k for k in keys if k.endswith("_rounding")}
     assert rounding == {"jp_wht_rounding", "jp_si_employee_share_rounding",
-                        "jp_ei_employee_share_rounding", "jp_sba_rounding"}
+                        "jp_ei_employee_share_rounding", "jp_sba_rounding",
+                        "jp_yea_taxable_rounding", "jp_yea_rounding"}
     for key in rounding:
         assert _scalar(key)[5] in content.ROUNDING_RULES, key
 
@@ -175,6 +176,8 @@ def test_authority_tables_point_at_their_taxslab_rule_types():
         "JP_WHT_MONTHLY", "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
         "JP_HEALTH_RATE", "JP_SMR_GRADE", "JP_WHT_BONUS",
         "JP_MIN_WAGE", "JP_HOLIDAY",
+        "JP_YEA_EID", "JP_YEA_BASIC", "JP_YEA_SPOUSE", "JP_YEA_DEPENDANT",
+        "JP_YEA_LIFE_INS", "JP_YEA_RATE",
     }
     assert all(len(rule_type) <= 30 for rule_type in content.JP_TABLE_RULE_TYPES)
     assert content.JP_EMPTY_TABLES["wht_bonus_rate_table"]["rule_type"] == "JP_WHT_BONUS"
@@ -351,3 +354,18 @@ def test_japan_is_a_hooked_statutory_module():
                  "template_activation_refusal", "pack_holidays",
                  "payment_treatment", "payslip_hold_view"):
         assert callable(jurisdiction_hooks.get("JP", hook))
+
+
+def test_year_end_content_is_empty_or_pending_until_g1():
+    for key in ("jp_yea_income_limit", "jp_yea_earthquake_cap", "jp_reconstruction_surtax_pct"):
+        assert key in content.JP_EMPTY_BY_DESIGN
+    for key in ("jp_yea_taxable_rounding", "jp_yea_rounding", "jp_yea_earliest_month"):
+        assert _scalar(key)[5] == content.PENDING
+    assert content.JP_EMPTY_TABLES["year_end_adjustment"]["rows"] == ()
+    assert set(content.JP_EMPTY_TABLES["year_end_adjustment"]["rule_types"]) == set(content.JP_YEA_RULE_TYPES)
+
+
+def test_corrections_and_exports_stay_closed_until_signed():
+    assert _scalar("jp_correction_policy")[5] == content.PENDING
+    assert content.CORRECTION_POLICIES == ("DELTA_PAYSLIP", "PENDING_G1")
+    assert content.JP_EXPORT_SCHEMAS == {}

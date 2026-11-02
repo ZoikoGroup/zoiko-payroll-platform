@@ -113,7 +113,10 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # Japan P5/P6 (9c1d7e4a2b6f, a7c4e9d1b2f8, a1a748b50902): the run payment
         # kind, the work-conditions table with its calendar columns and the
         # attendance approvals - every one must be visible to the drift filter.
-        jp_p6_tables = {"payroll_jp_work_conditions", "payroll_jp_attendance_approvals"}
+        jp_p6_tables = {"payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
+                        # Japan P8 (41a1fafbbfdc)
+                        "payroll_jp_run_exceptions", "payroll_jp_obligations",
+                        "payroll_jp_yea_declarations", "payroll_jp_yea_cases"}
         jp_p6_columns = {"payroll_runs": {"jp_payment_kind"},
                          "payroll_jp_work_conditions": {"scheduled_weekdays", "statutory_day_off_weekday",
                                                         "public_holidays_off"}}
