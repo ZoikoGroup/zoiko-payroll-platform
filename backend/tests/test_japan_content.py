@@ -337,7 +337,14 @@ def test_japan_dispatch_is_fail_closed():
             calculate_payroll(ctx, calculation_mode=mode)
 
 
-def test_japan_is_not_yet_a_hooked_statutory_module():
+def test_japan_is_a_hooked_statutory_module():
     from app.modules.payroll import jurisdiction_hooks
 
-    assert not jurisdiction_hooks.has_module("JP")                   # hooks arrive in Phase 5
+    assert jurisdiction_hooks.has_module("JP")
+    for hook in ("calc_inputs", "before_run_transition", "statutory_profile_errors",
+                 "statutory_profile_values", "pack_activation_refusal",
+                 "retention_settings", "service_registry_transition",
+                 "statutory_summary", "statutory_editors",
+                 "template_activation_refusal", "pack_holidays",
+                 "payment_treatment", "payslip_hold_view"):
+        assert callable(jurisdiction_hooks.get("JP", hook))

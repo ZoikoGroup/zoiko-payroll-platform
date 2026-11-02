@@ -20414,6 +20414,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     as_of=period_end or date.today())
             if emp_country == "NL" else None
         )
+        # Japan (ZP-JP-ENG-001 Phase 5): effective-dated employer/worker/SI/EI
+        # rows, notices and prior-bonus figures. Read-only.
+        japan_inputs = (
+            jurisdiction_hooks.call("JP", "calc_inputs", db, None, emp, None,
+                                    as_of=period_end or date.today())
+            if emp_country == "JP" else None
+        )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -20600,6 +20607,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             saudi_inputs=saudi_inputs,
             south_africa_inputs=south_africa_inputs,
             netherlands_inputs=netherlands_inputs,
+            japan_inputs=japan_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
@@ -25630,6 +25638,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "NL" else None
     )
+    # Japan (ZP-JP-ENG-001 Phase 5): effective-dated statutory inputs plus the
+    # prior-bonus bases the engine requires. No value is inferred.
+    japan_inputs = (
+        jurisdiction_hooks.call("JP", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "JP" else None
+    )
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
@@ -25755,6 +25769,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         saudi_inputs=saudi_inputs,
         south_africa_inputs=south_africa_inputs,
         netherlands_inputs=netherlands_inputs,
+        japan_inputs=japan_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         pay_date=run.pay_date,
@@ -25786,6 +25801,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if south_africa_inputs is not None:
         from app.modules.payroll import south_africa_service as _za_service
         za_frozen = _za_service.za_freeze_context(ctx, calculation_mode)
+    japan_frozen = None
+    if japan_inputs is not None:
+        from app.modules.payroll import japan_service as _jp_service
+        japan_frozen = _jp_service.jp_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25956,6 +25975,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                                     if saudi_frozen is not None else result.sa_result),
         "za_calculation_snapshot": (_za_service.za_payslip_snapshot(result, frozen=za_frozen)
                                     if za_frozen is not None else result.za_result),
+        # Japan (ZP-JP-ENG-001 Phase 5): jp_result plus the complete frozen
+        # context a correction replays. None for every non-JP payslip.
+        "jp_calculation_snapshot": (_jp_service.jp_payslip_snapshot(result, frozen=japan_frozen)
+                                    if japan_frozen is not None else None),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32695,6 +32718,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("NL", "calc_inputs", db, run, employee, None)
         if country == "NL" else None
     )
+    # Japan (ZP-JP-ENG-001 Phase 5): same effective-dated inputs as a generated
+    # run; a manually-added JP payslip must not bypass the statutory wiring.
+    japan_inputs = (
+        jurisdiction_hooks.call("JP", "calc_inputs", db, run, employee, None)
+        if country == "JP" else None
+    )
     # Mexico (Phase 6): the payslip is computed from the profile, labour policy
     # and approved hours; manual amounts that disagree are refused, never
     # silently replaced.
@@ -32839,6 +32868,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         saudi_inputs=saudi_inputs,
         south_africa_inputs=south_africa_inputs,
         netherlands_inputs=netherlands_inputs,
+        japan_inputs=japan_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         **ytd_inputs,
@@ -32859,6 +32889,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if south_africa_inputs is not None:
         from app.modules.payroll import south_africa_service as _za_service
         za_frozen = _za_service.za_freeze_context(ctx, calculation_mode)
+    japan_frozen = None
+    if japan_inputs is not None:
+        from app.modules.payroll import japan_service as _jp_service
+        japan_frozen = _jp_service.jp_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -32903,6 +32937,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if saudi_frozen is not None else None),
         za_calculation_snapshot=(_za_service.za_payslip_snapshot(calc, frozen=za_frozen)
                                  if za_frozen is not None else None),
+        jp_calculation_snapshot=(_jp_service.jp_payslip_snapshot(calc, frozen=japan_frozen)
+                                 if japan_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,

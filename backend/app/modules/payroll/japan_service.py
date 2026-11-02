@@ -14,6 +14,7 @@ hook the platform calls would make every Japan code path raise (fail-closed).
 
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -145,3 +146,1056 @@ def _money(value, field: str):
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         raise BadRequestException(f"{field} must be a decimal amount.")
+
+# ======================================================================
+# Japan Phase 5: platform hooks, calculation inputs, freeze and lifecycle
+# ======================================================================
+JP_PROFILE_STATUSES = ("ACTIVE",)
+JP_SOCIAL_INSURANCE_EVENTS = ("MATERNITY_EXEMPTION", "CHILDCARE_EXEMPTION")
+
+
+def _jp_value(employee, *keys):
+    fields = getattr(employee, "compliance_fields", None) or {}
+    for key in keys:
+        if key in fields:
+            return fields[key]
+        if hasattr(employee, key):
+            return getattr(employee, key)
+    return None
+
+
+def _jp_models():
+    from app.modules.payroll import models
+
+    return models
+
+
+
+
+def _jp_one_active(db: Session, model, organization_id: int, employee_id: Optional[int],
+                   as_of: date, label: str):
+    q = (db.query(model)
+         .filter(model.organization_id == organization_id,
+                 model.status == "ACTIVE",
+                 model.effective_from <= as_of,
+                 (model.effective_to.is_(None)) | (model.effective_to >= as_of)))
+    if employee_id is not None:
+        q = q.filter(model.employee_id == employee_id)
+    rows = q.order_by(model.effective_from.desc(), model.id.desc()).all()
+    if len(rows) > 1:
+        raise BadRequestException(
+            f"{len(rows)} ACTIVE Japan {label} versions are in force on {as_of}; exactly one is required.")
+    return rows[0] if rows else None
+
+
+def _jp_events_for_month(db: Session, organization_id: int, employee_id: int, as_of: date):
+    m = _jp_models()
+    start = date(as_of.year, as_of.month, 1)
+    if as_of.month == 12:
+        end = date(as_of.year + 1, 1, 1)
+    else:
+        end = date(as_of.year, as_of.month + 1, 1)
+    return (db.query(m.PayrollJpSocialInsuranceEvent)
+            .filter(m.PayrollJpSocialInsuranceEvent.organization_id == organization_id,
+                    m.PayrollJpSocialInsuranceEvent.employee_id == employee_id,
+                    m.PayrollJpSocialInsuranceEvent.effective_from < end,
+                    (m.PayrollJpSocialInsuranceEvent.effective_to.is_(None))
+                    | (m.PayrollJpSocialInsuranceEvent.effective_to >= start))
+            .order_by(m.PayrollJpSocialInsuranceEvent.id).all())
+
+
+def _jp_insurance_year_start(on: date) -> date:
+    return date(on.year, 4, 1) if on.month >= 4 else date(on.year - 1, 4, 1)
+
+
+def _jp_prior_payslips(db: Session, organization_id: int, employee_id: int, as_of: date,
+                       *, since: Optional[date] = None, current_run_id: Optional[int] = None):
+    from app.modules.payroll.models import PayrollRun, PayslipItem
+
+    q = (db.query(PayslipItem, PayrollRun.pay_date)
+         .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+         .filter(PayslipItem.organization_id == organization_id,
+                 PayslipItem.employee_id == employee_id,
+                 PayslipItem.country_code == JP,
+                 PayslipItem.status != "FAILED",
+                 PayrollRun.pay_date < as_of))
+    if since is not None:
+        q = q.filter(PayrollRun.pay_date >= since)
+    if current_run_id is not None:
+        q = q.filter(PayrollRun.id != current_run_id)
+    return q.order_by(PayrollRun.pay_date, PayslipItem.id).all()
+
+
+def _jp_snapshot_result(item):
+    return (getattr(item, "jp_calculation_snapshot", None) or {})
+
+
+def _jp_bonus_priors(db: Session, organization_id: int, employee_id: int, as_of: date,
+                     current_run_id: Optional[int] = None) -> dict:
+    """The two prior bonus figures the engine requires, never guessed.
+
+    Health SBA is cumulative from 1 April; pension SBA is per calendar month.
+    The prior-month salary-after-social-insurance is the frozen withholding base
+    of the most recent earlier salary payment in the previous month.
+    """
+    year_start = _jp_insurance_year_start(as_of)
+    month_start = date(as_of.year, as_of.month, 1)
+    health = Decimal("0")
+    pension_month = Decimal("0")
+    prior_salary_base = None
+    for item, pay_date in _jp_prior_payslips(
+            db, organization_id, employee_id, as_of, since=year_start,
+            current_run_id=current_run_id):
+        snap = _jp_snapshot_result(item)
+        kind = str(snap.get("jp_payment_kind") or "SALARY").upper()
+        if kind == "BONUS":
+            if snap.get("jp_bonus_sba") not in (None, ""):
+                health += Decimal(str(snap["jp_bonus_sba"]))
+            if pay_date.year == as_of.year and pay_date.month == as_of.month:
+                if snap.get("jp_bonus_sba") not in (None, ""):
+                    pension_month += Decimal(str(snap["jp_bonus_sba"]))
+        elif pay_date < month_start and snap.get("jp_wht_base") not in (None, ""):
+            prior_salary_base = Decimal(str(snap["jp_wht_base"]))
+    return {"ytd_health_sba": health, "month_pension_sba": pension_month,
+            "prior_month_pay_after_si": prior_salary_base}
+
+
+def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: date,
+                           run=None) -> dict:
+    """Resolve every Japan input effective at ``as_of``. No value is inferred:
+    a missing row stays missing so the engine's own BLOCK is the one surfaced.
+    """
+    m = _jp_models()
+    registration = _jp_one_active(
+        db, m.PayrollJpEmployerRegistration, organization_id, None, as_of,
+        "employer registration")
+    profile = _jp_one_active(
+        db, m.PayrollJpWorkerTaxProfile, organization_id, employee.id, as_of,
+        "worker tax profile")
+    enrollment = _jp_one_active(
+        db, m.PayrollJpSocialInsuranceEnrollment, organization_id, employee.id, as_of,
+        "social-insurance enrollment")
+    ei_profile = _jp_one_active(
+        db, m.PayrollJpEmploymentInsuranceProfile, organization_id, employee.id, as_of,
+        "employment-insurance profile")
+
+    assessments = (db.query(m.PayrollJpResidentTaxAssessment)
+                   .filter(m.PayrollJpResidentTaxAssessment.organization_id == organization_id,
+                           m.PayrollJpResidentTaxAssessment.employee_id == employee.id,
+                           m.PayrollJpResidentTaxAssessment.status.in_(("APPROVED", "SUPERSEDED")))
+                   .order_by(m.PayrollJpResidentTaxAssessment.first_deduction_month,
+                             m.PayrollJpResidentTaxAssessment.version,
+                             m.PayrollJpResidentTaxAssessment.id).all())
+
+    components = _jp_value(employee, "jp_components")
+    if not isinstance(components, dict):
+        components = None
+    payment_kind = _jp_value(run, "jp_payment_kind") if run is not None else None
+    payment_kind = (payment_kind or _jp_value(employee, "jp_payment_kind")
+                    or "SALARY")
+    priors = (_jp_bonus_priors(db, organization_id, employee.id, as_of,
+                               current_run_id=getattr(run, "id", None))
+              if str(payment_kind).upper() == "BONUS" else {})
+
+    return {
+        "jp_worker_tax_profile": profile,
+        "jp_employer_registration": registration,
+        "jp_social_insurance_enrollment": enrollment,
+        "jp_employment_insurance_profile": ei_profile,
+        "jp_resident_tax_assessments": assessments,
+        "jp_organization_id": organization_id,
+        "jp_employee_id": employee.id,
+        "jp_date_of_birth": getattr(employee, "date_of_birth", None),
+        "jp_components": components,
+        "jp_payment_kind": str(payment_kind).strip().upper(),
+        "jp_prior_month_pay_after_si": priors.get("prior_month_pay_after_si"),
+        "jp_ytd_health_sba": priors.get("ytd_health_sba"),
+        "jp_month_pension_sba": priors.get("month_pension_sba"),
+        "jp_social_insurance_events": _jp_events_for_month(
+            db, organization_id, employee.id, as_of),
+    }
+
+
+def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of: Optional[date] = None) -> dict:
+    on = as_of or getattr(run, "pay_date", None) or date.today()
+    return resolve_jp_calc_inputs(db, employee.organization_id, employee, on, run=run)
+
+
+# ---------------------------------------------------------------------
+# Frozen context and payslip snapshot
+# ---------------------------------------------------------------------
+def _json_safe(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+_JP_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime",
+                    "additional_compensation", "jp_prior_month_pay_after_si",
+                    "jp_ytd_health_sba", "jp_month_pension_sba")
+_JP_CTX_PLAIN = ("pay_frequency", "jp_organization_id", "jp_employee_id",
+                 "jp_components", "jp_payment_kind", "unpaid_leave_days",
+                 "date_of_joining")
+_JP_CTX_DATES = ("pay_date", "period_start", "period_end", "jp_date_of_birth",
+                 "date_of_birth")
+_JP_RATE_FIELDS = ("employee_rate_pct", "employer_rate_pct", "flat_amount",
+                   "text_value", "effective_from", "effective_to")
+_JP_SLAB_FIELDS = ("rule_type", "filing_status", "tax_regime", "assessment_basis",
+                   "tax_table_number", "rate_pct", "employer_rate_pct", "min_amount",
+                   "max_amount", "flat_amount", "rate_label", "effective_from",
+                   "effective_to")
+_JP_PROFILE_FIELDS = ("id", "residency_status", "declaration_class",
+                      "declaration_received_on", "dependants_count", "dependant_facts",
+                      "municipality_code", "residence_prefecture",
+                      "resident_tax_collection", "my_number_vault_id", "effective_from",
+                      "effective_to", "status", "evidence_ref")
+_JP_REGISTRATION_FIELDS = ("id", "corporate_number", "withholding_tax_office",
+                           "withholding_payer_status", "jps_office_symbol",
+                           "jps_office_number", "health_insurer_type",
+                           "health_insurer_code", "health_insurer_prefecture",
+                           "si_deduction_timing", "labour_insurance_number",
+                           "ei_office_number", "ei_industry_class",
+                           "workers_comp_rate_class", "municipality_reporting_enabled",
+                           "effective_from", "effective_to", "status", "evidence_ref")
+_JP_ENROLLMENT_FIELDS = ("id", "health_eligible", "pension_eligible",
+                         "health_insurer_code", "smr_health_grade", "smr_pension_grade",
+                         "smr_health_amount", "smr_pension_amount", "smr_basis",
+                         "actual_remuneration", "care_state", "child_support_state",
+                         "qualification_date", "loss_date", "effective_from",
+                         "effective_to", "status", "evidence_ref")
+_JP_EI_FIELDS = ("id", "insured", "ei_insured_number", "industry_class",
+                 "qualification_date", "loss_date", "effective_from", "effective_to",
+                 "status", "evidence_ref")
+_JP_ASSESSMENT_FIELDS = ("id", "municipality_code", "fiscal_notice_year", "notice_id",
+                         "version", "received_on", "first_deduction_month",
+                         "monthly_amounts", "total_amount", "source_hash", "replaces_id",
+                         "status", "evidence_ref")
+_JP_EVENT_FIELDS = ("id", "event_type", "effective_from", "effective_to", "payload",
+                    "bonus_paid_on", "sba_amount", "report_due_on",
+                    "submission_status", "receipt_ref", "evidence_ref")
+
+
+def _jp_facts(row, fields):
+    if row is None:
+        return None
+    return {name: getattr(row, name, None) for name in fields}
+
+
+def jp_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
+    return _json_safe({
+        "version": 1,
+        "calculationMode": calculation_mode,
+        "ctx": {k: getattr(ctx, k, None) for k in _JP_CTX_DECIMALS + _JP_CTX_PLAIN + _JP_CTX_DATES},
+        "profile": _jp_facts(getattr(ctx, "jp_worker_tax_profile", None), _JP_PROFILE_FIELDS),
+        "registration": _jp_facts(getattr(ctx, "jp_employer_registration", None),
+                                  _JP_REGISTRATION_FIELDS),
+        "enrollment": _jp_facts(getattr(ctx, "jp_social_insurance_enrollment", None),
+                                _JP_ENROLLMENT_FIELDS),
+        "employmentInsurance": _jp_facts(
+            getattr(ctx, "jp_employment_insurance_profile", None), _JP_EI_FIELDS),
+        "residentTaxAssessments": [
+            _jp_facts(row, _JP_ASSESSMENT_FIELDS)
+            for row in (getattr(ctx, "jp_resident_tax_assessments", None) or [])],
+        "socialInsuranceEvents": [
+            _jp_facts(row, _JP_EVENT_FIELDS)
+            for row in (getattr(ctx, "jp_social_insurance_events", None) or [])],
+        "rateMap": {k: {f: getattr(r, f, None) for f in _JP_RATE_FIELDS}
+                    for k, r in (getattr(ctx, "rate_map", None) or {}).items()},
+        "slabs": [{f: getattr(s, f, None) for f in _JP_SLAB_FIELDS}
+                  for s in (getattr(ctx, "slabs", None) or [])],
+    })
+
+
+JP_TOTAL_KEYS = ("jp_wht", "jp_si_employee_total", "jp_ei_employee",
+                 "jp_resident_tax", "jp_employee_total", "jp_employer_total")
+
+
+def jp_totals_all(result) -> dict:
+    r = getattr(result, "jp_result", None) if not isinstance(result, dict) else result
+    return {k: str((r or {}).get(k) or "0") for k in JP_TOTAL_KEYS}
+
+
+def jp_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]:
+    r = getattr(result, "jp_result", None) if not isinstance(result, dict) else result
+    if not r:
+        return None
+    snap = {**r, "totalsAll": jp_totals_all(r)}
+    if frozen is not None:
+        snap["frozenContext"] = frozen
+    return _json_safe(snap)
+
+
+def jp_approval_fingerprint(db: Session, run) -> Optional[str]:
+    import hashlib
+    import json
+
+    from app.modules.payroll.models import PayslipItem
+
+    rows = (db.query(PayslipItem)
+            .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == JP)
+            .order_by(PayslipItem.id).all())
+    if not rows:
+        return None
+    payload = [{"employeeId": row.employee_id, "snapshot": row.jp_calculation_snapshot}
+               for row in rows]
+    encoded = json.dumps(_json_safe(payload), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------
+# Run preflight
+# ---------------------------------------------------------------------
+def _jp_run_has_payslips(db: Session, run) -> bool:
+    from app.modules.payroll.models import PayslipItem
+
+    return (db.query(PayslipItem.id)
+            .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == JP)
+            .first() is not None)
+
+
+def before_run_transition(db: Session, run, next_status, actor_id: Optional[int]) -> None:
+    """JP approval needs every payslip frozen; a later transition re-verifies
+    the approval fingerprint and PAID records each bonus report obligation."""
+    from fastapi import HTTPException, status as http_status
+
+    from app.modules.payroll.models import PayrollStatus, PayslipItem
+
+    if not _jp_run_has_payslips(db, run):
+        return
+    if next_status == PayrollStatus.APPROVED:
+        missing = sum(1 for item in (db.query(PayslipItem)
+                                     .filter(PayslipItem.payroll_run_id == run.id,
+                                             PayslipItem.country_code == JP).all())
+                      if item.jp_calculation_snapshot is None)
+        if missing:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                f"Japan: {missing} payslip(s) have no frozen JP calculation snapshot - "
+                "recalculate the run before approval."))
+        run.jp_approval_fingerprint = jp_approval_fingerprint(db, run)
+        return
+    if next_status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
+        current = jp_approval_fingerprint(db, run)
+        if not run.jp_approval_fingerprint or current != run.jp_approval_fingerprint:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                "Japan: the approved calculation no longer matches this run - "
+                "recalculate and approve it again."))
+    if next_status != PayrollStatus.PAID:
+        return
+    from app.modules.payroll import japan_lifecycle as lifecycle
+
+    for item in (db.query(PayslipItem)
+                 .filter(PayslipItem.payroll_run_id == run.id,
+                         PayslipItem.country_code == JP)
+                 .order_by(PayslipItem.id).all()):
+        snap = item.jp_calculation_snapshot or {}
+        if snap.get("jp_bonus"):
+            lifecycle.record_bonus_obligation(
+                db, organization_id=run.organization_id, employee_id=item.employee_id,
+                jp_result=snap, paid_on=run.pay_date, actor_id=actor_id)
+
+
+# ---------------------------------------------------------------------
+# Profile validation (the shared EmployeeStatutoryProfile has no JP columns)
+# ---------------------------------------------------------------------
+def _jp_statutory_profile_errors(data) -> list:
+    errors = []
+    residency = getattr(data, "jp_residency_status", None)
+    if residency is not None:
+        value = str(residency).strip().upper()
+        if value not in ("RESIDENT", "NON_RESIDENT"):
+            errors.append("jp_residency_status must be RESIDENT or NON_RESIDENT.")
+    declaration = getattr(data, "jp_declaration_class", None)
+    if declaration is not None:
+        value = str(declaration).strip().upper()
+        if value not in ("PRIMARY", "SECONDARY"):
+            errors.append("jp_declaration_class must be PRIMARY or SECONDARY.")
+    dependants = getattr(data, "jp_dependants_count", None)
+    if dependants is not None and (not isinstance(dependants, int) or dependants < 0):
+        errors.append("jp_dependants_count must be a whole number of zero or more.")
+    collection = getattr(data, "jp_resident_tax_collection", None)
+    if collection is not None:
+        value = str(collection).strip().upper()
+        if value not in ("SPECIAL", "NOT_APPLICABLE"):
+            errors.append("jp_resident_tax_collection must be SPECIAL or NOT_APPLICABLE.")
+    return errors
+
+
+def _jp_profile_values(db: Session, employee, data, previous) -> dict:
+    return {}
+
+
+# ---------------------------------------------------------------------
+# Pack / service-registry / retention / summary hooks
+# ---------------------------------------------------------------------
+def _jp_pack_activation_refusal(db: Session, pack, actor_id: Optional[int]) -> Optional[str]:
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    if pack is None or (pack.jurisdiction_country or "").upper() != JP:
+        return None
+    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
+    pending_rates = (db.query(ContributionRate)
+                     .filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                             ContributionRate.organization_id.is_(None),
+                             ContributionRate.label.like(marker))
+                     .count())
+    pending_slabs = (db.query(TaxSlab)
+                     .filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                             TaxSlab.organization_id.is_(None),
+                             TaxSlab.rate_label.like(marker))
+                     .count())
+    if pending_rates or pending_slabs:
+        return (f"{pending_rates + pending_slabs} Japan pack row(s) are still PENDING G1 - "
+                "they must be signed at gate G1 before the pack can be activated")
+    return None
+
+
+def _jp_pack_holidays(db: Session, year: int) -> list:
+    return []
+
+
+def _jp_template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
+    country = (getattr(template, "jurisdiction_country", None) or "").upper()
+    report_type = str(getattr(template, "report_type", "") or "").upper()
+    if country != JP and not report_type.startswith("JP_"):
+        return None
+    return ("Japan filing and payment-report templates stay inactive until the official "
+            "form revision and the JP-1 evidence decision are recorded.")
+
+
+def _jp_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
+    return {}
+
+
+def _jp_payslip_hold_view(item) -> Optional[dict]:
+    return None
+
+
+def _jp_statutory_editors(db: Session, pack) -> set:
+    return set()
+
+
+def _jp_decision_state(db: Session, key: str) -> str:
+    return next((d["state"] for d in owner_decisions(db) if d["key"] == key), "OPEN")
+
+
+def _jp_retained_record_label(db: Session, organization_id: int, employee_id: int) -> Optional[str]:
+    m = _jp_models()
+    for model, label in (
+            (m.PayrollJpWorkerTaxProfile, "worker tax profiles"),
+            (m.PayrollJpSocialInsuranceEnrollment, "social-insurance enrollments"),
+            (m.PayrollJpResidentTaxAssessment, "resident-tax notices")):
+        if db.query(model.id).filter(model.organization_id == organization_id,
+                                     model.employee_id == employee_id).first():
+            return label
+    return None
+
+
+def _jp_has_statutory_profile(db: Session, employee_id: int) -> bool:
+    from app.modules.payroll.models import PayrollJpWorkerTaxProfile
+
+    return (db.query(PayrollJpWorkerTaxProfile.id)
+            .filter(PayrollJpWorkerTaxProfile.employee_id == employee_id)
+            .first() is not None)
+
+
+def _jp_is_report(report) -> bool:
+    country = (getattr(report, "jurisdiction_country", None) or "").upper()
+    report_type = str(getattr(report, "report_type", "") or "").upper()
+    return country == JP or report_type.startswith("JP_")
+
+
+JP_RETENTION_CATEGORIES = (
+    ("PAYROLL_RECORDS", "Payroll runs, payslips and the frozen JP calculation snapshot"),
+    ("TAX_RECORDS", "Withholding, resident-tax notices and NTA records"),
+    ("SOCIAL_INSURANCE_RECORDS", "SMR, social-insurance and bonus obligations"),
+    ("EMPLOYEE_IDENTITY", "My Number vault metadata and worker tax profiles"),
+    ("ACCESS_LOGS", "My Number reveal/export access events"),
+    ("CORRECTIONS", "Payslip corrections and their evidence"),
+)
+
+JP_DECISIONS = {
+    "D-1": ("Retention period per Japan data category", True),
+    "D-2": ("Deletion vs anonymisation of My Number at end of retention", True),
+    "D-3": ("Japan payroll-run approval four-eyes", True),
+    "D-4": ("My Number reveal approval four-eyes", True),
+    "D-5": ("Data location and cross-border transfer basis", True),
+}
+
+
+def _jp_evidence(db: Session, tag: str):
+    from app.modules.payroll.models import SourceArtifact
+
+    rows = (db.query(SourceArtifact)
+            .filter(SourceArtifact.form_number == tag,
+                    SourceArtifact.superseded_by_id.is_(None))
+            .order_by(SourceArtifact.id.desc()).all())
+    accepted = next((r for r in rows if (r.reviewer_id and r.file_path
+                                         and r.reviewer_id != r.created_by_id)), None)
+    return accepted, bool(rows)
+
+
+def owner_decisions(db: Session) -> list:
+    out = []
+    for key, (label, blocks) in JP_DECISIONS.items():
+        accepted, submitted = _jp_evidence(db, f"JP-DECISION-{key}")
+        out.append({"key": key, "label": label, "blocksLaunch": blocks,
+                    "evidenceTag": f"JP-DECISION-{key}",
+                    "state": "RECORDED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
+                    "artifactId": accepted.id if accepted else None})
+    return out
+
+
+def _jp_retention_settings(db: Session):
+    from app.modules.payroll.retention_service import RetentionJurisdiction
+
+    return RetentionJurisdiction(
+        country=JP, label="Japan", categories=JP_RETENTION_CATEGORIES,
+        period_decision="D-1", end_decision="D-2", decision_reference="JP-RETENTION",
+        decision_state=_jp_decision_state,
+        validate_employee=lambda session, organization_id, employee_id: None,
+        retained_record_label=_jp_retained_record_label,
+        has_statutory_profile=_jp_has_statutory_profile,
+        report_matches=_jp_is_report)
+
+
+def statutory_summary(db: Session) -> dict:
+    m = _jp_models()
+    from app.modules.payroll.models import JurisdictionPack
+
+    packs = (db.query(JurisdictionPack)
+             .filter(JurisdictionPack.jurisdiction_country == JP,
+                     JurisdictionPack.pack_type == "tax")
+             .order_by(JurisdictionPack.effective_from.desc()).all())
+    registrations = (db.query(m.PayrollJpEmployerRegistration)
+                     .filter(m.PayrollJpEmployerRegistration.status == "ACTIVE").count())
+    profiles = (db.query(m.PayrollJpWorkerTaxProfile)
+                .filter(m.PayrollJpWorkerTaxProfile.status == "ACTIVE").count())
+    enrollments = (db.query(m.PayrollJpSocialInsuranceEnrollment)
+                   .filter(m.PayrollJpSocialInsuranceEnrollment.status == "ACTIVE").count())
+    notices = (db.query(m.PayrollJpResidentTaxAssessment)
+               .filter(m.PayrollJpResidentTaxAssessment.status == "APPROVED").count())
+    pending_events = (db.query(m.PayrollJpSocialInsuranceEvent)
+                      .filter(m.PayrollJpSocialInsuranceEvent.submission_status == "CREATED")
+                      .count())
+    return {
+        "jurisdiction": JP, "spec": SPEC, "available": False,
+        "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version,
+                   "status": p.status,
+                   "effectiveFrom": p.effective_from.isoformat() if p.effective_from else None,
+                   "effectiveTo": p.effective_to.isoformat() if p.effective_to else None}
+                  for p in packs],
+        "activeEmployerRegistrations": registrations,
+        "activeWorkerTaxProfiles": profiles,
+        "activeSocialInsuranceEnrollments": enrollments,
+        "approvedResidentTaxNotices": notices,
+        "pendingSocialInsuranceEvents": pending_events,
+        "decisions": owner_decisions(db),
+        "note": ("Japan remains PLANNED; the official values and JP-1 evidence "
+                 "decisions are not yet recorded."),
+    }
+
+
+def _jp_service_registry_transition(db: Session, target: str, reason: str,
+                                    actor_id: Optional[int] = None,
+                                    as_of: Optional[date] = None):
+    from app.modules.payroll import service
+
+    def readiness():
+        unmet = [{"key": "JP-1", "label": "Japan official-values decision",
+                  "detail": "JP-1 has not been recorded; every value stays PENDING G1"}]
+        return unmet, {"decision": "JP-1", "recorded": False}
+
+    return service.transition_service_registry(
+        db, JP, target, reason, actor_id, label="Japan", readiness=readiness,
+        invalid_target_message=lambda t: (
+            f"Japan availability can only be {service.SERVICE_REGISTRY_OPEN} or "
+            f"{service.SERVICE_REGISTRY_CLOSED}."),
+        missing_row_message=("There is no Japan registry row - seed it (PLANNED); "
+                             "it is never created here."),
+        open_from_message=lambda a: f"Japan is {a}; only PLANNED moves to AVAILABLE.")
+
+
+JURISDICTION_HOOKS = {
+    "calc_inputs": "calc_inputs",
+    "before_run_transition": "before_run_transition",
+    "statutory_profile_errors": "_jp_statutory_profile_errors",
+    "statutory_profile_values": "_jp_profile_values",
+    "pack_activation_refusal": "_jp_pack_activation_refusal",
+    "retention_settings": "_jp_retention_settings",
+    "service_registry_transition": "_jp_service_registry_transition",
+    "statutory_summary": "statutory_summary",
+    "statutory_editors": "_jp_statutory_editors",
+    "template_activation_refusal": "_jp_template_activation_refusal",
+    "pack_holidays": "_jp_pack_holidays",
+    "payment_treatment": "_jp_payment_treatment",
+    "payslip_hold_view": "_jp_payslip_hold_view",
+}
+
+# ======================================================================
+# Japan organisation version writers and approvals (Phase 5)
+# ======================================================================
+JP_EMPLOYER_FIELDS = (
+    "effective_from", "effective_to", "corporate_number", "withholding_tax_office",
+    "withholding_payer_status", "jps_office_symbol", "jps_office_number",
+    "health_insurer_type", "health_insurer_code", "health_insurer_prefecture",
+    "si_deduction_timing", "labour_insurance_number", "ei_office_number",
+    "ei_industry_class", "workers_comp_rate_class", "municipality_reporting_enabled",
+    "legal_entity_id", "source_document_id", "evidence_ref",
+)
+JP_PROFILE_FIELDS = (
+    "effective_from", "effective_to", "residency_status", "declaration_class",
+    "declaration_received_on", "dependants_count", "dependant_facts",
+    "municipality_code", "residence_prefecture", "resident_tax_collection",
+    "my_number_vault_id", "legal_entity_id", "evidence_ref",
+)
+JP_ENROLLMENT_FIELDS = (
+    "effective_from", "effective_to", "health_eligible", "pension_eligible",
+    "health_insurer_code", "smr_health_grade", "smr_pension_grade",
+    "smr_health_amount", "smr_pension_amount", "smr_basis", "actual_remuneration",
+    "care_state", "child_support_state", "qualification_date", "loss_date",
+    "legal_entity_id", "evidence_ref",
+)
+JP_EI_FIELDS = (
+    "effective_from", "effective_to", "insured", "ei_insured_number",
+    "industry_class", "qualification_date", "loss_date", "legal_entity_id",
+    "evidence_ref",
+)
+JP_ASSESSMENT_FIELDS = (
+    "municipality_code", "fiscal_notice_year", "notice_id", "received_on",
+    "first_deduction_month", "monthly_amounts", "total_amount", "source_hash",
+    "replaces_id", "legal_entity_id", "evidence_ref",
+)
+_JP_INT_FIELDS = {"dependants_count", "smr_health_grade", "smr_pension_grade",
+                  "fiscal_notice_year", "version", "legal_entity_id",
+                  "source_document_id", "my_number_vault_id", "replaces_id"}
+_JP_DECIMAL_FIELDS = {"smr_health_amount", "smr_pension_amount", "total_amount"}
+_JP_DATE_FIELDS = {"effective_from", "effective_to", "declaration_received_on",
+                   "qualification_date", "loss_date", "received_on",
+                   "first_deduction_month"}
+
+
+def _jp_employee(db: Session, organization_id: int, employee_id: int):
+    from app.modules.payroll.models import PayrollEmployee
+
+    employee = (db.query(PayrollEmployee)
+                .filter(PayrollEmployee.id == employee_id,
+                        PayrollEmployee.organization_id == organization_id).first())
+    if employee is None:
+        from app.core.exceptions import NotFoundException
+
+        raise NotFoundException("Japan employee not found.")
+    return employee
+
+
+def _jp_clean(payload: dict, fields, *, required=()) -> dict:
+    unknown = sorted(set(payload) - set(fields))
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    data = {}
+    for key, value in payload.items():
+        if value is None or value == "":
+            data[key] = None
+        elif key in _JP_DATE_FIELDS:
+            data[key] = _as_date(value, key)
+        elif key in _JP_INT_FIELDS:
+            try:
+                data[key] = int(value)
+            except (TypeError, ValueError):
+                raise BadRequestException(f"{key} must be a whole number.")
+        elif key in _JP_DECIMAL_FIELDS:
+            data[key] = _money(value, key)
+        elif key == "municipality_reporting_enabled":
+            data[key] = bool(value)
+        else:
+            data[key] = value
+    missing = [key for key in required if data.get(key) in (None, "")]
+    if missing:
+        raise BadRequestException(f"required field(s): {', '.join(missing)}")
+    return data
+
+
+def _jp_audit(db, actor_id, action, entity_type, entity_id, old=None, new=None):
+    from app.modules.payroll.service import record_tax_audit
+
+    record_tax_audit(db, actor_id=actor_id, action=action, entity_type=entity_type,
+                     entity_id=entity_id, old_value=old, new_value=new, auto_commit=False)
+
+
+def _jp_create_version(db: Session, model, organization_id: int, employee_id: Optional[int],
+                       data: dict, actor_id: Optional[int], label: str):
+    query = db.query(model).filter(model.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(model.employee_id == employee_id)
+    prior = query.order_by(model.effective_from.desc(), model.id.desc()).first()
+    row = model(organization_id=organization_id, status="DRAFT",
+                created_by_id=actor_id, previous_version_id=getattr(prior, "id", None),
+                **data)
+    if employee_id is not None:
+        row.employee_id = employee_id
+    db.add(row)
+    db.flush()
+    _jp_audit(db, actor_id, "created", label, row.id,
+              new={"effective_from": data.get("effective_from").isoformat()})
+    return row
+
+
+def record_employer_registration(db: Session, organization_id: int, payload: dict,
+                                 actor_id: Optional[int]):
+    m = _jp_models()
+    data = _jp_clean(payload, JP_EMPLOYER_FIELDS,
+                     required=("effective_from", "health_insurer_type",
+                               "ei_industry_class"))
+    return _jp_create_version(db, m.PayrollJpEmployerRegistration, organization_id, None,
+                              data, actor_id, "jp_employer_registration")
+
+
+def record_worker_tax_profile(db: Session, organization_id: int, employee_id: int,
+                              payload: dict, actor_id: Optional[int]):
+    m = _jp_models()
+    _jp_employee(db, organization_id, employee_id)
+    data = _jp_clean(payload, JP_PROFILE_FIELDS, required=("effective_from",))
+    return _jp_create_version(db, m.PayrollJpWorkerTaxProfile, organization_id,
+                              employee_id, data, actor_id, "jp_worker_tax_profile")
+
+
+def record_social_insurance_enrollment(db: Session, organization_id: int, employee_id: int,
+                                       payload: dict, actor_id: Optional[int]):
+    m = _jp_models()
+    _jp_employee(db, organization_id, employee_id)
+    data = _jp_clean(payload, JP_ENROLLMENT_FIELDS,
+                     required=("effective_from", "health_eligible", "pension_eligible"))
+    return _jp_create_version(db, m.PayrollJpSocialInsuranceEnrollment, organization_id,
+                              employee_id, data, actor_id, "jp_social_insurance_enrollment")
+
+
+def record_employment_insurance_profile(db: Session, organization_id: int, employee_id: int,
+                                        payload: dict, actor_id: Optional[int]):
+    m = _jp_models()
+    _jp_employee(db, organization_id, employee_id)
+    data = _jp_clean(payload, JP_EI_FIELDS,
+                     required=("effective_from", "insured", "industry_class"))
+    return _jp_create_version(db, m.PayrollJpEmploymentInsuranceProfile, organization_id,
+                              employee_id, data, actor_id, "jp_employment_insurance_profile")
+
+
+def _jp_approve_version(db: Session, model, organization_id: int, row_id: int,
+                        actor_id: Optional[int], label: str):
+    from app.modules.payroll.service import require_four_eyes
+
+    row = (db.query(model).filter(model.id == row_id,
+                                  model.organization_id == organization_id).first())
+    if row is None:
+        from app.core.exceptions import NotFoundException
+
+        raise NotFoundException(f"Japan {label.replace('_', ' ')} not found.")
+    if row.status != "DRAFT":
+        raise BadRequestException(f"Only a DRAFT {label.replace('_', ' ')} can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, f"Approving a Japan {label}",
+                      db=db, entity_type=label, entity_id=row.id,
+                      current_status=row.status)
+    start = row.effective_from
+    q = (db.query(model)
+         .filter(model.organization_id == organization_id,
+                 model.status == "ACTIVE",
+                 model.id != row.id))
+    if hasattr(row, "employee_id"):
+        q = q.filter(model.employee_id == row.employee_id)
+    for old in q.all():
+        if old.effective_from >= start:
+            raise BadRequestException("A version on or after this effective date already exists.")
+        if old.effective_to is None or old.effective_to >= start:
+            old.effective_to = date.fromordinal(start.toordinal() - 1)
+            old.status = "SUPERSEDED"
+    row.status = "ACTIVE"
+    row.approved_by_id = actor_id
+    row.approved_at = datetime.utcnow()
+    db.flush()
+    _jp_audit(db, actor_id, "approved", label, row.id,
+              old={"status": "DRAFT"},
+              new={"status": "ACTIVE", "effective_from": start.isoformat()})
+    return row
+
+
+def approve_employer_registration(db: Session, organization_id: int, row_id: int,
+                                  actor_id: Optional[int]):
+    return _jp_approve_version(db, _jp_models().PayrollJpEmployerRegistration,
+                               organization_id, row_id, actor_id, "jp_employer_registration")
+
+
+def approve_worker_tax_profile(db: Session, organization_id: int, row_id: int,
+                               actor_id: Optional[int]):
+    return _jp_approve_version(db, _jp_models().PayrollJpWorkerTaxProfile,
+                               organization_id, row_id, actor_id, "jp_worker_tax_profile")
+
+
+def approve_social_insurance_enrollment(db: Session, organization_id: int, row_id: int,
+                                        actor_id: Optional[int]):
+    return _jp_approve_version(db, _jp_models().PayrollJpSocialInsuranceEnrollment,
+                               organization_id, row_id, actor_id,
+                               "jp_social_insurance_enrollment")
+
+
+def approve_employment_insurance_profile(db: Session, organization_id: int, row_id: int,
+                                         actor_id: Optional[int]):
+    return _jp_approve_version(db, _jp_models().PayrollJpEmploymentInsuranceProfile,
+                               organization_id, row_id, actor_id,
+                               "jp_employment_insurance_profile")
+
+
+def record_resident_tax_assessment(db: Session, organization_id: int, employee_id: int,
+                                   payload: dict, actor_id: Optional[int]):
+    m = _jp_models()
+    _jp_employee(db, organization_id, employee_id)
+    data = _jp_clean(payload, JP_ASSESSMENT_FIELDS,
+                     required=("municipality_code", "fiscal_notice_year", "notice_id",
+                               "received_on", "first_deduction_month",
+                               "monthly_amounts", "total_amount", "source_hash"))
+    amounts = data["monthly_amounts"]
+    if not isinstance(amounts, dict) or len(amounts) != 12:
+        raise BadRequestException("monthly_amounts must be an object of exactly twelve amounts.")
+    cleaned = {}
+    for key, value in amounts.items():
+        if not isinstance(key, str) or len(key) != 7 or key[4] != "-":
+            raise BadRequestException("monthly_amounts keys must be YYYY-MM.")
+        cleaned[key] = str(_money(value, f"monthly_amounts.{key}"))
+    data["monthly_amounts"] = cleaned
+    latest = (db.query(m.PayrollJpResidentTaxAssessment)
+              .filter(m.PayrollJpResidentTaxAssessment.organization_id == organization_id,
+                      m.PayrollJpResidentTaxAssessment.employee_id == employee_id,
+                      m.PayrollJpResidentTaxAssessment.municipality_code == data["municipality_code"],
+                      m.PayrollJpResidentTaxAssessment.fiscal_notice_year == data["fiscal_notice_year"])
+              .order_by(m.PayrollJpResidentTaxAssessment.version.desc()).first())
+    data["version"] = (latest.version + 1) if latest else 1
+    row = m.PayrollJpResidentTaxAssessment(
+        organization_id=organization_id, employee_id=employee_id, status="IMPORTED",
+        created_by_id=actor_id, previous_version_id=getattr(latest, "id", None),
+        **data)
+    db.add(row)
+    db.flush()
+    _jp_audit(db, actor_id, "created", "jp_resident_tax_assessment", row.id,
+              new={"notice_id": row.notice_id, "version": row.version})
+    return row
+
+
+def approve_resident_tax_assessment(db: Session, organization_id: int, row_id: int,
+                                    actor_id: Optional[int]):
+    from app.modules.payroll.service import require_four_eyes
+
+    m = _jp_models()
+    Assessment = m.PayrollJpResidentTaxAssessment
+    row = (db.query(Assessment)
+           .filter(Assessment.id == row_id,
+                   Assessment.organization_id == organization_id).first())
+    if row is None:
+        from app.core.exceptions import NotFoundException
+
+        raise NotFoundException("Japan resident-tax notice not found.")
+    if row.status != "IMPORTED":
+        raise BadRequestException("Only an IMPORTED resident-tax notice can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, "Approving a Japan resident-tax notice",
+                      db=db, entity_type="jp_resident_tax_assessment", entity_id=row.id,
+                      current_status=row.status)
+    now = datetime.utcnow()
+    for old in (db.query(Assessment)
+                .filter(Assessment.organization_id == organization_id,
+                        Assessment.employee_id == row.employee_id,
+                        Assessment.municipality_code == row.municipality_code,
+                        Assessment.fiscal_notice_year == row.fiscal_notice_year,
+                        Assessment.id != row.id,
+                        Assessment.status == "APPROVED").all()):
+        old.status = "SUPERSEDED"
+        old.updated_at = now
+    if row.replaces_id:
+        replaced = db.get(Assessment, row.replaces_id)
+        if replaced is not None and replaced.organization_id == organization_id:
+            replaced.status = "SUPERSEDED"
+            replaced.updated_at = now
+    row.status = "APPROVED"
+    row.approved_by_id = actor_id
+    row.approved_at = now
+    db.flush()
+    _jp_audit(db, actor_id, "approved", "jp_resident_tax_assessment", row.id,
+              old={"status": "IMPORTED"}, new={"status": "APPROVED"})
+    return row
+
+# ======================================================================
+# My Number vault boundary (Phase 5)
+# ======================================================================
+def _jp_vault(db: Session, organization_id: int, vault_id: int):
+    from app.core.exceptions import NotFoundException
+
+    m = _jp_models()
+    row = (db.query(m.PayrollJpMyNumberVault)
+           .filter(m.PayrollJpMyNumberVault.id == vault_id,
+                   m.PayrollJpMyNumberVault.organization_id == organization_id).first())
+    if row is None:
+        raise NotFoundException("Japan My Number vault row not found.")
+    return row
+
+
+def _jp_vault_event(db: Session, organization_id: int, row, action: str, actor_id,
+                    reason: Optional[str] = None, purpose: Optional[str] = None):
+    m = _jp_models()
+    event = m.PayrollJpMyNumberAccessEvent(
+        organization_id=organization_id, employee_id=row.employee_id, vault_id=row.id,
+        actor_id=actor_id, action=action, purpose=purpose or "TAX_SOCIAL_INSURANCE",
+        reason=reason, created_by_id=actor_id)
+    db.add(event)
+    db.flush()
+    _jp_audit(db, actor_id, action.lower(), "jp_my_number_access_event", event.id,
+              new={"employee_id": row.employee_id, "vault_id": row.id})
+    return event
+
+
+def list_my_numbers(db: Session, organization_id: int, employee_id: Optional[int] = None):
+    from app.modules.payroll import japan_my_number as my
+
+    m = _jp_models()
+    q = (db.query(m.PayrollJpMyNumberVault)
+         .filter(m.PayrollJpMyNumberVault.organization_id == organization_id))
+    if employee_id is not None:
+        _jp_employee(db, organization_id, employee_id)
+        q = q.filter(m.PayrollJpMyNumberVault.employee_id == employee_id)
+    return [{"id": row.id, "employeeId": row.employee_id,
+             "subjectType": row.subject_type, "subjectRef": row.subject_ref,
+             "masked": my.masked(), "purpose": row.purpose, "status": row.status,
+             "keyVersion": row.key_version,
+             "collectedAt": row.collected_at.isoformat() if row.collected_at else None,
+             "deletedAt": row.deleted_at.isoformat() if row.deleted_at else None}
+            for row in q.order_by(m.PayrollJpMyNumberVault.id).all()]
+
+
+def create_my_number(db: Session, organization_id: int, employee_id: int, payload: dict,
+                     actor_id: Optional[int]):
+    from app.modules.payroll import japan_my_number as my
+
+    m = _jp_models()
+    _jp_employee(db, organization_id, employee_id)
+    number = str(payload.get("myNumber") or "").strip()
+    subject_type = str(payload.get("subjectType") or "EMPLOYEE").strip().upper()
+    if subject_type not in ("EMPLOYEE", "DEPENDANT"):
+        raise BadRequestException("subjectType must be EMPLOYEE or DEPENDANT.")
+    subject_ref = str(payload.get("subjectRef") or "self").strip() or "self"
+    existing = (db.query(m.PayrollJpMyNumberVault)
+                .filter(m.PayrollJpMyNumberVault.organization_id == organization_id,
+                        m.PayrollJpMyNumberVault.employee_id == employee_id,
+                        m.PayrollJpMyNumberVault.subject_type == subject_type,
+                        m.PayrollJpMyNumberVault.subject_ref == subject_ref,
+                        m.PayrollJpMyNumberVault.status == "ACTIVE").first())
+    if existing is not None:
+        raise BadRequestException("An ACTIVE My Number already exists for this subject; delete it first.")
+    try:
+        fingerprint = my.fingerprint(number)
+    except my.MyNumberError as exc:
+        raise BadRequestException(str(exc))
+    duplicate = (db.query(m.PayrollJpMyNumberVault)
+                 .filter(m.PayrollJpMyNumberVault.organization_id == organization_id,
+                         m.PayrollJpMyNumberVault.fingerprint == fingerprint,
+                         m.PayrollJpMyNumberVault.status == "ACTIVE").first())
+    if duplicate is not None:
+        raise BadRequestException("This My Number is already held for another active vault subject.")
+    row = m.PayrollJpMyNumberVault(
+        organization_id=organization_id, employee_id=employee_id,
+        subject_type=subject_type, subject_ref=subject_ref, ciphertext="",
+        key_version=1, fingerprint=fingerprint, purpose="TAX_SOCIAL_INSURANCE",
+        collected_at=datetime.utcnow(), identity_verified_by=payload.get("identityVerifiedBy"),
+        status="ACTIVE", created_by_id=actor_id, evidence_ref=payload.get("evidenceRef"))
+    db.add(row)
+    db.flush()
+    try:
+        ciphertext, version = my.encrypt(number, owner=my.vault_owner(
+            organization_id, employee_id, row.id))
+    except my.MyNumberError as exc:
+        db.rollback()
+        raise BadRequestException(str(exc))
+    row.ciphertext = ciphertext
+    row.key_version = version
+    db.flush()
+    _jp_vault_event(db, organization_id, row, "CREATE", actor_id)
+    return row
+
+
+def request_my_number_reveal(db: Session, organization_id: int, vault_id: int, reason: str,
+                             actor_id: Optional[int]):
+    row = _jp_vault(db, organization_id, vault_id)
+    if row.status != "ACTIVE" or not row.ciphertext:
+        raise BadRequestException("The My Number has been deleted.")
+    if not (reason or "").strip():
+        raise BadRequestException("A reveal request needs a reason.")
+    return _jp_vault_event(db, organization_id, row, "REVEAL_REQUESTED", actor_id,
+                           reason=reason.strip(), purpose="REVEAL")
+
+
+def approve_my_number_reveal(db: Session, organization_id: int, vault_id: int,
+                             actor_id: Optional[int]):
+    from app.modules.payroll.service import require_four_eyes
+
+    m = _jp_models()
+    row = _jp_vault(db, organization_id, vault_id)
+    request = (db.query(m.PayrollJpMyNumberAccessEvent)
+               .filter(m.PayrollJpMyNumberAccessEvent.organization_id == organization_id,
+                       m.PayrollJpMyNumberAccessEvent.vault_id == row.id,
+                       m.PayrollJpMyNumberAccessEvent.action == "REVEAL_REQUESTED")
+               .order_by(m.PayrollJpMyNumberAccessEvent.id.desc()).first())
+    if request is None:
+        raise BadRequestException("There is no reveal request to approve.")
+    approved = (db.query(m.PayrollJpMyNumberAccessEvent)
+                .filter(m.PayrollJpMyNumberAccessEvent.organization_id == organization_id,
+                        m.PayrollJpMyNumberAccessEvent.vault_id == row.id,
+                        m.PayrollJpMyNumberAccessEvent.action == "REVEAL_APPROVED",
+                        m.PayrollJpMyNumberAccessEvent.id > request.id).first())
+    if approved is not None:
+        raise BadRequestException("This reveal request has already been approved.")
+    require_four_eyes(request.actor_id, actor_id, "Approving a My Number reveal",
+                      db=db, entity_type="jp_my_number_access_event", entity_id=request.id,
+                      current_status="REVEAL_REQUESTED")
+    return _jp_vault_event(db, organization_id, row, "REVEAL_APPROVED", actor_id,
+                           reason=request.reason, purpose="REVEAL")
+
+
+def reveal_my_number(db: Session, organization_id: int, vault_id: int, actor_id: Optional[int]):
+    from app.modules.payroll import japan_my_number as my
+
+    m = _jp_models()
+    row = _jp_vault(db, organization_id, vault_id)
+    request = (db.query(m.PayrollJpMyNumberAccessEvent)
+               .filter(m.PayrollJpMyNumberAccessEvent.organization_id == organization_id,
+                       m.PayrollJpMyNumberAccessEvent.vault_id == row.id,
+                       m.PayrollJpMyNumberAccessEvent.action == "REVEAL_REQUESTED")
+               .order_by(m.PayrollJpMyNumberAccessEvent.id.desc()).first())
+    approved = (db.query(m.PayrollJpMyNumberAccessEvent)
+                .filter(m.PayrollJpMyNumberAccessEvent.organization_id == organization_id,
+                        m.PayrollJpMyNumberAccessEvent.vault_id == row.id,
+                        m.PayrollJpMyNumberAccessEvent.action == "REVEAL_APPROVED",
+                        m.PayrollJpMyNumberAccessEvent.id > (request.id if request else 0))
+                .order_by(m.PayrollJpMyNumberAccessEvent.id.desc()).first())
+    if request is None or approved is None:
+        raise BadRequestException("A reveal needs a request and a second person's approval.")
+    try:
+        number = my.decrypt(row.ciphertext, row.key_version,
+                            owner=my.vault_owner(organization_id, row.employee_id, row.id))
+    except my.MyNumberError as exc:
+        raise BadRequestException(str(exc))
+    _jp_vault_event(db, organization_id, row, "REVEALED", actor_id,
+                    reason=request.reason, purpose="REVEAL")
+    return {"myNumber": number, "employeeId": row.employee_id,
+            "subjectType": row.subject_type, "subjectRef": row.subject_ref}
+
+
+def delete_my_number(db: Session, organization_id: int, vault_id: int,
+                     actor_id: Optional[int]):
+    row = _jp_vault(db, organization_id, vault_id)
+    if row.status == "DELETED":
+        raise BadRequestException("The My Number has already been deleted.")
+    row.status = "DELETED"
+    row.deleted_at = datetime.utcnow()
+    row.ciphertext = None
+    db.flush()
+    _jp_vault_event(db, organization_id, row, "DELETED", actor_id)
+    return row
