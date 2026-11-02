@@ -27,6 +27,11 @@ fi
 
 echo "==> Building frontend from $ROOT/frontend"
 cd "$ROOT/frontend"
+# Login prefill values are developer-only. Empty process variables override
+# whatever this machine's frontend/.env holds (same as the CI deploy), and
+# vite.config.js fails the build if a value still reaches dist/.
+export VITE_DEFAULT_EMAIL=''
+export VITE_DEFAULT_PASSWORD=''
 npm ci
 npm run build
 

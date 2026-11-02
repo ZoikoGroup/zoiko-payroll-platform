@@ -3,6 +3,12 @@
 .env
 .env.*
 !.env.example
+# Every folder, not just the root: frontend/.env would otherwise be copied
+# into the image and compiled into the bundle.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.production.example
 __pycache__
 *.pyc
 *.pyo

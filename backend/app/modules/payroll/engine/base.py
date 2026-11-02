@@ -980,20 +980,15 @@ class PayrollContext:
 
     # ── Japan (ZP-JP-ENG-001; "JP") ───────────────────────────────────────────
     # Pre-resolved by the service layer; all default to None so non-JP callers unaffected.
-    jp_statutory_profile: object = None        # EmployeeStatutoryProfile | None
     jp_worker_tax_profile: object = None
     jp_employer_registration: object = None
     jp_social_insurance_enrollment: object = None
     jp_employment_insurance_profile: object = None
     jp_resident_tax_assessments: list = None
     jp_organization_id: int = None
-    jp_legal_employer_id: int = None
-    jp_rule_packs: dict = None
-    jp_year_end_context: dict = None
-    jp_bonus_context: dict = None
-    jp_time_records: list = None
+    jp_employee_id: int = None
+    jp_date_of_birth: date = None
     jp_components: dict = None
-    jp_earning_items: list = None
 
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
@@ -1735,6 +1730,12 @@ class PayrollResult:
     # Mexico (ZP-MX-ENG-001) — the whole dict countries/mexico.py returns
     # under 'mx_result'. None for every non-MX country.
     mx_result: dict = None
+
+    # Japan (ZP-JP-ENG-001) — the whole dict countries/japan.py returns under
+    # 'jp_result' (separate WHT/SI/EI bases, every employee/employer component,
+    # the resident-tax notice reference and the calculation trace). None
+    # elsewhere. No My Number, name or bank data is ever placed here.
+    jp_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

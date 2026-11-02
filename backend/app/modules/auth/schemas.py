@@ -5,12 +5,32 @@ modules/auth/schemas.py
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.modules.auth.models import UserRole
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
+
+REGISTRATION_PASSWORD_MIN_LENGTH = 12
+REGISTRATION_PASSWORD_RULE = (
+    f"Password must be at least {REGISTRATION_PASSWORD_MIN_LENGTH} characters and include "
+    "a letter, a number and a symbol."
+)
+
+
+def registration_password_error(password: str) -> Optional[str]:
+    """None when `password` meets the registration rule (the sign-up page
+    shows the same rule), else the reason."""
+    if (len(password or "") < REGISTRATION_PASSWORD_MIN_LENGTH
+            or not re.search(r"[A-Za-z]", password)
+            or not re.search(r"[0-9]", password)
+            or not re.search(r"[^A-Za-z0-9]", password)):
+        return REGISTRATION_PASSWORD_RULE
+    return None
+
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -21,7 +41,7 @@ class RegisterRequest(BaseModel):
     organization: str = Field(..., min_length=1, max_length=200)
     name: str = Field(..., min_length=1, max_length=200)
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=REGISTRATION_PASSWORD_MIN_LENGTH, max_length=128)
     industry: Optional[str] = None
     company_type: Optional[str] = None
     tax_no: Optional[str] = None
@@ -47,6 +67,25 @@ class RegisterRequest(BaseModel):
     # billing/entitlement decisions here — POST /billing/checkout remains
     # the only place a plan is actually committed.
     plan_code: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def _password_rule(cls, value: str) -> str:
+        error = registration_password_error(value)
+        if error:
+            raise ValueError(error)
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_shape(cls, value: Optional[str]) -> Optional[str]:
+        # An IANA zone name such as "Asia/Kolkata", stored on the organisation.
+        value = (value or "").strip()
+        if not value:
+            return None
+        if len(value) > 64 or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*", value):
+            raise ValueError("Timezone must be an IANA time zone name such as Asia/Kolkata.")
+        return value
 
 
 class TrialRegisterRequest(BaseModel):

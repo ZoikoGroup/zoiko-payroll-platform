@@ -1001,6 +1001,7 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
         country=data.country,
         email=data.email,
         phone=data.phone,
+        timezone=data.timezone,
         is_active=True,
         billing_onboarding_status="PENDING_CHECKOUT",
         terms_accepted_at=datetime.utcnow(),

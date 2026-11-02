@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     # organisation can become Japanese. Leave UNSET in production until the
     # JP release gates G0-G8 are signed.
     JP_TENANT_ONBOARDING_ENABLED: bool = False
+    # Japan My Number vault (ZP-JP-ENG-001 Phase 2). JSON object mapping key
+    # version -> 32-byte key, e.g. {"1": "<32-byte key>"} from Secret Manager.
+    # Empty = encrypt/decrypt/fingerprint refuse, which is fine while Japan is
+    # dormant; add the key before Phase 5 writes any number.
+    JP_MY_NUMBER_KEYRING: str = ""
+    # Japan My Number duplicate-detection key (32 bytes, Secret Manager). Never
+    # rotated: fingerprints must stay comparable across keyring rotations.
+    JP_MY_NUMBER_FINGERPRINT_KEY: str = ""
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.

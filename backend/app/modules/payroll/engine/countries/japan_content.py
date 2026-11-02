@@ -132,6 +132,16 @@ SOURCE_URLS = {
 
 # ── TaxSlab rule_type discriminators (all ≤ 30 chars) ────────────────────
 JP_EARNING_CLASS_RULE = "JP_EARNING_CLASS"
+JP_WHT_MONTHLY_RULE = "JP_WHT_MONTHLY"
+JP_WHT_CMP_EID_RULE = "JP_WHT_CMP_EID"
+JP_WHT_CMP_RATE_RULE = "JP_WHT_CMP_RATE"
+JP_HEALTH_RATE_RULE = "JP_HEALTH_RATE"
+JP_SMR_GRADE_RULE = "JP_SMR_GRADE"
+JP_TABLE_RULE_TYPES = (
+    JP_WHT_MONTHLY_RULE, JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE,
+    JP_HEALTH_RATE_RULE, JP_SMR_GRADE_RULE,
+)
+JP_AUTHORITY_TABLE_RULE_TYPES = JP_TABLE_RULE_TYPES
 
 # ── Enumerations the engine validates against ─────────────────────────────
 PAY_FREQUENCIES_SUPPORTED = ("MONTHLY",)
@@ -167,6 +177,8 @@ JP_PARAMETER_KEYS = {
     # Scope and policy (spec §1, §3, JP-001, JP-006)
     "jp_supported_pay_frequencies": "text",
     "jp_withholding_method": "text",
+    "jp_wht_cmp_basic_deduction": "amount",
+    "jp_wht_cmp_dependant_deduction": "amount",
     "jp_correction_policy": "text",
     # Rounding — one row per statutory amount, no global helper (JP-002)
     "jp_wht_rounding": "text",
@@ -236,6 +248,11 @@ JP_SCALAR_CONTENT = (
     # JP-006: retroactive pay / correction treatment needs a documented policy.
     ("jp_correction_policy", "Japanese retro-pay and correction policy (JP-006)",
      None, None, None, PENDING, "S2", True, None, None),
+    # NTA computer-calculation deductions (S1): present, deliberately empty.
+    ("jp_wht_cmp_basic_deduction", "NTA computer method — basic employment-income deduction (JPY)",
+     None, None, None, None, "S1", True, None, None),
+    ("jp_wht_cmp_dependant_deduction", "NTA computer method — deduction per dependant (JPY)",
+     None, None, None, None, "S1", True, None, None),
 
     # JP-002: each statutory amount has its own truncation/rounding stage.
     ("jp_wht_rounding", "Withholding tax rounding (per the certified NTA method)",
@@ -338,7 +355,10 @@ JP_SCALAR_CONTENT = (
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
 # never filled with an assumed value.
-JP_EMPTY_BY_DESIGN = frozenset({"jp_ei_agriculture_sake", "jp_ei_construction"})
+JP_EMPTY_BY_DESIGN = frozenset({
+    "jp_ei_agriculture_sake", "jp_ei_construction",
+    "jp_wht_cmp_basic_deduction", "jp_wht_cmp_dependant_deduction",
+})
 
 # ── Authority tables not reproduced by the specification ──────────────────
 # Each is filled ONLY from an archived authority artefact (source code in the
@@ -348,18 +368,24 @@ JP_EMPTY_BY_DESIGN = frozenset({"jp_ei_agriculture_sake", "jp_ei_construction"})
 JP_EMPTY_TABLES = {
     # NTA 2026 monthly withholding table (S1): columns by declaration class
     # and dependant count; the SECONDARY column always needs the table.
-    "wht_monthly_table": {"source": "S1", "gate": "G1", "rows": ()},
+    "wht_monthly_table": {"source": "S1", "gate": "G1", "rows": (),
+                          "rule_type": JP_WHT_MONTHLY_RULE},
     # NTA computer-calculation method parameters for the PRIMARY column (S1).
-    "wht_computer_method": {"source": "S1", "gate": "G1", "rows": ()},
+    "wht_computer_method": {"source": "S1", "gate": "G1", "rows": (),
+                            "rule_type": (JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE),
+                            "rule_types": (JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE)},
     # NTA 2026 bonus rate table (S1): rate by prior-month pay band.
     "wht_bonus_rate_table": {"source": "S1", "gate": "G1", "rows": ()},
     # NTA 2026 year-end adjustment pack (S3) — separate from monthly content.
     "year_end_adjustment": {"source": "S3", "gate": "G1", "rows": ()},
     # Health and pension SMR grade tables (S6/S7).
-    "smr_grades_health": {"source": "S7", "gate": "G3", "rows": ()},
-    "smr_grades_pension": {"source": "S7", "gate": "G3", "rows": ()},
+    "smr_grades_health": {"source": "S7", "gate": "G3", "rows": (),
+                          "rule_type": JP_SMR_GRADE_RULE},
+    "smr_grades_pension": {"source": "S7", "gate": "G3", "rows": (),
+                           "rule_type": JP_SMR_GRADE_RULE},
     # Kyokai Kenpo FY2026 health rate per prefecture (S10).
-    "kyokai_health_rates": {"source": "S10", "gate": "G3", "rows": ()},
+    "kyokai_health_rates": {"source": "S10", "gate": "G3", "rows": (),
+                            "rule_type": JP_HEALTH_RATE_RULE},
     # Prefectural minimum wage per effective interval (S15) — an announced
     # future rate is never selected before its date (JP-004).
     "minimum_wage": {"source": "S15", "gate": "G4", "rows": ()},

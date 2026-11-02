@@ -235,9 +235,9 @@ _COUNTRY_CALC = {
     # employer incentive, never an employee line. Fail-closed:
     # countries/south_africa.py; simple mode is blocked in resolver.py.
     "ZA": _calc_south_africa,
-    # Japan (ZP-JP-ENG-001) — fail-closed scaffold: countries/japan.py BLOCKS
-    # every calculation until certified NTA/JPS/insurer content is wired, so
-    # Japan can never fall through to _calc_generic; simple mode is blocked
+    # Japan (ZP-JP-ENG-001) — monthly resident salary: NTA withholding,
+    # EPI/health/care/child support on SMR, class-based EI and notice-only
+    # resident tax. Fail-closed on every unsigned rule; simple mode is blocked
     # in resolver.py.
     "JP": _calc_japan,
 }
@@ -349,6 +349,9 @@ class StandardStrategy(PayrollStrategy):
             # not retained. It also reduces the IRRF legal-deduction base inside
             # countries/brazil.py. 0 for every non-BR calculation.
             + deductions.get("br_alimony_deduction", Decimal("0"))
+            # Japan: employee social insurance + employment insurance +
+            # resident tax. Withholding tax arrives as tds above. 0 elsewhere.
+            + deductions.get("jp_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -631,6 +634,10 @@ class StandardStrategy(PayrollStrategy):
             # Mexico (ZP-MX-ENG-001) — the whole MX dict. Absent from every
             # non-MX calculator dict, so every other country is unchanged.
             mx_result=deductions.get("mx_result"),
+            # Japan (ZP-JP-ENG-001) — the whole JP dict (separate bases,
+            # component amounts, resident-tax notice reference and trace).
+            # Absent from every non-JP calculator dict.
+            jp_result=deductions.get("jp_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

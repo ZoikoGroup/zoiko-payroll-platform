@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Loader2, Sparkles } from "lucide-react";
 import { apiFetch } from "../api/client";
 import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
 import DelayedBillingBanner from "../components/DelayedBillingBanner";
-import { PlanCapabilityRow, planCardStyle, badgeStyle } from "./RegisterPage";
+import { PlanCapabilityRow, planCardStyle, badgeStyle } from "../components/billing/PlanCard";
 import { getPlanChangeImpact } from "../service/billingService";
 import PlanChangeCountryNotice from "../components/billing/PlanChangeCountryNotice";
 import { getCountryPauseImpact, impactPausesCountries } from "../utils/planLimits";
@@ -45,7 +45,7 @@ export default function PlanReviewPage() {
   // Computed once per page load, not recomputed on every render — this
   // exact value is what both the banner displays AND what gets sent to
   // /billing/checkout, so the two can never drift apart.
-  const commencementDate = useMemo(() => new Date(Date.now() + THIRTY_DAYS_MS), []);
+  const [commencementDate] = useState(() => new Date(Date.now() + THIRTY_DAYS_MS));
 
   // A direct URL visit or a refresh that lost route state has no plan to
   // review — bounce back to plan selection rather than rendering a broken

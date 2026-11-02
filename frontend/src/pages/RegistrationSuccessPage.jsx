@@ -140,7 +140,7 @@ export default function RegistrationSuccessPage() {
 
         <p className="mt-6 text-center text-xs text-slate-400">
           Wrong email?{" "}
-          <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" className="font-medium text-info hover:text-info">
+          <a href="https://zoikopayroll.com/contact" target="_blank" rel="noopener noreferrer" className="font-medium text-info hover:text-info">
             Contact support
           </a>
         </p>

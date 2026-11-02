@@ -565,7 +565,7 @@ def test_register_enterprise_creates_primary_row():
     from app.modules.auth.service import register_enterprise
 
     register_enterprise(_db, RegisterRequest(organization="Registered Country Co", name="Reg Ister",
-                                             email="registered-country@example.com", password="strong-password",
+                                             email="registered-country@example.com", password="a-strong-password-1",
                                              country="Germany", terms_accepted=True))
     org = _db.query(Organization).filter(Organization.organization_name == "Registered Country Co").first()
     rows = _db.query(OrganizationJurisdiction).filter(OrganizationJurisdiction.organization_id == org.id).all()
