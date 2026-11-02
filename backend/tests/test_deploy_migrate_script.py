@@ -110,8 +110,22 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      "payroll_jp_my_number_access_events", "payroll_jp_worker_tax_profiles",
                      "payroll_jp_social_insurance_enrollments", "payroll_jp_social_insurance_events",
                      "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments"}
+        # Japan P5/P6 (9c1d7e4a2b6f, a7c4e9d1b2f8, a1a748b50902): the run payment
+        # kind, the work-conditions table with its calendar columns and the
+        # attendance approvals - every one must be visible to the drift filter.
+        jp_p6_tables = {"payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
+                        # Japan P8 (41a1fafbbfdc)
+                        "payroll_jp_run_exceptions", "payroll_jp_obligations",
+                        "payroll_jp_yea_declarations", "payroll_jp_yea_cases",
+                        # Japan P9 (b8bd939fffca)
+                        "payroll_jp_parallel_imports", "payroll_jp_parallel_differences"}
+        jp_p6_columns = {"payroll_runs": {"jp_payment_kind"},
+                         "payroll_jp_work_conditions": {"scheduled_weekdays", "statutory_day_off_weekday",
+                                                        "public_holidays_off"}}
+        jp_tables |= jp_p6_tables
         jp_columns = {"payslip_items": {"jp_calculation_snapshot"},
-                      "payroll_runs": {"jp_approval_fingerprint"}}
+                      "payroll_runs": {"jp_approval_fingerprint", "jp_payment_kind"},
+                      "payroll_jp_work_conditions": jp_p6_columns["payroll_jp_work_conditions"]}
         # 668472e4eb72 (2026-10-30): organizations.timezone, on top of Japan Phase 2.
         tz_columns = {"organizations": {"timezone"}}
         mx_final_mile = {"payroll_mx_decisions", *MX_X4_TABLES}     # Mexico m20 (d3f8b2a6c1e9)
@@ -127,7 +141,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = pending_objects("a8e4c1f7d3b5")
         assert tables == brazil_tables | za_tables | mx_final_mile | country | jp_tables
         assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint",
-                                           "jp_approval_fingerprint"}
+                                           "jp_approval_fingerprint", "jp_payment_kind"}
+        assert columns["payroll_jp_work_conditions"] == {"scheduled_weekdays", "statutory_day_off_weekday",
+                                                         "public_holidays_off"}
         assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
                                                          "authority_payment_id"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 10 + 13
@@ -139,14 +155,14 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
         assert tables == za_tables | mx_final_mile | country | jp_tables
         assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}                   # Mexico m18
-        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint"}
+        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind"}
         assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 13
         # Production since PR #136 (A18): Mexico m20 (d3f8b2a6c1e9) and South Africa
         # (447f57564983 -> c15d5b87d6f5) both grow from it, joined by merge 92c67cab49fc.
         tables, columns = pending_objects("c7d2e9a4f1b6")
         assert tables == za_tables | mx_final_mile | country | jp_tables and "payroll_mx_approved_hours" not in columns
-        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint"}
+        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind"}
         assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 13
         tables, columns = pending_objects("b9f3d5a1c7e2")
@@ -167,9 +183,10 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = pending_objects("3880223bfaa0")
         assert tables == {"payroll_za_parallel_imports", "payroll_za_parallel_differences"} | country | jp_tables
         assert columns == {**jp_columns, **tz_columns}
-        # A database already at Japan Phase 2 has only the registration timezone pending.
+        # A database already at Japan Phase 2 has the registration timezone and
+        # Japan P5/P6 pending.
         tables, columns = pending_objects("f686d5128f8a")
-        assert tables == set() and columns == tz_columns
+        assert tables == jp_p6_tables and columns == {**tz_columns, **jp_p6_columns}
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables

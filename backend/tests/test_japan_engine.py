@@ -51,11 +51,14 @@ def _base_rate_map():
     return rate_map
 
 
-def _earning_classes(review_si=False):
+def _earning_classes(review_si=False, signed_labour=True):
     rows = []
     for obligation, treatment, component, label, src in content.JP_EARNING_CLASSES:
         if review_si and obligation == "SI" and component == "SALARY":
             treatment = "REVIEW"
+        if signed_labour and obligation in ("OT_BASE", "MIN_WAGE"):
+            # Synthetic signed labour bases: salary counts, overtime pay never.
+            treatment = {"SALARY": "INCLUDED", "OVERTIME": "EXCLUDED"}.get(component, treatment)
         rows.append(SimpleNamespace(
             rule_type=content.JP_EARNING_CLASS_RULE, tax_regime=obligation,
             filing_status=component, assessment_basis=treatment, min_amount=D(0),
@@ -65,7 +68,8 @@ def _earning_classes(review_si=False):
 
 
 def _slabs(**overrides):
-    rows = _earning_classes(overrides.get("review_si", False))
+    rows = _earning_classes(overrides.get("review_si", False),
+                            signed_labour=overrides.get("signed_labour", True))
     rows.append(SimpleNamespace(
         rule_type=content.JP_WHT_MONTHLY_RULE, tax_column="PRIMARY",
         tax_table_number="0", min_amount=D(0), max_amount=D("100000000"),
@@ -81,6 +85,14 @@ def _slabs(**overrides):
         jurisdiction_state="13", min_amount=D(0), max_amount=None,
         rate_pct=D("10"), flat_amount=None, filing_status=None,
         effective_from=None, effective_to=None,
+    ))
+    # Synthetic minimum-wage fixture - not a statutory figure.
+    rows.append(SimpleNamespace(
+        rule_type=content.JP_MIN_WAGE_RULE, tax_regime=None, tax_column=None,
+        jurisdiction_state="13", min_amount=D(0), max_amount=None,
+        rate_pct=D(0), flat_amount=D("1000"), filing_status=None,
+        rate_label="Synthetic test minimum wage", tax_formula="test",
+        effective_from=date(2026, 1, 1), effective_to=None,
     ))
     if overrides.get("with_ei_pair") is False:
         pass
@@ -116,6 +128,13 @@ def _context(**overrides):
         fiscal_notice_year=2026, version=1, first_deduction_month=date(2026, 6, 1),
         monthly_amounts={"2026-06": "10000", "2026-07": "10000"},
     )]
+    work_conditions = SimpleNamespace(
+        status="ACTIVE", effective_from=date(2026, 1, 1), effective_to=None,
+        working_time_system="STANDARD", week_start_day=0,
+        scheduled_daily_minutes=480, scheduled_monthly_hours=D(240),
+        workplace_prefecture="13", specific_minimum_wage_applies=False,
+        scheduled_weekdays="0,1,2,3,4", statutory_day_off_weekday=6, public_holidays_off=True,
+    )
     ctx_kwargs = dict(
         gross=D(300000), basic=D(300000), overtime=D(0), country="JP",
         pay_frequency="MONTHLY", pay_date=date(2026, 6, 15), calendar_days=30,
@@ -127,6 +146,9 @@ def _context(**overrides):
         jp_employment_insurance_profile=ei_profile,
         jp_resident_tax_assessments=assessments,
         jp_components={},
+        jp_work_conditions=work_conditions,
+        jp_hours=[],
+        jp_hours_approved=False,
     )
     ctx_kwargs.update(overrides)
     return PayrollContext(**ctx_kwargs)
@@ -163,7 +185,11 @@ def test_result_is_deterministic_and_json_serialisable():
 
 
 def test_negative_net_pay_blocks():
-    ctx = _context(gross=D(50000), basic=D(50000))
+    notice = SimpleNamespace(
+        status="APPROVED", notice_id="LARGE", municipality_code="131016",
+        fiscal_notice_year=2026, version=1, first_deduction_month=date(2026, 6, 1),
+        monthly_amounts={"2026-06": "400000", "2026-07": "400000"})
+    ctx = _context(jp_resident_tax_assessments=[notice])
     with pytest.raises(MissingComplianceConfigurationError) as exc:
         japan.calculate(ctx)
     assert exc.value.key == "JP_NEGATIVE_NET"
@@ -208,11 +234,13 @@ def test_non_resident_blocks():
     assert exc.value.key == "JP_NON_RESIDENT_UNSUPPORTED"
 
 
-def test_bonus_blocks_on_the_p4_path():
-    ctx = _context(gross=D(300000), jp_components={"BONUS": D(10000)})
+def test_bonus_blocks_while_its_employment_insurance_class_is_review():
+    # Shipped content: EI on BONUS is REVIEW (no signed evidence), so any
+    # bonus BLOCKS. The bonus path itself is covered in test_japan_bonus.py.
+    ctx = _context(gross=D(310000), jp_components={"BONUS": D(10000)})
     with pytest.raises(MissingComplianceConfigurationError) as exc:
         japan.calculate(ctx)
-    assert exc.value.key == "JP_BONUS_PATH_PENDING_P4"
+    assert exc.value.key == "jp_earning_class:EI:BONUS"
 
 
 def test_review_component_blocks():
@@ -425,3 +453,11 @@ def test_rejected_and_imported_notices_never_govern():
         with pytest.raises(MissingComplianceConfigurationError):
             resident_tax.resident_tax_for_month([row], date(2026, 6, 15))
 
+
+def test_shipped_labour_bases_are_review_and_block():
+    # OT_BASE / MIN_WAGE ship REVIEW: the premium base and the minimum-wage
+    # wage are never assumed to be the salary.
+    ctx = _context(slabs=_slabs(signed_labour=False))
+    with pytest.raises(MissingComplianceConfigurationError) as exc:
+        japan.calculate(ctx)
+    assert exc.value.key == "jp_earning_class:OT_BASE:SALARY"

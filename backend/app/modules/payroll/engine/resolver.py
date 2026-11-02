@@ -278,6 +278,7 @@ def build_context_from_employee(
     mexico_inputs: dict | None = None,
     brazil_inputs: dict | None = None,
     south_africa_inputs: dict | None = None,
+    japan_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -478,4 +479,9 @@ def build_context_from_employee(
         # South Africa (ZP-ZA-ENG-001): za_statutory_profile + za_* context
         # fields resolved by south_africa_service (Phase 5 calc_inputs).
         **(south_africa_inputs or {}),
+        # Japan (ZP-JP-ENG-001): jp_worker_tax_profile, jp_employer_registration,
+        # jp_social_insurance_enrollment, jp_employment_insurance_profile,
+        # jp_resident_tax_assessments and jp_* context fields resolved by
+        # japan_service (Phase 5 calc_inputs).
+        **(japan_inputs or {}),
     )

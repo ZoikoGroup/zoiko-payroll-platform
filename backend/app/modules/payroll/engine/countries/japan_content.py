@@ -137,9 +137,31 @@ JP_WHT_CMP_EID_RULE = "JP_WHT_CMP_EID"
 JP_WHT_CMP_RATE_RULE = "JP_WHT_CMP_RATE"
 JP_HEALTH_RATE_RULE = "JP_HEALTH_RATE"
 JP_SMR_GRADE_RULE = "JP_SMR_GRADE"
+JP_WHT_BONUS_RULE = "JP_WHT_BONUS"
+JP_MIN_WAGE_RULE = "JP_MIN_WAGE"
+JP_HOLIDAY_RULE = "JP_HOLIDAY"
+# Year-end adjustment (S3), Phase 8: every table is empty until G1 signs it.
+#   JP_YEA_EID       annual employment-income deduction (band on annual pay;
+#                    formula, or flat + rate_pct)
+#   JP_YEA_BASIC     basic deduction (band on total income; flat_amount)
+#   JP_YEA_SPOUSE    spouse deduction (band on the spouse's income; flat_amount)
+#   JP_YEA_DEPENDANT dependant deduction per category (filing_status; flat_amount)
+#   JP_YEA_LIFE_INS  life-insurance premium deduction (band on premiums paid;
+#                    formula, or flat + rate_pct)
+#   JP_YEA_RATE      annual income-tax rate (band on taxable income; rate_pct
+#                    minus flat_amount, the quick deduction)
+JP_YEA_EID_RULE = "JP_YEA_EID"
+JP_YEA_BASIC_RULE = "JP_YEA_BASIC"
+JP_YEA_SPOUSE_RULE = "JP_YEA_SPOUSE"
+JP_YEA_DEPENDANT_RULE = "JP_YEA_DEPENDANT"
+JP_YEA_LIFE_INS_RULE = "JP_YEA_LIFE_INS"
+JP_YEA_RATE_RULE = "JP_YEA_RATE"
+JP_YEA_RULE_TYPES = (JP_YEA_EID_RULE, JP_YEA_BASIC_RULE, JP_YEA_SPOUSE_RULE,
+                     JP_YEA_DEPENDANT_RULE, JP_YEA_LIFE_INS_RULE, JP_YEA_RATE_RULE)
 JP_TABLE_RULE_TYPES = (
     JP_WHT_MONTHLY_RULE, JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE,
-    JP_HEALTH_RATE_RULE, JP_SMR_GRADE_RULE,
+    JP_HEALTH_RATE_RULE, JP_SMR_GRADE_RULE, JP_WHT_BONUS_RULE,
+    JP_MIN_WAGE_RULE, JP_HOLIDAY_RULE, *JP_YEA_RULE_TYPES,
 )
 JP_AUTHORITY_TABLE_RULE_TYPES = JP_TABLE_RULE_TYPES
 
@@ -167,6 +189,13 @@ EI_CLASSES = ("GENERAL", "AGRICULTURE_SAKE", "CONSTRUCTION")
 WITHHOLDING_METHODS = ("COMPUTER_PRIMARY_TABLES_OTHERS", "TABLES_ONLY", "PENDING_G1")
 SPLIT_RULES = ("EQUAL", "PENDING_G1")
 ROUNDING_RULES = ("PENDING_G1", "DOWN_1000")
+# JP-006: how a committed payslip is corrected. The only supported policy
+# books the difference as a linked delta payslip; PENDING_G1 blocks.
+CORRECTION_POLICIES = ("DELTA_PAYSLIP", "PENDING_G1")
+# Filing export formats (e-Tax, eLTAX, Japan Pension Service, Hello Work).
+# EMPTY until G5 certifies a schema: every submission file is refused and
+# only JSON previews are produced (the ZA BRS-catalogue pattern).
+JP_EXPORT_SCHEMAS = {}
 # Explicit policy choices the specification requires but does not make: until
 # G1 signs one, the engine BLOCKS any case that depends on it.
 PENDING = "PENDING_G1"
@@ -179,6 +208,7 @@ JP_PARAMETER_KEYS = {
     "jp_withholding_method": "text",
     "jp_wht_cmp_basic_deduction": "amount",
     "jp_wht_cmp_dependant_deduction": "amount",
+    "jp_wht_bonus_special_multiple": "amount",
     "jp_correction_policy": "text",
     # Rounding — one row per statutory amount, no global helper (JP-002)
     "jp_wht_rounding": "text",
@@ -209,6 +239,8 @@ JP_PARAMETER_KEYS = {
     "jp_smr_report_month": "text",
     "jp_smr_application_months": "text",
     "jp_smr_adhoc_revision_from_month": "amount",
+    "jp_smr_min_payment_base_days": "amount",
+    "jp_smr_adhoc_grade_gap": "amount",
     # Employment insurance FY2026 (spec §6, S13)
     "jp_ei_general": "pct_pair",
     "jp_ei_agriculture_sake_total": "pct_total",
@@ -224,6 +256,8 @@ JP_PARAMETER_KEYS = {
     "jp_statutory_holiday_premium_pct": "amount",
     "jp_night_premium_pct": "amount",
     "jp_night_window": "text",
+    "jp_premium_combination_rule": "text",
+    "jp_holiday_substitute_rule": "text",
     # Resident tax special collection (spec §4, S16)
     "jp_resident_tax_collection_months": "text",
     # Obligations and due dates (spec §2, §5, §8)
@@ -232,6 +266,14 @@ JP_PARAMETER_KEYS = {
     "jp_si_remittance_due": "text",
     "jp_bonus_report_days": "amount",
     "jp_statutory_reports_due": "text",
+    # Year-end adjustment (spec §8, S3; Phase 8)
+    "jp_yea_income_limit": "amount",
+    "jp_yea_earthquake_cap": "amount",
+    "jp_reconstruction_surtax_pct": "amount",
+    "jp_yea_taxable_rounding": "text",
+    "jp_yea_rounding": "text",
+    "jp_yea_earliest_month": "text",
+    "jp_resident_tax_remittance_due_day": "amount",
 }
 
 # ── ContributionRate scalar content ───────────────────────────────────────
@@ -252,6 +294,11 @@ JP_SCALAR_CONTENT = (
     ("jp_wht_cmp_basic_deduction", "NTA computer method — basic employment-income deduction (JPY)",
      None, None, None, None, "S1", True, None, None),
     ("jp_wht_cmp_dependant_deduction", "NTA computer method — deduction per dependant (JPY)",
+     None, None, None, None, "S1", True, None, None),
+    # NTA bonus method (S1): above this multiple of the prior month's pay, or
+    # with no prior-month pay, the bonus-rate table is not used. Empty until
+    # G1 signs it, so every bonus BLOCKS before the rate table is consulted.
+    ("jp_wht_bonus_special_multiple", "NTA bonus method — prior-month pay multiple for the special calculation",
      None, None, None, None, "S1", True, None, None),
 
     # JP-002: each statutory amount has its own truncation/rounding stage.
@@ -306,6 +353,13 @@ JP_SCALAR_CONTENT = (
      None, None, None, "09-08", "S7", True, None, None),
     ("jp_smr_adhoc_revision_from_month", "SMR ad hoc revision applies from this month after the pay change",
      None, None, "4", None, "S7", True, None, None),
+    # Not stated by the specification: a determination month counts only with
+    # at least this many payment base days; an ad hoc revision needs at least
+    # this grade gap. Empty → the determination / candidate BLOCKS.
+    ("jp_smr_min_payment_base_days", "SMR — minimum payment base days for a month to count",
+     None, None, None, None, "S7", True, None, None),
+    ("jp_smr_adhoc_grade_gap", "SMR ad hoc revision — minimum grade difference",
+     None, None, None, None, "S7", True, None, None),
 
     ("jp_ei_general", "Employment insurance FY2026 — general business (employee / employer)",
      "0.5000", "0.8500", None, None, "S13", True, _FY2026_FROM, _FY2026_TO),
@@ -335,6 +389,13 @@ JP_SCALAR_CONTENT = (
      None, None),
     ("jp_night_window", "Night work window (HH:MM-HH:MM)", None, None, None, "22:00-05:00", "S14", True,
      None, None),
+    # The specification states the individual premiums but not how they
+    # combine when more than one applies, nor when a statutory holiday is
+    # substituted. Both are policy choices signed at G1/G4, never inferred.
+    ("jp_premium_combination_rule", "How overtime, holiday and night premiums combine",
+     None, None, None, PENDING, "S14", True, None, None),
+    ("jp_holiday_substitute_rule", "When a statutory holiday is substituted for another day",
+     None, None, None, PENDING, "S14", True, None, None),
 
     # JP-007: amounts come from the municipality notice, never a formula.
     ("jp_resident_tax_collection_months", "Resident tax special collection months (MM-MM, June–May)",
@@ -351,6 +412,26 @@ JP_SCALAR_CONTENT = (
      None, None, "5", None, "S8", True, None, None),
     ("jp_statutory_reports_due", "Withholding slips / salary payment reports due (MM-DD, following year)",
      None, None, None, "01-31", "S5", True, None, None),
+
+    # Year-end adjustment (S3). The specification states none of these: the
+    # amounts are empty by design, the rounding / month rows PENDING_G1, so
+    # every year-end case BLOCKS until G1 signs them.
+    ("jp_yea_income_limit", "Year-end adjustment — annual pay above which the employee is excluded (JPY)",
+     None, None, None, None, "S3", True, None, None),
+    ("jp_yea_earthquake_cap", "Year-end adjustment — earthquake insurance premium deduction cap (JPY)",
+     None, None, None, None, "S3", True, None, None),
+    ("jp_reconstruction_surtax_pct", "Special reconstruction income tax (% of the income tax)",
+     None, None, None, None, "S3", True, None, None),
+    ("jp_yea_taxable_rounding", "Year-end adjustment — taxable income rounding",
+     None, None, None, PENDING, "S3", True, None, None),
+    ("jp_yea_rounding", "Year-end adjustment — annual tax rounding",
+     None, None, None, PENDING, "S3", True, None, None),
+    ("jp_yea_earliest_month", "Year-end adjustment — earliest pay month it may be applied in (MM)",
+     None, None, None, PENDING, "S3", True, None, None),
+    # Not stated by the specification: empty, so a resident-tax remittance is
+    # recorded without a due date until it is signed.
+    ("jp_resident_tax_remittance_due_day", "Resident tax special collection remitted by day of the following month",
+     None, None, None, None, "S16", True, None, None),
 )
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
@@ -358,6 +439,9 @@ JP_SCALAR_CONTENT = (
 JP_EMPTY_BY_DESIGN = frozenset({
     "jp_ei_agriculture_sake", "jp_ei_construction",
     "jp_wht_cmp_basic_deduction", "jp_wht_cmp_dependant_deduction",
+    "jp_wht_bonus_special_multiple", "jp_smr_min_payment_base_days", "jp_smr_adhoc_grade_gap",
+    "jp_yea_income_limit", "jp_yea_earthquake_cap", "jp_reconstruction_surtax_pct",
+    "jp_resident_tax_remittance_due_day",
 })
 
 # ── Authority tables not reproduced by the specification ──────────────────
@@ -375,9 +459,14 @@ JP_EMPTY_TABLES = {
                             "rule_type": (JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE),
                             "rule_types": (JP_WHT_CMP_EID_RULE, JP_WHT_CMP_RATE_RULE)},
     # NTA 2026 bonus rate table (S1): rate by prior-month pay band.
-    "wht_bonus_rate_table": {"source": "S1", "gate": "G1", "rows": ()},
+    # Rows: tax_column PRIMARY / SECONDARY, tax_table_number = dependants
+    # (PRIMARY only), band on the prior month's pay after social insurance,
+    # rate_pct applied to the bonus after its own social insurance.
+    "wht_bonus_rate_table": {"source": "S1", "gate": "G1", "rows": (),
+                             "rule_type": JP_WHT_BONUS_RULE},
     # NTA 2026 year-end adjustment pack (S3) — separate from monthly content.
-    "year_end_adjustment": {"source": "S3", "gate": "G1", "rows": ()},
+    "year_end_adjustment": {"source": "S3", "gate": "G1", "rows": (),
+                            "rule_type": JP_YEA_RULE_TYPES, "rule_types": JP_YEA_RULE_TYPES},
     # Health and pension SMR grade tables (S6/S7).
     "smr_grades_health": {"source": "S7", "gate": "G3", "rows": (),
                           "rule_type": JP_SMR_GRADE_RULE},
@@ -387,8 +476,14 @@ JP_EMPTY_TABLES = {
     "kyokai_health_rates": {"source": "S10", "gate": "G3", "rows": (),
                             "rule_type": JP_HEALTH_RATE_RULE},
     # Prefectural minimum wage per effective interval (S15) — an announced
-    # future rate is never selected before its date (JP-004).
-    "minimum_wage": {"source": "S15", "gate": "G4", "rows": ()},
+    # future rate is never selected before its date (JP-004). Rows carry the
+    # prefecture in jurisdiction_state and the hourly amount in flat_amount.
+    "minimum_wage": {"source": "S15", "gate": "G4", "rows": (),
+                     "rule_type": JP_MIN_WAGE_RULE},
+    # Statutory public holidays (S14), one dated row per holiday. No date is
+    # guessed; an empty table means no holiday premium can be classified.
+    "public_holidays": {"source": "S14", "gate": "G4", "rows": (),
+                        "rule_type": JP_HOLIDAY_RULE},
     # Workers' compensation employer rates by industry (spec §6: separately
     # sourced/certified — no evidence entry yet).
     "workers_comp_rates": {"source": None, "gate": "G4", "rows": ()},

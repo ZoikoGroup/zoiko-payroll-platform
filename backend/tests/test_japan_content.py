@@ -84,7 +84,8 @@ def test_there_is_no_global_rounding_row():
     assert not {"jp_rounding_mode", "jp_rounding_precision"} & keys
     rounding = {k for k in keys if k.endswith("_rounding")}
     assert rounding == {"jp_wht_rounding", "jp_si_employee_share_rounding",
-                        "jp_ei_employee_share_rounding", "jp_sba_rounding"}
+                        "jp_ei_employee_share_rounding", "jp_sba_rounding",
+                        "jp_yea_taxable_rounding", "jp_yea_rounding"}
     for key in rounding:
         assert _scalar(key)[5] in content.ROUNDING_RULES, key
 
@@ -173,9 +174,13 @@ def test_authority_tables_are_empty():
 def test_authority_tables_point_at_their_taxslab_rule_types():
     assert set(content.JP_TABLE_RULE_TYPES) == {
         "JP_WHT_MONTHLY", "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
-        "JP_HEALTH_RATE", "JP_SMR_GRADE",
+        "JP_HEALTH_RATE", "JP_SMR_GRADE", "JP_WHT_BONUS",
+        "JP_MIN_WAGE", "JP_HOLIDAY",
+        "JP_YEA_EID", "JP_YEA_BASIC", "JP_YEA_SPOUSE", "JP_YEA_DEPENDANT",
+        "JP_YEA_LIFE_INS", "JP_YEA_RATE",
     }
     assert all(len(rule_type) <= 30 for rule_type in content.JP_TABLE_RULE_TYPES)
+    assert content.JP_EMPTY_TABLES["wht_bonus_rate_table"]["rule_type"] == "JP_WHT_BONUS"
     assert content.JP_EMPTY_TABLES["wht_monthly_table"]["rule_type"] == "JP_WHT_MONTHLY"
     assert set(content.JP_EMPTY_TABLES["wht_computer_method"]["rule_types"]) == {
         "JP_WHT_CMP_EID", "JP_WHT_CMP_RATE",
@@ -183,6 +188,8 @@ def test_authority_tables_point_at_their_taxslab_rule_types():
     assert content.JP_EMPTY_TABLES["kyokai_health_rates"]["rule_type"] == "JP_HEALTH_RATE"
     assert content.JP_EMPTY_TABLES["smr_grades_health"]["rule_type"] == "JP_SMR_GRADE"
     assert content.JP_EMPTY_TABLES["smr_grades_pension"]["rule_type"] == "JP_SMR_GRADE"
+    assert content.JP_EMPTY_TABLES["minimum_wage"]["rule_type"] == "JP_MIN_WAGE"
+    assert content.JP_EMPTY_TABLES["public_holidays"]["rule_type"] == "JP_HOLIDAY"
 
 
 def test_computer_method_scalars_are_present_and_empty_until_g1():
@@ -191,6 +198,14 @@ def test_computer_method_scalars_are_present_and_empty_until_g1():
         assert key in content.JP_EMPTY_BY_DESIGN
         row = _scalar(key)
         assert row[4] is None and row[5] is None
+
+
+def test_p4_rules_the_spec_does_not_state_are_present_and_empty():
+    for key in ("jp_wht_bonus_special_multiple", "jp_smr_min_payment_base_days", "jp_smr_adhoc_grade_gap"):
+        assert content.JP_PARAMETER_KEYS[key] == "amount"
+        assert key in content.JP_EMPTY_BY_DESIGN
+        row = _scalar(key)
+        assert row[4] is None and row[5] is None and row[7] is True
 
 
 def test_prefectures_are_the_47_jis_codes():
@@ -328,7 +343,29 @@ def test_japan_dispatch_is_fail_closed():
             calculate_payroll(ctx, calculation_mode=mode)
 
 
-def test_japan_is_not_yet_a_hooked_statutory_module():
+def test_japan_is_a_hooked_statutory_module():
     from app.modules.payroll import jurisdiction_hooks
 
-    assert not jurisdiction_hooks.has_module("JP")                   # hooks arrive in Phase 5
+    assert jurisdiction_hooks.has_module("JP")
+    for hook in ("calc_inputs", "before_run_transition", "statutory_profile_errors",
+                 "statutory_profile_values", "pack_activation_refusal",
+                 "retention_settings", "service_registry_transition",
+                 "statutory_summary", "statutory_editors",
+                 "template_activation_refusal", "pack_holidays",
+                 "payment_treatment", "payslip_hold_view"):
+        assert callable(jurisdiction_hooks.get("JP", hook))
+
+
+def test_year_end_content_is_empty_or_pending_until_g1():
+    for key in ("jp_yea_income_limit", "jp_yea_earthquake_cap", "jp_reconstruction_surtax_pct"):
+        assert key in content.JP_EMPTY_BY_DESIGN
+    for key in ("jp_yea_taxable_rounding", "jp_yea_rounding", "jp_yea_earliest_month"):
+        assert _scalar(key)[5] == content.PENDING
+    assert content.JP_EMPTY_TABLES["year_end_adjustment"]["rows"] == ()
+    assert set(content.JP_EMPTY_TABLES["year_end_adjustment"]["rule_types"]) == set(content.JP_YEA_RULE_TYPES)
+
+
+def test_corrections_and_exports_stay_closed_until_signed():
+    assert _scalar("jp_correction_policy")[5] == content.PENDING
+    assert content.CORRECTION_POLICIES == ("DELTA_PAYSLIP", "PENDING_G1")
+    assert content.JP_EXPORT_SCHEMAS == {}

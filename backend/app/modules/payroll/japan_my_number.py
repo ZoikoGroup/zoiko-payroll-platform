@@ -103,20 +103,56 @@ def validate(number: str) -> str:
     return number
 
 
-def encrypt(number: str) -> Tuple[str, int]:
-    """Encrypt a validated My Number with the newest keyring version."""
+_AAD_LABEL = b"zp-jp-my-number-vault-v1:"
+
+
+def _owner_bytes(owner) -> bytes:
+    if owner is None:
+        return b""
+    if isinstance(owner, bytes):
+        return owner
+    if isinstance(owner, (tuple, list)):
+        owner = "/".join(str(part) for part in owner)
+    return str(owner).encode("utf-8")
+
+
+def vault_owner(organization_id: int, employee_id: int, vault_id) -> str:
+    """Canonical AAD owner for a vault row. The vault id is included once the
+    row exists, so moving the ciphertext to another row/employee/organisation
+    makes decryption fail instead of revealing a different person's number."""
+    if vault_id is None:
+        raise MyNumberError("a vault id is required to bind My Number ciphertext")
+    return f"org={int(organization_id)}/employee={int(employee_id)}/vault={int(vault_id)}"
+
+
+def _aad(owner) -> bytes:
+    raw = _owner_bytes(owner)
+    return _AAD_LABEL + raw if raw else b""
+
+
+def encrypt(number: str, owner=None) -> Tuple[str, int]:
+    """Encrypt a validated My Number with the newest keyring version.
+
+    ``owner`` binds the ciphertext to its vault row (use :func:`vault_owner`).
+    Omitting it keeps the legacy, unbound format readable by existing rows.
+    """
     validate(number)
     keyring = _keyring()
     if not keyring:
         raise MyNumberError("JP_MY_NUMBER_KEYRING is not configured")
     version = max(keyring)
     nonce = os.urandom(_NONCE_BYTES)
-    ciphertext = AESGCM(keyring[version]).encrypt(nonce, number.encode("utf-8"), None)
+    ciphertext = AESGCM(keyring[version]).encrypt(
+        nonce, number.encode("utf-8"), _aad(owner) or None)
     return base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii"), version
 
 
-def decrypt(ciphertext: str, key_version: int) -> str:
-    """Decrypt a stored value with the key version that encrypted it."""
+def decrypt(ciphertext: str, key_version: int, owner=None) -> str:
+    """Decrypt a stored value with the key version that encrypted it.
+
+    ``owner`` must be the same binding passed to :func:`encrypt`. Existing
+    unbound ciphertext decrypts with the default ``None``.
+    """
     keyring = _keyring()
     if not keyring:
         raise MyNumberError("JP_MY_NUMBER_KEYRING is not configured")
@@ -129,7 +165,8 @@ def decrypt(ciphertext: str, key_version: int) -> str:
         nonce, body = blob[:_NONCE_BYTES], blob[_NONCE_BYTES:]
         if len(nonce) != _NONCE_BYTES or not body:
             raise ValueError
-        number = AESGCM(key).decrypt(nonce, body, None).decode("utf-8")
+        number = AESGCM(key).decrypt(
+            nonce, body, _aad(owner) or None).decode("utf-8")
     except (InvalidTag, ValueError, TypeError, UnicodeError, binascii.Error):
         # InvalidTag (tampered data or the wrong key) is not a ValueError.
         raise MyNumberError("My Number ciphertext could not be decrypted")

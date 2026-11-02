@@ -989,6 +989,20 @@ class PayrollContext:
     jp_employee_id: int = None
     jp_date_of_birth: date = None
     jp_components: dict = None
+    # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
+    jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
+    jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band
+    jp_ytd_health_sba: Decimal = None          # health SBA already counted this insurance year
+    jp_month_pension_sba: Decimal = None       # pension SBA already counted this month
+    jp_social_insurance_events: list = None    # lifecycle events touching the pay month
+    # Phase 8 — an APPLIED year-end adjustment for THIS run (S3): withheld minus
+    # the annual tax; positive refunds, negative collects. None = no adjustment.
+    jp_year_end_difference: Decimal = None
+    jp_yea_case_id: int = None
+    # Phase 6 - working time, premiums and minimum wage (spec §6, S14).
+    jp_work_conditions: object = None          # PayrollJpWorkConditions in force
+    jp_hours: list = None                      # [{date, worked_minutes, scheduled_minutes, night_minutes, is_holiday}]
+    jp_hours_approved: bool = None             # attendance rows for this period are approved facts
 
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
