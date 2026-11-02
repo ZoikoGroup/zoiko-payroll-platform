@@ -4244,7 +4244,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_employees"
+    "payroll_employees",
+    "payslip_items"
    ],
    "overridden": false
   },
