@@ -1524,6 +1524,9 @@ class PayslipItemResponse(BaseModel):
     # South Africa (ZP-ZA-ENG-001): emitted by _serialize_payslip for ZA only;
     # declared so response_model does not strip it (ZAPayslipBreakdown).
     zaCalculationSnapshot: Optional[dict] = None
+    # Japan (ZP-JP-ENG-001): the frozen jp_result (separate WHT / SI / EI
+    # bases, bonus section, labour trace) without the frozen inputs. JP only.
+    jpCalculationSnapshot: Optional[dict] = None
     # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
     # input / content hashes, or the blocked reasons). Emitted for MX only;
     # declared here so response_model does not strip it.

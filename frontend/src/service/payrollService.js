@@ -2881,3 +2881,64 @@ export const withdrawZaParallelImport = (importId) => api.post(`${ZA}/parallel-i
 export const explainZaParallelDifference = (diffId, reason) =>
   api.post(`${ZA}/parallel-differences/${diffId}/explain`, { reason });
 export const acceptZaParallelDifference = (diffId) => api.post(`${ZA}/parallel-differences/${diffId}/accept`, {});
+
+// Japan (ZP-JP-ENG-001) — routes in backend/app/modules/payroll/japan_org_router.py,
+// mounted under /api/payroll/japan. Every route acts on the caller's own
+// organisation and answers 404 while JP_TENANT_ONBOARDING_ENABLED is off.
+// Four-eyes rules (creator != approver, requester != revealer's approver) are
+// enforced server-side; these calls only submit the operator's decision.
+// Payload keys are the backend's snake_case field names.
+const JP = "/api/payroll/japan";
+const jpList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const jpOne = (res) => res?.data ?? res;
+export const getJpSummary = async () => jpOne(await api.get(`${JP}/summary`));
+export const listJpEmployerRegistrations = async () => jpList(await api.get(`${JP}/employer`));
+export const createJpEmployerRegistration = (payload) => api.post(`${JP}/employer`, payload);
+export const approveJpEmployerRegistration = (id) => api.post(`${JP}/employer/${id}/approve`, {});
+export const listJpWorkConditions = async () => jpList(await api.get(`${JP}/work-conditions`));
+export const createJpWorkConditions = (payload) => api.post(`${JP}/work-conditions`, payload);
+export const approveJpWorkConditions = (id) => api.post(`${JP}/work-conditions/${id}/approve`, {});
+export const listJpBonusReports = async (status) =>
+  jpList(await api.get(`${JP}/bonus-reports`, { params: status ? { status } : {} }));
+export const getJpEmployeeSummary = async (employeeId) =>
+  jpOne(await api.get(`${JP}/employees/${employeeId}/summary`));
+export const listJpTaxProfiles = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/tax-profiles`));
+export const createJpTaxProfile = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/tax-profiles`, payload);
+export const approveJpTaxProfile = (id) => api.post(`${JP}/tax-profiles/${id}/approve`, {});
+export const listJpSocialInsurance = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/social-insurance`));
+export const createJpSocialInsurance = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/social-insurance`, payload);
+export const approveJpSocialInsurance = (id) => api.post(`${JP}/social-insurance/${id}/approve`, {});
+export const listJpSocialInsuranceEvents = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/social-insurance-events`));
+export const createJpSocialInsuranceEvent = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/social-insurance-events`, payload);
+export const approveJpSocialInsuranceEvent = (id) => api.post(`${JP}/social-insurance-events/${id}/approve`, {});
+export const applyJpSocialInsuranceEvent = (id) => api.post(`${JP}/social-insurance-events/${id}/apply`, {});
+export const listJpEmploymentInsurance = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/employment-insurance`));
+export const createJpEmploymentInsurance = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/employment-insurance`, payload);
+export const approveJpEmploymentInsurance = (id) => api.post(`${JP}/employment-insurance/${id}/approve`, {});
+export const listJpResidentTaxNotices = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/resident-tax-notices`));
+export const createJpResidentTaxNotice = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/resident-tax-notices`, payload);
+export const approveJpResidentTaxNotice = (id) => api.post(`${JP}/resident-tax-notices/${id}/approve`, {});
+export const listJpAttendanceApprovals = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/attendance-approvals`));
+export const requestJpAttendanceApproval = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/attendance-approvals`, payload);
+export const approveJpAttendanceApproval = (id) => api.post(`${JP}/attendance-approvals/${id}/approve`, {});
+export const getJpRunPreflight = async (runId) => jpOne(await api.get(`${JP}/runs/${runId}/preflight`));
+export const listJpMyNumbers = async (employeeId) =>
+  jpList(await api.get(`${JP}/my-numbers`, { params: employeeId ? { employee_id: employeeId } : {} }));
+export const createJpMyNumber = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/my-number`, payload);
+export const requestJpMyNumberReveal = (vaultId, reason) =>
+  api.post(`${JP}/my-numbers/${vaultId}/reveal-request`, { reason });
+export const approveJpMyNumberReveal = (vaultId) => api.post(`${JP}/my-numbers/${vaultId}/reveal-approve`, {});
+export const revealJpMyNumber = async (vaultId) => jpOne(await api.post(`${JP}/my-numbers/${vaultId}/reveal`, {}));

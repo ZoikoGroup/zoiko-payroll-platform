@@ -175,6 +175,21 @@ def approve_attendance_approval(approval_id: int,
     return _commit(db, row)
 
 
+@router.get("/bonus-reports",
+            summary="JPS bonus payment report obligations (due date, overdue flag)")
+def list_bonus_reports(status: Optional[str] = None,
+                       current_user=Depends(get_current_payroll_operator),
+                       db: Session = Depends(get_db)):
+    return jp.list_bonus_reports(db, _org_id(current_user), status)
+
+
+@router.get("/employees/{employee_id}/summary",
+            summary="Japan versions in force, attendance approvals and masked My Number")
+def employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    return jp.employee_summary(db, _org_id(current_user), employee_id)
+
+
 # ── worker tax profile ──────────────────────────────────────────────────────
 
 @router.get("/employees/{employee_id}/tax-profiles",

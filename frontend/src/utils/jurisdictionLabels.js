@@ -43,6 +43,8 @@ const INCOME_TAX_LABELS = {
   BR: "IRRF (Imposto de Renda)",
   // South Africa — PAYE (Pay As You Earn) monthly withholding
   ZA: "PAYE",
+  // Japan — national withholding income tax (gensen chōshū), NTA tables
+  JP: "Withholding Income Tax",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -169,6 +171,7 @@ const TAX_ID_LABELS = {
   CH: "UID (Business Identification No.)",
   BR: "CNPJ / CPF",
   ZA: "SARS PAYE / UIF / SDL Registration",
+  JP: "Corporate Number / Labour Insurance Number",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only

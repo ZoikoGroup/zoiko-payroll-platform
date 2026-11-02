@@ -33643,6 +33643,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # trace, UIF/SDL, employer-only ETI) the ZA payslip breakdown renders.
         # Gated to ZA ("SA" above is Saudi Arabia).
         "zaCalculationSnapshot": item.za_calculation_snapshot if (item.country_code or country) == "ZA" else None,
+        # Japan (ZP-JP-ENG-001): the frozen jp_result the JP payslip breakdown
+        # renders. The frozen inputs (frozenContext) stay server-side.
+        "jpCalculationSnapshot": (
+            {k: v for k, v in (item.jp_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "JP" and item.jp_calculation_snapshot else None),
     }
 
 

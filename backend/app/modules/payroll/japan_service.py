@@ -1189,6 +1189,79 @@ def approve_work_conditions(db: Session, organization_id: int, row_id: int,
                                organization_id, row_id, actor_id, "jp_work_conditions")
 
 
+def list_bonus_reports(db: Session, organization_id: int, status: Optional[str] = None,
+                       today: Optional[date] = None) -> list:
+    """The JPS bonus payment report obligations (BONUS events) of the
+    organisation, oldest due first, with an overdue flag. ``status`` filters
+    on the event's submission status; OPEN means not yet SUBMITTED/ACCEPTED."""
+    m = _jp_models()
+    Event = m.PayrollJpSocialInsuranceEvent
+    today = today or date.today()
+    q = db.query(Event).filter(Event.organization_id == organization_id,
+                               Event.event_type == "BONUS")
+    wanted = str(status or "").strip().upper()
+    if wanted == "OPEN":
+        q = q.filter(Event.submission_status.in_(("CREATED", "APPROVED", "REJECTED")))
+    elif wanted:
+        q = q.filter(Event.submission_status == wanted)
+    out = []
+    for row in q.order_by(Event.report_due_on, Event.id).all():
+        done = row.submission_status in ("SUBMITTED", "ACCEPTED", "CORRECTED")
+        out.append({"id": row.id, "employeeId": row.employee_id,
+                    "bonusPaidOn": row.bonus_paid_on.isoformat() if row.bonus_paid_on else None,
+                    "sbaAmount": None if row.sba_amount is None else str(row.sba_amount),
+                    "reportDueOn": row.report_due_on.isoformat() if row.report_due_on else None,
+                    "submissionStatus": row.submission_status, "receiptRef": row.receipt_ref,
+                    "overdue": bool(row.report_due_on and not done and row.report_due_on < today)})
+    return out
+
+
+def employee_summary(db: Session, organization_id: int, employee_id: int,
+                     as_of: Optional[date] = None) -> dict:
+    """One read for the employee panel: the versions in force on ``as_of``,
+    the latest attendance approvals and the masked My Number rows. Several
+    ACTIVE versions in force are reported, never resolved by picking one."""
+    m = _jp_models()
+    employee = _jp_employee(db, organization_id, employee_id)
+    as_of = as_of or date.today()
+
+    def in_force(model, employee_scoped=True):
+        q = db.query(model).filter(model.organization_id == organization_id,
+                                   model.status == "ACTIVE",
+                                   model.effective_from <= as_of,
+                                   (model.effective_to.is_(None)) | (model.effective_to >= as_of))
+        if employee_scoped:
+            q = q.filter(model.employee_id == employee_id)
+        rows = q.order_by(model.effective_from.desc(), model.id.desc()).all()
+        if not rows:
+            return {"state": "MISSING", "row": None}
+        if len(rows) > 1:
+            return {"state": "AMBIGUOUS", "row": None, "count": len(rows)}
+        row = rows[0]
+        return {"state": "ACTIVE",
+                "row": {c.name: getattr(row, c.name) for c in row.__table__.columns}}
+
+    approvals = (db.query(m.PayrollJpAttendanceApproval)
+                 .filter(m.PayrollJpAttendanceApproval.organization_id == organization_id,
+                         m.PayrollJpAttendanceApproval.employee_id == employee_id)
+                 .order_by(m.PayrollJpAttendanceApproval.period_start.desc(),
+                           m.PayrollJpAttendanceApproval.id.desc()).limit(6).all())
+    return {
+        "employeeId": employee.id, "asOf": as_of.isoformat(),
+        "countryCode": (getattr(employee, "country_code", None) or "").upper() or None,
+        "taxProfile": in_force(m.PayrollJpWorkerTaxProfile),
+        "socialInsurance": in_force(m.PayrollJpSocialInsuranceEnrollment),
+        "employmentInsurance": in_force(m.PayrollJpEmploymentInsuranceProfile),
+        "workConditions": in_force(m.PayrollJpWorkConditions, employee_scoped=False),
+        "attendanceApprovals": [
+            {"id": a.id, "periodStart": a.period_start.isoformat(),
+             "periodEnd": a.period_end.isoformat(), "status": a.status,
+             "rowCount": a.row_count, "createdById": a.created_by_id,
+             "approvedById": a.approved_by_id} for a in approvals],
+        "myNumbers": list_my_numbers(db, organization_id, employee_id),
+    }
+
+
 def request_attendance_approval(db: Session, organization_id: int, employee_id: int,
                                 payload: dict, actor_id: Optional[int]):
     """Ask a second person to approve one employee's attendance for one pay

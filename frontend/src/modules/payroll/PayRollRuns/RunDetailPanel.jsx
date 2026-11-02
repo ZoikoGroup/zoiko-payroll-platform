@@ -22,6 +22,8 @@ import BRRunPreflightPanel from "./BRRunPreflightPanel";
 import BRPayslipBreakdown from "./BRPayslipBreakdown";
 import ZAPayslipBreakdown from "./ZAPayslipBreakdown";
 import ZARunExceptionsPanel from "./ZARunExceptionsPanel";
+import JPPayslipBreakdown from "./JPPayslipBreakdown";
+import JPRunPreflightPanel from "./JPRunPreflightPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -400,6 +402,7 @@ function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCount
             {mxSnapshot && <MXRunCalculationTrace snapshot={mxSnapshot} />}
             {(item.country || item.countryCode) === "BR" && item.brCalculationSnapshot && <BRPayslipBreakdown snapshot={item.brCalculationSnapshot} employeeName={item.employee} />}
             {(item.country || item.countryCode) === "ZA" && item.zaCalculationSnapshot && <ZAPayslipBreakdown snapshot={item.zaCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "JP" && item.jpCalculationSnapshot && <JPPayslipBreakdown snapshot={item.jpCalculationSnapshot} employeeName={item.employee} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -614,6 +617,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               {items.some((i) => (i.country || i.countryCode) === "ZA") && (
                 <ZARunExceptionsPanel runId={run.id} runStatus={(detail || run).status} items={items} />
               )}
+              {items.some((i) => (i.country || i.countryCode) === "JP") && <JPRunPreflightPanel runId={run.id} />}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

@@ -283,6 +283,10 @@ const BR_SA = "/api/super-admin/compliance/brazil";
 const ZA_SA = "/api/super-admin/compliance/south-africa";
 
 export const getZaSummary = () => apiFetch(`${ZA_SA}/summary`);
+// Japan (ZP-JP-ENG-001): the generic statutory-summary route calls the JP
+// statutory_summary hook (packs, approved-record counts, owner decisions).
+export const getJpStatutorySummary = () =>
+  apiFetch("/api/super-admin/compliance/jurisdictions/JP/statutory-summary");
 export const getZaReadiness = () => apiFetch(`${ZA_SA}/readiness`);
 export const getZaGateChecklists = () => apiFetch(`${ZA_SA}/readiness/gate-checklists`);
 

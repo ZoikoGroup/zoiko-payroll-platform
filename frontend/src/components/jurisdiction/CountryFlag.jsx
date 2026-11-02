@@ -310,11 +310,20 @@ function SouthAfrica() {
   );
 }
 
+function Japan() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#fff" />
+      <circle cx="12" cy="8" r="4.8" fill="#BC002D" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica,
+  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {
