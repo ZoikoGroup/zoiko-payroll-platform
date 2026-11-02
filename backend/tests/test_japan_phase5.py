@@ -215,7 +215,7 @@ def _prior_run(db, organization, employee, pay_date, *, status=PayrollStatus.PAI
     db.add(run)
     db.flush()
     snapshot = {"jp_payment_kind": kind}
-    if kind == "BONUS":
+    if kind == "BONUS" or health_base is not None or pension_base is not None:
         snapshot["jp_bonus"] = {
             "jp_bonus_health_sba_base": health_base or "0",
             "jp_bonus_pension_sba_base": pension_base or "0",
@@ -233,6 +233,17 @@ def test_bonus_priors_read_nested_cap_bases(db, organization, employee):
     _prior_run(db, organization, employee, date(2026, 5, 25),
                health_base="230000", pension_base="300000")
     _prior_run(db, organization, employee, date(2026, 6, 10),
+               health_base="100000", pension_base="200000")
+
+    priors = jp._jp_bonus_priors(db, organization.id, employee.id, date(2026, 6, 25))
+    assert priors["ytd_health_sba"] == Decimal("330000")
+    assert priors["month_pension_sba"] == Decimal("200000")
+
+
+def test_bonus_paid_inside_a_salary_payment_counts_toward_the_caps(db, organization, employee):
+    _prior_run(db, organization, employee, date(2026, 5, 25), kind="SALARY",
+               health_base="230000", pension_base="300000", wht_base="256050")
+    _prior_run(db, organization, employee, date(2026, 6, 10), kind="SALARY",
                health_base="100000", pension_base="200000")
 
     priors = jp._jp_bonus_priors(db, organization.id, employee.id, date(2026, 6, 25))
@@ -342,7 +353,9 @@ def test_resident_tax_notice_rejects_null_or_impossible_month(db, organization, 
             {**body, "monthly_amounts": bad_month}, 1)
 
 
-def test_legacy_unbound_my_number_still_reveals(db, organization, employee, monkeypatch):
+def test_unbound_my_number_ciphertext_is_never_revealed(db, organization, employee, monkeypatch):
+    # Owner binding only: an unbound ciphertext (e.g. copied in from another
+    # row) is refused rather than revealed.
     monkeypatch.setattr(settings, "JP_MY_NUMBER_KEYRING", json.dumps({"1": KEY}))
     monkeypatch.setattr(settings, "JP_MY_NUMBER_FINGERPRINT_KEY", FINGERPRINT_KEY)
     from app.modules.payroll.models import PayrollJpMyNumberVault
@@ -361,4 +374,21 @@ def test_legacy_unbound_my_number_still_reveals(db, organization, employee, monk
     db.commit()
     jp.approve_my_number_reveal(db, organization.id, row.id, 2)
     db.commit()
-    assert jp.reveal_my_number(db, organization.id, row.id, 2)["myNumber"] == number
+    with pytest.raises(BadRequestException, match="could not be decrypted"):
+        jp.reveal_my_number(db, organization.id, row.id, 2)
+
+
+def test_retention_hook_takes_no_arguments_and_scopes_the_employee(db, organization, employee):
+    # The platform calls retention_settings() with no arguments; a hook that
+    # needs one breaks the retention report for every country.
+    from app.modules.payroll import retention_service
+
+    cfg = retention_service.settings("JP")
+    assert cfg.country == "JP"
+    with pytest.raises(NotFoundException):
+        cfg.validate_employee(db, employee.id, organization.id + 1)      # another tenant
+    with pytest.raises(NotFoundException):
+        cfg.validate_employee(db, employee.id, organization.id)          # not a Japan employee
+    employee.country_code = "JP"
+    db.commit()
+    cfg.validate_employee(db, employee.id, organization.id)

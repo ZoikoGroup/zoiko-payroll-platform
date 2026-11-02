@@ -293,12 +293,15 @@ def obligation_base(obligation: str, components: list, classes: dict, pack: _Pac
     return {"base": base, "lines": lines}
 
 
-def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list) -> dict:
+def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list,
+                  classes: dict) -> dict:
     """Working time, premium floor and minimum wage for a salary payment.
 
     The facts come only from the active work-conditions row, the approved
-    attendance hours and the signed prefectural minimum-wage row. A missing
-    fact blocks; nothing is inferred from gross pay.
+    attendance hours and the signed prefectural minimum-wage row. The premium
+    base and the minimum-wage wage are the pay components the signed OT_BASE
+    and MIN_WAGE classes include (JP-018: each obligation has its own base).
+    A missing fact blocks; nothing is inferred from gross pay.
     """
     conditions = getattr(ctx, "jp_work_conditions", None)
     if conditions is None:
@@ -330,16 +333,23 @@ def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list) -> 
         pack.block("jp_night_window", f"night window {window!r} is not HH:MM-HH:MM")
     window_start, window_end = (part.strip() for part in window_parts)
     rates = {
-        "within_schedule": pack.require_pct_total("jp_overtime_premium_pct") / 100,
         "statutory": pack.require_pct_total("jp_overtime_premium_pct") / 100,
         "over60": pack.require_pct_total("jp_overtime_over_60h_premium_pct") / 100,
         "holiday": pack.require_pct_total("jp_statutory_holiday_premium_pct") / 100,
         "night": pack.require_pct_total("jp_night_premium_pct") / 100,
     }
 
-    salary_base = sum((amount for name, amount in salary_components if name == "SALARY"), ZERO)
+    # Overtime pay can never sit in its own premium base, and the minimum
+    # wage is compared without it; a class that includes it is misconfigured.
+    for obligation in ("OT_BASE", "MIN_WAGE"):
+        if classes.get((obligation, "OVERTIME")) == TREATMENT_INCLUDED:
+            pack.block(f"jp_earning_class:{obligation}:OVERTIME",
+                       f"overtime pay cannot be INCLUDED in the {obligation} base")
+    premium_base = obligation_base("OT_BASE", salary_components, classes, pack)
+    wage_base = obligation_base("MIN_WAGE", salary_components, classes, pack)
     try:
-        hourly = _labour.premium_base_hourly(salary_base, scheduled_monthly)
+        hourly = _labour.premium_base_hourly(premium_base["base"], scheduled_monthly)
+        min_wage_hourly = _labour.premium_base_hourly(wage_base["base"], scheduled_monthly)
     except _labour.JapanLabourBlockedError as exc:
         pack.block(exc.key, exc.reason)
 
@@ -348,7 +358,7 @@ def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list) -> 
         min_row = _labour.minimum_wage_row(
             getattr(ctx, "slabs", None), prefecture, ctx.pay_date)
         minimum = _labour.minimum_wage_check(
-            hourly, None if min_row is None else _field(min_row, "flat_amount"), prefecture)
+            min_wage_hourly, None if min_row is None else _field(min_row, "flat_amount"), prefecture)
     except _labour.JapanLabourBlockedError as exc:
         pack.block(exc.key, exc.reason)
 
@@ -371,7 +381,8 @@ def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list) -> 
         breakdown = _labour.classify_hours(
             prepared, week_start, daily_minutes=int(daily_hours * 60),
             weekly_minutes=int(weekly_hours * 60),
-            over60_minutes=int(threshold_hours * 60))
+            over60_minutes=int(threshold_hours * 60),
+            period_end=_as_date(getattr(ctx, "period_end", None)))
     except _labour.JapanLabourBlockedError as exc:
         pack.block(exc.key, exc.reason)
 
@@ -404,6 +415,9 @@ def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list) -> 
         "scheduledDailyMinutes": int(scheduled_daily),
         "scheduledMonthlyHours": str(scheduled_monthly),
         "hourlyBase": str(hourly),
+        "premiumBase": {"base": str(premium_base["base"]), "lines": premium_base["lines"]},
+        "minimumWageHourly": str(min_wage_hourly),
+        "minimumWageBase": {"base": str(wage_base["base"]), "lines": wage_base["lines"]},
         "minimumWage": str(minimum),
         "minimumWageRow": _row_ref(min_row),
         "statutoryLimits": {
@@ -537,7 +551,7 @@ def calculate(ctx: PayrollContext) -> dict:
     method = None
     labour_trace = None
     if payment_kind == PAYMENT_SALARY:
-        labour_trace = _labour_check(ctx, pack, salary_components)
+        labour_trace = _labour_check(ctx, pack, salary_components, classes)
         si = _si.monthly_contributions(
             applicability["enrollment"], applicability["registration"], pack, as_of=ctx.pay_date,
             date_of_birth=date_of_birth, slabs=getattr(ctx, "slabs", None))

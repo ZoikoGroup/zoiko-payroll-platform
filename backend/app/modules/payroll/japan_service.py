@@ -12,6 +12,8 @@ in jurisdiction_hooks._MODULES only then — registering a module that lacks a
 hook the platform calls would make every Japan code path raise (fail-closed).
 """
 
+import hashlib
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -259,9 +261,8 @@ def _jp_bonus_priors(db: Session, organization_id: int, employee_id: int, as_of:
             db, organization_id, employee_id, as_of, since=year_start,
             current_run_id=current_run_id):
         snap = _jp_snapshot_result(item)
-        kind = str(snap.get("jp_payment_kind") or "SALARY").upper()
-        if kind != "BONUS":
-            continue
+        # A bonus paid inside a SALARY payment counts toward the caps exactly
+        # like a bonus-only payment.
         bonus = snap.get("jp_bonus") or {}
         if not isinstance(bonus, dict):
             continue
@@ -312,25 +313,72 @@ def _jp_holiday_dates(db: Session, start: date, end: date) -> set:
     return out
 
 
-def _jp_hours_for_period(db: Session, organization_id: int, employee_id: int,
-                         start: date, end: date, conditions) -> list:
-    """Attendance hours for the period, without inventing missing hours.
+def _jp_scheduled_weekdays(conditions) -> Optional[set]:
+    text = getattr(conditions, "scheduled_weekdays", None)
+    if text in (None, ""):
+        return None
+    return {int(part) for part in str(text).split(",") if part.strip()}
 
-    Only ``present`` rows are facts. The approved flag is simply whether such
-    rows exist: this platform has no separate attendance-approval column yet,
-    and a paid overtime component without rows is blocked by the engine.
-    """
+
+def _jp_attendance_records(db: Session, organization_id: int, employee_id: int,
+                           start: date, end: date) -> list:
     from app.modules.payroll.models import PayrollAttendanceRecord
 
+    return (db.query(PayrollAttendanceRecord)
+            .filter(PayrollAttendanceRecord.organization_id == organization_id,
+                    PayrollAttendanceRecord.employee_id == employee_id,
+                    PayrollAttendanceRecord.date >= start,
+                    PayrollAttendanceRecord.date <= end)
+            .order_by(PayrollAttendanceRecord.date, PayrollAttendanceRecord.id).all())
+
+
+def _jp_attendance_fingerprint(records) -> tuple:
+    """SHA-256 over every attendance fact the engine reads, in date order."""
+    facts = [[r.date.isoformat(), str(getattr(r, "status", "") or ""),
+              str(getattr(r, "hours", "") or ""), str(getattr(r, "check_in", "") or ""),
+              str(getattr(r, "check_out", "") or ""), bool(getattr(r, "is_half_day", False)),
+              str(getattr(r, "leave_type", "") or "")] for r in records]
+    raw = json.dumps(facts, separators=(",", ":"), sort_keys=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest(), len(records)
+
+
+def _jp_hours_approved(db: Session, organization_id: int, employee_id: int,
+                       start: date, end: date) -> bool:
+    """True only when an APPROVED attendance approval for exactly this period
+    matches the attendance rows as they are now."""
+    m = _jp_models()
+    fingerprint, _count = _jp_attendance_fingerprint(
+        _jp_attendance_records(db, organization_id, employee_id, start, end))
+    return (db.query(m.PayrollJpAttendanceApproval)
+            .filter(m.PayrollJpAttendanceApproval.organization_id == organization_id,
+                    m.PayrollJpAttendanceApproval.employee_id == employee_id,
+                    m.PayrollJpAttendanceApproval.period_start == start,
+                    m.PayrollJpAttendanceApproval.period_end == end,
+                    m.PayrollJpAttendanceApproval.status == "APPROVED",
+                    m.PayrollJpAttendanceApproval.fingerprint == fingerprint)
+            .first()) is not None
+
+
+def _jp_hours_for_period(db: Session, organization_id: int, employee_id: int,
+                         start: date, end: date, conditions) -> list:
+    """Attendance days for the period, without inventing missing facts.
+
+    Only ``present`` rows are worked days. The days of the first week that
+    fall before the period are loaded as context (``in_period`` False) so the
+    weekly limit is assessed over the whole week. Each day carries the
+    schedule and the statutory day off from the work calendar; a fact the
+    work conditions do not record is passed as None and the engine BLOCKS.
+    A national holiday is never treated as the statutory day off.
+    """
     if conditions is None or start is None or end is None:
         return []
-    records = (db.query(PayrollAttendanceRecord)
-               .filter(PayrollAttendanceRecord.organization_id == organization_id,
-                       PayrollAttendanceRecord.employee_id == employee_id,
-                       PayrollAttendanceRecord.date >= start,
-                       PayrollAttendanceRecord.date <= end)
-               .order_by(PayrollAttendanceRecord.date, PayrollAttendanceRecord.id).all())
-    holidays = _jp_holiday_dates(db, start, end)
+    week_start = int(getattr(conditions, "week_start_day", 0) or 0)
+    context_start = start - timedelta(days=(start.weekday() - week_start) % 7)
+    records = _jp_attendance_records(db, organization_id, employee_id, context_start, end)
+    holidays = _jp_holiday_dates(db, context_start, end)
+    weekdays = _jp_scheduled_weekdays(conditions)
+    day_off = getattr(conditions, "statutory_day_off_weekday", None)
+    holidays_off = getattr(conditions, "public_holidays_off", None)
     daily = int(getattr(conditions, "scheduled_daily_minutes", 0) or 0)
     out = []
     for record in records:
@@ -343,11 +391,23 @@ def _jp_hours_for_period(db: Session, organization_id: int, employee_id: int,
             raise BadRequestException(
                 f"Japan attendance hours on {record.date} are not a number.")
         day = record.date.isoformat()
+        public_holiday = day in holidays
+        scheduled = None if weekdays is None else (daily if record.date.weekday() in weekdays else 0)
+        policy_missing = False
+        if public_holiday and scheduled:
+            if holidays_off is None:
+                policy_missing = True
+            elif holidays_off:
+                scheduled = 0
         out.append({"date": day, "worked_minutes": minutes,
-                    "scheduled_minutes": daily,
+                    "scheduled_minutes": scheduled,
+                    "statutory_day_off": (None if day_off is None
+                                          else record.date.weekday() == int(day_off)),
+                    "public_holiday": public_holiday,
+                    "public_holiday_policy_missing": policy_missing,
+                    "in_period": record.date >= start,
                     "check_in": getattr(record, "check_in", None),
-                    "check_out": getattr(record, "check_out", None),
-                    "is_holiday": day in holidays})
+                    "check_out": getattr(record, "check_out", None)})
     return out
 
 
@@ -414,7 +474,8 @@ def resolve_jp_calc_inputs(db: Session, organization_id: int, employee, as_of: d
             db, organization_id, employee.id, as_of),
         "jp_work_conditions": work_conditions,
         "jp_hours": hours,
-        "jp_hours_approved": bool(hours),
+        "jp_hours_approved": (bool(hours) and _jp_hours_approved(
+            db, organization_id, employee.id, period_start, period_end)),
     }
 
 
@@ -451,7 +512,8 @@ _JP_CTX_DATES = ("pay_date", "period_start", "period_end", "jp_date_of_birth",
 _JP_WORK_CONDITION_FIELDS = (
     "id", "effective_from", "effective_to", "working_time_system", "week_start_day",
     "scheduled_daily_minutes", "scheduled_monthly_hours", "workplace_prefecture",
-    "specific_minimum_wage_applies", "status", "evidence_ref",
+    "specific_minimum_wage_applies", "scheduled_weekdays", "statutory_day_off_weekday",
+    "public_holidays_off", "status", "evidence_ref",
 )
 _JP_RATE_FIELDS = ("employee_rate_pct", "employer_rate_pct", "flat_amount",
                    "text_value", "effective_from", "effective_to")
@@ -779,14 +841,25 @@ def owner_decisions(db: Session) -> list:
     return out
 
 
-def _jp_retention_settings(db: Session):
+def _jp_retention_employee(db: Session, employee_id: int, organization_id: int) -> None:
+    """Retention scope check: the employee must be this organisation's Japan
+    employee (404 outside the tenant / jurisdiction)."""
+    employee = _jp_employee(db, organization_id, employee_id)
+    if (getattr(employee, "country_code", None) or "").upper() != JP:
+        from app.core.exceptions import NotFoundException
+
+        raise NotFoundException("Japan employee not found.")
+
+
+def _jp_retention_settings():
+    # The platform calls this hook with no arguments (retention_service.settings).
     from app.modules.payroll.retention_service import RetentionJurisdiction
 
     return RetentionJurisdiction(
         country=JP, label="Japan", categories=JP_RETENTION_CATEGORIES,
         period_decision="D-1", end_decision="D-2", decision_reference="JP-RETENTION",
         decision_state=_jp_decision_state,
-        validate_employee=lambda session, organization_id, employee_id: None,
+        validate_employee=_jp_retention_employee,
         retained_record_label=_jp_retained_record_label,
         has_statutory_profile=_jp_has_statutory_profile,
         report_matches=_jp_is_report)
@@ -902,15 +975,17 @@ JP_ASSESSMENT_FIELDS = (
 JP_WORK_CONDITION_FIELDS = (
     "effective_from", "effective_to", "working_time_system", "week_start_day",
     "scheduled_daily_minutes", "scheduled_monthly_hours", "workplace_prefecture",
-    "specific_minimum_wage_applies", "legal_entity_id", "evidence_ref",
+    "specific_minimum_wage_applies", "scheduled_weekdays", "statutory_day_off_weekday",
+    "public_holidays_off", "legal_entity_id", "evidence_ref",
 )
 _JP_INT_FIELDS = {"dependants_count", "smr_health_grade", "smr_pension_grade",
                   "fiscal_notice_year", "version", "legal_entity_id",
                   "source_document_id", "my_number_vault_id", "replaces_id",
-                  "week_start_day", "scheduled_daily_minutes"}
+                  "week_start_day", "scheduled_daily_minutes", "statutory_day_off_weekday"}
 _JP_DECIMAL_FIELDS = {"smr_health_amount", "smr_pension_amount", "total_amount",
                       "scheduled_monthly_hours"}
-_JP_BOOL_FIELDS = {"municipality_reporting_enabled", "specific_minimum_wage_applies"}
+_JP_BOOL_FIELDS = {"municipality_reporting_enabled", "specific_minimum_wage_applies",
+                   "public_holidays_off"}
 _JP_DATE_FIELDS = {"effective_from", "effective_to", "declaration_received_on",
                    "qualification_date", "loss_date", "received_on",
                    "first_deduction_month"}
@@ -927,6 +1002,37 @@ def _jp_employee(db: Session, organization_id: int, employee_id: int):
 
         raise NotFoundException("Japan employee not found.")
     return employee
+
+
+def _jp_bool(value, field: str) -> bool:
+    """Strict boolean: the string "false" is False, never truthy."""
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes"):
+        return True
+    if text in ("false", "0", "no"):
+        return False
+    raise BadRequestException(f"{field} must be true or false.")
+
+
+def _jp_work_calendar_errors(data: dict) -> None:
+    for key in ("week_start_day", "statutory_day_off_weekday"):
+        value = data.get(key)
+        if value is not None and not 0 <= value <= 6:
+            raise BadRequestException(f"{key} must be 0 (Monday) to 6 (Sunday).")
+    text = data.get("scheduled_weekdays")
+    if text is not None:
+        parts = [part.strip() for part in str(text).split(",")]
+        if (any(not part.isdigit() or not 0 <= int(part) <= 6 for part in parts)
+                or len(set(parts)) != len(parts)):
+            raise BadRequestException(
+                "scheduled_weekdays must list distinct weekdays 0 (Monday) to 6 (Sunday), "
+                "comma-separated.")
+        data["scheduled_weekdays"] = ",".join(str(day) for day in sorted(int(p) for p in parts))
+        day_off = data.get("statutory_day_off_weekday")
+        if day_off is not None and day_off in {int(p) for p in parts}:
+            raise BadRequestException("The statutory day off cannot be a scheduled working day.")
 
 
 def _jp_clean(payload: dict, fields, *, required=()) -> dict:
@@ -947,7 +1053,7 @@ def _jp_clean(payload: dict, fields, *, required=()) -> dict:
         elif key in _JP_DECIMAL_FIELDS:
             data[key] = _money(value, key)
         elif key in _JP_BOOL_FIELDS:
-            data[key] = bool(value)
+            data[key] = _jp_bool(value, key)
         else:
             data[key] = value
     missing = [key for key in required if data.get(key) in (None, "")]
@@ -999,6 +1105,7 @@ def record_work_conditions(db: Session, organization_id: int, payload: dict,
         required=("effective_from", "working_time_system", "week_start_day",
                   "scheduled_daily_minutes", "scheduled_monthly_hours",
                   "workplace_prefecture"))
+    _jp_work_calendar_errors(data)
     return _jp_create_version(db, m.PayrollJpWorkConditions, organization_id, None,
                               data, actor_id, "jp_work_conditions")
 
@@ -1080,6 +1187,69 @@ def approve_work_conditions(db: Session, organization_id: int, row_id: int,
                             actor_id: Optional[int]):
     return _jp_approve_version(db, _jp_models().PayrollJpWorkConditions,
                                organization_id, row_id, actor_id, "jp_work_conditions")
+
+
+def request_attendance_approval(db: Session, organization_id: int, employee_id: int,
+                                payload: dict, actor_id: Optional[int]):
+    """Ask a second person to approve one employee's attendance for one pay
+    period. The request records a fingerprint of the rows as they are now."""
+    m = _jp_models()
+    _jp_employee(db, organization_id, employee_id)
+    unknown = sorted(set(payload) - {"period_start", "period_end", "evidence_ref"})
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    start = _as_date(payload.get("period_start"), "period_start")
+    end = _as_date(payload.get("period_end"), "period_end")
+    if end < start:
+        raise BadRequestException("period_end must not be before period_start.")
+    records = _jp_attendance_records(db, organization_id, employee_id, start, end)
+    if not records:
+        raise BadRequestException("There is no attendance in this period to approve.")
+    fingerprint, count = _jp_attendance_fingerprint(records)
+    row = m.PayrollJpAttendanceApproval(
+        organization_id=organization_id, employee_id=employee_id, period_start=start,
+        period_end=end, fingerprint=fingerprint, row_count=count, status="REQUESTED",
+        evidence_ref=payload.get("evidence_ref") or None, created_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    _jp_audit(db, actor_id, "created", "jp_attendance_approval", row.id,
+              new={"period_start": start.isoformat(), "period_end": end.isoformat(),
+                   "row_count": count})
+    return row
+
+
+def approve_attendance_approval(db: Session, organization_id: int, approval_id: int,
+                                actor_id: Optional[int]):
+    """REQUESTED -> APPROVED by a different person, only while the attendance
+    rows still match the fingerprint taken at the request."""
+    from app.modules.payroll.service import require_four_eyes
+
+    m = _jp_models()
+    row = (db.query(m.PayrollJpAttendanceApproval)
+           .filter(m.PayrollJpAttendanceApproval.id == approval_id,
+                   m.PayrollJpAttendanceApproval.organization_id == organization_id).first())
+    if row is None:
+        from app.core.exceptions import NotFoundException
+
+        raise NotFoundException("Japan attendance approval not found.")
+    if row.status != "REQUESTED":
+        raise BadRequestException(f"Only a REQUESTED attendance approval can be approved "
+                                  f"(this one is {row.status}).")
+    require_four_eyes(row.created_by_id, actor_id, "Approving Japan attendance",
+                      db=db, entity_type="jp_attendance_approval", entity_id=row.id,
+                      current_status=row.status)
+    fingerprint, _count = _jp_attendance_fingerprint(_jp_attendance_records(
+        db, organization_id, row.employee_id, row.period_start, row.period_end))
+    if fingerprint != row.fingerprint:
+        raise BadRequestException("The attendance changed after this approval was requested; "
+                                  "request a new approval.")
+    row.status = "APPROVED"
+    row.approved_by_id = actor_id
+    row.approved_at = datetime.utcnow()
+    db.flush()
+    _jp_audit(db, actor_id, "approved", "jp_attendance_approval", row.id,
+              old={"status": "REQUESTED"}, new={"status": "APPROVED"})
+    return row
 
 
 def approve_worker_tax_profile(db: Session, organization_id: int, row_id: int,
@@ -1336,16 +1506,14 @@ def reveal_my_number(db: Session, organization_id: int, vault_id: int, actor_id:
                 .order_by(m.PayrollJpMyNumberAccessEvent.id.desc()).first())
     if request is None or approved is None:
         raise BadRequestException("A reveal needs a request and a second person's approval.")
+    # Owner-bound only: an unbound retry would let ciphertext copied from
+    # another row reveal as this employee's number (no unbound row was ever
+    # collected - Japan has never been enabled for a tenant).
     try:
         number = my.decrypt(row.ciphertext, row.key_version,
                             owner=my.vault_owner(organization_id, row.employee_id, row.id))
     except my.MyNumberError as bound_error:
-        # Rows collected before Phase 5 carry the legacy unbound AAD. They stay
-        # readable; the next collection writes the owner-bound format.
-        try:
-            number = my.decrypt(row.ciphertext, row.key_version)
-        except my.MyNumberError:
-            raise BadRequestException(str(bound_error))
+        raise BadRequestException(str(bound_error))
     _jp_vault_event(db, organization_id, row, "REVEALED", actor_id,
                     reason=request.reason, purpose="REVEAL")
     return {"myNumber": number, "employeeId": row.employee_id,

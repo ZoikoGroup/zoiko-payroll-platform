@@ -40,6 +40,9 @@ _GUARDED = [
     "67c8d7454716",
     "668472e4eb72",  # organizations.timezone (guarded, lock_timeout)  # South Africa Phase 10 parallel cycles (guarded, lock_timeout)
     "f686d5128f8a",  # Japan Phase 2 jp_foundation (guarded from day one, lock_timeout)
+    "9c1d7e4a2b6f",  # Japan run payment kind (guarded, lock_timeout)
+    "a7c4e9d1b2f8",  # Japan work conditions (guarded, lock_timeout)
+    "a1a748b50902",  # Japan work calendar + attendance approvals (guarded, lock_timeout)
 ]
 
 

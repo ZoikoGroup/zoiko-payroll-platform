@@ -51,11 +51,14 @@ def _base_rate_map():
     return rate_map
 
 
-def _earning_classes(review_si=False):
+def _earning_classes(review_si=False, signed_labour=True):
     rows = []
     for obligation, treatment, component, label, src in content.JP_EARNING_CLASSES:
         if review_si and obligation == "SI" and component == "SALARY":
             treatment = "REVIEW"
+        if signed_labour and obligation in ("OT_BASE", "MIN_WAGE"):
+            # Synthetic signed labour bases: salary counts, overtime pay never.
+            treatment = {"SALARY": "INCLUDED", "OVERTIME": "EXCLUDED"}.get(component, treatment)
         rows.append(SimpleNamespace(
             rule_type=content.JP_EARNING_CLASS_RULE, tax_regime=obligation,
             filing_status=component, assessment_basis=treatment, min_amount=D(0),
@@ -65,7 +68,8 @@ def _earning_classes(review_si=False):
 
 
 def _slabs(**overrides):
-    rows = _earning_classes(overrides.get("review_si", False))
+    rows = _earning_classes(overrides.get("review_si", False),
+                            signed_labour=overrides.get("signed_labour", True))
     rows.append(SimpleNamespace(
         rule_type=content.JP_WHT_MONTHLY_RULE, tax_column="PRIMARY",
         tax_table_number="0", min_amount=D(0), max_amount=D("100000000"),
@@ -129,6 +133,7 @@ def _context(**overrides):
         working_time_system="STANDARD", week_start_day=0,
         scheduled_daily_minutes=480, scheduled_monthly_hours=D(240),
         workplace_prefecture="13", specific_minimum_wage_applies=False,
+        scheduled_weekdays="0,1,2,3,4", statutory_day_off_weekday=6, public_holidays_off=True,
     )
     ctx_kwargs = dict(
         gross=D(300000), basic=D(300000), overtime=D(0), country="JP",
@@ -448,3 +453,11 @@ def test_rejected_and_imported_notices_never_govern():
         with pytest.raises(MissingComplianceConfigurationError):
             resident_tax.resident_tax_for_month([row], date(2026, 6, 15))
 
+
+def test_shipped_labour_bases_are_review_and_block():
+    # OT_BASE / MIN_WAGE ship REVIEW: the premium base and the minimum-wage
+    # wage are never assumed to be the salary.
+    ctx = _context(slabs=_slabs(signed_labour=False))
+    with pytest.raises(MissingComplianceConfigurationError) as exc:
+        japan.calculate(ctx)
+    assert exc.value.key == "jp_earning_class:OT_BASE:SALARY"

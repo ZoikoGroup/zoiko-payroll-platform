@@ -205,6 +205,8 @@ def test_other_hook_modules_unchanged():
         "BR": "app.modules.payroll.brazil_service",
         # South Africa (ZP-ZA-ENG-001) Phase 5 – fail-closed module.
         "ZA": "app.modules.payroll.south_africa_service",
+        # Japan (ZP-JP-ENG-001) Phase 5 – all 13 hooks, fail-closed module.
+        "JP": "app.modules.payroll.japan_service",
     }
 
 

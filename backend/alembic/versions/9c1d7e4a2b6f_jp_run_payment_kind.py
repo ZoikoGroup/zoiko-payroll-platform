@@ -35,7 +35,7 @@ def upgrade() -> None:
     if _postgres():
         op.execute(sa.text("SET LOCAL lock_timeout = '5s'"))
     if "jp_payment_kind" not in _columns(RUNS):
-        op.add_column(RUNS, sa.Column("jp_payment_kind", sa.String(length=10), nullable=True))
+        op.add_column("payroll_runs", sa.Column("jp_payment_kind", sa.String(length=10), nullable=True))
 
 
 def downgrade() -> None:

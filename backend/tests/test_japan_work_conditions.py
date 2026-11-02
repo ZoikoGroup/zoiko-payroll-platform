@@ -58,6 +58,14 @@ def _conditions(organization, **overrides):
     return row
 
 
+def _calendar(**overrides):
+    values = dict(scheduled_daily_minutes=480, week_start_day=0,
+                  scheduled_weekdays="0,1,2,3,4", statutory_day_off_weekday=6,
+                  public_holidays_off=True)
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 def _attendance(organization, employee, day, hours="8", status="present",
                 check_in=None, check_out=None):
     return PayrollAttendanceRecord(
@@ -145,13 +153,14 @@ def test_present_attendance_becomes_hours_with_night_and_schedule(db, organizati
     db.add(_attendance(organization, employee, date(2026, 6, 1),
                        hours="8", check_in="21:00", check_out="23:00"))
     db.commit()
-    conditions = SimpleNamespace(scheduled_daily_minutes=480)
     got = jp._jp_hours_for_period(
         db, organization.id, employee.id, date(2026, 6, 1), date(2026, 6, 30),
-        conditions)
+        _calendar())
     assert got == [{
         "date": "2026-06-01", "worked_minutes": 480, "scheduled_minutes": 480,
-        "check_in": "21:00", "check_out": "23:00", "is_holiday": False,
+        "statutory_day_off": False, "public_holiday": False,
+        "public_holiday_policy_missing": False, "in_period": True,
+        "check_in": "21:00", "check_out": "23:00",
     }]
 
 
@@ -218,8 +227,9 @@ def test_calc_inputs_loads_the_active_version_and_approved_hours(db, organizatio
         db, organization.id, employee, date(2026, 6, 15),
         period=(date(2026, 6, 1), date(2026, 6, 30)))
     assert got["jp_work_conditions"].workplace_prefecture == "13"
-    assert got["jp_hours_approved"] is True
     assert got["jp_hours"][0]["worked_minutes"] == 480
+    # Rows existing is not approval: a second person must approve the period.
+    assert got["jp_hours_approved"] is False
 
 
 def test_pack_holidays_without_an_in_force_pack_seeds_nothing(db):
@@ -262,3 +272,124 @@ def test_two_versions_in_force_are_a_configuration_error(db, organization, emplo
         jp.resolve_jp_calc_inputs(
             db, organization.id, employee, date(2026, 6, 15),
             period=(date(2026, 6, 1), date(2026, 6, 30)))
+
+
+# ── work calendar (scheduled days, statutory day off, national holidays) ──
+
+def test_calendar_marks_unscheduled_days_and_the_statutory_day_off(db, organization, employee):
+    db.add_all([_attendance(organization, employee, date(2026, 6, 6)),     # Saturday
+                _attendance(organization, employee, date(2026, 6, 7))])    # Sunday
+    db.commit()
+    got = jp._jp_hours_for_period(
+        db, organization.id, employee.id, date(2026, 6, 1), date(2026, 6, 30), _calendar())
+    assert [(row["scheduled_minutes"], row["statutory_day_off"]) for row in got] == \
+        [(0, False), (0, True)]
+
+
+def test_unrecorded_calendar_facts_are_passed_as_none(db, organization, employee):
+    db.add(_attendance(organization, employee, date(2026, 6, 1)))
+    db.commit()
+    got = jp._jp_hours_for_period(
+        db, organization.id, employee.id, date(2026, 6, 1), date(2026, 6, 30),
+        _calendar(scheduled_weekdays=None, statutory_day_off_weekday=None))
+    assert got[0]["scheduled_minutes"] is None and got[0]["statutory_day_off"] is None
+
+
+def test_first_week_days_before_the_period_are_context(db, organization, employee):
+    # 1 July 2026 is a Wednesday; with Monday weeks, 29-30 June are context.
+    db.add_all([_attendance(organization, employee, date(2026, 6, 29)),
+                _attendance(organization, employee, date(2026, 7, 1))])
+    db.commit()
+    got = jp._jp_hours_for_period(
+        db, organization.id, employee.id, date(2026, 7, 1), date(2026, 7, 31), _calendar())
+    assert [(row["date"], row["in_period"]) for row in got] == \
+        [("2026-06-29", False), ("2026-07-01", True)]
+
+
+@pytest.mark.parametrize("holidays_off,scheduled,missing", [
+    (True, 0, False), (False, 480, False), (None, 480, True),
+])
+def test_national_holiday_follows_the_recorded_policy(db, organization, employee, monkeypatch,
+                                                      holidays_off, scheduled, missing):
+    monkeypatch.setattr(jp, "_jp_pack_holidays",
+                        lambda _db, year: [{"date": "2026-06-03", "name": "Synthetic"}])
+    db.add(_attendance(organization, employee, date(2026, 6, 3)))           # Wednesday
+    db.commit()
+    got = jp._jp_hours_for_period(
+        db, organization.id, employee.id, date(2026, 6, 1), date(2026, 6, 30),
+        _calendar(public_holidays_off=holidays_off))
+    assert got[0]["public_holiday"] is True
+    assert got[0]["statutory_day_off"] is False          # a holiday is never the day off
+    assert got[0]["scheduled_minutes"] == scheduled
+    assert got[0]["public_holiday_policy_missing"] is missing
+
+
+@pytest.mark.parametrize("overrides,match", [
+    ({"scheduled_weekdays": "0,1,9"}, "scheduled_weekdays"),
+    ({"scheduled_weekdays": "0,0,1"}, "scheduled_weekdays"),
+    ({"scheduled_weekdays": "0,1,2,3,4,5,6", "statutory_day_off_weekday": 6}, "day off"),
+    ({"statutory_day_off_weekday": 7}, "0 \\(Monday\\)"),
+    ({"public_holidays_off": "maybe"}, "true or false"),
+])
+def test_work_calendar_is_validated(db, organization, overrides, match):
+    with pytest.raises(BadRequestException, match=match):
+        jp.record_work_conditions(db, organization.id, _body(**overrides), 1)
+
+
+def test_work_calendar_is_normalised_and_booleans_are_strict(db, organization):
+    row = jp.record_work_conditions(db, organization.id, _body(
+        scheduled_weekdays="4, 0,2", statutory_day_off_weekday=6,
+        public_holidays_off="false", specific_minimum_wage_applies="false"), 1)
+    assert row.scheduled_weekdays == "0,2,4"
+    assert row.public_holidays_off is False
+    assert row.specific_minimum_wage_applies is False      # "false" was truthy before
+
+
+# ── attendance approval (four-eyes, bound to the rows) ────────────────────
+
+def _period():
+    return {"period_start": "2026-06-01", "period_end": "2026-06-30"}
+
+
+def test_attendance_approval_is_four_eyes_and_makes_hours_approved(db, organization, employee):
+    db.add(_conditions(organization, scheduled_weekdays="0,1,2,3,4",
+                       statutory_day_off_weekday=6, public_holidays_off=True))
+    db.add(_attendance(organization, employee, date(2026, 6, 1)))
+    db.commit()
+    request = jp.request_attendance_approval(db, organization.id, employee.id, _period(), 1)
+    db.commit()
+    assert request.status == "REQUESTED" and request.row_count == 1
+    with pytest.raises(BadRequestException, match="four-eyes"):
+        jp.approve_attendance_approval(db, organization.id, request.id, 1)
+    jp.approve_attendance_approval(db, organization.id, request.id, 2)
+    db.commit()
+    got = jp.resolve_jp_calc_inputs(db, organization.id, employee, date(2026, 6, 15),
+                                    period=(date(2026, 6, 1), date(2026, 6, 30)))
+    assert got["jp_hours_approved"] is True
+
+    # A row added after approval voids it for the engine.
+    db.add(_attendance(organization, employee, date(2026, 6, 2)))
+    db.commit()
+    got = jp.resolve_jp_calc_inputs(db, organization.id, employee, date(2026, 6, 15),
+                                    period=(date(2026, 6, 1), date(2026, 6, 30)))
+    assert got["jp_hours_approved"] is False
+
+
+def test_attendance_changed_after_the_request_cannot_be_approved(db, organization, employee):
+    db.add(_attendance(organization, employee, date(2026, 6, 1)))
+    db.commit()
+    request = jp.request_attendance_approval(db, organization.id, employee.id, _period(), 1)
+    db.commit()
+    record = db.query(PayrollAttendanceRecord).one()
+    record.hours = "9"
+    db.commit()
+    with pytest.raises(BadRequestException, match="changed after"):
+        jp.approve_attendance_approval(db, organization.id, request.id, 2)
+
+
+def test_attendance_approval_needs_rows_and_known_fields(db, organization, employee):
+    with pytest.raises(BadRequestException, match="no attendance"):
+        jp.request_attendance_approval(db, organization.id, employee.id, _period(), 1)
+    with pytest.raises(BadRequestException, match="unknown field"):
+        jp.request_attendance_approval(db, organization.id, employee.id,
+                                       dict(_period(), approved=True), 1)

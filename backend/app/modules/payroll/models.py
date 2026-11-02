@@ -11812,6 +11812,11 @@ class PayrollJpWorkConditions(Base):
     workplace_prefecture           = Column(String(2), nullable=False)
     specific_minimum_wage_applies  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     status                         = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    # a1a748b50902: the work calendar. Weekdays are 0 = Monday .. 6 = Sunday.
+    # NULL is "not recorded": attendance that needs it BLOCKS.
+    scheduled_weekdays             = Column(String(13), nullable=True)      # "0,1,2,3,4"
+    statutory_day_off_weekday      = Column(SmallInteger, nullable=True)    # the statutory weekly day off
+    public_holidays_off            = Column(Boolean, nullable=True)         # national holidays are days off
 
     __table_args__ = (
         sa.CheckConstraint("working_time_system IN ('STANDARD')", name="ck_jp_work_conditions_system"),
@@ -11828,6 +11833,37 @@ class PayrollJpWorkConditions(Base):
 
     def __repr__(self):
         return f"<PayrollJpWorkConditions org={self.organization_id} {self.status}>"
+
+
+class PayrollJpAttendanceApproval(Base):
+    """A four-eyes approval of one employee's attendance for one pay period
+    (ZP-JP-ENG-001 §6). It is bound to a fingerprint of the attendance rows:
+    a row added, removed or changed after the request makes it stale, and the
+    engine then treats the hours as unapproved (a1a748b50902)."""
+    __tablename__ = "payroll_jp_attendance_approvals"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False)
+    period_start    = Column(Date, nullable=False)
+    period_end      = Column(Date, nullable=False)
+    fingerprint     = Column(String(64), nullable=False)
+    row_count       = Column(Integer, nullable=False)
+    status          = Column(String(12), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    evidence_ref    = Column(String(300), nullable=True)
+    created_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'VOID')", name="ck_jp_attendance_approval_status"),
+        sa.CheckConstraint("period_end >= period_start", name="ck_jp_attendance_approval_dates"),
+        Index("ix_jp_attendance_approval_employee_period", "organization_id", "employee_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpAttendanceApproval employee={self.employee_id} {self.period_start} {self.status}>"
 
 
 class PayrollJpMyNumberVault(Base):

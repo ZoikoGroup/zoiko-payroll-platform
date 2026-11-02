@@ -43,7 +43,9 @@ P9_COLUMNS = {"payroll_court_ordered_deductions": {"za_authority_type", "za_evid
 JP_TABLES = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
              "payroll_jp_my_number_access_events", "payroll_jp_worker_tax_profiles",
              "payroll_jp_social_insurance_enrollments", "payroll_jp_social_insurance_events",
-             "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments"}
+             "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments",
+             # Japan P6 (a7c4e9d1b2f8, a1a748b50902).
+             "payroll_jp_work_conditions", "payroll_jp_attendance_approvals"}
 
 
 def _load(prefix):
@@ -214,7 +216,8 @@ def test_deploy_drift_filter_explains_every_za_object():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot"}
-    assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint"}
+    assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
+                                       "jp_payment_kind"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

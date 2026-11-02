@@ -144,6 +144,37 @@ def approve_work_conditions(conditions_id: int,
     return _commit(db, row)
 
 
+# ── attendance approvals ───────────────────────────────────────────────────
+
+@router.get("/employees/{employee_id}/attendance-approvals",
+            summary="Japan attendance approvals for an employee")
+def list_attendance_approvals(employee_id: int,
+                              current_user=Depends(get_current_payroll_operator),
+                              db: Session = Depends(get_db)):
+    return _list(db, jp._jp_models().PayrollJpAttendanceApproval, _org_id(current_user),
+                 employee_id)
+
+
+@router.post("/employees/{employee_id}/attendance-approvals",
+             summary="Request approval of an employee's attendance for a pay period")
+def request_attendance_approval(employee_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_payroll_operator),
+                                db: Session = Depends(get_db)):
+    row = jp.request_attendance_approval(db, _org_id(current_user), employee_id, body,
+                                         _actor(current_user))
+    return _commit(db, row)
+
+
+@router.post("/attendance-approvals/{approval_id}/approve",
+             summary="Approve a period's attendance (second person; rows must be unchanged)")
+def approve_attendance_approval(approval_id: int,
+                                current_user=Depends(get_current_org_admin),
+                                db: Session = Depends(get_db)):
+    row = jp.approve_attendance_approval(db, _org_id(current_user), approval_id,
+                                         _actor(current_user))
+    return _commit(db, row)
+
+
 # ── worker tax profile ──────────────────────────────────────────────────────
 
 @router.get("/employees/{employee_id}/tax-profiles",
