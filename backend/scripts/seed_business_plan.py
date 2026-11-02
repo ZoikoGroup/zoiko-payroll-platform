@@ -30,7 +30,7 @@ from app.database import SessionLocal, initialize_database
 from app.modules.auth.models import User, UserRole
 from app.modules.billing import plan_catalog
 from app.modules.billing.feature_keys import (
-    API_ACCESS, MAX_BWM, MAX_ENTITIES, MAX_JURISDICTIONS, MAX_SCHEDULES,
+    API_ACCESS, ASSIST, MAX_BWM, MAX_ENTITIES, MAX_JURISDICTIONS, MAX_SCHEDULES,
     MULTI_CURRENCY, MULTI_ENTITY, PAYROLL_RUNS,
 )
 from app.modules.billing.models import PlanCode, PlanVersionStatus
@@ -48,6 +48,7 @@ BUSINESS_FEATURE_FLAGS = {
     API_ACCESS: None,               # on — same "on" Professional already has; there is
                                      # no limited/full API tiering mechanism yet, so this
                                      # is not actually a capability upgrade over Professional.
+    ASSIST: None,                   # on — Professional includes it, so Business must too
     MAX_ENTITIES: 10,
     MAX_JURISDICTIONS: 10,
     MAX_SCHEDULES: None,            # unlimited

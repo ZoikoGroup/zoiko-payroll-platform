@@ -202,6 +202,24 @@ Cloud Run's native Secret Manager integration.
   `PAYROLL_SUPER_ADMIN_EMAIL`, `PAYROLL_SUPER_ADMIN_PASSWORD`) as a one-off Cloud Run
   job or via `gcloud run jobs execute`, not as part of the normal request-serving
   container lifecycle.
+- **Plan catalog:** After the Super Admin exists, run these one-off jobs in order (each
+  is idempotent — re-running is a no-op). Without them `GET /billing/plans` returns an
+  empty list, registration shows no plans and checkout/trials fail:
+  1. `python -m scripts.seed_core_plan`
+  2. `python -m scripts.seed_professional_plan` (also the plan every evaluation trial runs on)
+  3. `python -m scripts.seed_business_plan`
+  4. `python -m scripts.migrate_plan_versions_v2` (publishes the corrected flag set for
+     Core/Professional/Business and moves existing subscriptions onto it)
+  5. `python -m scripts.seed_price_catalog` (Core $0, Professional $50, Business $150,
+     Enterprise $500 per month — the only source checkout charges from)
+
+  Enterprise has no self-service plan version; its limits come from the signed Order
+  Form recorded by a Super Admin.
+- **Plan-limit enforcement:** `BILLING_ENFORCEMENT_MODE` defaults to `warn` — limits are
+  checked and every would-be block is recorded as an `ENTITLEMENT_WOULD_HAVE_BLOCKED`
+  billing audit event, but nothing is blocked. Review those events, then set
+  `BILLING_ENFORCEMENT_MODE=enforce` on the Cloud Run service to start blocking
+  over-limit actions with an upgrade prompt. `off` disables the checks entirely.
 
 ---
 
@@ -383,6 +401,8 @@ the production image build includes it (it does, per current `Dockerfile`).
 - [ ] Load balancer routing (`/api/*` → backend, `/*` → frontend) configured and tested
 - [ ] Managed SSL certificate issued and attached to the load balancer
 - [ ] Super Admin seeded via one-off job (`scripts/seed_super_admin`), `SETUP_KEY` rotated/restricted afterward
+- [ ] Plan catalog + price catalog seeded (§6 "Plan catalog"), `GET /api/billing/plans` returns Core/Professional/Business
+- [ ] `BILLING_ENFORCEMENT_MODE` decided (`warn` default → `enforce` once the audit log is clean)
 - [ ] Health check endpoints wired into Cloud Run probes
 - [ ] Logging/alerting policies configured in Cloud Monitoring
 - [ ] Full backend test suite (`pytest tests/ -q`, 160 tests) passing against the production-config build before promoting

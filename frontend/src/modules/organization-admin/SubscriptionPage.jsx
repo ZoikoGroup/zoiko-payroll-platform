@@ -45,13 +45,13 @@ import {
 import { PlanChangeCountryDialog } from "../../components/billing/PlanChangeCountryNotice";
 import { getCountryNameFromCode } from "../../utils/currency";
 import {
-  COUNTRY_LIMIT_KEY,
   COMPLIANCE_COUNTRIES_ROUTE,
   COMPLIANCE_COUNTRIES_STATE,
   formatPlanFeature,
   getCountryPauseImpact,
   impactNeedsReview,
   impactPausesCountries,
+  isCustomerVisibleFeature,
 } from "../../utils/planLimits";
 
 const styles = `
@@ -741,8 +741,9 @@ export default function SubscriptionPage() {
   const hasHigherPlan = plans.some((p) => PLAN_ORDER.indexOf(p.code) > currentRank);
   const showPlanActions = isTrial || hasHigherPlan || hasStripe;
   // A null country limit means unlimited, so it stays in the list.
+  // null is "on" for a feature and "unlimited" for a limit, so it is listed.
   const entitlementList = Object.entries(entitlements).filter(
-    ([key, val]) => key !== "plan_code" && val !== undefined && (val !== null || key === COUNTRY_LIMIT_KEY) && val !== 0
+    ([key, val]) => isCustomerVisibleFeature(key) && val !== undefined && val !== 0
   );
 
   return (
@@ -1056,7 +1057,7 @@ export default function SubscriptionPage() {
                           ? flags
                           : Object.entries(flags).map(([feature_key, limit_value]) => ({ feature_key, limit_value }));
                         return list
-                          .filter((f) => f.limit_value !== 0)
+                          .filter((f) => f.limit_value !== 0 && isCustomerVisibleFeature(f.feature_key))
                           .slice(0, 3)
                           .map((f) => formatPlanFeature(f.feature_key, f.limit_value))
                           .join(" · ") || "Contact us for details";

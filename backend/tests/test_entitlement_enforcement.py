@@ -271,6 +271,15 @@ def test_professional_org_blocked_at_its_own_bwm_boundary(client, pro_headers):
     assert r.status_code == 403, r.text
 
 
+def test_bulk_import_cannot_bypass_the_bwm_limit(client, pro_headers):
+    # The Professional org is at its cap of 5 (previous tests) — a bulk
+    # import must be held to the same limit as single-employee create.
+    rows = [{"name": "Bulk One", "email": "bulk1@example.com"}, {"name": "Bulk Two", "email": "bulk2@example.com"}]
+    r = client.post("/api/payroll/employees/bulk", headers=pro_headers, json={"employees": rows})
+    assert r.status_code == 403, r.text
+    assert "max_billable_worker_months" in r.text
+
+
 # ── Assist entitlement (ASSIST) ─────────────────────────────────────────────
 
 def test_core_org_blocked_from_assist(client, core_headers):

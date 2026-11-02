@@ -285,6 +285,10 @@ def bulk_create_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # Same MAX_BWM cap create_employee enforces, checked against the whole
+    # batch up front — otherwise an import is a way around the plan limit.
+    current_count = billing_bwm.count_billable_workers(db, current_user.organization_id)
+    require_scope_limit(MAX_BWM, requested_qty=current_count + len(data.employees))(current_user=current_user, db=db)
     result = service.bulk_create_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{result['created']} created, {len(result['failed'])} failed.",

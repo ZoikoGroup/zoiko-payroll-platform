@@ -233,15 +233,15 @@ class Settings(BaseSettings):
     TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS: int = 24
 
     # ── Entitlement enforcement rollout (modules/billing/entitlements.py) ──
-    # "off": require_entitlement/require_scope_limit always pass — today's
-    # behavior, safe default. "warn": run the real check but only log +
-    # record a BillingCommercialAuditEvent (ENTITLEMENT_WOULD_HAVE_BLOCKED)
-    # instead of raising, so orgs already over a limit surface in the audit
-    # log before anything actually blocks them. "enforce": raise
+    # "off": require_entitlement/require_scope_limit always pass. "warn"
+    # (default): run the real check but only record a
+    # BillingCommercialAuditEvent (ENTITLEMENT_WOULD_HAVE_BLOCKED) instead
+    # of raising, so orgs already over a limit surface in the audit log
+    # before anything actually blocks them. "enforce": raise
     # ForbiddenException as coded. Flipping "warn" -> "enforce" in
-    # production is a deliberate, separate follow-up — not bundled into the
-    # change that first wires these dependencies into routes.
-    BILLING_ENFORCEMENT_MODE: str = "off"
+    # production is a deliberate, separate step (set the env var) once the
+    # audit log shows no unexpected would-have-blocked events.
+    BILLING_ENFORCEMENT_MODE: str = "warn"
 
     # ── Dunning (modules/billing/dunning.py) — Part 9 ───────────────────
     # PLACEHOLDER defaults, not a confirmed Finance decision — the spec

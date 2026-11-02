@@ -1,7 +1,7 @@
 """
 scripts/migrate_plan_versions_v2.py
 -------------------------------------
-Publishes corrected v2 plan versions for CORE and PROFESSIONAL, matching
+Publishes corrected v2 plan versions for CORE, PROFESSIONAL and BUSINESS, matching
 the Plan Entitlement spec's tier matrix, and migrates every existing
 BillingSubscription off the old (now RETIRED) version onto the new one.
 
@@ -69,6 +69,19 @@ TARGET_FLAGS = {
         API_ACCESS: None,
         ASSIST: None,
     },
+    # Business v1 shipped without an ASSIST flag, which (missing = not
+    # entitled) left the higher tier without Assist that Professional has.
+    PlanCode.BUSINESS.value: {
+        PAYROLL_RUNS: None,
+        MAX_ENTITIES: 10,
+        MAX_JURISDICTIONS: 10,
+        MAX_SCHEDULES: None,
+        MAX_BWM: 1000,
+        MULTI_ENTITY: None,
+        MULTI_CURRENCY: None,
+        API_ACCESS: None,
+        ASSIST: None,
+    },
 }
 
 SCALE_LIMIT_KEYS = (MAX_ENTITIES, MAX_JURISDICTIONS, MAX_SCHEDULES, MAX_BWM)
@@ -81,7 +94,9 @@ def _actor_user_id(db) -> int:
 
 def _version_matches_target(db, version, target_flags: dict) -> bool:
     current = plan_catalog.list_entitlement_flags(db, version.id)
-    return all(current.get(key) == value for key, value in target_flags.items())
+    # `key in current` matters: a missing flag means "not entitled", so it
+    # must not compare equal to a target of None ("on"/unlimited).
+    return all(key in current and current[key] == value for key, value in target_flags.items())
 
 
 def _migrate_plan(db, plan_code: str, actor_user_id: int) -> None:
@@ -156,7 +171,7 @@ def main() -> None:
     db = SessionLocal()
     try:
         actor_user_id = _actor_user_id(db)
-        for plan_code in (PlanCode.CORE.value, PlanCode.PROFESSIONAL.value):
+        for plan_code in (PlanCode.CORE.value, PlanCode.PROFESSIONAL.value, PlanCode.BUSINESS.value):
             _migrate_plan(db, plan_code, actor_user_id)
         print("Done.")
     finally:

@@ -52,9 +52,18 @@ const COUNT_LIMIT_NOUNS = {
 const FEATURE_NAMES = {
   multi_entity: "Multiple legal entities",
   multi_currency: "Multi-currency payroll",
-  api_access: "API access",
   assist: "Zoiko Assist",
 };
+
+// Flags that exist on plan versions but gate nothing customer-facing yet
+// (api_access: there is no customer API-key system), so plan cards never
+// advertise them.
+const HIDDEN_PLAN_FEATURES = new Set(["api_access"]);
+
+/** True when a plan flag should be listed on a plan card. */
+export function isCustomerVisibleFeature(key) {
+  return key !== "plan_code" && !HIDDEN_PLAN_FEATURES.has(key);
+}
 
 function formatCount(n) {
   return Number(n).toLocaleString("en-US");
