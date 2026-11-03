@@ -154,6 +154,16 @@ def calculate_payroll(
             "Japan payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "NZ" and key == "simple":
+        # New Zealand (ZP-NZ-ENG-001): simple mode would silently skip PAYE/ACC,
+        # KiwiSaver/ESCT, student loan and authority deductions. Fail-closed.
+        from app.modules.payroll.engine.countries.new_zealand import NZCalculationBlockedError
+
+        raise NZCalculationBlockedError(
+            "NZ_SIMPLE_MODE_UNSUPPORTED",
+            "New Zealand payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)

@@ -80,6 +80,7 @@ from app.modules.payroll.engine.countries import mexico as _mexico
 from app.modules.payroll.engine.countries import brazil as _brazil
 from app.modules.payroll.engine.countries import south_africa as _south_africa
 from app.modules.payroll.engine.countries import japan as _japan
+from app.modules.payroll.engine.countries import new_zealand as _new_zealand
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -159,6 +160,7 @@ _calc_mexico = _mexico.calculate
 _calc_brazil = _brazil.calculate
 _calc_south_africa = _south_africa.calculate
 _calc_japan = _japan.calculate
+_calc_new_zealand = _new_zealand.calculate
 
 
 _COUNTRY_CALC = {
@@ -240,6 +242,8 @@ _COUNTRY_CALC = {
     # resident tax. Fail-closed on every unsigned rule; simple mode is blocked
     # in resolver.py.
     "JP": _calc_japan,
+    # New Zealand (ZP-NZ-ENG-001): fail-closed, never the generic calculator.
+    "NZ": _calc_new_zealand,
 }
 
 

@@ -134,6 +134,8 @@ _COUNTRY_NAME_TO_CODE = {
     "singapore": "SG", "sg": "SG",
     # Without this, "Hong Kong" would truncate to "HO".
     "hong kong": "HK", "hong kong sar": "HK", "hk": "HK", "hkg": "HK",
+    # Without this, "New Zealand" would truncate to "NE" (Nebraska / Niger).
+    "new zealand": "NZ", "nz": "NZ", "nzl": "NZ", "aotearoa": "NZ",
 }
 
 
@@ -37242,6 +37244,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.japan_dormancy import entering_japan_refusal
             if code and entering_japan_refusal(row.jurisdiction_country, code):
                 code = None
+            # New Zealand (ZP-NZ-ENG-001 Phase 0 dormancy): never back-fill INTO NZ.
+            from app.modules.payroll.nz_dormancy import entering_nz_refusal
+            if code and entering_nz_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -37344,6 +37350,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     jp_refusal = entering_japan_refusal(row.jurisdiction_country, incoming_country)
     if jp_refusal:
         raise BadRequestException(jp_refusal)
+    # New Zealand (ZP-NZ-ENG-001 Phase 0): choosing New Zealand is refused the
+    # same way while New Zealand onboarding is disabled.
+    from app.modules.payroll.nz_dormancy import entering_nz_refusal
+    nz_refusal = entering_nz_refusal(row.jurisdiction_country, incoming_country)
+    if nz_refusal:
+        raise BadRequestException(nz_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",
