@@ -214,6 +214,12 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
     """Compose a clear, governed answer from a deterministic tool result."""
     if not tool_result or not tool_result.get("found"):
         reason = (tool_result or {}).get("reason") or "No payroll record is visible in your authorized scope."
+        if reason == "Need two payroll runs to compare.":
+            return (
+                "Comparing pay periods needs at least two payroll runs, and only one is visible in your "
+                "authorized scope so far. Once the next pay period has been run, ask me again. Meanwhile I can "
+                "summarize the current run's status, readiness and exceptions."
+            )
         if reason == "No visible payroll run.":
             reason = (
                 "I don't see any payroll run in your authorized scope yet. "

@@ -279,8 +279,23 @@ def list_capabilities(db) -> list[AssistCapability]:
     return db.query(AssistCapability).order_by(AssistCapability.order_index).all()
 
 
-def list_suggestions(db) -> list[AssistSuggestion]:
-    return db.query(AssistSuggestion).filter(AssistSuggestion.enabled == 1).order_by(AssistSuggestion.position).all()
+# Suggestions that only make sense once the org has the data they act on.
+# Offering "Compare this payroll period with the previous one" to an org
+# with fewer than two runs guaranteed a dead-end answer (chatbot bug report
+# BUG-01, figure 3).
+_MIN_RUNS_FOR_SUGGESTION = {"variance.compare": 2}
+
+
+def list_suggestions(db, organization_id: int | None = None) -> list[AssistSuggestion]:
+    suggestions = (
+        db.query(AssistSuggestion).filter(AssistSuggestion.enabled == 1).order_by(AssistSuggestion.position).all()
+    )
+    if organization_id is None:
+        return suggestions
+    from app.modules.payroll.models import PayrollRun
+
+    run_count = db.query(PayrollRun).filter(PayrollRun.organization_id == organization_id).count()
+    return [s for s in suggestions if run_count >= _MIN_RUNS_FOR_SUGGESTION.get(s.intent_id, 0)]
 
 
 def get_current_notice(db, org_id, user) -> AssistNotice | None:

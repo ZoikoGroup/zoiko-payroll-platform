@@ -26,6 +26,7 @@ from app.modules.assist.models import (
     KnowledgeSourceState,
     KnowledgeState,
 )
+from app.modules.assist.public_registry import live_country_names
 
 logger = logging.getLogger("zoiko_payroll.assist.knowledge")
 
@@ -175,6 +176,18 @@ def _score_item(item: AssistKbItem, query_terms: list[str]) -> int:
     for keyword, synonyms in _CONTENT_KEYWORDS.items():
         if any(s in haystack_title for s in synonyms) and any(s in query_terms for s in synonyms):
             score += 3
+    # Title-coverage bonus: every meaningful word of the title appears in the
+    # question ("How do I book a demo?" vs "How to book a demo"), and more
+    # when the question is also fully covered by the title. Lets the specific
+    # article beat broader ones that merely share a common word like
+    # "payroll", instead of relying on id order to break the tie.
+    title_terms = _query_terms(item.title)
+
+    def _covered(terms: list[str], others: list[str]) -> bool:
+        return bool(terms) and all(any(t in o or o in t for o in others) for t in terms)
+
+    if score > 0 and _covered(title_terms, query_terms):
+        score += 5 if _covered(query_terms, title_terms) else 2
     # The authority bonus is a tie-breaker among items that already matched
     # something — applying it unconditionally would give every query a
     # nonzero score on every authoritative item, even one with no real
@@ -434,13 +447,186 @@ DEFAULT_KB_ITEMS = [
         "keywords": ["payroll", "what is payroll", "payroll definition", "payroll meaning"],
         "jurisdiction_codes": [],
     },
+    # ── Public product questions (chatbot bug reports, 30 Oct 2026) ───────
+    # The concierge's topic cards and popular questions had no article to
+    # answer from, so pricing/demo/countries/integrations returned "no
+    # matching article" (platform) or "can't confirm" (website). Content is
+    # taken only from approved sources: the website's published pricing,
+    # demo and integrations pages, and the public jurisdiction registry.
+    {
+        "title": "Where Zoiko Payroll is available: supported countries",
+        "content_type": "JURISDICTION_GUIDE",
+        "summary": (
+            f"Zoiko Payroll currently supports payroll in {len(live_country_names())} live jurisdictions. "
+            "Use Check your country in the assistant to see a specific country's status."
+        ),
+        "body": (
+            "Zoiko Payroll is currently live in these jurisdictions: "
+            + ", ".join(live_country_names())
+            + ". Availability is maintained in the Zoiko Payroll jurisdiction registry, not inferred: if a country "
+            "is not on this list, it is not currently listed as available, and the Sales team can confirm "
+            "options for it. Use Check your country in the assistant for a specific country's status and "
+            "last-verified date. Country-specific capabilities (tax calculation, statutory filings, payments) are "
+            "confirmed per country during evaluation."
+        ),
+        "keywords": ["countries", "available", "supported", "jurisdictions", "where"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Multi-country payroll: how payroll works when you manage several countries",
+        "content_type": "HOW_TO",
+        "summary": (
+            "Zoiko Payroll runs payroll for several countries from one account, applying each country's own "
+            "tax and statutory rules."
+        ),
+        "body": (
+            "Multi-country payroll works by giving each jurisdiction its own versioned rule pack for taxes, "
+            "statutory contributions and filings, while you manage employees, payroll runs, approvals and "
+            "reporting from one Zoiko Payroll account. Each country's payroll is calculated with that country's "
+            "rules and goes through the same governed approval lifecycle (Draft, Review, Approved, Authorized, "
+            "Paid, Closed). How many legal entities and production jurisdictions you can run depends on your "
+            "plan (Professional supports up to 3; the pricing page lists each plan's limits). Live countries: "
+            + ", ".join(live_country_names())
+            + ". Use Check your country for a specific country's status."
+        ),
+        "keywords": ["multi-country", "several countries", "global", "entities"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Pricing plans",
+        "content_type": "FAQ",
+        "summary": (
+            "Core is $8, Professional $15 and Business $25 per billable worker per month; Enterprise is custom. "
+            "A 30-day evaluation is available on Professional."
+        ),
+        "body": (
+            "Zoiko Payroll has four plans. Core is $8 per billable worker per month with a $40 monthly minimum. "
+            "Professional is $15 per worker per month with a $150 minimum. Business is $25 per worker per month "
+            "with a $500 minimum. Enterprise pricing is custom. Where annual billing is offered, 12 months are "
+            "prepaid for the price of 10. Administrators are not billed separately and there is no separate "
+            "platform fee; taxes, implementation and operational service packs may be additional. Professional "
+            "is typically recommended for growing businesses (up to 250 workers, up to 3 legal entities and "
+            "production jurisdictions). A 30-day evaluation window is available on the Professional plan, with "
+            "no payment method required by default. Full details are on the Zoiko Payroll pricing page, and "
+            "Sales can quote Enterprise requirements."
+        ),
+        "keywords": ["pricing", "plans", "price", "cost", "trial"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "How to book a demo",
+        "content_type": "HOW_TO",
+        "summary": "Use Book a Demo in the assistant or on the website, share a few details, and a specialist follows up.",
+        "body": (
+            "To book a demo, select Book a Demo in this assistant or on the Zoiko Payroll website. The request "
+            "form asks for your name, work email and company, plus an optional note about your current payroll "
+            "setup, headcount or timeline. After you submit it, the team reviews your context, routes it to a "
+            "specialist, and follows up to schedule a demo tailored to your countries and requirements. Do not "
+            "include employee, salary or bank details in the request."
+        ),
+        "keywords": ["demo", "book", "schedule", "sales"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Which accounting software and ERP systems integrate with Zoiko Payroll",
+        "content_type": "FAQ",
+        "summary": (
+            "Zoiko Payroll integrates with NetSuite, SAP S/4HANA, Xero, QuickBooks Online and Microsoft Dynamics "
+            "365, each through a confirmed method."
+        ),
+        "body": (
+            "Zoiko Payroll connects payroll to accounting through journal export with account and dimension "
+            "mapping. NetSuite: API-supported journal export with dimension mapping. SAP S/4HANA: available with "
+            "implementation, with scoped mapping and testing required (managed exchange). Xero: validation "
+            "required to confirm ledger and dimension fit for your account (API). QuickBooks Online: file or "
+            "managed exchange for standard chart configurations. Microsoft Dynamics 365: API-supported, with "
+            "entity and dimension scope confirmed during fit validation. If your system is not listed, that does "
+            "not mean it is unsupported: request a custom fit review through Sales."
+        ),
+        "keywords": ["integration", "accounting", "erp", "quickbooks", "xero", "netsuite"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "How to generate payslips",
+        "content_type": "HOW_TO",
+        "summary": "Payslips are generated from a processed payroll run; admins download them and employees view their own.",
+        "body": (
+            "Payslips are generated from a payroll run. Once a run has been calculated and moves through review "
+            "and approval, Zoiko Payroll produces a payslip for each employee in it showing gross pay, deductions, "
+            "taxes and net pay. Payroll administrators can view and download payslips from the Payslips area. "
+            "Employees view and download their own payslips through employee self-service after signing in. "
+            "The assistant never creates payslips or shows a specific person's payslip in a public chat."
+        ),
+        "keywords": ["payslip", "generate", "create", "download"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Tax features: how Zoiko Payroll handles taxes",
+        "content_type": "JURISDICTION_GUIDE",
+        "summary": (
+            "Zoiko Payroll calculates payroll taxes and statutory contributions with each country's versioned "
+            "rules; specific rates depend on the country."
+        ),
+        "body": (
+            "Zoiko Payroll handles taxes per jurisdiction. Each country has a versioned tax and statutory rule "
+            "pack with effective dates for the rules that apply there, and the payroll engine uses it to calculate "
+            "income-tax withholding, "
+            "employee and employer contributions, and other statutory deductions for every payroll run. Rule "
+            "changes are versioned so past runs stay reproducible. Specific rates and filing requirements depend "
+            "on the country, so include the country in your question or use Check your country. This is general "
+            "information, not tax or legal advice; confirm specific obligations with a qualified adviser."
+        ),
+        "keywords": ["tax", "taxes", "withholding", "statutory"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Payroll reports",
+        "content_type": "HOW_TO",
+        "summary": "Generate payroll and statutory reports per run and period, and find past reports in Report History.",
+        "body": (
+            "Zoiko Payroll's Reports area has three parts: Payroll Reports for each run's totals (gross, "
+            "deductions, taxes and net), Generate Report for country-specific statutory and filing reports by "
+            "year and payroll run, and Report History for previously generated reports. Payroll registers can be "
+            "exported as PDF or CSV. Which statutory reports are available depends on each country's rules."
+        ),
+        "keywords": ["reports", "register", "export"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Security practices: how Zoiko Payroll protects payroll data",
+        "content_type": "FAQ",
+        "summary": (
+            "Role-based access, organization isolation, human approvals and audit trails protect payroll data."
+        ),
+        "body": (
+            "Zoiko Payroll protects payroll data with role-based access (super admin, org admin, payroll admin "
+            "and employee), strict isolation so each organization only ever sees its own data, governed approvals "
+            "so a person always reviews payroll and payments before release, and audit trails of material "
+            "actions. SAML single sign-on is available on the Business and Enterprise plans, and SCIM provisioning "
+            "on Enterprise. The assistant is not trained on customer conversations by default. For security "
+            "reviews and documentation, see the Trust Center or contact Sales."
+        ),
+        "keywords": ["security", "privacy", "data protection", "protect"],
+        "jurisdiction_codes": [],
+    },
 ]
 
 
 def ensure_default_kb(db: Session) -> None:
-    """Idempotently seed the governed knowledge base (global platform content)."""
-    existing = db.query(AssistKbItem).filter(AssistKbItem.organization_id.is_(None)).count()
-    if existing > 0:
+    """Idempotently seed the governed knowledge base (global platform content).
+
+    Adds any default article whose title isn't present yet, so articles added
+    to DEFAULT_KB_ITEMS reach databases that were seeded earlier (previously
+    this returned as soon as any global article existed, so new defaults
+    never reached production). Existing articles — including ones edited or
+    withdrawn through the KB admin — are never modified.
+    """
+    existing_titles = {
+        title
+        for (title,) in db.query(AssistKbItem.title).filter(AssistKbItem.organization_id.is_(None)).all()
+    }
+    missing = [item for item in DEFAULT_KB_ITEMS if item["title"] not in existing_titles]
+    if not missing:
         return
 
     source_map = {}
@@ -464,7 +650,7 @@ def ensure_default_kb(db: Session) -> None:
 
     default_source_id = source_map.get(DEFAULT_SOURCES[0]["name"])
 
-    for idx, item in enumerate(DEFAULT_KB_ITEMS):
+    for item in missing:
         db.add(
             AssistKbItem(
                 source_id=default_source_id,
@@ -485,4 +671,4 @@ def ensure_default_kb(db: Session) -> None:
             )
         )
     db.commit()
-    logger.info("Seeded %s default knowledge base items.", len(DEFAULT_KB_ITEMS))
+    logger.info("Seeded %s default knowledge base items.", len(missing))

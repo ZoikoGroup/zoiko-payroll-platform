@@ -42,6 +42,22 @@ NO_MATCH_FALLBACK = (
 )
 
 
+def public_health(db) -> str:
+    """Header status for the public concierge. Fails closed: the kill switch
+    or an unreachable database reports "unavailable"."""
+    from sqlalchemy import text
+
+    from app.modules.assist.service import is_assist_kill_switch_enabled
+
+    try:
+        db.execute(text("SELECT 1"))
+        if is_assist_kill_switch_enabled(db):
+            return "unavailable"
+    except Exception:  # noqa: BLE001 - any DB failure means the assistant can't answer
+        return "unavailable"
+    return "available"
+
+
 def create_public_session(db, ip_address: str | None, locale: str = "en") -> AssistPublicSession:
     from app.modules.assist.service import require_assist_enabled
 
