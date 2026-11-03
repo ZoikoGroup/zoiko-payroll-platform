@@ -233,7 +233,7 @@ POST,/api/payroll/employee-forms/templates,tenant_config,create,templates,org_ad
 POST,/api/payroll/employee-forms/templates/{form_id}/send,worker,create,send,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_update_form_sends,no,
 GET,/api/payroll/employees,worker,read,employees,org_admin|payroll_admin|support_temp,tenant,,,payroll_employees,no,
 POST,/api/payroll/employees,worker,create,employees,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_new_hire_reports|payslip_items,no,
-POST,/api/payroll/employees/bulk,worker,create,bulk,org_admin|payroll_admin,tenant,,,payroll_employees,no,
+POST,/api/payroll/employees/bulk,worker,create,bulk,org_admin|payroll_admin,tenant,,,payroll_employees|payslip_items,no,
 POST,/api/payroll/employees/bulk-delete,worker,create,bulk-delete,org_admin|payroll_admin,tenant,,,payroll_attendance_records|payroll_employees|payroll_leave_allocations|payroll_leave_requests|payroll_legal_holds|payslip_items,no,
 POST,/api/payroll/employees/bulk-update,worker,create,bulk-update,org_admin|payroll_admin,tenant,,,payroll_employees,no,
 GET,/api/payroll/employees/roster,worker,read,roster,org_admin|payroll_admin|support_temp,tenant,,,payroll_employees,no,
