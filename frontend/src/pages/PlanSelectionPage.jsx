@@ -26,6 +26,7 @@ import {
   getCountryPauseImpact,
   impactNeedsReview,
   impactPausesCountries,
+  isCustomerVisibleFeature,
 } from "../utils/planLimits";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
@@ -255,7 +256,7 @@ export default function PlanSelectionPage() {
                 ? flags
                 : Object.entries(flags).map(([feature_key, limit_value]) => ({ feature_key, limit_value }))
               )
-                .filter((f) => f.limit_value !== 0)
+                .filter((f) => f.limit_value !== 0 && isCustomerVisibleFeature(f.feature_key))
                 .map((f) => formatPlanFeature(f.feature_key, f.limit_value));
 
               const planCode = plan.code;

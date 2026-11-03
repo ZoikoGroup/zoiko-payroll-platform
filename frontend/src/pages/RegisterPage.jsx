@@ -57,7 +57,6 @@ const CAPABILITY_LABELS = [
   ["payroll_runs", "Payroll runs"],
   ["multi_entity", "Multi-entity payroll"],
   ["multi_currency", "Multi-currency"],
-  ["api_access", "API access"],
   ["assist", "Zoiko Payroll Assist"],
 ];
 
