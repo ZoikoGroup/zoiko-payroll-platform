@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # no organisation can become a New Zealand employer and the NZ APIs refuse.
     # Leave UNSET in production until the NZ release gates G1-G7 are signed.
     NZ_TENANT_ONBOARDING_ENABLED: bool = False
+    # New Zealand IRD-number vault (ZP-NZ-ENG-001 Phase 2, nz_ird_number). JSON
+    # object mapping key version -> 32-byte key from Secret Manager. Empty =
+    # encrypt/decrypt/fingerprint refuse, which is fine while NZ is dormant.
+    NZ_IRD_KEYRING: str = ""
+    # IRD-number duplicate-detection key (32 bytes, Secret Manager). Never
+    # rotated: fingerprints must stay comparable across keyring rotations.
+    NZ_IRD_FINGERPRINT_KEY: str = ""
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.
