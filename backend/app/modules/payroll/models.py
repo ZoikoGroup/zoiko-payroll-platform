@@ -12760,3 +12760,212 @@ class PayrollNzAccumulatorEntry(_NzCommon, Base):
 
     def __repr__(self):
         return f"<PayrollNzAccumulatorEntry employee={self.employee_id} {self.tax_year} {self.obligation} {self.amount}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand Holidays Act (ZP-NZ-ENG-001 Phase 5, migration ac08988ecd3a)
+# ══════════════════════════════════════════════════════════════════════════
+_NZ_LEAVE_TYPES = ("ANNUAL", "SICK", "BEREAVEMENT_CLOSE", "BEREAVEMENT_OTHER", "FAMILY_VIOLENCE", "ALTERNATIVE")
+
+
+class PayrollNzEmployment(_NzCommon, Base):
+    """One employment instance (spec §8, §10): the anniversary anchor for every
+    Holidays Act entitlement. A rehire is a NEW instance unless continuity is
+    evidenced and linked to the prior instance. Pay-as-you-go holiday pay is
+    allowed only on a recorded basis with a written agreement reference."""
+    __tablename__ = "payroll_nz_employments"
+
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    start_date           = Column(Date, nullable=False)
+    end_date             = Column(Date, nullable=True)
+    continuity_rule      = Column(String(16), nullable=False, default="NEW_INSTANCE", server_default="NEW_INSTANCE")
+    prior_employment_id  = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="SET NULL"), nullable=True)
+    termination_reason   = Column(String(30), nullable=True)
+    payg_eligible        = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    payg_basis           = Column(String(28), nullable=True)
+    payg_agreement_ref   = Column(String(300), nullable=True)
+    status               = Column(String(10), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("end_date IS NULL OR end_date >= start_date", name="ck_nz_employment_dates"),
+        sa.CheckConstraint("continuity_rule IN ('NEW_INSTANCE', 'CONTINUOUS')", name="ck_nz_employment_continuity"),
+        sa.CheckConstraint("continuity_rule <> 'CONTINUOUS' OR (evidence_ref IS NOT NULL AND "
+                           "prior_employment_id IS NOT NULL)", name="ck_nz_employment_continuity_evidence"),
+        sa.CheckConstraint("payg_basis IS NULL OR payg_basis IN ('FIXED_TERM_UNDER_12_MONTHS', "
+                           "'IRREGULAR_INTERMITTENT')", name="ck_nz_employment_payg_basis"),
+        sa.CheckConstraint("payg_eligible = false OR (payg_basis IS NOT NULL AND payg_agreement_ref IS NOT NULL)",
+                           name="ck_nz_employment_payg_evidence"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'ENDED')", name="ck_nz_employment_status"),
+        Index("ix_nz_employment_employee_start", "employee_id", "start_date"),
+        Index("uq_nz_employment_one_active", "organization_id", "employee_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzEmployment employee={self.employee_id} {self.start_date} {self.status}>"
+
+
+class PayrollNzPublicHolidayDecision(_NzCommon, Base):
+    """Per employee and public holiday (spec §8): the otherwise-working-day
+    decision with its basis (agreement / operator decisions need evidence),
+    whether it was worked, the shift in NZ local time (a shift may cross
+    midnight) and whether an alternative holiday is due. One APPROVED row per
+    employee and date; a change supersedes."""
+    __tablename__ = "payroll_nz_public_holiday_decisions"
+
+    updated_at              = Column(DateTime(timezone=True), nullable=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id           = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    holiday_date            = Column(Date, nullable=False)
+    holiday_name            = Column(String(80), nullable=False)
+    region                  = Column(String(3), nullable=True)
+    otherwise_working_day   = Column(String(12), nullable=False)          # YES / NO / UNDETERMINED
+    owd_basis               = Column(String(24), nullable=False)
+    owd_evidence_ref        = Column(String(300), nullable=True)
+    worked                  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    shift_start             = Column(DateTime(timezone=True), nullable=True)
+    shift_end               = Column(DateTime(timezone=True), nullable=True)
+    timezone                = Column(String(40), nullable=False, default="Pacific/Auckland",
+                                     server_default="Pacific/Auckland")
+    hours_on_holiday        = Column(Numeric(6, 2), nullable=True)
+    alternative_holiday_due = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status                  = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("otherwise_working_day IN ('YES', 'NO', 'UNDETERMINED')", name="ck_nz_phd_owd"),
+        sa.CheckConstraint("owd_basis IN ('FIXED_PATTERN', 'ROSTER', 'HISTORY', 'AGREEMENT', "
+                           "'OPERATOR_DECISION')", name="ck_nz_phd_owd_basis"),
+        sa.CheckConstraint("owd_basis NOT IN ('AGREEMENT', 'OPERATOR_DECISION') OR owd_evidence_ref IS NOT NULL",
+                           name="ck_nz_phd_owd_evidence"),
+        sa.CheckConstraint("worked = false OR (shift_start IS NOT NULL AND shift_end IS NOT NULL)",
+                           name="ck_nz_phd_shift"),
+        sa.CheckConstraint("shift_end IS NULL OR shift_start IS NULL OR shift_end > shift_start",
+                           name="ck_nz_phd_shift_order"),
+        sa.CheckConstraint("timezone IN ('Pacific/Auckland', 'Pacific/Chatham')", name="ck_nz_phd_timezone"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_nz_phd_status"),
+        Index("uq_nz_phd_one_approved", "employee_id", "holiday_date", unique=True,
+              postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzPublicHolidayDecision employee={self.employee_id} {self.holiday_date} {self.status}>"
+
+
+class PayrollNzLeaveEntitlement(_NzCommon, Base):
+    """The LEGAL Holidays Act entitlement (spec §8, NZ-016): weeks or days
+    vested on a qualifying date / anniversary for one employment instance,
+    with carried-in, taken and paid-out quantities. Never a generic hours
+    accrual. An alternative holiday points at the public-holiday decision
+    that earned it."""
+    __tablename__ = "payroll_nz_leave_entitlements"
+
+    updated_at          = Column(DateTime(timezone=True), nullable=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id       = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    leave_type          = Column(String(20), nullable=False)
+    qualifying_date     = Column(Date, nullable=False)
+    entitlement_date    = Column(Date, nullable=False)
+    unit                = Column(String(6), nullable=False)                 # WEEKS / DAYS
+    quantity            = Column(Numeric(8, 4), nullable=False)
+    carried_in          = Column(Numeric(8, 4), nullable=False, default=0, server_default="0")
+    taken               = Column(Numeric(8, 4), nullable=False, default=0, server_default="0")
+    paid_out            = Column(Numeric(8, 4), nullable=False, default=0, server_default="0")
+    source              = Column(String(24), nullable=False)
+    source_decision_id  = Column(Integer, ForeignKey("payroll_nz_public_holiday_decisions.id", ondelete="SET NULL"),
+                                 nullable=True)
+    pack_hash           = Column(String(64), nullable=False)
+    expires_on          = Column(Date, nullable=True)
+    status              = Column(String(12), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"leave_type IN {_nz_in(_NZ_LEAVE_TYPES)}", name="ck_nz_entitlement_type"),
+        sa.CheckConstraint("unit IN ('WEEKS', 'DAYS')", name="ck_nz_entitlement_unit"),
+        sa.CheckConstraint("quantity >= 0 AND carried_in >= 0 AND taken >= 0 AND paid_out >= 0",
+                           name="ck_nz_entitlement_non_negative"),
+        sa.CheckConstraint("taken + paid_out <= quantity + carried_in", name="ck_nz_entitlement_balance"),
+        sa.CheckConstraint("source IN ('HOLIDAYS_ACT_2003', 'EMPLOYMENT_AGREEMENT', 'PUBLIC_HOLIDAY_WORKED')",
+                           name="ck_nz_entitlement_source"),
+        sa.CheckConstraint("leave_type <> 'ALTERNATIVE' OR source_decision_id IS NOT NULL",
+                           name="ck_nz_entitlement_alternative_source"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'EXHAUSTED', 'PAID_OUT', 'SUPERSEDED')",
+                           name="ck_nz_entitlement_status"),
+        Index("ix_nz_entitlement_lookup", "employee_id", "leave_type", "entitlement_date"),
+        Index("uq_nz_entitlement_vest", "employment_id", "leave_type", "entitlement_date", unique=True,
+              postgresql_where=text("leave_type <> 'ALTERNATIVE'"), sqlite_where=text("leave_type <> 'ALTERNATIVE'")),
+        Index("uq_nz_entitlement_alternative", "source_decision_id", unique=True,
+              postgresql_where=text("leave_type = 'ALTERNATIVE'"), sqlite_where=text("leave_type = 'ALTERNATIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzLeaveEntitlement employee={self.employee_id} {self.leave_type} {self.entitlement_date}>"
+
+
+class PayrollNzGrossEarningsLedger(_NzCommon, Base):
+    """Append-only statutory gross earnings (spec §8): one row per paid
+    payslip and pay component with its inclusion reason — the base for
+    average weekly earnings and the 8% final-pay test in Phase 6. Written at
+    PAID; nothing updates or deletes these rows."""
+    __tablename__ = "payroll_nz_gross_earnings_ledger"
+
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id    = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=True)
+    run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    pay_date         = Column(Date, nullable=False)
+    period_start     = Column(Date, nullable=False)
+    period_end       = Column(Date, nullable=False)
+    component        = Column(String(24), nullable=False)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    included         = Column(Boolean, nullable=False)
+    treatment        = Column(String(14), nullable=False)
+    reason           = Column(String(120), nullable=False)
+    days_worked      = Column(Numeric(6, 2), nullable=True)
+    pack_hash        = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("treatment IN ('INCLUDED', 'EXCLUDED', 'LUMP_SUM_PATH', 'REVIEW')",
+                           name="ck_nz_gross_ledger_treatment"),
+        sa.CheckConstraint("period_end >= period_start", name="ck_nz_gross_ledger_period"),
+        Index("ix_nz_gross_ledger_lookup", "employee_id", "employment_id", "pay_date"),
+        Index("uq_nz_gross_ledger_payslip_component", "payslip_item_id", "component", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzGrossEarningsLedger employee={self.employee_id} {self.pay_date} {self.component}>"
+
+
+class PayrollNzLeaveEvent(_NzCommon, Base):
+    """Leave taken against a Holidays Act entitlement (spec §8). There is
+    deliberately no reason or narrative column: family-violence leave is
+    always restricted and visible only with the dedicated permission
+    (NZ-023)."""
+    __tablename__ = "payroll_nz_leave_events"
+
+    updated_at         = Column(DateTime(timezone=True), nullable=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id      = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    entitlement_id     = Column(Integer, ForeignKey("payroll_nz_leave_entitlements.id", ondelete="SET NULL"), nullable=True)
+    leave_type         = Column(String(20), nullable=False)
+    start_date         = Column(Date, nullable=False)
+    end_date           = Column(Date, nullable=False)
+    quantity           = Column(Numeric(8, 4), nullable=False)
+    unit               = Column(String(6), nullable=False)
+    source_request_id  = Column(Integer, ForeignKey("payroll_leave_requests.id", ondelete="SET NULL"), nullable=True)
+    restricted         = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status             = Column(String(12), nullable=False, default="REQUESTED", server_default="REQUESTED")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"leave_type IN {_nz_in(_NZ_LEAVE_TYPES)}", name="ck_nz_leave_event_type"),
+        sa.CheckConstraint("unit IN ('WEEKS', 'DAYS')", name="ck_nz_leave_event_unit"),
+        sa.CheckConstraint("quantity > 0", name="ck_nz_leave_event_quantity"),
+        sa.CheckConstraint("end_date >= start_date", name="ck_nz_leave_event_dates"),
+        sa.CheckConstraint("leave_type <> 'FAMILY_VIOLENCE' OR restricted = true",
+                           name="ck_nz_leave_event_restricted"),
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'PAID', 'CANCELLED')",
+                           name="ck_nz_leave_event_status"),
+        Index("ix_nz_leave_event_employee_dates", "employee_id", "start_date"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzLeaveEvent employee={self.employee_id} {self.leave_type} {self.status}>"

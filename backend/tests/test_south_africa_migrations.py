@@ -55,7 +55,10 @@ JP_TABLES = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
 NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz_ird_access_events",
              "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
              "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
-             "payroll_nz_accumulator_entries"}
+             "payroll_nz_accumulator_entries",
+             # New Zealand P5 (ac08988ecd3a).
+             "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
+             "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events"}
 
 
 def _load(prefix):

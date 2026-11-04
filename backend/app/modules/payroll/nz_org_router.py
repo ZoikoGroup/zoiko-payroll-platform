@@ -315,3 +315,157 @@ def nz_run_fingerprint(run_id: int, current_user=Depends(get_current_payroll_ope
 def nz_employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),
                         db: Session = Depends(get_db)):
     return nz.employee_summary(db, _org_id(current_user), employee_id)
+
+
+# ── Holidays Act (Phase 5): employments, entitlements, leave, public holidays ─
+def _leave():
+    from app.modules.payroll import nz_leave_service
+
+    return nz_leave_service
+
+
+@router.get("/employees/{employee_id}/employments", summary="The employee's New Zealand employment instances")
+def nz_list_employments(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    lv = _leave()
+    return [lv.employment_view(row) for row in lv.list_nz_employments(db, _org_id(current_user), employee_id)]
+
+
+@router.post("/employees/{employee_id}/employments", summary="Record a DRAFT employment instance (org admin)")
+def nz_create_employment(employee_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    lv = _leave()
+    payload, reason = _split(body)
+    row = lv.record_nz_employment(db, _org_id(current_user), employee_id, payload, _actor(current_user), reason)
+    db.commit()
+    return lv.employment_view(row)
+
+
+@router.post("/employments/{row_id}/approve", summary="Approve an employment instance (four-eyes)")
+def nz_approve_employment(row_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    lv = _leave()
+    row = lv.approve_nz_employment(db, _org_id(current_user), row_id, _actor(current_user))
+    db.commit()
+    return lv.employment_view(row)
+
+
+@router.post("/employments/{row_id}/end", summary="End an employment instance (org admin)")
+def nz_end_employment(row_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                      db: Session = Depends(get_db)):
+    lv = _leave()
+    body = dict(body or {})
+    row = lv.end_nz_employment(db, _org_id(current_user), row_id, body.get("endDate"),
+                               body.get("terminationReason"), _actor(current_user), body.get("reason"))
+    db.commit()
+    return lv.employment_view(row)
+
+
+@router.post("/leave/vest", summary="Vest Holidays Act entitlements due up to a date (idempotent)")
+def nz_vest_entitlements(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    body = dict(body or {})
+    result = _leave().vest_entitlements(db, _org_id(current_user), body.get("asOf"),
+                                        employee_id=body.get("employeeId"), actor_id=_actor(current_user))
+    db.commit()
+    return result
+
+
+@router.get("/employees/{employee_id}/leave-entitlements",
+            summary="The employee's legal leave entitlements (weeks / days) and the planning view")
+def nz_list_entitlements(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    result = _leave().balances(db, _org_id(current_user), _actor(current_user), employee_id)
+    db.commit()
+    return result
+
+
+@router.get("/employees/{employee_id}/leave-events",
+            summary="The employee's leave events (restricted ones only with the permission)")
+def nz_list_leave_events(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    result = _leave().visible_events(db, _org_id(current_user), _actor(current_user), employee_id)
+    db.commit()
+    return result
+
+
+@router.post("/leave-events/{event_id}/cancel", summary="Cancel an approved leave event (org admin)")
+def nz_cancel_leave_event(event_id: int, body: Dict[str, Any] = Body(...),
+                          current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    row = _leave().cancel_leave_event(db, _org_id(current_user), event_id, _actor(current_user),
+                                      dict(body or {}).get("reason"))
+    db.commit()
+    return {"id": row.id, "status": row.status}
+
+
+@router.post("/public-holidays/propose", summary="Propose DRAFT public-holiday decisions for a year")
+def nz_propose_public_holidays(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                               db: Session = Depends(get_db)):
+    lv = _leave()
+    body = dict(body or {})
+    rows = lv.propose_public_holiday_decisions(db, _org_id(current_user), body.get("year"),
+                                               employee_id=body.get("employeeId"), actor_id=_actor(current_user))
+    db.commit()
+    return [lv.decision_view(row) for row in rows]
+
+
+@router.get("/employees/{employee_id}/public-holiday-decisions",
+            summary="The employee's public-holiday decisions")
+def nz_list_public_holiday_decisions(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                                     db: Session = Depends(get_db)):
+    lv = _leave()
+    return [lv.decision_view(row) for row in lv.list_public_holiday_decisions(db, _org_id(current_user), employee_id)]
+
+
+@router.put("/public-holiday-decisions/{decision_id}", summary="Change a DRAFT public-holiday decision (org admin)")
+def nz_update_public_holiday_decision(decision_id: int, body: Dict[str, Any] = Body(...),
+                                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    lv = _leave()
+    payload, reason = _split(body)
+    row = lv.update_public_holiday_decision(db, _org_id(current_user), decision_id, payload, _actor(current_user),
+                                            reason)
+    db.commit()
+    return lv.decision_view(row)
+
+
+@router.post("/public-holiday-decisions/{decision_id}/approve",
+             summary="Approve a public-holiday decision (four-eyes)")
+def nz_approve_public_holiday_decision(decision_id: int, current_user=Depends(get_current_org_admin),
+                                       db: Session = Depends(get_db)):
+    lv = _leave()
+    row = lv.approve_public_holiday_decision(db, _org_id(current_user), decision_id, _actor(current_user))
+    db.commit()
+    return lv.decision_view(row)
+
+
+@router.get("/employees/{employee_id}/gross-earnings", summary="The employee's Holidays Act gross-earnings ledger")
+def nz_list_gross_earnings(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    lv = _leave()
+    return [lv.gross_earnings_view(row) for row in lv.list_gross_earnings(db, _org_id(current_user), employee_id)]
+
+
+@router.get("/permissions/family-violence", summary="Holders of the family-violence leave permission")
+def nz_list_fv_holders(current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _leave().family_violence_view_holders(db, _org_id(current_user))
+
+
+@router.post("/permissions/family-violence", summary="Grant the family-violence leave permission (another admin)")
+def nz_grant_fv_view(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    body = dict(body or {})
+    try:
+        user_id = int(body.get("userId"))
+    except (TypeError, ValueError):
+        raise BadRequestException("userId must be a whole number.")
+    row = _leave().grant_family_violence_view(db, _org_id(current_user), _actor(current_user), user_id,
+                                               body.get("reason"))
+    db.commit()
+    return {"id": row.id, "userId": row.user_id}
+
+
+@router.delete("/permissions/family-violence/{user_id}", summary="Revoke the family-violence leave permission")
+def nz_revoke_fv_view(user_id: int, reason: Optional[str] = None, current_user=Depends(get_current_org_admin),
+                      db: Session = Depends(get_db)):
+    row = _leave().revoke_family_violence_view(db, _org_id(current_user), _actor(current_user), user_id, reason)
+    db.commit()
+    return {"id": row.id, "revoked": True}

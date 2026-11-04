@@ -32249,7 +32249,7 @@ def _notify_leave_request_submitted(db: Session, record, organization_id: int) -
             idempotency_key(organization_id, "payroll.leave_submitted", org_email, None, f"leave:{record.id}"),
             send_leave_request_submitted_email,
             org_email, employee.name if employee else f"Employee #{record.employee_id}",
-            str(record.leave_type), str(record.start_date), str(record.end_date),
+            str(_nz_public_leave_type(record.leave_type)), str(record.start_date), str(record.end_date),
             record.days, record.request_code or "",
             send_kwargs={"reason": record.reason or "", "organization_id": organization_id},
             organization_id=organization_id, db=db,
@@ -35743,18 +35743,18 @@ def _sync_leave_to_attendance(
             old_status = existing.status
             old_leave_type = existing.leave_type
             existing.status = "leave"
-            existing.leave_type = leave_request.leave_type
+            existing.leave_type = _nz_public_leave_type(leave_request.leave_type)
             existing.leave_request_id = leave_request.id
-            if old_status == "leave" and old_leave_type != leave_request.leave_type:
+            if old_status == "leave" and old_leave_type != existing.leave_type:
                 _restore_leave_balance(db, existing.employee_id, old_leave_type, organization_id)
-                _update_leave_balance(db, existing.employee_id, leave_request.leave_type, organization_id)
+                _update_leave_balance(db, existing.employee_id, existing.leave_type, organization_id)
         else:
             rec = PayrollAttendanceRecord(
                 organization_id=organization_id,
                 employee_id=leave_request.employee_id,
                 date=d,
                 status="leave",
-                leave_type=leave_request.leave_type,
+                leave_type=_nz_public_leave_type(leave_request.leave_type),
                 leave_request_id=leave_request.id,
             )
             db.add(rec)
@@ -38959,6 +38959,8 @@ def _ie_sick_leave_summary(db: Session, record: PayrollLeaveRequest) -> Optional
 
 
 def create_payroll_leave_request(db: Session, data, organization_id: int) -> dict:
+    from app.modules.payroll import nz_leave_service
+    nz_leave_service.guard_generic_request(db, data, organization_id)
     start = data.startDate if hasattr(data, "startDate") else data.start_date
     end = data.endDate if hasattr(data, "endDate") else data.end_date
     days = (end - start).days + 1
@@ -38983,7 +38985,7 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     _notify_leave_request_submitted(db, record, organization_id)
 
     try:
-        log_activity(db, organization_id, f"Leave request submitted by employee {record.employee_id} ({record.leave_type}, {record.days}d).", ActivityStatus.INFO)
+        log_activity(db, organization_id, f"Leave request submitted by employee {record.employee_id} ({nz_leave_service.public_leave_type(record.leave_type)}, {record.days}d).", ActivityStatus.INFO)
     except Exception:
         pass
 
@@ -38994,7 +38996,8 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     return _enrich_leave_request(db, record, organization_id)
 
 
-def get_payroll_leave_requests(db: Session, organization_id: int, *, employee_id=None, status=None, leave_type=None) -> list:
+def get_payroll_leave_requests(db: Session, organization_id: int, *, employee_id=None, status=None, leave_type=None,
+                               viewer_id=None) -> list:
     _backfill_orphaned_leave_syncs(db, organization_id)
     _dedupe_auto_created_leave_requests(db, organization_id)
 
@@ -39009,6 +39012,8 @@ def get_payroll_leave_requests(db: Session, organization_id: int, *, employee_id
         query = query.filter(PayrollLeaveRequest.leave_type == leave_type)
 
     rows = query.order_by(PayrollLeaveRequest.created_at.desc()).all()
+    from app.modules.payroll import nz_leave_service
+    rows = nz_leave_service.hide_restricted_requests(db, organization_id, viewer_id, rows)
     return [_enrich_leave_request(db, r, organization_id) for r in rows]
 
 
@@ -39224,6 +39229,24 @@ def _ie_usual_daily_earnings(db: Session, employee_id: int, as_of: date) -> Opti
     return _round2(gross / Decimal(covered_days))
 
 
+def _nz_public_leave_type(leave_type):
+    """Family-violence leave is never named on shared surfaces (NZ-023)."""
+    from app.modules.payroll.nz_leave_service import public_leave_type
+    return public_leave_type(leave_type)
+
+
+def _maybe_record_nz_leave_event(db: Session, record: PayrollLeaveRequest, organization_id: int, reviewer_id):
+    """New Zealand Holidays Act: an approved request becomes a leave event
+    against the legal entitlement (None for any other country)."""
+    from app.modules.payroll.nz_leave_service import record_leave_event_from_request
+    return record_leave_event_from_request(db, record, organization_id, reviewer_id)
+
+
+def _maybe_cancel_nz_leave_event(db: Session, record: PayrollLeaveRequest, organization_id: int, reviewer_id):
+    from app.modules.payroll.nz_leave_service import cancel_events_for_request
+    return cancel_events_for_request(db, record, organization_id, reviewer_id)
+
+
 def _maybe_assess_ie_statutory_sick_leave(db: Session, record: PayrollLeaveRequest,
                                           organization_id: int) -> Optional[IrelandStatutorySickLeaveRecord]:
     """Called once, right after an Irish `sick` leave request is approved.
@@ -39360,6 +39383,9 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
 
     # Update leave allocation balances when approved
     if record.status == "approved" and prev_status != "approved":
+        # New Zealand: the approval consumes the legal Holidays Act entitlement
+        # first, so an insufficient entitlement refuses before anything is written.
+        _maybe_record_nz_leave_event(db, record, organization_id, reviewer_id)
         _sync_leave_to_attendance(db, record, organization_id)
         _maybe_compute_uk_statutory_leave_pay(db, record, organization_id)
         _maybe_assess_ie_statutory_sick_leave(db, record, organization_id)
@@ -39376,7 +39402,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
             db.add(alloc)
             db.flush()
         balances = copy.deepcopy(alloc.leave_balances or {})
-        lt = record.leave_type
+        lt = _nz_public_leave_type(record.leave_type)
         if lt not in balances:
             balances[lt] = {"used": 0, "total": 0}
         balances[lt]["used"] = balances[lt].get("used", 0) + record.days
@@ -39389,6 +39415,8 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
             pass
 
     elif record.status == "rejected" and prev_status != "rejected":
+        if prev_status == "approved":
+            _maybe_cancel_nz_leave_event(db, record, organization_id, reviewer_id)
         _remove_linked_attendance(db, record, organization_id)
         alloc = db.query(PayrollLeaveAllocation).filter(
             PayrollLeaveAllocation.organization_id == organization_id,
@@ -39396,7 +39424,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
         ).first()
         if alloc and prev_status == "approved":
             balances = copy.deepcopy(alloc.leave_balances or {})
-            lt = record.leave_type
+            lt = _nz_public_leave_type(record.leave_type)
             if lt in balances:
                 used = balances[lt].get("used", 0)
                 balances[lt]["used"] = max(0, used - record.days)
@@ -39436,7 +39464,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
                         {"status": record.status},
                     ),
                     sender, employee.email, employee.name,
-                    record.leave_type, str(record.start_date), str(record.end_date),
+                    _nz_public_leave_type(record.leave_type), str(record.start_date), str(record.end_date),
                     record.days, record.request_code,
                     send_kwargs={"organization_id": organization_id},
                     organization_id=organization_id, actor_user_id=reviewer_id, db=db,

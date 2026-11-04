@@ -190,5 +190,18 @@ class NzPack:
             self._note("slab", ident, r)
         return sorted(rows, key=lambda r: (dec(field(r, "min_amount")), field(r, "sort_order") or 0))
 
+    def dated_rows(self, rule_type: str, table_name: str) -> list:
+        """Every row of a table whose rows are themselves dated events (public
+        holidays: effective_from IS the holiday), not filtered by the payday
+        window. Empty blocks; an unsigned row blocks."""
+        rows = [r for r in self.slabs if upper(field(r, "rule_type")) == rule_type]
+        if not rows:
+            self.block(E.keyed(E.TABLE_EMPTY, table_name), f"{table_name} has no rows (release gate)")
+        for index, r in enumerate(rows):
+            ident = f"{rule_type}:{field(r, 'id') if field(r, 'id') is not None else index}"
+            self._signed(ident, field(r, "rate_label"))
+            self._note("slab", ident, r)
+        return rows
+
     def used(self) -> list:
         return [self._used[k] for k in sorted(self._used, key=lambda k: (k[0], str(k[1])))]

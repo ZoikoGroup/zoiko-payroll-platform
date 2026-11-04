@@ -1280,7 +1280,8 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
     """Approval needs every NZ payslip frozen, the employer verified and no
     open statutory exception (minimum wage NZ-015, child-support shortfall
     NZ-012); later steps re-verify the approval fingerprint; PAID posts the
-    year-to-date ledger exactly once (NZ-013)."""
+    year-to-date ledger exactly once (NZ-013) and the Holidays Act gross-earnings
+    ledger once per payslip and component (Phase 5)."""
     from fastapi import HTTPException, status as http_status
 
     from app.modules.payroll.models import PayrollStatus
@@ -1302,6 +1303,9 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
                 "New Zealand: the approved calculation no longer matches this run - recalculate and approve again."))
     if next_status == PayrollStatus.PAID:
         post_accumulators(db, run, actor_id)
+        from app.modules.payroll import nz_leave_service
+
+        nz_leave_service.write_gross_earnings(db, run, actor_id)
 
 
 # ── platform hooks ──────────────────────────────────────────────────────────

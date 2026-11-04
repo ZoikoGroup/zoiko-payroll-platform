@@ -9161,6 +9161,10 @@
     "payroll_ie_statutory_sick_leave_records",
     "payroll_leave_allocations",
     "payroll_leave_requests",
+    "payroll_nz_employments",
+    "payroll_nz_leave_entitlements",
+    "payroll_nz_leave_events",
+    "payroll_nz_work_pattern_versions",
     "payslip_items"
    ],
    "overridden": false
@@ -12927,6 +12931,67 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/employments",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employments",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/employments",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "employments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/gross-earnings",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "gross-earnings",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_gross_earnings_ledger"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/ird-number",
    "data_class": "worker",
    "action": "read",
@@ -13008,6 +13073,51 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/leave-entitlements",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "leave-entitlements",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_leave_allocations",
+    "payroll_nz_leave_entitlements",
+    "payroll_personal_data_access_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/leave-events",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "leave-events",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_leave_events",
+    "payroll_personal_data_access_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/opening-balances",
    "data_class": "worker",
    "action": "read",
@@ -13041,6 +13151,27 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/public-holiday-decisions",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "public-holiday-decisions",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_public_holiday_decisions"
    ],
    "overridden": false
   },
@@ -13239,6 +13370,42 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/new-zealand/employments/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/employments/{row_id}/end",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "end",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/new-zealand/ird-numbers/{vault_id}/delete",
    "data_class": "worker",
    "action": "create",
@@ -13333,6 +13500,45 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/new-zealand/leave-events/{event_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_leave_entitlements",
+    "payroll_nz_leave_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/leave/vest",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "vest",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments",
+    "payroll_nz_leave_entitlements"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/new-zealand/opening-balances/{request_id}/approve",
    "data_class": "worker",
    "action": "approve",
@@ -13346,6 +13552,112 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_nz_accumulator_entries"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/permissions/family-violence",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "family-violence",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/permissions/family-violence",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "family-violence",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/payroll/new-zealand/permissions/family-violence/{user_id}",
+   "data_class": "tenant_config",
+   "action": "delete",
+   "resource": "family-violence",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/new-zealand/public-holiday-decisions/{decision_id}",
+   "data_class": "worker",
+   "action": "update",
+   "resource": "public-holiday-decisions",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_public_holiday_decisions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/public-holiday-decisions/{decision_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_leave_entitlements",
+    "payroll_nz_public_holiday_decisions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/public-holidays/propose",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "propose",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments",
+    "payroll_nz_public_holiday_decisions",
+    "payroll_nz_work_pattern_versions"
    ],
    "overridden": false
   },

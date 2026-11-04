@@ -3,7 +3,10 @@
 There is no universal "taxable gross": every obligation takes its own base
 from the components the signed NZ_EARNING_CLASS rows include. A REVIEW
 treatment blocks when its component is non-zero; LUMP_SUM_PATH blocks until
-the lump-sum method exists (Phase 6).
+the lump-sum method exists (Phase 6). HOLIDAY_GROSS (Holidays Act gross
+earnings, Phase 5) never changes pay, so it never blocks the payslip: an
+unreviewed component is recorded as not counted and Phase 6 leave pay refuses
+to use it (NZ-017).
 """
 from __future__ import annotations
 
@@ -13,7 +16,8 @@ from app.modules.payroll.engine.countries import new_zealand_content as content
 from . import errors as E
 from .pack import ZERO, NzPack, dec, field, upper
 
-BASES = ("PAYE", "ACC", "KIWISAVER", "STUDENT_LOAN", "MIN_WAGE")
+BASES = ("PAYE", "ACC", "KIWISAVER", "STUDENT_LOAN", "MIN_WAGE", "HOLIDAY_GROSS")
+RECORD_ONLY = ("HOLIDAY_GROSS",)
 INCLUDED, EXCLUDED, LUMP_SUM_PATH, REVIEW = content.TREATMENTS
 _DIRECT = ("SALARY", "OVERTIME", "OTHER_EARNINGS")
 
@@ -49,13 +53,19 @@ def earning_classes(pack: NzPack) -> dict:
             for r in rows}
 
 
-def obligation_base(obligation: str, components: list, classes: dict, pack: NzPack) -> dict:
+def obligation_base(obligation: str, components: list, classes: dict, pack: NzPack,
+                    block_on_review: bool = None) -> dict:
+    if block_on_review is None:
+        block_on_review = obligation not in RECORD_ONLY
     base, lines = ZERO, []
     for component, amount in components:
         treatment = classes.get((obligation, component))
         if treatment is None:
             pack.block(E.keyed(E.EARNING_CLASS_MISSING, obligation, component),
                        f"{component} has no {obligation} classification")
+        if not block_on_review and treatment in (REVIEW, LUMP_SUM_PATH):
+            lines.append({"component": component, "amount": amount, "treatment": treatment, "counted": ZERO})
+            continue
         if treatment == REVIEW:
             pack.block(E.keyed(E.EARNING_CLASS_REVIEW, obligation, component),
                        f"{component} ({amount}) is REVIEW for {obligation}: it needs a signed treatment")

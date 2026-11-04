@@ -129,7 +129,10 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         nz_tables = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz_ird_access_events",
                      "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
                      "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
-                     "payroll_nz_accumulator_entries"}
+                     "payroll_nz_accumulator_entries",
+                     # New Zealand P5 (ac08988ecd3a): Holidays Act tables.
+                     "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
+                     "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events"}
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind"}
         jp_tables |= nz_tables
         jp_p6_tables |= nz_tables

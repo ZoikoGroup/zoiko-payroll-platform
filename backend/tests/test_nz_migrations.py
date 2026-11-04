@@ -197,7 +197,11 @@ def test_deploy_drift_filter_explains_every_nz_object():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
+    # P5 (ac08988ecd3a) is pending on the same chain: its tables only.
+    assert tables - set(NEW_TABLES) == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
+                                        "payroll_nz_leave_entitlements", "payroll_nz_gross_earnings_ledger",
+                                        "payroll_nz_leave_events"}
+    assert set(NEW_TABLES) <= tables
     assert columns == SHARED
 
 

@@ -2288,6 +2288,7 @@ def list_leave_requests(
         employee_id=employee_id,
         status=leave_status,
         leave_type=leave_type,
+        viewer_id=current_user.id,
     )
 
 
