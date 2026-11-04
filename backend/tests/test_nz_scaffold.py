@@ -102,14 +102,18 @@ def test_nz_never_falls_through_to_the_generic_calculator():
 
 
 def test_nz_calculation_is_blocked():
-    from types import SimpleNamespace
+    from decimal import Decimal
 
+    from app.modules.payroll.engine.base import PayrollContext
     from app.modules.payroll.engine.countries.new_zealand import NZCalculationBlockedError, calculate
     from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
 
-    with pytest.raises(NZCalculationBlockedError, match="NZ_ENGINE_NOT_BUILT") as raised:
-        calculate(SimpleNamespace(country="NZ"))
+    # Phase 3: the engine exists but an input with no payday, pack or profiles
+    # is refused with a named reason - never calculated, never a generic result.
+    with pytest.raises(NZCalculationBlockedError) as raised:
+        calculate(PayrollContext(gross=Decimal("5000"), basic=Decimal("5000"), country="NZ"))
     assert isinstance(raised.value, MissingComplianceConfigurationError)
+    assert raised.value.key == "NZ_PAY_DATE_MISSING"
 
 
 def test_nz_registered_with_shared_gates():
@@ -130,5 +134,5 @@ def test_every_calculation_mode_is_blocked(mode):
 
     with pytest.raises(NZCalculationBlockedError) as raised:
         calculate_payroll(PayrollContext(gross=Decimal("5000"), basic=Decimal("5000"), country="NZ"), mode)
-    expected = "NZ_SIMPLE_MODE_UNSUPPORTED" if mode == "simple" else "NZ_ENGINE_NOT_BUILT"
+    expected = "NZ_SIMPLE_MODE_UNSUPPORTED" if mode == "simple" else "NZ_PAY_DATE_MISSING"
     assert raised.value.key == expected

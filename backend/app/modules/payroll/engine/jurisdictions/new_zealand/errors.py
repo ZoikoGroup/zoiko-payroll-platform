@@ -1,4 +1,10 @@
-"""New Zealand calculation errors shared by the engine and its pure helpers."""
+"""New Zealand calculation errors and reason codes (ZP-NZ-ENG-001).
+
+A block code is the ``key`` of NZCalculationBlockedError; keyed() adds detail
+after a colon (``NZ_TABLE_EMPTY:paye_main_method``). Exception codes are not
+blocks: they ride on ``nz_result["exceptions"]`` and stop run APPROVAL in
+Phase 4 (NZ-015 minimum wage, NZ-012 child-support shortfall).
+"""
 from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
 
 _COUNTRY = "NZ"
@@ -9,3 +15,48 @@ class NZCalculationBlockedError(MissingComplianceConfigurationError):
         super().__init__(key, _COUNTRY, organization_id)
         self.reason = reason
         self.args = (f"New Zealand calculation blocked ({key}): {reason}",)
+
+
+# ── block codes ─────────────────────────────────────────────────────────────
+ENGINE_NOT_BUILT = "NZ_ENGINE_NOT_BUILT"
+PACK_UNSIGNED = "NZ_PACK_UNSIGNED"
+TABLE_EMPTY = "NZ_TABLE_EMPTY"
+ROW_MISSING = "NZ_ROW_MISSING"
+ROUNDING_PENDING = "NZ_ROUNDING_PENDING"
+PAY_DATE_MISSING = "NZ_PAY_DATE_MISSING"
+FREQUENCY_UNSUPPORTED = "NZ_FREQUENCY_UNSUPPORTED"
+CURRENCY_UNSUPPORTED = "NZ_CURRENCY_UNSUPPORTED"
+EMPLOYER_PROFILE_MISSING = "NZ_EMPLOYER_PROFILE_MISSING"
+TAX_PROFILE_MISSING = "NZ_TAX_PROFILE_MISSING"
+PROFILE_NOT_ACTIVE = "NZ_PROFILE_NOT_ACTIVE"
+NON_RESIDENT_UNSUPPORTED = "NZ_NON_RESIDENT_UNSUPPORTED"
+TAX_CODE_UNSUPPORTED = "NZ_TAX_CODE_UNSUPPORTED"
+TAX_CODE_REFUSED = "NZ_TAX_CODE_REFUSED"
+STC_OUT_OF_WINDOW = "NZ_STC_OUT_OF_WINDOW"
+PAYMENT_KIND_UNSUPPORTED = "NZ_PAYMENT_KIND_UNSUPPORTED"
+COMPONENTS_INVALID = "NZ_COMPONENTS_INVALID"
+EARNING_CLASS_REVIEW = "NZ_EARNING_CLASS_REVIEW"
+EARNING_CLASS_MISSING = "NZ_EARNING_CLASS_MISSING"
+LUMP_SUM_UNSUPPORTED = "NZ_LUMP_SUM_UNSUPPORTED"
+ACC_ACCUMULATOR_MISSING = "NZ_ACC_ACCUMULATOR_MISSING"
+KS_RATE_UNSUPPORTED = "NZ_KS_RATE_UNSUPPORTED"
+KS_EMPLOYER_RATE_BELOW_MINIMUM = "NZ_KS_EMPLOYER_RATE_BELOW_MINIMUM"
+KS_SUSPENSION_UNEVIDENCED = "NZ_KS_SUSPENSION_UNEVIDENCED"
+KS_PAYE_ALTERNATIVE_UNSUPPORTED = "NZ_KS_PAYE_ALTERNATIVE_UNSUPPORTED"
+KS_AGE_UNKNOWN = "NZ_KS_AGE_UNKNOWN"
+ESCT_RATE_UNRESOLVED = "NZ_ESCT_RATE_UNRESOLVED"
+SL_CERTIFICATE_INVALID = "NZ_SL_CERTIFICATE_INVALID"
+CS_VARIATION_CODE_MISSING = "NZ_CS_VARIATION_CODE_MISSING"
+CS_NOTICE_INVALID = "NZ_CS_NOTICE_INVALID"
+PRECEDENCE_PENDING = "NZ_PRECEDENCE_PENDING"
+NEGATIVE_NET = "NZ_NEGATIVE_NET"
+
+# ── exception codes (nz_result["exceptions"]) ──────────────────────────────
+EXC_MIN_WAGE_FAIL = "NZ_MIN_WAGE_FAIL"
+EXC_MIN_WAGE_UNDETERMINABLE = "NZ_MIN_WAGE_UNDETERMINABLE"
+EXC_CS_SHORTFALL = "NZ_CS_SHORTFALL"
+
+
+def keyed(code: str, *parts) -> str:
+    """keyed(TABLE_EMPTY, "paye_main_method") -> "NZ_TABLE_EMPTY:paye_main_method"."""
+    return ":".join([code, *(str(p) for p in parts)]) if parts else code

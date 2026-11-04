@@ -989,6 +989,23 @@ class PayrollContext:
     jp_employee_id: int = None
     jp_date_of_birth: date = None
     jp_components: dict = None
+    # New Zealand (ZP-NZ-ENG-001 Phase 3). Supplied by new_zealand_service.calc_inputs
+    # (Phase 4); the engine never reads the database. The payday is ctx.pay_date
+    # and selects every rule (NZ-008).
+    nz_employer_profile: object = None        # ACTIVE employer profile in force on the payday
+    nz_tax_profile: object = None             # ACTIVE employee tax profile
+    nz_kiwisaver: object = None               # ACTIVE KiwiSaver election
+    nz_authority_deductions: list = None      # APPROVED authority notices
+    nz_work_pattern: object = None            # ACTIVE work pattern
+    nz_accumulators: dict = None              # {obligation: YTD before this payday}; missing = unknown
+    nz_hours: Decimal = None                  # paid hours this period (minimum-wage test)
+    nz_hours_source: str = None               # ATTENDANCE / WORK_PATTERN
+    nz_payment_kind: str = None               # None = REGULAR
+    nz_date_of_birth: date = None
+    nz_components: dict = None                # {"SALARY": ..., "OVERTIME": ...}
+    nz_organization_id: int = None
+    nz_legal_entity_id: int = None
+    nz_employee_id: int = None
     # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
     jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
     jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band
@@ -1750,6 +1767,9 @@ class PayrollResult:
     # the resident-tax notice reference and the calculation trace). None
     # elsewhere. No My Number, name or bank data is ever placed here.
     jp_result: dict = None
+    # New Zealand (ZP-NZ-ENG-001): the whole NZ dict (separate bases, obligations,
+    # accumulator deltas, exceptions, trace and hashes). None for every other country.
+    nz_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

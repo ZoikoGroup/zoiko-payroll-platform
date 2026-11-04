@@ -356,6 +356,9 @@ class StandardStrategy(PayrollStrategy):
             # Japan: employee social insurance + employment insurance +
             # resident tax. Withholding tax arrives as tds above. 0 elsewhere.
             + deductions.get("jp_employee_total", Decimal("0"))
+            # New Zealand: student loan + KiwiSaver employee + child support.
+            # PAYE incl. the ACC earner levy arrives as tds above. 0 elsewhere.
+            + deductions.get("nz_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -642,6 +645,8 @@ class StandardStrategy(PayrollStrategy):
             # component amounts, resident-tax notice reference and trace).
             # Absent from every non-JP calculator dict.
             jp_result=deductions.get("jp_result"),
+            # New Zealand (ZP-NZ-ENG-001). Absent from every non-NZ calculator dict.
+            nz_result=deductions.get("nz_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),
