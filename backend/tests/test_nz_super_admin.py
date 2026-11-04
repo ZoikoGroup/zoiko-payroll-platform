@@ -225,3 +225,24 @@ def test_activated_super_admin_values_drive_the_calculation(db, pack, sources, a
     acc = _rate(db, pack, "nz_acc_earner_levy_rate")
     assert MARK not in acc.label and acc.source_document_id == sources[0]
     assert acc.flat_amount == Decimal("1.75") and signed["obligations"]["accLevy"] == "52.50"
+
+
+def test_generic_canonical_editor_refuses_nz_rows(db, pack, admins):
+    """NZ rows change only through the governed console: the generic
+    canonical-row editor (no source, no signing) is refused."""
+    rate = _rate(db, pack, "nz_acc_earner_levy_rate")
+    slab = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).first()
+    with pytest.raises(BadRequestException, match="New Zealand statutory rows"):
+        service.delete_canonical_contribution_rate(db, rate.id, admins[0])
+    with pytest.raises(BadRequestException, match="New Zealand statutory rows"):
+        service.delete_canonical_tax_slab(db, slab.id, admins[0])
+    from app.modules.payroll.schemas import CanonicalContributionRateUpsert
+
+    fields = CanonicalContributionRateUpsert.model_fields
+    payload = {"jurisdictionPackId": pack.id, "jurisdictionCountry": "NZ", "componentKey": "nz_acc_earner_levy_rate",
+               "label": "x", "flatAmount": "9", "id": rate.id}
+    with pytest.raises(BadRequestException, match="New Zealand statutory rows"):
+        service.upsert_canonical_contribution_rate(
+            db, CanonicalContributionRateUpsert(**{k: v for k, v in payload.items() if k in fields}), admins[0])
+    db.refresh(rate)
+    assert rate.flat_amount == Decimal("1.75")

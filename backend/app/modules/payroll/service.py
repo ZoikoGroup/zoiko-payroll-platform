@@ -8163,6 +8163,19 @@ def _refuse_mx_generic_statutory_edit(pack) -> None:
         )
 
 
+def _refuse_nz_generic_statutory_edit(pack) -> None:
+    """New Zealand only (ZP-NZ-ENG-001 Phase 7a, decision Option 1): NZ statutory
+    rows change only through the governed signing console (reason + source,
+    signing needs a second Super Admin's reviewed source, every editor is
+    refused as approver) - never through the generic canonical-row editor,
+    which carries no source. Other countries unchanged."""
+    if pack is not None and pack.jurisdiction_country == "NZ":
+        raise BadRequestException(
+            "New Zealand statutory rows are edited and signed in Compliance → New Zealand (a source document "
+            "and a change reason are required; signing needs a second Super Admin)."
+        )
+
+
 def _existing_row_pack(db: Session, model, row_id):
     """The pack an existing canonical row belongs to NOW (Mexico final mile X8):
     the editors otherwise check only the target pack id the caller sends, so a
@@ -8182,6 +8195,8 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
     _refuse_hk_generic_statutory_edit(pack)
     _refuse_mx_generic_statutory_edit(pack)
     _refuse_mx_generic_statutory_edit(_existing_row_pack(db, TaxSlab, data.id))
+    _refuse_nz_generic_statutory_edit(pack)
+    _refuse_nz_generic_statutory_edit(_existing_row_pack(db, TaxSlab, data.id))
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -8261,6 +8276,8 @@ def upsert_canonical_contribution_rate(
     _refuse_hk_generic_statutory_edit(pack)
     _refuse_mx_generic_statutory_edit(pack)
     _refuse_mx_generic_statutory_edit(_existing_row_pack(db, ContributionRate, data.id))
+    _refuse_nz_generic_statutory_edit(pack)
+    _refuse_nz_generic_statutory_edit(_existing_row_pack(db, ContributionRate, data.id))
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -8357,6 +8374,7 @@ def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Opti
     if pack:
         _refuse_hk_generic_statutory_edit(pack)
         _refuse_mx_generic_statutory_edit(pack)
+        _refuse_nz_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -8460,6 +8478,7 @@ def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int]
     if pack:
         _refuse_hk_generic_statutory_edit(pack)
         _refuse_mx_generic_statutory_edit(pack)
+        _refuse_nz_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
