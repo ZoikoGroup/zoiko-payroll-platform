@@ -1,11 +1,15 @@
 import { BarChart3, Globe2, ShieldCheck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import loginHero from "../../assets/auth/login-hero.webp";
+import HeroArtwork from "./HeroArtwork";
+
 // Brand hero for the sign-in card. Every word is real text (sharp at any
 // size, readable by assistive tech); only the globe / device scene is art:
-// public/auth/login-hero.webp, the designer's export (no text baked in; its
-// dark upper-left is where the headline sits).
-const HERO_ARTWORK = "/auth/login-hero.webp";
+// src/assets/auth/login-hero.webp, the designer's export (no text baked in;
+// its dark upper-left is where the headline sits). LOGIN_HERO_PLACEHOLDER is
+// a 20 x 24 blurred copy of it, painted until the full image is ready.
+const LOGIN_HERO_PLACEHOLDER = "data:image/webp;base64,UklGRtYAAABXRUJQVlA4IMoAAADQBQCdASoUABgAPs1WpEunpKOhsBgMAPAZiWgAnTKDKsSdgHKzSzF7JguJ/nKSrVcdlzNeusLAAP7yqFFU6dWGNc6dq1dlxkQxQd0TaZbcQ4qIeCauEjl+KfnaOd60Uww1jmZSkS+7F9ehQzG3gJYOt8GSr3GXskLR4uX1lLhHUMg8IFP1PER7KtI4vclhjvf0DpTvL94eHxTpAcRirYc65k/K2hUNZ5milKsQOAc8Qy9Si6lzzlH5rN/sYNdMLotYgmp0DwBfWgAA";
 
 const FEATURES = [
   { icon: Globe2, label: "Multi-jurisdiction payroll" },
@@ -19,10 +23,7 @@ const STRIP = ["PEOPLE", "PAYROLL", "COMPLIANCE", "INSIGHTS", "SECURITY"];
 export default function AuthHero() {
   return (
     <aside className="relative hidden w-[54%] shrink-0 overflow-hidden bg-[radial-gradient(120%_90%_at_80%_25%,#1a6cf0_0%,#0a3fa8_45%,#06215f_100%)] text-white lg:flex lg:flex-col">
-      <img
-        src={HERO_ARTWORK} alt="" aria-hidden="true" decoding="async"
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover object-bottom"
-      />
+      <HeroArtwork src={loginHero} placeholder={LOGIN_HERO_PLACEHOLDER} className="object-bottom bg-bottom" />
 
       <div className="relative z-10 flex flex-1 flex-col px-12 pt-7">
         <Link to="/" aria-label="Zoiko Payroll home" className="w-fit">
