@@ -178,6 +178,14 @@ def cancel_final_pay(db: Session, organization_id: int, case_id: int, actor_id, 
     return case
 
 
+def list_final_pay_cases(db: Session, organization_id: int, employee_id: int) -> list:
+    m = nzs._nz_models()
+    F = m.PayrollNzFinalPayCase
+    nzs._nz_employee(db, organization_id, employee_id)
+    return (db.query(F).filter(F.organization_id == organization_id, F.employee_id == employee_id)
+            .order_by(F.termination_date, F.id).all())
+
+
 def final_case_view(case) -> dict:
     return {"id": case.id, "employeeId": case.employee_id, "employmentId": case.employment_id,
             "terminationDate": lv._iso(case.termination_date), "terminationReason": case.termination_reason,

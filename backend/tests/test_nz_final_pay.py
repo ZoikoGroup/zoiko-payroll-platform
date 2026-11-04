@@ -145,3 +145,11 @@ def test_special_run_kinds(db, world):
     with pytest.raises(BadRequestException, match="kind must be"):
         life.create_special_run(db, organization.id, {"kind": "CORRECTION", "payDate": END,
                                                       "employeeIds": [employee.id]}, 1, "x")
+
+
+def test_list_final_pay_cases_and_cash_ups(db, world):
+    """P7c list routes: an employee's final pay cases and cash-up requests."""
+    organization, employee, _employment = world
+    case = _case(db, organization, employee)
+    assert [c.id for c in life.list_final_pay_cases(db, organization.id, employee.id)] == [case.id]
+    assert lps.list_cash_ups(db, organization.id, employee.id) == []

@@ -330,6 +330,14 @@ def reject_cash_up(db: Session, organization_id: int, request_id: int, actor_id,
     return row
 
 
+def list_cash_ups(db: Session, organization_id: int, employee_id: int) -> list:
+    m = nzs._nz_models()
+    Q = m.PayrollNzCashUpRequest
+    nzs._nz_employee(db, organization_id, employee_id)
+    return (db.query(Q).filter(Q.organization_id == organization_id, Q.employee_id == employee_id)
+            .order_by(Q.requested_on, Q.id).all())
+
+
 def cash_up_view(row) -> dict:
     return {"id": row.id, "entitlementId": row.entitlement_id, "requestedOn": lv._iso(row.requested_on),
             "writtenRequestRef": row.written_request_ref, "weeks": lv._num(row.weeks),

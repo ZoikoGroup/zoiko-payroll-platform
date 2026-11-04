@@ -13050,6 +13050,27 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/cash-ups",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "cash-ups",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_cash_up_requests"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/cash-ups",
    "data_class": "worker",
@@ -13106,6 +13127,27 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/final-pay-cases",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "final-pay-cases",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_final_pay_cases"
    ],
    "overridden": false
   },

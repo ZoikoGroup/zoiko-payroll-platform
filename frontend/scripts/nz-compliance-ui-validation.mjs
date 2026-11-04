@@ -52,6 +52,13 @@ const NZ_FILES = [
   "components/jurisdiction/new_zealand/NZSigningStatusTab.jsx",
   "config/jurisdictions/newZealandComplianceConfig.jsx",
   "pages/JurisdictionCompliance/NZCompliancePage.jsx",
+  // P7c — organisation screens
+  "components/jurisdiction/new_zealand/nzOrgOptions.js",
+  "modules/payroll/Compliances/NZComplianceCentreTab.jsx",
+  "modules/payroll/Payroll_Employees/NewZealandStatutoryProfilePanel.jsx",
+  "modules/payroll/Payroll_Employees/NZLeaveSections.jsx",
+  "modules/payroll/Payroll_Employees/NZNoticeSection.jsx",
+  "modules/payroll/Payroll_Employees/NZIrdNumberField.jsx",
 ];
 const files = Object.fromEntries(NZ_FILES.map((f) => [f, read(f)]));
 const contentJs = files["components/jurisdiction/new_zealand/nzContent.js"];
@@ -144,6 +151,70 @@ check("Editable statuses match the backend's editable pack statuses", () => {
 });
 check("No value is shown as configured while it is pending", () =>
   files["components/jurisdiction/new_zealand/NZPackRowsTab.jsx"].includes('value === "PENDING_G1"'));
+
+// ── P7c: organisation client ↔ nz_org_router ──────────────────────────────────
+const payrollService = read("service/payrollService.js");
+const nzOrgBlock = payrollService.slice(payrollService.indexOf('const NZ = "/api/payroll/new-zealand";'));
+const orgRouter = readBackend("app/modules/payroll/nz_org_router.py");
+const orgPrefix = /APIRouter\(prefix="([^"]+)"/.exec(orgRouter)?.[1];
+const orgRoutes = new Set([...orgRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
+  .map(([, method, path]) => `${method.toUpperCase()} ${orgPrefix}${path.replace(/\{[^}]+\}/g, "{}")}`));
+const orgCalls = [...nzOrgBlock.matchAll(/api\.(get|post|put|patch|delete)\(\s*`\$\{NZ\}([^`]+)`/g)]
+  .map(([, method, path]) => `${method.toUpperCase()} /new-zealand${path.replace(/\$\{[^}]+\}/g, "{}")}`);
+
+check("The NZ organisation client covers every organisation route", () => {
+  const missing = [...orgRoutes].filter((route) => !orgCalls.includes(route));
+  assert(orgPrefix === "/new-zealand" && missing.length === 0, `no client for: ${missing.join(" | ")}`);
+});
+check("Every NZ organisation client call matches a declared route", () => {
+  const unknown = orgCalls.filter((call) => !orgRoutes.has(call));
+  assert(orgCalls.length > 0 && unknown.length === 0, unknown.join(" | "));
+});
+
+// ── P7c: privacy of the IRD number and family-violence leave (NZ-023) ────────
+const irdField = files["modules/payroll/Payroll_Employees/NZIrdNumberField.jsx"];
+const centre = files["modules/payroll/Compliances/NZComplianceCentreTab.jsx"];
+check("IRD numbers are typed into password fields and cleared before the request", () => {
+  for (const [name, text] of [["NZIrdNumberField", irdField], ["NZComplianceCentreTab", centre]]) {
+    assert(/type="password"/.test(text) && /autoComplete="off"/.test(text), `${name}: password input`);
+    assert(/setNumber\(""\);\s*\/\/ never keep the typed digits around/.test(text), `${name}: cleared before request`);
+  }
+});
+check("Revealed IRD digits live only in component state and expire", () => {
+  assert(/setTimeout\(\(\) => setRevealed\(null\), REVEAL_SECONDS \* 1000\)/.test(irdField), "timer");
+  assert(/useEffect\(\(\) => \(\) => \{\s*clearTimeout\(timer\.current\);\s*setRevealed\(null\);/.test(irdField), "wipe on unmount");
+  const all = NZ_FILES.map((f) => files[f]).join("\n");
+  assert(!/localStorage|sessionStorage|console\.(log|info|debug)/.test(all), "no storage / console");
+});
+check("Family-violence leave is never asked for a reason and shows only as restricted", () => {
+  const all = NZ_FILES.map((f) => files[f]).join("\n");
+  const lines = all.replace(/never records a reason/g, "").split("\n");
+  const offending = lines.filter((line) => /family[_ ]violence/i.test(line) && /reason/i.test(line)
+    && !/Grant reason|revoked|Permission granted/.test(line));
+  assert(offending.length === 0, `a family-violence reason prompt: ${offending.join(" | ")}`);
+  assert(files["modules/payroll/Payroll_Employees/NZLeaveSections.jsx"].includes('"Restricted leave"'), "restricted label");
+});
+check("Legal entitlements are shown apart from the planning view", () =>
+  files["modules/payroll/Payroll_Employees/NZLeaveSections.jsx"].includes('data-testid="nz-planning-view"'));
+check("Leave pay shows both candidates and the chosen one", () => {
+  const leave = files["modules/payroll/Payroll_Employees/NZLeaveSections.jsx"];
+  return leave.includes("r.candidateA, r.candidateB") && leave.includes("r.statutoryReason");
+});
+check("Every NZ write form carries a reason (NZ-024)", () => {
+  const panel = files["modules/payroll/Payroll_Employees/NewZealandStatutoryProfilePanel.jsx"];
+  // one REASON_FIELD per write form: tax profile, KiwiSaver, work pattern, opening balance |
+  // employer profile | employment, rehire, cash-up, final pay
+  const count = (text) => (text.match(/^\s*REASON_FIELD,$/gm) || []).length;
+  const leave = files["modules/payroll/Payroll_Employees/NZLeaveSections.jsx"];
+  assert(count(panel) === 4 && count(centre) === 1 && count(leave) === 4,
+    `reason fields: panel ${count(panel)}, centre ${count(centre)}, leave ${count(leave)}`);
+});
+check("The NZ Compliance Centre tab and the employee panel are mounted", () => {
+  const compliance = read("modules/payroll/Compliances/CompliancePage.jsx");
+  const employee = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
+  assert(compliance.includes("<NZComplianceCentreTab />") && /isNewZealand \? \[NZ_TAB\]/.test(compliance), "compliance tab");
+  assert(employee.includes('employee.countryCode === "NZ"') && employee.includes("<NewZealandStatutoryProfilePanel"), "employee panel");
+});
 
 // ── mounting ────────────────────────────────────────────────────────────────
 check("The NZ Super Admin page is routed", () => {

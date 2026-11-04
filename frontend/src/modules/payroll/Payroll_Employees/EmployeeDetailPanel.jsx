@@ -19,6 +19,7 @@ import MexicoStatutoryProfilePanel from "./MexicoStatutoryProfilePanel";
 import BrazilStatutoryProfilePanel from "./BrazilStatutoryProfilePanel";
 import SouthAfricaStatutoryProfilePanel from "./SouthAfricaStatutoryProfilePanel";
 import JapanStatutoryProfilePanel from "./JapanStatutoryProfilePanel";
+import NewZealandStatutoryProfilePanel from "./NewZealandStatutoryProfilePanel";
 import ZADeductionOrdersBlock from "./ZADeductionOrdersBlock";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
@@ -114,6 +115,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showSaStatutory, setShowSaStatutory] = useState(false);
   const [showZaStatutory, setShowZaStatutory] = useState(false);
   const [showJpStatutory, setShowJpStatutory] = useState(false);
+  const [showNzStatutory, setShowNzStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
@@ -506,6 +508,27 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "NZ" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      New Zealand statutory records
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowNzStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Tax profile, KiwiSaver, work pattern, authority notices, IRD number (masked) and Holidays Act
+                    records — each approved by a second user before New Zealand payroll uses it.
+                  </p>
+                </div>
+              )}
+
 {employee.countryCode === "IT" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <div className="flex items-center justify-between">
@@ -707,6 +730,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showJpStatutory && (
         <JapanStatutoryProfilePanel employee={employee} onClose={() => setShowJpStatutory(false)} />
+      )}
+      {showNzStatutory && (
+        <NewZealandStatutoryProfilePanel employee={employee} onClose={() => setShowNzStatutory(false)} />
       )}
       {showSwissStatutory && (
         <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />

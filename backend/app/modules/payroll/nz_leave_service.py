@@ -497,7 +497,8 @@ def event_view(row) -> dict:
     return {"id": row.id, "employmentId": row.employment_id, "entitlementId": row.entitlement_id,
             "leaveType": row.leave_type, "startDate": _iso(row.start_date), "endDate": _iso(row.end_date),
             "quantity": _num(row.quantity), "unit": row.unit, "sourceRequestId": row.source_request_id,
-            "restricted": row.restricted, "status": row.status}
+            "restricted": row.restricted, "status": row.status,
+            "leavePayCalculationId": row.leave_pay_calculation_id}
 
 
 # ── family-violence restricted access (NZ-023) ──────────────────────────────

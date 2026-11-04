@@ -519,6 +519,13 @@ def nz_list_leave_pay(employee_id: int, current_user=Depends(get_current_payroll
     return result
 
 
+@router.get("/employees/{employee_id}/cash-ups", summary="The employee's annual-holiday cash-up requests")
+def nz_list_cash_ups(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    pay = _pay()
+    return [pay.cash_up_view(row) for row in pay.list_cash_ups(db, _org_id(current_user), employee_id)]
+
+
 @router.post("/employees/{employee_id}/cash-ups", summary="Record a cash-up request (written request reference)")
 def nz_request_cash_up(employee_id: int, body: Dict[str, Any] = Body(...),
                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
@@ -546,6 +553,13 @@ def nz_reject_cash_up(request_id: int, body: Dict[str, Any] = Body(...),
                              dict(body or {}).get("reason"))
     db.commit()
     return pay.cash_up_view(row)
+
+
+@router.get("/employees/{employee_id}/final-pay-cases", summary="The employee's final pay cases")
+def nz_list_final_pay(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    life = _life()
+    return [life.final_case_view(row) for row in life.list_final_pay_cases(db, _org_id(current_user), employee_id)]
 
 
 @router.post("/employees/{employee_id}/final-pay-cases", summary="Open a final pay case (termination)")
