@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Building, Building2, Check, ChevronDown, ClipboardCheck, Clock, Eye, EyeOff, Factory,
   FileText, Globe2, Info, Landmark, Loader2, Lock, Mail, MapPin, Settings, UserRound,
 } from "lucide-react";
-import { apiFetch, setSession } from "../api/client";
+import { apiFetch, setSession, API_BASE } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { listPublishedPlans } from "../service/billingService";
 import {
@@ -26,6 +26,7 @@ import StepIndicator from "../components/auth/StepIndicator";
 import PhoneInput, { dialCodeForCountry } from "../components/auth/PhoneInput";
 import { AuthAlert, AuthPrimaryButton, authInputClass } from "../components/auth/authUi";
 import MfaLoginStep from "../components/MfaLoginStep";
+import SocialSignInButtons from "../components/auth/SocialSignInButtons";
 import { COUNTRY_LIMIT_KEY, formatCountryLimit } from "../utils/planLimits";
 
 // ── Plan catalog (Stage 1) ──────────────────────────────────────────────────
@@ -359,6 +360,38 @@ export default function RegisterPage() {
   // ZP-PRIV B08: a new organization admin sets up MFA before the first session.
   const [mfaStep, setMfaStep] = useState(null);
 
+  // Google Sign-Up: when the OAuth callback lands here with ?pending=<token>,
+  // pre-fill name + email and skip the password field (Google is the IdP).
+  const [searchParams] = useSearchParams();
+  const [isGoogleSignup, setIsGoogleSignup] = useState(false);
+  const [googlePendingToken, setGooglePendingToken] = useState("");
+  const [googleId, setGoogleId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const pending = searchParams.get("pending");
+    const email = searchParams.get("email");
+    if (pending && !cancelled) {
+      setGooglePendingToken(pending);
+      setIsGoogleSignup(true);
+      if (email) setForm((f) => ({ ...f, adminEmail: email }));
+      fetch(`${API_BASE}/api/auth/google/pending/${pending}`, { credentials: "include" })
+        .then(async (res) => {
+          if (cancelled || !res.ok) return;
+          const p = await res.json();
+          setGoogleId(p.google_id || "");
+          setForm((f) => ({
+            ...f,
+            firstName: p.given_name || "",
+            lastName: p.family_name || "",
+            adminEmail: p.email || email || "",
+          }));
+        })
+        .catch(() => {}); // non-fatal: form still shows, user types manually
+    }
+    return () => { cancelled = true; };
+  }, [searchParams]);
+
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
@@ -418,7 +451,7 @@ export default function RegisterPage() {
       setLocalError(taxValidationErrors[0].message);
       return;
     }
-    if (!passwordOk(form.password)) {
+    if (!isGoogleSignup && !passwordOk(form.password)) {
       setLocalError("Password must be at least 12 characters and include a letter, a number and a symbol.");
       return;
     }
@@ -436,28 +469,41 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       const hasTaxIdentifiers = jurisdictionTaxFields.length > 0;
+      const body = {
+        organization: form.orgName,
+        name: fullName,
+        email: form.adminEmail,
+        phone,
+        address: form.address,
+        city: form.city,
+        state: form.state,
+        country: form.country,
+        timezone: form.timezone,
+        industry: form.industry,
+        company_type: form.companyType,
+        terms_accepted: form.termsAccepted,
+        tax_no: hasTaxIdentifiers
+          ? primaryTaxValue(form.country, form.taxIdentifiers)
+          : form.taxNo,
+        tax_identifiers: hasTaxIdentifiers ? form.taxIdentifiers : undefined,
+        plan_code: selectedPlanCode,
+      };
+      // Google Sign-Up: no password (Google is the IdP); link the Google
+      // identity instead. The pending token is consumed server-side once the
+      // account is created.
+      if (isGoogleSignup) {
+        if (!googleId) {
+          setLocalError("Google profile couldn't be loaded. Please sign in with Google again.");
+          return;
+        }
+        body.auth_provider = "google";
+        body.google_id = googleId;
+      } else {
+        body.password = form.password;
+      }
       const data = await apiFetch("/api/auth/register", {
         method: "POST",
-        body: {
-          organization: form.orgName,
-          name: fullName,
-          email: form.adminEmail,
-          password: form.password,
-          phone,
-          address: form.address,
-          city: form.city,
-          state: form.state,
-          country: form.country,
-          timezone: form.timezone,
-          industry: form.industry,
-          company_type: form.companyType,
-          terms_accepted: form.termsAccepted,
-          tax_no: hasTaxIdentifiers
-            ? primaryTaxValue(form.country, form.taxIdentifiers)
-            : form.taxNo,
-          tax_identifiers: hasTaxIdentifiers ? form.taxIdentifiers : undefined,
-          plan_code: selectedPlanCode,
-        },
+        body,
       });
 
       // Account exists from here on — log the browser in immediately so
@@ -523,6 +569,21 @@ export default function RegisterPage() {
         </div>
       )}
 
+      {isGoogleSignup ? (
+        <div className="mb-4 rounded-lg bg-blue-50 border border-blue-100 p-4 text-sm text-blue-800">
+          Signing up with Google — your name and email are pre-filled below. No password is needed;
+          Google handles authentication for this account.
+        </div>
+      ) : (
+        <div className="mb-4 flex items-center gap-3 text-[13px] text-blue-700">
+          <span className="h-px flex-1 bg-slate-200" />
+          <span>or sign up with email</span>
+          <span className="h-px flex-1 bg-slate-200" />
+        </div>
+      )}
+
+      <SocialSignInButtons mode="register" />
+
       {selectedPlan && stage !== "plan" && (
         <button
           type="button"
@@ -567,7 +628,7 @@ export default function RegisterPage() {
               <ReviewRow label="Administrator" value={fullName} />
               <ReviewRow label="Work email" value={form.adminEmail} />
               <ReviewRow label="Phone" value={phone} />
-              <ReviewRow label="Password" value="••••••••••••" />
+              <ReviewRow label="Password" value={isGoogleSignup ? "Set via Google" : "••••••••••••"} />
               <ReviewRow label="Timezone" value={form.timezone} />
               <ReviewRow label="Product" value="Zoiko Payroll" />
               <ReviewRow label="Plan" value={selectedPlan ? `${selectedPlan.name} (${selectedPlan.priceLabel})` : "Choose in the next step"} />
@@ -679,31 +740,33 @@ export default function RegisterPage() {
                 <PhoneInput id="phone" country={form.phoneCountry} onCountryChange={(v) => update("phoneCountry", v)}
                   number={form.phoneNumber} onNumberChange={(v) => update("phoneNumber", v)} />
               </Field>
-              <Field id="password" label="Password" required
-                hint={
-                  <ul className="flex flex-wrap gap-x-3 gap-y-1">
-                    {PASSWORD_CHECKS.map(([label, test]) => {
-                      const ok = test(form.password);
-                      return (
-                        <li key={label} className={`inline-flex items-center gap-1 ${ok ? "text-emerald-700" : ""}`}>
-                          {ok ? <Check size={13} aria-hidden="true" /> : <span aria-hidden="true">•</span>} {label}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                }>
-                <div className="relative">
-                  <Lock size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input id="password" type={showPassword ? "text" : "password"} required minLength={12}
-                    autoComplete="new-password" value={form.password} onChange={(e) => update("password", e.target.value)}
-                    placeholder="Create a strong password" className={authInputClass({ withIcon: true, withTrailing: true })} />
-                  <button type="button" onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 hover:text-slate-800">
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </Field>
+              {!isGoogleSignup && (
+                <Field id="password" label="Password" required
+                  hint={
+                    <ul className="flex flex-wrap gap-x-3 gap-y-1">
+                      {PASSWORD_CHECKS.map(([label, test]) => {
+                        const ok = test(form.password);
+                        return (
+                          <li key={label} className={`inline-flex items-center gap-1 ${ok ? "text-emerald-700" : ""}`}>
+                            {ok ? <Check size={13} aria-hidden="true" /> : <span aria-hidden="true">•</span>} {label}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  }>
+                  <div className="relative">
+                    <Lock size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input id="password" type={showPassword ? "text" : "password"} required minLength={12}
+                      autoComplete="new-password" value={form.password} onChange={(e) => update("password", e.target.value)}
+                      placeholder="Create a strong password" className={authInputClass({ withIcon: true, withTrailing: true })} />
+                    <button type="button" onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 hover:text-slate-800">
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </Field>
+              )}
             </div>
           </Section>
 

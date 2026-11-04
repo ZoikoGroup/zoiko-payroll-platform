@@ -226,8 +226,11 @@ def test_deploy_drift_filter_explains_every_za_object():
     # Mexico m20 (d3f8b2a6c1e9) also grows from c7d2e9a4f1b6 (joined by merge 92c67cab49fc).
     mexico_m20 = {"payroll_mx_decisions", "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"}
     # The country entitlement ledger (b4d6f8a0c2e3) and Japan Phase 2 are pending from here too.
+    google_tables = {"google_pending"}
+    google_columns = {"auth_provider", "google_id", "avatar_url"}
     assert tables == (set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
-                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES)
+                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES | google_tables)
+    assert columns["users"] == google_columns
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}

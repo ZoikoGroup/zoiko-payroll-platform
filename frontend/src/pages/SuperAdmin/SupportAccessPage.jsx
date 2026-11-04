@@ -348,30 +348,61 @@ function MyAccess({ config, role, initialCode, narrow, onCounts }) {
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [breakGlass, setBreakGlass] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const lastStatus = useRef(null);
+  const refreshId = useRef(0);
 
   const refresh = useCallback(async () => {
-    try {
-      const [a, mine] = await Promise.all([svc.active(), svc.mine()]);
-      const grant = a.grant;
-      if (lastStatus.current === "pending_approval" && grant?.status === "active") {
-        setNotice("Approved — your temporary login is ready.");
-      }
-      lastStatus.current = grant?.status || null;
-      setActive(grant);
-      setHistory(mine.filter((g) => !["pending_approval", "active"].includes(g.status)));
-      onCounts?.(grant ? 1 : 0);
-      setError(null);
-    } catch (err) {
-      setError(err.message || "Could not load your support access.");
-    } finally {
-      setLoading(false);
+    const id = ++refreshId.current;
+    setRefreshing(true);
+    let activeGrant = null;
+    let mineRows = [];
+    let activeError = null;
+    let mineError = null;
+
+    // Fetch active grant and history independently — one endpoint failing
+    // must not prevent the other from refreshing.
+    await Promise.allSettled([
+      svc.active().then((a) => {
+        activeGrant = a.grant;
+      }).catch((err) => {
+        activeError = err;
+      }),
+      svc.mine().then((rows) => {
+        mineRows = rows || [];
+      }).catch((err) => {
+        mineError = err;
+      }),
+    ]);
+
+    // Ignore stale responses if a newer refresh is already in flight.
+    if (id !== refreshId.current) {
+      setRefreshing(false);
+      return;
     }
+
+    const grant = activeGrant;
+    if (lastStatus.current === "pending_approval" && grant?.status === "active") {
+      setNotice("Approved — your temporary login is ready.");
+    }
+    lastStatus.current = grant?.status || null;
+    setActive(grant);
+    setHistory(mineRows.filter((g) => !["pending_approval", "active"].includes(g.status)));
+    onCounts?.(grant ? 1 : 0);
+
+    // Surface errors from either endpoint without wiping good data.
+    if (activeError || mineError) {
+      setError(
+        (activeError?.message || mineError?.message) || "Could not load your support access.",
+      );
+    } else {
+      setError(null);
+    }
+    setRefreshing(false);
   }, [onCounts]);
 
   useEffect(() => {
     // Initial load + polling of server state (an external system).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
     const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
@@ -413,8 +444,15 @@ function MyAccess({ config, role, initialCode, narrow, onCounts }) {
               </dl>
               <p className="text-sm text-foreground">Request expires in <strong>{formatCountdown(pendingMs)}</strong></p>
               <div className="flex flex-wrap gap-2">
-                <button type="button" className={subtle} onClick={refresh}><RefreshCw className="h-4 w-4" aria-hidden="true" /> Check now</button>
-                <button type="button" className={subtle} disabled={narrow} onClick={() => setConfirm("cancel")}>Cancel request</button>
+                <button type="button" className={subtle} disabled={refreshing} onClick={refresh}>
+                  {refreshing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  Check now
+                </button>
+                <button type="button" className={subtle} disabled={narrow || refreshing} onClick={() => setConfirm("cancel")}>Cancel request</button>
               </div>
             </>
           ) : (

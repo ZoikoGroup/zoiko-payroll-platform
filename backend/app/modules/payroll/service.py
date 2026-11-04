@@ -21057,7 +21057,7 @@ def _seed_holidays_for_country(db: Session, organization_id: int, country: str, 
     return rows
 
 
-def list_holidays(db: Session, organization_id: int, year: int = None) -> List[PayrollHoliday]:
+def list_holidays(db: Session, organization_id: int, year: int = None, country: str = None) -> List[PayrollHoliday]:
     """Returns every holiday saved for this org (all jurisdictions it has —
     an org pays employees in its default country plus its entitled
     countries, and each employee's working days follow their own country's
@@ -21068,6 +21068,8 @@ def list_holidays(db: Session, organization_id: int, year: int = None) -> List[P
     ensure_holidays_seeded(db, organization_id, target_year)
 
     query = db.query(PayrollHoliday).filter(PayrollHoliday.organization_id == organization_id)
+    if country:
+        query = query.filter(PayrollHoliday.country == country)
     if year:
         query = query.filter(
             PayrollHoliday.date >= date(year, 1, 1),

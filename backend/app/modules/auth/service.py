@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core import google_oauth
 from app.core.code_generation import generate_employee_code, generate_organization_code
 from app.core.exceptions import (
     AlreadyExistsException,
@@ -39,6 +40,7 @@ from app.core.security import (
 )
 from app.modules.auth.models import (
     AuthEmailEvent,
+    GooglePending,
     RevokedToken,
     SecurityActionPurpose,
     SecurityActionToken,
@@ -795,6 +797,208 @@ def login_user(db: Session, email: str, password: str, request=None) -> dict:
     return issue_session(db, user, request)
 
 
+# ── Google Sign-In ─────────────────────────────────────────────────────
+
+GOOGLE_PENDING_TTL_MINUTES = 10
+
+
+def _google_tokens(code: str) -> dict:
+    """Exchange an authorization code for Google OAuth tokens."""
+    data = {
+        "code": code,
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+    resp = google_oauth.exchange_code(settings.GOOGLE_TOKEN_URL, data)
+    if resp.status_code >= 400:
+        logger.warning("Google token exchange failed: %s", resp.text[:200])
+        raise UnauthorizedException("Google sign-in failed. Please try again.")
+    return resp.json()
+
+
+def _google_userinfo(access_token: str) -> dict:
+    """Fetch the authenticated user's profile from Google."""
+    resp = google_oauth.fetch_userinfo(settings.GOOGLE_USERINFO_URL, access_token)
+    if resp.status_code >= 400:
+        logger.warning("Google userinfo fetch failed: %s", resp.text[:200])
+        raise UnauthorizedException("Google sign-in failed. Please try again.")
+    return resp.json()
+
+
+def _find_google_user(db: Session, profile: dict):
+    """Find an existing Zoiko user for a Google profile (never creates).
+
+    Matching priority:
+      1. existing user with the same google_id (re-sign in)
+      2. existing user with the same verified email (link accounts)
+    Returns None when there is no Zoiko account for this Google identity."""
+    google_id = profile["id"]
+    email = profile.get("email")
+
+    user = db.query(User).filter(User.google_id == google_id).first()
+    if user is not None:
+        return user
+
+    if email:
+        user = db.query(User).filter(User.email == email).first()
+        if user is not None:
+            # Link the Google identity to this existing email account.
+            if not user.google_id:
+                user.google_id = google_id
+                user.auth_provider = "google"
+            user.avatar_url = profile.get("picture")
+            db.commit()
+            db.refresh(user)
+            return user
+
+    return None
+
+
+def _create_google_pending(db: Session, profile: dict, mode: str) -> str:
+    """Store the Google profile under a single-use token so the registration
+    page can pre-fill the form and finish org signup. Token lives 10 minutes."""
+    from datetime import timedelta
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(minutes=GOOGLE_PENDING_TTL_MINUTES)
+    db.add(GooglePending(
+        token=token,
+        email=profile.get("email"),
+        google_id=profile["id"],
+        given_name=profile.get("given_name"),
+        family_name=profile.get("family_name"),
+        picture=profile.get("picture"),
+        mode=mode,
+        expires_at=expires_at,
+    ))
+    db.commit()
+    return token
+
+
+def _consume_google_pending(db: Session, token: str):
+    """Mark a pending Google registration as consumed and return its profile,
+    or None when missing/expired/already consumed."""
+    from datetime import datetime as _dt
+
+    row = db.query(GooglePending).filter(GooglePending.token == token).first()
+    if row is None:
+        return None
+    if row.consumed_at is not None or row.expires_at <= _dt.utcnow():
+        return None
+    row.consumed_at = _dt.utcnow()
+    db.commit()
+    return {
+        "email": row.email,
+        "google_id": row.google_id,
+        "given_name": row.given_name,
+        "family_name": row.family_name,
+        "picture": row.picture,
+        "mode": row.mode,
+    }
+
+
+def get_google_pending(db: Session, token: str):
+    """Read a pending Google profile without consuming it. Returns the profile
+    dict or None when missing/expired. The token is consumed only when the
+    registration actually succeeds (see register_enterprise)."""
+    from datetime import datetime as _dt
+
+    row = db.query(GooglePending).filter(GooglePending.token == token).first()
+    if row is None:
+        return None
+    if row.consumed_at is not None or row.expires_at <= _dt.utcnow():
+        return None
+    return {
+        "email": row.email,
+        "google_id": row.google_id,
+        "given_name": row.given_name,
+        "family_name": row.family_name,
+        "picture": row.picture,
+        "mode": row.mode,
+    }
+
+
+def consume_google_pending_by_google_id(db: Session, google_id: str) -> bool:
+    """Consume the pending row tied to a Google id after a successful
+    registration. Returns True when a row was consumed."""
+    from datetime import datetime as _dt
+
+    row = (
+        db.query(GooglePending)
+        .filter(GooglePending.google_id == google_id, GooglePending.consumed_at.is_(None))
+        .first()
+    )
+    if row is None or row.expires_at <= _dt.utcnow():
+        return False
+    row.consumed_at = _dt.utcnow()
+    db.commit()
+    return True
+
+
+def _profile_display(profile: dict) -> tuple[str, str]:
+    first_name = (profile.get("given_name") or "").strip() or "Google"
+    last_name = (profile.get("family_name") or "").strip() or "User"
+    return first_name, last_name
+
+
+def google_sign_in(db: Session, code: str, request=None, mode: str = "login") -> dict:
+    """Full Google OAuth sign-in.
+
+    ``mode`` is "login" (existing account → session) or "register" (no
+    account yet → send to the registration page pre-filled with Google info).
+
+    Returns one of:
+      {"action": "session", "session": {...}}   — account exists, logged in
+      {"action": "pending", "token": str, ...}  — no account, needs signup
+    """
+    from app.modules.auth import audit as auth_audit
+
+    tokens = _google_tokens(code)
+    profile = _google_userinfo(tokens["access_token"])
+    email = profile.get("email")
+    if not email or not profile.get("verified_email", False):
+        raise UnauthorizedException("Google account email is not verified. Please use email/password sign-in.")
+
+    user = _find_google_user(db, profile)
+    if user is not None:
+        if not user.is_active:
+            auth_audit.record(db, auth_audit.ACCOUNT_INACTIVE, user=user, request=request, reason="ACCOUNT_DEACTIVATED")
+            raise UnauthorizedException("Your account has been deactivated.")
+        if temporary_access_ended(user):
+            auth_audit.record(db, auth_audit.TEMPORARY_ACCESS_ENDED, user=user, request=request, reason="LOGIN")
+            raise UnauthorizedException(TEMPORARY_ACCESS_ENDED_MESSAGE)
+
+        # Refresh Google-sourced names/avatar in case they changed.
+        first_name, last_name = _profile_display(profile)
+        if first_name:
+            user.first_name = first_name
+        if last_name:
+            user.last_name = last_name
+        user.avatar_url = profile.get("picture")
+        db.commit()
+
+        auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
+        logger.info("User %s (%s) signed in via Google", user.email, user.role.value)
+        return {"action": "session", "session": issue_session(db, user, request)}
+
+    # No Zoiko account for this Google identity → hold the profile and send
+    # the user to the registration page to finish org signup.
+    token = _create_google_pending(db, profile, mode)
+    first_name, last_name = _profile_display(profile)
+    logger.info("New Google identity needs registration (mode=%s)", mode)
+    return {
+        "action": "pending",
+        "token": token,
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "picture": profile.get("picture"),
+        "mode": mode,
+    }
+
+
 def _redeem_mfa_token(db: Session, mfa_token: str, token_type: str):
     """The user behind a valid, unused MFA challenge/enrolment token. The
     token is single-use: its jti is revoked by the caller once redeemed."""
@@ -1019,9 +1223,11 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     first_name = name_parts[0]
     last_name = name_parts[1] if len(name_parts) > 1 else "Admin"
 
+    is_google = (data.auth_provider or "email") == "google"
     admin = User(
         email=data.email,
-        hashed_password=hash_password(data.password),
+        # Google-signed-up accounts have no usable password — Google is the IdP.
+        hashed_password="" if is_google else hash_password(data.password),
         role=UserRole.ORG_ADMIN,
         organization_id=org.id,
         first_name=first_name,
@@ -1029,13 +1235,22 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
         phone=data.phone or "",
         is_active=True,
         is_verified=True,
+        auth_provider="google" if is_google else "email",
+        google_id=data.google_id if is_google else None,
+        avatar_url=None,
     )
     db.add(admin)
     db.commit()
     db.refresh(admin)
     db.refresh(org)
 
-    logger.info("New organization %s registered by %s", org.organization_code, data.email)
+    # Consume the Google pending token now that the account exists, so the
+    # one-time registration hold can't be reused.
+    if is_google and data.google_id:
+        consume_google_pending_by_google_id(db, data.google_id)
+
+    logger.info("New organization %s registered by %s (auth_provider=%s)",
+                org.organization_code, data.email, admin.auth_provider)
 
     def _dispatch_org_created_emails() -> None:
         # Runs after the HTTP response is sent (or synchronously if no
@@ -1437,7 +1652,13 @@ def invite_user(db: Session, actor, data) -> User:
     db.flush()
 
     if data.send_invite:
-        _dispatch_invite_email(db, user, actor)
+        try:
+            _dispatch_invite_email(db, user, actor)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Invite email failed for user %s (%s): %s — account created but invite email not sent",
+                user.email, user.id, exc,
+            )
 
     db.commit()
     db.refresh(user)

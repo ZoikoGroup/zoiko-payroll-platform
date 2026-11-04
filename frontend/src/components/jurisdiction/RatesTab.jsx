@@ -5,13 +5,20 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 // style split employer/employee rates. Extracted verbatim from the old
 // monolithic CompliancePage.jsx.
 export default function RatesTab({ pack, rates, onAdd, onEdit, onDelete }) {
+  const isActive = pack?.status === "Active";
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-foreground-muted">Canonical contribution rates linked to this pack — org-scoped rows sync from these.</p>
-        <button onClick={onAdd} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover">
-          <Plus size={13} /> Add Rate
-        </button>
+        {isActive ? (
+          <span className="rounded-lg border border-error/40 bg-error/5 px-3 py-1.5 text-xs font-medium text-error">
+            Active pack — rates are locked. Use "New Version" to create an editable draft.
+          </span>
+        ) : (
+          <button onClick={onAdd} disabled={isActive} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover disabled:opacity-50 disabled:hover:bg-primary">
+            <Plus size={13} /> Add Rate
+          </button>
+        )}
       </div>
       {rates.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border-light px-3 py-8 text-center text-xs text-foreground-disabled">No contribution rates yet.</p>

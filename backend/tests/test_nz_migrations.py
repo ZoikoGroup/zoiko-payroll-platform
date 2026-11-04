@@ -202,10 +202,11 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_nz_leave_entitlements", "payroll_nz_gross_earnings_ledger",
                                         "payroll_nz_leave_events", "payroll_nz_final_pay_cases",
                                         "payroll_nz_leave_pay_calculations", "payroll_nz_cash_up_requests",
-                                        "payroll_nz_corrections"}
+                                        "payroll_nz_corrections", "google_pending"}
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table
+    assert columns["users"] == {"auth_provider", "google_id", "avatar_url"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CreditCard, RefreshCcw, ShieldCheck } from "lucide-react";
+import { CreditCard, RefreshCcw, ShieldCheck, X } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
 import { listAllSubscriptions } from "../../service/commandCenterService";
@@ -268,6 +268,20 @@ export default function SubscriptionsBillingPage() {
     loadSummary();
   }
 
+  const anyFilterActive = Boolean(
+    status || workspaceType || billingClassification || chargeEnabled || dunningStage || countryLimit,
+  );
+
+  const clearFilters = useCallback(() => {
+    setStatus("");
+    setWorkspaceType("");
+    setBillingClassification("");
+    setChargeEnabled("");
+    setDunningStage("");
+    setCountryLimit("");
+    setSearchParams(new URLSearchParams(), { replace: true });
+  }, [setSearchParams]);
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -346,6 +360,15 @@ export default function SubscriptionsBillingPage() {
           <option value="">Countries: Any</option>
           <option value="OVER">Over Country Limit</option>
         </select>
+        {anyFilterActive && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground-secondary hover:bg-slate-100"
+          >
+            <X size={14} className="shrink-0" /> Clean filters
+          </button>
+        )}
       </div>
 
       <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">

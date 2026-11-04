@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Power, RefreshCw, Pencil, Building2, Receipt } from "lucide-react";
+import { Plus, Trash2, Power, RefreshCw, Pencil, Building2, Receipt, Eye } from "lucide-react";
 
 import { apiFetch } from "../api/client";
+import { formatDateTime } from "../utils/time";
 import { useToast } from "../context/ToastContext";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import SearchInput from "../components/SearchInput";
 import StatusPill from "../components/StatusPill";
+import OrganizationDetailDrawer from "../components/superAdmin/OrganizationDetailDrawer";
 
 const BILLING_CLASSIFICATIONS = ["COMMERCIAL_ACTIVE", "NON_CHARGEABLE", "LEGACY", "INTERNAL", "DEMO", "QA"];
 
@@ -26,6 +28,11 @@ const BILLING_CLASSIFICATION_CONSEQUENCE = {
   INTERNAL: "This organization will be marked as an internal Zoiko account and excluded from billing eligibility.",
   DEMO: "This organization will be marked as a demo account and excluded from billing eligibility.",
   QA: "This organization will be marked as a QA/test account and excluded from billing eligibility.",
+};
+
+const WORKSPACE_TYPE_BADGE = {
+  PRODUCTION: "active",
+  EVALUATION: "pending",
 };
 
 const EMPTY_ORG = {
@@ -64,6 +71,7 @@ export default function OrganizationsPage() {
   const [billingOrg, setBillingOrg] = useState(null); // org currently being reclassified
   const [billingClassification, setBillingClassification] = useState("");
   const [billingReason, setBillingReason] = useState("");
+  const [detailId, setDetailId] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -224,6 +232,8 @@ export default function OrganizationsPage() {
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Code</th>
+              <th className="px-4 py-3">Country</th>
+              <th className="px-4 py-3">Workspace</th>
               <th className="px-4 py-3">Industry</th>
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Status</th>
@@ -240,10 +250,22 @@ export default function OrganizationsPage() {
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
                       {initialsFor(org.organization_name)}
                     </span>
-                    {org.organization_name}
+                    <div className="flex flex-col">
+                      <span className="font-medium text-foreground">{org.organization_name}</span>
+                      {org.workspace_type === "EVALUATION" && (
+                        <span className="text-[10px] text-foreground-muted">Evaluation</span>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-foreground-muted">{org.organization_code}</td>
+                <td className="px-4 py-3 text-foreground-muted">{org.country || "—"}</td>
+                <td className="px-4 py-3">
+                  <StatusPill
+                    status={WORKSPACE_TYPE_BADGE[org.workspace_type] || "inactive"}
+                    label={org.workspace_type || "PRODUCTION"}
+                  />
+                </td>
                 <td className="px-4 py-3 text-foreground-muted">{org.industry || "—"}</td>
                 <td className="px-4 py-3 text-foreground-secondary">{org.email || "—"}</td>
                 <td className="px-4 py-3">
@@ -255,11 +277,18 @@ export default function OrganizationsPage() {
                     label={org.billing_classification || "NON_CHARGEABLE"}
                   />
                 </td>
-                <td className="px-4 py-3 text-foreground-muted">
-                  {new Date(org.created_at).toLocaleDateString()}
+                <td className="px-4 py-3 whitespace-nowrap text-foreground-muted" title={org.created_at ? new Date(org.created_at).toISOString().replace("T", " ").slice(0, 19) + " UTC" : undefined}>
+                  {formatDateTime(org.created_at)}
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <button
+                      onClick={() => setDetailId(org.id)}
+                      className="flex items-center gap-1 rounded-lg bg-primary-light px-2.5 py-1 text-xs font-medium text-primary-hover hover:bg-primary/20"
+                    >
+                      <Eye size={12} />
+                      View
+                    </button>
                     <button
                       disabled={busy}
                       title="Edit organization"
@@ -362,8 +391,12 @@ export default function OrganizationsPage() {
                 className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50"
               >
                 {busy
-                  ? modalMode === "edit" ? "Saving…" : "Creating…"
-                  : modalMode === "edit" ? "Save Changes" : "Create"}
+                  ? modalMode === "edit"
+                    ? "Saving…"
+                    : "Creating…"
+                  : modalMode === "edit"
+                    ? "Save Changes"
+                    : "Create"}
               </button>
             </div>
           </form>
@@ -432,6 +465,8 @@ export default function OrganizationsPage() {
           </form>
         </Modal>
       )}
+
+      {detailId !== null && <OrganizationDetailDrawer organizationId={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
 }

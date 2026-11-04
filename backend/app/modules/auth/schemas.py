@@ -41,7 +41,9 @@ class RegisterRequest(BaseModel):
     organization: str = Field(..., min_length=1, max_length=200)
     name: str = Field(..., min_length=1, max_length=200)
     email: EmailStr
-    password: str = Field(..., min_length=REGISTRATION_PASSWORD_MIN_LENGTH, max_length=128)
+    # Password is required for email/password signup, omitted when signing up
+    # with Google (auth_provider="google", google_id set).
+    password: Optional[str] = Field(default=None, max_length=128)
     industry: Optional[str] = None
     company_type: Optional[str] = None
     tax_no: Optional[str] = None
@@ -53,6 +55,11 @@ class RegisterRequest(BaseModel):
     timezone: Optional[str] = "UTC"
     phone: Optional[str] = None
     terms_accepted: bool = Field(..., description="Whether the registration terms were accepted")
+    # Google Sign-Up: the Google subject id and provider marker. When set,
+    # password is not required and the account is created with
+    # auth_provider="google" (no usable password).
+    google_id: Optional[str] = None
+    auth_provider: Optional[str] = Field(default="email", description="'email' or 'google'")
     # Jurisdiction-aware tax/registration identifiers collected on the Register
     # Page once a country is selected — keyed by the field keys in
     # app/core/jurisdiction.py (gstin/pan/cin, ein/state_tax_id, crn/vat_number,
@@ -70,11 +77,18 @@ class RegisterRequest(BaseModel):
 
     @field_validator("password")
     @classmethod
-    def _password_rule(cls, value: str) -> str:
+    def _password_rule(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         error = registration_password_error(value)
         if error:
             raise ValueError(error)
         return value
+
+    @field_validator("auth_provider")
+    @classmethod
+    def _auth_provider(cls, value: Optional[str]) -> str:
+        return value or "email"
 
     @field_validator("timezone")
     @classmethod

@@ -408,10 +408,20 @@ export default function SuperAdminShell({ children }) {
     refreshAlerts();
     const id = setInterval(refreshAlerts, ALERTS_POLL_INTERVAL_MS);
     window.addEventListener("focus", refreshAlerts);
+
+    // Clearing the badge when the Command Center is opened: the dashboard
+    // page dispatches "alerts-viewed" on mount, and we reset the count so
+    // the "2 new updates" indicator doesn't persist after viewing.
+    const onAlertsViewed = () => {
+      if (!cancelled) setAlertCount(0);
+    };
+    window.addEventListener("alerts-viewed", onAlertsViewed);
+
     return () => {
       cancelled = true;
       clearInterval(id);
       window.removeEventListener("focus", refreshAlerts);
+      window.removeEventListener("alerts-viewed", onAlertsViewed);
     };
   }, []);
 

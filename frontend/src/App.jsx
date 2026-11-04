@@ -7,6 +7,7 @@ import PayrollShell from "./components/PayrollShell";
 import SuperAdminShell from "./components/SuperAdminShell";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import GoogleCallbackPage from "./pages/GoogleCallbackPage";
 import TrialSignupPage from "./pages/TrialSignupPage";
 import RegistrationSuccessPage from "./pages/RegistrationSuccessPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -115,6 +116,7 @@ export default function App() {
       <PageTitleUpdater />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/trial-register" element={<TrialSignupPage />} />
       <Route path="/register/success" element={<RegistrationSuccessPage />} />

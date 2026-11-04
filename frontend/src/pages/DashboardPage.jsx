@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Building2, Users, ShieldCheck, CreditCard, RefreshCcw, LayoutGrid, Info,
 } from "lucide-react";
@@ -8,6 +8,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 
+import { apiFetch, clearSession } from "../api/client";
 import StatusPill from "../components/StatusPill";
 import DateRangeFilter from "../components/DateRangeFilter";
 import { resolveDateRange } from "../utils/dateRangePresets";
@@ -118,6 +119,14 @@ export default function DashboardPage() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({ preset: "thisYear", ...resolveDateRange("thisYear") });
+  const navigate = useNavigate();
+
+  // Mark the Command Center as viewed so the high-severity alert badge in the
+  // shell clears. Alerts remain in the feed (they're computed dynamically),
+  // but the "new updates" indicator is dismissed once the page is opened.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("alerts-viewed"));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -132,12 +141,18 @@ export default function DashboardPage() {
         setCharts(chartsRes);
       })
       .catch((err) => {
+        // 401/403 means the session is invalid — clear it and go to login.
+        if (err.status === 401 || err.status === 403) {
+          clearSession();
+          navigate("/login", { replace: true });
+          return;
+        }
         const friendly = aggregateRefusalMessage(err);
         if (friendly) setNotice(friendly);
         else setError(err.message);
       })
       .finally(() => setLoading(false));
-  }, [dateRange]);
+  }, [dateRange, navigate]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

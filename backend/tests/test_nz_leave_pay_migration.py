@@ -134,7 +134,8 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) and columns == SHARED
+    assert tables == set(NEW_TABLES) | {"google_pending"}
+    assert columns == {**SHARED, "users": {"auth_provider", "google_id", "avatar_url"}}
 
 
 def test_single_child_literal_and_manifest():

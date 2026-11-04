@@ -143,9 +143,11 @@ def test_drift_filter_explains():
         os.chdir(here)
     # P6 (c6ea8c6c35ce) is pending on the same chain.
     assert tables == set(NEW_TABLES) | {"payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
-                                        "payroll_nz_cash_up_requests", "payroll_nz_corrections"}
+                                        "payroll_nz_cash_up_requests", "payroll_nz_corrections",
+                                        "google_pending"}
     assert columns == {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_options"},
-                       "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
+                       "payroll_nz_leave_events": {"leave_pay_calculation_id"},
+                       "users": {"auth_provider", "google_id", "avatar_url"}}
 
 
 def test_single_child_of_foundation():
