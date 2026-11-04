@@ -781,6 +781,34 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/assist/public/health",
+   "data_class": "public",
+   "action": "read",
+   "resource": "health",
+   "principals": [],
+   "scope_level": "public",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/assist/public/payroll-countries",
+   "data_class": "public",
+   "action": "read",
+   "resource": "payroll-countries",
+   "principals": [],
+   "scope_level": "public",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/assist/public/sessions",
    "data_class": "public",
