@@ -22,10 +22,13 @@ INCLUDED, EXCLUDED, LUMP_SUM_PATH, REVIEW = content.TREATMENTS
 _DIRECT = ("SALARY", "OVERTIME", "OTHER_EARNINGS")
 
 
-def pay_components(ctx, pack: NzPack) -> list:
-    """[(component, amount)] for every component above zero, in content order."""
+def pay_components(ctx, pack: NzPack, named_components: dict = None) -> list:
+    """[(component, amount)] for every component above zero, in content order.
+    `named_components` (the orchestrator's per-payment-kind view) replaces
+    ctx.nz_components when given."""
     named = {}
-    for key, value in (getattr(ctx, "nz_components", None) or {}).items():
+    source = named_components if named_components is not None else (getattr(ctx, "nz_components", None) or {})
+    for key, value in source.items():
         name = upper(key)
         if name not in content.NZ_COMPONENTS:
             pack.block(E.COMPONENTS_INVALID, f"unknown pay component {name!r}")
@@ -76,6 +79,25 @@ def obligation_base(obligation: str, components: list, classes: dict, pack: NzPa
             pack.block(E.keyed(E.EARNING_CLASS_MISSING, obligation, component),
                        f"unknown treatment {treatment!r}")
         counted = amount if treatment == INCLUDED else ZERO
+        base += counted
+        lines.append({"component": component, "amount": amount, "treatment": treatment, "counted": counted})
+    return {"base": base, "lines": lines}
+
+
+def extra_base(obligation: str, extra: list, classes: dict, pack: NzPack) -> dict:
+    """Base of an extra payment (Phase 6) for one obligation: a component is
+    counted when its treatment is INCLUDED or LUMP_SUM_PATH (it is paid on
+    the extra-pay path); REVIEW blocks; EXCLUDED is not counted."""
+    base, lines = ZERO, []
+    for component, amount in extra:
+        treatment = classes.get((obligation, component))
+        if treatment is None:
+            pack.block(E.keyed(E.EARNING_CLASS_MISSING, obligation, component),
+                       f"{component} has no {obligation} classification")
+        if treatment == REVIEW:
+            pack.block(E.keyed(E.EARNING_CLASS_REVIEW, obligation, component),
+                       f"{component} ({amount}) is REVIEW for {obligation}: it needs a signed treatment")
+        counted = amount if treatment in (INCLUDED, LUMP_SUM_PATH) else ZERO
         base += counted
         lines.append({"component": component, "amount": amount, "treatment": treatment, "counted": counted})
     return {"base": base, "lines": lines}

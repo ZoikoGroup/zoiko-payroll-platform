@@ -237,6 +237,20 @@ NZ_PARAMETER_KEYS = {
     "nz_hol_payg_pct": "pct_total",
     "nz_hol_cashup_max_weeks": "amount",
     "nz_hol_ph_worked_multiplier": "amount",
+    # Holidays Act leave pay (Phase 6) — the spec states no formula: empty by
+    # design until gate G2 signs them; rounding PENDING like every rounding row.
+    "nz_hol_pay_rounding": "text",
+    "nz_hol_awe_lookback_months": "amount",
+    "nz_hol_awe_divisor_weeks": "amount",
+    "nz_hol_owp_fallback_weeks": "amount",
+    "nz_hol_adp_lookback_weeks": "amount",
+    "nz_hol_owp_method": "text",
+    "nz_hol_rdp_method": "text",
+    "nz_hol_adp_use_rule": "text",
+    "nz_hol_final_pay_unvested_method": "text",
+    # Non-standard payments (Phase 6) — IRD methods, empty until gate G1.
+    "nz_out_of_cycle_paye_method": "text",
+    "nz_lump_sum_paye_method": "text",
     # Record-keeping (spec §7, S9)
     "nz_record_retention_years": "amount",
 }
@@ -358,13 +372,40 @@ NZ_SCALAR_CONTENT = (
     ("nz_hol_ph_worked_multiplier", "Public holiday worked — minimum pay multiplier",
      None, None, "1.5", None, "S7", True, None, None),
 
+    # Holidays Act leave pay (Phase 6): not stated by the specification.
+    ("nz_hol_pay_rounding", "Holiday and leave pay rounding", None, None, None, PENDING, "S7", True, None, None),
+    ("nz_hol_awe_lookback_months", "Average weekly earnings — lookback (months)",
+     None, None, None, None, "S7", True, None, None),
+    ("nz_hol_awe_divisor_weeks", "Average weekly earnings — divisor (weeks)",
+     None, None, None, None, "S7", True, None, None),
+    ("nz_hol_owp_fallback_weeks", "Ordinary weekly pay — fallback lookback (weeks)",
+     None, None, None, None, "S7", True, None, None),
+    ("nz_hol_adp_lookback_weeks", "Average daily pay — lookback (weeks)",
+     None, None, None, None, "S7", True, None, None),
+    ("nz_hol_owp_method", "Ordinary weekly pay — method", None, None, None, None, "S7", True, None, None),
+    ("nz_hol_rdp_method", "Relevant daily pay — method", None, None, None, None, "S7", True, None, None),
+    ("nz_hol_adp_use_rule", "When average daily pay replaces relevant daily pay",
+     None, None, None, None, "S7", True, None, None),
+    ("nz_hol_final_pay_unvested_method", "Final pay — holiday pay on unvested employment",
+     None, None, None, None, "S7", True, None, None),
+    ("nz_out_of_cycle_paye_method", "Out-of-cycle payment — PAYE method (IRD)",
+     None, None, None, None, "S1", True, None, None),
+    ("nz_lump_sum_paye_method", "Lump sum / extra pay — PAYE method (IRD)",
+     None, None, None, None, "S1", True, None, None),
+
     ("nz_record_retention_years", "Wage/time and holiday/leave records retained (years)",
      None, None, "6", None, "S9", True, None, None),
 )
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
 # never filled with an assumed value.
-NZ_EMPTY_BY_DESIGN = frozenset({"nz_ks_employer_max_age"})
+NZ_EMPTY_BY_DESIGN = frozenset({
+    "nz_ks_employer_max_age",
+    # Phase 6: leave-pay windows and methods, and the IRD extra-pay methods.
+    "nz_hol_awe_lookback_months", "nz_hol_awe_divisor_weeks", "nz_hol_owp_fallback_weeks",
+    "nz_hol_adp_lookback_weeks", "nz_hol_owp_method", "nz_hol_rdp_method", "nz_hol_adp_use_rule",
+    "nz_hol_final_pay_unvested_method", "nz_out_of_cycle_paye_method", "nz_lump_sum_paye_method",
+})
 
 # ── Rate bands (TaxSlab) ──────────────────────────────────────────────────
 # (min_amount, max_amount, rate_pct): rate_pct on income above min_amount up

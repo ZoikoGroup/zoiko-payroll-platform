@@ -1567,6 +1567,9 @@ class PayrollRun(Base):
     # FINAL / HOLIDAY_PAY_ADVANCE / CORRECTION. NULL = REGULAR. On the run, never
     # the employee (the Japan P5 lesson: a payment kind must not stick).
     nz_payment_kind = Column(String(20), nullable=True)
+    # New Zealand per-run options (Phase 6, c6ea8c6c35ce): holidayAdvanceMethod,
+    # advancePeriods, lumpSumComponent, finalPayCaseId.
+    nz_run_options = Column(JSON, nullable=True)
     # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
     # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
     # so one run is never paid twice. Migration 8f90dde5f7b5.
@@ -2022,6 +2025,9 @@ class PayslipItem(Base):
     # New Zealand (ZP-NZ-ENG-001): frozen NZ inputs + nz_result + trace, replayed
     # exactly as computed; NULL for non-NZ payslips (0e697c2388bf).
     nz_calculation_snapshot = Column(JSON, nullable=True)
+    # New Zealand (Phase 6, c6ea8c6c35ce): a correction payslip -> the payslip it
+    # corrects (NZ-006). Plain integer; the service checks the reference.
+    nz_correction_of_id = Column(Integer, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -12954,6 +12960,8 @@ class PayrollNzLeaveEvent(_NzCommon, Base):
     source_request_id  = Column(Integer, ForeignKey("payroll_leave_requests.id", ondelete="SET NULL"), nullable=True)
     restricted         = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     status             = Column(String(12), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    # Phase 6 (c6ea8c6c35ce): the leave-pay calculation that paid this event.
+    leave_pay_calculation_id = Column(Integer, nullable=True)
 
     __table_args__ = (
         sa.CheckConstraint(f"leave_type IN {_nz_in(_NZ_LEAVE_TYPES)}", name="ck_nz_leave_event_type"),
@@ -12969,3 +12977,151 @@ class PayrollNzLeaveEvent(_NzCommon, Base):
 
     def __repr__(self):
         return f"<PayrollNzLeaveEvent employee={self.employee_id} {self.leave_type} {self.status}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand leave pay and non-standard payments (ZP-NZ-ENG-001 Phase 6,
+# migration c6ea8c6c35ce)
+# ══════════════════════════════════════════════════════════════════════════
+_NZ_LEAVE_PAY_PURPOSES = ("ANNUAL_LEAVE", "SICK", "BEREAVEMENT", "FAMILY_VIOLENCE", "PUBLIC_HOLIDAY_NOT_WORKED",
+                          "PUBLIC_HOLIDAY_WORKED", "ALTERNATIVE_HOLIDAY", "CASH_UP", "PAYG", "FINAL_VESTED",
+                          "FINAL_UNVESTED")
+
+
+class PayrollNzFinalPayCase(_NzCommon, Base):
+    """A termination's final holiday pay (spec §10, NZ-021): one open case per
+    employment; every outstanding entitlement is resolved in `outstanding`
+    (paid, or listed as not payable) — never silently zeroed."""
+    __tablename__ = "payroll_nz_final_pay_cases"
+
+    updated_at          = Column(DateTime(timezone=True), nullable=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id       = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    termination_date    = Column(Date, nullable=False)
+    termination_reason  = Column(String(30), nullable=False)
+    last_anniversary    = Column(Date, nullable=True)
+    outstanding         = Column(_NZ_JSON, nullable=True)
+    run_id              = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    status              = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'CALCULATED', 'APPROVED', 'PAID', 'CANCELLED')",
+                           name="ck_nz_final_pay_status"),
+        Index("uq_nz_final_pay_one_per_employment", "employment_id", unique=True,
+              postgresql_where=text("status <> 'CANCELLED'"), sqlite_where=text("status <> 'CANCELLED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzFinalPayCase employee={self.employee_id} {self.termination_date} {self.status}>"
+
+
+class PayrollNzLeavePayCalculation(_NzCommon, Base):
+    """Append-only leave-pay calculation (NZ-017): both candidates (OWP/AWE or
+    RDP/ADP), the winner, the statutory reason, units, rate and amount, the
+    ordinary pay it displaces, and the inputs used. Paid once; never edited."""
+    __tablename__ = "payroll_nz_leave_pay_calculations"
+
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id               = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    leave_event_id              = Column(Integer, ForeignKey("payroll_nz_leave_events.id", ondelete="SET NULL"), nullable=True)
+    public_holiday_decision_id  = Column(Integer, ForeignKey("payroll_nz_public_holiday_decisions.id", ondelete="SET NULL"),
+                                         nullable=True)
+    final_pay_case_id           = Column(Integer, ForeignKey("payroll_nz_final_pay_cases.id", ondelete="SET NULL"), nullable=True)
+    entitlement_id              = Column(Integer, ForeignKey("payroll_nz_leave_entitlements.id", ondelete="SET NULL"), nullable=True)
+    run_id                      = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id             = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    pay_on                      = Column(Date, nullable=False)
+    purpose                     = Column(String(28), nullable=False)
+    method_pair                 = Column(String(10), nullable=False)
+    candidate_a_name            = Column(String(4), nullable=True)
+    candidate_a_amount          = Column(Numeric(14, 4), nullable=True)
+    candidate_b_name            = Column(String(4), nullable=True)
+    candidate_b_amount          = Column(Numeric(14, 4), nullable=True)
+    chosen                      = Column(String(4), nullable=False)
+    statutory_reason            = Column(String(200), nullable=False)
+    units                       = Column(Numeric(14, 4), nullable=False)
+    unit                        = Column(String(6), nullable=False)
+    rate_amount                 = Column(Numeric(14, 4), nullable=False)
+    amount                      = Column(Numeric(14, 2), nullable=False)
+    displaced_amount            = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    restricted                  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    inputs                      = Column(_NZ_JSON, nullable=False)
+    pack_hash                   = Column(String(64), nullable=False)
+    status                      = Column(String(10), nullable=False, default="CALCULATED", server_default="CALCULATED")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"purpose IN {_nz_in(_NZ_LEAVE_PAY_PURPOSES)}", name="ck_nz_leave_pay_purpose"),
+        sa.CheckConstraint("method_pair IN ('OWP_AWE', 'RDP_ADP', 'PAYG_PCT', 'PCT_GROSS')",
+                           name="ck_nz_leave_pay_method"),
+        sa.CheckConstraint("chosen IN ('OWP', 'AWE', 'RDP', 'ADP', 'PCT')", name="ck_nz_leave_pay_chosen_enum"),
+        sa.CheckConstraint("chosen = 'PCT' OR chosen = candidate_a_name OR chosen = candidate_b_name",
+                           name="ck_nz_leave_pay_chosen_candidate"),
+        sa.CheckConstraint("unit IN ('WEEKS', 'DAYS', 'HOURS', 'AMOUNT')", name="ck_nz_leave_pay_unit"),
+        sa.CheckConstraint("amount >= 0 AND displaced_amount >= 0", name="ck_nz_leave_pay_amount"),
+        sa.CheckConstraint("purpose <> 'FAMILY_VIOLENCE' OR restricted = true", name="ck_nz_leave_pay_restricted"),
+        sa.CheckConstraint("status IN ('CALCULATED', 'PAID', 'VOID')", name="ck_nz_leave_pay_status"),
+        Index("ix_nz_leave_pay_employee_pay_on", "employee_id", "pay_on"),
+        Index("uq_nz_leave_pay_event_live", "leave_event_id", unique=True,
+              postgresql_where=text("leave_event_id IS NOT NULL AND status <> 'VOID'"),
+              sqlite_where=text("leave_event_id IS NOT NULL AND status <> 'VOID'")),
+        Index("uq_nz_leave_pay_decision_live", "public_holiday_decision_id", unique=True,
+              postgresql_where=text("public_holiday_decision_id IS NOT NULL AND status <> 'VOID'"),
+              sqlite_where=text("public_holiday_decision_id IS NOT NULL AND status <> 'VOID'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzLeavePayCalculation employee={self.employee_id} {self.purpose} {self.amount} {self.status}>"
+
+
+class PayrollNzCashUpRequest(_NzCommon, Base):
+    """Annual-holiday cash-up on the employee's written request (spec §8):
+    limited by the signed maximum weeks per entitlement year; one open request
+    per entitlement; approved by a second person."""
+    __tablename__ = "payroll_nz_cash_up_requests"
+
+    updated_at                = Column(DateTime(timezone=True), nullable=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id             = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    entitlement_id            = Column(Integer, ForeignKey("payroll_nz_leave_entitlements.id", ondelete="CASCADE"), nullable=False)
+    requested_on              = Column(Date, nullable=False)
+    written_request_ref       = Column(String(300), nullable=False)
+    weeks                     = Column(Numeric(6, 4), nullable=False)
+    leave_pay_calculation_id  = Column(Integer, ForeignKey("payroll_nz_leave_pay_calculations.id", ondelete="SET NULL"),
+                                       nullable=True)
+    status                    = Column(String(10), nullable=False, default="REQUESTED", server_default="REQUESTED")
+
+    __table_args__ = (
+        sa.CheckConstraint("weeks > 0", name="ck_nz_cash_up_weeks"),
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'PAID', 'REJECTED')", name="ck_nz_cash_up_status"),
+        Index("uq_nz_cash_up_one_open", "entitlement_id", unique=True,
+              postgresql_where=text("status IN ('REQUESTED', 'APPROVED')"),
+              sqlite_where=text("status IN ('REQUESTED', 'APPROVED')")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzCashUpRequest employee={self.employee_id} {self.weeks} {self.status}>"
+
+
+class PayrollNzCorrection(_NzCommon, Base):
+    """A compensating correction (NZ-006): the original PAID payslip is never
+    modified or deleted (RESTRICT); the correction payslip carries only the
+    deltas and its accumulator entries post as CORRECTION."""
+    __tablename__ = "payroll_nz_corrections"
+
+    updated_at                  = Column(DateTime(timezone=True), nullable=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_payslip_item_id    = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False)
+    correction_run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    correction_payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    reason                      = Column(String(300), nullable=False)
+    input_delta                 = Column(_NZ_JSON, nullable=False)
+    result_delta                = Column(_NZ_JSON, nullable=True)
+    status                      = Column(String(10), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'APPLIED', 'VOID')", name="ck_nz_correction_status"),
+        Index("ix_nz_correction_original", "original_payslip_item_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzCorrection original={self.original_payslip_item_id} {self.status}>"

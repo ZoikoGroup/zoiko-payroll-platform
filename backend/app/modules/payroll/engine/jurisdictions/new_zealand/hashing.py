@@ -69,6 +69,10 @@ def input_document(ctx, components, age=None) -> dict:
         "hours": ctx.nz_hours,
         "hoursSource": ctx.nz_hours_source,
         "ageAtPayday": age,
+        "leaveLines": getattr(ctx, "nz_leave_lines", None) or [],
+        "finalPayLines": getattr(ctx, "nz_final_pay_lines", None) or [],
+        "priorFourWeekGross": getattr(ctx, "nz_prior_four_week_gross", None),
+        "runOptions": getattr(ctx, "nz_run_options", None) or {},
     }
 
 

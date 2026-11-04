@@ -1072,7 +1072,9 @@ def resolve_nz_calc_inputs(db: Session, organization_id: int, employee, pay_date
     kind = str(getattr(run, "nz_payment_kind", None) or REGULAR).strip().upper()
     if kind not in _content().PAYMENT_KINDS:
         raise BadRequestException(f"nz_payment_kind must be one of: {', '.join(_content().PAYMENT_KINDS)}.")
+    phase6 = _nz_phase6_inputs(db, organization_id, employee, entity, pay_date, run, kind)
     return {
+        **phase6,
         "nz_employer_profile": _facts(employer), "nz_tax_profile": _facts(profile),
         "nz_kiwisaver": _facts(kiwisaver), "nz_work_pattern": _facts(pattern),
         "nz_authority_deductions": [_facts(n) for n in notices],
@@ -1082,6 +1084,38 @@ def resolve_nz_calc_inputs(db: Session, organization_id: int, employee, pay_date
         "nz_date_of_birth": getattr(employee, "date_of_birth", None),
         "nz_organization_id": organization_id, "nz_legal_entity_id": entity, "nz_employee_id": employee.id,
     }
+
+
+def _nz_prior_four_week_gross(db: Session, organization_id: int, employee_id: int, legal_entity_id,
+                              pay_date: date) -> Optional[Decimal]:
+    """PAYE gross posted in the four weeks before the payday (extra-pay
+    method). None when the employee has no year-to-date history at all: the
+    engine then blocks rather than taxing extra pay from the bottom band."""
+    from datetime import timedelta
+
+    from sqlalchemy import func
+
+    Entry = _nz_models().PayrollNzAccumulatorEntry
+    scope = (db.query(Entry).filter(Entry.organization_id == organization_id, Entry.employee_id == employee_id,
+                                    Entry.pay_date < pay_date))
+    scope = scope.filter(Entry.legal_entity_id.is_(None) if legal_entity_id is None
+                         else Entry.legal_entity_id == legal_entity_id)
+    if scope.first() is None:
+        return None
+    total = (scope.with_entities(func.sum(Entry.amount))
+             .filter(Entry.obligation == "PAYE_GROSS", Entry.pay_date >= pay_date - timedelta(weeks=4)).scalar())
+    return Decimal(str(total or 0))
+
+
+def _nz_phase6_inputs(db: Session, organization_id: int, employee, entity, pay_date: date, run, kind: str) -> dict:
+    from app.modules.payroll import nz_leave_pay_service, nz_lifecycle
+
+    leave = nz_leave_pay_service.leave_lines_for_run(db, run, employee) \
+        if run is not None and kind in (REGULAR, "FINAL") else []
+    final = nz_lifecycle.final_pay_lines_for_run(db, run, employee) if run is not None else []
+    return {"nz_leave_lines": leave, "nz_final_pay_lines": final,
+            "nz_prior_four_week_gross": _nz_prior_four_week_gross(db, organization_id, employee.id, entity, pay_date),
+            "nz_run_options": dict(getattr(run, "nz_run_options", None) or {})}
 
 
 def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of: Optional[date] = None,
@@ -1094,9 +1128,11 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of:
 
 
 # ── frozen snapshot, replay and approval fingerprint (NZ-005/006/022) ───────
-_NZ_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation", "nz_hours")
+_NZ_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation", "nz_hours",
+                    "nz_prior_four_week_gross")
 _NZ_CTX_PLAIN = ("pay_frequency", "nz_payment_kind", "nz_hours_source", "nz_components", "nz_organization_id",
-                 "nz_legal_entity_id", "nz_employee_id", "trace_id")
+                 "nz_legal_entity_id", "nz_employee_id", "trace_id", "nz_leave_lines", "nz_final_pay_lines",
+                 "nz_run_options")
 _NZ_CTX_DATES = ("pay_date", "nz_pay_date", "period_start", "period_end", "nz_date_of_birth", "date_of_birth")
 _NZ_RECORD_KEYS = ("nz_employer_profile", "nz_tax_profile", "nz_kiwisaver", "nz_work_pattern")
 _NZ_RATE_FIELDS = ("component_key", "label", "employee_rate_pct", "employer_rate_pct", "flat_amount",
@@ -1241,7 +1277,32 @@ def nz_run_preflight(db: Session, run) -> list:
         elif employer.verification_state != "VERIFIED":
             problems.append({"code": "NZ_EMPLOYER_NOT_VERIFIED", "employeeId": item.employee_id,
                              "message": "The New Zealand employer profile is not verified."})
+        problems.extend(_nz_phase6_preflight(db, run, item))
     return problems
+
+
+def _nz_phase6_preflight(db: Session, run, item) -> list:
+    """Leave approved inside the period must be calculated (NZ-017); a FINAL
+    run needs its APPROVED final pay case."""
+    m = _nz_models()
+    out = []
+    kind = (getattr(run, "nz_payment_kind", None) or REGULAR).upper()
+    if kind in (REGULAR, "FINAL") and run.period_start and run.period_end:
+        V = m.PayrollNzLeaveEvent
+        missing = (db.query(V.id).filter(V.organization_id == run.organization_id, V.employee_id == item.employee_id,
+                                         V.status == "APPROVED", V.leave_pay_calculation_id.is_(None),
+                                         V.start_date >= run.period_start, V.start_date <= run.period_end).first())
+        if missing:
+            out.append({"code": "NZ_LEAVE_PAY_UNCALCULATED", "employeeId": item.employee_id,
+                        "message": "Leave approved in this period has no leave-pay calculation."})
+    if kind == "FINAL":
+        options = getattr(run, "nz_run_options", None) or {}
+        case = db.get(m.PayrollNzFinalPayCase, int(options["finalPayCaseId"])) \
+            if options.get("finalPayCaseId") else None
+        if case is None or case.status != "APPROVED" or case.employee_id != item.employee_id:
+            out.append({"code": "NZ_FINAL_PAY_OPEN", "employeeId": item.employee_id,
+                        "message": "A FINAL run needs the employee's APPROVED final pay case."})
+    return out
 
 
 def post_accumulators(db: Session, run, actor_id) -> int:
@@ -1306,6 +1367,10 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
         from app.modules.payroll import nz_leave_service
 
         nz_leave_service.write_gross_earnings(db, run, actor_id)
+        from app.modules.payroll import nz_leave_pay_service, nz_lifecycle
+
+        nz_leave_pay_service.mark_paid(db, run)
+        nz_lifecycle.on_final_run_paid(db, run)
 
 
 # ── platform hooks ──────────────────────────────────────────────────────────

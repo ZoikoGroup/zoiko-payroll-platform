@@ -84,7 +84,8 @@ def test_values_parse_and_dates_are_ordered():
 def test_there_is_no_global_rounding_row_and_every_rounding_is_pending():
     rounding = {k for k in content.NZ_PARAMETER_KEYS if k.endswith("_rounding")}
     assert rounding == {"nz_paye_rounding", "nz_acc_rounding", "nz_sl_rounding",
-                        "nz_ks_rounding", "nz_esct_rounding", "nz_cs_rounding"}
+                        "nz_ks_rounding", "nz_esct_rounding", "nz_cs_rounding",
+                        "nz_hol_pay_rounding"}                                   # + Phase 6 leave pay
     for key in rounding:
         assert _scalar(key)[5] == content.PENDING, key
 

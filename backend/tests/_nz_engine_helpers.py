@@ -156,3 +156,52 @@ def ctx(pack=None, **overrides):
                   nz_date_of_birth=date(1996, 5, 1), nz_organization_id=1)
     values.update(overrides)
     return PayrollContext(**values)
+
+
+# ── Phase 6 TEST content (leave pay, extra pay, holiday advance) ─────────────
+P6_TEST_VALUES = {
+    "nz_hol_awe_lookback_months": 12, "nz_hol_awe_divisor_weeks": 52, "nz_hol_owp_fallback_weeks": 4,
+    "nz_hol_adp_lookback_weeks": 52, "nz_hol_owp_method": "AGREEMENT_THEN_FALLBACK",
+    "nz_hol_rdp_method": "AGREEMENT_DAILY", "nz_hol_adp_use_rule": "RDP_UNDETERMINABLE_OR_VARIES",
+    "nz_hol_final_pay_unvested_method": "PCT_OF_GROSS_SINCE_ANNIVERSARY",
+    "nz_out_of_cycle_paye_method": "EXTRA_PAY", "nz_lump_sum_paye_method": "EXTRA_PAY_FOUR_WEEK_ANNUALISE",
+    "nz_correction_policy": "COMPENSATING_DELTA",
+}
+P6_TEST_SLABS = (
+    dict(rule_type=content.NZ_LUMP_SUM_RULE, filing_status="ANNUALISATION_FACTOR", flat_amount="13",
+         rate_label="TEST factor"),
+    dict(rule_type=content.NZ_LUMP_SUM_RULE, filing_status="SL_ON_EXTRA_PAY", tax_formula="WHOLE",
+         rate_label="TEST SL whole"),
+    dict(rule_type=content.NZ_LUMP_SUM_RULE, filing_status="IETC_ON_EXTRA_PAY", tax_formula="NONE",
+         rate_label="TEST no IETC on extra pay"),
+    dict(rule_type=content.NZ_HOLIDAY_ADVANCE_RULE, filing_status="STANDARD", rate_label="TEST standard"),
+    dict(rule_type=content.NZ_HOLIDAY_ADVANCE_RULE, filing_status="ALTERNATIVE", rate_label="TEST alternative"),
+)
+
+
+def build_p6_pack(overrides=None, holiday_pay="INCLUDED", extra_slabs=()):
+    """The P3 TEST pack plus Phase 6 TEST rows. HOLIDAY_PAY earning classes are
+    set to `holiday_pay` in this fixture ONLY (shipped content keeps REVIEW)."""
+    values = dict(P6_TEST_VALUES)
+    values.update(overrides or {})
+    rate_map, slabs = build_pack(overrides=values, extra_slabs=tuple(P6_TEST_SLABS) + tuple(extra_slabs))
+    for slab in slabs:
+        if slab.rule_type == content.NZ_EARNING_CLASS_RULE and slab.filing_status == "HOLIDAY_PAY" \
+                and slab.tax_regime in ("PAYE", "ACC", "KIWISAVER", "STUDENT_LOAN", "HOLIDAY_GROSS"):
+            slab.assessment_basis = holiday_pay
+        if slab.rule_type == content.NZ_EARNING_CLASS_RULE and slab.filing_status == "HOLIDAY_PAY"                 and slab.tax_regime == "MIN_WAGE":
+            slab.assessment_basis = "EXCLUDED"                 # TEST: holiday pay is not pay for hours worked
+    return rate_map, slabs
+
+
+def ledger_rows(weeks=52, weekly="1300", end=date(2026, 9, 30), days=5):
+    """Weekly gross-earnings ledger rows ending on `end` (SALARY, INCLUDED)."""
+    from datetime import timedelta
+
+    rows = []
+    for k in range(weeks):
+        period_end = end - timedelta(weeks=k)
+        rows.append({"id": k + 1, "payDate": period_end, "periodStart": period_end - timedelta(days=6),
+                     "periodEnd": period_end, "component": "SALARY", "amount": Decimal(weekly), "included": True,
+                     "treatment": "INCLUDED", "daysWorked": Decimal(days)})
+    return rows

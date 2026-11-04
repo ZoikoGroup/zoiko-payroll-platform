@@ -35,8 +35,9 @@ def test_worked_example_fortnightly_m_sl():
     out = engine.calculate(_worked_example())
     r = out["nz_result"]
     assert r["obligations"] == {
-        "paye": "600.79", "accLevy": "52.50", "payeTotal": "653.29", "studentLoan": "248.64",
-        "studentLoanStandard": "248.64", "studentLoanExtra": "0.00", "ksEmployee": "105.00",
+        "paye": "600.79", "payeRegular": "600.79", "payeExtra": "0.00", "accLevy": "52.50",
+        "payeTotal": "653.29", "studentLoan": "248.64", "studentLoanStandard": "248.64",
+        "studentLoanExtra": "0.00", "studentLoanExtraPay": "0.00", "ksEmployee": "105.00",
         "ksEmployerGross": "105.00", "esct": "31.50", "ksEmployerNet": "73.50", "childSupport": "797.22"}
     assert r["netPay"] == "1195.85" and r["employeeTotal"] == "1150.86"
     assert r["childSupport"]["shortfall"] == "102.78" and r["childSupport"]["variationCode"] == "TESTV"
@@ -74,7 +75,9 @@ def test_guards():
     _blocked(ctx(nz_tax_profile=None), E.TAX_PROFILE_MISSING)
     _blocked(ctx(nz_tax_profile=tax_profile(effective_from=date(2026, 5, 1))), "NZ_PROFILE_NOT_ACTIVE:tax_profile")
     _blocked(ctx(nz_tax_profile=tax_profile(residency_status="NON_RESIDENT")), E.NON_RESIDENT_UNSUPPORTED)
-    _blocked(ctx(nz_payment_kind="LUMP_SUM"), E.PAYMENT_KIND_UNSUPPORTED)
+    _blocked(ctx(nz_payment_kind="BONUS_RUN"), E.PAYMENT_KIND_UNSUPPORTED)
+    # Phase 6: a lump sum is accepted, then blocks on the unsigned IRD extra-pay method.
+    _blocked(ctx(nz_payment_kind="LUMP_SUM"), "NZ_ROW_MISSING:nz_lump_sum_paye_method")
     _blocked(ctx(nz_accumulators=None), E.ACC_ACCUMULATOR_MISSING)
 
 

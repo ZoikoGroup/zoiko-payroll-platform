@@ -1007,6 +1007,11 @@ class PayrollContext:
     nz_organization_id: int = None
     nz_legal_entity_id: int = None
     nz_employee_id: int = None
+    # Phase 6 — leave pay, final pay and non-standard payments.
+    nz_leave_lines: list = None               # [{calculationId, purpose, amount, displaced}] taken this period
+    nz_final_pay_lines: list = None           # [{calculationId, purpose, amount}] of an APPROVED final-pay case
+    nz_prior_four_week_gross: Decimal = None  # PAYE gross in the 4 weeks before the payday (extra-pay method)
+    nz_run_options: dict = None               # {holidayAdvanceMethod, advancePeriods, lumpSumComponent, ...}
     # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
     jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
     jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band

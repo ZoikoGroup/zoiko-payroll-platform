@@ -56,6 +56,9 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
              "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
              "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
              "payroll_nz_accumulator_entries",
+             # New Zealand P6 (c6ea8c6c35ce).
+             "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
+             "payroll_nz_cash_up_requests", "payroll_nz_corrections",
              # New Zealand P5 (ac08988ecd3a).
              "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
              "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events"}
@@ -229,9 +232,10 @@ def test_deploy_drift_filter_explains_every_za_object():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot",
-                                        "nz_calculation_snapshot"}
+                                        "nz_calculation_snapshot", "nz_correction_of_id"}
     assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
-                                       "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind"}
+                                       "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind",
+                                       "nz_run_options"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

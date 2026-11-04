@@ -11669,6 +11669,7 @@
     "payroll_mx_run_corrections",
     "payroll_mx_terminations",
     "payroll_ni_relief_facts",
+    "payroll_nz_corrections",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
     "payroll_salary_tds_declarations",
@@ -12890,6 +12891,125 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/cash-ups/{request_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_cash_up_requests",
+    "payroll_nz_employments",
+    "payroll_nz_gross_earnings_ledger",
+    "payroll_nz_leave_entitlements",
+    "payroll_nz_leave_pay_calculations",
+    "payroll_nz_work_pattern_versions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/cash-ups/{request_id}/reject",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reject",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_cash_up_requests"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/corrections/{correction_id}/apply",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "apply",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/corrections/{correction_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_attendance_records",
+    "payroll_ch_absence_benefit_events",
+    "payroll_ch_family_allowance_entitlements",
+    "payroll_court_ordered_deductions",
+    "payroll_employee_benefit_valuations",
+    "payroll_employee_establishments",
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_fr_pas_rates",
+    "payroll_hk_payslip_corrections",
+    "payroll_hk_work_hours",
+    "payroll_ie_myfuturefund_statuses",
+    "payroll_ie_rpn_snapshots",
+    "payroll_leave_requests",
+    "payroll_ni_relief_facts",
+    "payroll_nz_corrections",
+    "payroll_pr_withholding_certificates",
+    "payroll_salary_tds_claims",
+    "payroll_salary_tds_declarations",
+    "payroll_ytd_accumulators",
+    "payslip_allowance_items",
+    "payslip_items",
+    "sgp_ir21_cases"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/corrections/{correction_id}/void",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "void",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_corrections"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/authority-deductions",
    "data_class": "worker",
@@ -12930,6 +13050,26 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/cash-ups",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cash-ups",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_cash_up_requests",
+    "payroll_nz_leave_entitlements"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/employments",
    "data_class": "worker",
@@ -12966,6 +13106,26 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/final-pay-cases",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "final-pay-cases",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments",
+    "payroll_nz_final_pay_cases"
    ],
    "overridden": false
   },
@@ -13118,6 +13278,28 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/leave-pay-calculations",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "leave-pay-calculations",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_leave_pay_calculations",
+    "payroll_personal_data_access_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/opening-balances",
    "data_class": "worker",
    "action": "read",
@@ -13172,6 +13354,25 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_nz_public_holiday_decisions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/rehire",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "rehire",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments"
    ],
    "overridden": false
   },
@@ -13405,6 +13606,89 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/final-pay-cases/{case_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "final-pay-cases",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_hk_ird_reporting_cases",
+    "payroll_jp_yea_cases",
+    "payroll_nz_final_pay_cases"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/final-pay-cases/{case_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_final_pay_cases"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/final-pay-cases/{case_id}/calculate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "calculate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments",
+    "payroll_nz_final_pay_cases",
+    "payroll_nz_gross_earnings_ledger",
+    "payroll_nz_leave_entitlements",
+    "payroll_nz_leave_pay_calculations",
+    "payroll_nz_work_pattern_versions",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/final-pay-cases/{case_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_final_pay_cases",
+    "payroll_nz_leave_pay_calculations"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/new-zealand/ird-numbers/{vault_id}/delete",
    "data_class": "worker",
@@ -13500,6 +13784,29 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/new-zealand/leave-events/{event_id}/calculate-pay",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "calculate-pay",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments",
+    "payroll_nz_gross_earnings_ledger",
+    "payroll_nz_leave_events",
+    "payroll_nz_leave_pay_calculations",
+    "payroll_nz_work_pattern_versions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/new-zealand/leave-events/{event_id}/cancel",
    "data_class": "worker",
    "action": "create",
@@ -13552,6 +13859,49 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_nz_accumulator_entries"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/payslips/{item_id}/corrections",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "corrections",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "organization_ytd_accumulators",
+    "payroll_attendance_records",
+    "payroll_ch_absence_benefit_events",
+    "payroll_ch_family_allowance_entitlements",
+    "payroll_court_ordered_deductions",
+    "payroll_employee_benefit_valuations",
+    "payroll_employee_establishments",
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_fr_pas_rates",
+    "payroll_hk_work_hours",
+    "payroll_ie_myfuturefund_statuses",
+    "payroll_ie_rpn_snapshots",
+    "payroll_leave_requests",
+    "payroll_mx_ptu_allocations",
+    "payroll_mx_run_corrections",
+    "payroll_mx_terminations",
+    "payroll_ni_relief_facts",
+    "payroll_nz_corrections",
+    "payroll_pr_withholding_certificates",
+    "payroll_salary_tds_claims",
+    "payroll_salary_tds_declarations",
+    "payroll_super_guarantee_liabilities",
+    "payroll_ytd_accumulators",
+    "payslip_allowance_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -13642,6 +13992,29 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/new-zealand/public-holiday-decisions/{decision_id}/calculate-pay",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "calculate-pay",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_employments",
+    "payroll_nz_gross_earnings_ledger",
+    "payroll_nz_leave_pay_calculations",
+    "payroll_nz_public_holiday_decisions",
+    "payroll_nz_work_pattern_versions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/new-zealand/public-holidays/propose",
    "data_class": "worker",
    "action": "create",
@@ -13679,6 +14052,48 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/runs/special",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "special",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "organization_ytd_accumulators",
+    "payroll_attendance_records",
+    "payroll_ch_absence_benefit_events",
+    "payroll_ch_family_allowance_entitlements",
+    "payroll_court_ordered_deductions",
+    "payroll_employee_benefit_valuations",
+    "payroll_employee_establishments",
+    "payroll_employee_statutory_profiles",
+    "payroll_employees",
+    "payroll_fr_pas_rates",
+    "payroll_hk_work_hours",
+    "payroll_ie_myfuturefund_statuses",
+    "payroll_ie_rpn_snapshots",
+    "payroll_leave_requests",
+    "payroll_mx_ptu_allocations",
+    "payroll_mx_terminations",
+    "payroll_ni_relief_facts",
+    "payroll_nz_final_pay_cases",
+    "payroll_pr_withholding_certificates",
+    "payroll_salary_tds_claims",
+    "payroll_salary_tds_declarations",
+    "payroll_super_guarantee_liabilities",
+    "payroll_ytd_accumulators",
+    "payslip_allowance_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/new-zealand/runs/{run_id}/fingerprint",
    "data_class": "worker",
@@ -13713,6 +14128,8 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_nz_final_pay_cases",
+    "payroll_nz_leave_events",
     "payslip_items"
    ],
    "overridden": false

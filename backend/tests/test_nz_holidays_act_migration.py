@@ -105,8 +105,9 @@ def test_tables_match_models(model_engine):
         for table in _load()._TABLES:
             conn.execute(sa.text(f'DROP TABLE "{table}"'))
     _run(engine, "upgrade")
+    later = {"payroll_nz_leave_events": {"leave_pay_calculation_id"}}          # added by P6 (c6ea8c6c35ce)
     for table in NEW_TABLES:
-        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns}, table
+        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns} - later.get(table, set()), table
         assert model_indexes[table] <= _indexes(engine, table), table
 
 
@@ -140,8 +141,11 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
-    assert columns == {}
+    # P6 (c6ea8c6c35ce) is pending on the same chain.
+    assert tables == set(NEW_TABLES) | {"payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
+                                        "payroll_nz_cash_up_requests", "payroll_nz_corrections"}
+    assert columns == {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_options"},
+                       "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
 
 
 def test_single_child_of_foundation():

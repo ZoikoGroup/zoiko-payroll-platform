@@ -469,3 +469,182 @@ def nz_revoke_fv_view(user_id: int, reason: Optional[str] = None, current_user=D
     row = _leave().revoke_family_violence_view(db, _org_id(current_user), _actor(current_user), user_id, reason)
     db.commit()
     return {"id": row.id, "revoked": True}
+
+# ── Holidays Act II and non-standard payments (Phase 6) ─────────────────────
+def _pay():
+    from app.modules.payroll import nz_leave_pay_service
+
+    return nz_leave_pay_service
+
+
+def _life():
+    from app.modules.payroll import nz_lifecycle
+
+    return nz_lifecycle
+
+
+def _agreement(body: Dict[str, Any]):
+    value = dict(body or {}).get("agreement")
+    if value is not None and not isinstance(value, dict):
+        raise BadRequestException("agreement must be an object (weekly, daily, hourly, dailyPayVaries).")
+    return value
+
+
+@router.post("/leave-events/{event_id}/calculate-pay", summary="Calculate leave pay for an approved leave event")
+def nz_calculate_leave_pay(event_id: int, body: Dict[str, Any] = Body(default={}),
+                           current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    pay = _pay()
+    row = pay.calculate_for_event(db, _org_id(current_user), event_id, _actor(current_user), _agreement(body))
+    db.commit()
+    return pay.calculation_view(row)
+
+
+@router.post("/public-holiday-decisions/{decision_id}/calculate-pay",
+             summary="Calculate pay for an approved public-holiday decision")
+def nz_calculate_public_holiday_pay(decision_id: int, body: Dict[str, Any] = Body(default={}),
+                                    current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    pay = _pay()
+    row = pay.calculate_for_public_holiday(db, _org_id(current_user), decision_id, _actor(current_user),
+                                           _agreement(body))
+    db.commit()
+    return pay.calculation_view(row)
+
+
+@router.get("/employees/{employee_id}/leave-pay-calculations",
+            summary="The employee's leave-pay calculations (restricted ones only with the permission)")
+def nz_list_leave_pay(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    result = _pay().list_calculations(db, _org_id(current_user), _actor(current_user), employee_id)
+    db.commit()
+    return result
+
+
+@router.post("/employees/{employee_id}/cash-ups", summary="Record a cash-up request (written request reference)")
+def nz_request_cash_up(employee_id: int, body: Dict[str, Any] = Body(...),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    pay = _pay()
+    payload, reason = _split(body)
+    row = pay.request_cash_up(db, _org_id(current_user), employee_id, payload, _actor(current_user), reason)
+    db.commit()
+    return pay.cash_up_view(row)
+
+
+@router.post("/cash-ups/{request_id}/approve", summary="Approve a cash-up (four-eyes)")
+def nz_approve_cash_up(request_id: int, body: Dict[str, Any] = Body(default={}),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    pay = _pay()
+    row = pay.approve_cash_up(db, _org_id(current_user), request_id, _actor(current_user), _agreement(body))
+    db.commit()
+    return pay.cash_up_view(row)
+
+
+@router.post("/cash-ups/{request_id}/reject", summary="Reject a cash-up request")
+def nz_reject_cash_up(request_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    pay = _pay()
+    row = pay.reject_cash_up(db, _org_id(current_user), request_id, _actor(current_user),
+                             dict(body or {}).get("reason"))
+    db.commit()
+    return pay.cash_up_view(row)
+
+
+@router.post("/employees/{employee_id}/final-pay-cases", summary="Open a final pay case (termination)")
+def nz_open_final_pay(employee_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    body = dict(body or {})
+    row = life.open_final_pay_case(db, _org_id(current_user), employee_id, body.get("terminationDate"),
+                                   body.get("terminationReason"), _actor(current_user), body.get("reason"))
+    db.commit()
+    return life.final_case_view(row)
+
+
+@router.get("/final-pay-cases/{case_id}", summary="A final pay case and every resolved entitlement")
+def nz_get_final_pay(case_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    life = _life()
+    return life.final_case_view(life._case(db, _org_id(current_user), case_id))
+
+
+@router.post("/final-pay-cases/{case_id}/calculate", summary="Calculate a final pay case (vests first)")
+def nz_calculate_final_pay(case_id: int, body: Dict[str, Any] = Body(default={}),
+                           current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    row = life.calculate_final_pay(db, _org_id(current_user), case_id, _actor(current_user), _agreement(body))
+    db.commit()
+    return life.final_case_view(row)
+
+
+@router.post("/final-pay-cases/{case_id}/approve", summary="Approve a final pay case (four-eyes)")
+def nz_approve_final_pay(case_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    row = life.approve_final_pay(db, _org_id(current_user), case_id, _actor(current_user))
+    db.commit()
+    return life.final_case_view(row)
+
+
+@router.post("/final-pay-cases/{case_id}/cancel", summary="Cancel a final pay case")
+def nz_cancel_final_pay(case_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                        db: Session = Depends(get_db)):
+    life = _life()
+    row = life.cancel_final_pay(db, _org_id(current_user), case_id, _actor(current_user),
+                                dict(body or {}).get("reason"))
+    db.commit()
+    return life.final_case_view(row)
+
+
+@router.post("/runs/special", summary="Create an out-of-cycle / lump-sum / holiday-advance / final run")
+def nz_create_special_run(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                          db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    run = _life().create_special_run(db, _org_id(current_user), payload, _actor(current_user), reason)
+    return {"id": run.id, "runCode": run.run_code, "status": str(getattr(run.status, "value", run.status)),
+            "paymentKind": run.nz_payment_kind, "options": run.nz_run_options or {}}
+
+
+@router.post("/payslips/{item_id}/corrections", summary="Create a compensating correction of a paid payslip")
+def nz_create_correction(item_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    life = _life()
+    body = dict(body or {})
+    row = life.create_correction(db, _org_id(current_user), item_id, body.get("inputDelta"), _actor(current_user),
+                                 body.get("reason"))
+    db.commit()
+    return life.correction_view(row)
+
+
+@router.post("/corrections/{correction_id}/approve", summary="Approve a correction (four-eyes)")
+def nz_approve_correction(correction_id: int, current_user=Depends(get_current_org_admin),
+                          db: Session = Depends(get_db)):
+    life = _life()
+    row = life.approve_correction(db, _org_id(current_user), correction_id, _actor(current_user))
+    db.commit()
+    return life.correction_view(row)
+
+
+@router.post("/corrections/{correction_id}/apply", summary="Apply a correction as a CORRECTION run")
+def nz_apply_correction(correction_id: int, body: Dict[str, Any] = Body(...),
+                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    row = life.apply_correction(db, _org_id(current_user), correction_id, dict(body or {}).get("payDate"),
+                                _actor(current_user))
+    db.commit()
+    return life.correction_view(row)
+
+
+@router.post("/corrections/{correction_id}/void", summary="Void a correction")
+def nz_void_correction(correction_id: int, body: Dict[str, Any] = Body(...),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    row = life.void_correction(db, _org_id(current_user), correction_id, _actor(current_user),
+                               dict(body or {}).get("reason"))
+    db.commit()
+    return life.correction_view(row)
+
+
+@router.post("/employees/{employee_id}/rehire", summary="Rehire: a new DRAFT employment instance")
+def nz_rehire(employee_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+              db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    row = _life().rehire(db, _org_id(current_user), employee_id, payload, _actor(current_user), reason)
+    db.commit()
+    return _leave().employment_view(row)
