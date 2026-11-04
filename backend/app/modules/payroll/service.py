@@ -20425,6 +20425,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     if period_start and period_end else None)
             if emp_country == "JP" else None
         )
+        # New Zealand (ZP-NZ-ENG-001 Phase 4): inputs in force on the run's PAYDAY
+        # (NZ-008) - never the period end; without a pay date the preview refuses.
+        nz_inputs = (
+            jurisdiction_hooks.call("NZ", "calc_inputs", db, None, emp, None, as_of=pay_date,
+                                    period=(period_start, period_end)
+                                    if period_start and period_end else None)
+            if emp_country == "NZ" else None
+        )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -20612,6 +20620,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             south_africa_inputs=south_africa_inputs,
             netherlands_inputs=netherlands_inputs,
             japan_inputs=japan_inputs,
+            nz_inputs=nz_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
@@ -25653,6 +25662,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             else None)
         if country == "JP" else None
     )
+    # New Zealand (ZP-NZ-ENG-001 Phase 4): inputs in force on the run's payday.
+    nz_inputs = (
+        jurisdiction_hooks.call(
+            "NZ", "calc_inputs", db, run, employee, resolved_pack,
+            period=(run.period_start, run.period_end)
+            if getattr(run, "period_start", None) and getattr(run, "period_end", None)
+            else None)
+        if country == "NZ" else None
+    )
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
@@ -25814,6 +25832,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if japan_inputs is not None:
         from app.modules.payroll import japan_service as _jp_service
         japan_frozen = _jp_service.jp_freeze_context(ctx, calculation_mode)
+    nz_frozen = None
+    if nz_inputs is not None:
+        from app.modules.payroll import new_zealand_service as _nz_service
+        nz_frozen = _nz_service.nz_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25988,6 +26010,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # context a correction replays. None for every non-JP payslip.
         "jp_calculation_snapshot": (_jp_service.jp_payslip_snapshot(result, frozen=japan_frozen)
                                     if japan_frozen is not None else None),
+        # New Zealand (ZP-NZ-ENG-001 Phase 4): nz_result plus the frozen context
+        # a replay or correction uses. None for every non-NZ payslip.
+        "nz_calculation_snapshot": (_nz_service.nz_payslip_snapshot(result, frozen=nz_frozen)
+                                    if nz_frozen is not None else None),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32733,6 +32759,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("JP", "calc_inputs", db, run, employee, None)
         if country == "JP" else None
     )
+    # New Zealand (ZP-NZ-ENG-001 Phase 4): the same payday inputs as a generated run.
+    nz_inputs = (
+        jurisdiction_hooks.call("NZ", "calc_inputs", db, run, employee, None)
+        if country == "NZ" else None
+    )
     # Mexico (Phase 6): the payslip is computed from the profile, labour policy
     # and approved hours; manual amounts that disagree are refused, never
     # silently replaced.
@@ -32902,6 +32933,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if japan_inputs is not None:
         from app.modules.payroll import japan_service as _jp_service
         japan_frozen = _jp_service.jp_freeze_context(ctx, calculation_mode)
+    nz_frozen = None
+    if nz_inputs is not None:
+        from app.modules.payroll import new_zealand_service as _nz_service
+        nz_frozen = _nz_service.nz_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -32948,6 +32983,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if za_frozen is not None else None),
         jp_calculation_snapshot=(_jp_service.jp_payslip_snapshot(calc, frozen=japan_frozen)
                                  if japan_frozen is not None else None),
+        nz_calculation_snapshot=(_nz_service.nz_payslip_snapshot(calc, frozen=nz_frozen)
+                                 if nz_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -33650,6 +33687,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "jpCalculationSnapshot": (
             {k: v for k, v in (item.jp_calculation_snapshot or {}).items() if k != "frozenContext"}
             if (item.country_code or country) == "JP" and item.jp_calculation_snapshot else None),
+        # New Zealand (ZP-NZ-ENG-001): the frozen nz_result; the frozen inputs
+        # (frozenContext) stay server-side.
+        "nzCalculationSnapshot": (
+            {k: v for k, v in (item.nz_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "NZ" and item.nz_calculation_snapshot else None),
     }
 
 

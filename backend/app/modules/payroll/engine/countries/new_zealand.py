@@ -39,6 +39,12 @@ def _organization_id(ctx):
     return getattr(ctx, "nz_organization_id", None) or getattr(ctx, "organization_id", None)
 
 
+def payday(ctx):
+    """The run's payday (NZ-008): nz_pay_date when the service supplied it
+    (a preview's pay_date is the period end), else pay_date."""
+    return getattr(ctx, "nz_pay_date", None) or ctx.pay_date
+
+
 def _require_active(pack: NzPack, record, missing_code: str, name: str, pay_date) -> None:
     if record is None:
         pack.block(missing_code, f"no New Zealand {name} is in force")
@@ -49,7 +55,8 @@ def _require_active(pack: NzPack, record, missing_code: str, name: str, pay_date
 
 
 def resolve_applicability(ctx: PayrollContext, pack: NzPack) -> dict:
-    if ctx.pay_date is None:
+    on = payday(ctx)
+    if on is None:
         pack.block(E.PAY_DATE_MISSING, "the payday selects every New Zealand rule (NZ-008)")
     frequency = normalise_frequency(ctx.pay_frequency)
     if frequency not in pack.text_list("nz_supported_pay_frequencies"):
@@ -57,8 +64,8 @@ def resolve_applicability(ctx: PayrollContext, pack: NzPack) -> dict:
     currency = upper(getattr(ctx, "currency", None))
     if currency and currency != content.CURRENCY:
         pack.block(E.CURRENCY_UNSUPPORTED, f"{currency} is not an NZD payroll")
-    _require_active(pack, ctx.nz_employer_profile, E.EMPLOYER_PROFILE_MISSING, "employer profile", ctx.pay_date)
-    _require_active(pack, ctx.nz_tax_profile, E.TAX_PROFILE_MISSING, "tax profile", ctx.pay_date)
+    _require_active(pack, ctx.nz_employer_profile, E.EMPLOYER_PROFILE_MISSING, "employer profile", on)
+    _require_active(pack, ctx.nz_tax_profile, E.TAX_PROFILE_MISSING, "tax profile", on)
     if upper(field(ctx.nz_tax_profile, "residency_status")) != "RESIDENT":
         pack.block(E.NON_RESIDENT_UNSUPPORTED, "non-resident payroll is outside the first release")
     code = _paye.resolve_tax_code(ctx.nz_tax_profile, pack)
@@ -78,9 +85,9 @@ def _lines(lines: list) -> list:
 
 
 def calculate(ctx: PayrollContext) -> dict:
-    pack = NzPack(ctx.rate_map, ctx.slabs, _organization_id(ctx), ctx.pay_date)
+    pack = NzPack(ctx.rate_map, ctx.slabs, _organization_id(ctx), payday(ctx))
     app = resolve_applicability(ctx, pack)
-    pay_date, frequency, code, profile = ctx.pay_date, app["frequency"], app["taxCode"], app["profile"]
+    pay_date, frequency, code, profile = payday(ctx), app["frequency"], app["taxCode"], app["profile"]
 
     components = _comp.pay_components(ctx, pack)
     classes = _comp.earning_classes(pack)

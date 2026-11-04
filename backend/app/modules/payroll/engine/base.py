@@ -1001,6 +1001,7 @@ class PayrollContext:
     nz_hours: Decimal = None                  # paid hours this period (minimum-wage test)
     nz_hours_source: str = None               # ATTENDANCE / WORK_PATTERN
     nz_payment_kind: str = None               # None = REGULAR
+    nz_pay_date: date = None                  # the run's payday; preferred over pay_date
     nz_date_of_birth: date = None
     nz_components: dict = None                # {"SALARY": ..., "OVERTIME": ...}
     nz_organization_id: int = None

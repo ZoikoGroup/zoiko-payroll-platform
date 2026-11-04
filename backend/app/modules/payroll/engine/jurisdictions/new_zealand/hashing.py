@@ -58,7 +58,7 @@ def input_document(ctx, components, age=None) -> dict:
         "gross": ctx.gross, "basic": ctx.basic, "overtime": ctx.overtime,
         "components": [[name, amount] for name, amount in components],
         "frequency": normalise_frequency(ctx.pay_frequency),
-        "payDate": ctx.pay_date,
+        "payDate": getattr(ctx, "nz_pay_date", None) or ctx.pay_date,
         "paymentKind": ctx.nz_payment_kind or "REGULAR",
         "employer": pick(ctx.nz_employer_profile, EMPLOYER_FIELDS),
         "taxProfile": pick(ctx.nz_tax_profile, PROFILE_FIELDS),
