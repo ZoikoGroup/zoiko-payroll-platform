@@ -40,7 +40,8 @@ from app.modules.payroll import jurisdiction_hooks
 from app.modules.payroll.models import LegalHold, PersonalDataAccessEvent, RetentionPolicy
 
 ACCESS_ACTIONS = ("VIEW_REPORT", "DOWNLOAD_CERTIFICATE", "DOWNLOAD_CERTIFICATES_ZIP", "VIEW_STATUTORY_PROFILE",
-                  "DOWNLOAD_PAYSLIP", "DOWNLOAD_PAYSLIPS_ZIP", "DOWNLOAD_BANK_FILE", "REVEAL_MPF_MEMBER_ACCOUNT")
+                  "DOWNLOAD_PAYSLIP", "DOWNLOAD_PAYSLIPS_ZIP", "DOWNLOAD_BANK_FILE", "REVEAL_MPF_MEMBER_ACCOUNT",
+                  "VIEW_RESTRICTED_LEAVE")
 
 
 @dataclass(frozen=True)

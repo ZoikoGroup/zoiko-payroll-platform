@@ -134,6 +134,8 @@ _COUNTRY_NAME_TO_CODE = {
     "singapore": "SG", "sg": "SG",
     # Without this, "Hong Kong" would truncate to "HO".
     "hong kong": "HK", "hong kong sar": "HK", "hk": "HK", "hkg": "HK",
+    # Without this, "New Zealand" would truncate to "NE" (Nebraska / Niger).
+    "new zealand": "NZ", "nz": "NZ", "nzl": "NZ", "aotearoa": "NZ",
 }
 
 
@@ -20423,6 +20425,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                                     if period_start and period_end else None)
             if emp_country == "JP" else None
         )
+        # New Zealand (ZP-NZ-ENG-001 Phase 4): inputs in force on the run's PAYDAY
+        # (NZ-008) - never the period end; without a pay date the preview refuses.
+        nz_inputs = (
+            jurisdiction_hooks.call("NZ", "calc_inputs", db, None, emp, None, as_of=pay_date,
+                                    period=(period_start, period_end)
+                                    if period_start and period_end else None)
+            if emp_country == "NZ" else None
+        )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -20610,6 +20620,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             south_africa_inputs=south_africa_inputs,
             netherlands_inputs=netherlands_inputs,
             japan_inputs=japan_inputs,
+            nz_inputs=nz_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
@@ -25651,6 +25662,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             else None)
         if country == "JP" else None
     )
+    # New Zealand (ZP-NZ-ENG-001 Phase 4): inputs in force on the run's payday.
+    nz_inputs = (
+        jurisdiction_hooks.call(
+            "NZ", "calc_inputs", db, run, employee, resolved_pack,
+            period=(run.period_start, run.period_end)
+            if getattr(run, "period_start", None) and getattr(run, "period_end", None)
+            else None)
+        if country == "NZ" else None
+    )
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
@@ -25812,6 +25832,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if japan_inputs is not None:
         from app.modules.payroll import japan_service as _jp_service
         japan_frozen = _jp_service.jp_freeze_context(ctx, calculation_mode)
+    nz_frozen = None
+    if nz_inputs is not None:
+        from app.modules.payroll import new_zealand_service as _nz_service
+        nz_frozen = _nz_service.nz_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -25986,6 +26010,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # context a correction replays. None for every non-JP payslip.
         "jp_calculation_snapshot": (_jp_service.jp_payslip_snapshot(result, frozen=japan_frozen)
                                     if japan_frozen is not None else None),
+        # New Zealand (ZP-NZ-ENG-001 Phase 4): nz_result plus the frozen context
+        # a replay or correction uses. None for every non-NZ payslip.
+        "nz_calculation_snapshot": (_nz_service.nz_payslip_snapshot(result, frozen=nz_frozen)
+                                    if nz_frozen is not None else None),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32221,7 +32249,7 @@ def _notify_leave_request_submitted(db: Session, record, organization_id: int) -
             idempotency_key(organization_id, "payroll.leave_submitted", org_email, None, f"leave:{record.id}"),
             send_leave_request_submitted_email,
             org_email, employee.name if employee else f"Employee #{record.employee_id}",
-            str(record.leave_type), str(record.start_date), str(record.end_date),
+            str(_nz_public_leave_type(record.leave_type)), str(record.start_date), str(record.end_date),
             record.days, record.request_code or "",
             send_kwargs={"reason": record.reason or "", "organization_id": organization_id},
             organization_id=organization_id, db=db,
@@ -32731,6 +32759,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("JP", "calc_inputs", db, run, employee, None)
         if country == "JP" else None
     )
+    # New Zealand (ZP-NZ-ENG-001 Phase 4): the same payday inputs as a generated run.
+    nz_inputs = (
+        jurisdiction_hooks.call("NZ", "calc_inputs", db, run, employee, None)
+        if country == "NZ" else None
+    )
     # Mexico (Phase 6): the payslip is computed from the profile, labour policy
     # and approved hours; manual amounts that disagree are refused, never
     # silently replaced.
@@ -32900,6 +32933,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if japan_inputs is not None:
         from app.modules.payroll import japan_service as _jp_service
         japan_frozen = _jp_service.jp_freeze_context(ctx, calculation_mode)
+    nz_frozen = None
+    if nz_inputs is not None:
+        from app.modules.payroll import new_zealand_service as _nz_service
+        nz_frozen = _nz_service.nz_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -32946,6 +32983,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if za_frozen is not None else None),
         jp_calculation_snapshot=(_jp_service.jp_payslip_snapshot(calc, frozen=japan_frozen)
                                  if japan_frozen is not None else None),
+        nz_calculation_snapshot=(_nz_service.nz_payslip_snapshot(calc, frozen=nz_frozen)
+                                 if nz_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -33648,6 +33687,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "jpCalculationSnapshot": (
             {k: v for k, v in (item.jp_calculation_snapshot or {}).items() if k != "frozenContext"}
             if (item.country_code or country) == "JP" and item.jp_calculation_snapshot else None),
+        # New Zealand (ZP-NZ-ENG-001): the frozen nz_result; the frozen inputs
+        # (frozenContext) stay server-side.
+        "nzCalculationSnapshot": (
+            {k: v for k, v in (item.nz_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "NZ" and item.nz_calculation_snapshot else None),
     }
 
 
@@ -35699,18 +35743,18 @@ def _sync_leave_to_attendance(
             old_status = existing.status
             old_leave_type = existing.leave_type
             existing.status = "leave"
-            existing.leave_type = leave_request.leave_type
+            existing.leave_type = _nz_public_leave_type(leave_request.leave_type)
             existing.leave_request_id = leave_request.id
-            if old_status == "leave" and old_leave_type != leave_request.leave_type:
+            if old_status == "leave" and old_leave_type != existing.leave_type:
                 _restore_leave_balance(db, existing.employee_id, old_leave_type, organization_id)
-                _update_leave_balance(db, existing.employee_id, leave_request.leave_type, organization_id)
+                _update_leave_balance(db, existing.employee_id, existing.leave_type, organization_id)
         else:
             rec = PayrollAttendanceRecord(
                 organization_id=organization_id,
                 employee_id=leave_request.employee_id,
                 date=d,
                 status="leave",
-                leave_type=leave_request.leave_type,
+                leave_type=_nz_public_leave_type(leave_request.leave_type),
                 leave_request_id=leave_request.id,
             )
             db.add(rec)
@@ -37242,6 +37286,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.japan_dormancy import entering_japan_refusal
             if code and entering_japan_refusal(row.jurisdiction_country, code):
                 code = None
+            # New Zealand (ZP-NZ-ENG-001 Phase 0 dormancy): never back-fill INTO NZ.
+            from app.modules.payroll.nz_dormancy import entering_nz_refusal
+            if code and entering_nz_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -37344,6 +37392,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     jp_refusal = entering_japan_refusal(row.jurisdiction_country, incoming_country)
     if jp_refusal:
         raise BadRequestException(jp_refusal)
+    # New Zealand (ZP-NZ-ENG-001 Phase 0): choosing New Zealand is refused the
+    # same way while New Zealand onboarding is disabled.
+    from app.modules.payroll.nz_dormancy import entering_nz_refusal
+    nz_refusal = entering_nz_refusal(row.jurisdiction_country, incoming_country)
+    if nz_refusal:
+        raise BadRequestException(nz_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",
@@ -38905,6 +38959,8 @@ def _ie_sick_leave_summary(db: Session, record: PayrollLeaveRequest) -> Optional
 
 
 def create_payroll_leave_request(db: Session, data, organization_id: int) -> dict:
+    from app.modules.payroll import nz_leave_service
+    nz_leave_service.guard_generic_request(db, data, organization_id)
     start = data.startDate if hasattr(data, "startDate") else data.start_date
     end = data.endDate if hasattr(data, "endDate") else data.end_date
     days = (end - start).days + 1
@@ -38929,7 +38985,7 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     _notify_leave_request_submitted(db, record, organization_id)
 
     try:
-        log_activity(db, organization_id, f"Leave request submitted by employee {record.employee_id} ({record.leave_type}, {record.days}d).", ActivityStatus.INFO)
+        log_activity(db, organization_id, f"Leave request submitted by employee {record.employee_id} ({nz_leave_service.public_leave_type(record.leave_type)}, {record.days}d).", ActivityStatus.INFO)
     except Exception:
         pass
 
@@ -38940,7 +38996,8 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     return _enrich_leave_request(db, record, organization_id)
 
 
-def get_payroll_leave_requests(db: Session, organization_id: int, *, employee_id=None, status=None, leave_type=None) -> list:
+def get_payroll_leave_requests(db: Session, organization_id: int, *, employee_id=None, status=None, leave_type=None,
+                               viewer_id=None) -> list:
     _backfill_orphaned_leave_syncs(db, organization_id)
     _dedupe_auto_created_leave_requests(db, organization_id)
 
@@ -38955,6 +39012,8 @@ def get_payroll_leave_requests(db: Session, organization_id: int, *, employee_id
         query = query.filter(PayrollLeaveRequest.leave_type == leave_type)
 
     rows = query.order_by(PayrollLeaveRequest.created_at.desc()).all()
+    from app.modules.payroll import nz_leave_service
+    rows = nz_leave_service.hide_restricted_requests(db, organization_id, viewer_id, rows)
     return [_enrich_leave_request(db, r, organization_id) for r in rows]
 
 
@@ -39170,6 +39229,24 @@ def _ie_usual_daily_earnings(db: Session, employee_id: int, as_of: date) -> Opti
     return _round2(gross / Decimal(covered_days))
 
 
+def _nz_public_leave_type(leave_type):
+    """Family-violence leave is never named on shared surfaces (NZ-023)."""
+    from app.modules.payroll.nz_leave_service import public_leave_type
+    return public_leave_type(leave_type)
+
+
+def _maybe_record_nz_leave_event(db: Session, record: PayrollLeaveRequest, organization_id: int, reviewer_id):
+    """New Zealand Holidays Act: an approved request becomes a leave event
+    against the legal entitlement (None for any other country)."""
+    from app.modules.payroll.nz_leave_service import record_leave_event_from_request
+    return record_leave_event_from_request(db, record, organization_id, reviewer_id)
+
+
+def _maybe_cancel_nz_leave_event(db: Session, record: PayrollLeaveRequest, organization_id: int, reviewer_id):
+    from app.modules.payroll.nz_leave_service import cancel_events_for_request
+    return cancel_events_for_request(db, record, organization_id, reviewer_id)
+
+
 def _maybe_assess_ie_statutory_sick_leave(db: Session, record: PayrollLeaveRequest,
                                           organization_id: int) -> Optional[IrelandStatutorySickLeaveRecord]:
     """Called once, right after an Irish `sick` leave request is approved.
@@ -39306,6 +39383,9 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
 
     # Update leave allocation balances when approved
     if record.status == "approved" and prev_status != "approved":
+        # New Zealand: the approval consumes the legal Holidays Act entitlement
+        # first, so an insufficient entitlement refuses before anything is written.
+        _maybe_record_nz_leave_event(db, record, organization_id, reviewer_id)
         _sync_leave_to_attendance(db, record, organization_id)
         _maybe_compute_uk_statutory_leave_pay(db, record, organization_id)
         _maybe_assess_ie_statutory_sick_leave(db, record, organization_id)
@@ -39322,7 +39402,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
             db.add(alloc)
             db.flush()
         balances = copy.deepcopy(alloc.leave_balances or {})
-        lt = record.leave_type
+        lt = _nz_public_leave_type(record.leave_type)
         if lt not in balances:
             balances[lt] = {"used": 0, "total": 0}
         balances[lt]["used"] = balances[lt].get("used", 0) + record.days
@@ -39335,6 +39415,8 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
             pass
 
     elif record.status == "rejected" and prev_status != "rejected":
+        if prev_status == "approved":
+            _maybe_cancel_nz_leave_event(db, record, organization_id, reviewer_id)
         _remove_linked_attendance(db, record, organization_id)
         alloc = db.query(PayrollLeaveAllocation).filter(
             PayrollLeaveAllocation.organization_id == organization_id,
@@ -39342,7 +39424,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
         ).first()
         if alloc and prev_status == "approved":
             balances = copy.deepcopy(alloc.leave_balances or {})
-            lt = record.leave_type
+            lt = _nz_public_leave_type(record.leave_type)
             if lt in balances:
                 used = balances[lt].get("used", 0)
                 balances[lt]["used"] = max(0, used - record.days)
@@ -39382,7 +39464,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
                         {"status": record.status},
                     ),
                     sender, employee.email, employee.name,
-                    record.leave_type, str(record.start_date), str(record.end_date),
+                    _nz_public_leave_type(record.leave_type), str(record.start_date), str(record.end_date),
                     record.days, record.request_code,
                     send_kwargs={"organization_id": organization_id},
                     organization_id=organization_id, actor_user_id=reviewer_id, db=db,

@@ -677,6 +677,21 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{14}$", "example": "13101234567000", "primary": False},
         ],
     },
+    # New Zealand (ZP-NZ-ENG-001 Phase 0) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live New Zealand payroll stays disabled until
+    # release gates G1-G7 are signed and the registry row leaves PLANNED.
+    # Only the public NZBN lives here, because these identifiers are stored in
+    # plaintext on the organisation. The employer IRD number can be a sole
+    # trader's personal IRD number, so it is held encrypted in the NZ IRD vault
+    # (Phase 2) and checked with nz_ird_number_valid below.
+    "NZ": {
+        "label": "NZBN",
+        "currency": "NZD",
+        "fields": [
+            {"key": "nzbn", "label": "NZBN (New Zealand Business Number, 13 digits)",
+             "pattern": r"^\d{13}$", "example": "9429041234567", "primary": True},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -733,6 +748,13 @@ COUNTRY_NAME_TO_CODE = {
     "japan": "JP",
     "nippon": "JP",
     "nihon": "JP",
+    # Without these, "New Zealand" truncates to "NE" (Nebraska / Niger) in
+    # payroll.service._normalize_country.
+    "new zealand": "NZ",
+    "newzealand": "NZ",
+    "aotearoa": "NZ",
+    "aotearoa new zealand": "NZ",
+    "nzl": "NZ",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -762,6 +784,7 @@ CODE_TO_COUNTRY_NAME = {
     "BR": "Brazil",
     "ZA": "South Africa",
     "JP": "Japan",
+    "NZ": "New Zealand",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this
@@ -778,6 +801,33 @@ ALL_CODE_TO_COUNTRY_NAME = {
     **CODE_TO_COUNTRY_NAME,
     "CA": "Canada",
 }
+
+
+_NZ_IRD_PRIMARY_WEIGHTS = (3, 2, 7, 6, 5, 4, 3, 2)
+_NZ_IRD_SECONDARY_WEIGHTS = (7, 4, 3, 2, 5, 2, 7, 6)
+
+
+def nz_ird_number_valid(value) -> bool:
+    """Inland Revenue's IRD-number check (an algorithm, not a statutory rate):
+    8 or 9 digits (dashes and spaces ignored) in the range 10,000,000 to
+    150,000,000, with a modulus-11 check digit. When the primary weights give
+    a check digit of 10, the secondary weights are used instead; 10 again
+    means the number is invalid."""
+    if value is None:
+        return False
+    digits = "".join(ch for ch in str(value) if ch not in " -")
+    if not digits.isdigit() or len(digits) not in (8, 9):
+        return False
+    number = int(digits)
+    if not 10_000_000 < number < 150_000_000:
+        return False
+    base, check = digits[:-1].zfill(8), int(digits[-1])
+    for weights in (_NZ_IRD_PRIMARY_WEIGHTS, _NZ_IRD_SECONDARY_WEIGHTS):
+        remainder = sum(int(d) * w for d, w in zip(base, weights)) % 11
+        expected = 0 if remainder == 0 else 11 - remainder
+        if expected != 10:
+            return expected == check
+    return False
 
 
 def get_jurisdiction_code(country) -> Optional[str]:

@@ -154,6 +154,16 @@ def calculate_payroll(
             "Japan payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "NZ" and key == "simple":
+        # New Zealand (ZP-NZ-ENG-001): simple mode would silently skip PAYE/ACC,
+        # KiwiSaver/ESCT, student loan and authority deductions. Fail-closed.
+        from app.modules.payroll.engine.countries.new_zealand import NZCalculationBlockedError
+
+        raise NZCalculationBlockedError(
+            "NZ_SIMPLE_MODE_UNSUPPORTED",
+            "New Zealand payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -279,6 +289,7 @@ def build_context_from_employee(
     brazil_inputs: dict | None = None,
     south_africa_inputs: dict | None = None,
     japan_inputs: dict | None = None,
+    nz_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -484,4 +495,7 @@ def build_context_from_employee(
         # jp_resident_tax_assessments and jp_* context fields resolved by
         # japan_service (Phase 5 calc_inputs).
         **(japan_inputs or {}),
+        # New Zealand (ZP-NZ-ENG-001): nz_* context fields resolved by
+        # new_zealand_service.calc_inputs as of the run's payday (NZ-008).
+        **(nz_inputs or {}),
     )

@@ -45,6 +45,9 @@ _GUARDED = [
     "a1a748b50902",  # Japan work calendar + attendance approvals (guarded, lock_timeout)
     "41a1fafbbfdc",  # Japan P8 lifecycle and filings (guarded, lock_timeout)
     "b8bd939fffca",  # Japan P9 parallel cycles (guarded, lock_timeout)
+    "0e697c2388bf",  # New Zealand P2 nz_foundation (guarded from day one, lock_timeout)
+    "ac08988ecd3a",  # New Zealand P5 nz_holidays_act (guarded from day one, lock_timeout)
+    "c6ea8c6c35ce",  # New Zealand P6 nz_leave_pay (guarded from day one, lock_timeout)
 ]
 
 
