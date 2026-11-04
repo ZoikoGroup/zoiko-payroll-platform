@@ -1431,7 +1431,11 @@ def _nz_payslip_hold_view(item) -> Optional[dict]:
 
 
 def _nz_statutory_editors(db: Session, pack) -> set:
-    return set()
+    """Super Admins who edited or signed a statutory row of this pack version
+    (Phase 7a signing console): the pack approval refuses every one of them."""
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.statutory_editors(db, pack)
 
 
 NZ_RETENTION_CATEGORIES = (

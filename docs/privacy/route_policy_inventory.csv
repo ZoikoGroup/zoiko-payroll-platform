@@ -1256,6 +1256,12 @@ POST,/api/super-admin/compliance/netherlands/tax-tables/import,platform,create,i
 PUT,/api/super-admin/compliance/netherlands/tax-tables/{file_id}/{action},platform,update,tax-tables,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/netherlands/vcr,worker,read,vcr,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),,yes,per-employee cumulative wage snapshots (takes employee_id)
 GET,/api/super-admin/compliance/netherlands/wkr-bands,platform,read,wkr-bands,super_admin,platform,,,,no,
+PUT,/api/super-admin/compliance/new-zealand/configuration/rows/{kind}/{row_id},platform,update,rows,super_admin,platform,,,,no,
+DELETE,/api/super-admin/compliance/new-zealand/configuration/table-rows/{row_id},platform,delete,table-rows,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/new-zealand/decisions,platform,read,decisions,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/new-zealand/packs,platform,read,packs,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/tables/{rule_type}/rows,platform,create,rows,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/policies,platform,read,policies,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/policies,platform,update,policies,super_admin,platform,,,payslip_items,yes,"verified config: upserts a jurisdiction pack; returns the pack, no worker rows"
 PUT,/api/super-admin/compliance/policies/{id}/approve,platform,update,approve,super_admin,platform,,,,no,

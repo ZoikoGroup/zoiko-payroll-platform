@@ -4669,6 +4669,67 @@ def hong_kong_configuration_update_row(kind: str, row_id: int, payload: HkConfig
     return hong_kong_service.update_row(db, kind, row_id, payload.model_dump(exclude_none=True), current_user.id)
 
 
+# ── New Zealand signing console (ZP-NZ-ENG-001 Phase 7a, decision Option 1) ──
+# Super Admin values drive the NZ calculation only through governance: a
+# governed edit / sign with a source and a reason, a distinct approver (the
+# editors are refused), then activation, which still refuses while any row is
+# pending or any authority table is empty.
+@router.get("/compliance/new-zealand/packs", summary="New Zealand packs with their status")
+def new_zealand_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.list_packs(db)
+
+
+@router.get("/compliance/new-zealand/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a New Zealand pack (pending rows, empty tables, editors)")
+def new_zealand_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                               db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/new-zealand/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one New Zealand statutory row (editable packs; source + reason; audited)")
+def new_zealand_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/new-zealand/packs/{pack_row_id}/tables/{rule_type}/rows",
+             summary="Add a row to a New Zealand authority table (editable packs; source + reason; audited)")
+def new_zealand_add_table_row(pack_row_id: int, rule_type: str, payload: dict = Body(...),
+                              current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.add_table_row(db, pack_row_id, rule_type, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.delete("/compliance/new-zealand/configuration/table-rows/{row_id}",
+               summary="Remove a New Zealand authority-table row (editable packs; reason; audited)")
+def new_zealand_delete_table_row(row_id: int, reason: Optional[str] = Query(None),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.delete_table_row(db, row_id, {"reason": reason}, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/new-zealand/decisions", summary="New Zealand owner decisions D-1 to D-7")
+def new_zealand_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.decisions(db)
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,
