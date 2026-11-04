@@ -3081,6 +3081,8 @@ export const calculateNzFinalPay = (id, agreement) =>
 export const approveNzFinalPay = (id) => api.post(`${NZ}/final-pay-cases/${id}/approve`, {});
 export const cancelNzFinalPay = (id, reason) => api.post(`${NZ}/final-pay-cases/${id}/cancel`, { reason });
 export const createNzSpecialRun = (body) => api.post(`${NZ}/runs/special`, body);
+export const listNzCorrections = async (employeeId) =>
+  nzList(await api.get(`${NZ}/corrections`, { params: employeeId ? { employee_id: employeeId } : undefined }));
 export const createNzCorrection = (itemId, body) => api.post(`${NZ}/payslips/${itemId}/corrections`, body);
 export const approveNzCorrection = (id) => api.post(`${NZ}/corrections/${id}/approve`, {});
 export const applyNzCorrection = (id, payDate) => api.post(`${NZ}/corrections/${id}/apply`, { payDate });

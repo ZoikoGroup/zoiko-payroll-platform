@@ -59,6 +59,10 @@ const NZ_FILES = [
   "modules/payroll/Payroll_Employees/NZLeaveSections.jsx",
   "modules/payroll/Payroll_Employees/NZNoticeSection.jsx",
   "modules/payroll/Payroll_Employees/NZIrdNumberField.jsx",
+  // P7d — runs, special payments, corrections
+  "modules/payroll/PayRollRuns/NZPayslipBreakdown.jsx",
+  "modules/payroll/PayRollRuns/NZRunPreflightPanel.jsx",
+  "modules/payroll/Compliances/NZPaymentsSection.jsx",
 ];
 const files = Object.fromEntries(NZ_FILES.map((f) => [f, read(f)]));
 const contentJs = files["components/jurisdiction/new_zealand/nzContent.js"];
@@ -214,6 +218,45 @@ check("The NZ Compliance Centre tab and the employee panel are mounted", () => {
   const employee = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
   assert(compliance.includes("<NZComplianceCentreTab />") && /isNewZealand \? \[NZ_TAB\]/.test(compliance), "compliance tab");
   assert(employee.includes('employee.countryCode === "NZ"') && employee.includes("<NewZealandStatutoryProfilePanel"), "employee panel");
+});
+
+// ── P7d: runs and the shared leave screens ───────────────────────────────────
+check("The NZ payslip breakdown and preflight are mounted on run details", () => {
+  const runs = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  assert(/=== "NZ" && item\.nzCalculationSnapshot && <NZPayslipBreakdown/.test(runs), "breakdown");
+  assert(/=== "NZ"\) && <NZRunPreflightPanel runId=\{run\.id\} \/>/.test(runs), "preflight");
+});
+check("The payslip breakdown only reads the frozen result (no frozen inputs, no recalculation)", () => {
+  const breakdown = files["modules/payroll/PayRollRuns/NZPayslipBreakdown.jsx"];
+  assert(!/frozenContext|calculate|api\./.test(breakdown), "breakdown must only render the snapshot");
+  assert(breakdown.includes('"RESTRICTED_LEAVE" ? "Restricted leave"'), "restricted leave lines stay masked");
+});
+check("Special runs and corrections are reachable from the NZ Compliance Centre", () =>
+  centre.includes("<NZPaymentsSection />"));
+check("NZ leave types are exactly the ones the backend accepts", () => {
+  const leaveService = readBackend("app/modules/payroll/nz_leave_service.py");
+  const requestBlock = leaveService.slice(leaveService.indexOf("NZ_REQUEST_TYPES = {"), leaveService.indexOf("}", leaveService.indexOf("NZ_REQUEST_TYPES = {")));
+  const backend = [...requestBlock.matchAll(/"([a-z_]+)":/g)].map((m) => m[1]);
+  backend.push("nz_family_violence");                       // keyed by the FAMILY_VIOLENCE_REQUEST constant
+  const passthrough = /NZ_PASSTHROUGH_TYPES = \(([^)]+)\)/.exec(leaveService)[1].match(/"([a-z_]+)"/g).map((x) => x.replace(/"/g, ""));
+  const options = files["components/jurisdiction/new_zealand/nzOrgOptions.js"];
+  const ui = [...options.slice(options.indexOf("NZ_LEAVE_REQUEST_TYPES = ["), options.indexOf("];", options.indexOf("NZ_LEAVE_REQUEST_TYPES = [")))
+    .matchAll(/key: "([a-z_]+)"/g)].map((m) => m[1]).concat(options.includes("key: NZ_FAMILY_VIOLENCE") ? ["nz_family_violence"] : []);
+  const want = [...new Set([...backend, ...passthrough])].sort();
+  assert(JSON.stringify([...new Set(ui)].sort()) === JSON.stringify(want), `ui ${[...new Set(ui)].sort()} vs backend ${want}`);
+});
+check("The leave form gives NZ employees the NZ types and never sends a family-violence reason", () => {
+  const leaves = read("modules/payroll/Attendance/Payroll_Leaves.jsx");
+  assert(/applyIsNz \? NZ_LEAVE_REQUEST_TYPES : LEAVE_TYPES/.test(leaves), "NZ types for NZ employees only");
+  assert(/reason: applyForm\.leaveType === NZ_FAMILY_VIOLENCE \? undefined : applyForm\.reason/.test(leaves), "reason not sent");
+  assert(/applyForm\.leaveType === NZ_FAMILY_VIOLENCE \? \(/.test(leaves) && leaves.includes('data-testid="nz-fv-no-reason"'),
+    "reason box hidden");
+  assert(/reason: lt\.key === NZ_FAMILY_VIOLENCE \? "" : f\.reason/.test(leaves), "reason cleared on switching to it");
+});
+check("Shared leave screens label NZ types and mark balances as a planning view", () => {
+  assert(/\.\.\.NZ_LEAVE_LABELS/.test(read("modules/payroll/Attendance/LeaveRequestsTab.jsx")), "labels");
+  assert(read("modules/payroll/Attendance/LeaveBalancesTab.jsx").includes('data-testid="nz-planning-view-note"'), "planning note");
+  assert(/restricted: "Restricted leave"/.test(files["components/jurisdiction/new_zealand/nzOrgOptions.js"]), "restricted label");
 });
 
 // ── mounting ────────────────────────────────────────────────────────────────

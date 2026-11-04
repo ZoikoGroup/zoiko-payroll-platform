@@ -371,7 +371,7 @@ def test_router_is_dormant_until_onboarding_is_enabled(db, organization, monkeyp
 def test_every_nz_route_is_behind_the_dormancy_guard():
     from app.modules.payroll.nz_org_router import require_nz_tenant, router
 
-    assert len(router.routes) == 67           # 32 (P4) + 16 (P5) + 17 (P6) + 2 list routes (P7c)
+    assert len(router.routes) == 68           # 32 (P4) + 16 (P5) + 17 (P6) + 2 (P7c) + corrections list (P7d)
     assert any(dep.dependency is require_nz_tenant for dep in router.dependencies)
     assert all(route.path.startswith("/new-zealand/") for route in router.routes)
 

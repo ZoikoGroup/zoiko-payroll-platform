@@ -29,6 +29,26 @@ export const CONTINUITY = ["NEW_INSTANCE", "CONTINUOUS"];
 export const PAYG_BASES = ["FIXED_TERM_UNDER_12_MONTHS", "IRREGULAR_INTERMITTENT"];
 export const OWD_DECISIONS = ["YES", "NO"];
 
+// Leave types a New Zealand employee's request may use (nz_leave_service
+// NZ_REQUEST_TYPES + the pass-through "unpaid"). Family violence leave never
+// records a reason: the form hides and clears it, and the server refuses one.
+export const NZ_FAMILY_VIOLENCE = "nz_family_violence";
+export const NZ_LEAVE_REQUEST_TYPES = [
+  { key: "annual", label: "Annual holidays", icon: "🌴" },
+  { key: "sick", label: "Sick leave", icon: "🏥" },
+  { key: "nz_bereavement_close", label: "Bereavement (immediate family)", icon: "🕊️" },
+  { key: "nz_bereavement_other", label: "Bereavement (other)", icon: "🕊️" },
+  { key: NZ_FAMILY_VIOLENCE, label: "Family violence leave", icon: "🛡️" },
+  { key: "nz_alternative", label: "Alternative holiday", icon: "🔁" },
+  { key: "unpaid", label: "Unpaid leave", icon: "🆓" },
+];
+// Labels for shared screens; "restricted" is how family-violence leave appears
+// on attendance and balances (the server never names it there).
+export const NZ_LEAVE_LABELS = {
+  ...Object.fromEntries(NZ_LEAVE_REQUEST_TYPES.map((t) => [t.key, t.label])),
+  restricted: "Restricted leave",
+};
+
 // A reason is required on every New Zealand statutory write (NZ-024).
 export const REASON_FIELD = { key: "reason", label: "Reason for the change", required: true };
 

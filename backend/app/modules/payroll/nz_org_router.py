@@ -615,6 +615,13 @@ def nz_create_special_run(body: Dict[str, Any] = Body(...), current_user=Depends
             "paymentKind": run.nz_payment_kind, "options": run.nz_run_options or {}}
 
 
+@router.get("/corrections", summary="Compensating corrections (optionally one employee's)")
+def nz_list_corrections(employee_id: Optional[int] = None, current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    life = _life()
+    return [life.correction_view(row) for row in life.list_corrections(db, _org_id(current_user), employee_id)]
+
+
 @router.post("/payslips/{item_id}/corrections", summary="Create a compensating correction of a paid payslip")
 def nz_create_correction(item_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
                          db: Session = Depends(get_db)):

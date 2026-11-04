@@ -417,6 +417,16 @@ def void_correction(db: Session, organization_id: int, correction_id: int, actor
     return row
 
 
+def list_corrections(db: Session, organization_id: int, employee_id: Optional[int] = None) -> list:
+    m = nzs._nz_models()
+    K = m.PayrollNzCorrection
+    query = db.query(K).filter(K.organization_id == organization_id)
+    if employee_id is not None:
+        nzs._nz_employee(db, organization_id, employee_id)
+        query = query.filter(K.employee_id == employee_id)
+    return query.order_by(K.id.desc()).all()
+
+
 def correction_view(row) -> dict:
     return {"id": row.id, "employeeId": row.employee_id, "originalPayslipItemId": row.original_payslip_item_id,
             "correctionRunId": row.correction_run_id, "correctionPayslipItemId": row.correction_payslip_item_id,
