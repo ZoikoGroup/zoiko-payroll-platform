@@ -747,8 +747,8 @@ export const previewPayrollRun = async (employeeIds, country = "IN", periodStart
 // Shared calendar backing LOP proration in the payroll engine. Intended to
 // also replace whatever separate holiday sources the Attendance/Leave pages
 // currently use, so all three agree on the same list.
-export const getPayrollHolidays = async (year) => {
-  return await api.get("/api/payroll/holidays", { params: year ? { year } : {} });
+export const getPayrollHolidays = async (year, country) => {
+  return await api.get("/api/payroll/holidays", { params: { ...(year ? { year } : {}), ...(country ? { country } : {}) } });
 };
 
 export const upsertPayrollHolidays = async (holidays) => {

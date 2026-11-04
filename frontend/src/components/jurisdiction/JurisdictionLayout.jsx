@@ -113,6 +113,7 @@ export default function JurisdictionLayout({
   const [audit, setAudit] = useState([]);
 
   const [showNewPack, setShowNewPack] = useState(false);
+  const [newVersionFromPackId, setNewVersionFromPackId] = useState<string | null>(null);
   const [showEditOverview, setShowEditOverview] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [showImpactPreview, setShowImpactPreview] = useState(false);
@@ -344,8 +345,20 @@ export default function JurisdictionLayout({
             about pack selection itself moves or transforms anything. */}
         <div className="min-w-0 rounded-xl border border-border bg-surface p-5">
           {!selectedPack ? (
-            <div className="flex h-64 items-center justify-center">
-              <p className="text-sm text-foreground-disabled">Select a pack from the list to view/edit it.</p>
+            <div className="flex h-64 items-center justify-center flex-col gap-2">
+              <p className="text-sm text-foreground-disabled">No {packType} pack selected — select one from the list, or create a new one.</p>
+              <button
+                onClick={() => {
+                  if (packType === "policy") {
+                    navigate(`/super-admin/compliance/policy/new?mode=new&country=${country}${state ? `&state=${encodeURIComponent(state)}` : ""}`);
+                  } else {
+                    setShowNewPack(true);
+                  }
+                }}
+                className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-primary-hover"
+              >
+                <Plus size={13} className="shrink-0" /> Create New {packType === "tax" ? "Tax" : "Policy"} Pack
+              </button>
             </div>
           ) : (
             <>
@@ -385,6 +398,12 @@ export default function JurisdictionLayout({
                         className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
                       >
                         <Pencil size={13} /> Edit
+                      </button>
+                      <button
+                        onClick={() => { setNewVersionFromPackId(selectedPack.packId); setShowNewPack(true); }}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <Plus size={13} /> New Version
                       </button>
                       {/* Maker-checker (ZP-TAX-UK-2026-27-001 section 19.2): a
                           distinct Super Admin from whoever last edited the pack
@@ -581,9 +600,11 @@ export default function JurisdictionLayout({
       {showNewPack && (
         <NewPackFormComponent
           country={country} state={state} packType={packType} stateOptions={stateOptions}
-          onClose={() => setShowNewPack(false)}
+          defaultPackId={newVersionFromPackId}
+          onClose={() => { setShowNewPack(false); setNewVersionFromPackId(null); }}
           onCreated={(created) => {
             setShowNewPack(false);
+            setNewVersionFromPackId(null);
             loadPacks();
             setSelectedPack(created);
             // A brand-new state (e.g. typed into the pack's State field)

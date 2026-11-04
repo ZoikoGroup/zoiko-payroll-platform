@@ -7,13 +7,20 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 // component — this one stays untouched for everyone else. Extracted
 // verbatim from the old monolithic CompliancePage.jsx.
 export default function SlabsTab({ pack, slabs, onAdd, onEdit, onDelete }) {
+  const isActive = pack?.status === "Active";
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-foreground-muted">Canonical tax brackets linked to this pack.</p>
-        <button onClick={onAdd} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover">
-          <Plus size={13} /> Add Bracket
-        </button>
+        {isActive ? (
+          <span className="rounded-lg border border-error/40 bg-error/5 px-3 py-1.5 text-xs font-medium text-error">
+            Active pack — brackets are locked. Use "New Version" to create an editable draft.
+          </span>
+        ) : (
+          <button onClick={onAdd} disabled={isActive} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover disabled:opacity-50 disabled:hover:bg-primary">
+            <Plus size={13} /> Add Bracket
+          </button>
+        )}
       </div>
       {slabs.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border-light px-3 py-8 text-center text-xs text-foreground-disabled">No tax slabs yet.</p>

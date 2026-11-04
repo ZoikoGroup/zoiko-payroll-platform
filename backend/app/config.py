@@ -148,6 +148,17 @@ class Settings(BaseSettings):
     # ── Public-facing links (e.g. "Send Template" form-fill emails) ────
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # ── Google Sign-In (OAuth 2.0) ─────────────────────────────────────
+    # Client credentials from Google Cloud Console. Authorized redirect URIs
+    # must include the /auth/google/callback route for each environment.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:5173/auth/google/callback"
+    # Google OAuth endpoints (stable, no env override needed).
+    GOOGLE_AUTH_URL: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URL: str = "https://www.googleapis.com/oauth2/v2/userinfo"
+
     # ── Email / SMTP ──────────────────────────────────────────────────
     SMTP_HOST: str = ""
     SMTP_PORT: str = "587"

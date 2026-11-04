@@ -1121,9 +1121,6 @@ class BulkUpsertResponse(BaseModel):
     created:   int = 0
     employees: List[EmployeeResponse] = []
     failed:    List[dict] = []
-    created: int
-    employees: List[EmployeeResponse]
-    failed: List[dict] = []
 
     model_config = ConfigDict(populate_by_name=True)
 

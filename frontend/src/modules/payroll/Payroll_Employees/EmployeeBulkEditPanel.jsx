@@ -29,7 +29,11 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
   const { addToast } = useToast();
   const symbol = currencyInfo?.symbol || "";
   const hasSelection = selectedIds && selectedIds.size > 0;
-  const [scope, setScope] = useState(hasSelection ? "selected" : "all");
+  // Scope is derived directly from selection state: if any employees are
+  // selected, scope is "selected"; otherwise it's "all". This avoids stale
+  // state issues where useState + useEffect could leave scope out of sync
+  // with the actual selection.
+  const scope = hasSelection ? "selected" : "all";
   const [checked, setChecked] = useState({});
   const [values, setValues] = useState({});
   const [saving, setSaving] = useState(false);
@@ -117,21 +121,16 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
-            onClick={() => hasSelection && setScope("selected")}
             disabled={!hasSelection}
-            className={`flex-1 flex items-center gap-2.5 rounded-[12px] border px-4 py-3 text-left text-[13px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
-              scope === "selected" ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground-muted"
-            }`}
+            className={`flex-1 flex items-center gap-2.5 rounded-[12px] border px-4 py-3 text-left text-[13px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${scope === "selected" ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground-muted"}`}
           >
             {scope === "selected" ? <CheckSquare size={16} /> : <Square size={16} />}
             Selected employees ({selectedIds?.size || 0})
           </button>
           <button
             type="button"
-            onClick={() => setScope("all")}
-            className={`flex-1 flex items-center gap-2.5 rounded-[12px] border px-4 py-3 text-left text-[13px] font-semibold transition-all duration-200 ${
-              scope === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground-muted"
-            }`}
+            disabled={hasSelection}
+            className={`flex-1 flex items-center gap-2.5 rounded-[12px] border px-4 py-3 text-left text-[13px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${scope === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground-muted"}`}
           >
             <Users size={16} />
             All employees in this list ({employees.length})
@@ -150,9 +149,7 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
             return (
               <div
                 key={field.key}
-                className={`rounded-[12px] border px-3.5 py-3 transition-all duration-200 ${
-                  isChecked ? "border-primary bg-primary/5" : "border-border"
-                }`}
+                className={`rounded-[12px] border px-3.5 py-3 transition-all duration-200 ${isChecked ? "border-primary bg-primary/5" : "border-border"}`}
               >
                 <button
                   type="button"
@@ -188,8 +185,8 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
                   </div>
                 )}
               </div>
-            );
-          })}
+            )}
+          )}
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import {
   getEmployees, getLeaveRecords, getPayrollLeaveRequests, createPayrollLeaveRequest, reviewPayrollLeaveRequest,
   getPayrollHolidays, upsertPayrollHolidays, deletePayrollHoliday,
 } from "../../../service/payrollService";
+import { getMySubscription } from "../../../service/billingService";
 import LeaveRequestsTab from "./LeaveRequestsTab";
 import HolidaysTab from "./HolidaysTab";
 import LeaveBalancesTab from "./LeaveBalancesTab";
@@ -122,6 +123,17 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
             </button>
           )}
         </div>
+        {statusFilter !== "all" || search !== "" ? (
+          <button
+            onClick={() => {
+              setStatusFilter("all");
+              setSearch("");
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-xs font-medium text-foreground-secondary hover:bg-surface-muted transition-colors"
+          >
+            <X size={13} className="shrink-0" /> Clean filters
+          </button>
+        ) : null}
       </div>
 
       <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -223,8 +235,9 @@ export default function PayrollLeavesPage() {
   requestsRef.current = requests;
   const [activeTab, setActiveTab] = useState("requests");
 
-  // Company holidays — the real backend list (payroll_holidays), the same
-  // one Attendance's Bulk Generation "Exclude Holidays" reads from.
+  // Company holidays — filtered by the org's jurisdiction country so a UK org
+  // doesn't show Indian holidays just because it has an Indian employee.
+  const [orgCountry, setOrgCountry] = useState("");
   const [holidays, setHolidays] = useState([]);
   const [holidaysLoading, setHolidaysLoading] = useState(false);
 
@@ -250,12 +263,19 @@ export default function PayrollLeavesPage() {
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [holidays]);
 
-  const jurisdictionCountry = allHolidays[0]?.country || "";
+  const jurisdictionCountry = orgCountry || allHolidays[0]?.country || "";
 
   const loadHolidays = useCallback(async () => {
     setHolidaysLoading(true);
     try {
-      const data = await getPayrollHolidays(currentYear);
+      // Determine the org's jurisdiction country from the subscription's
+      // primary country so we only show that country's holidays.
+      const subData = await getMySubscription();
+      const primaryCountry = (subData?.country_usage?.countries || [])
+        .find((c) => c.isPrimary)?.code || "";
+      setOrgCountry(primaryCountry);
+
+      const data = await getPayrollHolidays(currentYear, primaryCountry || undefined);
       const list = Array.isArray(data) ? data : data?.items || data?.holidays || [];
       setHolidays(list);
     } catch {

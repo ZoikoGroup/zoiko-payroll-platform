@@ -4,10 +4,10 @@ import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
 import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS } from "./constants";
 
-export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated }) {
+export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated, defaultPackId }) {
   const { addToast } = useToast() || {};
   const [form, setForm] = useState({
-    packId: "", jurisdictionState: state || "", version: "1.0", status: "Draft",
+    packId: defaultPackId || "", jurisdictionState: state || "", version: "1.0", status: "Draft",
     effectiveFrom: "", effectiveTo: "", taxYear: "", taxRegime: "", currency: "",
     regulatoryAuthority: "", complianceCategory: "", complianceOwner: "", engineeringOwner: "", changeSummary: "",
     nextReviewDate: "", sourceReferences: "",

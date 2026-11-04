@@ -2330,10 +2330,11 @@ def review_leave_request(
 )
 def list_holidays(
     year: Optional[int] = Query(None),
+    country: Optional[str] = Query(None, description="Filter holidays by 2-letter country code (e.g. UK, IN)"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.list_holidays(db, current_user.organization_id, year=year)
+    return service.list_holidays(db, current_user.organization_id, year=year, country=country)
 
 
 @payroll_router.post(

@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Eye, KeyRound, RefreshCw, Users as UsersIcon } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-import { apiFetch } from "../api/client";
+import { apiFetch, clearSession } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import SearchInput from "../components/SearchInput";
 import StatusPill from "../components/StatusPill";
@@ -22,8 +23,26 @@ function initialsFor(firstName, lastName, email) {
   );
 }
 
+// Role badge styling
+function roleBadge(role) {
+  const map = {
+    org_admin: "bg-blue-50 text-blue-700",
+    payroll_admin: "bg-indigo-50 text-indigo-700",
+    employee: "bg-slate-50 text-slate-700",
+  };
+  return `inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${map[role] || "bg-surface-muted text-foreground-secondary"}`;
+}
+
+// ZP-PRIV A03: platform staff cannot reset credentials for a tenant user
+// without tenant consent or a live JIT support grant. A tenant user has a
+// non-null organization_id; a platform user has organization_id === null.
+function canResetPassword(u) {
+  return u.organization_id == null;
+}
+
 export default function UsersPage() {
   const { addToast } = useToast();
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -44,9 +63,17 @@ export default function UsersPage() {
         setUsers(data.users);
         setTotal(data.total);
       })
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        // 401/403 means the session is invalid — clear it and send to login.
+        if (err.status === 401 || err.status === 403) {
+          clearSession();
+          navigate("/login", { replace: true });
+          return;
+        }
+        setError(err.message);
+      })
       .finally(() => setLoading(false));
-  }, [search, role]);
+  }, [search, role, navigate]);
 
   useEffect(() => {
     load();
@@ -66,6 +93,11 @@ export default function UsersPage() {
       addToast?.(`User ${u.email} ${u.is_active ? "deactivated" : "activated"}.`);
       load();
     } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        clearSession();
+        navigate("/login", { replace: true });
+        return;
+      }
       addToast?.(err.message, "error");
     } finally {
       setBusyId(null);
@@ -76,8 +108,14 @@ export default function UsersPage() {
     setBusyId(u.id);
     try {
       await apiFetch(`/api/super-admin/users/${u.id}/reset-password`, { method: "PUT" });
-      addToast?.(`Reset link sent to ${u.email}.`);
+      addToast?.(`Password reset link sent to ${u.email}.`);
+      load();
     } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        clearSession();
+        navigate("/login", { replace: true });
+        return;
+      }
       addToast?.(err.message, "error");
     } finally {
       setBusyId(null);
@@ -88,7 +126,9 @@ export default function UsersPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Platform Users</h1>
-        <p className="text-sm text-foreground-muted mt-0.5">{loading ? "Loading…" : `${total} user${total === 1 ? "" : "s"}`}</p>
+        <p className="text-sm text-foreground-muted mt-0.5">
+          {loading ? "Loading…" : `${total} user${total === 1 ? "" : "s"}`}
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4">
@@ -146,16 +186,23 @@ export default function UsersPage() {
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
                       {initialsFor(u.first_name, u.last_name, u.email)}
                     </span>
-                    {u.first_name} {u.last_name}
+                    <div className="flex flex-col">
+                      <span className="font-medium text-foreground">
+                        {u.first_name} {u.last_name}
+                      </span>
+                      {u.organization_id == null && (
+                        <span className="text-[10px] text-foreground-muted">Platform account</span>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-foreground-secondary">{u.email}</td>
                 <td className="px-4 py-3">
-                  <span className="inline-block rounded-full bg-surface-muted px-2 py-0.5 text-xs font-medium text-foreground-secondary">
-                    {u.role}
-                  </span>
+                  <span className={roleBadge(u.role)}>{u.role}</span>
                 </td>
-                <td className="px-4 py-3 text-foreground-muted">{u.organization_name || "—"}</td>
+                <td className="px-4 py-3 text-foreground-muted">
+                  {u.organization_name || (u.organization_id == null ? "— (platform)" : "—")}
+                </td>
                 <td className="px-4 py-3">
                   <StatusPill status={u.is_active ? "active" : "inactive"} />
                 </td>
@@ -187,9 +234,18 @@ export default function UsersPage() {
                       {u.is_active ? "Deactivate" : "Activate"}
                     </button>
                     <button
-                      disabled={busyId === u.id}
+                      disabled={busyId === u.id || !canResetPassword(u)}
+                      title={
+                        !canResetPassword(u)
+                          ? "Cannot reset tenant credentials without tenant consent or a live JIT support grant (ZP-PRIV A03)"
+                          : undefined
+                      }
                       onClick={() => resetPassword(u)}
-                      className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
+                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
+                        !canResetPassword(u)
+                          ? "bg-surface-muted text-foreground-disabled cursor-not-allowed"
+                          : "bg-surface-muted text-foreground-secondary hover:bg-border-light"
+                      }`}
                     >
                       <KeyRound size={12} />
                       Reset PW
