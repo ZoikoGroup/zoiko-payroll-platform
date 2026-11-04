@@ -125,6 +125,15 @@ def submit_public_message(db, session_id: int, text: str) -> dict:
         if injection_markers:
             answer_text = guardrails.injection_boundary_response()["answer"]
             sources = []
+        elif (country := knowledge_module.find_mentioned_country(text)) and not knowledge_module.is_live_country(
+            country
+        ):
+            # Same no-substitution rule as the signed-in assistant: a country
+            # that isn't live gets the coverage answer, not another country's guidance.
+            answer_text = gateway.deterministic_answer(
+                intent_id, text, {"unsupported_jurisdiction": country}, []
+            )["answer"]
+            sources = []
         else:
             kb_candidates = knowledge_module.search_kb(db, PUBLIC_KB_ORG_SENTINEL, text, limit=3, record_run=False)
             knowledge_items = [
@@ -152,6 +161,9 @@ def submit_public_message(db, session_id: int, text: str) -> dict:
             else:
                 top = kb_candidates[0][1]
                 answer_text = f"{top.summary}\n\n{top.body}"
+            note = knowledge_module.live_country_note(text)
+            if note and knowledge_items:
+                answer_text = f"{note}\n\n{answer_text}"
             sources = [{"title": item.title, "authority": item.authority} for _score, item in kb_candidates]
 
     db.add(AssistPublicMessage(session_id=session.id, role="assistant", content=answer_text))

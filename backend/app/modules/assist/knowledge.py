@@ -26,7 +26,7 @@ from app.modules.assist.models import (
     KnowledgeSourceState,
     KnowledgeState,
 )
-from app.modules.assist.public_registry import live_country_names
+from app.modules.assist.public_registry import is_live_country, live_country_names
 
 logger = logging.getLogger("zoiko_payroll.assist.knowledge")
 
@@ -119,8 +119,24 @@ def find_mentioned_country(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def live_country_note(text: str) -> str | None:
+    """A one-line confirmation when `text` names a live jurisdiction, so a
+    country question isn't answered with only the generic multi-country article."""
+    country = find_mentioned_country(text)
+    if not country or not is_live_country(country):
+        return None
+    return (
+        f"{country} is one of the {len(live_country_names())} jurisdictions where Zoiko Payroll "
+        "runs payroll today, using its own versioned tax and statutory rules."
+    )
+
+
 def is_jurisdiction_supported(db: Session, org_id: int, country_name: str) -> bool:
-    """Whether `country_name` is the org's configured compliance jurisdiction.
+    """Whether Assist may give general guidance about `country_name`.
+
+    True for any jurisdiction live in the public country registry (general,
+    non-tenant product guidance), or for the org's configured compliance
+    jurisdiction.
 
     Local import avoids a hard module-level dependency between the Assist
     package and the payroll package for an org-scoped check used only here
@@ -138,6 +154,8 @@ def is_jurisdiction_supported(db: Session, org_id: int, country_name: str) -> bo
     from app.core.jurisdiction import get_jurisdiction_code
     from app.modules.payroll.models import CompanyComplianceDetails
 
+    if is_live_country(country_name):
+        return True
     compliance = (
         db.query(CompanyComplianceDetails)
         .filter(CompanyComplianceDetails.organization_id == org_id)

@@ -418,11 +418,15 @@ def deterministic_answer(
         }
 
     if tool_result and tool_result.get("unsupported_jurisdiction"):
+        from app.modules.assist.public_registry import live_country_names
+
         country = tool_result["unsupported_jurisdiction"]
         return {
             "answer": (
-                f"Approved guidance is not currently available for {country} for this period. "
-                "I don't substitute another jurisdiction's rule for one that isn't covered."
+                f"Zoiko Payroll doesn't currently run payroll in {country}, so I don't have approved "
+                "guidance for it — and I don't substitute another country's rules. "
+                f"Payroll is live today in: {', '.join(live_country_names())}. "
+                "To ask about expansion plans, contact our sales team or book a demo."
             ),
             "facts": [],
             "inferences": [],
@@ -458,8 +462,13 @@ def deterministic_answer(
     kb_requested = intent_id in ("kb.answer", "explain.field")
     if kb_requested:
         if knowledge_items:
+            from app.modules.assist.knowledge import live_country_note
+
             top = knowledge_items[0]
             answer = f"{top.get('summary')}\n\n{top.get('body')}"
+            note = live_country_note(user_text)
+            if note:
+                answer = f"{note}\n\n{answer}"
             sources = [
                 {"evidence_id": 0, "title": top.get("title"), "source_type": "KNOWLEDGE", "authority": top.get("authority")}
             ]

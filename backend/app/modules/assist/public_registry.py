@@ -67,3 +67,12 @@ def list_public_countries() -> dict:
 
 def live_country_names() -> list[str]:
     return [name for _code, name, _aliases in _LIVE_JURISDICTIONS]
+
+
+def is_live_country(country_name: str) -> bool:
+    """Whether `country_name` (display name or alias, any case) is live."""
+    wanted = (country_name or "").strip().lower()
+    return any(
+        wanted == name.lower() or wanted in (alias.lower() for alias in aliases)
+        for _code, name, aliases in _LIVE_JURISDICTIONS
+    )

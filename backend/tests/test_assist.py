@@ -1371,6 +1371,30 @@ def test_public_concierge_questions_get_grounded_answers(client):
         assert any(title_fragment in s["title"] for s in body["sources"]), (question, body["sources"])
 
 
+def test_public_country_questions_answer_live_and_refuse_others(client):
+    sid = _new_public_session(client)
+    for country in ("Canada", "Germany", "India"):
+        r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": f"How does payroll work in {country}?"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["answer"].startswith(f"{country} is one of the"), body["answer"]
+        assert body["sources"]
+
+    r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": "How does payroll work in Brazil?"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "doesn't currently run payroll in Brazil" in body["answer"]
+    assert "Canada" in body["answer"] and not body["sources"]
+
+
+def test_live_jurisdictions_are_supported_for_any_org():
+    from app.modules.assist import knowledge
+
+    assert knowledge.is_jurisdiction_supported(_db, 999999, "Canada")
+    assert knowledge.is_jurisdiction_supported(_db, 999999, "united kingdom")
+    assert not knowledge.is_jurisdiction_supported(_db, 999999, "Brazil")
+
+
 def test_default_kb_tops_up_missing_articles(client):
     from app.database import SessionLocal
     from app.modules.assist import knowledge
