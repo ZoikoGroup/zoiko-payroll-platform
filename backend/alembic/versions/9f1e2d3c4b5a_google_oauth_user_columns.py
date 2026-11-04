@@ -1,6 +1,6 @@
 """add google_oauth columns to users
 
-Revision ID: 9f1e2d3c4b5a_google_oauth_user_columns
+Revision ID: 9f1e2d3c4b5a
 Revises: b8bd939fffca
 Create Date: 2026-11-04
 
@@ -17,7 +17,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "9f1e2d3c4b5a_google_oauth_user_columns"
+revision: str = "9f1e2d3c4b5a"
 down_revision: Union[str, Sequence[str], None] = "b8bd939fffca"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

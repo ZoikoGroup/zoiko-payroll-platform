@@ -1,7 +1,7 @@
 """add google_pending table for Google sign-up flow
 
-Revision ID: 7a3c9e1f2b4d_google_pending_table
-Revises: 9f1e2d3c4b5a_google_oauth_user_columns
+Revision ID: 7a3c9e1f2b4d
+Revises: 9f1e2d3c4b5a
 Create Date: 2026-11-04
 
 Holds a Google profile under a single-use, short-lived token between the
@@ -13,8 +13,8 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "7a3c9e1f2b4d_google_pending_table"
-down_revision: Union[str, Sequence[str], None] = "9f1e2d3c4b5a_google_oauth_user_columns"
+revision: str = "7a3c9e1f2b4d"
+down_revision: Union[str, Sequence[str], None] = "9f1e2d3c4b5a"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

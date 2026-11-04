@@ -20,6 +20,7 @@ const STATUS_COLORS = {
 // to the canonical JurisdictionPack via upsertCompliancePolicy, which affects
 // all organizations sharing this pack. Use with care.
 export default function PackMetadataPanel({ country, state }) {
+  const { addToast } = useToast() || {};
   const [meta, setMeta] = useState({
     packId: "",
     version: "1.0",

@@ -113,7 +113,7 @@ export default function JurisdictionLayout({
   const [audit, setAudit] = useState([]);
 
   const [showNewPack, setShowNewPack] = useState(false);
-  const [newVersionFromPackId, setNewVersionFromPackId] = useState<string | null>(null);
+  const [newVersionFromPackId, setNewVersionFromPackId] = useState(null);
   const [showEditOverview, setShowEditOverview] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [showImpactPreview, setShowImpactPreview] = useState(false);

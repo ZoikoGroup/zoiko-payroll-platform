@@ -15,14 +15,13 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Callable, Optional
 
-import httpx
-
 from fastapi import BackgroundTasks
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core import google_oauth
 from app.core.code_generation import generate_employee_code, generate_organization_code
 from app.core.exceptions import (
     AlreadyExistsException,
@@ -812,8 +811,7 @@ def _google_tokens(code: str) -> dict:
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
         "grant_type": "authorization_code",
     }
-    with httpx.Client(timeout=20) as client:
-        resp = client.post(settings.GOOGLE_TOKEN_URL, data=data)
+    resp = google_oauth.exchange_code(settings.GOOGLE_TOKEN_URL, data)
     if resp.status_code >= 400:
         logger.warning("Google token exchange failed: %s", resp.text[:200])
         raise UnauthorizedException("Google sign-in failed. Please try again.")
@@ -822,9 +820,7 @@ def _google_tokens(code: str) -> dict:
 
 def _google_userinfo(access_token: str) -> dict:
     """Fetch the authenticated user's profile from Google."""
-    headers = {"Authorization": f"Bearer {access_token}"}
-    with httpx.Client(timeout=20) as client:
-        resp = client.get(settings.GOOGLE_USERINFO_URL, headers=headers)
+    resp = google_oauth.fetch_userinfo(settings.GOOGLE_USERINFO_URL, access_token)
     if resp.status_code >= 400:
         logger.warning("Google userinfo fetch failed: %s", resp.text[:200])
         raise UnauthorizedException("Google sign-in failed. Please try again.")
@@ -991,7 +987,7 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
     # the user to the registration page to finish org signup.
     token = _create_google_pending(db, profile, mode)
     first_name, last_name = _profile_display(profile)
-    logger.info("New Google identity %s needs registration (pending token %s)", email, token)
+    logger.info("New Google identity needs registration (mode=%s)", mode)
     return {
         "action": "pending",
         "token": token,
