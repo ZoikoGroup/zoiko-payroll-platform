@@ -42,6 +42,8 @@ KNOWN_PUBLIC = {
     ("GET", "/api/jurisdictions/tax-schemas"),
     ("GET", "/api/payroll/public/employee-forms/{token}"),
     ("POST", "/api/payroll/public/employee-forms/{token}/submit"),
+    ("GET", "/api/assist/public/health"),
+    ("GET", "/api/assist/public/payroll-countries"),
     ("POST", "/api/assist/public/sessions"),
     ("GET", "/api/assist/public/sessions/{session_id}/messages"),
     ("POST", "/api/assist/public/sessions/{session_id}/messages"),

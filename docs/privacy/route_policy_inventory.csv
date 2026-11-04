@@ -44,6 +44,8 @@ POST,/api/assist/knowledge/sources/{source_id}/reactivate,tenant_config,create,r
 GET,/api/assist/messages/{message_id},tenant_config,read,messages,org_admin|payroll_admin|support_temp,tenant,,,,no,
 GET,/api/assist/notices/current,tenant_config,read,current,org_admin|payroll_admin|support_temp,tenant,,,,no,
 POST,/api/assist/notices/{notice_version}/acknowledge,tenant_config,create,acknowledge,org_admin|payroll_admin,tenant,,,,no,
+GET,/api/assist/public/health,public,read,health,,public,,,,no,
+GET,/api/assist/public/payroll-countries,public,read,payroll-countries,,public,,,,no,
 POST,/api/assist/public/sessions,public,create,sessions,,public,,,,no,
 GET,/api/assist/public/sessions/{session_id}/messages,public,read,messages,,public,,,,no,
 POST,/api/assist/public/sessions/{session_id}/messages,public,create,messages,,public,,,,no,
