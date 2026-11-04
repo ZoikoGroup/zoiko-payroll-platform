@@ -123,9 +123,27 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                          "payroll_jp_work_conditions": {"scheduled_weekdays", "statutory_day_off_weekday",
                                                         "public_holidays_off"}}
         jp_tables |= jp_p6_tables
-        jp_columns = {"payslip_items": {"jp_calculation_snapshot"},
-                      "payroll_runs": {"jp_approval_fingerprint", "jp_payment_kind"},
-                      "payroll_jp_work_conditions": jp_p6_columns["payroll_jp_work_conditions"]}
+        # New Zealand P2 (0e697c2388bf, ZP-NZ-ENG-001): eight payroll_nz_* tables, the
+        # payslip snapshot, the run fingerprint and the run payment kind - pending on
+        # top of Japan P9, so pending from every revision below.
+        nz_tables = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz_ird_access_events",
+                     "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
+                     "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
+                     "payroll_nz_accumulator_entries",
+                     # New Zealand P6 (c6ea8c6c35ce): leave pay, cash-ups, final pay, corrections.
+                     "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
+                     "payroll_nz_cash_up_requests", "payroll_nz_corrections",
+                     # New Zealand P5 (ac08988ecd3a): Holidays Act tables.
+                     "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
+                     "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events"}
+        nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options"}   # + P6 options
+        jp_tables |= nz_tables
+        jp_p6_tables |= nz_tables
+        jp_columns = {"payslip_items": {"jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id"},
+                      "payroll_runs": {"jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns},
+                      "payroll_jp_work_conditions": jp_p6_columns["payroll_jp_work_conditions"],
+                      # New Zealand P6 (c6ea8c6c35ce) adds a column to its P5 table.
+                      "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
         # 668472e4eb72 (2026-10-30): organizations.timezone, on top of Japan Phase 2.
         tz_columns = {"organizations": {"timezone"}}
         mx_final_mile = {"payroll_mx_decisions", *MX_X4_TABLES}     # Mexico m20 (d3f8b2a6c1e9)
@@ -151,7 +169,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert_google_pending(tables, columns)
         assert tables == brazil_tables | za_tables | mx_final_mile | country | jp_tables | google_tables
         assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint",
-                                           "jp_approval_fingerprint", "jp_payment_kind"}
+                                           "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
         assert columns["payroll_jp_work_conditions"] == {"scheduled_weekdays", "statutory_day_off_weekday",
                                                          "public_holidays_off"}
         assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
@@ -166,17 +184,17 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert_google_pending(tables, columns)
         assert tables == za_tables | mx_final_mile | country | jp_tables | google_tables
         assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}                   # Mexico m18
-        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind"}
-        assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot"}
+        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
+        assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 13
         # Production since PR #136 (A18): Mexico m20 (d3f8b2a6c1e9) and South Africa
         # (447f57564983 -> c15d5b87d6f5) both grow from it, joined by merge 92c67cab49fc.
         tables, columns = pending_objects("c7d2e9a4f1b6")
         assert_google_pending(tables, columns)
-        assert tables == (za_tables | mx_final_mile | country | jp_tables | google_tables)
+        assert tables == (za_tables | mx_final_mile | country | jp_tables | nz_tables | google_tables)
         assert "payroll_mx_approved_hours" not in columns
-        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind"}
-        assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot"}
+        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
+        assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id"}
         assert len(columns["payroll_employee_statutory_profiles"]) == 13
         tables, columns = pending_objects("b9f3d5a1c7e2")
         assert_google_pending(tables, columns)
@@ -207,7 +225,10 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = pending_objects("f686d5128f8a")
         assert_google_pending(tables, columns)
         assert tables == jp_p6_tables | google_tables
-        assert columns == {**tz_columns, **jp_p6_columns, **google_columns}
+        assert columns == {**tz_columns, **jp_p6_columns, **google_columns,
+                           "payroll_runs": {"jp_payment_kind", *nz_run_columns},
+                           "payslip_items": {"nz_calculation_snapshot", "nz_correction_of_id"},
+                           "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert_google_pending(tables, columns)

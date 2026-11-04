@@ -1957,6 +1957,31 @@ _STRATEGIES = {
     "NL": NLEmployeeValidation,
 }
 
+class NZEmployeeValidation(EmployeeValidationStrategy):
+    """New Zealand (ZP-NZ-ENG-001 Phase 4).
+
+    DORMANT: consulted only while NZ_TENANT_ONBOARDING_ENABLED is on. Every
+    statutory fact (tax code, KiwiSaver, student loan, notices) lives in the
+    effective-dated payroll_nz_* records with a second person's approval, and
+    the IRD number lives ONLY in the encrypted IRD vault (NZ-023): a
+    compliance field that looks like an IRD number is refused, never stored.
+    """
+
+    country_code = "NZ"
+    SENSITIVE_FIELDS = ("ird_number", "tax_number")
+    FIELD_SPECS = {}
+    _VAULT_ONLY = ("ird_number", "irdnumber", "ird", "tax_number", "tax_file_number")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("New Zealand IRD numbers are held only in the encrypted IRD vault "
+                                      "(/api/payroll/new-zealand/employees/{id}/ird-number), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
+
+
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while
 # their country's onboarding flag is on, and never listed in _STRATEGIES —
 # so the "Supported: …" message every other country sees never changes.
@@ -1966,6 +1991,8 @@ _DORMANT_STRATEGIES = {
     "BR": BREmployeeValidation,
     # South Africa (ZP-ZA-ENG-001 Phase 5): dormant until the release gates.
     "ZA": ZAEmployeeValidation,
+    # New Zealand (ZP-NZ-ENG-001 Phase 4): dormant until NZ_TENANT_ONBOARDING_ENABLED.
+    "NZ": NZEmployeeValidation,
 }
 
 
@@ -1981,6 +2008,10 @@ def _dormant_strategy(code: str):
         from app.modules.payroll import south_africa_dormancy
 
         return strategy if south_africa_dormancy.onboarding_enabled() else None
+    if code == "NZ":
+        from app.modules.payroll import nz_dormancy
+
+        return strategy if nz_dormancy.onboarding_enabled() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

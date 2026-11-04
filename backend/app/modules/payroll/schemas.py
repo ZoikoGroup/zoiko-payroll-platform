@@ -1155,6 +1155,8 @@ class PayrollRunCreate(BaseModel):
     attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
     jp_payment_kind: Optional[str] = Field(None, alias="jpPaymentKind",
         description="Japan run payment kind: SALARY or BONUS (default SALARY).")
+    nz_payment_kind: Optional[str] = Field(None, alias="nzPaymentKind",
+        description="New Zealand run payment kind (default REGULAR); set per run, never per employee.")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1166,6 +1168,17 @@ class PayrollRunCreate(BaseModel):
         value = value.strip().upper()
         if value not in ("SALARY", "BONUS"):
             raise ValueError("jpPaymentKind must be SALARY or BONUS")
+        return value
+
+    @field_validator("nz_payment_kind")
+    @classmethod
+    def _validate_nz_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("REGULAR", "OUT_OF_CYCLE", "LUMP_SUM", "FINAL", "HOLIDAY_PAY_ADVANCE", "CORRECTION"):
+            raise ValueError("nzPaymentKind must be REGULAR, OUT_OF_CYCLE, LUMP_SUM, FINAL, "
+                             "HOLIDAY_PAY_ADVANCE or CORRECTION")
         return value
 
     @model_validator(mode="after")
@@ -1187,8 +1200,20 @@ class PayrollRunUpdate(BaseModel):
     pay_date:     Optional[date] = None
     notes:        Optional[str] = None
     jp_payment_kind: Optional[str] = Field(None, alias="jpPaymentKind")
+    nz_payment_kind: Optional[str] = Field(None, alias="nzPaymentKind")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("nz_payment_kind")
+    @classmethod
+    def _validate_nz_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("REGULAR", "OUT_OF_CYCLE", "LUMP_SUM", "FINAL", "HOLIDAY_PAY_ADVANCE", "CORRECTION"):
+            raise ValueError("nzPaymentKind must be REGULAR, OUT_OF_CYCLE, LUMP_SUM, FINAL, "
+                             "HOLIDAY_PAY_ADVANCE or CORRECTION")
+        return value
 
     @field_validator("jp_payment_kind")
     @classmethod
@@ -1319,6 +1344,7 @@ class PayrollRunResponse(BaseModel):
     # each in that country's currency — see service.run_totals_by_country.
     totalsByCountry:       Optional[List[dict]] = Field(None, validation_alias="totals_by_country", serialization_alias="totalsByCountry")
     jpPaymentKind:         Optional[str] = Field(None, validation_alias="jp_payment_kind", serialization_alias="jpPaymentKind")
+    nzPaymentKind:         Optional[str] = Field(None, validation_alias="nz_payment_kind", serialization_alias="nzPaymentKind")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -1524,6 +1550,9 @@ class PayslipItemResponse(BaseModel):
     # Japan (ZP-JP-ENG-001): the frozen jp_result (separate WHT / SI / EI
     # bases, bonus section, labour trace) without the frozen inputs. JP only.
     jpCalculationSnapshot: Optional[dict] = None
+    # New Zealand (ZP-NZ-ENG-001): the frozen nz_result (bases, obligations,
+    # trace) without the frozen inputs. NZ only.
+    nzCalculationSnapshot: Optional[dict] = None
     # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
     # input / content hashes, or the blocked reasons). Emitted for MX only;
     # declared here so response_model does not strip it.

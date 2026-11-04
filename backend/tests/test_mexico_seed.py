@@ -409,7 +409,8 @@ def test_validation_switch_adds_only_mexico():
     # + Brazil (ZP-BR-ENG-001), opted in alongside Mexico at the venu/main merge.
     # + South Africa (ZP-ZA-ENG-001 Phase 3), fail-closed from its first engine.
     # + Japan (ZP-JP-ENG-001 Phase 3), fail-closed from its first engine.
-    assert set(_VALIDATION_ENABLED_COUNTRIES) == _VALIDATION_SET_BEFORE_MX | {"MX", "BR", "ZA", "JP"}
+    # + New Zealand (ZP-NZ-ENG-001 Phase 0), fail-closed from its first stub.
+    assert set(_VALIDATION_ENABLED_COUNTRIES) == _VALIDATION_SET_BEFORE_MX | {"MX", "BR", "ZA", "JP", "NZ"}
 
 
 def test_validation_behaviour_is_unchanged_for_every_other_country():

@@ -191,10 +191,13 @@ def test_deploy_drift_filter_explains_every_jp_object():
     finally:
         os.chdir(here)
     assert set(NEW_TABLES) <= tables
-    assert columns["payslip_items"] == {"jp_calculation_snapshot"}
+    assert columns["payslip_items"] == {"jp_calculation_snapshot", "nz_calculation_snapshot",
+                                        "nz_correction_of_id"}                       # + NZ P2 / P6
     # Later Japan revisions on the same chain: P5's run payment kind must also
     # be visible to the drift filter (literal table name, 9c1d7e4a2b6f).
-    assert columns["payroll_runs"] == {"jp_approval_fingerprint", "jp_payment_kind"}
+    # New Zealand P2 (0e697c2388bf) is pending on the same chain.
+    assert columns["payroll_runs"] == {"jp_approval_fingerprint", "jp_payment_kind",
+                                       "nz_approval_fingerprint", "nz_payment_kind", "nz_run_options"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

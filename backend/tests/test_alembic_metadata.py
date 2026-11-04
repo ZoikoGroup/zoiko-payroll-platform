@@ -291,8 +291,12 @@ def test_alembic_heads_is_single_head():
     # 41a1fafbbfdc (2026-11-02, Japan P8): run-exception approvals, obligations,
     # year-end declarations and cases; single child of a1a748b50902.
     # b8bd939fffca (2026-11-02, Japan P9): parallel cycles; child of 41a1fafbbfdc.
+    # 0e697c2388bf (2026-11-03, New Zealand P2): nz_foundation; child of b8bd939fffca.
+    # ac08988ecd3a (2026-11-04, New Zealand P5): nz_holidays_act; child of 0e697c2388bf.
+    # c6ea8c6c35ce (2026-11-04, New Zealand P6): nz_leave_pay; child of ac08988ecd3a.
     # 9f1e2d3c4b5a and 7a3c9e1f2b4d add Google OAuth columns and pending state.
-    assert heads == ["7a3c9e1f2b4d"]
+    # 5739c5ccf50c merges the Google OAuth and New Zealand leave-pay heads.
+    assert heads == ["5739c5ccf50c"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -304,13 +308,13 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["7a3c9e1f2b4d"]
+    assert list(script.get_heads()) == ["5739c5ccf50c"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
     """Branch points == revisions with more than one child. Reconciliation
-    adds exactly one new branchpoint (`2b3c4d5e6f70`, where Germany's
-    post-fork history diverges from `main`'s own); every other branchpoint
+    adds the known branchpoints where independently-developed histories fork
+    and later rejoin; every other branchpoint
     here is pre-existing on `main`'s own independently-evolved graph, plus
     the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`,
     and `d4e5f6a7c8b9` where venu's France/Ireland chain and main's
@@ -331,7 +335,10 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # 998877665544: main's Singapore chain (c3d9e1f4a7b2) and venu's
         # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
         "998877665544",
-        "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        "a3f5c9d1b2e4", "b6c7d8e9f0a1",
+        # b8bd939fffca: Google OAuth and New Zealand leave-pay both descend
+        # from Japan P9; merge 5739c5ccf50c rejoins their heads.
+        "b8bd939fffca", "c1f5a9d22e10",
         # Country entitlement and main's M9 both branch from the prior merge;
         # d4c8f1a7b2e9 reunites them.
         "c3e5a7b9d1f4",
@@ -354,7 +361,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 248
+    assert len(revs) == 252
 
 
 def test_germany_head_chain_wiring_is_intact():
