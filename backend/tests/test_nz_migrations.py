@@ -205,7 +205,8 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_nz_leave_pay_calculations", "payroll_nz_cash_up_requests",
                                         "payroll_nz_corrections", "google_pending", "payroll_nz_filings",
                                         "payroll_nz_remittances", "payroll_nz_remittance_lines",
-                                        "payroll_nz_settlements", "payroll_nz_run_exceptions"}
+                                        "payroll_nz_settlements", "payroll_nz_run_exceptions",
+                                        "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

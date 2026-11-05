@@ -210,6 +210,9 @@ def ledger_rows(weeks=52, weekly="1300", end=date(2026, 9, 30), days=5):
 
 
 # ── Signing a seeded pack with the TEST values (Phase 7a console) ────────────
+# The P3 worked example in the golden-check format (nz_golden.parse_example).
+TEST_IRD_EXAMPLE = ("F=FORTNIGHTLY;C=M SL;G=3000;D=2026-04-08;KS=3.5;ESCT=30;EB=80730 => "
+                    "payeTotal=653.29;studentLoan=248.64;ksEmployee=105.00;esct=31.50")
 def _signing_value(key):
     kind = content.NZ_PARAMETER_KEYS[key]
     if key.endswith("_rounding"):
@@ -249,7 +252,7 @@ def sign_with_test_values(db, pack, source_id, actor_id, reason="IRD specialist 
             if rule_type == content.NZ_IETC_RULE:
                 data.setdefault("flatAmount", "0")
             console.add_table_row(db, pack.id, rule_type, ask(**data), actor_id)
-    console.add_table_row(db, pack.id, "NZ_IRD_EXAMPLE", ask(filingStatus="EX1", taxFormula="{}", name="TEST example"),
-                          actor_id)
+    console.add_table_row(db, pack.id, "NZ_IRD_EXAMPLE", ask(filingStatus="EX1", taxFormula=TEST_IRD_EXAMPLE,
+                                                          name="TEST example (the P3 worked example)"), actor_id)
     console.add_table_row(db, pack.id, "NZ_PUBLIC_HOLIDAY", ask(date="2026-12-25", name="TEST Christmas Day"), actor_id)
     db.commit()

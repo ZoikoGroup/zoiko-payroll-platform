@@ -329,6 +329,13 @@ def add_table_row(db: Session, pack_row_id: int, rule_type: str, data: dict, act
     if allowed_codes is not None and code not in allowed_codes:
         raise BadRequestException(f"filingStatus must be one of: {', '.join(allowed_codes)}.")
     formula = str(data.get("taxFormula") or "").strip() or None
+    if rule_type == content.NZ_IRD_EXAMPLE_RULE:
+        from app.modules.payroll import nz_golden
+
+        try:
+            nz_golden.parse_example(formula)
+        except ValueError as exc:
+            raise BadRequestException(f"NZ_IRD_EXAMPLE taxFormula: {exc}.")
     if rule_type == content.NZ_PAYE_METHOD_RULE and formula != specs["_paye_formula"]:
         raise BadRequestException(f"taxFormula must be {specs['_paye_formula']}.")
     if rule_type == content.NZ_LUMP_SUM_RULE:
@@ -425,6 +432,13 @@ def list_packs(db: Session) -> list:
 
 def decisions(db: Session) -> list:
     return nzs.owner_decisions(db)
+
+
+def golden_check(db: Session, pack_row_id: int) -> dict:
+    """Replay the pack's Inland Revenue examples through the engine (read-only)."""
+    from app.modules.payroll import nz_golden
+
+    return nz_golden.nz_golden_check(db, _pack(db, pack_row_id))
 
 
 def seed_draft(db: Session, data: dict, actor_id) -> dict:

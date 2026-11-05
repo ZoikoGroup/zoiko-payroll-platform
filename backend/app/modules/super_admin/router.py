@@ -4723,6 +4723,15 @@ def new_zealand_delete_table_row(row_id: int, reason: Optional[str] = Query(None
     return result
 
 
+@router.post("/compliance/new-zealand/packs/{pack_row_id}/golden-check",
+             summary="Replay a New Zealand pack's Inland Revenue examples through the engine (read-only; gate G1)")
+def new_zealand_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.golden_check(db, pack_row_id)
+
+
 @router.post("/compliance/new-zealand/seed-draft",
              summary="Create the Draft New Zealand pack from the specification (only while none exists; reason; audited)")
 def new_zealand_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),

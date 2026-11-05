@@ -37309,7 +37309,7 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
                 code = None
             # New Zealand (ZP-NZ-ENG-001 Phase 0 dormancy): never back-fill INTO NZ.
             from app.modules.payroll.nz_dormancy import entering_nz_refusal
-            if code and entering_nz_refusal(row.jurisdiction_country, code):
+            if code and entering_nz_refusal(row.jurisdiction_country, code, row.organization_id):
                 code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
@@ -37416,7 +37416,7 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     # New Zealand (ZP-NZ-ENG-001 Phase 0): choosing New Zealand is refused the
     # same way while New Zealand onboarding is disabled.
     from app.modules.payroll.nz_dormancy import entering_nz_refusal
-    nz_refusal = entering_nz_refusal(row.jurisdiction_country, incoming_country)
+    nz_refusal = entering_nz_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
     if nz_refusal:
         raise BadRequestException(nz_refusal)
 

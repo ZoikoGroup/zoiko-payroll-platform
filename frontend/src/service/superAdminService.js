@@ -304,6 +304,8 @@ export const deleteNzTableRow = (rowId, reason) =>
   apiFetch(`${NZ_SA}/configuration/table-rows/${rowId}`, { method: "DELETE", params: { reason } });
 export const getNzDecisions = () => apiFetch(`${NZ_SA}/decisions`);
 // Creates the Draft pack from the specification — only while no NZ pack exists (reason; audited).
+// Replays a pack's Inland Revenue examples through the engine (read-only; gate G1).
+export const runNzGoldenCheck = (packRowId) => apiFetch(`${NZ_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
 export const seedNzDraftPack = (reason) => apiFetch(`${NZ_SA}/seed-draft`, { method: "POST", body: { reason } });
 export const getZaReadiness = () => apiFetch(`${ZA_SA}/readiness`);
 export const getZaGateChecklists = () => apiFetch(`${ZA_SA}/readiness/gate-checklists`);

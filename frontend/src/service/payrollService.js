@@ -3109,3 +3109,13 @@ export const rejectNzRunException = (id, reason) => api.post(`${NZ}/run-exceptio
 export const getNzRunJournal = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/journal`));
 export const setNzJournalAccounts = (profileId, accounts, reason) =>
   api.put(`${NZ}/employer-profiles/${profileId}/journal-accounts`, { accounts, reason });
+// Release gates and parallel cycles (P9). Parallel files carry no identifier:
+// the server refuses any IRD-number or bank-account column or value.
+export const listNzParallelImports = async () => nzList(await api.get(`${NZ}/parallel-imports`));
+export const createNzParallelImport = (body) => api.post(`${NZ}/parallel-imports`, body);
+export const getNzParallelImport = async (id) => nzOne(await api.get(`${NZ}/parallel-imports/${id}`));
+export const acceptNzParallelImport = (id) => api.post(`${NZ}/parallel-imports/${id}/accept`, {});
+export const withdrawNzParallelImport = (id, reason) => api.post(`${NZ}/parallel-imports/${id}/withdraw`, { reason });
+export const explainNzParallelDifference = (id, reason) =>
+  api.post(`${NZ}/parallel-differences/${id}/explain`, { reason });
+export const acceptNzParallelDifference = (id) => api.post(`${NZ}/parallel-differences/${id}/accept`, {});

@@ -33,9 +33,9 @@ from app.modules.payroll import new_zealand_service as nz
 def require_nz_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     from app.modules.payroll import nz_dormancy, service
 
-    if not nz_dormancy.onboarding_enabled():
-        raise NotFoundException(nz_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
+    if not nz_dormancy.onboarding_enabled(org_id):
+        raise NotFoundException(nz_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
     if not nz_dormancy.is_new_zealand(service._resolve_org_country(db, org_id)):
@@ -100,9 +100,11 @@ def nz_summary(current_user=Depends(get_current_payroll_operator), db: Session =
     return nz.statutory_summary(db)
 
 
-@router.get("/readiness", summary="New Zealand release-gate readiness (read-only)")
+@router.get("/readiness", summary="New Zealand release gates G1-G7 with checks and evidence (read-only)")
 def nz_readiness(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    return {"available": False, "unmet": nz.nz_unmet_requirements(db)}
+    from app.modules.payroll import nz_readiness as readiness
+
+    return readiness.nz_readiness(db)
 
 
 # ── employer profiles ───────────────────────────────────────────────────────
@@ -807,3 +809,63 @@ def nz_set_journal_accounts(row_id: int, body: Dict[str, Any] = Body(...), curre
                                           _actor(current_user), body.get("reason"))
     db.commit()
     return {"id": row.id, "accounts": row.nz_journal_accounts}
+
+
+# ── Parallel cycles (Phase 9, release gate G5) ──────────────────────────────
+def _parallel():
+    from app.modules.payroll import nz_parallel
+
+    return nz_parallel
+
+
+@router.get("/parallel-imports", summary="New Zealand parallel-cycle imports")
+def nz_list_parallel_imports(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _parallel().list_parallel_imports(db, _org_id(current_user))
+
+
+@router.post("/parallel-imports", summary="Compare an incumbent payroll file with a committed New Zealand run")
+def nz_create_parallel_import(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    result = _parallel().import_parallel(db, _org_id(current_user), body, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.get("/parallel-imports/{import_id}", summary="One parallel import with its differences")
+def nz_get_parallel_import(import_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    return _parallel().parallel_summary(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel-imports/{import_id}/accept", summary="Accept a clean parallel cycle (four-eyes)")
+def nz_accept_parallel_import(import_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    result = _parallel().accept_import(db, _org_id(current_user), import_id, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-imports/{import_id}/withdraw", summary="Withdraw an open parallel import (reason required)")
+def nz_withdraw_parallel_import(import_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    result = _parallel().withdraw_import(db, _org_id(current_user), import_id, dict(body or {}).get("reason"),
+                                         _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-differences/{difference_id}/explain", summary="Explain a parallel-run difference")
+def nz_explain_parallel_difference(difference_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    result = _parallel().explain_difference(db, _org_id(current_user), difference_id,
+                                            dict(body or {}).get("reason"), _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-differences/{difference_id}/accept", summary="Accept an explained difference (four-eyes)")
+def nz_accept_parallel_difference(difference_id: int, current_user=Depends(get_current_org_admin),
+                                  db: Session = Depends(get_db)):
+    result = _parallel().accept_difference(db, _org_id(current_user), difference_id, _actor(current_user))
+    db.commit()
+    return result

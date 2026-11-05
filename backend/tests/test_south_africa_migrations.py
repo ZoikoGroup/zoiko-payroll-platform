@@ -59,6 +59,8 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
              # New Zealand P8 (dd8a60634320).
              "payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_remittance_lines",
              "payroll_nz_settlements", "payroll_nz_run_exceptions",
+             # New Zealand P9 (a8cde2482ef0).
+             "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
              # New Zealand P6 (c6ea8c6c35ce).
              "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
              "payroll_nz_cash_up_requests", "payroll_nz_corrections",

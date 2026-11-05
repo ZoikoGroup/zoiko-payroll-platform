@@ -133,6 +133,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      # New Zealand P8 (dd8a60634320): filings, remittances, settlements, run exceptions.
                      "payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_remittance_lines",
                      "payroll_nz_settlements", "payroll_nz_run_exceptions",
+                     # New Zealand P9 (a8cde2482ef0): parallel cycles.
+                     "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
                      # New Zealand P6 (c6ea8c6c35ce): leave pay, cash-ups, final pay, corrections.
                      "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
                      "payroll_nz_cash_up_requests", "payroll_nz_corrections",

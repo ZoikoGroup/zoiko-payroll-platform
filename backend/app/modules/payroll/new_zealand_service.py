@@ -919,6 +919,68 @@ def _nz_vault_event(db: Session, row, action: str, actor_id, reason=None, purpos
     return event
 
 
+def rotate_nz_ird_keys(db: Session, *, dry_run: bool = True) -> dict:
+    """Re-encrypt every ACTIVE vault row not under the newest NZ_IRD_KEYRING
+    version, keeping its owner binding (Phase 9, gate G4). The duplicate
+    fingerprint uses its own never-rotated key, so it must still match. Any
+    row that fails to decrypt or match stops the run: nothing is written.
+    Each rotated row gets a ROTATED access event. Returns counts and row ids
+    only - never a number."""
+    from app.modules.payroll import nz_ird_number as ird
+
+    m = _nz_models()
+    keyring = ird._keyring()
+    if not keyring:
+        raise BadRequestException("NZ_IRD_KEYRING is not configured.")
+    newest = max(keyring)
+    out = {"newestKeyVersion": newest, "examined": 0, "current": 0, "rotated": 0, "failed": [], "dryRun": dry_run}
+    plan = []
+    for row in (db.query(m.PayrollNzIrdVault).filter(m.PayrollNzIrdVault.status == "ACTIVE")
+                .order_by(m.PayrollNzIrdVault.id)):
+        out["examined"] += 1
+        if row.key_version == newest:
+            out["current"] += 1
+            continue
+        owner = _nz_vault_owner(row)
+        try:
+            number = ird.decrypt(row.ciphertext, row.key_version, owner)
+        except ird.IrdNumberError:
+            out["failed"].append({"id": row.id, "reason": "does not decrypt with its owner binding"})
+            continue
+        matches = ird.fingerprint(number) == row.fingerprint
+        number = None
+        if not matches:
+            out["failed"].append({"id": row.id, "reason": "fingerprint mismatch"})
+            continue
+        plan.append((row, owner))
+    out["rotated"] = len(plan)
+    if dry_run or out["failed"]:
+        out["written"] = False
+        return out
+    for row, owner in plan:
+        row.ciphertext, row.key_version = ird.reencrypt(row.ciphertext, row.key_version, owner)
+        _nz_vault_event(db, row, "ROTATED", None, reason=f"re-encrypted under key version {newest}")
+    db.flush()
+    out["written"] = True
+    return out
+
+
+def nz_vault_stale_rows(db: Session) -> Optional[int]:
+    """ACTIVE vault rows not under the newest key version, or None when no
+    keyring is configured (presence only; no key is read into a result)."""
+    from app.modules.payroll import nz_ird_number as ird
+
+    try:
+        keyring = ird._keyring()
+    except ird.IrdNumberError:
+        return None
+    if not keyring:
+        return None
+    m = _nz_models()
+    V = m.PayrollNzIrdVault
+    return db.query(V.id).filter(V.status == "ACTIVE", V.key_version != max(keyring)).count()
+
+
 def nz_ird_view(row) -> dict:
     from app.modules.payroll import nz_ird_number as ird
 
@@ -1614,9 +1676,19 @@ def _nz_retention_settings():
         has_statutory_profile=_nz_has_statutory_profile, report_matches=_nz_is_report)
 
 
+def _nz_readiness_overview(db: Session) -> dict:
+    from app.modules.payroll import nz_readiness
+
+    state = nz_readiness.nz_readiness(db)
+    return {"allPassed": state["allPassed"], "gates": state["gates"], "decisions": state["decisions"]}
+
+
 def nz_unmet_requirements(db: Session) -> list:
-    """Release gates G1-G7 arrive with Phase 9; until then New Zealand can never open."""
-    return ["New Zealand release gates G1-G7 are not implemented yet (Phase 9)."]
+    """[{key, label, detail}] of every unmet release gate G1-G7 and owner
+    decision, re-derived now (nz_readiness, Phase 9)."""
+    from app.modules.payroll import nz_readiness
+
+    return nz_readiness.nz_unmet_requirements(db)
 
 
 def statutory_summary(db: Session) -> dict:
@@ -1653,8 +1725,8 @@ def statutory_summary(db: Session) -> dict:
         "approvedNotices": db.query(m.PayrollNzAuthorityDeduction).filter(
             m.PayrollNzAuthorityDeduction.status == "APPROVED").count(),
         "decisions": owner_decisions(db),
-        "readiness": {"gatesImplemented": False, "unmet": nz_unmet_requirements(db)},
-        "note": "New Zealand remains PLANNED: no statutory row is signed and the release gates are not built.",
+        "readiness": _nz_readiness_overview(db),
+        "note": "New Zealand stays PLANNED until every release gate G1-G7 and owner decision passes.",
     }
 
 

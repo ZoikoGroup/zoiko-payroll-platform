@@ -146,7 +146,7 @@ def test_drift_filter_explains():
                                         "payroll_nz_cash_up_requests", "payroll_nz_corrections",
                                         "google_pending", "payroll_nz_filings", "payroll_nz_remittances",
                                         "payroll_nz_remittance_lines", "payroll_nz_settlements",
-                                        "payroll_nz_run_exceptions"}
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
     assert columns == {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_options"},
                        "payroll_nz_leave_events": {"leave_pay_calculation_id"},
                        "users": {"auth_provider", "google_id", "avatar_url"},
