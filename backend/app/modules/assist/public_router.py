@@ -14,8 +14,11 @@ from fastapi import APIRouter, Depends, Request
 
 from app.core.rate_limiter import limiter
 from app.database import get_db
+from app.modules.assist import public_registry
 from app.modules.assist import public_service as service
 from app.modules.assist.public_schemas import (
+    PublicCountriesResponse,
+    PublicHealthResponse,
     PublicMessageResponse,
     PublicMessageSubmitRequest,
     PublicMessageSubmitResponse,
@@ -42,3 +45,15 @@ def submit_public_message(request: Request, session_id: int, payload: PublicMess
 @limiter.limit("30/minute")
 def list_public_messages(request: Request, session_id: int, db=Depends(get_db)):
     return service.list_public_messages(db, session_id)
+
+
+@assist_public_router.get("/health", response_model=PublicHealthResponse)
+@limiter.limit("60/minute")
+def public_health(request: Request, db=Depends(get_db)):
+    return {"status": service.public_health(db)}
+
+
+@assist_public_router.get("/payroll-countries", response_model=PublicCountriesResponse)
+@limiter.limit("60/minute")
+def public_payroll_countries(request: Request):
+    return public_registry.list_public_countries()

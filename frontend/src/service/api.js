@@ -6,9 +6,41 @@ const TOKEN_KEY = "zoiko_payroll_access";
 const REFRESH_KEY = "zoiko_payroll_refresh";
 const USER_KEY = "zoiko_payroll_user";
 const AUTH_INVALID_EVENT = "zoiko-payroll-auth-session-invalid";
+const BROADCAST_CHANNEL_NAME = "zoiko_payroll_auth";
 
 let refreshPromise = null;
 let sessionInvalidNotified = false;
+let authChannel = null;
+
+// ── Cross-tab token synchronization (ZP-PRIV B08) ──────────────────────────
+// Refresh tokens rotate on every use. When one tab refreshes, all other tabs
+// holding the old refresh token would trigger reuse detection and get logged
+// out. BroadcastChannel lets the refreshing tab announce new tokens so every
+// tab can update immediately instead of stale-refreshing and getting revoked.
+
+function getAuthChannel() {
+  if (typeof window === "undefined" || typeof window.BroadcastChannel === "undefined") return null;
+  if (!authChannel) {
+    authChannel = new window.BroadcastChannel(BROADCAST_CHANNEL_NAME);
+    authChannel.onmessage = (event) => {
+      if (!event.data || event.data.type !== "TOKEN_REFRESHED") return;
+      const { accessToken, refreshToken } = event.data;
+      if (accessToken) localStorage.setItem(TOKEN_KEY, accessToken);
+      if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
+      // Proactively refresh with the new token so this tab never tries the
+      // revoked one on its next request.
+      scheduleProactiveRefresh();
+    };
+  }
+  return authChannel;
+}
+
+function broadcastTokens(accessToken, refreshToken) {
+  const ch = getAuthChannel();
+  if (ch) {
+    ch.postMessage({ type: "TOKEN_REFRESHED", accessToken, refreshToken });
+  }
+}
 
 export function getAccessToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -79,6 +111,9 @@ export function setSession(data = {}) {
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
   if (accessToken || refreshToken || user) sessionInvalidNotified = false;
   scheduleProactiveRefresh();
+  // Notify other tabs of the new tokens so they don't try to use a revoked
+  // refresh token and get their whole session family ended.
+  broadcastTokens(accessToken, refreshToken);
 }
 
 export function clearSession() {
@@ -217,11 +252,27 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
 // session, so every caller must go through this one promise.
 export async function tryRefreshToken() {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = refreshAccessToken()
+  refreshPromise = (async () => {
+    // Try up to 3 times. A refresh can fail with invalidSession when another
+    // tab rotated the refresh token first (ZP-PRIV B08 reuse detection).
+    // After a failed attempt, another tab may have already refreshed and
+    // broadcast new tokens via BroadcastChannel — re-read localStorage and
+    // try again before giving up.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await refreshAccessToken();
+      if (result.ok) return result;
+      if (!result.invalidSession) return result; // transient failure, don't retry
+      // invalidSession: another tab may have refreshed. Re-read localStorage
+      // (BroadcastChannel may have updated it) and retry once before quitting.
+      const rt = getRefreshToken();
+      const at = getAccessToken();
+      if (!rt || !at) return result; // nothing to retry with
+      // Small delay to let any in-flight broadcast from another tab settle.
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
+    return { ok: false, invalidSession: true, reason: "refresh_exhausted_retries" };
+  })()
     .then((result) => {
-      // A rejected refresh means the session is over (expired, revoked, or
-      // issued by another server): clear it and tell the app once, so the
-      // user is taken to sign in instead of every request failing in place.
       if (!result.ok && result.invalidSession) {
         clearSession();
         notifySessionInvalid(result.reason);

@@ -123,7 +123,11 @@ export default function EmployeeListPage() {
       addToast?.("No employees to export.", "error");
       return;
     }
-    const rows = employees.map((emp) => {
+    // Deduplicate employees by ID to prevent duplicate rows in the export
+    const uniqueEmployees = Array.from(
+      new Map(employees.map((emp) => [emp.id, emp])).values()
+    );
+    const rows = uniqueEmployees.map((emp) => {
       const row = {
         "ID": emp.employeeCode || "",
         "Employee Name": emp.name || "",
@@ -147,7 +151,12 @@ export default function EmployeeListPage() {
       }
       return row;
     });
-    const headers = Object.keys(rows[0]);
+    // Collect all unique headers from ALL rows (not just rows[0]) so no
+    // compliance column is dropped when the first employee lacks a field
+    // that a later employee has.
+    const allHeaders = new Set();
+    rows.forEach((row) => Object.keys(row).forEach((k) => allHeaders.add(k)));
+    const headers = Array.from(allHeaders);
     const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
     ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length, 18) }));
     const wb = XLSX.utils.book_new();

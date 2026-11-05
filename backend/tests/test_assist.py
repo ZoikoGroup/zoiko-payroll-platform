@@ -208,7 +208,8 @@ def test_capabilities_and_suggestions_seeded(client, headers):
     caps = client.get("/api/assist/capabilities", headers=headers).json()["capabilities"]
     assert len(caps) >= 6
     sugg = client.get("/api/assist/suggestions", headers=headers).json()["suggestions"]
-    assert len(sugg) >= 5
+    # The period-comparison suggestion is hidden until the org has two runs.
+    assert len(sugg) >= 4
 
 
 def test_notice_gate_blocks_until_acknowledged(client):
@@ -1318,3 +1319,109 @@ def test_brand_name_hallucination_is_corrected():
     )
     # Already-correct text must pass through unchanged.
     assert gateway._correct_brand_name("Zoiko Payroll is ready.") == "Zoiko Payroll is ready."
+
+
+# ── Chatbot bug reports (30 Oct 2026) ───────────────────────────────────
+
+
+def test_public_health_reports_available(client):
+    r = client.get("/api/assist/public/health")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "available"
+
+
+def test_public_country_registry_serves_live_jurisdictions(client):
+    r = client.get("/api/assist/public/payroll-countries")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    codes = {c["code"] for c in data["countries"]}
+    assert data["live_count"] == len(codes) == 19
+    assert {"US", "GB", "IN", "SG", "TT"} <= codes
+    # Capabilities stay unconfirmed until verified per module (A05).
+    assert all(c["capabilities"] == {} for c in data["countries"])
+
+
+def test_product_questions_are_not_routed_to_record_lookup():
+    from app.modules.assist import intents
+
+    for q in (
+        "Where is Zoiko Payroll available?",
+        "Which countries do you currently support?",
+        "Which accounting systems integrate?",
+    ):
+        assert intents.classify_intent(q)["intent_id"] == "kb.answer", q
+    # Real record lookups keep their intent.
+    assert intents.classify_intent("Which runs failed last month?")["intent_id"] == "find.object"
+    assert intents.classify_intent("Show me the latest run")["intent_id"] == "find.object"
+
+
+def test_public_concierge_questions_get_grounded_answers(client):
+    sid = _new_public_session(client)
+    expected = {
+        "Where is Zoiko Payroll available?": "Where Zoiko Payroll is available",
+        "What are your pricing plans?": "Pricing plans",
+        "How do I book a demo?": "How to book a demo",
+        "Which accounting systems integrate?": "accounting software and ERP",
+    }
+    for question, title_fragment in expected.items():
+        r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": question})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["sources"], f"no grounded source for {question!r}: {body['answer']!r}"
+        assert any(title_fragment in s["title"] for s in body["sources"]), (question, body["sources"])
+
+
+def test_public_country_questions_answer_live_and_refuse_others(client):
+    sid = _new_public_session(client)
+    for country in ("Canada", "Germany", "India"):
+        r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": f"How does payroll work in {country}?"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["answer"].startswith(f"{country} is one of the"), body["answer"]
+        assert body["sources"]
+
+    r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": "How does payroll work in Brazil?"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "doesn't currently run payroll in Brazil" in body["answer"]
+    assert "Canada" in body["answer"] and not body["sources"]
+
+
+def test_live_jurisdictions_are_supported_for_any_org():
+    from app.modules.assist import knowledge
+
+    assert knowledge.is_jurisdiction_supported(_db, 999999, "Canada")
+    assert knowledge.is_jurisdiction_supported(_db, 999999, "united kingdom")
+    assert not knowledge.is_jurisdiction_supported(_db, 999999, "Brazil")
+
+
+def test_default_kb_tops_up_missing_articles(client):
+    from app.database import SessionLocal
+    from app.modules.assist import knowledge
+    from app.modules.assist.models import AssistKbItem
+
+    db = SessionLocal()
+    try:
+        pricing = db.query(AssistKbItem).filter(
+            AssistKbItem.organization_id.is_(None), AssistKbItem.title == "Pricing plans"
+        ).first()
+        assert pricing is not None
+        db.delete(pricing)
+        db.commit()
+        knowledge.ensure_default_kb(db)
+        titles = [t for (t,) in db.query(AssistKbItem.title).filter(AssistKbItem.organization_id.is_(None)).all()]
+        assert titles.count("Pricing plans") == 1
+        knowledge.ensure_default_kb(db)  # idempotent
+        titles = [t for (t,) in db.query(AssistKbItem.title).filter(AssistKbItem.organization_id.is_(None)).all()]
+        assert titles.count("Pricing plans") == 1
+    finally:
+        db.close()
+
+
+def test_compare_suggestion_hidden_until_two_runs(client, headers):
+    sugg = client.get("/api/assist/suggestions", headers=headers).json()["suggestions"]
+    from app.modules.payroll.models import PayrollRun
+
+    run_count = _db.query(PayrollRun).filter(PayrollRun.organization_id == _org.id).count()
+    has_compare = any(s["intent_id"] == "variance.compare" for s in sugg)
+    assert has_compare == (run_count >= 2)

@@ -1346,6 +1346,7 @@ export default function AssistLauncher() {
                         links={links}
                         disabled={sending || !sessionId}
                         onAsk={(country) => sendMessage(`How does payroll work in ${country.name}?`)}
+                        onAskAvailability={(name) => sendMessage(`Is Zoiko Payroll available in ${name}?`)}
                       />
                       <div className="border-t border-border-light" aria-hidden="true" />
                       <PopularQuestions

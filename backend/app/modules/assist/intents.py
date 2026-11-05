@@ -380,6 +380,29 @@ def _is_term_definition_question(lowered: str, tokens: set[str]) -> bool:
     return not (tokens & _PERIOD_CONTEXT_TOKENS)
 
 
+# find.object's "where is" / "which" keywords exist to look up the user's
+# own payroll records ("which runs failed?"). A question about the product
+# itself — "Where is Zoiko Payroll available?", "Which countries do you
+# support?", "Which accounting systems integrate?" — has no record to find;
+# routing it to the record lookup made the public website reply "sign in"
+# and the signed-in assistant reply about payroll runs. Only reroutes when
+# the question names a product topic AND carries no account wording.
+_PRODUCT_TOPIC_MARKERS = (
+    "zoiko", "countr", "jurisdiction", "integrat", "accounting", "erp", "pricing", "price", "plan",
+    "demo", "trial", "availab", "support", "security", "privacy", "feature",
+)
+_ACCOUNT_TOKENS = {
+    "my", "mine", "me", "our", "ours", "run", "runs", "employee", "employees", "exception",
+    "exceptions", "payslips", "draft", "drafts", "case", "cases", "latest", "last",
+}
+
+
+def _is_product_question(lowered: str, tokens: set[str]) -> bool:
+    if tokens & _ACCOUNT_TOKENS:
+        return False
+    return any(marker in lowered for marker in _PRODUCT_TOPIC_MARKERS)
+
+
 def _is_meaning_question(lowered: str) -> bool:
     """"What does/is X mean?" — a definition request, not a status lookup.
 
@@ -462,6 +485,8 @@ def classify_intent(text: str) -> dict:
             continue
         for kw in intent["keywords"]:
             if kw in lowered or (len(kw.split()) == 1 and kw in tokens):
+                if intent["id"] == "find.object" and _is_product_question(lowered, tokens):
+                    break  # product question, not a record lookup — fall through to kb.answer
                 return {
                     "intent_id": intent["id"],
                     "risk_tier": intent["risk_tier"],

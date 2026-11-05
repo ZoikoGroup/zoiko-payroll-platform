@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "dd8a60634320"
-PARENT = "c6ea8c6c35ce"
+PARENT = "5739c5ccf50c"   # main's merge of Google OAuth and NZ P6
 TENANT = ("payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_settlements")
 WORKER = ("payroll_nz_remittance_lines", "payroll_nz_run_exceptions")
 NEW_TABLES = TENANT + WORKER

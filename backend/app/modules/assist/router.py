@@ -358,8 +358,8 @@ def list_capabilities(db: Session = Depends(get_db)):
 @assist_router.get(
     "/suggestions", response_model=SuggestionsResponse, summary="List suggested prompts"
 )
-def list_suggestions(db: Session = Depends(get_db)):
-    return {"suggestions": service.list_suggestions(db)}
+def list_suggestions(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return {"suggestions": service.list_suggestions(db, getattr(current_user, "organization_id", None))}
 
 
 @assist_router.get(

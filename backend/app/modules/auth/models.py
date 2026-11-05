@@ -70,6 +70,14 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
 
+    # ── Sign-in provider ───────────────────────────────────────────────
+    # "email" (password) or "google" (Google OAuth). google_id is only set
+    # for Google-signed-in users and lets us link an existing email account
+    # to a Google identity without forcing a password reset.
+    auth_provider = Column(String(20), nullable=False, default="email", server_default="email")
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    avatar_url = Column(String(500), nullable=True)
+
     # ZP-PRIV D.2: temporary support accounts. Login, refresh and the
     # per-request auth check all refuse a user whose access_expires_at has
     # passed; the account is also deactivated when its grant ends.
@@ -296,6 +304,29 @@ class RefreshTokenRecord(Base):
     # Risk signals for privileged re-authentication (hashes, never raw).
     client_fingerprint = Column(String(64), nullable=True)
     mfa_at = Column(Integer, nullable=True)
+
+
+class GooglePending(Base):
+    """Short-lived hold for a Google profile between the OAuth callback and
+    the registration page. A user who signs in with Google but has no Zoiko
+    account yet is sent to /register?pending=<token> to finish org signup.
+    Single-use and short-lived (10 minutes)."""
+
+    __tablename__ = "google_pending"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Unguessable one-time token passed as ?pending= on the register URL.
+    token = Column(String(64), unique=True, index=True, nullable=False)
+    email = Column(String(200), nullable=False, index=True)
+    google_id = Column(String(255), nullable=False)
+    given_name = Column(String(120), nullable=True)
+    family_name = Column(String(120), nullable=True)
+    picture = Column(String(500), nullable=True)
+    # "register" (finish org signup) or "login" (no account, offered signup).
+    mode = Column(String(20), nullable=False, default="register", server_default="register")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
 
 
 from app.core import audit_immutability as _audit_immutability  # noqa: E402

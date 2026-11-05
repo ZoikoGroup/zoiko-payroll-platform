@@ -159,4 +159,50 @@ def test_only_the_guarded_chokepoint_opens_an_smtp_connection_and_no_sms_or_webh
                     clients.append(f"{rel}: {n}")
     assert smtp_openers == ["services/email_service.py"]
     # A new SMS / webhook / HTTP sender must route through app/core/outbound.py first; update this test with it.
-    assert clients == []
+    assert clients == ["core/google_oauth.py: httpx"]
+    oauth_boundary = (APP / "core" / "google_oauth.py").read_text(encoding="utf-8")
+    assert "https://oauth2.googleapis.com/token" in oauth_boundary
+    assert "https://www.googleapis.com/oauth2/v2/userinfo" in oauth_boundary
+    assert "follow_redirects=False" in oauth_boundary
+    assert "trust_env=False" in oauth_boundary
+    assert "httpx.Timeout(20.0)" in oauth_boundary
+
+
+def test_google_oauth_outbound_boundary_rejects_non_google_endpoints(monkeypatch):
+    from app.core import google_oauth
+
+    requests = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            requests.append(("client", kwargs))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, url, data):
+            requests.append(("post", url, data))
+            return object()
+
+        def get(self, url, headers):
+            requests.append(("get", url, headers))
+            return object()
+
+    monkeypatch.setattr(google_oauth.httpx, "Client", Client)
+    google_oauth.exchange_code(google_oauth.TOKEN_ENDPOINT, {"code": "code"})
+    google_oauth.fetch_userinfo(google_oauth.USERINFO_ENDPOINT, "access-token")
+    client_options = requests[0][1]
+    assert client_options["timeout"].connect == 20.0
+    assert client_options["timeout"].read == 20.0
+    assert client_options["follow_redirects"] is False
+    assert client_options["trust_env"] is False
+    assert requests[1][1] == google_oauth.TOKEN_ENDPOINT
+    assert requests[3][1] == google_oauth.USERINFO_ENDPOINT
+
+    with pytest.raises(ValueError, match="not allowlisted"):
+        google_oauth.exchange_code("https://attacker.example/token", {"code": "code"})
+    with pytest.raises(ValueError, match="not allowlisted"):
+        google_oauth.fetch_userinfo("https://attacker.example/userinfo", "access-token")

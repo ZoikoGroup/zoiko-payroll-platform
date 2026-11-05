@@ -63,6 +63,7 @@ export default function OrderFormsPage() {
   const [rows, setRows] = useState([]);
   const [organizations, setOrganizations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [orgsLoading, setOrgsLoading] = useState(true);
   const [keyword, setKeyword] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
@@ -88,7 +89,8 @@ export default function OrderFormsPage() {
   useEffect(() => {
     listOrderFormEligibleOrgs()
       .then(setOrganizations)
-      .catch((err) => addToast?.(err.message, "error"));
+      .catch((err) => addToast?.(err.message, "error"))
+      .finally(() => setOrgsLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Organizations a signed Order Form literally cannot be recorded for
@@ -212,16 +214,40 @@ export default function OrderFormsPage() {
             <select
               value={form.organization_id}
               onChange={(e) => setField("organization_id", e.target.value)}
+              disabled={orgsLoading || organizations.length === 0}
               className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
             >
-              <option value="">Choose an organization…</option>
-              {organizations.map((org) => (
-                <option key={org.organization_id} value={org.organization_id} disabled={!org.eligible}>
-                  {org.organization_name}
-                  {!org.eligible ? ` — ${org.block_reason}` : ""}
-                </option>
-              ))}
+              {orgsLoading ? (
+                <option disabled>Loading organizations…</option>
+              ) : organizations.length === 0 ? (
+                <option disabled>No organizations available.</option>
+              ) : (
+                <>
+                  <option value="">Choose an organization…</option>
+                  {organizations.map((org) => (
+                    <option
+                      key={org.organization_id}
+                      value={org.organization_id}
+                      disabled={!org.eligible}
+                      className={
+                        !org.eligible
+                          ? "text-foreground-muted opacity-60 select-none"
+                          : undefined
+                      }
+                    >
+                      {org.organization_name}
+                      {!org.eligible ? ` — ${org.block_reason}` : ""}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
+            {!orgsLoading && organizations.length > 0 && (
+              <span className="mt-1 block text-[11px] text-foreground-muted">
+                {organizations.filter((o) => o.eligible).length} of {organizations.length} organizations available
+                {organizations.some((o) => !o.eligible) && " — grayed out orgs already have an Order Form or a non-Enterprise billing relationship"}
+              </span>
+            )}
           </label>
 
           <label className="block">

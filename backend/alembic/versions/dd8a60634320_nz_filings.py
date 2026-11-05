@@ -1,7 +1,7 @@
 """nz_filings: New Zealand payday filings, remittances, settlements, run exceptions, journal accounts
 
 Revision ID: dd8a60634320
-Revises: c6ea8c6c35ce
+Revises: 5739c5ccf50c
 Create Date: 2026-11-04
 
 ZP-NZ-ENG-001 Phase 8 (spec §9; NZ-018 idempotent filing, NZ-019 filing
@@ -36,7 +36,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "dd8a60634320"
-down_revision: Union[str, Sequence[str], None] = "c6ea8c6c35ce"
+down_revision: Union[str, Sequence[str], None] = "5739c5ccf50c"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
