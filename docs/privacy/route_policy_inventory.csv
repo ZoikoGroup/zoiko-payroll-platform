@@ -778,6 +778,7 @@ GET,/api/payroll/payslips/{payslip_id}/download,worker,export,download,org_admin
 GET,/api/payroll/poland/employees/{employee_id}/annual-cap,worker,read,annual-cap,employee|org_admin|payroll_admin,tenant,,,payroll_employees|payroll_pl_accumulator_entries,no,
 GET,/api/payroll/poland/employees/{employee_id}/identifiers,worker,read,identifiers,employee|org_admin|payroll_admin,tenant,,,payroll_employees|payroll_pl_identifier_vault,no,
 POST,/api/payroll/poland/employees/{employee_id}/identifiers,worker,create,identifiers,org_admin,tenant,,,payroll_employees|payroll_pl_identifier_access_events|payroll_pl_identifier_vault,no,
+GET,/api/payroll/poland/employees/{employee_id}/leave-entitlement,worker,read,leave-entitlement,employee|org_admin|payroll_admin,tenant,,,payroll_employees|payroll_pl_worker_profiles,no,
 GET,/api/payroll/poland/employees/{employee_id}/ppk,worker,read,ppk,employee|org_admin|payroll_admin,tenant,,,payroll_employees|payroll_pl_ppk_participations,no,
 POST,/api/payroll/poland/employees/{employee_id}/ppk,worker,create,ppk,org_admin,tenant,,,payroll_employees|payroll_pl_declarations|payroll_pl_ppk_participations,no,
 GET,/api/payroll/poland/employees/{employee_id}/statements,worker,read,statements,employee|org_admin|payroll_admin,tenant,,,payroll_employees|payroll_pl_declarations,no,

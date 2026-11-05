@@ -53,7 +53,8 @@ def _profile(w, **over):
     payload = {"effective_from": "2026-01-01", "contract_type": "umowa_o_prace", "insurance_title_code": "011000",
                "cov_pension": True, "cov_disability": True, "cov_sickness": True, "cov_accident": True,
                "cov_health": True, "other_titles_declared": False, "a1_certificate": False, "is_student": False,
-               "is_pensioner": False, "pay_frequency": "monthly"}
+               "is_pensioner": False, "pay_frequency": "monthly", "fte_numerator": 1, "fte_denominator": 1,
+               "service_credit_months": 60}
     payload.update(over)
     row = pl.record_pl_worker_profile(w.db, w.org, w.employee.id, payload, w.a, "hire")
     return pl.approve_pl_worker_profile(w.db, w.org, row.id, w.b)
@@ -447,3 +448,31 @@ def test_router_exposes_identifiers_only_masked():
     paths = {(sorted(r.methods)[0], r.path) for r in router.routes}
     assert ("POST", "/poland/identifiers/{vault_id}/reveal") in paths
     assert all("/poland/" in p for _m, p in paths)
+
+
+# ── Phase 5: annual leave entitlement through the service ──────────────────
+def test_leave_entitlement_needs_a_profile_and_an_active_pack(world):
+    from app.modules.payroll import poland_service as pl
+
+    w = world
+    with pytest.raises(BadRequestException, match="worker profile"):
+        pl.pl_leave_entitlement(w.db, w.org, w.employee.id, "2026-03-31")
+    _profile(w)
+    with pytest.raises(BadRequestException, match="rule pack"):
+        pl.pl_leave_entitlement(w.db, w.org, w.employee.id, "2026-03-31")      # the seeded pack is still Draft
+
+
+def test_leave_entitlement_from_an_active_signed_pack(world):
+    from app.modules.payroll import poland_service as pl
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    w = world
+    _profile(w, service_credit_months=130)
+    pack = pl.seed_poland_pack(w.db)
+    for row in w.db.query(ContributionRate).filter_by(jurisdiction_pack_id=pack.id):
+        row.label = row.label.replace(pl.PENDING_G1_SUFFIX, "")                  # simulate the G1 signature
+    pack.status = "Active"
+    w.db.commit()
+    assert w.db.query(TaxSlab).filter_by(jurisdiction_pack_id=pack.id).count() > 0
+    out = pl.pl_leave_entitlement(w.db, w.org, w.employee.id, "2026-03-31")
+    assert (out["tier"], out["days"]) == ("SENIOR", "26")

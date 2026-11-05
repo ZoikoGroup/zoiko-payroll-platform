@@ -258,6 +258,12 @@ def pl_annual_cap(employee_id: int, year: int = Query(...), current_user=Depends
     return pl.pl_annual_cap_view(db, _org_id(current_user), employee_id, year)
 
 
+@router.get("/employees/{employee_id}/leave-entitlement", summary="Annual leave entitlement (20 / 26 days, spec §8)")
+def pl_leave_entitlement(employee_id: int, as_of: date = Query(..., alias="asOf"),
+                         current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return pl.pl_leave_entitlement(db, _org_id(current_user), employee_id, as_of)
+
+
 @router.get("/employees/{employee_id}/summary", summary="An employee's Poland records (identifiers masked)")
 def pl_employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),
                         db: Session = Depends(get_db)):

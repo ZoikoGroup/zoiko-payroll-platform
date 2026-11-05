@@ -91,6 +91,7 @@ def build_pack(overrides=None, signed=True, classes=None):
 
 def profile(**overrides):
     values = dict(contract_type="UMOWA_O_PRACE", pay_frequency="MONTHLY", tax_residency="RESIDENT",
+                  fte_numerator=1, fte_denominator=1, service_credit_months=60,
                   cov_pension=True, cov_disability=True, cov_sickness=True, cov_accident=True, cov_health=True,
                   other_titles_declared=False, a1_certificate=False, is_student=False, is_pensioner=False,
                   fep_qualifying=False, fep_from=None, fep_to=None, fund_exemption_code=None,

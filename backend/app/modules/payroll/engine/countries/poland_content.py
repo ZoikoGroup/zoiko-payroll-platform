@@ -152,6 +152,14 @@ FUND_CAP_RULES = ("CAPPED_WITH_PENSION_BASE", "UNCAPPED")
 PPK_EMPLOYER_PIT_TREATMENTS = ("TAXABLE_EMPLOYEE_INCOME", "NOT_TAXABLE")
 PIT2_ALLOCATIONS = {"FULL": "pl_pit2_reduction_full", "HALF": "pl_pit2_reduction_half",
                     "THIRD": "pl_pit2_reduction_third"}
+# PL-016: the event that created an overtime premium (spec §8). Which events
+# earn the standard vs the high premium is NOT given by the specification:
+# pl_overtime_premium_map ("DAILY=50,WEEKLY=100,...") ships PENDING_G1.
+OVERTIME_EVENT_KINDS = ("DAILY", "WEEKLY", "NIGHT", "SUNDAY_HOLIDAY", "COMP_TIME_FAILED")
+LEAVE_PART_TIME_ROUNDING = ("ROUND_UP_FULL_DAY", "EXACT")
+# The night-work supplement formula is not given by the specification; no
+# signed vocabulary exists yet, so a non-zero supplement always blocks.
+NIGHT_SUPPLEMENT_RULES = ()
 ZUS_DEADLINE_CLASSES = ("DAY_5", "DAY_15", "DAY_20")
 ACCIDENT_RATE_SOURCES = ("ZUS_NOTICE", "SELF_DETERMINED", "SMALL_PAYER_DEFAULT")
 # PL-005: every declaration is effective-dated with evidence (Phase 2 table).
@@ -260,7 +268,9 @@ POLAND_PARAMETER_KEYS = {
     "pl_working_hours_weekly_avg": "amount",
     "pl_overtime_premium_standard": "employee_pct",
     "pl_overtime_premium_high": "employee_pct",
+    "pl_overtime_premium_map": "text",
     "pl_night_supplement_basis": "text",
+    "pl_leave_part_time_rounding": "text",
     "pl_leave_days_base": "amount",
     "pl_leave_days_senior": "amount",
     "pl_leave_service_years_senior": "amount",
@@ -428,6 +438,10 @@ POLAND_SCALAR_CONTENT = (
      None, "S10", False, None, None, _PM),
     ("pl_overtime_premium_high", "Overtime premium on normal pay, statutory high case", "100.0000", None,
      None, None, "S10", False, None, None, _PM),
+    # Spec §8: "50% or 100% premium depending on statutory circumstance" — the
+    # event-to-premium mapping is not given (PL-016).
+    ("pl_overtime_premium_map", "Overtime event kind -> premium (spec §8, not given)", None, None, None,
+     _PENDING, "S10", True, None, None, _PM),
     # Spec: "tied to current minimum wage/hours" — the formula is not given.
     ("pl_night_supplement_basis", "Night-work supplement basis", None, None, None, _PENDING, "S10", True,
      None, None, _PM),
@@ -437,6 +451,9 @@ POLAND_SCALAR_CONTENT = (
      "26", None, "S10", False, None, None, _EE),
     ("pl_leave_service_years_senior", "Service credit (years) for the higher leave tier", None, None, "10",
      None, "S10", False, None, None, _EE),
+    # Spec §8: "proportional rules for part-time" — the rounding is not given.
+    ("pl_leave_part_time_rounding", "Part-time annual leave rounding (not in spec)", None, None, None, _PENDING,
+     "S10", True, None, None, _EE),
     ("pl_leave_pay_reference_rule", "Leave remuneration reference-period rule", None, None, None, _PENDING,
      "S10", True, None, None, _PM),
 

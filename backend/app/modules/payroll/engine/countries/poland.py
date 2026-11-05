@@ -23,8 +23,10 @@ Platform mapping (standard.py):
   employer_pension      PPK employer
   pl_result             every base, component, decision, trace and hash
 
-Labour-law checks (minimum wage, overtime, leave) arrive in Phase 5 and
-sickness / benefits in Phase 6; until then the MIN_WAGE base is traced only.
+Labour-law checks (Phase 5): minimum wage on the MIN_WAGE base x FTE,
+overtime only with its events, night supplement blocked until signed, pay
+timing — breaches are run exceptions, never silent. Sickness / benefits
+arrive in Phase 6.
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ from app.modules.payroll.engine.jurisdictions.poland import bases as _bases
 from app.modules.payroll.engine.jurisdictions.poland import employer_funds as _funds
 from app.modules.payroll.engine.jurisdictions.poland import errors as E
 from app.modules.payroll.engine.jurisdictions.poland import health as _health
+from app.modules.payroll.engine.jurisdictions.poland import labour as _labour
 from app.modules.payroll.engine.jurisdictions.poland import pit as _pit
 from app.modules.payroll.engine.jurisdictions.poland import ppk as _ppk
 from app.modules.payroll.engine.jurisdictions.poland import zus as _zus
@@ -60,7 +63,7 @@ def _record(record, names) -> dict:
     return None if record is None else {n: field(record, n) for n in names}
 
 
-_PROFILE_FIELDS = ("contract_type", "pay_frequency", "tax_residency", "cov_pension", "cov_disability",
+_PROFILE_FIELDS = ("contract_type", "pay_frequency", "tax_residency", "fte_numerator", "fte_denominator", "cov_pension", "cov_disability",
                    "cov_sickness", "cov_accident", "cov_health", "other_titles_declared", "a1_certificate",
                    "is_student", "is_pensioner", "fep_qualifying", "fep_from", "fep_to", "fund_exemption_code",
                    "status", "effective_from", "effective_to")
@@ -81,6 +84,10 @@ def calculate(ctx: PayrollContext) -> dict:
     applicability = _applicability.determine(ctx, pack, pay_date)
     pay = _bases.components(ctx, pack)
     bases = _bases.build(pay, pack.earning_classes(), pack)
+    _labour.night_supplement(pack, pay)
+    overtime = _labour.overtime(pack, pay, getattr(ctx, "pl_overtime_events", None))
+    minimum_wage = _labour.minimum_wage(pack, bases, applicability["profile"], getattr(ctx, "unpaid_leave_days", 0))
+    pay_timing = _labour.pay_timing(pack, pay_date, getattr(ctx, "period_end", None))
     ytd = getattr(ctx, "pl_ytd", None)
     if ytd is None:
         pack.block(E.YTD_MISSING, "the year-to-date accumulator snapshot is not supplied")
@@ -101,6 +108,7 @@ def calculate(ctx: PayrollContext) -> dict:
     net = gross - pit["advance"] - employee_total
 
     exceptions = list(ppk["exceptions"])
+    exceptions += [check["exception"] for check in (minimum_wage, pay_timing) if check["exception"]]
     if net < ZERO:
         exceptions.append({"code": E.EXC_NEGATIVE_NET, "detail": "statutory deductions exceed gross pay"})
     if zus["capCrossed"]:
@@ -124,6 +132,9 @@ def calculate(ctx: PayrollContext) -> dict:
         "profile": _record(applicability["profile"], _PROFILE_FIELDS),
         "registration": _record(applicability["registration"], _REGISTRATION_FIELDS),
         "ppkState": field(getattr(ctx, "pl_ppk", None), "state"),
+        "overtimeEvents": getattr(ctx, "pl_overtime_events", None),
+        "unpaidLeaveDays": getattr(ctx, "unpaid_leave_days", 0),
+        "periodEnd": getattr(ctx, "period_end", None),
         "declarations": sorted((_record(d, _DECLARATION_FIELDS) for d in declarations), key=_canonical),
         "ytd": {k: str(v) for k, v in sorted(ytd.items())},
     }
@@ -136,6 +147,8 @@ def calculate(ctx: PayrollContext) -> dict:
         "contractType": applicability["contractType"], "payFrequency": applicability["payFrequency"],
         "applicability": obligations, "bases": _bases.trace(bases), "zus": zus["trace"],
         "health": health["trace"], "ppk": ppk["trace"], "pit": pit["trace"], "funds": funds["trace"],
+        "labour": {"minimumWage": {k: v for k, v in minimum_wage.items() if k != "exception"},
+                   "overtime": overtime, "payTiming": {k: v for k, v in pay_timing.items() if k != "exception"}},
         "rounding": pack.rounding_events, "contentUsed": used, "hashes": hashes,
     }
     result = {

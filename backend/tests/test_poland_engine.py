@@ -156,13 +156,19 @@ def test_each_obligation_keeps_its_own_base():
     assert pl["pl_pit_base"] == "7773.00"                                   # 9120 - 1096.80 - 250
 
 
+TEST_PREMIUM_MAP = "DAILY=50,WEEKLY=100,NIGHT=100,SUNDAY_HOLIDAY=100,COMP_TIME_FAILED=50"   # TEST fixture
+
+
 def test_minimum_wage_base_excludes_overtime():
     classes = {(o, "OVERTIME_50"): "INCLUDED" for o in ("PIT", "EMERYTALNE", "RENTOWE", "CHOROBOWE", "WYPADKOWE",
                                                          "ZDROWOTNE", "FP_FS", "FGSP", "FEP", "PPK")}
-    pl = _pl(ctx(gross="9000", components={"SALARY": Decimal("8000"), "OVERTIME_50": Decimal("1000")},
-                 pack=build_pack(classes=classes)))
+    events = [{"kind": "DAILY", "event_ref": "2026-03-10", "hours": "20", "hourly_rate": "50"}]   # 20 x 50 x 150%
+    pl = _pl(ctx(gross="9500", components={"SALARY": Decimal("8000"), "OVERTIME_50": Decimal("1500")},
+                 pack=build_pack({"pl_overtime_premium_map": TEST_PREMIUM_MAP}, classes=classes),
+                 pl_overtime_events=events))
     assert pl["trace"]["bases"]["MIN_WAGE"]["base"] == "8000.00"             # PL-015
-    assert pl["trace"]["bases"]["EMERYTALNE"]["base"] == "9000.00"
+    assert pl["trace"]["bases"]["EMERYTALNE"]["base"] == "9500.00"
+    assert pl["trace"]["labour"]["overtime"]["status"] == "MATCHED"
 
 
 # ── ZUS cap and accumulators ───────────────────────────────────────────────

@@ -922,6 +922,35 @@ def pl_annual_cap_view(db: Session, organization_id: int, employee_id: int, year
                          "runId": r.run_id, "declarationId": r.declaration_id} for r in rows]}
 
 
+# ── annual leave entitlement (spec §8, Phase 5) ─────────────────────────────
+def pl_leave_entitlement(db: Session, organization_id: int, employee_id: int, as_of) -> dict:
+    """Whole-year entitlement from the ACTIVE worker profile and the pack in
+    force on `as_of`. Refused (with the engine's own reason) when the service
+    credit, FTE or a needed signed rule is missing — never a guessed figure."""
+    from app.modules.payroll.engine.jurisdictions.poland import leave
+    from app.modules.payroll.engine.jurisdictions.poland.errors import PLCalculationBlockedError
+    from app.modules.payroll.engine.jurisdictions.poland.pack import PlPack
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    on = _as_date(as_of, "asOf")
+    employee = _employee(db, organization_id, employee_id)
+    profile = _one_active(db, _models().PayrollPlWorkerProfile, organization_id, employee.id, on, "worker profile")
+    if profile is None:
+        raise BadRequestException("No ACTIVE Poland worker profile is in force on that date.")
+    try:
+        rates, slabs, pack = resolve_tax_configuration(db, PL, payroll_date=on)
+    except Exception:  # an unresolvable pack is "no pack"
+        pack = None
+    if pack is None:
+        raise BadRequestException("No active Poland rule pack is in force on that date.")
+    try:
+        out = leave.annual_entitlement(PlPack({r.component_key: r for r in rates}, slabs, organization_id, on),
+                                       _facts(profile))
+    except PLCalculationBlockedError as blocked:
+        raise BadRequestException(f"Annual leave cannot be determined ({blocked.key}): {blocked.reason}")
+    return {"employeeId": employee.id, "asOf": on.isoformat(), **out}
+
+
 # ── calculation inputs (selected by the PAY DATE, PL-003) ───────────────────
 def resolve_pl_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, run=None) -> dict:
     """Every Polish input in force ON THE PAY DATE. Nothing is inferred: a
@@ -955,8 +984,8 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of:
 
 # ── frozen snapshot, replay and approval fingerprint (spec §14 Replay) ─────
 _CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation")
-_CTX_PLAIN = ("pay_frequency", "pl_components", "pl_organization_id", "pl_legal_entity_id", "pl_employee_id",
-              "trace_id")
+_CTX_PLAIN = ("pay_frequency", "pl_components", "pl_overtime_events", "unpaid_leave_days", "pl_organization_id",
+              "pl_legal_entity_id", "pl_employee_id", "trace_id")
 _CTX_DATES = ("pay_date", "pl_pay_date", "period_start", "period_end")
 _RECORD_KEYS = ("pl_profile", "pl_registration", "pl_ppk")
 _RATE_FIELDS = ("component_key", "label", "employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
