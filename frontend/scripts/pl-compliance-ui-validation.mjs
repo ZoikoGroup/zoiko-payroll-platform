@@ -53,14 +53,15 @@ check("NIP check digit matches the backend", () => {
 });
 check("Poland employee field specs mirror PLEmployeeValidation", () => {
   const keys = COUNTRY_FIELD_SPECS.PL.map((s) => s.key);
-  assert(JSON.stringify(keys) === JSON.stringify(["national_id", "passport_number", "tax_number", "iban"]), keys.join(","));
+  assert(JSON.stringify(keys) === JSON.stringify(["passport_number", "iban"]), keys.join(","));
+  assert(!keys.includes("national_id") && !keys.includes("tax_number"), "PESEL / NIP are vault-only (spec §13)");
   const iban = COUNTRY_FIELD_SPECS.PL.find((s) => s.key === "iban");
   assert(iban.pattern.test("PL61109010140000071219812874") && iban.check("PL61109010140000071219812874"), "valid IBAN refused");
   assert(!iban.check("PL61109010140000071219812875"), "bad IBAN accepted");
   assert(!iban.pattern.test("DE89370400440532013000"), "non-Polish IBAN accepted");
   assert(COUNTRY_FIELD_SPECS.PL.every((s) => !/\$\{|got/.test(s.error)), "errors must not echo the value");
   assert(COUNTRIES.some((c) => c.code === "PL" && c.name === "Poland"), "PL missing from COUNTRIES");
-  assert(DUPLICATE_ID_FIELDS.PL === "national_id", "duplicate field mismatch");
+  assert(DUPLICATE_ID_FIELDS.PL === "passport_number", "duplicate field mismatch");
 });
 check("jurisdiction schema mirrors core/jurisdiction.py", () => {
   ["Poland", "polska", "Rzeczpospolita Polska", "Republic of Poland", "PL", "pol"].forEach((v) =>

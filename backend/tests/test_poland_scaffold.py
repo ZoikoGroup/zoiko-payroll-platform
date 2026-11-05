@@ -130,21 +130,27 @@ def pl_strategy(monkeypatch):
 
 
 def test_valid_polish_employee_is_cleaned(pl_strategy):
-    cleaned = pl_strategy.validate({"national_id": "440514 01359", "tax_number": "526-104-08-28",
+    cleaned = pl_strategy.validate({"passport_number": "ab1234567",
                                     "iban": " ".join(PL_IBAN.lower()[i:i + 4] for i in range(0, 28, 4))})
-    assert cleaned == {"national_id": "44051401359", "tax_number": "5261040828",
-                       "iban": PL_IBAN}
+    assert cleaned == {"passport_number": "AB1234567", "iban": PL_IBAN}
 
 
-def test_passport_alone_is_enough(pl_strategy):
-    assert pl_strategy.validate({"passport_number": "ab1234567"}) == {"passport_number": "AB1234567"}
+def test_no_identifier_is_required_on_the_employee_record(pl_strategy):
+    # PESEL lives in the vault; the run preflight (Phase 4) requires it there.
+    assert pl_strategy.validate({}) == {}
+
+
+@pytest.mark.parametrize("key", ["national_id", "PESEL", "tax_number", "nip", "tax_id"])
+def test_pesel_and_nip_are_vault_only(pl_strategy, key):
+    from app.core.exceptions import BadRequestException
+
+    with pytest.raises(BadRequestException) as raised:
+        pl_strategy.validate({key: "44051401359"})
+    text = str(raised.value.detail if hasattr(raised.value, "detail") else raised.value)
+    assert "identifier vault" in text and "44051401359" not in text          # PL-025: never echoed
 
 
 @pytest.mark.parametrize("payload, message", [
-    ({}, "PESEL (national_id) or a passport_number is required"),
-    ({"national_id": "44051401358"}, "PESEL must be 11 digits"),
-    ({"national_id": "1234"}, "PESEL must be 11 digits"),
-    ({"passport_number": "AB1234567", "tax_number": "5261040827"}, "NIP must be 10 digits"),
     ({"passport_number": "AB1234567", "iban": PL_IBAN_BAD_CHECK}, "Polish IBAN"),
     ({"passport_number": "AB1234567", "iban": DE_IBAN}, "Polish IBAN"),
 ])
@@ -155,13 +161,12 @@ def test_invalid_polish_employee_is_refused_without_echoing_the_value(pl_strateg
         pl_strategy.validate(payload)
     text = str(raised.value.detail if hasattr(raised.value, "detail") else raised.value)
     assert message in text
-    for value in payload.values():
-        assert value not in text                                     # PL-025: never echo identifiers
+    assert payload["iban"] not in text
 
 
 def test_identifiers_are_masked(pl_strategy):
-    assert set(pl_strategy.SENSITIVE_FIELDS) == {"national_id", "passport_number", "tax_number"}
-    assert pl_strategy.duplicate_field == "national_id"
+    assert set(pl_strategy.SENSITIVE_FIELDS) == {"passport_number"}
+    assert pl_strategy.duplicate_field == "passport_number"
 
 
 # ── bank routing ──────────────────────────────────────────────────────────
@@ -253,9 +258,8 @@ def test_registry_row_required():
     assert "PL" in _REGISTRY_ROW_REQUIRED_COUNTRIES
 
 
-def test_phase0_scope_is_not_exceeded():
-    # Hooks, validation-required config and four-eyes lists arrive with the
-    # service / content phases, never with the scaffold.
+def test_poland_has_a_statutory_module_from_phase_4():
+    # Phase 4 registers the Poland service with all 13 hooks (fail-closed).
     from app.modules.payroll import jurisdiction_hooks
 
-    assert not jurisdiction_hooks.has_module("PL")
+    assert jurisdiction_hooks.has_module("PL")

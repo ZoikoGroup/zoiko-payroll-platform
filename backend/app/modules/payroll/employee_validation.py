@@ -1991,48 +1991,42 @@ def pl_regon_is_valid(value) -> bool:
 
 
 class PLEmployeeValidation(EmployeeValidationStrategy):
-    """Poland (ZP-PL-ENG-001 Phase 0) - identity and bank validation.
+    """Poland (ZP-PL-ENG-001) - employee fields that are NOT vault-only.
 
     DORMANT: consulted only while PL_TENANT_ONBOARDING_ENABLED is on.
-    At least one of national_id (PESEL) / passport_number is required. PESEL
-    carries a real birth date and the weighted check digit; NIP (tax_number,
-    optional - used where a worker has no PESEL) has the mod-11 check digit;
-    the IBAN must be a Polish IBAN passing ISO 13616 mod-97.
-    PESEL and NIP are format- AND checksum-checked in _validate_combination
-    (their FIELD_SPECS carry no pattern) so no refusal ever echoes the value
-    (spec §13, PL-025). IBAN is masked platform-wide
-    (PLATFORM_SENSITIVE_COMPLIANCE_FIELDS).
-    Storage: the encrypted vault (payroll_pl_identifier_vault, pl_identifiers.py)
-    exists since Phase 2; Phase 4 moves PESEL / NIP out of compliance_fields
-    into it before Poland can leave dormancy (spec §13).
+    PESEL and NIP are held ONLY in the encrypted identifier vault
+    (payroll_pl_identifier_vault via /api/payroll/poland/employees/{id}/
+    identifiers, spec section 13, PL-025): a compliance field carrying either
+    is refused, never stored, and the refusal never echoes the value. The run
+    preflight requires a vault PESEL or a passport number (MISSING_IDENTIFIER).
+    The IBAN must be a Polish IBAN passing ISO 13616 mod-97 (masked
+    platform-wide, PLATFORM_SENSITIVE_COMPLIANCE_FIELDS).
     """
 
     country_code = "PL"
-    duplicate_field = "national_id"
-    SENSITIVE_FIELDS = ("national_id", "passport_number", "tax_number")
+    duplicate_field = "passport_number"
+    SENSITIVE_FIELDS = ("passport_number",)
     FIELD_SPECS = {
-        "national_id": {"required": False, "strip_chars": " -"},
         "passport_number": {
             "required": False, "upper": True, "strip_chars": " -",
             "pattern": re.compile(r"^[A-Z0-9]{6,20}$"),
             "error": "Passport number must be 6-20 letters or digits.",
         },
-        "tax_number": {"required": False, "strip_chars": " -"},
         "iban": {"required": False, "upper": True, "strip_chars": " "},
     }
+    _VAULT_ONLY = ("national_id", "pesel", "tax_number", "nip", "tax_id")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("Polish PESEL and NIP are held only in the encrypted identifier vault "
+                                      "(/api/payroll/poland/employees/{id}/identifiers), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
 
     @classmethod
     def _validate_combination(cls, cleaned: dict) -> None:
-        national_id = cleaned.get("national_id")
-        if not national_id and not cleaned.get("passport_number"):
-            raise BadRequestException(
-                "A PESEL (national_id) or a passport_number is required for PL employees.")
-        if national_id and not pl_pesel_is_valid(national_id):
-            raise BadRequestException(
-                "PESEL must be 11 digits with a valid birth date and check digit.")
-        tax_number = cleaned.get("tax_number")
-        if tax_number and not pl_nip_is_valid(tax_number):
-            raise BadRequestException("NIP must be 10 digits with a valid check digit.")
         iban = cleaned.get("iban")
         if iban:
             if not re.fullmatch(r"PL\d{26}", iban) or not iban_checksum_ok(iban):

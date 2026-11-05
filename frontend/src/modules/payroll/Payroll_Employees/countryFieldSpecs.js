@@ -66,10 +66,9 @@ export const COUNTRIES = [
   // statutory profile (employee detail → "Manage"), never here.
   { code: "ZA", name: "South Africa" },
   // Poland (ZP-PL-ENG-001 Phase 0) — mirrors employee_validation.py's
-  // PLEmployeeValidation (PESEL birth date + check digit, or a passport; NIP
-  // mod-11; Polish IBAN mod-97) plus bank_routing.py's PL IBAN routing.
-  // Contract, ZUS title, PIT declarations and PPK live on the Poland
-  // statutory profile (later phases), never here.
+  // PLEmployeeValidation (passport; Polish IBAN mod-97) plus bank_routing.py's
+  // PL IBAN routing. PESEL and NIP are vault-only (spec §13); contract, ZUS
+  // title, PIT statements and PPK live on the Poland statutory profile, never here.
   { code: "PL", name: "Poland" },
 ];
 
@@ -523,13 +522,12 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "branch_code", label: "Branch code", type: "text", placeholder: "6 digits", strip: " -", pattern: /^\d{6}$/, error: "Branch code must be 6 digits." },
     { key: "account_number", label: "Account number", type: "text", placeholder: "7–11 digits", strip: " -", pattern: /^\d{7,11}$/, error: "Account number must be 7-11 digits." },
   ],
-  // Poland — mirrors backend PLEmployeeValidation. A PESEL or a passport is
-  // required (the server enforces the pair); NIP only where a worker has no
-  // PESEL. Messages never repeat the identifier.
+  // Poland — mirrors backend PLEmployeeValidation. PESEL and NIP are held ONLY
+  // in the encrypted identifier vault (Poland statutory profile, spec §13) and
+  // are refused as employee fields; the run preflight needs a vault PESEL or a
+  // passport. plPeselIsValid / plNipIsValid above serve the vault form.
   PL: [
-    { key: "national_id", label: "PESEL", type: "text", placeholder: "11 digits", strip: " -", pattern: /^\d{11}$/, check: plPeselIsValid, error: "PESEL must be 11 digits with a valid birth date and check digit." },
     { key: "passport_number", label: "Passport number (if no PESEL)", type: "text", placeholder: "6–20 letters/digits", upper: true, strip: " -", pattern: /^[A-Z0-9]{6,20}$/, error: "Passport number must be 6–20 letters/digits." },
-    { key: "tax_number", label: "NIP (if no PESEL)", type: "text", placeholder: "10 digits", strip: " -", pattern: /^\d{10}$/, check: plNipIsValid, error: "NIP must be 10 digits with a valid check digit." },
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.PL).
     { key: "iban", label: "IBAN", type: "text", placeholder: "PL + 26 digits", upper: true, strip: " ", pattern: /^PL\d{26}$/, check: ibanPassesMod97, error: "Polish IBAN must be PL followed by 26 digits with a valid check digit." },
   ],
@@ -552,7 +550,7 @@ export const COUNTRY_FIELD_SPECS = {
 export const DUPLICATE_ID_FIELDS = {
   US: "ssn", UK: "nino", AU: "tfn", CA: "sin", DE: "steuer_id", IE: "ppsn", SG: "nric_fin",
   HK: "hkid", SE: "swedish_id_number", IT: "codice_fiscale", CH: "ahv_number", SA: "national_id_iqama",
-  NL: "bsn", MX: "curp", BR: "cpf", PL: "national_id",
+  NL: "bsn", MX: "curp", BR: "cpf", PL: "passport_number",
 };
 
 // Every jurisdiction's compliance field, flattened into one list — used to
