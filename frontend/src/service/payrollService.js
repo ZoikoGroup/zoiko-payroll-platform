@@ -3088,3 +3088,24 @@ export const approveNzCorrection = (id) => api.post(`${NZ}/corrections/${id}/app
 export const applyNzCorrection = (id, payDate) => api.post(`${NZ}/corrections/${id}/apply`, { payDate });
 export const voidNzCorrection = (id, reason) => api.post(`${NZ}/corrections/${id}/void`, { reason });
 export const rehireNz = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/rehire`, body);
+// Payday filing, remittance, run exceptions and the journal (P8). Submission
+// is refused server-side until gate G3 certifies the filing schema; only the
+// masked JSON preview exists until then.
+export const listNzFilings = async (params) => nzList(await api.get(`${NZ}/filings`, { params }));
+export const getNzFiling = async (id) => nzOne(await api.get(`${NZ}/filings/${id}`));
+export const approveNzFiling = (id) => api.post(`${NZ}/filings/${id}/approve`, {});
+export const submitNzFiling = (id) => api.post(`${NZ}/filings/${id}/submit`, {});
+export const recordNzFilingResponse = (id, body) => api.post(`${NZ}/filings/${id}/response`, body);
+export const listNzRemittances = async (periodStart) =>
+  nzList(await api.get(`${NZ}/remittances`, { params: periodStart ? { periodStart } : undefined }));
+export const getNzRemittance = async (id) => nzOne(await api.get(`${NZ}/remittances/${id}`));
+export const recordNzSettlement = (remittanceId, body) => api.post(`${NZ}/remittances/${remittanceId}/settlements`, body);
+export const matchNzSettlement = (id) => api.post(`${NZ}/settlements/${id}/match`, {});
+export const reverseNzSettlement = (id, reason) => api.post(`${NZ}/settlements/${id}/reverse`, { reason });
+export const listNzRunExceptions = async (runId) => nzList(await api.get(`${NZ}/runs/${runId}/exceptions`));
+export const requestNzRunException = (runId, body) => api.post(`${NZ}/runs/${runId}/exceptions`, body);
+export const approveNzRunException = (id) => api.post(`${NZ}/run-exceptions/${id}/approve`, {});
+export const rejectNzRunException = (id, reason) => api.post(`${NZ}/run-exceptions/${id}/reject`, { reason });
+export const getNzRunJournal = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/journal`));
+export const setNzJournalAccounts = (profileId, accounts, reason) =>
+  api.put(`${NZ}/employer-profiles/${profileId}/journal-accounts`, { accounts, reason });

@@ -63,6 +63,9 @@ const NZ_FILES = [
   "modules/payroll/PayRollRuns/NZPayslipBreakdown.jsx",
   "modules/payroll/PayRollRuns/NZRunPreflightPanel.jsx",
   "modules/payroll/Compliances/NZPaymentsSection.jsx",
+  // P8 — payday filing, remittance, run exceptions, journal
+  "modules/payroll/Compliances/NZFilingRemittanceSection.jsx",
+  "modules/payroll/PayRollRuns/NZRunFilingPanel.jsx",
 ];
 const files = Object.fromEntries(NZ_FILES.map((f) => [f, read(f)]));
 const contentJs = files["components/jurisdiction/new_zealand/nzContent.js"];
@@ -233,6 +236,36 @@ check("The payslip breakdown only reads the frozen result (no frozen inputs, no 
 });
 check("Special runs and corrections are reachable from the NZ Compliance Centre", () =>
   centre.includes("<NZPaymentsSection />"));
+
+// ── P8: payday filing, remittance, run exceptions, journal ──────────────────
+const filingSection = files["modules/payroll/Compliances/NZFilingRemittanceSection.jsx"];
+const runFiling = files["modules/payroll/PayRollRuns/NZRunFilingPanel.jsx"];
+check("Filing / remittance and the run exceptions panel are mounted", () => {
+  const runs = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  assert(centre.includes("<NZFilingRemittanceSection />"), "compliance centre");
+  assert(/<NZRunFilingPanel runId=\{run\.id\}/.test(runs), "run details");
+});
+check("Only the exceptions the backend can approve are offered (never a minimum-wage failure)", () => {
+  const backend = readBackend("app/modules/payroll/nz_lifecycle.py");
+  const server = /APPROVABLE_EXCEPTIONS = \(([^)]*)\)/.exec(backend)?.[1].match(/"([A-Z_]+)"/g).map((s) => s.slice(1, -1));
+  const client = /const APPROVABLE = \[([^\]]*)\]/.exec(runFiling)?.[1].match(/"([A-Z_]+)"/g).map((s) => s.slice(1, -1));
+  assert(JSON.stringify(server) === JSON.stringify(client), `server ${server} vs client ${client}`);
+  assert(!/NZ_MIN_WAGE_FAIL/.test(runFiling.replace(/\/\/.*$/gm, "")), "min-wage code in the panel");
+});
+check("The journal account map edits exactly the backend's account keys", () => {
+  const backend = readBackend("app/modules/payroll/nz_journal.py");
+  const block = backend.slice(backend.indexOf("ACCOUNT_KEYS = ("), backend.indexOf(")", backend.indexOf("ACCOUNT_KEYS = (")));
+  const server = [...block.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  const client = [...filingSection.slice(filingSection.indexOf("const ACCOUNT_FIELDS"))
+    .matchAll(/\["([a-z_]+)", "/g)].map((m) => m[1]);
+  assert(server.length === 9 && JSON.stringify(server) === JSON.stringify(client), `${server} vs ${client}`);
+});
+check("P8 writes carry a reason and no screen edits a filed or owed amount", () => {
+  assert(/payment_reference: v\.reference, reason: v\.reason/.test(filingSection), "settlement reason");
+  assert(/setNzJournalAccounts\(Number\(selected\), accounts, reason\)/.test(filingSection), "account map reason");
+  assert(/requestNzRunException\(runId, \{ code, payslip_item_id: item\.id, reason \}\)/.test(runFiling), "exception reason");
+  assert(!/api\.|updateNzFiling|updateNzRemittance/.test(filingSection + runFiling), "no direct or amount-editing calls");
+});
 check("NZ leave types are exactly the ones the backend accepts", () => {
   const leaveService = readBackend("app/modules/payroll/nz_leave_service.py");
   const requestBlock = leaveService.slice(leaveService.indexOf("NZ_REQUEST_TYPES = {"), leaveService.indexOf("}", leaveService.indexOf("NZ_REQUEST_TYPES = {")));

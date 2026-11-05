@@ -27,6 +27,7 @@ import JPRunPreflightPanel from "./JPRunPreflightPanel";
 import JPRunExceptionsPanel from "./JPRunExceptionsPanel";
 import NZPayslipBreakdown from "./NZPayslipBreakdown";
 import NZRunPreflightPanel from "./NZRunPreflightPanel";
+import NZRunFilingPanel from "./NZRunFilingPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -628,6 +629,10 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </>
               )}
               {items.some((i) => (i.country || i.countryCode) === "NZ") && <NZRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "NZ") && (
+                <NZRunFilingPanel runId={run.id} items={items.filter((i) => (i.country || i.countryCode) === "NZ")}
+                  paid={["Paid", "Closed"].includes((detail || run).status)} />
+              )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

@@ -147,8 +147,9 @@ def test_new_tables_match_the_models_exactly(model_engine):
         for table in _load()._TABLES:
             conn.execute(sa.text(f'DROP TABLE "{table}"'))
     _run(engine, "upgrade")
+    later = {"payroll_nz_employer_profiles": {"nz_journal_accounts"}}   # added by P8 (dd8a60634320)
     for table in NEW_TABLES:
-        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns}, table
+        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns} - later.get(table, set()),             table
         assert model_indexes[table] <= _indexes(engine, table), table
 
 
@@ -202,7 +203,7 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_nz_leave_entitlements", "payroll_nz_gross_earnings_ledger",
                                         "payroll_nz_leave_events", "payroll_nz_final_pay_cases",
                                         "payroll_nz_leave_pay_calculations", "payroll_nz_cash_up_requests",
-                                        "payroll_nz_corrections"}
+                                        "payroll_nz_corrections", "payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_remittance_lines", "payroll_nz_settlements", "payroll_nz_run_exceptions"}
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

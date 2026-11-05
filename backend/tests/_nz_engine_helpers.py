@@ -166,6 +166,8 @@ P6_TEST_VALUES = {
     "nz_hol_final_pay_unvested_method": "PCT_OF_GROSS_SINCE_ANNIVERSARY",
     "nz_out_of_cycle_paye_method": "EXTRA_PAY", "nz_lump_sum_paye_method": "EXTRA_PAY_FOUR_WEEK_ANNUALISE",
     "nz_correction_policy": "COMPENSATING_DELTA",
+    # Phase 8 TEST values (filing deadline definition, payload schema version)
+    "nz_working_day_rule": "WEEKDAYS_EXCL_PUBLIC_HOLIDAYS_AND_25DEC_15JAN", "nz_filing_payload_version": 1,
 }
 P6_TEST_SLABS = (
     dict(rule_type=content.NZ_LUMP_SUM_RULE, filing_status="ANNUALISATION_FACTOR", flat_amount="13",

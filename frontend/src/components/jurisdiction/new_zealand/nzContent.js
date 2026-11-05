@@ -26,6 +26,7 @@ export const TEXT_ROWS = {
   nz_hol_final_pay_unvested_method: { choices: ["PCT_OF_GROSS_SINCE_ANNIVERSARY"] },
   nz_out_of_cycle_paye_method: { choices: ["EXTRA_PAY", "PERIOD_MAIN"] },
   nz_lump_sum_paye_method: { choices: ["EXTRA_PAY_FOUR_WEEK_ANNUALISE"] },
+  nz_working_day_rule: { choices: ["WEEKDAYS_EXCL_PUBLIC_HOLIDAYS_AND_25DEC_15JAN"] },
   nz_supported_pay_frequencies: { hint: "Comma-separated: WEEKLY, FORTNIGHTLY, FOUR_WEEKLY, MONTHLY" },
   nz_deduction_precedence: { hint: "Each of PAYE, ACC_LEVY, STUDENT_LOAN, KS_EMPLOYEE, CHILD_SUPPORT once; child support after PAYE and ACC_LEVY" },
   nz_ks_employee_rates: { hint: "Comma-separated percentages, e.g. 3.5,4,6,8,10" },
@@ -87,7 +88,7 @@ export const GROUPS = {
     keys: ["nz_payday_filing_working_days", "nz_paper_filing_working_days", "nz_efiling_threshold",
       "nz_efiling_threshold_after_months", "nz_large_employer_threshold", "nz_remit_monthly_due_day",
       "nz_remit_first_half_due_day", "nz_remit_second_half_due_day", "nz_remit_december_second_half_due",
-      "nz_record_retention_years"],
+      "nz_working_day_rule", "nz_filing_payload_version", "nz_record_retention_years"],
     tables: [],
   },
   policy: {

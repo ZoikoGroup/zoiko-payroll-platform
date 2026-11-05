@@ -12,6 +12,7 @@ import {
 } from "../../../components/jurisdiction/new_zealand/nzOrgOptions";
 import { NewZealandEmployeeRecords } from "../Payroll_Employees/NewZealandStatutoryProfilePanel";
 import NZPaymentsSection from "./NZPaymentsSection";
+import NZFilingRemittanceSection from "./NZFilingRemittanceSection";
 
 // New Zealand Compliance Centre (ZP-NZ-ENG-001). Organisation setup (employer
 // profile per legal employer, verification, employer IRD number), Holidays Act
@@ -257,6 +258,7 @@ export default function NZComplianceCentreTab() {
       <LeaveAdministration />
       <FamilyViolencePermission />
       <NZPaymentsSection />
+      <NZFilingRemittanceSection />
       <EmployeeRecords />
     </div>
   );

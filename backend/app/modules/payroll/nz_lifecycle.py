@@ -450,3 +450,108 @@ def rehire(db: Session, organization_id: int, employee_id: int, payload: dict, a
     if str(payload.get("continuity_rule") or "").upper() == "CONTINUOUS":
         payload["prior_employment_id"] = previous.id
     return lv.record_nz_employment(db, organization_id, employee_id, payload, actor_id, reason)
+
+
+# ── run exceptions (Phase 8, D-P8-1) ────────────────────────────────────────
+# Only a documented exception may be approved by a second person so a run can
+# proceed: the child-support shortfall (reported to Inland Revenue with its
+# variation code). A minimum-wage FAIL is never approvable (also a DB CHECK);
+# UNDETERMINABLE means the hours are missing — record them instead.
+APPROVABLE_EXCEPTIONS = ("NZ_CS_SHORTFALL",)
+
+
+def _exception(db: Session, organization_id: int, exception_id: int):
+    m = nzs._nz_models()
+    X = m.PayrollNzRunException
+    row = db.query(X).filter(X.id == exception_id, X.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("New Zealand run exception")
+    return row
+
+
+def request_run_exception(db: Session, organization_id: int, run_id: int, payload: dict, actor_id):
+    from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
+
+    m = nzs._nz_models()
+    payload = dict(payload or {})
+    reason = nzs._nz_reason(payload.get("reason"))
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id, PayrollRun.organization_id == organization_id).first()
+    if run is None:
+        raise NotFoundException("Payroll run")
+    code = str(payload.get("code") or "").strip().upper()
+    if code not in APPROVABLE_EXCEPTIONS:
+        raise BadRequestException(f"{code or 'This exception'} cannot be approved: fix the payslip instead "
+                                  f"(approvable: {', '.join(APPROVABLE_EXCEPTIONS)}).")
+    try:
+        item_id = int(payload.get("payslip_item_id"))
+    except (TypeError, ValueError):
+        raise BadRequestException("payslip_item_id is required.")
+    item = db.get(PayslipItem, item_id)
+    if item is None or item.payroll_run_id != run.id:
+        raise NotFoundException("Payslip in this run")
+    found = [e for e in (item.nz_calculation_snapshot or {}).get("exceptions") or [] if e.get("code") == code]
+    if not found:
+        raise BadRequestException(f"The payslip has no {code} exception.")
+    fingerprint = nzs.nz_approval_fingerprint(db, run)
+    X = m.PayrollNzRunException
+    existing = (db.query(X).filter(X.run_id == run.id, X.payslip_item_id == item.id, X.code == code,
+                                   X.run_fingerprint == fingerprint, X.status != "REJECTED").first())
+    if existing is not None:
+        return existing
+    employee = db.get(PayrollEmployee, item.employee_id)
+    row = X(organization_id=organization_id, legal_entity_id=getattr(employee, "legal_entity_id", None),
+            employee_id=item.employee_id, run_id=run.id, payslip_item_id=item.id, code=code,
+            detail=nzs._json_safe(found[0]), run_fingerprint=fingerprint, status="REQUESTED", created_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    nzs._nz_audit(db, actor_id, "requested", "nz_run_exception", row.id, new={"code": code}, reason=reason)
+    return row
+
+
+def approve_run_exception(db: Session, organization_id: int, exception_id: int, actor_id):
+    from app.modules.payroll.service import require_four_eyes
+
+    row = _exception(db, organization_id, exception_id)
+    if row.status != "REQUESTED":
+        raise BadRequestException("Only a REQUESTED run exception can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, "Approving a New Zealand run exception", db=db,
+                      entity_type="nz_run_exception", entity_id=row.id, current_status=row.status)
+    row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, datetime.utcnow()
+    db.flush()
+    nzs._nz_audit(db, actor_id, "approved", "nz_run_exception", row.id, new={"code": row.code})
+    return row
+
+
+def reject_run_exception(db: Session, organization_id: int, exception_id: int, actor_id, reason=None):
+    reason = nzs._nz_reason(reason)
+    row = _exception(db, organization_id, exception_id)
+    if row.status != "REQUESTED":
+        raise BadRequestException("Only a REQUESTED run exception can be rejected.")
+    row.status = "REJECTED"
+    db.flush()
+    nzs._nz_audit(db, actor_id, "rejected", "nz_run_exception", row.id, new={"code": row.code}, reason=reason)
+    return row
+
+
+def approved_exception_keys(db: Session, run) -> set:
+    """(payslip_item_id, code) approved for the run's CURRENT fingerprint: a
+    changed payslip makes the approval stale and the exception blocks again."""
+    m = nzs._nz_models()
+    X = m.PayrollNzRunException
+    fingerprint = nzs.nz_approval_fingerprint(db, run)
+    rows = (db.query(X.payslip_item_id, X.code).filter(X.run_id == run.id, X.status == "APPROVED",
+                                                       X.run_fingerprint == fingerprint).all())
+    return {(r[0], r[1]) for r in rows}
+
+
+def run_exception_view(row) -> dict:
+    return {"id": row.id, "runId": row.run_id, "payslipItemId": row.payslip_item_id, "employeeId": row.employee_id,
+            "code": row.code, "detail": row.detail, "runFingerprint": row.run_fingerprint, "status": row.status,
+            "createdById": row.created_by_id, "approvedById": row.approved_by_id}
+
+
+def list_run_exceptions(db: Session, organization_id: int, run_id: int) -> list:
+    m = nzs._nz_models()
+    X = m.PayrollNzRunException
+    return [run_exception_view(r) for r in db.query(X).filter(X.organization_id == organization_id, X.run_id == run_id)
+            .order_by(X.id)]

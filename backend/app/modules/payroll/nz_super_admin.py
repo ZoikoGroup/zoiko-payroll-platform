@@ -93,6 +93,7 @@ def _vocabulary() -> dict:
         "nz_hol_final_pay_unvested_method": one_of(leave_pay.UNVESTED_METHOD),
         "nz_out_of_cycle_paye_method": one_of("EXTRA_PAY", "PERIOD_MAIN"),
         "nz_lump_sum_paye_method": one_of(extra_pay.FOUR_WEEK_ANNUALISE),
+        "nz_working_day_rule": one_of("WEEKDAYS_EXCL_PUBLIC_HOLIDAYS_AND_25DEC_15JAN"),
     })
     return vocab
 

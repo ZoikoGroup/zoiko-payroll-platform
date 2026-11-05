@@ -12475,6 +12475,8 @@ class PayrollNzEmployerProfile(_NzCommon, Base):
                                              server_default="UNVERIFIED")
     source_document_id              = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"), nullable=True)
     status                          = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    # Phase 8 (dd8a60634320): the employer's own journal account map.
+    nz_journal_accounts             = Column(_NZ_JSON, nullable=True)
 
     __table_args__ = (
         sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_nz_employer_status"),
@@ -13125,3 +13127,168 @@ class PayrollNzCorrection(_NzCommon, Base):
 
     def __repr__(self):
         return f"<PayrollNzCorrection original={self.original_payslip_item_id} {self.status}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand payday filing and remittance (ZP-NZ-ENG-001 Phase 8,
+# migration dd8a60634320)
+# ══════════════════════════════════════════════════════════════════════════
+_NZ_REMIT_OBLIGATIONS = ("PAYE", "STUDENT_LOAN", "KS_EMPLOYEE", "KS_EMPLOYER_NET", "ESCT", "CHILD_SUPPORT")
+
+
+class PayrollNzFiling(_NzCommon, Base):
+    """A payday filing record per legal employer, payday, schedule, kind and
+    version (spec §9, NZ-018). The payload comes only from PAID payslips and
+    carries IRD numbers as vault id + masked form (D-P8-4). Nothing is sent
+    while content.NZ_EXPORT_SCHEMAS is empty (G3)."""
+    __tablename__ = "payroll_nz_filings"
+
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+    pay_date             = Column(Date, nullable=False)
+    filing_type          = Column(String(24), nullable=False)
+    kind                 = Column(String(10), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    version              = Column(SmallInteger, nullable=False, default=1, server_default="1")
+    run_ids              = Column(_NZ_JSON, nullable=False)
+    payload              = Column(_NZ_JSON, nullable=False)
+    payload_hash         = Column(String(64), nullable=False)
+    channel              = Column(String(20), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    amends_id            = Column(Integer, ForeignKey("payroll_nz_filings.id", ondelete="SET NULL"), nullable=True)
+    correction_id        = Column(Integer, ForeignKey("payroll_nz_corrections.id", ondelete="SET NULL"), nullable=True)
+    authority_reference  = Column(String(100), nullable=True)
+    authority_errors     = Column(_NZ_JSON, nullable=True)
+    submitted_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at         = Column(DateTime(timezone=True), nullable=True)
+    responded_at         = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("filing_type IN ('EMPLOYMENT_INFORMATION', 'EMPLOYEE_DETAILS')", name="ck_nz_filing_type"),
+        sa.CheckConstraint("kind IN ('ORIGINAL', 'AMENDMENT')", name="ck_nz_filing_kind"),
+        sa.CheckConstraint("kind <> 'AMENDMENT' OR amends_id IS NOT NULL", name="ck_nz_filing_amends"),
+        sa.CheckConstraint("version >= 1", name="ck_nz_filing_version"),
+        sa.CheckConstraint("channel IN ('PAYDAY_GATEWAY', 'MYIR_FILE_UPLOAD', 'MYIR_ONSCREEN', 'PAPER')",
+                           name="ck_nz_filing_channel"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'SUPERSEDED')",
+                           name="ck_nz_filing_status"),
+        Index("ix_nz_filing_due", "organization_id", "due_on"),
+        Index("uq_nz_filing_version_entity", "organization_id", "legal_entity_id", "pay_date", "filing_type", "kind",
+              "version", unique=True, postgresql_where=text("legal_entity_id IS NOT NULL"),
+              sqlite_where=text("legal_entity_id IS NOT NULL")),
+        Index("uq_nz_filing_version_org", "organization_id", "pay_date", "filing_type", "kind", "version", unique=True,
+              postgresql_where=text("legal_entity_id IS NULL"), sqlite_where=text("legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzFiling {self.pay_date} {self.filing_type} {self.kind} v{self.version} {self.status}>"
+
+
+class PayrollNzRemittance(_NzCommon, Base):
+    """One remittance period × obligation × destination (spec §9). PAID only
+    through matched settlements — a filing's acceptance never pays (NZ-019)."""
+    __tablename__ = "payroll_nz_remittances"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    period_start      = Column(Date, nullable=False)
+    period_end        = Column(Date, nullable=False)
+    remittance_class  = Column(String(15), nullable=False)
+    obligation        = Column(String(20), nullable=False)
+    destination       = Column(String(16), nullable=False)
+    fund_ref          = Column(String(100), nullable=False, default="", server_default="")
+    amount            = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    settled           = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    due_on            = Column(Date, nullable=True)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    late              = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+
+    __table_args__ = (
+        sa.CheckConstraint("period_end >= period_start", name="ck_nz_remittance_period"),
+        sa.CheckConstraint("remittance_class IN ('MONTHLY', 'TWICE_MONTHLY')", name="ck_nz_remittance_class"),
+        sa.CheckConstraint(f"obligation IN {_nz_in(_NZ_REMIT_OBLIGATIONS)}", name="ck_nz_remittance_obligation"),
+        sa.CheckConstraint("destination IN ('INLAND_REVENUE', 'COMPLYING_FUND')", name="ck_nz_remittance_destination"),
+        sa.CheckConstraint("status IN ('OPEN', 'PART_PAID', 'PAID')", name="ck_nz_remittance_status"),
+        Index("ix_nz_remittance_due", "organization_id", "due_on"),
+        Index("uq_nz_remittance_entity", "organization_id", "legal_entity_id", "period_start", "obligation",
+              "destination", "fund_ref", unique=True, postgresql_where=text("legal_entity_id IS NOT NULL"),
+              sqlite_where=text("legal_entity_id IS NOT NULL")),
+        Index("uq_nz_remittance_org", "organization_id", "period_start", "obligation", "destination", "fund_ref",
+              unique=True, postgresql_where=text("legal_entity_id IS NULL"),
+              sqlite_where=text("legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzRemittance {self.period_start} {self.obligation} {self.amount} {self.status}>"
+
+
+class PayrollNzRemittanceLine(_NzCommon, Base):
+    """Append-only: one payslip's share of a remittance (a correction's delta
+    lands in the ORIGINAL period, D-P8-3)."""
+    __tablename__ = "payroll_nz_remittance_lines"
+
+    remittance_id    = Column(Integer, ForeignKey("payroll_nz_remittances.id", ondelete="CASCADE"), nullable=False)
+    run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    source           = Column(String(10), nullable=False)
+    correction_id    = Column(Integer, ForeignKey("payroll_nz_corrections.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("source IN ('RUN', 'CORRECTION')", name="ck_nz_remittance_line_source"),
+        sa.CheckConstraint("source <> 'CORRECTION' OR correction_id IS NOT NULL",
+                           name="ck_nz_remittance_line_correction"),
+        Index("ix_nz_remittance_line_remittance", "remittance_id"),
+        Index("uq_nz_remittance_line_payslip", "payslip_item_id", "remittance_id", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzRemittanceLine remittance={self.remittance_id} {self.amount}>"
+
+
+class PayrollNzSettlement(_NzCommon, Base):
+    """Money paid against a remittance: recorded by one person and matched by
+    a second; a reference only, never bank details."""
+    __tablename__ = "payroll_nz_settlements"
+
+    updated_at         = Column(DateTime(timezone=True), nullable=True)
+    remittance_id      = Column(Integer, ForeignKey("payroll_nz_remittances.id", ondelete="CASCADE"), nullable=False)
+    paid_on            = Column(Date, nullable=False)
+    amount             = Column(Numeric(14, 2), nullable=False)
+    payment_reference  = Column(String(100), nullable=False)
+    status             = Column(String(10), nullable=False, default="RECORDED", server_default="RECORDED")
+    matched_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    matched_at         = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("amount > 0", name="ck_nz_settlement_amount"),
+        sa.CheckConstraint("status IN ('RECORDED', 'MATCHED', 'REVERSED')", name="ck_nz_settlement_status"),
+        Index("ix_nz_settlement_remittance", "remittance_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzSettlement remittance={self.remittance_id} {self.amount} {self.status}>"
+
+
+class PayrollNzRunException(_NzCommon, Base):
+    """A second person's approval of a documented exception on one payslip,
+    bound to the run fingerprint (a changed payslip re-blocks). A minimum-wage
+    FAIL is never an approvable exception (D-P8-1)."""
+    __tablename__ = "payroll_nz_run_exceptions"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    code              = Column(String(40), nullable=False)
+    detail            = Column(_NZ_JSON, nullable=True)
+    run_fingerprint   = Column(String(64), nullable=False)
+    status            = Column(String(10), nullable=False, default="REQUESTED", server_default="REQUESTED")
+
+    __table_args__ = (
+        sa.CheckConstraint("code <> 'NZ_MIN_WAGE_FAIL'", name="ck_nz_run_exception_never_min_wage_fail"),
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'REJECTED')", name="ck_nz_run_exception_status"),
+        Index("uq_nz_run_exception", "run_id", "payslip_item_id", "code", "run_fingerprint", unique=True,
+              postgresql_where=text("status <> 'REJECTED'"), sqlite_where=text("status <> 'REJECTED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzRunException run={self.run_id} {self.code} {self.status}>"

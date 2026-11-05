@@ -1258,6 +1258,9 @@ def nz_run_preflight(db: Session, run) -> list:
         problems.append({"code": "NZ_NO_PACK_IN_FORCE", "employeeId": None,
                          "message": "No New Zealand rule pack is in force on the payday."})
     m = _nz_models()
+    from app.modules.payroll import nz_lifecycle, nz_remittance
+
+    approved = nz_lifecycle.approved_exception_keys(db, run)
     for item in _nz_run_items(db, run):
         employee = db.get(PayrollEmployee, item.employee_id)
         snapshot = item.nz_calculation_snapshot
@@ -1266,6 +1269,8 @@ def nz_run_preflight(db: Session, run) -> list:
                              "message": "No frozen New Zealand calculation; recalculate the run."})
         else:
             for exception in snapshot.get("exceptions") or []:
+                if (item.id, exception.get("code")) in approved:      # approved by a second person (Phase 8)
+                    continue
                 problems.append({"code": exception.get("code"), "employeeId": item.employee_id,
                                  "message": "A statutory exception needs resolving before approval."})
         employer = _nz_one_active(db, m.PayrollNzEmployerProfile, run.organization_id, None, run.pay_date,
@@ -1277,6 +1282,11 @@ def nz_run_preflight(db: Session, run) -> list:
         elif employer.verification_state != "VERIFIED":
             problems.append({"code": "NZ_EMPLOYER_NOT_VERIFIED", "employeeId": item.employee_id,
                              "message": "The New Zealand employer profile is not verified."})
+        if employer is not None:
+            mismatch = nz_remittance.class_mismatch(db, employer, run.pay_date)
+            if mismatch:
+                problems.append({"code": "NZ_REMITTANCE_CLASS_MISMATCH", "employeeId": item.employee_id,
+                                 "message": mismatch})
         problems.extend(_nz_phase6_preflight(db, run, item))
     return problems
 
@@ -1371,6 +1381,10 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
 
         nz_leave_pay_service.mark_paid(db, run)
         nz_lifecycle.on_final_run_paid(db, run)
+        from app.modules.payroll import nz_filing, nz_remittance
+
+        nz_remittance.post_run(db, run, actor_id)            # Phase 8: remittance lines (NZ-019: never paid here)
+        nz_filing.build_filings(db, run, actor_id)           # Phase 8: payday filing records / amendments
 
 
 # ── platform hooks ──────────────────────────────────────────────────────────

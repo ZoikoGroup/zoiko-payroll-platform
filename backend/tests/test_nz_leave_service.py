@@ -346,6 +346,9 @@ def _paid_run(db, organization, employee):
 
 
 def test_paid_run_writes_gross_ledger_once(db, organization, employee, signed):
+    from tests._nz_p6_fixtures import employer_profile
+
+    employer_profile(db, organization)
     _employment(db, organization.id, employee.id, date(2025, 5, 12))
     _pattern(db, organization.id, employee.id)
     run, item = _paid_run(db, organization, employee)

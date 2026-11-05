@@ -73,6 +73,16 @@ def add_ledger(db, organization, employee, employment, end=date(2026, 5, 29), we
     db.commit()
 
 
+def employer_profile(db, organization, start=date(2026, 4, 1), **kw):
+    """An ACTIVE organisation-level employer profile (approved by a second user)."""
+    body = {"effective_from": start, "legal_name": "Kiwi Test Ltd", "filing_method": "PAYDAY_GATEWAY",
+            "remittance_class": "MONTHLY", **kw}
+    row = nzs.record_nz_employer_profile(db, organization.id, body, 1, "setup")
+    nzs.approve_nz_employer_profile(db, organization.id, row.id, 2)
+    db.commit()
+    return row
+
+
 def request(db, organization, employee, leave_type, start, end):
     from app.modules.payroll import service
 
