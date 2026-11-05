@@ -13725,3 +13725,58 @@ class PayrollPlAccumulatorEntry(_PlCommon, Base):
 
     def __repr__(self):
         return f"<PayrollPlAccumulatorEntry employee={self.employee_id} {self.year} {self.accumulator} {self.amount}>"
+
+
+_PL_INCAPACITY_CATEGORIES = ("ILLNESS", "ROUTE_ACCIDENT", "PREGNANCY", "DONOR", "WORK_ACCIDENT", "OTHER")
+
+
+class PayrollPlIncapacityEpisode(Base):
+    """Poland incapacity episode (spec §9 IncapacityEpisode / BenefitBaseSnapshot,
+    PL-017 / PL-018; migration e11c2c36df17). Dates, statutory category, the
+    certificate reference and only a POINTER to the protected medical record —
+    never a diagnosis. The approved benefit-base snapshot (daily base, reference
+    window, evidence) is held on the episode. A change is a new version that
+    supersedes the old one; committed payslips are never edited."""
+    __tablename__ = "payroll_pl_incapacity_episodes"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    date_from            = Column(Date, nullable=False)
+    date_to              = Column(Date, nullable=False)
+    category             = Column(String(16), nullable=False)
+    certificate_ref      = Column(String(60), nullable=True)       # restricted: never in calc inputs / snapshots
+    medical_record_ref   = Column(String(100), nullable=True)      # pointer only (PL-017)
+    daily_base_amount    = Column(Numeric(12, 2), nullable=True)
+    base_reference_from  = Column(Date, nullable=True)
+    base_reference_to    = Column(Date, nullable=True)
+    base_evidence_ref    = Column(String(300), nullable=True)
+    evidence_ref         = Column(String(300), nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    previous_version_id  = Column(Integer, ForeignKey("payroll_pl_incapacity_episodes.id", ondelete="SET NULL"),
+                                  nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"category IN {_nz_in(_PL_INCAPACITY_CATEGORIES)}", name="ck_pl_incapacity_category"),
+        sa.CheckConstraint("date_to >= date_from", name="ck_pl_incapacity_dates"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED', 'CANCELLED')", name="ck_pl_incapacity_status"),
+        sa.CheckConstraint("evidence_ref IS NOT NULL OR certificate_ref IS NOT NULL", name="ck_pl_incapacity_evidence"),
+        sa.CheckConstraint("daily_base_amount IS NULL OR (daily_base_amount > 0 AND base_reference_from IS NOT NULL "
+                           "AND base_reference_to IS NOT NULL AND base_evidence_ref IS NOT NULL)",
+                           name="ck_pl_incapacity_base_evidence"),
+        sa.CheckConstraint("base_reference_to IS NULL OR base_reference_from IS NULL OR "
+                           "base_reference_to >= base_reference_from", name="ck_pl_incapacity_base_dates"),
+        sa.CheckConstraint("status <> 'APPROVED' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_pl_incapacity_four_eyes"),
+        Index("ix_pl_incapacity_employee_dates", "employee_id", "date_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlIncapacityEpisode employee={self.employee_id} {self.date_from}..{self.date_to} {self.status}>"

@@ -120,7 +120,7 @@ def test_every_row_names_its_date_basis():
                                  "pl_health_limitation_rule", "pl_ppk_employer_pit_treatment",
                                  "pl_fp_fs_min_base_rule", "pl_fund_cap_rule", "pl_fund_exemption_rules",
                                  "pl_night_supplement_basis", "pl_overtime_premium_map",
-                                 "pl_leave_part_time_rounding",
+                                 "pl_leave_part_time_rounding", "pl_sick_age_rule",
                                  "pl_leave_pay_reference_rule", "pl_pit_remittance_due_rule"])
 def test_policy_the_spec_does_not_give_is_pending_g1(key):
     row = _scalar(key)

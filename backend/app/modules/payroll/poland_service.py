@@ -713,6 +713,139 @@ def _post_prior_employer(db: Session, row, actor_id) -> None:
     db.flush()
 
 
+# ── incapacity episodes (spec §9, PL-017 / PL-018; Phase 6) ─────────────────
+PL_EPISODE_FIELDS = ("date_from", "date_to", "category", "certificate_ref", "medical_record_ref",
+                     "daily_base_amount", "base_reference_from", "base_reference_to", "base_evidence_ref",
+                     "evidence_ref", "supersedes_id")
+# What payroll calculation may see (PL-017): no certificate, no medical pointer.
+_EPISODE_CALC_FIELDS = ("id", "date_from", "date_to", "category", "daily_base_amount", "base_reference_from",
+                        "base_reference_to", "status")
+_EPISODE_RESTRICTED = ("certificate_ref", "medical_record_ref")
+
+
+def _episode(db: Session, organization_id: int, row_id: int):
+    M = _models().PayrollPlIncapacityEpisode
+    row = db.query(M).filter(M.id == row_id, M.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Poland incapacity episode")
+    return row
+
+
+def record_pl_incapacity_episode(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id,
+                                 reason=None):
+    """A DRAFT episode. A retro change is a NEW episode with supersedes_id: the
+    approved one is superseded on approval, never edited (PL-018)."""
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    unknown = sorted(set(payload) - set(PL_EPISODE_FIELDS))
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    data = {}
+    for key in ("date_from", "date_to", "base_reference_from", "base_reference_to"):
+        if payload.get(key) not in (None, ""):
+            data[key] = _as_date(payload[key], key)
+    for key in ("certificate_ref", "medical_record_ref", "base_evidence_ref", "evidence_ref", "category"):
+        if payload.get(key) not in (None, ""):
+            data[key] = str(payload[key]).strip()[:300]
+    if payload.get("daily_base_amount") not in (None, ""):
+        data["daily_base_amount"] = _decimal(payload["daily_base_amount"], "daily_base_amount")
+    missing = [k for k in ("date_from", "date_to", "category") if not data.get(k)]
+    if missing:
+        raise BadRequestException(f"required field(s): {', '.join(missing)}")
+    _enum(data, "category", _content().INCAPACITY_CATEGORIES)
+    if data["date_to"] < data["date_from"]:
+        raise BadRequestException("date_to cannot be before date_from.")
+    if not data.get("certificate_ref") and not data.get("evidence_ref"):
+        raise BadRequestException("An incapacity episode needs its certificate reference or other evidence.")
+    if data.get("daily_base_amount") is not None and not (data.get("base_reference_from")
+                                                          and data.get("base_reference_to")
+                                                          and data.get("base_evidence_ref")):
+        raise BadRequestException("A daily benefit base needs its reference window and evidence (spec §9).")
+    M = _models().PayrollPlIncapacityEpisode
+    previous = None
+    if payload.get("supersedes_id") not in (None, ""):
+        previous = _episode(db, organization_id, int(payload["supersedes_id"]))
+        if previous.employee_id != employee.id or previous.status != "APPROVED":
+            raise BadRequestException("Only an APPROVED episode of this employee can be superseded.")
+    row = M(organization_id=organization_id, legal_entity_id=getattr(employee, "legal_entity_id", None),
+            employee_id=employee.id, status="DRAFT", created_by_id=actor_id,
+            previous_version_id=getattr(previous, "id", None), **data)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "pl_incapacity_episode", row.id,
+           new={"from": row.date_from.isoformat(), "to": row.date_to.isoformat(), "category": row.category},
+           reason=reason)
+    return row
+
+
+def approve_pl_incapacity_episode(db: Session, organization_id: int, row_id: int, actor_id):
+    from app.modules.payroll.service import require_four_eyes
+
+    row = _episode(db, organization_id, row_id)
+    if row.status != "DRAFT":
+        raise BadRequestException("Only a DRAFT incapacity episode can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, "Approving a Poland incapacity episode", db=db,
+                      entity_type="pl_incapacity_episode", entity_id=row.id, current_status=row.status)
+    if row.previous_version_id is not None:
+        previous = _episode(db, organization_id, row.previous_version_id)
+        if previous.status != "APPROVED":
+            raise BadRequestException("The episode this one supersedes is no longer APPROVED.")
+        previous.status = "SUPERSEDED"
+    row.status = "APPROVED"
+    row.approved_by_id = actor_id
+    row.approved_at = datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "approved", "pl_incapacity_episode", row.id, old={"status": "DRAFT"},
+           new={"status": "APPROVED"})
+    return row
+
+
+def cancel_pl_incapacity_episode(db: Session, organization_id: int, row_id: int, actor_id, reason):
+    reason = _reason(reason)
+    row = _episode(db, organization_id, row_id)
+    if row.status not in ("DRAFT", "APPROVED"):
+        raise BadRequestException("Only a DRAFT or APPROVED episode can be cancelled.")
+    old = row.status
+    row.status = "CANCELLED"
+    db.flush()
+    _audit(db, actor_id, "cancelled", "pl_incapacity_episode", row.id, old={"status": old},
+           new={"status": "CANCELLED"}, reason=reason)
+    return row
+
+
+def episode_view(row, restricted: bool = True) -> dict:
+    """Payroll users see only the facts calculation needs (PL-017); the
+    certificate and the medical-record pointer only on the restricted view."""
+    out = dict(_json_safe(_facts(row)))
+    if restricted:
+        for key in _EPISODE_RESTRICTED:
+            out[key] = None
+        out["restricted"] = True
+    return out
+
+
+def list_pl_incapacity_episodes(db: Session, organization_id: int, employee_id: int,
+                                restricted: bool = True) -> list:
+    M = _models().PayrollPlIncapacityEpisode
+    _employee(db, organization_id, employee_id)
+    rows = (db.query(M).filter(M.organization_id == organization_id, M.employee_id == employee_id)
+            .order_by(M.date_from, M.id).all())
+    return [episode_view(r, restricted) for r in rows]
+
+
+def pl_episode_facts(db: Session, organization_id: int, employee_id: int, pay_date: date) -> list:
+    """APPROVED episodes from 1 January of the pay-date year up to the pay
+    date: calculation fields only (no certificate, no medical pointer)."""
+    M = _models().PayrollPlIncapacityEpisode
+    rows = (db.query(M).filter(M.organization_id == organization_id, M.employee_id == employee_id,
+                               M.status == "APPROVED", M.date_from <= pay_date,
+                               M.date_to >= date(pay_date.year, 1, 1))
+            .order_by(M.date_from, M.id).all())
+    return [{k: getattr(r, k) for k in _EPISODE_CALC_FIELDS} for r in rows]
+
+
 # ── identifier vault (spec §13, PL-025): masked; reveal requested + approved ─
 def _vault(db: Session, organization_id: int, vault_id: int):
     V = _models().PayrollPlIdentifierVault
@@ -967,6 +1100,8 @@ def resolve_pl_calc_inputs(db: Session, organization_id: int, employee, pay_date
                                        (D.effective_to.is_(None)) | (D.effective_to >= pay_date))
                     .order_by(D.declaration_type, D.effective_from, D.id).all())
     return {
+        "pl_incapacity_episodes": pl_episode_facts(db, organization_id, employee.id, pay_date),
+        "pl_date_of_birth": getattr(employee, "date_of_birth", None),
         "pl_pay_date": pay_date, "pl_profile": _facts(profile), "pl_registration": _facts(registration),
         "pl_ppk": _facts(ppk), "pl_declarations": [_facts(d) for d in declarations],
         "pl_ytd": pl_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
@@ -984,9 +1119,9 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of:
 
 # ── frozen snapshot, replay and approval fingerprint (spec §14 Replay) ─────
 _CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation")
-_CTX_PLAIN = ("pay_frequency", "pl_components", "pl_overtime_events", "unpaid_leave_days", "pl_organization_id",
-              "pl_legal_entity_id", "pl_employee_id", "trace_id")
-_CTX_DATES = ("pay_date", "pl_pay_date", "period_start", "period_end")
+_CTX_PLAIN = ("pay_frequency", "pl_components", "pl_overtime_events", "pl_incapacity_episodes", "unpaid_leave_days",
+              "pl_organization_id", "pl_legal_entity_id", "pl_employee_id", "trace_id")
+_CTX_DATES = ("pay_date", "pl_pay_date", "period_start", "period_end", "pl_date_of_birth")
 _RECORD_KEYS = ("pl_profile", "pl_registration", "pl_ppk")
 _RATE_FIELDS = ("component_key", "label", "employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
                 "effective_from", "effective_to")
@@ -1000,7 +1135,8 @@ _FROZEN_RECORD_EXCLUDE = ("pesel_vault_id", "nip_vault_id", "nrs_vault_id", "fil
 def _record_for_freeze(record):
     if record is None:
         return None
-    return {k: v for k, v in dict(record).items() if k not in _FROZEN_RECORD_EXCLUDE}
+    data = record if isinstance(record, dict) else {k: v for k, v in vars(record).items() if not k.startswith("_")}
+    return {k: v for k, v in data.items() if k not in _FROZEN_RECORD_EXCLUDE}
 
 
 def pl_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
@@ -1231,6 +1367,7 @@ PL_RETENTION_CATEGORIES = (
     ("SOCIAL_INSURANCE_RECORDS", "ZUS, health, employer funds and PPK records"),
     ("EMPLOYEE_IDENTITY", "Identifier vault metadata (PESEL / NIP) and worker statutory profiles"),
     ("ACCESS_LOGS", "Identifier access events"),
+    ("ABSENCE_RECORDS", "Incapacity episodes and benefit-base snapshots (restricted; no medical detail)"),
 )
 PL_DECISIONS = {
     "D-1": ("Hybrid architecture: ZA layout, NZ-style engine and records", False),
@@ -1277,7 +1414,8 @@ def _retained_record_label(db: Session, organization_id: int, employee_id: int) 
     m = _models()
     for model, label in ((m.PayrollPlWorkerProfile, "worker statutory profiles"),
                          (m.PayrollPlDeclaration, "employee statements"),
-                         (m.PayrollPlAccumulatorEntry, "year-to-date ledger")):
+                         (m.PayrollPlAccumulatorEntry, "year-to-date ledger"),
+                         (m.PayrollPlIncapacityEpisode, "incapacity episodes")):
         if db.query(model.id).filter(model.organization_id == organization_id,
                                      model.employee_id == employee_id).first():
             return label

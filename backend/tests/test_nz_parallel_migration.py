@@ -137,7 +137,8 @@ def test_drift_filter_explains():
     assert tables == set(NEW_TABLES) | {"payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
                                         "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
                                         "payroll_pl_declarations", "payroll_pl_ppk_participations",
-                                        "payroll_pl_accumulator_entries"}
+                                        "payroll_pl_accumulator_entries",
+                                        "payroll_pl_incapacity_episodes"}  # + Poland P6 (e11c2c36df17)
     assert columns == {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
 
 

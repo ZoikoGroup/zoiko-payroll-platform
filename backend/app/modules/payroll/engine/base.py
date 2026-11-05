@@ -1023,6 +1023,8 @@ class PayrollContext:
     pl_ppk: object = None                     # PayrollPlPpkParticipation in force
     pl_ytd: dict = None                       # {accumulator: sum before this pay date}; missing key = unknown
     pl_overtime_events: list = None           # [{kind, event_ref, hours, hourly_rate}] behind OVERTIME_* (PL-016)
+    pl_incapacity_episodes: list = None       # APPROVED episodes: dates, category, daily base — no medical data
+    pl_date_of_birth: date = None             # the sick-pay age test (spec §9)
     pl_organization_id: int = None
     pl_legal_entity_id: int = None
     pl_employee_id: int = None

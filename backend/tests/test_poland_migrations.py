@@ -196,7 +196,8 @@ def test_deploy_drift_filter_explains_every_pl_object():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
+    # Poland P6 (e11c2c36df17) is pending on the same chain.
+    assert tables == set(NEW_TABLES) | {"payroll_pl_incapacity_episodes"}
     assert columns == SHARED
 
 

@@ -28,6 +28,7 @@ TEST_TEXT = {
     "pl_ppk_employer_pit_treatment": "TAXABLE_EMPLOYEE_INCOME",
     "pl_fp_fs_min_base_rule": "BASE_AT_LEAST_MIN_WAGE",
     "pl_fund_cap_rule": "CAPPED_WITH_PENSION_BASE",
+    "pl_sick_age_rule": "FROM_YEAR_AFTER_REACHING_AGE",
 }
 TEST_AMOUNTS = {
     "pl_costs_standard_annual_cap": "3000",

@@ -51,6 +51,7 @@ _GUARDED = [
     "dd8a60634320",  # New Zealand P8 nz_filings (guarded from day one, lock_timeout)
     "a8cde2482ef0",  # New Zealand P9 nz_parallel_cycles (guarded from day one, lock_timeout)
     "1ee3bbde33bb",  # Poland P2 pl_foundation (guarded from day one, lock_timeout)
+    "e11c2c36df17",  # Poland P6 pl_incapacity_episodes (guarded from day one, lock_timeout)
 ]
 
 

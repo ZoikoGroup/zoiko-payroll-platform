@@ -205,6 +205,47 @@ def pl_ppk_due(on: Optional[date] = Query(None), current_user=Depends(get_curren
     return pl.pl_ppk_reenrolment_due(db, _org_id(current_user), on)
 
 
+# ── incapacity episodes (spec §9, PL-017) ───────────────────────────────────
+@router.get("/employees/{employee_id}/incapacity-episodes",
+            summary="Incapacity episodes of an employee (certificate and medical pointer withheld, PL-017)")
+def pl_list_episodes(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    return pl.list_pl_incapacity_episodes(db, _org_id(current_user), employee_id, restricted=True)
+
+
+@router.get("/employees/{employee_id}/incapacity-episodes/restricted",
+            summary="Incapacity episodes with certificate references (org admin, restricted HR record)")
+def pl_list_episodes_restricted(employee_id: int, current_user=Depends(get_current_org_admin),
+                                db: Session = Depends(get_db)):
+    return pl.list_pl_incapacity_episodes(db, _org_id(current_user), employee_id, restricted=False)
+
+
+@router.post("/employees/{employee_id}/incapacity-episodes", summary="Record a DRAFT incapacity episode")
+def pl_create_episode(employee_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                      db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    row = pl.record_pl_incapacity_episode(db, _org_id(current_user), employee_id, payload, _actor(current_user),
+                                          reason)
+    db.commit()
+    return pl.episode_view(row, restricted=False)
+
+
+@router.post("/incapacity-episodes/{row_id}/approve", summary="Approve an incapacity episode (four-eyes)")
+def pl_approve_episode(row_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    row = pl.approve_pl_incapacity_episode(db, _org_id(current_user), row_id, _actor(current_user))
+    db.commit()
+    return pl.episode_view(row, restricted=False)
+
+
+@router.post("/incapacity-episodes/{row_id}/cancel", summary="Cancel an incapacity episode (reason required)")
+def pl_cancel_episode(row_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                      db: Session = Depends(get_db)):
+    row = pl.cancel_pl_incapacity_episode(db, _org_id(current_user), row_id, _actor(current_user),
+                                          body.get("reason"))
+    db.commit()
+    return pl.episode_view(row, restricted=False)
+
+
 # ── identifier vault (spec §13, PL-025) ─────────────────────────────────────
 @router.get("/employees/{employee_id}/identifiers", summary="An employee's PESEL / NIP on file (masked)")
 def pl_list_identifiers(employee_id: int, current_user=Depends(get_current_payroll_operator),

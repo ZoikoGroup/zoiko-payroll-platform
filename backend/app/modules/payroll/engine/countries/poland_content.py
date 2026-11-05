@@ -160,6 +160,11 @@ LEAVE_PART_TIME_ROUNDING = ("ROUND_UP_FULL_DAY", "EXACT")
 # The night-work supplement formula is not given by the specification; no
 # signed vocabulary exists yet, so a non-zero supplement always blocks.
 NIGHT_SUPPLEMENT_RULES = ()
+# Spec §9 IncapacityEpisode statutory category. Which categories are paid at
+# the full rate is a signed list (pl_sick_full_rate_cases, PENDING_G1).
+INCAPACITY_CATEGORIES = ("ILLNESS", "ROUTE_ACCIDENT", "PREGNANCY", "DONOR", "WORK_ACCIDENT", "OTHER")
+# How "aged over 50 under statutory age rule" is measured is not given.
+SICK_AGE_RULES = ("AGE_AT_EPISODE_START", "FROM_YEAR_AFTER_REACHING_AGE")
 ZUS_DEADLINE_CLASSES = ("DAY_5", "DAY_15", "DAY_20")
 ACCIDENT_RATE_SOURCES = ("ZUS_NOTICE", "SELF_DETERMINED", "SMALL_PAYER_DEFAULT")
 # PL-005: every declaration is effective-dated with evidence (Phase 2 table).
@@ -282,6 +287,7 @@ POLAND_PARAMETER_KEYS = {
     "pl_sick_rate_standard": "employee_pct",
     "pl_sick_rate_full": "employee_pct",
     "pl_sick_full_rate_cases": "text",
+    "pl_sick_age_rule": "text",
     "pl_benefit_reference_months": "amount",
     # filing and settlement
     "pl_zus_due_day_classes": "text",
@@ -473,6 +479,8 @@ POLAND_SCALAR_CONTENT = (
     # cases" — an example list, not the closed statutory list.
     ("pl_sick_full_rate_cases", "Cases paid at the full sick-pay rate", None, None, None,
      "ROUTE_ACCIDENT,PREGNANCY,DONOR", "S10", True, None, None, _EE),
+    ("pl_sick_age_rule", "How the shorter employer sick-pay period's age test is applied (not in spec)", None, None,
+     None, _PENDING, "S10", True, None, None, _CY),
     ("pl_benefit_reference_months", "Benefit base reference period (months)", None, None, None, None, "S10",
      True, None, None, _EE),
 

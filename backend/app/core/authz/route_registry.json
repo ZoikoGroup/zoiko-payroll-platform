@@ -14902,6 +14902,66 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/poland/employees/{employee_id}/incapacity-episodes",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "incapacity-episodes",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_pl_incapacity_episodes"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/employees/{employee_id}/incapacity-episodes",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "incapacity-episodes",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_pl_incapacity_episodes"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/poland/employees/{employee_id}/incapacity-episodes/restricted",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "restricted",
+   "principals": [
+    "employee",
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_pl_incapacity_episodes"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/poland/employees/{employee_id}/leave-entitlement",
    "data_class": "worker",
    "action": "read",
@@ -15227,6 +15287,42 @@
    "scan_worker_tables": [
     "payroll_pl_identifier_access_events",
     "payroll_pl_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/incapacity-episodes/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_pl_incapacity_episodes"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/incapacity-episodes/{row_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_pl_incapacity_episodes"
    ],
    "overridden": false
   },
