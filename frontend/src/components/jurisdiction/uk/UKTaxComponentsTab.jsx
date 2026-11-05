@@ -66,14 +66,14 @@ export default function UKTaxComponentsTab({ pack, rates, slabs, onReload, onDel
   return (
     <div className="space-y-5">
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <SummaryCard label="Total Components" value={totalComponents} />
         <SummaryCard label="Contribution Rates" value={configuredRates} />
         <SummaryCard label="Statutory Thresholds" value={configuredThresholds} />
       </div>
 
       {/* Header + Add button */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center flex-wrap justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Percent size={15} /> Tax Components</h3>
           <p className="mt-0.5 text-xs text-foreground-muted">National Insurance, Workplace Pension, Student Loans, and statutory thresholds for this Compliance Pack.</p>

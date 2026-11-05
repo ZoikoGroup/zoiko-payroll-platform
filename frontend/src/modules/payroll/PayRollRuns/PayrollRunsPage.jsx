@@ -388,7 +388,7 @@ export default function PayrollRunsPage() {
         <div className="flex-1 p-5">
           {!isWizard ? (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
                   { label: "Total Runs", value: stats.total, accent: "text-foreground" },
                   { label: "Pending Review", value: stats.pending, accent: "text-warning" },

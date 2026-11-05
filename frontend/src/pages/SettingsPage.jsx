@@ -44,7 +44,7 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center flex-wrap justify-between gap-3 mb-6">
         <h1 className="text-2xl font-bold text-foreground">Platform Settings</h1>
         <button
           onClick={load}
@@ -63,43 +63,45 @@ export default function SettingsPage() {
       )}
 
       <div className="bg-surface rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-background text-left text-xs text-foreground-muted">
-            <tr>
-              <th className="px-4 py-3">Key</th>
-              <th className="px-4 py-3">Description</th>
-              <th className="px-4 py-3">Value</th>
-              <th className="px-4 py-3">Public</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {settings.map((s) => (
-              <tr key={s.key} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{s.key}</td>
-                <td className="px-4 py-3 text-foreground-muted">{s.description || "—"}</td>
-                <td className="px-4 py-3">
-                  <input
-                    value={edits[s.key] ?? ""}
-                    onChange={(e) => setEdits((d) => ({ ...d, [s.key]: e.target.value }))}
-                    className="w-64 rounded-lg border border-border bg-surface text-foreground px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                  />
-                </td>
-                <td className="px-4 py-3 text-foreground-muted">{s.is_public ? "Yes" : "No"}</td>
-                <td className="px-4 py-3">
-                  <button
-                    disabled={busyKey === s.key}
-                    onClick={() => save(s.key)}
-                    className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
-                  >
-                    <Save size={12} />
-                    Save
-                  </button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Key</th>
+                <th className="px-4 py-3">Description</th>
+                <th className="px-4 py-3">Value</th>
+                <th className="px-4 py-3">Public</th>
+                <th className="px-4 py-3"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {settings.map((s) => (
+                <tr key={s.key} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{s.key}</td>
+                  <td className="px-4 py-3 text-foreground-muted">{s.description || "—"}</td>
+                  <td className="px-4 py-3">
+                    <input
+                      value={edits[s.key] ?? ""}
+                      onChange={(e) => setEdits((d) => ({ ...d, [s.key]: e.target.value }))}
+                      className="w-64 rounded-lg border border-border bg-surface text-foreground px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-foreground-muted">{s.is_public ? "Yes" : "No"}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      disabled={busyKey === s.key}
+                      onClick={() => save(s.key)}
+                      className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
+                    >
+                      <Save size={12} />
+                      Save
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {!loading && settings.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
             <SettingsIcon size={28} className="text-foreground-disabled" />

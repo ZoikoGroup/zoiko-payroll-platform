@@ -49,7 +49,7 @@ export default function RecentActivity({ onViewAll, filter, refreshTick, currenc
   return (
     <div className="rounded-[18px] border border-border bg-surface p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       {/* Header */}
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex items-center flex-wrap justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-bold text-foreground">Recent Payroll Runs</h3>
           <p className="mt-1 text-[12px] font-medium text-foreground-muted">

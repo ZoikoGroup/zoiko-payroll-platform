@@ -458,8 +458,8 @@ export default function SuperAdminShell({ children }) {
         <aside
           role="navigation"
           aria-label="Sidebar"
-          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 shadow-[0_8px_28px_rgba(8,43,69,0.28)] transition-[transform,width] duration-200 lg:translate-x-0 ${
-            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 transition-[transform,width,box-shadow] duration-200 lg:translate-x-0 lg:shadow-[0_8px_28px_rgba(8,43,69,0.28)] ${
+            sidebarOpen ? "translate-x-0 shadow-[0_8px_28px_rgba(8,43,69,0.28)]" : "-translate-x-full"
           } ${collapsed ? "w-72 lg:w-20" : "w-72 lg:w-[272px]"}`}
         >
           <SidebarContent
@@ -476,12 +476,14 @@ export default function SuperAdminShell({ children }) {
             reserved space for it via the lg:pl-* classes, so opening the
             mobile menu on a sub-lg viewport drew the sidebar straight over
             the page title/description/filters instead of pushing them
-            aside. `sidebarOpen ? "pl-72" : ""` reserves the same width the
+            aside. `sidebarOpen ? "sm:pl-72" : ""` reserves the same width the
             open sidebar actually uses (`w-72` on the <aside>, unconditional
-            below lg) whenever it's open; the lg:pl-* classes remain
+            below lg) whenever it's open on tablets. Phones (< sm) keep the
+            plain overlay: pushing a 288px pad there would leave ~70px for the
+            page. The lg:pl-* classes remain
             unconditional at lg and above, where the sidebar is always
             visible regardless of `sidebarOpen`. */}
-        <div className={`transition-[padding] duration-200 ${sidebarOpen ? "pl-72" : ""} ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
+        <div className={`transition-[padding] duration-200 ${sidebarOpen ? "sm:pl-72" : ""} ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
           <Header onOpenSidebar={() => setSidebarOpen(true)} onToggleCollapse={toggleCollapse} collapsed={collapsed} />
           <main className="w-full p-4 sm:p-6 lg:p-8">
             <PageErrorBoundary resetKey={pathname}>{children}</PageErrorBoundary>

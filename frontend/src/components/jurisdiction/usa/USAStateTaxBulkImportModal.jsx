@@ -82,7 +82,7 @@ export default function USAStateTaxBulkImportModal({ onClose, onImported }) {
         approver, golden-test variance) still apply before it goes Active.
       </p>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div>
           <label className={labelClass}>State</label>
           <input className={inputClass} value={state} onChange={(e) => setState(e.target.value.toUpperCase())} placeholder="e.g. KS" maxLength={2} />
@@ -111,9 +111,9 @@ export default function USAStateTaxBulkImportModal({ onClose, onImported }) {
             <Plus size={12} /> Add Row
           </button>
         </div>
-        <div className="max-h-56 space-y-2 overflow-y-auto">
+        <div className="max-h-56 space-y-2 overflow-auto">
           {bracketRows.map((r, i) => (
-            <div key={i} className="grid grid-cols-12 items-center gap-1.5">
+            <div key={i} className="grid min-w-[560px] grid-cols-12 items-center gap-1.5">
               <select className={inputClass + " col-span-3"} value={r.filingStatus} onChange={(e) => updateBracket(i, "filingStatus", e.target.value)}>
                 <option value="">(any / not filing-status-specific)</option>
                 {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -136,9 +136,9 @@ export default function USAStateTaxBulkImportModal({ onClose, onImported }) {
             <Plus size={12} /> Add Row
           </button>
         </div>
-        <div className="max-h-40 space-y-2 overflow-y-auto">
+        <div className="max-h-40 space-y-2 overflow-auto">
           {deductionRows.map((r, i) => (
-            <div key={i} className="grid grid-cols-12 items-center gap-1.5">
+            <div key={i} className="grid min-w-[560px] grid-cols-12 items-center gap-1.5">
               <select className={inputClass + " col-span-3"} value={r.filingStatus} onChange={(e) => updateDeduction(i, "filingStatus", e.target.value)}>
                 <option value="">(any / not filing-status-specific)</option>
                 {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}

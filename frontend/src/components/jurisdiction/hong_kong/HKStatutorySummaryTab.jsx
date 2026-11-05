@@ -69,21 +69,23 @@ export default function HKStatutorySummaryTab() {
 
       <section className={card} aria-labelledby="hk-packs">
         <h3 id="hk-packs" className="mb-2 text-[14px] font-semibold text-foreground">Rule packs (year of assessment)</h3>
-        <table className="w-full">
-          <thead><tr><th className={th}>Pack</th><th className={th}>YA</th><th className={th}>Window</th><th className={th}>Status</th><th className={th}>Rows</th><th className={th}>[G1] rows</th></tr></thead>
-          <tbody>
-            {data.packs.map((p) => (
-              <tr key={p.id} className="border-t border-border">
-                <td className={td}>{p.packId} v{p.version}</td>
-                <td className={td}>{p.yearOfAssessment}</td>
-                <td className={td}>{p.effectiveFrom} – {p.effectiveTo}</td>
-                <td className={td}>{p.status}</td>
-                <td className={td}>{p.contributionRates} rates · {p.taxSlabs} bands{p.unsourcedRows.length ? ` · ${p.unsourcedRows.length} unsourced` : ""}</td>
-                <td className={td}>{p.g1CertificationRows}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr><th className={th}>Pack</th><th className={th}>YA</th><th className={th}>Window</th><th className={th}>Status</th><th className={th}>Rows</th><th className={th}>[G1] rows</th></tr></thead>
+            <tbody>
+              {data.packs.map((p) => (
+                <tr key={p.id} className="border-t border-border">
+                  <td className={td}>{p.packId} v{p.version}</td>
+                  <td className={td}>{p.yearOfAssessment}</td>
+                  <td className={td}>{p.effectiveFrom} – {p.effectiveTo}</td>
+                  <td className={td}>{p.status}</td>
+                  <td className={td}>{p.contributionRates} rates · {p.taxSlabs} bands{p.unsourcedRows.length ? ` · ${p.unsourcedRows.length} unsourced` : ""}</td>
+                  <td className={td}>{p.g1CertificationRows}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className={card} aria-labelledby="hk-gates">
@@ -92,27 +94,29 @@ export default function HKStatutorySummaryTab() {
           Submit each gate&apos;s signed document below (tagged with the gate, e.g. HK-GATE-G1; the server computes its SHA-256);
           a different Super Admin accepts or rejects it. G1 is enforced at pack activation; G1–G7 at service opening.
         </p>
-        <table className="w-full">
-          <thead><tr><th className={th}>Gate</th><th className={th}>Requirement</th><th className={th}>State</th><th className={th}>Evidence</th></tr></thead>
-          <tbody>
-            {data.gates.map((g) => (
-              <Fragment key={g.gate}>
-                <tr className="border-t border-border">
-                  <td className={td}>{g.gate}</td><td className={td}>{g.requirement}</td><td className={td}><GateState state={g.state} /></td>
-                  <td className={td}>
-                    <button type="button" className="text-[12px] font-semibold text-primary underline" aria-expanded={open === g.gate}
-                      onClick={() => setOpen(open === g.gate ? null : g.gate)}>
-                      {open === g.gate ? "Hide" : `Evidence (${(g.evidence || []).length})`}
-                    </button>
-                  </td>
-                </tr>
-                {open === g.gate && (
-                  <tr><td colSpan={4} className="px-2 pb-2"><HKEvidencePanel tag={g.evidenceTag} items={g.evidence} onChanged={load} /></td></tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr><th className={th}>Gate</th><th className={th}>Requirement</th><th className={th}>State</th><th className={th}>Evidence</th></tr></thead>
+            <tbody>
+              {data.gates.map((g) => (
+                <Fragment key={g.gate}>
+                  <tr className="border-t border-border">
+                    <td className={td}>{g.gate}</td><td className={td}>{g.requirement}</td><td className={td}><GateState state={g.state} /></td>
+                    <td className={td}>
+                      <button type="button" className="text-[12px] font-semibold text-primary underline" aria-expanded={open === g.gate}
+                        onClick={() => setOpen(open === g.gate ? null : g.gate)}>
+                        {open === g.gate ? "Hide" : `Evidence (${(g.evidence || []).length})`}
+                      </button>
+                    </td>
+                  </tr>
+                  {open === g.gate && (
+                    <tr><td colSpan={4} className="px-2 pb-2"><HKEvidencePanel tag={g.evidenceTag} items={g.evidence} onChanged={load} /></td></tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <div className="mt-3">
           <h4 className="mb-1 text-[12px] font-semibold text-foreground">Production read-only verification (HK-PRODUCTION-VERIFICATION)</h4>
           <HKEvidencePanel tag="HK-PRODUCTION-VERIFICATION" items={data.productionVerificationEvidence} onChanged={load} />
@@ -130,19 +134,21 @@ export default function HKStatutorySummaryTab() {
 
       <section className={card} aria-labelledby="hk-sources">
         <h3 id="hk-sources" className="mb-2 text-[14px] font-semibold text-foreground">Official sources ({data.sources.length})</h3>
-        <table className="w-full">
-          <thead><tr><th className={th}>Authority</th><th className={th}>Document</th><th className={th}>SHA-256</th><th className={th}>Reviewed</th></tr></thead>
-          <tbody>
-            {data.sources.map((s) => (
-              <tr key={s.id} className="border-t border-border">
-                <td className={td}>{s.agency}</td>
-                <td className={td}><a className="text-primary underline" href={s.url} target="_blank" rel="noreferrer">{s.title}</a></td>
-                <td className={`${td} font-mono text-[11px]`}>{s.sha256 ? `${s.sha256.slice(0, 12)}…` : <span className="text-warning">not retrieved (G1)</span>}</td>
-                <td className={td}>{s.reviewed ? "Yes" : "No"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr><th className={th}>Authority</th><th className={th}>Document</th><th className={th}>SHA-256</th><th className={th}>Reviewed</th></tr></thead>
+            <tbody>
+              {data.sources.map((s) => (
+                <tr key={s.id} className="border-t border-border">
+                  <td className={td}>{s.agency}</td>
+                  <td className={td}><a className="text-primary underline" href={s.url} target="_blank" rel="noreferrer">{s.title}</a></td>
+                  <td className={`${td} font-mono text-[11px]`}>{s.sha256 ? `${s.sha256.slice(0, 12)}…` : <span className="text-warning">not retrieved (G1)</span>}</td>
+                  <td className={td}>{s.reviewed ? "Yes" : "No"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className={card} aria-labelledby="hk-g1">

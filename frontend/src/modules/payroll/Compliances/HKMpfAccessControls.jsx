@@ -56,14 +56,16 @@ export function EmpfFilingView({ submissionId }) {
       </div>
       {a.error && <p role="alert" className="text-[12px] text-error">{a.error}</p>}
       {view && (
-        <table className="w-full text-[12px]" aria-label={`eMPF filing rows #${submissionId}`}>
-          <thead><tr><th className="text-left">Payslip</th><th className="text-left">Member account</th><th className="text-left">Relevant income</th><th className="text-left">Employer</th><th className="text-left">Employee</th></tr></thead>
-          <tbody>
-            {view.rows.map((r) => (
-              <tr key={r.payslipId}><td>#{r.payslipId}</td><td className="font-mono">{r.memberAccount || "—"}</td><td>{r.relevantIncome}</td><td>{r.employerMandatory}</td><td>{r.employeeMandatory}</td></tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]" aria-label={`eMPF filing rows #${submissionId}`}>
+            <thead><tr><th className="text-left">Payslip</th><th className="text-left">Member account</th><th className="text-left">Relevant income</th><th className="text-left">Employer</th><th className="text-left">Employee</th></tr></thead>
+            <tbody>
+              {view.rows.map((r) => (
+                <tr key={r.payslipId}><td>#{r.payslipId}</td><td className="font-mono">{r.memberAccount || "—"}</td><td>{r.relevantIncome}</td><td>{r.employerMandatory}</td><td>{r.employeeMandatory}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

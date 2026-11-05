@@ -72,7 +72,7 @@ export default function CHWageFloorTab({ addToast }) {
 
   return (
     <section aria-labelledby="ch-floors-heading" className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start flex-wrap justify-between gap-3">
         <div>
           <h3 id="ch-floors-heading" className="text-sm font-semibold text-foreground">Canton wage floors</h3>
           <p className="text-xs text-foreground-muted">

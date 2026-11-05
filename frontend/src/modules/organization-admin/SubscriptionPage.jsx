@@ -137,7 +137,8 @@ const styles = `
   }
   @media (max-width:640px){ .sub-page h1.title{ font-size:38px; } }
   .sub-page .subtitle{ color:var(--ink-soft); font-size:15px; margin:0; max-width:520px; }
-  .sub-page .head-actions{ display:flex; gap:10px; flex:none; }
+  .sub-page .head-actions{ display:flex; flex-wrap:wrap; gap:10px; flex:none; }
+  @media (max-width:640px){ .sub-page .head-actions{ flex:1 1 100%; } }
 
   .sub-page .btn{
     font-family:'Inter', sans-serif; font-size:13.5px; font-weight:600;

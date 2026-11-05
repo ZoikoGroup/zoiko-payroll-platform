@@ -77,22 +77,24 @@ function SuaDetail({ id, reloadList }) {
       {p.status === "DRAFT" && (
         <>
           <p className="mb-1 text-[11px] text-foreground-muted">Enter each figure exactly as SUA shows it (worker × branch × side).</p>
-          <table className="mb-2 w-full text-[11px]">
-            <thead><tr className="text-left text-foreground-muted"><th>Employee</th><th>Branch</th><th>Side</th><th>Zoiko</th><th>SUA</th></tr></thead>
-            <tbody>
-              {keys.map((k) => {
-                const [emp, bs] = k.split("|");
-                const [branch, side] = bs.split(":");
-                return (
-                  <tr key={k} className="border-t border-border">
-                    <td>#{emp}</td><td>{branch}</td><td>{side}</td><td>{money(p.zoikoTotals[k])}</td>
-                    <td><input className={`${input} w-28`} aria-label={`SUA ${k}`} value={figures[k] ?? ""}
-                      onChange={(e) => setFigures((f) => ({ ...f, [k]: e.target.value }))} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="mb-2 w-full text-[11px]">
+              <thead><tr className="text-left text-foreground-muted"><th>Employee</th><th>Branch</th><th>Side</th><th>Zoiko</th><th>SUA</th></tr></thead>
+              <tbody>
+                {keys.map((k) => {
+                  const [emp, bs] = k.split("|");
+                  const [branch, side] = bs.split(":");
+                  return (
+                    <tr key={k} className="border-t border-border">
+                      <td>#{emp}</td><td>{branch}</td><td>{side}</td><td>{money(p.zoikoTotals[k])}</td>
+                      <td><input className={`${input} w-28`} aria-label={`SUA ${k}`} value={figures[k] ?? ""}
+                        onChange={(e) => setFigures((f) => ({ ...f, [k]: e.target.value }))} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           <span className="flex flex-wrap items-center gap-2">
             <input className={input} aria-label="SUA version" placeholder="SUA version (as shown)" value={version} onChange={(e) => setVersion(e.target.value)} />
             <button type="button" className={btn} disabled={busy || rows.some((r) => r.amount === "" || r.amount === undefined)}

@@ -13,16 +13,18 @@ function Section({ title, children }) {
 
 function Rows({ rows }) {
   return (
-    <table className="w-full text-[12px]">
-      <tbody>
-        {rows.map(([k, v]) => (
-          <tr key={k} className="border-b border-border/50">
-            <td className="py-1 pr-3 text-foreground-muted">{k}</td>
-            <td className="py-1 text-right tabular-nums text-foreground">{v ?? "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="overflow-x-auto">
+      <table className="w-full text-[12px]">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k} className="border-b border-border/50">
+              <td className="py-1 pr-3 text-foreground-muted">{k}</td>
+              <td className="py-1 text-right tabular-nums text-foreground">{v ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -57,20 +59,22 @@ export default function MXRunCalculationTrace({ snapshot }) {
         {r.rounding_rule}
       </p>
       <Section title="Perceptions">
-        <table className="w-full text-[12px]">
-          <thead><tr className="text-left text-foreground-muted">
-            <th className="py-1">Code</th><th>Gross</th><th>ISR taxable</th><th>SBC</th><th>ISN</th><th>CFDI</th>
-          </tr></thead>
-          <tbody>
-            {(r.concepts || []).map((c) => (
-              <tr key={c.code} className="border-b border-border/50">
-                <td className="py-1">{c.code}</td><td className="tabular-nums">{c.gross}</td>
-                <td className="tabular-nums">{c.isr_taxable}</td><td>{c.sbc}</td><td>{c.isn ? "yes" : "no"}</td>
-                <td>{c.cfdi_node}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead><tr className="text-left text-foreground-muted">
+              <th className="py-1">Code</th><th>Gross</th><th>ISR taxable</th><th>SBC</th><th>ISN</th><th>CFDI</th>
+            </tr></thead>
+            <tbody>
+              {(r.concepts || []).map((c) => (
+                <tr key={c.code} className="border-b border-border/50">
+                  <td className="py-1">{c.code}</td><td className="tabular-nums">{c.gross}</td>
+                  <td className="tabular-nums">{c.isr_taxable}</td><td>{c.sbc}</td><td>{c.isn ? "yes" : "no"}</td>
+                  <td>{c.cfdi_node}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
       <Section title="ISR and employment subsidy">
         <Rows rows={[
@@ -101,17 +105,19 @@ export default function MXRunCalculationTrace({ snapshot }) {
         ]} />
       </Section>
       <Section title="IMSS branches">
-        <table className="w-full text-[12px]">
-          <thead><tr className="text-left text-foreground-muted"><th className="py-1">Branch</th><th>Side</th><th>Amount</th></tr></thead>
-          <tbody>
-            {(r.imss || []).map((b) => (
-              <tr key={`${b.branch}-${b.side}`} className="border-b border-border/50">
-                <td className="py-1">{b.branch}{b.lines?.[0]?.band ? ` · band ${b.lines[0].band}` : ""}</td>
-                <td>{b.side}</td><td className="tabular-nums">{b.amount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead><tr className="text-left text-foreground-muted"><th className="py-1">Branch</th><th>Side</th><th>Amount</th></tr></thead>
+            <tbody>
+              {(r.imss || []).map((b) => (
+                <tr key={`${b.branch}-${b.side}`} className="border-b border-border/50">
+                  <td className="py-1">{b.branch}{b.lines?.[0]?.band ? ` · band ${b.lines[0].band}` : ""}</td>
+                  <td>{b.side}</td><td className="tabular-nums">{b.amount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
       <Section title="INFONAVIT, state ISN and totals">
         <Rows rows={[
