@@ -8,13 +8,11 @@ on:
       - '.github/workflows/**'
       - 'scripts/**'
       - 'docs/privacy/**'
+  # No path filter on PRs: the test + privacy jobs must report on every PR
+  # (a frontend-only PR otherwise shows no backend checks at all). The
+  # deploy job is push-only, so this never deploys from a PR.
   pull_request:
     branches: [main, rugvedh]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/**'
-      - 'scripts/**'
-      - 'docs/privacy/**'
   workflow_dispatch:
 
 jobs:

@@ -16,11 +16,10 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-build.yml'
+  # No path filter on PRs so the build check always reports; deploy is
+  # gated to push/dispatch on main below.
   pull_request:
     branches: [main, rugvedh]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/frontend-build.yml'
   workflow_dispatch:
 
 jobs:
