@@ -240,7 +240,7 @@ def test_vocabularies_match_the_content_module():
     assert module.PPK_STATES == content.PPK_STATES == models._PL_PPK_STATES
     assert module.CONTRACT_TYPES == content.CONTRACT_TYPES_SUPPORTED + content.CONTRACT_TYPES_BLOCKED
     assert module.CONTRACT_TYPES == models._PL_CONTRACT_TYPES
-    assert module.ACCUMULATORS == models._PL_ACCUMULATORS
+    assert module.ACCUMULATORS == models._PL_ACCUMULATORS == content.ACCUMULATORS
     reliefs = {a.replace("PIT0_EXEMPT_", "PIT0_") for a in module.ACCUMULATORS if a.startswith("PIT0_EXEMPT_")}
     assert reliefs == set(content.PIT0_RELIEFS)
 

@@ -1,38 +1,167 @@
 """modules/payroll/engine/countries/poland.py
 -------------------------------------------
-Poland (ZP-PL-ENG-001) — fail-closed calculation entry point.
+Poland (ZP-PL-ENG-001) — the calculation orchestrator over the bounded rule
+modules in engine/jurisdictions/poland/ (spec §11: no monolithic "Poland
+formula" class). Pure: immutable inputs + approved content + accumulator
+snapshot -> deterministic result and trace. No ORM, no clock, no network
+(PL-021).
 
-Phase 0: the Polish engine does not exist yet, so EVERY calculation is
-refused with a named reason. Registering this module in
-standard._COUNTRY_CALC means a Polish context can never fall through to the
-generic calculator and return a plausible but wrong net (spec: applicability
-precedes calculation; unsupported cases fail closed). Phase 3 replaces
-`calculate` with the orchestrator over engine/jurisdictions/poland/*.
+Order (spec §12 "Calculation detail"):
+  applicability (PL-006) -> pay components -> one base per obligation ->
+  ZUS social (30x cap on pension/disability only) -> health (own base) ->
+  PPK (uncapped pension base) -> PIT (cumulative, statements, costs, relief) ->
+  employer funds -> net, employer cost, accumulator deltas, exceptions, hashes.
 
-Pure module: no ORM, no clock, no network (PL-021).
+Platform mapping (standard.py):
+  tds                   PIT advance
+  pl_employee_total     ZUS employee (pension + disability + sickness) + health
+                        + PPK employee — the ONLY other employee deduction key;
+                        employee_esi / employee_pension are deliberately NOT
+                        set (standard.py sums them too, which would double count)
+  employer_esi          ZUS employer (pension + disability + accident)
+  employer_payroll_tax  FP/FS + FGSP + FEP
+  employer_pension      PPK employer
+  pl_result             every base, component, decision, trace and hash
+
+Labour-law checks (minimum wage, overtime, leave) arrive in Phase 5 and
+sickness / benefits in Phase 6; until then the MIN_WAGE base is traced only.
 """
+from __future__ import annotations
+
+import hashlib
+import json
+from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext
-from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+from app.modules.payroll.engine.countries import poland_content as content
+from app.modules.payroll.engine.jurisdictions.poland import applicability as _applicability
+from app.modules.payroll.engine.jurisdictions.poland import bases as _bases
+from app.modules.payroll.engine.jurisdictions.poland import employer_funds as _funds
+from app.modules.payroll.engine.jurisdictions.poland import errors as E
+from app.modules.payroll.engine.jurisdictions.poland import health as _health
+from app.modules.payroll.engine.jurisdictions.poland import pit as _pit
+from app.modules.payroll.engine.jurisdictions.poland import ppk as _ppk
+from app.modules.payroll.engine.jurisdictions.poland import zus as _zus
+from app.modules.payroll.engine.jurisdictions.poland.errors import PLCalculationBlockedError  # noqa: F401 (re-export)
+from app.modules.payroll.engine.jurisdictions.poland.pack import ZERO, PlPack, as_date, dec, field, money
 
-_COUNTRY = "PL"
+ENGINE_BUILD = "PL-ENGINE-P3-2026.11"
 
 
-class PLCalculationBlockedError(MissingComplianceConfigurationError):
-    """A Polish statutory calculation that must not proceed — missing
-    configured row, missing employee/employer fact, or an unsupported case.
-    A MissingComplianceConfigurationError, so the existing
-    MISSING_COMPLIANCE_CONFIGURATION 400 handler applies unchanged."""
+def _canonical(value) -> str:
+    return json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
 
-    def __init__(self, key: str, reason: str, organization_id: int = None):
-        super().__init__(key, _COUNTRY, organization_id)
-        self.reason = reason
-        self.args = (f"Poland calculation blocked ({key}): {reason}",)
+
+def _sha(value) -> str:
+    return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _record(record, names) -> dict:
+    return None if record is None else {n: field(record, n) for n in names}
+
+
+_PROFILE_FIELDS = ("contract_type", "pay_frequency", "tax_residency", "cov_pension", "cov_disability",
+                   "cov_sickness", "cov_accident", "cov_health", "other_titles_declared", "a1_certificate",
+                   "is_student", "is_pensioner", "fep_qualifying", "fep_from", "fep_to", "fund_exemption_code",
+                   "status", "effective_from", "effective_to")
+_REGISTRATION_FIELDS = ("accident_rate_pct", "accident_rate_source", "accident_rate_from", "accident_rate_to",
+                        "fp_fs_applicable", "fgsp_applicable", "ppk_employer_additional_pct", "status",
+                        "effective_from", "effective_to")
+_DECLARATION_FIELDS = ("id", "declaration_type", "status", "effective_from", "effective_to", "value")
 
 
 def calculate(ctx: PayrollContext) -> dict:
-    raise PLCalculationBlockedError(
-        "PL_ENGINE_NOT_BUILT",
-        "Polish payroll calculation is not available yet (ZP-PL-ENG-001 Phase 3).",
-        getattr(ctx, "organization_id", None),
-    )
+    organization_id = getattr(ctx, "pl_organization_id", None)
+    pay_date = as_date(getattr(ctx, "pl_pay_date", None) or getattr(ctx, "pay_date", None))
+    if pay_date is None:
+        raise PLCalculationBlockedError(E.PAY_DATE_MISSING, "the pay date decides every Polish rule (PL-003)",
+                                        organization_id)
+    pack = PlPack(ctx.rate_map, ctx.slabs, organization_id, pay_date)
+
+    applicability = _applicability.determine(ctx, pack, pay_date)
+    pay = _bases.components(ctx, pack)
+    bases = _bases.build(pay, pack.earning_classes(), pack)
+    ytd = getattr(ctx, "pl_ytd", None)
+    if ytd is None:
+        pack.block(E.YTD_MISSING, "the year-to-date accumulator snapshot is not supplied")
+    declarations = getattr(ctx, "pl_declarations", None) or []
+    zus_round = pack.rounder("pl_rounding_zus")
+
+    zus = _zus.compute(pack, bases, applicability, ytd, zus_round)
+    health = _health.compute(pack, bases, applicability, zus["employeeTotal"])
+    ppk = _ppk.compute(pack, bases, applicability, declarations, pay_date, pack.rounder("pl_rounding_ppk"))
+    ppk_taxable = ppk["employerTotal"] if ppk["employerPitTreatment"] == "TAXABLE_EMPLOYEE_INCOME" else ZERO
+    pit = _pit.compute(pack, bases, declarations, ytd, zus["employeeTotal"], ppk_taxable, pay_date)
+    ytd_pension = dec(ytd["ZUS_CAP_PENSION_BASE"]) if ytd.get("ZUS_CAP_PENSION_BASE") is not None else None
+    funds = _funds.compute(pack, bases, applicability, zus, ytd_pension, zus_round)
+
+    gross = dec(ctx.gross)
+    employee_total = zus["employeeTotal"] + health["amount"] + ppk["employeeTotal"]
+    employer_total = zus["employerTotal"] + funds["total"] + ppk["employerTotal"]
+    net = gross - pit["advance"] - employee_total
+
+    exceptions = list(ppk["exceptions"])
+    if net < ZERO:
+        exceptions.append({"code": E.EXC_NEGATIVE_NET, "detail": "statutory deductions exceed gross pay"})
+    if zus["capCrossed"]:
+        exceptions.append({"code": E.EXC_ANNUAL_CAP_CROSSED,
+                           "detail": "the pension/disability annual base limit is reached in this run"})
+
+    deltas = dict(pit["deltas"])
+    if zus["pension"] is not None:
+        deltas["ZUS_CAP_PENSION_BASE"] = zus["pension"]["assessed"]
+    if zus["disability"] is not None:
+        deltas["ZUS_CAP_DISABILITY_BASE"] = zus["disability"]["assessed"]
+    if applicability["obligations"]["PPK"]["applies"]:
+        deltas["PPK_EMPLOYEE"] = ppk["employeeTotal"]
+        deltas["PPK_EMPLOYER"] = ppk["employerTotal"]
+    unknown = set(deltas) - set(content.ACCUMULATORS)
+    if unknown:
+        raise RuntimeError(f"unknown Poland accumulator(s): {sorted(unknown)}")
+
+    inputs = {
+        "payDate": pay_date.isoformat(), "gross": str(gross), "components": {k: str(v) for k, v in pay.items()},
+        "profile": _record(applicability["profile"], _PROFILE_FIELDS),
+        "registration": _record(applicability["registration"], _REGISTRATION_FIELDS),
+        "ppkState": field(getattr(ctx, "pl_ppk", None), "state"),
+        "declarations": sorted((_record(d, _DECLARATION_FIELDS) for d in declarations), key=_canonical),
+        "ytd": {k: str(v) for k, v in sorted(ytd.items())},
+    }
+    used = pack.used()
+    hashes = {"input": _sha(inputs), "content": _sha(used), "engineBuild": ENGINE_BUILD}
+
+    obligations = {name: dict(o) for name, o in applicability["obligations"].items()}
+    trace = {
+        "jurisdiction": "PL", "spec": content.SPEC, "payDate": pay_date.isoformat(),
+        "contractType": applicability["contractType"], "payFrequency": applicability["payFrequency"],
+        "applicability": obligations, "bases": _bases.trace(bases), "zus": zus["trace"],
+        "health": health["trace"], "ppk": ppk["trace"], "pit": pit["trace"], "funds": funds["trace"],
+        "rounding": pack.rounding_events, "contentUsed": used, "hashes": hashes,
+    }
+    result = {
+        "pl_pit_advance": money(pit["advance"]),
+        "pl_pit_base": money(pit["base"]),
+        "pl_zus_employee": {k: money(v) for k, v in zus["employee"].items()},
+        "pl_zus_employer": {k: money(v) for k, v in zus["employer"].items()},
+        "pl_health": money(health["amount"]),
+        "pl_health_base": money(health["base"]),
+        "pl_ppk_employee": {k: money(v) for k, v in ppk["employee"].items()},
+        "pl_ppk_employer": {k: money(v) for k, v in ppk["employer"].items()},
+        "pl_funds": {k: money(v) for k, v in funds["amounts"].items()},
+        "pl_employee_total": money(employee_total),
+        "pl_employer_total": money(employer_total),
+        "pl_net": money(net),
+        "obligations": obligations,
+        "accumulatorDeltas": {k: money(v) for k, v in sorted(deltas.items())},
+        "exceptions": exceptions,
+        "hashes": hashes,
+        "trace": trace,
+    }
+    return {
+        "tds": pit["advance"],
+        "pl_employee_total": employee_total,
+        "employer_esi": zus["employerTotal"],
+        "employer_payroll_tax": funds["total"],
+        "employer_pension": ppk["employerTotal"],
+        "pl_result": result,
+    }

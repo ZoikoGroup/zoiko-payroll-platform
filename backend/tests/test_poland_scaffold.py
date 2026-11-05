@@ -241,7 +241,9 @@ def test_every_calculation_mode_is_blocked(mode):
     with pytest.raises(PLCalculationBlockedError) as raised:
         calculate_payroll(PayrollContext(gross=Decimal("8000"), basic=Decimal("8000"), country="PL"), mode)
     assert isinstance(raised.value, MissingComplianceConfigurationError)
-    expected = "PL_SIMPLE_MODE_UNSUPPORTED" if mode == "simple" else "PL_ENGINE_NOT_BUILT"
+    # Phase 3: the engine exists, but a bare context (no pay date, profile or
+    # pack) is refused with a named reason - never a generic result.
+    expected = "PL_SIMPLE_MODE_UNSUPPORTED" if mode == "simple" else "PL_PAY_DATE_MISSING"
     assert raised.value.key == expected
 
 

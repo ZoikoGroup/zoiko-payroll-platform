@@ -140,7 +140,18 @@ COVERAGE_OBLIGATIONS = ("PIT", "EMERYTALNE", "RENTOWE", "CHOROBOWE", "WYPADKOWE"
 OBLIGATIONS = COVERAGE_OBLIGATIONS + ("MIN_WAGE",)
 TREATMENTS = ("INCLUDED", "EXCLUDED", "REVIEW")
 DATE_BASES = ("CALENDAR_YEAR", "CONTRIBUTION_YEAR", "PAYROLL_MONTH", "PAYMENT_DATE", "EMPLOYMENT_EVENT")
-ROUNDING_MODES = ("HALF_UP", "DOWN", "UP", "FULL_PLN_HALF_UP", "PENDING_G1")
+# Rounding rule vocabulary (unit + mode). Which rule each obligation uses is
+# NOT given by the specification (PL-004) — every pl_rounding_* row ships
+# PENDING_G1 and the engine blocks until G1 signs one of these.
+ROUNDING_MODES = ("GROSZ_HALF_UP", "GROSZ_DOWN", "FULL_PLN_HALF_UP", "FULL_PLN_DOWN", "PENDING_G1")
+# Signed-value vocabularies for the policy rows the specification leaves open.
+# A vocabulary is not a decision: the shipped rows stay PENDING_G1.
+HEALTH_LIMITATION_RULES = ("NONE",)
+FP_FS_MIN_BASE_RULES = ("NONE", "BASE_AT_LEAST_MIN_WAGE")
+FUND_CAP_RULES = ("CAPPED_WITH_PENSION_BASE", "UNCAPPED")
+PPK_EMPLOYER_PIT_TREATMENTS = ("TAXABLE_EMPLOYEE_INCOME", "NOT_TAXABLE")
+PIT2_ALLOCATIONS = {"FULL": "pl_pit2_reduction_full", "HALF": "pl_pit2_reduction_half",
+                    "THIRD": "pl_pit2_reduction_third"}
 ZUS_DEADLINE_CLASSES = ("DAY_5", "DAY_15", "DAY_20")
 ACCIDENT_RATE_SOURCES = ("ZUS_NOTICE", "SELF_DETERMINED", "SMALL_PAYER_DEFAULT")
 # PL-005: every declaration is effective-dated with evidence (Phase 2 table).
@@ -148,6 +159,10 @@ DECLARATION_TYPES = ("PIT2", "COSTS_COMMUTER", "COSTS_MULTIPLE", "PIT0_UNDER26",
                      "PIT0_FAMILY4", "PIT0_SENIOR", "PIT0_WAIVER", "HIGHER_RATE_REQUEST",
                      "PPK_OPT_OUT", "PPK_REDUCED_RATE", "PPK_ADDITIONAL", "PRIOR_EMPLOYER_CAP")
 PIT0_RELIEFS = ("PIT0_UNDER26", "PIT0_RETURN", "PIT0_FAMILY4", "PIT0_SENIOR")
+# Accumulator ledger keys (payroll_pl_accumulator_entries.accumulator, spec §11).
+ACCUMULATORS = ("PIT_TAXABLE_INCOME", "PIT_ADVANCE", "PIT_COSTS_USED", "PIT0_EXEMPT_UNDER26", "PIT0_EXEMPT_RETURN",
+                "PIT0_EXEMPT_FAMILY4", "PIT0_EXEMPT_SENIOR", "ZUS_CAP_PENSION_BASE", "ZUS_CAP_DISABILITY_BASE",
+                "SICK_DAYS_EMPLOYER", "PPK_EMPLOYEE", "PPK_EMPLOYER")
 # Spec §7 PPK state machine.
 PPK_STATES = ("NOT_ELIGIBLE", "ELIGIBLE_NOT_ENROLLED", "ENROLLED", "OPTED_OUT", "SUSPENDED_BY_LAW", "ENDED")
 PPK_SETTLEMENT_STATES = ("CALCULATED", "WITHHELD", "EMPLOYER_FUNDED", "TRANSFERRED", "RECONCILED",
@@ -226,6 +241,7 @@ POLAND_PARAMETER_KEYS = {
     # employer funds
     "pl_fp_fs": "employer_pct",
     "pl_fp_fs_min_base_rule": "text",
+    "pl_fund_cap_rule": "text",
     "pl_fgsp": "employer_pct",
     "pl_fep": "employer_pct",
     "pl_fund_exemption_rules": "text",
@@ -367,6 +383,11 @@ POLAND_SCALAR_CONTENT = (
     # applicability engine" — the test itself is not given.
     ("pl_fp_fs_min_base_rule", "FP/FS minimum-base applicability test", None, None, None, _PENDING, "S5",
      True, None, None, _PM),
+    # Spec §5 says the 30x cap "does not automatically cap ... employer funds
+    # that are defined without that limit" and §6 states it only for FEP — so
+    # whether FP/FS and FGSP use the capped base is not decided by the spec.
+    ("pl_fund_cap_rule", "FP/FS and FGSP base: with or without the 30x cap (not in spec)", None, None, None,
+     _PENDING, "S5", True, None, None, _PD),
     ("pl_fgsp", "Guaranteed Employee Benefits Fund (FGSP), employer", None, "0.1000", None, None, "S12",
      False, None, None, _PD),
     ("pl_fep", "Bridging Pension Fund (FEP), employer, qualifying work only", None, "1.5000", None, None,

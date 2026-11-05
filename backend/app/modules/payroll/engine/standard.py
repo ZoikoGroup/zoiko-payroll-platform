@@ -246,8 +246,8 @@ _COUNTRY_CALC = {
     "JP": _calc_japan,
     # New Zealand (ZP-NZ-ENG-001): fail-closed, never the generic calculator.
     "NZ": _calc_new_zealand,
-    # Poland (ZP-PL-ENG-001): fail-closed, never the generic calculator.
-    # Phase 0 refuses every calculation (PL_ENGINE_NOT_BUILT) until Phase 3.
+    # Poland (ZP-PL-ENG-001): fail-closed orchestrator over
+    # engine/jurisdictions/poland/* (Phase 3); never the generic calculator.
     "PL": _calc_poland,
 }
 
@@ -364,6 +364,9 @@ class StandardStrategy(PayrollStrategy):
             # New Zealand: student loan + KiwiSaver employee + child support.
             # PAYE incl. the ACC earner levy arrives as tds above. 0 elsewhere.
             + deductions.get("nz_employee_total", Decimal("0"))
+            # Poland: ZUS employee (pension + disability + sickness) + health +
+            # PPK employee. PIT arrives as tds above. 0 elsewhere.
+            + deductions.get("pl_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -652,6 +655,8 @@ class StandardStrategy(PayrollStrategy):
             jp_result=deductions.get("jp_result"),
             # New Zealand (ZP-NZ-ENG-001). Absent from every non-NZ calculator dict.
             nz_result=deductions.get("nz_result"),
+            # Poland (ZP-PL-ENG-001). Absent from every non-PL calculator dict.
+            pl_result=deductions.get("pl_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),
