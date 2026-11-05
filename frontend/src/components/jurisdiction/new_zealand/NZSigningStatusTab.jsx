@@ -25,9 +25,40 @@ export default function NZSigningStatusTab({ pack }) {
   status.pendingRates.forEach((key) => { (byGroup[groupOf(key)] ||= []).push(key); });
   const empty = new Set(status.emptyValues);
   const emptyTables = status.authorityTables.filter((t) => !t.rows && !t.employerContent);
+  const requiredTables = status.authorityTables.filter((t) => !t.employerContent);
+  const pendingSlabs = Object.values(status.pendingSlabsByRuleType).reduce((a, b) => a + b, 0);
+  const approved = Boolean(pack.approvedById) && !status.editors.includes(pack.approvedById);
+  const steps = [
+    { label: "Draft pack seeded from the specification", done: true, where: "" },
+    { label: `Parameters signed (${status.pendingRates.length} still pending)`, done: status.pendingRates.length === 0,
+      where: "the parameter tabs — Edit / sign each row" },
+    { label: `Table rows signed (${pendingSlabs} still pending)`, done: pendingSlabs === 0,
+      where: "PAYE bands, tax codes and earning classes tabs" },
+    { label: `Authority tables filled (${requiredTables.length - emptyTables.length} of ${requiredTables.length})`,
+      done: emptyTables.length === 0, where: "the Authority tables tab — from IRD / MBIE publications" },
+    { label: "Approved by a Super Admin who made none of the edits", done: approved,
+      where: "Approve in the pack header (an editor is refused)" },
+    { label: "Activated", done: pack.status === "Active",
+      where: status.activationRefusal ? "refused until the steps above are done" : "Activate in the pack header" },
+  ];
 
   return (
     <div className="space-y-4" data-testid="nz-signing-status">
+      <div className={card} data-testid="nz-activation-checklist">
+        <h3 className="mb-2 text-[14px] font-semibold text-foreground">Activation checklist</h3>
+        <ol className="space-y-1.5">
+          {steps.map((step, index) => (
+            <li key={step.label} className="flex items-start gap-2 text-[12px]">
+              <span className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                step.done ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{step.done ? "✓" : index + 1}</span>
+              <span className="text-foreground">
+                {step.label}
+                {!step.done && step.where && <span className="block text-foreground-muted">Where: {step.where}</span>}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
       <div className={card}>
         <h3 className="mb-1 text-[14px] font-semibold text-foreground">Activation</h3>
         <p className="text-[12px] text-foreground-secondary">

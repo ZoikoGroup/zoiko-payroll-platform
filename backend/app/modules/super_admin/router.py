@@ -4723,6 +4723,17 @@ def new_zealand_delete_table_row(row_id: int, reason: Optional[str] = Query(None
     return result
 
 
+@router.post("/compliance/new-zealand/seed-draft",
+             summary="Create the Draft New Zealand pack from the specification (only while none exists; reason; audited)")
+def new_zealand_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
 @router.get("/compliance/new-zealand/decisions", summary="New Zealand owner decisions D-1 to D-7")
 def new_zealand_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
     from app.modules.payroll import nz_super_admin

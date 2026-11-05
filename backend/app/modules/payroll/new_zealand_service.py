@@ -173,6 +173,84 @@ def seed_nz_pack(db: Session, *, status: str = "Draft") -> "JurisdictionPack":
     return pack
 
 
+def ensure_nz_service_registry_row(db: Session) -> str:
+    """New Zealand's jurisdiction_service_registry row, PLANNED, created only
+    when missing — an existing row is never changed."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    existing = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == NZ).first()
+    if existing is not None:
+        return existing.availability
+    db.add(JurisdictionServiceRegistry(country=NZ, availability="PLANNED",
+                                       payment_execution_responsibility="NOT_OFFERED",
+                                       filing_responsibility="NOT_OFFERED", remittance_responsibility="NOT_OFFERED"))
+    db.flush()
+    return "PLANNED"
+
+
+def _nz_seeded_packs(db: Session) -> list:
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.models import JurisdictionPack
+
+    ids = (content.NZ_2026_27[0], content.NZ_ELA_2028[0])
+    return (db.query(JurisdictionPack).filter(JurisdictionPack.pack_id.in_(ids), JurisdictionPack.version == "1.0")
+            .order_by(JurisdictionPack.effective_from).all())
+
+
+def nz_seed_blockers(db: Session) -> list:
+    """Why seeding now would be wrong. seed_nz_pack replaces a Draft pack's
+    canonical rows wholesale, so a pack that has left Draft — or a Draft a
+    Super Admin has already started signing (any console edit, or any
+    authority-table row) — is never re-seeded: that work would be erased."""
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.models import TaxSlab
+
+    table_types = [t["rule_type"] for t in content.NZ_EMPTY_TABLES.values()]
+    blockers = []
+    for pack in _nz_seeded_packs(db):
+        if pack.status != "Draft":
+            blockers.append(f"{pack.pack_id} is {pack.status}, not Draft — it is never rewritten")
+            continue
+        editors = _nz_statutory_editors(db, pack)
+        table_rows = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                               TaxSlab.organization_id.is_(None),
+                                               TaxSlab.rule_type.in_(table_types)).count())
+        if editors or table_rows:
+            blockers.append(f"{pack.pack_id} is already being signed in the console ({len(editors)} editor(s), "
+                            f"{table_rows} authority-table row(s)) — re-seeding would erase that work")
+    return blockers
+
+
+def nz_seed_summary(db: Session) -> dict:
+    """Read-only: what the seed would write, what exists now, and what still
+    blocks activation. Never writes."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
+    packs = []
+    for pack in _nz_seeded_packs(db):
+        rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                  ContributionRate.organization_id.is_(None))
+        slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None))
+        packs.append({"packId": pack.pack_id, "id": pack.id, "version": pack.version, "status": pack.status,
+                      "rates": rates.count(), "slabs": slabs.count(),
+                      "pending": (rates.filter(ContributionRate.label.like(marker)).count()
+                                  + slabs.filter(TaxSlab.rate_label.like(marker)).count()),
+                      "activationRefusal": nz_pack_activation_refusal(db, pack)})
+    registry = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == NZ).first()
+    return {
+        "content": {"rates": len(content.NZ_SCALAR_CONTENT),
+                    "slabs": (len(content.NZ_PAYE_BANDS) + len(content.NZ_ESCT_BANDS) + len(content.NZ_TAX_CODES)
+                              + len(content.NZ_EARNING_CLASSES)),
+                    "emptyAuthorityTables": sorted(content.NZ_EMPTY_TABLES)},
+        "packs": packs,
+        "registry": None if registry is None else registry.availability,
+        "blockers": nz_seed_blockers(db),
+    }
+
+
 # ── shared validation helpers ───────────────────────────────────────────────
 def nz_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None,
                                today: Optional[date] = None) -> Optional[str]:

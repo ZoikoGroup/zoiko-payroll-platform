@@ -23840,6 +23840,22 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/new-zealand/seed-draft",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "seed-draft",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/super-admin/compliance/policies",
    "data_class": "platform",

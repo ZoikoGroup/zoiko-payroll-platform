@@ -52,6 +52,7 @@ const NZ_FILES = [
   "components/jurisdiction/new_zealand/NZSigningStatusTab.jsx",
   "config/jurisdictions/newZealandComplianceConfig.jsx",
   "pages/JurisdictionCompliance/NZCompliancePage.jsx",
+  "components/jurisdiction/new_zealand/NZSeedDraftPanel.jsx",
   // P7c — organisation screens
   "components/jurisdiction/new_zealand/nzOrgOptions.js",
   "modules/payroll/Compliances/NZComplianceCentreTab.jsx",
@@ -91,6 +92,23 @@ check("Every NZ Super Admin client call matches a declared route", () => {
   const missing = clientCalls.filter((call) => !saRoutes.has(call) && call !== generic.replace("{}", "NZ")
     && !(call.endsWith("/statutory-summary") && saRoutes.has(generic)));
   assert(missing.length === 0, missing.join(" | "));
+});
+
+check("The draft-pack seed is offered only while no NZ pack exists, with a reason", () => {
+  const seed = files["components/jurisdiction/new_zealand/NZSeedDraftPanel.jsx"];
+  const overview = files["components/jurisdiction/new_zealand/NZOverviewDashboard.jsx"];
+  assert(/if \(!pack\) return <NZSeedDraftPanel \/>;/.test(overview), "mounted only without a selected pack");
+  assert(/packs\.length > 0 && !state\.done/.test(seed), "hidden once any NZ pack exists");
+  assert(/seedNzDraftPack\(reason\.trim\(\)\)/.test(seed) && /disabled=\{state\.busy \|\| !reason\.trim\(\)\}/.test(seed),
+    "a reason is required");
+  assert(!/Active/.test(seed.replace(/\/\/.*$/gm, "").replace(/is active|not active/gi, "")), "the seed never activates");
+});
+check("The signing status shows the activation checklist in order", () => {
+  const signing = files["components/jurisdiction/new_zealand/NZSigningStatusTab.jsx"];
+  const order = ["Draft pack seeded", "Parameters signed", "Table rows signed", "Authority tables filled",
+    "Approved by a Super Admin who made none of the edits", "Activated"].map((label) => signing.indexOf(label));
+  assert(signing.includes('data-testid="nz-activation-checklist"') && order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])),
+    `order ${order}`);
 });
 
 // ── content keys ↔ backend content ──────────────────────────────────────────

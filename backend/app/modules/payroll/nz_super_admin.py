@@ -425,3 +425,28 @@ def list_packs(db: Session) -> list:
 
 def decisions(db: Session) -> list:
     return nzs.owner_decisions(db)
+
+
+def seed_draft(db: Session, data: dict, actor_id) -> dict:
+    """Create the Draft NZ-PAYROLL-2026-27 pack (every row PENDING G1), the
+    empty NZ-ELA-2028 staging pack and the PLANNED service-registry row from
+    new_zealand_content.py, inside the deployed app — no shell access and no
+    environment file. Only while no New Zealand pack exists: once one does,
+    every change goes through the governed edit / sign above. Audited."""
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.service import record_tax_audit
+
+    reason = _reason(data)
+    existing = [p.pack_id for p in nzs._nz_seeded_packs(db)]
+    if existing:
+        raise BadRequestException(f"New Zealand content is already seeded ({', '.join(existing)}); change it "
+                                  "through the signing console instead.")
+    pack = nzs.seed_nz_pack(db)
+    availability = nzs.ensure_nz_service_registry_row(db)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=pack.id,
+                     jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=nzs.SPEC,
+                     old_value=None, new_value={"status": pack.status, "availability": availability},
+                     reason=f"{reason} — canonical {content.NZ_2026_27[0]} seeded as Draft from {nzs.SPEC} "
+                            "(Super Admin console).", auto_commit=False)
+    db.flush()
+    return nzs.nz_seed_summary(db)

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
+import { CheckCircle2, RefreshCw } from "lucide-react";
 import { getNzDecisions, getNzSigningStatus } from "../../../service/superAdminService";
 import { card } from "../japan/jpFormat";
 import { ErrorNote } from "./nzShared";
+import NZSeedDraftPanel from "./NZSeedDraftPanel";
 
 // New Zealand pack overview (ZP-NZ-ENG-001, decision Option 1): what still
 // blocks activation, straight from the backend's signing status — pending
@@ -24,14 +25,7 @@ export default function NZOverviewDashboard({ pack, onReload }) {
 
   useEffect(() => { load(); }, [load]);
 
-  if (!pack) {
-    return (
-      <div className="rounded-xl border border-dashed border-border bg-surface-muted p-8 text-center">
-        <AlertTriangle size={32} className="mx-auto text-foreground-disabled" />
-        <p className="mt-3 text-sm text-foreground-muted">Select a New Zealand tax pack to see its configuration.</p>
-      </div>
-    );
-  }
+  if (!pack) return <NZSeedDraftPanel />;
 
   const pendingSlabs = status ? Object.values(status.pendingSlabsByRuleType || {}).reduce((a, b) => a + b, 0) : 0;
   const ready = status && !status.activationRefusal;

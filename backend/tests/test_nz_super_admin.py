@@ -20,8 +20,7 @@ from app.modules.payroll.engine.countries import new_zealand as engine
 from app.modules.payroll.engine.countries import new_zealand_content as content
 from app.modules.payroll.models import ContributionRate, JurisdictionPack, SourceArtifact, TaxSlab
 from tests._nz_engine_helpers import (
-    P6_TEST_SLABS, P6_TEST_VALUES, TEST_KS_MAX_AGE, TEST_PRECEDENCE, TEST_ROUNDING, TEST_TABLES, build_pack, ctx,
-    notice, tax_profile,
+    build_pack, ctx, notice, sign_with_test_values, tax_profile,
 )
 
 MARK = "[PENDING G1]"
@@ -150,41 +149,8 @@ def test_authority_table_rows(db, pack, sources, admins):
 
 
 # ── maker-checker and the end-to-end proof ──────────────────────────────────
-def _value_for(key):
-    kind = content.NZ_PARAMETER_KEYS[key]
-    if key.endswith("_rounding"):
-        return {"textValue": TEST_ROUNDING}
-    if key == "nz_deduction_precedence":
-        return {"textValue": TEST_PRECEDENCE}
-    if key == "nz_ks_employer_max_age":
-        return {"flatAmount": TEST_KS_MAX_AGE}
-    if key in P6_TEST_VALUES:
-        value = P6_TEST_VALUES[key]
-        return {"textValue": value} if kind == "text" else {"flatAmount": str(value)}
-    return {}
-
-
 def _sign_everything(db, pack, source, actor):
-    for row in db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                                                 ContributionRate.organization_id.is_(None)).all():
-        console.update_row(db, "rate", row.id, _ask(source, specialistVerified=True, **_value_for(row.component_key)),
-                           actor)
-    for row in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                        TaxSlab.organization_id.is_(None)).all():
-        console.update_row(db, "slab", row.id, _ask(source, specialistVerified=True), actor)
-    fields = {"filing_status": "filingStatus", "flat_amount": "flatAmount", "tax_formula": "taxFormula",
-              "rate_pct": "ratePct", "min_amount": "minAmount", "max_amount": "maxAmount", "rate_label": "name"}
-    for rule_type, rows in list(TEST_TABLES.items()) + [(s["rule_type"], [s]) for s in P6_TEST_SLABS]:
-        for row in rows:
-            data = {fields[k]: v for k, v in row.items() if k in fields and v is not None}
-            if rule_type == content.NZ_IETC_RULE:
-                data.setdefault("flatAmount", "0")
-            console.add_table_row(db, pack.id, rule_type, _ask(source, specialistVerified=True, **data), actor)
-    console.add_table_row(db, pack.id, "NZ_IRD_EXAMPLE", _ask(
-        source, specialistVerified=True, filingStatus="EX1", taxFormula="{}", name="TEST example"), actor)
-    console.add_table_row(db, pack.id, "NZ_PUBLIC_HOLIDAY", _ask(
-        source, specialistVerified=True, date="2026-12-25", name="TEST Christmas Day"), actor)
-    db.commit()
+    sign_with_test_values(db, pack, source, actor)
 
 
 def test_editors_cannot_approve_and_activation_waits_for_everything(db, pack, sources, admins):
