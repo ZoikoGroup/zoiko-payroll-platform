@@ -67,6 +67,9 @@ const NZ_FILES = [
   // P8 — payday filing, remittance, run exceptions, journal
   "modules/payroll/Compliances/NZFilingRemittanceSection.jsx",
   "modules/payroll/PayRollRuns/NZRunFilingPanel.jsx",
+  // P9 — release gates and parallel cycles
+  "components/jurisdiction/new_zealand/NZReadinessTab.jsx",
+  "modules/payroll/Compliances/NZParallelCyclesSection.jsx",
 ];
 const files = Object.fromEntries(NZ_FILES.map((f) => [f, read(f)]));
 const contentJs = files["components/jurisdiction/new_zealand/nzContent.js"];
@@ -109,6 +112,34 @@ check("The signing status shows the activation checklist in order", () => {
     "Approved by a Super Admin who made none of the edits", "Activated"].map((label) => signing.indexOf(label));
   assert(signing.includes('data-testid="nz-activation-checklist"') && order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])),
     `order ${order}`);
+});
+
+// ── P9: release gates and parallel cycles ───────────────────────────────────
+check("The release-gate tab and the parallel-cycle section are mounted", () => {
+  assert(/tab\("nz-readiness", "Release gates", BadgeCheck, "nz-signing", \(\{ pack \}\) => <NZReadinessTab pack=\{pack\} \/>\)/
+    .test(config), "Super Admin tab");
+  const centreText = read("modules/payroll/Compliances/NZComplianceCentreTab.jsx");
+  assert(centreText.includes("<NZParallelCyclesSection />") && centreText.includes('data-testid="nz-gates-passed"'),
+    "compliance centre");
+});
+check("The readiness tab only reads the server's gates (nothing ticked in the browser)", () => {
+  const tab = files["components/jurisdiction/new_zealand/NZReadinessTab.jsx"];
+  assert(/getNzStatutorySummary\(\)/.test(tab) && /summary\?\.readiness/.test(tab), "reads the summary readiness");
+  assert(!/useState\(\s*\{[^}]*passed/.test(tab) && !/passed:\s*true/.test(tab), "no client-side pass");
+  assert(/runNzGoldenCheck\(pack\.id\)/.test(tab), "golden check runs against the selected pack");
+});
+check("Parallel concepts are exactly the backend's and no identifier column is offered", () => {
+  const section = files["modules/payroll/Compliances/NZParallelCyclesSection.jsx"];
+  const backend = readBackend("app/modules/payroll/nz_parallel.py");
+  const server = [...backend.slice(backend.indexOf("CONCEPTS = ("), backend.indexOf(")", backend.indexOf("CONCEPTS = (")))
+    .matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  const client = [...section.slice(section.indexOf("const CONCEPTS"), section.indexOf("];", section.indexOf("const CONCEPTS")))
+    .matchAll(/\["([a-z_]+)", "/g)].map((m) => m[1]);
+  assert(JSON.stringify(server) === JSON.stringify(client), `${server} vs ${client}`);
+  assert(!/ird|bank/i.test(section.slice(section.indexOf("const CONCEPTS"), section.indexOf("];", section.indexOf("const CONCEPTS")))),
+    "no identifier concept");
+  assert(/columnMap, reason: form\.reason/.test(section), "the import carries a reason");
+  assert(/Accept \(another user\)/.test(section) && /Accept cycle \(not the importer\)/.test(section), "four-eyes labels");
 });
 
 // ── content keys ↔ backend content ──────────────────────────────────────────

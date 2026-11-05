@@ -1,9 +1,10 @@
-import { Banknote, Calculator, CalendarDays, FileCheck2, FileText, Gauge, HeartHandshake, ListChecks, Scale, ShieldCheck, Table2 } from "lucide-react";
+import { BadgeCheck, Banknote, Calculator, CalendarDays, FileCheck2, FileText, Gauge, HeartHandshake, ListChecks, Scale, ShieldCheck, Table2 } from "lucide-react";
 import NZOverviewDashboard from "../../components/jurisdiction/new_zealand/NZOverviewDashboard";
 import NZPackRowsTab from "../../components/jurisdiction/new_zealand/NZPackRowsTab";
 import NZAuthorityTablesTab from "../../components/jurisdiction/new_zealand/NZAuthorityTablesTab";
 import NZEarningClassTab from "../../components/jurisdiction/new_zealand/NZEarningClassTab";
 import NZSigningStatusTab from "../../components/jurisdiction/new_zealand/NZSigningStatusTab";
+import NZReadinessTab from "../../components/jurisdiction/new_zealand/NZReadinessTab";
 import { GROUPS } from "../../components/jurisdiction/new_zealand/nzContent";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 
@@ -36,7 +37,8 @@ export function newZealandExtraTabs() {
     tab("nz-authority", "Authority tables", Table2, "nz-earning",
       ({ pack, slabs, onReload }) => <NZAuthorityTablesTab pack={pack} slabs={slabs} onReload={onReload} />),
     tab("nz-signing", "Signing status", Gauge, "nz-authority", ({ pack }) => <NZSigningStatusTab pack={pack} />),
-    tab("sources", "Sources", FileCheck2, "nz-signing", () => <SourceEvidencePanel />),
+    tab("nz-readiness", "Release gates", BadgeCheck, "nz-signing", ({ pack }) => <NZReadinessTab pack={pack} />),
+    tab("sources", "Sources", FileCheck2, "nz-readiness", () => <SourceEvidencePanel />),
   ];
 }
 

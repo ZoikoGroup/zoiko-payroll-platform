@@ -231,3 +231,27 @@ Targeted tests per sub-phase. The full suite is for P10 (saved reminder), or as 
 | D-P9-4 | Option 3 canary allow-list (`NZ_CANARY_ORG_IDS`, empty by default) | Yes |
 | D-P9-5 | Golden check as a service + Super Admin action (G1 re-derived, not a test result) | Yes |
 | D-P9-6 | Split into P9a / P9b / P9c, one local commit each | Yes |
+
+---
+
+## 11. Build notes (2026-11-05)
+
+Built as P9a `e4d2b49`, P9b `df996bf` and P9c (this commit).
+
+### Changes from the plan
+- **D-7 retention.** No new content row was added. The platform already governs retention: the D-7 decision is recorded, then a period with a legal basis is approved per category. G7 checks for approved periods for TAX_RECORDS, WAGE_TIME_RECORDS and HOLIDAY_LEAVE_RECORDS.
+- **Golden-check examples.** Examples use a compact format that fits the existing 150-character `tax_formula` field: `F=…;C=…;G=…[;D;KS;ER;ESCT;EB] => payeTotal=…`. They are validated when entered, never silently truncated.
+- **G5.** Implemented strictly: at least 2 legal employers, **each** with accepted cycles in at least 2 distinct months.
+
+### Found and fixed during the build
+- **Registry crash.** The P4 `nz_unmet_requirements` stub returned plain strings, so the registry's AVAILABLE step would have crashed instead of refusing.
+- **Foreign-run listing.** `GET /runs/{id}/exceptions` answered 200 `[]` for another tenant's run; it now answers 404.
+
+### Shipped
+| Area | What |
+|---|---|
+| Migration | `a8cde2482ef0` (head, 254 revisions) |
+| Routes | 7 organisation routes, 1 Super Admin route (registry 1,461) |
+| Screens | Super Admin **Release gates** tab (gates, evidence, decisions, golden check); Compliance Centre **Parallel cycles** section and a gate count on the setup card |
+| Docs | `release-gates/` G1–G7 and `RUNBOOK_GO_LIVE.md` |
+| UI validation | NZ checks: 40 |
