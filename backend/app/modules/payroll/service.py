@@ -37311,6 +37311,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.nz_dormancy import entering_nz_refusal
             if code and entering_nz_refusal(row.jurisdiction_country, code, row.organization_id):
                 code = None
+            # Poland (ZP-PL-ENG-001 Phase 0 dormancy): never back-fill INTO Poland.
+            from app.modules.payroll.poland_dormancy import entering_poland_refusal
+            if code and entering_poland_refusal(row.jurisdiction_country, code):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -37419,6 +37423,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     nz_refusal = entering_nz_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
     if nz_refusal:
         raise BadRequestException(nz_refusal)
+    # Poland (ZP-PL-ENG-001 Phase 0): choosing Poland is refused the same way
+    # while Poland onboarding is disabled.
+    from app.modules.payroll.poland_dormancy import entering_poland_refusal
+    pl_refusal = entering_poland_refusal(row.jurisdiction_country, incoming_country)
+    if pl_refusal:
+        raise BadRequestException(pl_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",

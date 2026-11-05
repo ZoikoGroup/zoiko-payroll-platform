@@ -164,6 +164,17 @@ def calculate_payroll(
             "New Zealand payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "PL" and key == "simple":
+        # Poland (ZP-PL-ENG-001): simple mode would silently skip PIT, ZUS,
+        # health, employer funds and PPK — each a separate obligation with its
+        # own base (spec §5-§7). Fail-closed: countries/poland.py.
+        from app.modules.payroll.engine.countries.poland import PLCalculationBlockedError
+
+        raise PLCalculationBlockedError(
+            "PL_SIMPLE_MODE_UNSUPPORTED",
+            "Poland payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)

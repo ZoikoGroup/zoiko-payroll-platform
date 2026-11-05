@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # no organisation can become a New Zealand employer and the NZ APIs refuse.
     # Leave UNSET in production until the NZ release gates G1-G7 are signed.
     NZ_TENANT_ONBOARDING_ENABLED: bool = False
+    # Poland dormancy switch (ZP-PL-ENG-001 Phase 0, poland_dormancy). False = no
+    # organisation can become Polish and the Poland APIs refuse. Leave UNSET in
+    # production until the PL release gates G1-G7 are signed.
+    PL_TENANT_ONBOARDING_ENABLED: bool = False
     # Option 3 canary (ZP-NZ-ENG-001 Phase 9): comma-separated organisation ids that may use New Zealand
     # while the flag above is off and New Zealand stays PLANNED for everyone else. Empty by default.
     NZ_CANARY_ORG_IDS: str = ""

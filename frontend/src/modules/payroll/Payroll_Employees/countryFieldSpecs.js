@@ -65,6 +65,12 @@ export const COUNTRIES = [
   // type, medical scheme, travel, UIF and ETI facts live on the South Africa
   // statutory profile (employee detail → "Manage"), never here.
   { code: "ZA", name: "South Africa" },
+  // Poland (ZP-PL-ENG-001 Phase 0) — mirrors employee_validation.py's
+  // PLEmployeeValidation (PESEL birth date + check digit, or a passport; NIP
+  // mod-11; Polish IBAN mod-97) plus bank_routing.py's PL IBAN routing.
+  // Contract, ZUS title, PIT declarations and PPK live on the Poland
+  // statutory profile (later phases), never here.
+  { code: "PL", name: "Poland" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -164,6 +170,37 @@ function zaIdPassesCheck(value) {
     total += digit;
   });
   return total % 10 === 0;
+}
+
+// Polish PESEL (mirrors employee_validation.py's pl_pesel_is_valid): 11
+// digits, the birth month carrying the century (+80 1800s, +0 1900s,
+// +20 2000s, +40 2100s, +60 2200s) and weights 1,3,7,9,1,3,7,9,1,3.
+export function plPeselIsValid(value) {
+  const raw = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{11}$/.test(raw)) return false;
+  const yy = Number(raw.slice(0, 2));
+  const monthCode = Number(raw.slice(2, 4));
+  const dd = Number(raw.slice(4, 6));
+  const centuries = [[80, 1800], [60, 2200], [40, 2100], [20, 2000], [0, 1900]];
+  const match = centuries.find(([offset]) => monthCode > offset && monthCode <= offset + 12);
+  if (!match) return false;
+  const [offset, century] = match;
+  const mm = monthCode - offset;
+  const d = new Date(Date.UTC(century + yy, mm - 1, dd));
+  if (d.getUTCFullYear() !== century + yy || d.getUTCMonth() !== mm - 1 || d.getUTCDate() !== dd) return false;
+  const weights = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3];
+  const total = weights.reduce((sum, w, i) => sum + w * Number(raw[i]), 0);
+  return (10 - (total % 10)) % 10 === Number(raw[10]);
+}
+
+// Polish NIP (mirrors pl_nip_is_valid): weights 6,5,7,2,3,4,5,6,7 mod 11;
+// a remainder of 10 is never valid.
+export function plNipIsValid(value) {
+  const raw = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{10}$/.test(raw)) return false;
+  const weights = [6, 5, 7, 2, 3, 4, 5, 6, 7];
+  const check = weights.reduce((sum, w, i) => sum + w * Number(raw[i]), 0) % 11;
+  return check !== 10 && check === Number(raw[9]);
 }
 
 // A PIX key only carries check digits when its declared type is CPF or CNPJ;
@@ -486,6 +523,16 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "branch_code", label: "Branch code", type: "text", placeholder: "6 digits", strip: " -", pattern: /^\d{6}$/, error: "Branch code must be 6 digits." },
     { key: "account_number", label: "Account number", type: "text", placeholder: "7–11 digits", strip: " -", pattern: /^\d{7,11}$/, error: "Account number must be 7-11 digits." },
   ],
+  // Poland — mirrors backend PLEmployeeValidation. A PESEL or a passport is
+  // required (the server enforces the pair); NIP only where a worker has no
+  // PESEL. Messages never repeat the identifier.
+  PL: [
+    { key: "national_id", label: "PESEL", type: "text", placeholder: "11 digits", strip: " -", pattern: /^\d{11}$/, check: plPeselIsValid, error: "PESEL must be 11 digits with a valid birth date and check digit." },
+    { key: "passport_number", label: "Passport number (if no PESEL)", type: "text", placeholder: "6–20 letters/digits", upper: true, strip: " -", pattern: /^[A-Z0-9]{6,20}$/, error: "Passport number must be 6–20 letters/digits." },
+    { key: "tax_number", label: "NIP (if no PESEL)", type: "text", placeholder: "10 digits", strip: " -", pattern: /^\d{10}$/, check: plNipIsValid, error: "NIP must be 10 digits with a valid check digit." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.PL).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "PL + 26 digits", upper: true, strip: " ", pattern: /^PL\d{26}$/, check: ibanPassesMod97, error: "Polish IBAN must be PL followed by 26 digits with a valid check digit." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -505,7 +552,7 @@ export const COUNTRY_FIELD_SPECS = {
 export const DUPLICATE_ID_FIELDS = {
   US: "ssn", UK: "nino", AU: "tfn", CA: "sin", DE: "steuer_id", IE: "ppsn", SG: "nric_fin",
   HK: "hkid", SE: "swedish_id_number", IT: "codice_fiscale", CH: "ahv_number", SA: "national_id_iqama",
-  NL: "bsn", MX: "curp", BR: "cpf",
+  NL: "bsn", MX: "curp", BR: "cpf", PL: "national_id",
 };
 
 // Every jurisdiction's compliance field, flattened into one list — used to
