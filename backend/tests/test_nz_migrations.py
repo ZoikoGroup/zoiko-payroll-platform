@@ -206,7 +206,12 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_nz_corrections", "google_pending", "payroll_nz_filings",
                                         "payroll_nz_remittances", "payroll_nz_remittance_lines",
                                         "payroll_nz_settlements", "payroll_nz_run_exceptions",
-                                        "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
+                                        "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+                                        # Poland P2 (1ee3bbde33bb) on the same chain.
+                                        "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+                                        "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
+                                        "payroll_pl_declarations", "payroll_pl_ppk_participations",
+                                        "payroll_pl_accumulator_entries"}
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

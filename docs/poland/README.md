@@ -50,7 +50,7 @@ declaration shapes follow New Zealand (NZ) where the Poland spec requires it.
 |---|---|---|
 | P0 Scaffold, dormancy, identifiers | [HANDOFF_P0.md](HANDOFF_P0.md) | built by Claude 2026-11-05 (uncommitted) — also added a fail-closed engine stub (`engine/countries/poland.py`, `PL_ENGINE_NOT_BUILT` / `PL_SIMPLE_MODE_UNSUPPORTED`) and the dormancy refusals in `service.py` (company-details update + backfill), which the handoff missed |
 | P1 Content pack | — | built by Claude 2026-11-05 (uncommitted): `engine/countries/poland_content.py`, `poland_service.seed_poland_pack` + `pl_pack_activation_refusal`, `scripts/seed_poland_canonical_packs.py` (NOT run) |
-| P2 Migration + models (incl. PESEL vault) | HANDOFF_P2.md | — |
+| P2 Migration + models (incl. PESEL vault) | — | built by Claude 2026-11-05 (uncommitted): migration `1ee3bbde33bb_pl_foundation` (child of `a8cde2482ef0`, single head, 255 revisions) — `payroll_pl_identifier_vault` / `_identifier_access_events` / `_employer_registrations` (TENANT) / `_worker_profiles` / `_declarations` / `_ppk_participations` / `_accumulator_entries` + `payslip_items.pl_calculation_snapshot`, `payroll_runs.pl_approval_fingerprint`; `PayrollPl*` models; `pl_identifiers.py` (AES-GCM vault, keys `PL_IDENTIFIER_KEYRING` / `PL_IDENTIFIER_FINGERPRINT_KEY`). Never applied to any database. |
 | P3 Engine (PIT / ZUS / health / funds / PPK) | HANDOFF_P3.md | — |
 | P4 Service, hooks, API | HANDOFF_P4.md | — |
 | P5 Labour (minimum wage, overtime, leave) | HANDOFF_P5.md | — |

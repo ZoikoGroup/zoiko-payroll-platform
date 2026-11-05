@@ -134,11 +134,17 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    # Main's Google OAuth chain and P8 (dd8a60634320) are pending on the same head.
+    # Main's Google OAuth chain and P8 (dd8a60634320) are pending on the same head; so is Poland P2 (1ee3bbde33bb).
     assert tables == set(NEW_TABLES) | {"google_pending", "payroll_nz_filings", "payroll_nz_remittances",
                                         "payroll_nz_remittance_lines", "payroll_nz_settlements",
-                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
-    assert columns == {**SHARED, "users": {"auth_provider", "google_id", "avatar_url"},
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+                                        "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+                                        "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
+                                        "payroll_pl_declarations", "payroll_pl_ppk_participations",
+                                        "payroll_pl_accumulator_entries"}
+    pl_shared = {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
+    assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}},
+                       "users": {"auth_provider", "google_id", "avatar_url"},
                        "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
 
 

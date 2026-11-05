@@ -2002,7 +2002,9 @@ class PLEmployeeValidation(EmployeeValidationStrategy):
     (their FIELD_SPECS carry no pattern) so no refusal ever echoes the value
     (spec §13, PL-025). IBAN is masked platform-wide
     (PLATFORM_SENSITIVE_COMPLIANCE_FIELDS).
-    # P2: PESEL moves to the PL identifier vault (encrypted at rest, spec §13).
+    Storage: the encrypted vault (payroll_pl_identifier_vault, pl_identifiers.py)
+    exists since Phase 2; Phase 4 moves PESEL / NIP out of compliance_fields
+    into it before Poland can leave dormancy (spec §13).
     """
 
     country_code = "PL"

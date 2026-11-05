@@ -133,7 +133,12 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) and columns == {}
+    # Poland P2 (1ee3bbde33bb) is pending on the same chain.
+    assert tables == set(NEW_TABLES) | {"payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+                                        "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
+                                        "payroll_pl_declarations", "payroll_pl_ppk_participations",
+                                        "payroll_pl_accumulator_entries"}
+    assert columns == {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
 
 
 def test_single_child_literal_and_manifest():

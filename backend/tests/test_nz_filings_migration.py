@@ -139,8 +139,14 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    # P9 (a8cde2482ef0) is pending on the same chain.
-    assert tables == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} and columns == SHARED
+    # P9 (a8cde2482ef0) and Poland P2 (1ee3bbde33bb) are pending on the same chain.
+    assert tables == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+                                        "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+                                        "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
+                                        "payroll_pl_declarations", "payroll_pl_ppk_participations",
+                                        "payroll_pl_accumulator_entries"}
+    pl_shared = {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
+    assert columns == {t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}}
 
 
 def test_single_child_literal_and_manifest():
