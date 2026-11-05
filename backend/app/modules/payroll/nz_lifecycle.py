@@ -551,6 +551,10 @@ def run_exception_view(row) -> dict:
 
 
 def list_run_exceptions(db: Session, organization_id: int, run_id: int) -> list:
+    from app.modules.payroll.models import PayrollRun
+
+    if db.query(PayrollRun.id).filter(PayrollRun.id == run_id, PayrollRun.organization_id == organization_id).first()             is None:
+        raise NotFoundException("Payroll run")              # another tenant's run is not found, not "empty"
     m = nzs._nz_models()
     X = m.PayrollNzRunException
     return [run_exception_view(r) for r in db.query(X).filter(X.organization_id == organization_id, X.run_id == run_id)
