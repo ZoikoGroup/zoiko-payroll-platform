@@ -99,7 +99,7 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
     <Modal title={slab ? "Edit Tax Bracket" : "Add Tax Bracket"} onClose={onClose} maxWidth="max-w-2xl">
       <div className="space-y-5">
         <FormSection title="General">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div><label className={labelClass}>Label</label><input className={inputClass} value={form.rateLabel} onChange={set("rateLabel")} placeholder="e.g. 20% Bracket" /></div>
             <div><label className={labelClass}>Rule Type</label><select className={inputClass} value={form.ruleType} onChange={set("ruleType")}>{ruleTypeOptions.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
             <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
@@ -107,7 +107,7 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
         </FormSection>
 
         <FormSection title="Bracket">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div><label className={labelClass}>Min Amount</label><input className={inputClass} value={form.minAmount} onChange={set("minAmount")} /></div>
             <div><label className={labelClass}>Max Amount (blank = and above)</label><input className={inputClass} value={form.maxAmount} onChange={set("maxAmount")} /></div>
             <div><label className={labelClass}>Rate % {isNiBand ? "(Employee)" : ""}</label><input className={inputClass} value={form.ratePct} onChange={set("ratePct")} /></div>
@@ -116,7 +116,7 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
 
         {(isUS || isNiBand) && (
           <FormSection title="Applicability">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {isUS && (
                 <div>
                   <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
@@ -143,7 +143,7 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
         )}
 
         <FormSection title="Administration">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
             <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
           </div>

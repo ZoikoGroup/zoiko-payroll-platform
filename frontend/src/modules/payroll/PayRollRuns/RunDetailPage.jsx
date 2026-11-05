@@ -267,7 +267,7 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
       {isMultiCountry ? (
         <MultiCountryTotals totalsByCountry={totalsByCountry} isSimple={isSimple} />
       ) : (
-      <div className={`grid gap-3 ${isSimple ? "grid-cols-3" : "grid-cols-5"}`}>
+      <div className={`grid gap-3 ${isSimple ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"}`}>
         {[
           { label: "Employees", value: totals.count, accent: "text-foreground" },
           { label: "Total Gross", value: fmtCurrency(totals.totalGross), accent: "text-primary" },

@@ -463,7 +463,7 @@ export default function AssistAdminPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center flex-wrap justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.2em] text-primary">
             <ShieldCheck size={14} /> Zoiko Payroll Assist
@@ -574,7 +574,7 @@ export default function AssistAdminPage() {
           ) : events.length === 0 ? (
             <p className="p-8 text-center text-[12px] text-foreground-muted">No audit events match.</p>
           ) : (
-            <div className="max-h-[560px] overflow-y-auto">
+            <div className="max-h-[560px] overflow-auto">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-white">
                   <tr className="border-b border-border-light text-[10px] uppercase tracking-wide text-foreground-muted">
@@ -617,7 +617,7 @@ export default function AssistAdminPage() {
           ) : sessions.length === 0 ? (
             <p className="p-8 text-center text-[12px] text-foreground-muted">No sessions found.</p>
           ) : (
-            <div className="max-h-[560px] overflow-y-auto">
+            <div className="max-h-[560px] overflow-auto">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-white">
                   <tr className="border-b border-border-light text-[10px] uppercase tracking-wide text-foreground-muted">

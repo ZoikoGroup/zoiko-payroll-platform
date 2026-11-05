@@ -36,7 +36,7 @@ export default function NLCaoPensionCatalogTab() {
         ]} />
       </div>
       <div className={card}>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center flex-wrap justify-between gap-3">
           <h3 className="text-[14px] font-semibold text-foreground">Pension schemes — platform catalog</h3>
           {!form && <button type="button" className={btnPrimary} onClick={() => setForm(EMPTY)}>New scheme</button>}
         </div>

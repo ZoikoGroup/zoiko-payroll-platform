@@ -94,7 +94,7 @@ export default function INComponentFormModal({ pack, rate, initial, onClose, onS
     <Modal title={rate ? `Edit ${rate.label}` : initial ? `Add ${initial.displayName}` : "Add Contribution Rate"} onClose={onClose} maxWidth="max-w-2xl">
       <div className="space-y-5">
         <FormSection title="General">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div><label className={labelClass}>Component Key</label><input className={inputClass} value={form.componentKey} onChange={set("componentKey")} placeholder="e.g. pf" /></div>
             <div><label className={labelClass}>Label</label><input className={inputClass} value={form.label} onChange={set("label")} placeholder="e.g. Provident Fund" /></div>
             <div><label className={labelClass}>State (optional — overrides country-level)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
@@ -102,7 +102,7 @@ export default function INComponentFormModal({ pack, rate, initial, onClose, onS
         </FormSection>
 
         <FormSection title="Calculation">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {desc.employeeRate && desc.employerRate && (
               <>
                 <div><label className={labelClass}>Employee Contribution Rate %</label><input className={inputClass} value={form.employeeSharePct} onChange={set("employeeSharePct")} placeholder="12.00" /></div>
@@ -120,7 +120,7 @@ export default function INComponentFormModal({ pack, rate, initial, onClose, onS
             <ChevronDown size={13} className={`transition-transform ${advancedOpen ? "" : "-rotate-90"}`} /> Advanced Settings
           </button>
           {advancedOpen && (
-            <div className="mt-2 grid grid-cols-3 gap-3">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
               <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. EPFO notification" /></div>
             </div>

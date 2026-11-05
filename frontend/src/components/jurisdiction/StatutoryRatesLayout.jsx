@@ -215,7 +215,7 @@ function QuickEditRateModal({ rate, pack, onClose, onSaved }) {
 
   return (
     <Modal title={`Edit "${rate.label}"`} onClose={onClose} maxWidth="max-w-lg">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div><label className={labelClass}>Employee Rate %</label><input className={inputClass} value={employeeSharePct} onChange={(e) => setEmployeeSharePct(e.target.value)} /></div>
         <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={employerSharePct} onChange={(e) => setEmployerSharePct(e.target.value)} /></div>
         <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={flatAmount} onChange={(e) => setFlatAmount(e.target.value)} /></div>

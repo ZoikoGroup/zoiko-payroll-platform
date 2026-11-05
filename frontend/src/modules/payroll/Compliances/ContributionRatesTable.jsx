@@ -107,38 +107,40 @@ export function RatesTable({ rows, caption, singleColumn = false }) {
       <div className="px-6 py-3 border-b border-border">
         <p className="text-[13px] text-foreground-muted">{caption}</p>
       </div>
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-border">
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Component</th>
-            {singleColumn ? (
-              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Amount</th>
-            ) : (
-              <>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee Share</th>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employer Share</th>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total</th>
-              </>
-            )}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((r, i) => (
-            <tr key={r.id ?? r.label ?? i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
-              <td className="px-5 py-3.5 font-bold text-foreground">{r.label}</td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Component</th>
               {singleColumn ? (
-                <td className="px-5 py-3.5 font-bold text-foreground">{r.total || r.employee || r.employer}</td>
+                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Amount</th>
               ) : (
                 <>
-                  <td className="px-5 py-3.5 text-foreground-muted">{r.employee}</td>
-                  <td className="px-5 py-3.5 text-foreground-muted">{r.employer}</td>
-                  <td className="px-5 py-3.5 font-bold text-foreground">{r.total}</td>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee Share</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employer Share</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total</th>
                 </>
               )}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((r, i) => (
+              <tr key={r.id ?? r.label ?? i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                <td className="px-5 py-3.5 font-bold text-foreground">{r.label}</td>
+                {singleColumn ? (
+                  <td className="px-5 py-3.5 font-bold text-foreground">{r.total || r.employee || r.employer}</td>
+                ) : (
+                  <>
+                    <td className="px-5 py-3.5 text-foreground-muted">{r.employee}</td>
+                    <td className="px-5 py-3.5 text-foreground-muted">{r.employer}</td>
+                    <td className="px-5 py-3.5 font-bold text-foreground">{r.total}</td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -1953,7 +1953,7 @@ export default function AttendancePage() {
           <div className="bg-primary/5 border border-primary/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted">
             Only <strong>Active</strong> employees are shown. Inactive employees are excluded from attendance tracking.
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
               <div className="p-2.5 rounded-[12px] bg-category-teal/10">
                 <Users className="w-5 h-5 text-category-teal" />
@@ -2661,7 +2661,7 @@ export default function AttendancePage() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                   <div className="bg-background rounded-[12px] p-3 text-center border border-border">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Employees</p>
                     <p className="text-[18px] font-bold text-foreground">{summaryTotal}</p>

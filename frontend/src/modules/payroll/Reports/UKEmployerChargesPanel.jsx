@@ -106,7 +106,7 @@ export default function UKEmployerChargesPanel() {
         {summaryError ? (
           <p className="text-[13px] text-error">{summaryError}</p>
         ) : summary ? (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Tax Year</p>
               <p className="mt-1 text-[15px] font-bold text-foreground">{summary.taxYear}</p>

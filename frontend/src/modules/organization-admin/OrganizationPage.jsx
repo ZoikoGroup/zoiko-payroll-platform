@@ -99,7 +99,8 @@ const styles = `
   }
   @media (max-width:640px){ .org-dash h1.title{ font-size:38px; } }
   .org-dash .subtitle{ color:var(--ink-soft); font-size:15px; margin:0; max-width:520px; }
-  .org-dash .head-actions{ display:flex; gap:10px; flex:none; }
+  .org-dash .head-actions{ display:flex; flex-wrap:wrap; gap:10px; flex:none; }
+  @media (max-width:640px){ .org-dash .head-actions{ flex:1 1 100%; } }
 
   .org-dash .btn{
     font-family:'Inter', sans-serif; font-size:13.5px; font-weight:600;
@@ -815,38 +816,40 @@ export default function OrgAdminOrganizationPage() {
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table className="simple-table">
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Department</th>
-                  <th>Designation</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {employeeData.length === 0 ? (
-                  <tr><td colSpan={4} className="empty-cell">No employees found.</td></tr>
-                ) : employeeData.map((e, idx) => (
-                  <tr key={e.name || idx}>
-                    <td>
-                      <div className="emp-cell">
-                        <span className="emp-avatar">{e.initials}</span>
-                        <span>{e.name}</span>
-                      </div>
-                    </td>
-                    <td>{e.dept || "—"}</td>
-                    <td>{e.designation || "—"}</td>
-                    <td>
-                      <span className="status-dot">
-                        <span className="dot" style={{ background: EMPLOYEE_STATUS_DOT[e.statusColor] || EMPLOYEE_STATUS_DOT.off }} />
-                        {e.status}
-                      </span>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th>Designation</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {employeeData.length === 0 ? (
+                    <tr><td colSpan={4} className="empty-cell">No employees found.</td></tr>
+                  ) : employeeData.map((e, idx) => (
+                    <tr key={e.name || idx}>
+                      <td>
+                        <div className="emp-cell">
+                          <span className="emp-avatar">{e.initials}</span>
+                          <span>{e.name}</span>
+                        </div>
+                      </td>
+                      <td>{e.dept || "—"}</td>
+                      <td>{e.designation || "—"}</td>
+                      <td>
+                        <span className="status-dot">
+                          <span className="dot" style={{ background: EMPLOYEE_STATUS_DOT[e.statusColor] || EMPLOYEE_STATUS_DOT.off }} />
+                          {e.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 

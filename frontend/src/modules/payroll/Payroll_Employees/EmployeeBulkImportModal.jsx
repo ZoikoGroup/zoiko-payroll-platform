@@ -600,7 +600,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported, defaultCo
                   <AlertCircle size={14} className="inline mr-1 -mt-0.5" />
                   {result.failed.length} row{result.failed.length === 1 ? "" : "s"} could not be imported:
                 </p>
-                <div className="max-h-56 overflow-y-auto rounded-[12px] border border-error/20 bg-error/10">
+                <div className="max-h-56 overflow-auto rounded-[12px] border border-error/20 bg-error/10">
                   <table className="w-full text-[13px]">
                     <thead className="sticky top-0 bg-error-light">
                       <tr className="text-left text-[12px] uppercase tracking-wide text-error">

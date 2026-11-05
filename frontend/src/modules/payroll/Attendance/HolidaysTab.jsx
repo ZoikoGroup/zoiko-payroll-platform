@@ -110,7 +110,7 @@ export default function HolidaysTab({ holidays = [], onAdd, onDelete, year, juri
       <div className="flex flex-col lg:flex-row gap-4">
         {/* Left: Holiday list */}
         <div className="w-full lg:w-[40%] bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center flex-wrap justify-between gap-3 px-5 py-4 border-b border-border">
             <div>
               <h3 className="text-[15px] font-bold text-foreground">{year} Holidays</h3>
               <p className="text-[11px] text-foreground-muted">

@@ -78,7 +78,7 @@ export default function CHSchemeCatalogTab({ addToast }) {
 
   return (
     <section aria-labelledby="ch-schemes-heading" className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start flex-wrap justify-between gap-3">
         <div>
           <h3 id="ch-schemes-heading" className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
             <Landmark size={13} /> Platform scheme catalog

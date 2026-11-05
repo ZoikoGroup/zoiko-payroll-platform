@@ -76,7 +76,7 @@ export default function HKGovernanceTab() {
         </ul>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="text-[12px] text-foreground-secondary">Reason (the change record)
-            <input aria-label="Registry change reason" className={`${input} ml-2 w-80`} value={reason} onChange={(e) => setReason(e.target.value)} />
+            <input aria-label="Registry change reason" className={`${input} w-full sm:ml-2 sm:w-80`} value={reason} onChange={(e) => setReason(e.target.value)} />
           </label>
           <button type="button" className={btn} disabled={!ready.canOpen || !reason} onClick={() => registry("AVAILABLE")}>
             Open onboarding (AVAILABLE)
@@ -89,21 +89,23 @@ export default function HKGovernanceTab() {
 
       <section className={card} aria-labelledby="hk-coverage">
         <h3 id="hk-coverage" className="mb-2 text-[14px] font-semibold text-foreground">Report template coverage (exact year — no fallback)</h3>
-        <table className="w-full">
-          <thead><tr><th className={th}>Report type</th><th className={th}>Year basis</th><th className={th}>Period</th><th className={th}>Year</th><th className={th}>State</th><th className={th}>Versions</th></tr></thead>
-          <tbody>
-            {data.templateCoverage.map((c) => (
-              <tr key={`${c.reportType}-${c.period}`} className="border-t border-border">
-                <td className={td}>{human(c.reportType)}</td>
-                <td className={td}>{c.yearKind === "YA" ? "Year of assessment" : "Calendar year"}</td>
-                <td className={td}>{c.period === "current" ? "Current" : "Next"}</td>
-                <td className={td}>{c.yearKey}</td>
-                <td className={td}>{STATE_LABEL[c.state]}</td>
-                <td className={td}>{c.versions.map((v) => `v${v.version} ${v.status}${v.sourceDocumentId ? "" : " (no source)"} · ${v.contentHash.slice(0, 10)}`).join(", ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr><th className={th}>Report type</th><th className={th}>Year basis</th><th className={th}>Period</th><th className={th}>Year</th><th className={th}>State</th><th className={th}>Versions</th></tr></thead>
+            <tbody>
+              {data.templateCoverage.map((c) => (
+                <tr key={`${c.reportType}-${c.period}`} className="border-t border-border">
+                  <td className={td}>{human(c.reportType)}</td>
+                  <td className={td}>{c.yearKind === "YA" ? "Year of assessment" : "Calendar year"}</td>
+                  <td className={td}>{c.period === "current" ? "Current" : "Next"}</td>
+                  <td className={td}>{c.yearKey}</td>
+                  <td className={td}>{STATE_LABEL[c.state]}</td>
+                  <td className={td}>{c.versions.map((v) => `v${v.version} ${v.status}${v.sourceDocumentId ? "" : " (no source)"} · ${v.contentHash.slice(0, 10)}`).join(", ") || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className={card} aria-labelledby="hk-decisions">
@@ -111,28 +113,30 @@ export default function HKGovernanceTab() {
         <p className="mb-2 text-[12px] text-foreground-secondary">
           A decision is recorded only when its signed document (tag shown) is submitted here and accepted by a different Super Admin.
         </p>
-        <table className="w-full" aria-label="Owner decisions">
-          <thead><tr><th className={th}>Decision</th><th className={th}>Subject</th><th className={th}>Blocks launch</th><th className={th}>State</th><th className={th}>Evidence tag</th><th className={th}>Evidence</th></tr></thead>
-          <tbody>
-            {data.ownerDecisions.map((d) => (
-              <Fragment key={d.key}>
-                <tr className="border-t border-border">
-                  <td className={td}>{d.key}</td><td className={td}>{d.label}</td><td className={td}>{d.blocksLaunch ? "Yes" : "No"}</td>
-                  <td className={td}>{DECISION_LABEL[d.state]}</td><td className={td}><code>{d.evidenceTag}</code></td>
-                  <td className={td}>
-                    <button type="button" className="text-[12px] font-semibold text-primary underline" aria-expanded={openDecision === d.key}
-                      onClick={() => setOpenDecision(openDecision === d.key ? null : d.key)}>
-                      {openDecision === d.key ? "Hide" : `Evidence (${(d.evidence || []).length})`}
-                    </button>
-                  </td>
-                </tr>
-                {openDecision === d.key && (
-                  <tr><td colSpan={6} className="px-2 pb-2"><HKEvidencePanel tag={d.evidenceTag} items={d.evidence} onChanged={load} /></td></tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full" aria-label="Owner decisions">
+            <thead><tr><th className={th}>Decision</th><th className={th}>Subject</th><th className={th}>Blocks launch</th><th className={th}>State</th><th className={th}>Evidence tag</th><th className={th}>Evidence</th></tr></thead>
+            <tbody>
+              {data.ownerDecisions.map((d) => (
+                <Fragment key={d.key}>
+                  <tr className="border-t border-border">
+                    <td className={td}>{d.key}</td><td className={td}>{d.label}</td><td className={td}>{d.blocksLaunch ? "Yes" : "No"}</td>
+                    <td className={td}>{DECISION_LABEL[d.state]}</td><td className={td}><code>{d.evidenceTag}</code></td>
+                    <td className={td}>
+                      <button type="button" className="text-[12px] font-semibold text-primary underline" aria-expanded={openDecision === d.key}
+                        onClick={() => setOpenDecision(openDecision === d.key ? null : d.key)}>
+                        {openDecision === d.key ? "Hide" : `Evidence (${(d.evidence || []).length})`}
+                      </button>
+                    </td>
+                  </tr>
+                  {openDecision === d.key && (
+                    <tr><td colSpan={6} className="px-2 pb-2"><HKEvidencePanel tag={d.evidenceTag} items={d.evidence} onChanged={load} /></td></tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className={card} aria-labelledby="hk-deps">

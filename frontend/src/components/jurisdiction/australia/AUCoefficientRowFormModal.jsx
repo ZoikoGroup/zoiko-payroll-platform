@@ -69,7 +69,7 @@ export default function AUCoefficientRowFormModal({ pack, ruleType, familyOption
         </div>
         <p className="text-xs text-foreground-muted">Withholding for this band: y = a·x − b, rounded to the nearest dollar.</p>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
           <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-AU-2026-27-001 §6" /></div>
         </div>

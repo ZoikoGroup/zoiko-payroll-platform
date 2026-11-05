@@ -296,7 +296,7 @@ export default function ReportsPage() {
 
       {activeTab === "payroll-reports" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
               <div className="p-2.5 rounded-[12px] bg-primary/10">
                 <FileText className="w-5 h-5 text-primary" />
@@ -367,94 +367,96 @@ export default function ReportsPage() {
                 <p className="text-[13px] text-foreground-muted mt-1">Reports will appear here once payroll runs are completed</p>
               </div>
             ) : (
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Report Name</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Period</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Countries</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Generated</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
-                    <th className="px-5 py-3.5" />
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Bank Transfer File</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {reports.map((r, i) => (
-                    <tr key={r.id || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
-                      <td className="px-5 py-4 font-semibold text-foreground">{r.name || "Payroll Report"}</td>
-                      <td className="px-5 py-4 text-[13px] text-foreground-muted">{r.period || "-"}</td>
-                      <td className="px-5 py-4">
-                        <div className="flex flex-wrap gap-1.5">
-                          {(r.countries || []).length === 0 ? <span className="text-[12px] text-foreground-muted">-</span> : r.countries.map((c) => (
-                            <span key={c.country} title={`${countryLabel(c.country)}: ${c.employeeCount} employee(s), net ${formatMoney(c.totalNet, c.currency)}`}
-                              className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-1 text-[11px] font-semibold text-info whitespace-nowrap">
-                              {countryLabel(c.country)} · {c.employeeCount} · {formatMoney(c.totalNet, c.currency)}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-[13px] text-foreground-muted">{r.generatedAt || r.generated || "-"}</td>
-                      <td className="px-5 py-4">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-info/10 text-info px-3 py-1 text-[11px] font-bold">
-                          {r.status || "available"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <button
-                          onClick={() => handleDownloadReport(r)}
-                          disabled={downloadingId === r.id}
-                          className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Download size={12} /> {downloadingId === r.id ? "Downloading..." : "Download"}
-                        </button>
-                      </td>
-                      <td className="px-5 py-4">
-                        {r.status === "available" ? (
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={bankFileFormat[r.id] || "csv"}
-                              onChange={(e) => setBankFileFormat((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                              className="rounded-[10px] border border-border bg-background px-2.5 py-2 text-[12px] font-semibold text-foreground focus:outline-none focus:border-category-teal focus:ring-2 focus:ring-category-teal/20"
-                            >
-                              <option value="csv">CSV</option>
-                              <option value="xlsx">Excel (.xlsx)</option>
-                              <option value="txt">TXT</option>
-                              <option value="pdf">PDF</option>
-                            </select>
-                            {(bankFileCountries[r.id] || r.countries || []).length > 1 ? (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                {(bankFileCountries[r.id] || r.countries).map((c) => (
-                                  <button
-                                    key={c.country}
-                                    onClick={() => handleDownloadBankFile(r, c.country)}
-                                    disabled={downloadingBankFileId === `${r.id}:${c.country}`}
-                                    title={`Generate and download this run's ${getCountryNameFromCode(c.country) || c.country} bank transfer file (${c.currency})`}
-                                    className="flex items-center gap-1.5 rounded-[12px] bg-category-teal text-white px-3 py-2 text-[12px] font-bold hover:bg-category-teal transition-all duration-200 shadow-[0_2px_8px_rgba(157,123,242,0.3)] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                                  >
-                                    <Banknote size={12} /> {downloadingBankFileId === `${r.id}:${c.country}` ? "Generating..." : (getCountryNameFromCode(c.country) || c.country)}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleDownloadBankFile(r)}
-                                disabled={downloadingBankFileId === r.id}
-                                title="Generate and download this run's bank transfer file"
-                                className="flex items-center gap-1.5 rounded-[12px] bg-category-teal text-white px-3.5 py-2 text-[13px] font-bold hover:bg-category-teal transition-all duration-200 shadow-[0_2px_8px_rgba(157,123,242,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Banknote size={12} /> {downloadingBankFileId === r.id ? "Generating..." : "Download"}
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-[12px] text-foreground-muted">Available once approved</span>
-                        )}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Report Name</th>
+                      <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Period</th>
+                      <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Countries</th>
+                      <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Generated</th>
+                      <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
+                      <th className="px-5 py-3.5" />
+                      <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Bank Transfer File</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {reports.map((r, i) => (
+                      <tr key={r.id || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                        <td className="px-5 py-4 font-semibold text-foreground">{r.name || "Payroll Report"}</td>
+                        <td className="px-5 py-4 text-[13px] text-foreground-muted">{r.period || "-"}</td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {(r.countries || []).length === 0 ? <span className="text-[12px] text-foreground-muted">-</span> : r.countries.map((c) => (
+                              <span key={c.country} title={`${countryLabel(c.country)}: ${c.employeeCount} employee(s), net ${formatMoney(c.totalNet, c.currency)}`}
+                                className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-1 text-[11px] font-semibold text-info whitespace-nowrap">
+                                {countryLabel(c.country)} · {c.employeeCount} · {formatMoney(c.totalNet, c.currency)}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-[13px] text-foreground-muted">{r.generatedAt || r.generated || "-"}</td>
+                        <td className="px-5 py-4">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-info/10 text-info px-3 py-1 text-[11px] font-bold">
+                            {r.status || "available"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <button
+                            onClick={() => handleDownloadReport(r)}
+                            disabled={downloadingId === r.id}
+                            className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Download size={12} /> {downloadingId === r.id ? "Downloading..." : "Download"}
+                          </button>
+                        </td>
+                        <td className="px-5 py-4">
+                          {r.status === "available" ? (
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={bankFileFormat[r.id] || "csv"}
+                                onChange={(e) => setBankFileFormat((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                                className="rounded-[10px] border border-border bg-background px-2.5 py-2 text-[12px] font-semibold text-foreground focus:outline-none focus:border-category-teal focus:ring-2 focus:ring-category-teal/20"
+                              >
+                                <option value="csv">CSV</option>
+                                <option value="xlsx">Excel (.xlsx)</option>
+                                <option value="txt">TXT</option>
+                                <option value="pdf">PDF</option>
+                              </select>
+                              {(bankFileCountries[r.id] || r.countries || []).length > 1 ? (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {(bankFileCountries[r.id] || r.countries).map((c) => (
+                                    <button
+                                      key={c.country}
+                                      onClick={() => handleDownloadBankFile(r, c.country)}
+                                      disabled={downloadingBankFileId === `${r.id}:${c.country}`}
+                                      title={`Generate and download this run's ${getCountryNameFromCode(c.country) || c.country} bank transfer file (${c.currency})`}
+                                      className="flex items-center gap-1.5 rounded-[12px] bg-category-teal text-white px-3 py-2 text-[12px] font-bold hover:bg-category-teal transition-all duration-200 shadow-[0_2px_8px_rgba(157,123,242,0.3)] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                                    >
+                                      <Banknote size={12} /> {downloadingBankFileId === `${r.id}:${c.country}` ? "Generating..." : (getCountryNameFromCode(c.country) || c.country)}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleDownloadBankFile(r)}
+                                  disabled={downloadingBankFileId === r.id}
+                                  title="Generate and download this run's bank transfer file"
+                                  className="flex items-center gap-1.5 rounded-[12px] bg-category-teal text-white px-3.5 py-2 text-[13px] font-bold hover:bg-category-teal transition-all duration-200 shadow-[0_2px_8px_rgba(157,123,242,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <Banknote size={12} /> {downloadingBankFileId === r.id ? "Generating..." : "Download"}
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[12px] text-foreground-muted">Available once approved</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>

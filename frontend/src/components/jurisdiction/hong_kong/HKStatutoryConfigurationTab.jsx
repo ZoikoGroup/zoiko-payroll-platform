@@ -142,19 +142,21 @@ export default function HKStatutoryConfigurationTab() {
 
       <section className={card} aria-labelledby="hk-cfg-versions">
         <h3 id="hk-cfg-versions" className="mb-2 text-[14px] font-semibold text-foreground">Statutory versions</h3>
-        <table className="w-full" aria-label="Statutory versions">
-          <thead><tr><th className={th}>Version</th><th className={th}>Year of assessment</th><th className={th}>Effective</th><th className={th}>Status</th><th className={th}>State</th><th className={th} /></tr></thead>
-          <tbody>
-            {versions.map((v) => (
-              <tr key={v.id} className={`border-t border-border ${v.id === packId ? "bg-surface-muted" : ""}`}>
-                <td className={td}>{v.packId} v{v.version}</td><td className={td}>{v.yearOfAssessment}</td>
-                <td className={td}>{v.effectiveFrom} → {v.effectiveTo || "open"}</td><td className={td}>{v.status}</td>
-                <td className={td}>{STATE[v.versionState] || v.versionState}</td>
-                <td className={td}><button type="button" className={btn} onClick={() => selectPack(v.id)} disabled={v.id === packId}>{v.id === packId ? "Viewing" : "View"}</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full" aria-label="Statutory versions">
+            <thead><tr><th className={th}>Version</th><th className={th}>Year of assessment</th><th className={th}>Effective</th><th className={th}>Status</th><th className={th}>State</th><th className={th} /></tr></thead>
+            <tbody>
+              {versions.map((v) => (
+                <tr key={v.id} className={`border-t border-border ${v.id === packId ? "bg-surface-muted" : ""}`}>
+                  <td className={td}>{v.packId} v{v.version}</td><td className={td}>{v.yearOfAssessment}</td>
+                  <td className={td}>{v.effectiveFrom} → {v.effectiveTo || "open"}</td><td className={td}>{v.status}</td>
+                  <td className={td}>{STATE[v.versionState] || v.versionState}</td>
+                  <td className={td}><button type="button" className={btn} onClick={() => selectPack(v.id)} disabled={v.id === packId}>{v.id === packId ? "Viewing" : "View"}</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="text-[12px] text-foreground-secondary">Why is this version selected? Payroll date
             <input type="date" aria-label="Payroll date" className={`${input} ml-2`} value={whyDate} onChange={(e) => setWhyDate(e.target.value)} />
@@ -204,19 +206,21 @@ export default function HKStatutoryConfigurationTab() {
           {diff && (
             <div aria-label="Version comparison" className="mb-3 rounded-lg border border-border p-3 text-[12px] text-foreground-secondary">
               <p className="font-semibold text-foreground">{diff.from.packId} v{diff.from.version} → {diff.to.packId} v{diff.to.version}: {diff.changed.length} changed · {diff.added.length} added · {diff.removed.length} removed · {diff.unchanged} unchanged</p>
-              <table className="mt-2 w-full">
-                <thead><tr><th className={th}>Domain</th><th className={th}>Item</th><th className={th}>Previous</th><th className={th}>New</th></tr></thead>
-                <tbody>
-                  {diff.changed.map((c) => Object.entries(c.changes).map(([field, v]) => (
-                    <tr key={`${c.key}-${c.label}-${field}`} className="border-t border-border">
-                      <td className={td}>{c.domain}</td><td className={td}>{c.label}{field !== "value" ? ` (${field})` : ""}</td>
-                      <td className={td}>{String(v.from ?? "—")}</td><td className={td}>{String(v.to ?? "—")}</td>
-                    </tr>
-                  )))}
-                  {diff.added.map((r) => <tr key={`a-${r.key}-${r.label}`} className="border-t border-border"><td className={td}>{r.domain}</td><td className={td}>{r.label}</td><td className={td}>—</td><td className={td}>{r.value} (added)</td></tr>)}
-                  {diff.removed.map((r) => <tr key={`r-${r.key}-${r.label}`} className="border-t border-border"><td className={td}>{r.domain}</td><td className={td}>{r.label}</td><td className={td}>{r.value}</td><td className={td}>— (removed)</td></tr>)}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="mt-2 w-full">
+                  <thead><tr><th className={th}>Domain</th><th className={th}>Item</th><th className={th}>Previous</th><th className={th}>New</th></tr></thead>
+                  <tbody>
+                    {diff.changed.map((c) => Object.entries(c.changes).map(([field, v]) => (
+                      <tr key={`${c.key}-${c.label}-${field}`} className="border-t border-border">
+                        <td className={td}>{c.domain}</td><td className={td}>{c.label}{field !== "value" ? ` (${field})` : ""}</td>
+                        <td className={td}>{String(v.from ?? "—")}</td><td className={td}>{String(v.to ?? "—")}</td>
+                      </tr>
+                    )))}
+                    {diff.added.map((r) => <tr key={`a-${r.key}-${r.label}`} className="border-t border-border"><td className={td}>{r.domain}</td><td className={td}>{r.label}</td><td className={td}>—</td><td className={td}>{r.value} (added)</td></tr>)}
+                    {diff.removed.map((r) => <tr key={`r-${r.key}-${r.label}`} className="border-t border-border"><td className={td}>{r.domain}</td><td className={td}>{r.label}</td><td className={td}>{r.value}</td><td className={td}>— (removed)</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
           <div role="tablist" aria-label="Statutory domains" className="mb-3 flex flex-wrap gap-1">
@@ -231,27 +235,29 @@ export default function HKStatutoryConfigurationTab() {
             <div>
               {current.notice && <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] font-semibold text-foreground">{current.notice}</p>}
               <p className="mb-2 text-[11px] text-foreground-muted">Consumer: <code>{current.consumer}</code> · {current.unverified} value(s) not yet statutorily verified.</p>
-              <table className="w-full" aria-label={`${current.label} configuration`}>
-                <thead><tr><th className={th}>Item</th><th className={th}>Value</th><th className={th}>Unit</th><th className={th}>Effective</th><th className={th}>Source</th><th className={th}>Status</th><th className={th} /></tr></thead>
-                <tbody>
-                  {current.rows.map((r) => (
-                    <tr key={`${r.kind}-${r.id}`} className="border-t border-border">
-                      <td className={td}>{r.label}<div className="text-[10px] text-foreground-muted">{r.key}</div></td>
-                      <td className={td}>{r.value}</td><td className={td}>{r.unit}</td>
-                      <td className={td}>{r.effectiveFrom} → {r.effectiveTo}</td>
-                      <td className={td}>{r.source ? <>{r.source.agency}<div className="text-[10px] text-foreground-muted">{r.source.sha256 ? `sha256 ${r.source.sha256.slice(0, 12)}…` : "no hash"}{r.source.reviewed ? " · reviewed" : ""}</div></> : "—"}</td>
-                      <td className={td}>{STATUS[r.status] || r.status}</td>
-                      <td className={td}>
-                        {r.editable ? <button type="button" className={btn} onClick={() => setEditing(r)}>Edit</button> : <Lock size={13} aria-label="locked" />}
-                        {editing && editing.kind === r.kind && editing.id === r.id && (
-                          <EditRow row={r} sources={sources} onCancel={() => setEditing(null)}
-                            onSaved={async () => { setEditing(null); setNotice(`${r.label} updated — the version's approval was reset; it needs re-approval.`); setData(await getHkConfigPack(packId)); }} />
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full" aria-label={`${current.label} configuration`}>
+                  <thead><tr><th className={th}>Item</th><th className={th}>Value</th><th className={th}>Unit</th><th className={th}>Effective</th><th className={th}>Source</th><th className={th}>Status</th><th className={th} /></tr></thead>
+                  <tbody>
+                    {current.rows.map((r) => (
+                      <tr key={`${r.kind}-${r.id}`} className="border-t border-border">
+                        <td className={td}>{r.label}<div className="text-[10px] text-foreground-muted">{r.key}</div></td>
+                        <td className={td}>{r.value}</td><td className={td}>{r.unit}</td>
+                        <td className={td}>{r.effectiveFrom} → {r.effectiveTo}</td>
+                        <td className={td}>{r.source ? <>{r.source.agency}<div className="text-[10px] text-foreground-muted">{r.source.sha256 ? `sha256 ${r.source.sha256.slice(0, 12)}…` : "no hash"}{r.source.reviewed ? " · reviewed" : ""}</div></> : "—"}</td>
+                        <td className={td}>{STATUS[r.status] || r.status}</td>
+                        <td className={td}>
+                          {r.editable ? <button type="button" className={btn} onClick={() => setEditing(r)}>Edit</button> : <Lock size={13} aria-label="locked" />}
+                          {editing && editing.kind === r.kind && editing.id === r.id && (
+                            <EditRow row={r} sources={sources} onCancel={() => setEditing(null)}
+                              onSaved={async () => { setEditing(null); setNotice(`${r.label} updated — the version's approval was reset; it needs re-approval.`); setData(await getHkConfigPack(packId)); }} />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </section>

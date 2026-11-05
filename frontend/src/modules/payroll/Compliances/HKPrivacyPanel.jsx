@@ -74,49 +74,53 @@ export default function HKPrivacyPanel({ employees = [] }) {
         {error && <p role="alert" className="text-[12px] font-medium text-error">{error}</p>}
         {notice && <p role="status" className="text-[12px] font-medium text-success">{notice}</p>}
       </div>
-      <table className="w-full">
-        <caption className="sr-only">Legal holds</caption>
-        <thead><tr><th scope="col" className={th}>Scope</th><th scope="col" className={th}>Status</th><th scope="col" className={th}>Reason</th><th scope="col" className={th}>Placed</th><th scope="col" className={th}>Action</th></tr></thead>
-        <tbody>
-          {holds.map((h) => (
-            <tr key={h.id} className="border-t border-border">
-              <td className={td}>{h.employeeId ? name(h.employeeId) : hkLabel("ORGANISATION")}</td>
-              <td className={td}>{hkLabel(h.status)}</td>
-              <td className={td}>{h.reason}{h.reference ? ` (${h.reference})` : ""}</td>
-              <td className={td}>{(h.placedAt || "").slice(0, 10)}</td>
-              <td className={td}>
-                {h.status === "ACTIVE" && (
-                  <div className="flex flex-wrap gap-1">
-                    <input aria-label={`Release reason for hold ${h.id}`} placeholder="Release reason" className={input}
-                      onChange={(e) => setReleaseReason({ ...releaseReason, [h.id]: e.target.value })} />
-                    <button type="button" className={btnGhost} onClick={() => act(() => releaseHkLegalHold(h.id, releaseReason[h.id] || ""), "Legal hold released.")}>
-                      Release (different user)
-                    </button>
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
-          {!holds.length && <tr><td className={td} colSpan={5}>No legal holds.</td></tr>}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <caption className="sr-only">Legal holds</caption>
+          <thead><tr><th scope="col" className={th}>Scope</th><th scope="col" className={th}>Status</th><th scope="col" className={th}>Reason</th><th scope="col" className={th}>Placed</th><th scope="col" className={th}>Action</th></tr></thead>
+          <tbody>
+            {holds.map((h) => (
+              <tr key={h.id} className="border-t border-border">
+                <td className={td}>{h.employeeId ? name(h.employeeId) : hkLabel("ORGANISATION")}</td>
+                <td className={td}>{hkLabel(h.status)}</td>
+                <td className={td}>{h.reason}{h.reference ? ` (${h.reference})` : ""}</td>
+                <td className={td}>{(h.placedAt || "").slice(0, 10)}</td>
+                <td className={td}>
+                  {h.status === "ACTIVE" && (
+                    <div className="flex flex-wrap gap-1">
+                      <input aria-label={`Release reason for hold ${h.id}`} placeholder="Release reason" className={input}
+                        onChange={(e) => setReleaseReason({ ...releaseReason, [h.id]: e.target.value })} />
+                      <button type="button" className={btnGhost} onClick={() => act(() => releaseHkLegalHold(h.id, releaseReason[h.id] || ""), "Legal hold released.")}>
+                        Release (different user)
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {!holds.length && <tr><td className={td} colSpan={5}>No legal holds.</td></tr>}
+          </tbody>
+        </table>
+      </div>
       <h3 className="text-[13px] font-semibold text-foreground">Access to Hong Kong statutory data</h3>
-      <table className="w-full">
-        <caption className="sr-only">Hong Kong statutory data access log</caption>
-        <thead><tr><th scope="col" className={th}>When</th><th scope="col" className={th}>Action</th><th scope="col" className={th}>Employee</th><th scope="col" className={th}>Document</th><th scope="col" className={th}>By</th></tr></thead>
-        <tbody>
-          {events.map((e) => (
-            <tr key={e.id} className="border-t border-border">
-              <td className={td}>{(e.occurredAt || "").replace("T", " ").slice(0, 16)}</td>
-              <td className={td}>{hkLabel(e.action)}{e.assistedAccessSessionId ? " (support session)" : ""}</td>
-              <td className={td}>{name(e.employeeId)}</td>
-              <td className={td}>{e.reportType ? hkLabel(e.reportType) : "Statutory profile"}</td>
-              <td className={td}>{e.actorId ? `User #${e.actorId}` : "—"}</td>
-            </tr>
-          ))}
-          {!events.length && <tr><td className={td} colSpan={5}>No access recorded yet.</td></tr>}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <caption className="sr-only">Hong Kong statutory data access log</caption>
+          <thead><tr><th scope="col" className={th}>When</th><th scope="col" className={th}>Action</th><th scope="col" className={th}>Employee</th><th scope="col" className={th}>Document</th><th scope="col" className={th}>By</th></tr></thead>
+          <tbody>
+            {events.map((e) => (
+              <tr key={e.id} className="border-t border-border">
+                <td className={td}>{(e.occurredAt || "").replace("T", " ").slice(0, 16)}</td>
+                <td className={td}>{hkLabel(e.action)}{e.assistedAccessSessionId ? " (support session)" : ""}</td>
+                <td className={td}>{name(e.employeeId)}</td>
+                <td className={td}>{e.reportType ? hkLabel(e.reportType) : "Statutory profile"}</td>
+                <td className={td}>{e.actorId ? `User #${e.actorId}` : "—"}</td>
+              </tr>
+            ))}
+            {!events.length && <tr><td className={td} colSpan={5}>No access recorded yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

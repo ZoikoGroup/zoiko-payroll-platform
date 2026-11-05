@@ -39,7 +39,7 @@ function NewVersion({ v, onDone }) {
                onChange={(e) => setForm({ ...form, version: e.target.value })} required />
       </label>
       <label className="text-[12px] text-foreground-secondary">Reason (rollback or change it starts)
-        <input aria-label="New version reason" className={`${input} mt-1 w-80`} value={form.reason}
+        <input aria-label="New version reason" className={`${input} mt-1 w-full sm:w-80`} value={form.reason}
                onChange={(e) => setForm({ ...form, reason: e.target.value })} required />
       </label>
       <button type="submit" className={btnPrimary}>Create Draft copy of v{v.version}</button>

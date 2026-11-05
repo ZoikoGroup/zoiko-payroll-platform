@@ -136,20 +136,22 @@ function GOSIRegistration({ employees }) {
       {profiles.length > 0 && (
         <div className={card}>
           <p className="mb-2 text-[13px] font-semibold text-foreground">Existing statutory profiles</p>
-          <table className="w-full">
-            <thead><tr><th className={th}>Employee</th><th className={th}>Worker class</th><th className={th}>Cohort</th><th className={th}>Evidence</th><th className={th}>Contributory wage</th></tr></thead>
-            <tbody>
-              {profiles.map((p) => (
-                <tr key={p.employeeId} className="border-t border-border">
-                  <td className={td}>{p.employeeName} ({p.employeeCode})</td>
-                  <td className={td}>{p.workerClass}</td>
-                  <td className={td}>{p.cohort}</td>
-                  <td className={td}>{p.cohortEvidenceRef || "—"}</td>
-                  <td className={td}>SAR {p.contributoryWage}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead><tr><th className={th}>Employee</th><th className={th}>Worker class</th><th className={th}>Cohort</th><th className={th}>Evidence</th><th className={th}>Contributory wage</th></tr></thead>
+              <tbody>
+                {profiles.map((p) => (
+                  <tr key={p.employeeId} className="border-t border-border">
+                    <td className={td}>{p.employeeName} ({p.employeeCode})</td>
+                    <td className={td}>{p.workerClass}</td>
+                    <td className={td}>{p.cohort}</td>
+                    <td className={td}>{p.cohortEvidenceRef || "—"}</td>
+                    <td className={td}>SAR {p.contributoryWage}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -271,20 +273,22 @@ function Corrections({ employees }) {
       {!rows.length ? (
         <p className="text-[12px] text-foreground-muted">No Saudi Arabia correction chain found.</p>
       ) : (
-        <table className="w-full">
-          <thead><tr><th className={th}>Payslip</th><th className={th}>Run</th><th className={th}>Deltas</th><th className={th}>Totals (all)</th><th className={th}>Created</th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.payslipId} className="border-t border-border">
-                <td className={td}>{r.payslipId}</td>
-                <td className={td}>{r.runId}</td>
-                <td className={td}><pre className="text-[11px] text-foreground-secondary">{JSON.stringify(r.deltas, null, 2)}</pre></td>
-                <td className={td}><pre className="text-[11px] text-foreground-secondary">{JSON.stringify(r.totalsAll, null, 2)}</pre></td>
-                <td className={td}>{r.createdAt}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr><th className={th}>Payslip</th><th className={th}>Run</th><th className={th}>Deltas</th><th className={th}>Totals (all)</th><th className={th}>Created</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.payslipId} className="border-t border-border">
+                  <td className={td}>{r.payslipId}</td>
+                  <td className={td}>{r.runId}</td>
+                  <td className={td}><pre className="text-[11px] text-foreground-secondary">{JSON.stringify(r.deltas, null, 2)}</pre></td>
+                  <td className={td}><pre className="text-[11px] text-foreground-secondary">{JSON.stringify(r.totalsAll, null, 2)}</pre></td>
+                  <td className={td}>{r.createdAt}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -327,27 +331,29 @@ function GOSILiability() {
       <div className={card}>
         <h3 className="mb-1 text-[14px] font-semibold text-foreground">GOSI Monthly Liability</h3>
         <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">Employer GOSI liability per contribution month (pension, SANED, occupational hazards), built from a payroll run.</p>
-        <table className="w-full">
-          <thead><tr>{["Month", "Pension (Emp.)", "Pension (Er.)", "SANED (Emp.)", "SANED (Er.)", "Occ. Hazard (Er.)", "Total Due", "Status", "Source Run", "Paid Ref"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={10} className={td}>No GOSI liabilities yet.</td></tr>}
-            {rows.map((g) => (
-              <tr key={g.id} className="border-t border-border">
-                <td className={td}>{g.contributionMonth ? new Date(g.contributionMonth).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "—"}</td>
-                <td className={td}>SAR {g.pensionEmployee ?? "—"}</td>
-                <td className={td}>SAR {g.pensionEmployer ?? "—"}</td>
-                <td className={td}>SAR {g.sanedEmployee ?? "—"}</td>
-                <td className={td}>SAR {g.sanedEmployer ?? "—"}</td>
-                <td className={td}>SAR {g.occupationalHazardEmployer ?? "—"}</td>
-                <td className={td}>SAR {g.totalDue ?? "—"}</td>
-                <td className={td}>{g.status || "—"}</td>
-                <td className={td}>{g.sourceRunId ?? "—"}</td>
-                <td className={td}>{g.paymentReference || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="mt-3 flex items-end gap-2">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr>{["Month", "Pension (Emp.)", "Pension (Er.)", "SANED (Emp.)", "SANED (Er.)", "Occ. Hazard (Er.)", "Total Due", "Status", "Source Run", "Paid Ref"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={10} className={td}>No GOSI liabilities yet.</td></tr>}
+              {rows.map((g) => (
+                <tr key={g.id} className="border-t border-border">
+                  <td className={td}>{g.contributionMonth ? new Date(g.contributionMonth).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "—"}</td>
+                  <td className={td}>SAR {g.pensionEmployee ?? "—"}</td>
+                  <td className={td}>SAR {g.pensionEmployer ?? "—"}</td>
+                  <td className={td}>SAR {g.sanedEmployee ?? "—"}</td>
+                  <td className={td}>SAR {g.sanedEmployer ?? "—"}</td>
+                  <td className={td}>SAR {g.occupationalHazardEmployer ?? "—"}</td>
+                  <td className={td}>SAR {g.totalDue ?? "—"}</td>
+                  <td className={td}>{g.status || "—"}</td>
+                  <td className={td}>{g.sourceRunId ?? "—"}</td>
+                  <td className={td}>{g.paymentReference || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
           <input placeholder="Run ID" aria-label="Run ID" className={input} value={runId} onChange={(e) => setRunId(e.target.value)} style={{ width: "100px" }} />
           <button type="button" className={btn} disabled={!runId} onClick={build}>Build from Run</button>
         </div>
@@ -377,25 +383,27 @@ function EOSLedger({ employees }) {
       <div className={card}>
         <h3 className="mb-1 text-[14px] font-semibold text-foreground">EOS Accrual Ledger (SA-020/SA-021)</h3>
         <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">Incremental EOS accrual per payroll run. Resignation fractions applied at final settlement.</p>
-        <table className="w-full">
-          <thead><tr>{["Employee", "Period From", "Period To", "Service Years", "Monthly Base", "Award Months", "Status", "Source Run"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {ledger.length === 0 && <tr><td colSpan={8} className={td}>No EOS ledger entries yet.</td></tr>}
-            {ledger.map((e) => (
-              <tr key={e.id} className="border-t border-border">
-                <td className={td}>{e.employeeName || e.employeeId}</td>
-                <td className={td}>{e.periodFrom ? new Date(e.periodFrom).toLocaleDateString() : "—"}</td>
-                <td className={td}>{e.periodTo ? new Date(e.periodTo).toLocaleDateString() : "—"}</td>
-                <td className={td}>{e.serviceYears?.toFixed(2) ?? "—"}</td>
-                <td className={td}>SAR {e.monthlyBase ?? "—"}</td>
-                <td className={td}>{e.accrualMonths ?? "—"}</td>
-                <td className={td}>{e.status || "—"}</td>
-                <td className={td}>{e.sourceRunId ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="mt-3 flex items-end gap-2">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr>{["Employee", "Period From", "Period To", "Service Years", "Monthly Base", "Award Months", "Status", "Source Run"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {ledger.length === 0 && <tr><td colSpan={8} className={td}>No EOS ledger entries yet.</td></tr>}
+              {ledger.map((e) => (
+                <tr key={e.id} className="border-t border-border">
+                  <td className={td}>{e.employeeName || e.employeeId}</td>
+                  <td className={td}>{e.periodFrom ? new Date(e.periodFrom).toLocaleDateString() : "—"}</td>
+                  <td className={td}>{e.periodTo ? new Date(e.periodTo).toLocaleDateString() : "—"}</td>
+                  <td className={td}>{e.serviceYears?.toFixed(2) ?? "—"}</td>
+                  <td className={td}>SAR {e.monthlyBase ?? "—"}</td>
+                  <td className={td}>{e.accrualMonths ?? "—"}</td>
+                  <td className={td}>{e.status || "—"}</td>
+                  <td className={td}>{e.sourceRunId ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
           <input placeholder="Run ID" className={input} value={accrueRunId} onChange={(e) => setAccrueRunId(e.target.value)} style={{ width: "100px" }} />
           <button className={btn} disabled={!accrueRunId} onClick={() => accrue()}>Accrue from Run</button>
         </div>
@@ -444,32 +452,34 @@ function FinalSettlement({ employees }) {
       <div className={card}>
         <h3 className="mb-1 text-[14px] font-semibold text-foreground">Final Settlement (SA-026/SA-027)</h3>
         <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">EOS award (Art. 84/85/87) plus leave/notice/repatriation dues. Four-eyes: approve then pay.</p>
-        <table className="w-full">
-          <thead><tr>{["Employee", "Type", "Date", "EOS Award", "Notice Pay", "Leave Pay", "Repatriation", "Other", "Total", "Status", "Approved By", "Paid Ref", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {settlements.length === 0 && <tr><td colSpan={13} className={td}>No final settlements yet.</td></tr>}
-            {settlements.map((s) => (
-              <tr key={s.id} className="border-t border-border">
-                <td className={td}>{s.employeeName || s.employeeId}</td>
-                <td className={td}>{s.terminationType || "—"}</td>
-                <td className={td}>{s.terminationDate ? new Date(s.terminationDate).toLocaleDateString() : "—"}</td>
-                <td className={td}>SAR {s.eosAward ?? "—"}</td>
-                <td className={td}>SAR {s.noticePay ?? "—"}</td>
-                <td className={td}>SAR {s.leavePay ?? "—"}</td>
-                <td className={td}>SAR {s.repatriationPay ?? "—"}</td>
-                <td className={td}>SAR {s.otherDues ?? "—"}</td>
-                <td className={td}>SAR {s.totalAmount ?? "—"}</td>
-                <td className={td}>{s.status || "—"}</td>
-                <td className={td}>{s.approvedById ?? "—"}</td>
-                <td className={td}>{s.paymentReference || "—"}</td>
-                <td className={td}>
-                  {s.status === "DRAFT" && <button className={btn} onClick={() => approve(s.id)}>Approve</button>}
-                  {s.status === "APPROVED" && <button className={btn} onClick={() => pay(s.id)}>Pay</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr>{["Employee", "Type", "Date", "EOS Award", "Notice Pay", "Leave Pay", "Repatriation", "Other", "Total", "Status", "Approved By", "Paid Ref", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {settlements.length === 0 && <tr><td colSpan={13} className={td}>No final settlements yet.</td></tr>}
+              {settlements.map((s) => (
+                <tr key={s.id} className="border-t border-border">
+                  <td className={td}>{s.employeeName || s.employeeId}</td>
+                  <td className={td}>{s.terminationType || "—"}</td>
+                  <td className={td}>{s.terminationDate ? new Date(s.terminationDate).toLocaleDateString() : "—"}</td>
+                  <td className={td}>SAR {s.eosAward ?? "—"}</td>
+                  <td className={td}>SAR {s.noticePay ?? "—"}</td>
+                  <td className={td}>SAR {s.leavePay ?? "—"}</td>
+                  <td className={td}>SAR {s.repatriationPay ?? "—"}</td>
+                  <td className={td}>SAR {s.otherDues ?? "—"}</td>
+                  <td className={td}>SAR {s.totalAmount ?? "—"}</td>
+                  <td className={td}>{s.status || "—"}</td>
+                  <td className={td}>{s.approvedById ?? "—"}</td>
+                  <td className={td}>{s.paymentReference || "—"}</td>
+                  <td className={td}>
+                    {s.status === "DRAFT" && <button className={btn} onClick={() => approve(s.id)}>Approve</button>}
+                    {s.status === "APPROVED" && <button className={btn} onClick={() => pay(s.id)}>Pay</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <input placeholder="Employee ID" className={input} value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} style={{ width: "100px" }} />
           <select className={input} value={form.terminationType} onChange={(e) => setForm({ ...form, terminationType: e.target.value })}><option value="TERMINATION">TERMINATION</option><option value="RESIGNATION">RESIGNATION</option></select>
@@ -526,33 +536,35 @@ function WPSSection({ employees }) {
       <div className={card}>
         <h3 className="mb-1 text-[14px] font-semibold text-foreground">WPS SIE Extract (SA-025)</h3>
         <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">Salary Information Extract for Mudad. Content-addressed (SHA-256), tracked UPLOADED → ACCEPTED/REJECTED.</p>
-        <table className="w-full">
-          <thead><tr>{["Run", "Month", "SHA-256", "Employees", "Total Net", "Status", "Observations", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {files.length === 0 && <tr><td colSpan={8} className={td}>No WPS files yet.</td></tr>}
-            {files.map((f) => (
-              <tr key={f.id} className="border-t border-border">
-                <td className={td}>{f.sourceRunId ?? "—"}</td>
-                <td className={td}>{f.periodMonth ? new Date(f.periodMonth).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "—"}</td>
-                <td className={td}><code className="text-[10px] font-mono">{f.fileSha256 ? f.fileSha256.slice(0, 16) + "…" : "—"}</code></td>
-                <td className={td}>{f.employeeCount ?? "—"}</td>
-                <td className={td}>SAR {f.totalAmount ?? "—"}</td>
-                <td className={td}>{f.status || "—"}</td>
-                <td className={td}>{f.observationCount ?? 0}</td>
-                <td className={td}>
-                  {f.status === "UPLOADED" && (
-                    <>
-                      <button className={btn} onClick={() => accept(f.id)}>Accept</button>
-                      <button className={btn} onClick={() => reject(f.id)}>Reject</button>
-                    </>
-                  )}
-                  <button className={btn} onClick={() => viewObs(f.id)}>View Obs</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="mt-3 flex items-end gap-2">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr>{["Run", "Month", "SHA-256", "Employees", "Total Net", "Status", "Observations", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {files.length === 0 && <tr><td colSpan={8} className={td}>No WPS files yet.</td></tr>}
+              {files.map((f) => (
+                <tr key={f.id} className="border-t border-border">
+                  <td className={td}>{f.sourceRunId ?? "—"}</td>
+                  <td className={td}>{f.periodMonth ? new Date(f.periodMonth).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "—"}</td>
+                  <td className={td}><code className="text-[10px] font-mono">{f.fileSha256 ? f.fileSha256.slice(0, 16) + "…" : "—"}</code></td>
+                  <td className={td}>{f.employeeCount ?? "—"}</td>
+                  <td className={td}>SAR {f.totalAmount ?? "—"}</td>
+                  <td className={td}>{f.status || "—"}</td>
+                  <td className={td}>{f.observationCount ?? 0}</td>
+                  <td className={td}>
+                    {f.status === "UPLOADED" && (
+                      <>
+                        <button className={btn} onClick={() => accept(f.id)}>Accept</button>
+                        <button className={btn} onClick={() => reject(f.id)}>Reject</button>
+                      </>
+                    )}
+                    <button className={btn} onClick={() => viewObs(f.id)}>View Obs</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
           <input placeholder="Run ID" className={input} value={buildRunId} onChange={(e) => setBuildRunId(e.target.value)} style={{ width: "100px" }} />
           <button className={btn} disabled={!buildRunId} onClick={() => build()}>Build from Run</button>
         </div>
@@ -560,23 +572,25 @@ function WPSSection({ employees }) {
 
       {obsFileId && (
         <div className={card}>
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center flex-wrap justify-between gap-3 mb-2">
             <h3 className="text-[14px] font-semibold text-foreground">Observations for file #{obsFileId}</h3>
             <button className={btn} onClick={() => setObsFileId("")}>Close</button>
           </div>
           {obs.length === 0 ? <p className="text-[12px] text-foreground-muted">No observations.</p> : (
-            <table className="w-full">
-              <thead><tr>{["Code", "Employee", "Field", "Value", "Severity"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-              <tbody>{obs.map((o) => (
-                <tr key={o.id} className="border-t border-border">
-                  <td className={td}>{o.observationCode || o.code}</td>
-                  <td className={td}>{o.employeeName || o.employeeId}</td>
-                  <td className={td}>{o.field}</td>
-                  <td className={td}>{o.value}</td>
-                  <td className={td}><span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${o.severity === "ERROR" ? "bg-error/10 text-error" : "bg-warning/10 text-warning"}`}>{o.severity || "—"}</span></td>
-                </tr>
-              ))}</tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead><tr>{["Code", "Employee", "Field", "Value", "Severity"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+                <tbody>{obs.map((o) => (
+                  <tr key={o.id} className="border-t border-border">
+                    <td className={td}>{o.observationCode || o.code}</td>
+                    <td className={td}>{o.employeeName || o.employeeId}</td>
+                    <td className={td}>{o.field}</td>
+                    <td className={td}>{o.value}</td>
+                    <td className={td}><span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${o.severity === "ERROR" ? "bg-error/10 text-error" : "bg-warning/10 text-warning"}`}>{o.severity || "—"}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

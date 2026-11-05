@@ -397,8 +397,8 @@ export default function PayrollShell({ children }) {
       <aside
         role="navigation"
         aria-label="Sidebar"
-        className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 shadow-[0_8px_28px_rgba(8,43,69,0.28)] transition-[transform,width] duration-200 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 transition-[transform,width,box-shadow] duration-200 lg:translate-x-0 lg:shadow-[0_8px_28px_rgba(8,43,69,0.28)] ${
+          sidebarOpen ? "translate-x-0 shadow-[0_8px_28px_rgba(8,43,69,0.28)]" : "-translate-x-full"
         } ${collapsed ? "w-72 lg:w-20" : "w-72 lg:w-[272px]"}`}
       >
         <SidebarContent

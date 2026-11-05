@@ -40,7 +40,7 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex items-center flex-wrap justify-between gap-3">
         <div>
           <h3 className="text-sm font-bold text-foreground">Income Tax Brackets</h3>
           <p className="mt-0.5 text-xs text-foreground-muted">Marginal-rate brackets by W-4 filing status — a row with no filing status applies to every employee.</p>

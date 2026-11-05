@@ -40,7 +40,7 @@ export default function GeneratedReportPreview({ report, currencyCode = "INR" })
 
   return (
     <div className="rounded-[18px] border border-border bg-surface p-5 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center flex-wrap justify-between gap-3">
         <h3 className="text-[15px] font-bold text-foreground">Report Preview</h3>
         <div className="flex items-center gap-2">
           {isPerEmployee ? (
@@ -94,28 +94,30 @@ export default function GeneratedReportPreview({ report, currencyCode = "INR" })
 
       {report.reconciliation?.fieldDiffs && (
         <div className="rounded-[12px] border border-border-light overflow-hidden">
-          <table className="w-full text-[12px]">
-            <thead className="bg-surface-muted">
-              <tr>
-                <th className="px-3 py-2 text-left font-bold text-foreground-muted">Value</th>
-                <th className="px-3 py-2 text-right font-bold text-foreground-muted">Payroll</th>
-                <th className="px-3 py-2 text-right font-bold text-foreground-muted">Report</th>
-                <th className="px-3 py-2 text-right font-bold text-foreground-muted">Difference</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {report.reconciliation.fieldDiffs.map((d) => (
-                <tr key={d.field}>
-                  <td className="px-3 py-2 font-medium text-foreground">{d.field}</td>
-                  <td className="px-3 py-2 text-right text-foreground-secondary">{formatCurrency(d.runSum, currencyCode)}</td>
-                  <td className="px-3 py-2 text-right text-foreground-secondary">{formatCurrency(d.reportSum, currencyCode)}</td>
-                  <td className={`px-3 py-2 text-right font-semibold ${Math.abs(d.delta) > 0.005 ? "text-warning" : "text-success"}`}>
-                    {formatCurrency(d.delta, currencyCode)}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead className="bg-surface-muted">
+                <tr>
+                  <th className="px-3 py-2 text-left font-bold text-foreground-muted">Value</th>
+                  <th className="px-3 py-2 text-right font-bold text-foreground-muted">Payroll</th>
+                  <th className="px-3 py-2 text-right font-bold text-foreground-muted">Report</th>
+                  <th className="px-3 py-2 text-right font-bold text-foreground-muted">Difference</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border-light">
+                {report.reconciliation.fieldDiffs.map((d) => (
+                  <tr key={d.field}>
+                    <td className="px-3 py-2 font-medium text-foreground">{d.field}</td>
+                    <td className="px-3 py-2 text-right text-foreground-secondary">{formatCurrency(d.runSum, currencyCode)}</td>
+                    <td className="px-3 py-2 text-right text-foreground-secondary">{formatCurrency(d.reportSum, currencyCode)}</td>
+                    <td className={`px-3 py-2 text-right font-semibold ${Math.abs(d.delta) > 0.005 ? "text-warning" : "text-success"}`}>
+                      {formatCurrency(d.delta, currencyCode)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

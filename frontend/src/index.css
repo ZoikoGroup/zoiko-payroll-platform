@@ -80,6 +80,17 @@ body {
   color: var(--color-foreground);
 }
 
+@layer base {
+  /* An absolutely positioned descendant (e.g. an `sr-only` column label)
+     escapes an `overflow-x-auto` wrapper unless something inside that
+     wrapper is positioned. Without this, a table scrolled sideways on a
+     phone leaks its hidden labels past the viewport and widens the whole
+     page. Base layer, so a `static`/`sticky` utility still wins. */
+  table {
+    position: relative;
+  }
+}
+
 /* Cross-browser hidden-but-functional scrollbar. Scrolling (wheel, trackpad,
    keyboard) keeps working — only the visual scrollbar track/thumb is hidden. */
 .scrollbar-hide {

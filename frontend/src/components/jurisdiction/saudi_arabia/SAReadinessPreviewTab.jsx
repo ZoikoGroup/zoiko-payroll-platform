@@ -103,18 +103,20 @@ export function SAReadinessPreviewTab({ packId }) {
                 </ul>
               </div>
             )}
-            <table className="w-full" aria-label="Readiness gates">
-              <thead><tr>{["Gate", "Status", "Detail"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {readiness.items?.map((item) => (
-                  <tr key={item.key} className="border-t border-border">
-                    <td className={td}>{item.label}</td>
-                    <td className={td}><span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${item.complete ? "bg-success/10 text-success" : item.required ? "bg-error/10 text-error" : "bg-warning/10 text-warning"}`}>{item.complete ? "COMPLETE" : item.required ? "BLOCKER" : "PENDING"}</span></td>
-                    <td className={td}>{item.detail || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full" aria-label="Readiness gates">
+                <thead><tr>{["Gate", "Status", "Detail"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {readiness.items?.map((item) => (
+                    <tr key={item.key} className="border-t border-border">
+                      <td className={td}>{item.label}</td>
+                      <td className={td}><span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${item.complete ? "bg-success/10 text-success" : item.required ? "bg-error/10 text-error" : "bg-warning/10 text-warning"}`}>{item.complete ? "COMPLETE" : item.required ? "BLOCKER" : "PENDING"}</span></td>
+                      <td className={td}>{item.detail || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         ) : (
           <p className="text-[12px] text-foreground-muted py-4">Select a pack to view readiness.</p>
