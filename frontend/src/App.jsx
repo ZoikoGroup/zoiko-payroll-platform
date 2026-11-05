@@ -31,6 +31,7 @@ import {
   CHCompliancePage, SACompliancePage, NLCompliancePage, MXCompliancePage, BRCompliancePage,
   ZACompliancePage,
   JPCompliancePage,
+  NZCompliancePage,
 } from "./pages/JurisdictionCompliance";
 import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
@@ -239,6 +240,8 @@ export default function App() {
       <Route path="/super-admin/compliance/south-africa/:state" element={<SuperAdminShell><ZACompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/japan" element={<SuperAdminShell><JPCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/japan/:state" element={<SuperAdminShell><JPCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/new-zealand" element={<SuperAdminShell><NZCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/new-zealand/:state" element={<SuperAdminShell><NZCompliancePage /></SuperAdminShell>} />
         {/* Caribbean production jurisdictions (2026-09-21) — each is
             country-level only, so no :jurisdiction sub-route is needed. */}
         <Route path="/super-admin/compliance/barbados" element={<SuperAdminShell><BBCompliancePage /></SuperAdminShell>} />

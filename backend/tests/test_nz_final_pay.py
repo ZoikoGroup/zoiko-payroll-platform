@@ -16,7 +16,7 @@ from app.modules.payroll.models import (
     PayrollNzEmployment, PayrollNzLeaveEntitlement, PayrollNzLeavePayCalculation, PayrollRun, PayrollStatus,
     PayslipItem,
 )
-from tests._nz_p6_fixtures import _request_codes, add_ledger, employ, make_employee, signed  # noqa: F401
+from tests._nz_p6_fixtures import _request_codes, add_ledger, employ, employer_profile, make_employee, signed  # noqa: F401
 
 D = Decimal
 END = date(2026, 10, 15)
@@ -26,6 +26,7 @@ END = date(2026, 10, 15)
 def world(db, organization, signed, monkeypatch):
     employee = make_employee(db, organization)
     employment = employ(db, organization, employee)
+    employer_profile(db, organization)
     add_ledger(db, organization, employee, employment, end=date(2026, 10, 9), weeks=52)
     monkeypatch.setattr(service, "generate_payslips_for_run", lambda db, run, org, employee_ids=None: run)
     return organization, employee, employment
@@ -145,3 +146,11 @@ def test_special_run_kinds(db, world):
     with pytest.raises(BadRequestException, match="kind must be"):
         life.create_special_run(db, organization.id, {"kind": "CORRECTION", "payDate": END,
                                                       "employeeIds": [employee.id]}, 1, "x")
+
+
+def test_list_final_pay_cases_and_cash_ups(db, world):
+    """P7c list routes: an employee's final pay cases and cash-up requests."""
+    organization, employee, _employment = world
+    case = _case(db, organization, employee)
+    assert [c.id for c in life.list_final_pay_cases(db, organization.id, employee.id)] == [case.id]
+    assert lps.list_cash_ups(db, organization.id, employee.id) == []

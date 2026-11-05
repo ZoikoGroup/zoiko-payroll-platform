@@ -26,6 +26,7 @@ export { default as MXCompliancePage } from "./MXCompliancePage";
 export { default as BRCompliancePage } from "./BRCompliancePage";
 export { default as ZACompliancePage } from "./ZACompliancePage";
 export { default as JPCompliancePage } from "./JPCompliancePage";
+export { default as NZCompliancePage } from "./NZCompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -58,4 +59,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   BR: "brazil",
   ZA: "south-africa",
   JP: "japan",
+  NZ: "new-zealand",
 };

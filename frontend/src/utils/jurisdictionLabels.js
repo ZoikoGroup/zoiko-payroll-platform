@@ -45,6 +45,8 @@ const INCOME_TAX_LABELS = {
   ZA: "PAYE",
   // Japan — national withholding income tax (gensen chōshū), NTA tables
   JP: "Withholding Income Tax",
+  // New Zealand — PAYE, which also collects the ACC earner levy (ZP-NZ-ENG-001)
+  NZ: "PAYE (incl. ACC earner levy)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -172,6 +174,7 @@ const TAX_ID_LABELS = {
   BR: "CNPJ / CPF",
   ZA: "SARS PAYE / UIF / SDL Registration",
   JP: "Corporate Number / Labour Insurance Number",
+  NZ: "IRD number / NZBN",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only

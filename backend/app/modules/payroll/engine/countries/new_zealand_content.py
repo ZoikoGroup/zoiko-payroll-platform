@@ -225,6 +225,9 @@ NZ_PARAMETER_KEYS = {
     "nz_remit_first_half_due_day": "amount",
     "nz_remit_second_half_due_day": "amount",
     "nz_remit_december_second_half_due": "text",
+    # Phase 8 — not stated by the specification: empty by design until signed.
+    "nz_working_day_rule": "text",            # what a "working day" is for the filing deadline (D-P8-2)
+    "nz_filing_payload_version": "amount",    # IR schema version the payload targets (G3)
     # Holidays Act 2003 (spec §8) — read by Phases 5 and 6
     "nz_hol_annual_weeks": "amount",
     "nz_hol_annual_qualifying_months": "amount",
@@ -348,6 +351,11 @@ NZ_SCALAR_CONTENT = (
      None, None, "5", None, "S5", True, None, None),
     ("nz_remit_december_second_half_due", "Twice-monthly remitter — 16–31 December due (MM-DD)",
      None, None, None, "01-15", "S5", True, None, None),
+    # Phase 8 (D-P8-2): the spec says "2 working days" without defining the term.
+    ("nz_working_day_rule", "Payday filing — definition of a working day", None, None, None, None, "S2", True,
+     None, None),
+    ("nz_filing_payload_version", "Payday filing — IR payload schema version", None, None, None, None, "S2", True,
+     None, None),
 
     ("nz_hol_annual_weeks", "Annual holidays — weeks after each 12 months' continuous employment",
      None, None, "4", None, "S7", True, None, None),
@@ -405,6 +413,8 @@ NZ_EMPTY_BY_DESIGN = frozenset({
     "nz_hol_awe_lookback_months", "nz_hol_awe_divisor_weeks", "nz_hol_owp_fallback_weeks",
     "nz_hol_adp_lookback_weeks", "nz_hol_owp_method", "nz_hol_rdp_method", "nz_hol_adp_use_rule",
     "nz_hol_final_pay_unvested_method", "nz_out_of_cycle_paye_method", "nz_lump_sum_paye_method",
+    # Phase 8: filing deadline definition and payload schema version.
+    "nz_working_day_rule", "nz_filing_payload_version",
 })
 
 # ── Rate bands (TaxSlab) ──────────────────────────────────────────────────

@@ -33,9 +33,9 @@ from app.modules.payroll import new_zealand_service as nz
 def require_nz_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     from app.modules.payroll import nz_dormancy, service
 
-    if not nz_dormancy.onboarding_enabled():
-        raise NotFoundException(nz_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
+    if not nz_dormancy.onboarding_enabled(org_id):
+        raise NotFoundException(nz_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
     if not nz_dormancy.is_new_zealand(service._resolve_org_country(db, org_id)):
@@ -100,9 +100,11 @@ def nz_summary(current_user=Depends(get_current_payroll_operator), db: Session =
     return nz.statutory_summary(db)
 
 
-@router.get("/readiness", summary="New Zealand release-gate readiness (read-only)")
+@router.get("/readiness", summary="New Zealand release gates G1-G7 with checks and evidence (read-only)")
 def nz_readiness(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    return {"available": False, "unmet": nz.nz_unmet_requirements(db)}
+    from app.modules.payroll import nz_readiness as readiness
+
+    return readiness.nz_readiness(db)
 
 
 # ── employer profiles ───────────────────────────────────────────────────────
@@ -519,6 +521,13 @@ def nz_list_leave_pay(employee_id: int, current_user=Depends(get_current_payroll
     return result
 
 
+@router.get("/employees/{employee_id}/cash-ups", summary="The employee's annual-holiday cash-up requests")
+def nz_list_cash_ups(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                     db: Session = Depends(get_db)):
+    pay = _pay()
+    return [pay.cash_up_view(row) for row in pay.list_cash_ups(db, _org_id(current_user), employee_id)]
+
+
 @router.post("/employees/{employee_id}/cash-ups", summary="Record a cash-up request (written request reference)")
 def nz_request_cash_up(employee_id: int, body: Dict[str, Any] = Body(...),
                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
@@ -546,6 +555,13 @@ def nz_reject_cash_up(request_id: int, body: Dict[str, Any] = Body(...),
                              dict(body or {}).get("reason"))
     db.commit()
     return pay.cash_up_view(row)
+
+
+@router.get("/employees/{employee_id}/final-pay-cases", summary="The employee's final pay cases")
+def nz_list_final_pay(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    life = _life()
+    return [life.final_case_view(row) for row in life.list_final_pay_cases(db, _org_id(current_user), employee_id)]
 
 
 @router.post("/employees/{employee_id}/final-pay-cases", summary="Open a final pay case (termination)")
@@ -601,6 +617,13 @@ def nz_create_special_run(body: Dict[str, Any] = Body(...), current_user=Depends
             "paymentKind": run.nz_payment_kind, "options": run.nz_run_options or {}}
 
 
+@router.get("/corrections", summary="Compensating corrections (optionally one employee's)")
+def nz_list_corrections(employee_id: Optional[int] = None, current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    life = _life()
+    return [life.correction_view(row) for row in life.list_corrections(db, _org_id(current_user), employee_id)]
+
+
 @router.post("/payslips/{item_id}/corrections", summary="Create a compensating correction of a paid payslip")
 def nz_create_correction(item_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
                          db: Session = Depends(get_db)):
@@ -648,3 +671,201 @@ def nz_rehire(employee_id: int, body: Dict[str, Any] = Body(...), current_user=D
     row = _life().rehire(db, _org_id(current_user), employee_id, payload, _actor(current_user), reason)
     db.commit()
     return _leave().employment_view(row)
+
+# ── Payday filing, remittance, run exceptions, journal (Phase 8) ────────────
+def _filing():
+    from app.modules.payroll import nz_filing
+
+    return nz_filing
+
+
+def _remit():
+    from app.modules.payroll import nz_remittance
+
+    return nz_remittance
+
+
+@router.get("/filings", summary="Payday filing records (newest payday first)")
+def nz_list_filings(payDate: Optional[str] = None, status: Optional[str] = None,
+                    current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _filing().list_filings(db, _org_id(current_user), payDate, status)
+
+
+@router.get("/filings/{filing_id}", summary="One payday filing with its masked JSON preview")
+def nz_get_filing(filing_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    f = _filing()
+    return f.filing_view(f._filing(db, _org_id(current_user), filing_id), include_payload=True)
+
+
+@router.post("/filings/{filing_id}/approve", summary="Approve a payday filing (four-eyes)")
+def nz_approve_filing(filing_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    f = _filing()
+    row = f.approve_filing(db, _org_id(current_user), filing_id, _actor(current_user))
+    db.commit()
+    return f.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/submit", summary="Submit a payday filing (refused until gate G3)")
+def nz_submit_filing(filing_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    _filing().submit_filing(db, _org_id(current_user), filing_id, _actor(current_user))
+
+
+@router.post("/filings/{filing_id}/response", summary="Record Inland Revenue's response to a submitted filing")
+def nz_filing_response(filing_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    f = _filing()
+    row = f.record_authority_response(db, _org_id(current_user), filing_id, body, _actor(current_user))
+    db.commit()
+    return f.filing_view(row)
+
+
+@router.get("/remittances", summary="Remittance periods by obligation and destination")
+def nz_list_remittances(periodStart: Optional[str] = None, current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    return _remit().list_remittances(db, _org_id(current_user), periodStart)
+
+
+@router.get("/remittances/{remittance_id}", summary="One remittance with its lines and settlements")
+def nz_get_remittance(remittance_id: int, current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    return _remit().get_remittance(db, _org_id(current_user), remittance_id)
+
+
+@router.post("/remittances/{remittance_id}/settlements", summary="Record a payment against a remittance")
+def nz_record_settlement(remittance_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    r = _remit()
+    row = r.record_settlement(db, _org_id(current_user), remittance_id, body, _actor(current_user))
+    db.commit()
+    return r.settlement_view(row)
+
+
+@router.post("/settlements/{settlement_id}/match", summary="Match a recorded settlement (four-eyes)")
+def nz_match_settlement(settlement_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    r = _remit()
+    row = r.match_settlement(db, _org_id(current_user), settlement_id, _actor(current_user))
+    db.commit()
+    return r.settlement_view(row)
+
+
+@router.post("/settlements/{settlement_id}/reverse", summary="Reverse a settlement (reason required)")
+def nz_reverse_settlement(settlement_id: int, body: Dict[str, Any] = Body(...),
+                          current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    r = _remit()
+    row = r.reverse_settlement(db, _org_id(current_user), settlement_id, _actor(current_user),
+                               dict(body or {}).get("reason"))
+    db.commit()
+    return r.settlement_view(row)
+
+
+@router.get("/runs/{run_id}/exceptions", summary="Run exceptions requested / approved for a run")
+def nz_list_run_exceptions(run_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    return _life().list_run_exceptions(db, _org_id(current_user), run_id)
+
+
+@router.post("/runs/{run_id}/exceptions", summary="Request approval of a documented exception (child-support shortfall)")
+def nz_request_run_exception(run_id: int, body: Dict[str, Any] = Body(...),
+                             current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    row = life.request_run_exception(db, _org_id(current_user), run_id, body, _actor(current_user))
+    db.commit()
+    return life.run_exception_view(row)
+
+
+@router.post("/run-exceptions/{exception_id}/approve", summary="Approve a run exception (four-eyes)")
+def nz_approve_run_exception(exception_id: int, current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    life = _life()
+    row = life.approve_run_exception(db, _org_id(current_user), exception_id, _actor(current_user))
+    db.commit()
+    return life.run_exception_view(row)
+
+
+@router.post("/run-exceptions/{exception_id}/reject", summary="Reject a run exception (reason required)")
+def nz_reject_run_exception(exception_id: int, body: Dict[str, Any] = Body(...),
+                            current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    life = _life()
+    row = life.reject_run_exception(db, _org_id(current_user), exception_id, _actor(current_user),
+                                    dict(body or {}).get("reason"))
+    db.commit()
+    return life.run_exception_view(row)
+
+
+@router.get("/runs/{run_id}/journal", summary="The balanced accounting journal of a PAID run (or why it is blocked)")
+def nz_run_journal(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_journal
+
+    return nz_journal.build_nz_journal(db, _org_id(current_user), run_id)
+
+
+@router.put("/employer-profiles/{row_id}/journal-accounts", summary="Set the employer's journal account map")
+def nz_set_journal_accounts(row_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_journal
+
+    body = dict(body or {})
+    row = nz_journal.set_journal_accounts(db, _org_id(current_user), row_id, body.get("accounts"),
+                                          _actor(current_user), body.get("reason"))
+    db.commit()
+    return {"id": row.id, "accounts": row.nz_journal_accounts}
+
+
+# ── Parallel cycles (Phase 9, release gate G5) ──────────────────────────────
+def _parallel():
+    from app.modules.payroll import nz_parallel
+
+    return nz_parallel
+
+
+@router.get("/parallel-imports", summary="New Zealand parallel-cycle imports")
+def nz_list_parallel_imports(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _parallel().list_parallel_imports(db, _org_id(current_user))
+
+
+@router.post("/parallel-imports", summary="Compare an incumbent payroll file with a committed New Zealand run")
+def nz_create_parallel_import(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    result = _parallel().import_parallel(db, _org_id(current_user), body, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.get("/parallel-imports/{import_id}", summary="One parallel import with its differences")
+def nz_get_parallel_import(import_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    return _parallel().parallel_summary(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel-imports/{import_id}/accept", summary="Accept a clean parallel cycle (four-eyes)")
+def nz_accept_parallel_import(import_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    result = _parallel().accept_import(db, _org_id(current_user), import_id, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-imports/{import_id}/withdraw", summary="Withdraw an open parallel import (reason required)")
+def nz_withdraw_parallel_import(import_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    result = _parallel().withdraw_import(db, _org_id(current_user), import_id, dict(body or {}).get("reason"),
+                                         _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-differences/{difference_id}/explain", summary="Explain a parallel-run difference")
+def nz_explain_parallel_difference(difference_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    result = _parallel().explain_difference(db, _org_id(current_user), difference_id,
+                                            dict(body or {}).get("reason"), _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-differences/{difference_id}/accept", summary="Accept an explained difference (four-eyes)")
+def nz_accept_parallel_difference(difference_id: int, current_user=Depends(get_current_org_admin),
+                                  db: Session = Depends(get_db)):
+    result = _parallel().accept_difference(db, _org_id(current_user), difference_id, _actor(current_user))
+    db.commit()
+    return result

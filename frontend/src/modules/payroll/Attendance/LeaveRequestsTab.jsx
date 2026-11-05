@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Search, X, Check, Ban, Mail, UserPlus, CalendarDays, Download } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "../ToastContext";
+import { NZ_LEAVE_LABELS } from "../../../components/jurisdiction/new_zealand/nzOrgOptions";
 
 const STATUS_COLORS = {
   pending:  "bg-warning/10 text-warning border-warning/20",
@@ -16,7 +17,9 @@ const TYPE_PILL = {
   compOff: "bg-category-teal/10 text-category-teal border-category-teal/20",
 };
 
-const TYPE_LABEL = { paid: "Paid", unpaid: "Unpaid", sick: "Sick", compOff: "Comp-Off" };
+// New Zealand Holidays Act types (and "restricted" family-violence leave) get
+// readable labels; every other country's labels are unchanged.
+const TYPE_LABEL = { ...NZ_LEAVE_LABELS, paid: "Paid", unpaid: "Unpaid", sick: "Sick", compOff: "Comp-Off" };
 
 const COLORS = [
   "bg-primary", "bg-info", "bg-category-teal",

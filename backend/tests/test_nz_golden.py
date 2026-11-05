@@ -1,11 +1,14 @@
 """Inland Revenue official calculation examples (AC-NZ-01, gate G1).
 
-Each NZ_IRD_EXAMPLE row's formula_expression is JSON:
-  {"inputs": {...ctx overrides...}, "expected": {"paye": "...", "accLevy": "...", ...}}
-and every expected amount must match exactly - no tolerance. Until the
-signed examples are loaded the test is skipped with the gate reason.
+Each NZ_IRD_EXAMPLE row's tax_formula holds one example in the compact format
+nz_golden.parse_example reads:
+  F=FORTNIGHTLY;C=M SL;G=3000;D=2026-04-08;KS=3.5;ESCT=30;EB=80730 => payeTotal=653.29;...
+and every expected figure must match exactly - no tolerance. The live check
+is nz_golden.nz_golden_check (Super Admin "Run golden check" and readiness
+gate G1); until signed examples ship in the content this test is skipped with
+the gate reason.
 """
-import json
+from datetime import date
 
 import pytest
 
@@ -17,10 +20,13 @@ EXAMPLES = content.NZ_EMPTY_TABLES["ird_official_examples"]["rows"]
 @pytest.mark.skipif(not EXAMPLES, reason="G1: Inland Revenue official examples are not loaded (AC-NZ-01)")
 @pytest.mark.parametrize("example", EXAMPLES)
 def test_ird_official_example(example):
+    from app.modules.payroll import nz_golden
     from app.modules.payroll.engine.countries import new_zealand as engine
-    from tests._nz_engine_helpers import ctx
+    from tests._nz_engine_helpers import build_pack
 
-    spec = json.loads(example["formula_expression"])
-    obligations = engine.calculate(ctx(**spec["inputs"]))["nz_result"]["obligations"]
+    rate_map, slabs = build_pack()
+    spec = nz_golden.parse_example(example["tax_formula"])
+    result = engine.calculate(nz_golden.example_context(spec, rate_map, slabs, date(2026, 4, 1)))["nz_result"]
+    figures = {**result["obligations"], "netPay": result["netPay"]}
     for key, value in spec["expected"].items():
-        assert obligations[key] == value, key
+        assert figures[key] == str(value), key

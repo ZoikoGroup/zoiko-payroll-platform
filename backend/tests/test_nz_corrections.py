@@ -117,3 +117,11 @@ def test_void_correction(db, paid):
     assert row.status == "VOID"
     with pytest.raises(BadRequestException, match="APPROVED"):
         life.apply_correction(db, organization.id, row.id, date(2026, 4, 22), 1)
+
+
+def test_list_corrections(db, paid):
+    """P7d list route: the organisation's corrections, newest first, or one employee's."""
+    organization, item = paid
+    row = _create(db, organization, item)
+    assert [c.id for c in life.list_corrections(db, organization.id)] == [row.id]
+    assert [c.id for c in life.list_corrections(db, organization.id, item.employee_id)] == [row.id]

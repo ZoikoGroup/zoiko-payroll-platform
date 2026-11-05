@@ -130,6 +130,11 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
                      "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
                      "payroll_nz_accumulator_entries",
+                     # New Zealand P8 (dd8a60634320): filings, remittances, settlements, run exceptions.
+                     "payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_remittance_lines",
+                     "payroll_nz_settlements", "payroll_nz_run_exceptions",
+                     # New Zealand P9 (a8cde2482ef0): parallel cycles.
+                     "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
                      # New Zealand P6 (c6ea8c6c35ce): leave pay, cash-ups, final pay, corrections.
                      "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
                      "payroll_nz_cash_up_requests", "payroll_nz_corrections",
@@ -143,7 +148,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                       "payroll_runs": {"jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns},
                       "payroll_jp_work_conditions": jp_p6_columns["payroll_jp_work_conditions"],
                       # New Zealand P6 (c6ea8c6c35ce) adds a column to its P5 table.
-                      "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
+                      "payroll_nz_leave_events": {"leave_pay_calculation_id"},
+                      # New Zealand P8 (dd8a60634320) adds the journal account map to its P2 table.
+                      "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
         # 668472e4eb72 (2026-10-30): organizations.timezone, on top of Japan Phase 2.
         tz_columns = {"organizations": {"timezone"}}
         mx_final_mile = {"payroll_mx_decisions", *MX_X4_TABLES}     # Mexico m20 (d3f8b2a6c1e9)
@@ -228,7 +235,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert columns == {**tz_columns, **jp_p6_columns, **google_columns,
                            "payroll_runs": {"jp_payment_kind", *nz_run_columns},
                            "payslip_items": {"nz_calculation_snapshot", "nz_correction_of_id"},
-                           "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
+                           "payroll_nz_leave_events": {"leave_pay_calculation_id"},
+                           "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert_google_pending(tables, columns)

@@ -355,7 +355,7 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     # New Zealand (ZP-NZ-ENG-001 Phase 0): dormant until G1-G7 are signed.
     from app.modules.payroll.nz_dormancy import entering_nz_refusal
 
-    nz_refusal = entering_nz_refusal(old_country, new_country)
+    nz_refusal = entering_nz_refusal(old_country, new_country, organization_id)
     if nz_refusal:
         return nz_refusal
 

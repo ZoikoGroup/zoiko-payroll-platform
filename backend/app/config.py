@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # no organisation can become a New Zealand employer and the NZ APIs refuse.
     # Leave UNSET in production until the NZ release gates G1-G7 are signed.
     NZ_TENANT_ONBOARDING_ENABLED: bool = False
+    # Option 3 canary (ZP-NZ-ENG-001 Phase 9): comma-separated organisation ids that may use New Zealand
+    # while the flag above is off and New Zealand stays PLANNED for everyone else. Empty by default.
+    NZ_CANARY_ORG_IDS: str = ""
     # New Zealand IRD-number vault (ZP-NZ-ENG-001 Phase 2, nz_ird_number). JSON
     # object mapping key version -> 32-byte key from Secret Manager. Empty =
     # encrypt/decrypt/fingerprint refuse, which is fine while NZ is dormant.

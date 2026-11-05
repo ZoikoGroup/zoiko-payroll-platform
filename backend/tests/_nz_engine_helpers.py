@@ -166,6 +166,8 @@ P6_TEST_VALUES = {
     "nz_hol_final_pay_unvested_method": "PCT_OF_GROSS_SINCE_ANNIVERSARY",
     "nz_out_of_cycle_paye_method": "EXTRA_PAY", "nz_lump_sum_paye_method": "EXTRA_PAY_FOUR_WEEK_ANNUALISE",
     "nz_correction_policy": "COMPENSATING_DELTA",
+    # Phase 8 TEST values (filing deadline definition, payload schema version)
+    "nz_working_day_rule": "WEEKDAYS_EXCL_PUBLIC_HOLIDAYS_AND_25DEC_15JAN", "nz_filing_payload_version": 1,
 }
 P6_TEST_SLABS = (
     dict(rule_type=content.NZ_LUMP_SUM_RULE, filing_status="ANNUALISATION_FACTOR", flat_amount="13",
@@ -205,3 +207,52 @@ def ledger_rows(weeks=52, weekly="1300", end=date(2026, 9, 30), days=5):
                      "periodEnd": period_end, "component": "SALARY", "amount": Decimal(weekly), "included": True,
                      "treatment": "INCLUDED", "daysWorked": Decimal(days)})
     return rows
+
+
+# ── Signing a seeded pack with the TEST values (Phase 7a console) ────────────
+# The P3 worked example in the golden-check format (nz_golden.parse_example).
+TEST_IRD_EXAMPLE = ("F=FORTNIGHTLY;C=M SL;G=3000;D=2026-04-08;KS=3.5;ESCT=30;EB=80730 => "
+                    "payeTotal=653.29;studentLoan=248.64;ksEmployee=105.00;esct=31.50")
+def _signing_value(key):
+    kind = content.NZ_PARAMETER_KEYS[key]
+    if key.endswith("_rounding"):
+        return {"textValue": TEST_ROUNDING}
+    if key == "nz_deduction_precedence":
+        return {"textValue": TEST_PRECEDENCE}
+    if key == "nz_ks_employer_max_age":
+        return {"flatAmount": TEST_KS_MAX_AGE}
+    if key in P6_TEST_VALUES:
+        value = P6_TEST_VALUES[key]
+        return {"textValue": value} if kind == "text" else {"flatAmount": str(value)}
+    return {}
+
+
+def sign_with_test_values(db, pack, source_id, actor_id, reason="IRD specialist sign-off (TEST)"):
+    """Sign every canonical row of a seeded NZ pack and fill every authority
+    table through the governed console, with the TEST values above. Used by
+    the console tests and by scripts/nz_local_demo_pack.py (local databases
+    only). TEST values are not statutory content."""
+    from app.modules.payroll import nz_super_admin as console
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    def ask(**kw):
+        return {"reason": reason, "sourceDocumentId": source_id, "specialistVerified": True, **kw}
+
+    for row in db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                 ContributionRate.organization_id.is_(None)).all():
+        console.update_row(db, "rate", row.id, ask(**_signing_value(row.component_key)), actor_id)
+    for row in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                        TaxSlab.organization_id.is_(None)).all():
+        console.update_row(db, "slab", row.id, ask(), actor_id)
+    fields = {"filing_status": "filingStatus", "flat_amount": "flatAmount", "tax_formula": "taxFormula",
+              "rate_pct": "ratePct", "min_amount": "minAmount", "max_amount": "maxAmount", "rate_label": "name"}
+    for rule_type, rows in list(TEST_TABLES.items()) + [(s["rule_type"], [s]) for s in P6_TEST_SLABS]:
+        for row in rows:
+            data = {fields[k]: v for k, v in row.items() if k in fields and v is not None}
+            if rule_type == content.NZ_IETC_RULE:
+                data.setdefault("flatAmount", "0")
+            console.add_table_row(db, pack.id, rule_type, ask(**data), actor_id)
+    console.add_table_row(db, pack.id, "NZ_IRD_EXAMPLE", ask(filingStatus="EX1", taxFormula=TEST_IRD_EXAMPLE,
+                                                          name="TEST example (the P3 worked example)"), actor_id)
+    console.add_table_row(db, pack.id, "NZ_PUBLIC_HOLIDAY", ask(date="2026-12-25", name="TEST Christmas Day"), actor_id)
+    db.commit()

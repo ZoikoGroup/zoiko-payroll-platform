@@ -10053,7 +10053,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_mx_sua_differences"
+    "payroll_mx_sua_differences",
+    "payroll_nz_parallel_differences"
    ],
    "overridden": false
   },
@@ -11143,6 +11144,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_parallel_differences",
+    "payroll_nz_parallel_differences",
     "payslip_items"
    ],
    "overridden": false
@@ -13017,6 +13019,27 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/corrections",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "corrections",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_hk_payslip_corrections",
+    "payroll_nz_corrections"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/new-zealand/corrections/{correction_id}/apply",
    "data_class": "worker",
@@ -13134,6 +13157,27 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/cash-ups",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "cash-ups",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_cash_up_requests"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/new-zealand/employees/{employee_id}/cash-ups",
    "data_class": "worker",
@@ -13190,6 +13234,27 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_nz_employments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/employees/{employee_id}/final-pay-cases",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "final-pay-cases",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_final_pay_cases"
    ],
    "overridden": false
   },
@@ -13638,6 +13703,22 @@
    "overridden": false
   },
   {
+   "method": "PUT",
+   "path": "/api/payroll/new-zealand/employer-profiles/{row_id}/journal-accounts",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "journal-accounts",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/new-zealand/employer-profiles/{row_id}/verify",
    "data_class": "tenant_config",
@@ -13687,6 +13768,88 @@
    "scan_worker_tables": [
     "payroll_nz_employments"
    ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/filings",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/filings/{filing_id}",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/filings/{filing_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/filings/{filing_id}/response",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "response",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/filings/{filing_id}/submit",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "submit",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
    "overridden": false
   },
   {
@@ -13948,6 +14111,137 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/new-zealand/parallel-differences/{difference_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/parallel-differences/{difference_id}/explain",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "explain",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_sua_differences",
+    "payroll_nz_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/parallel-imports",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/parallel-imports",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_parallel_differences",
+    "payroll_nz_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/parallel-imports/{import_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_parallel_differences",
+    "payroll_nz_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/parallel-imports/{import_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/parallel-imports/{import_id}/withdraw",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/new-zealand/payslips/{item_id}/corrections",
    "data_class": "worker",
    "action": "create",
@@ -14121,7 +14415,7 @@
   {
    "method": "GET",
    "path": "/api/payroll/new-zealand/readiness",
-   "data_class": "tenant_config",
+   "data_class": "worker",
    "action": "read",
    "resource": "readiness",
    "principals": [
@@ -14132,7 +14426,97 @@
    "field_classes": [],
    "retired_reason": null,
    "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_ird_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/remittances",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "remittances",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
    "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/remittances/{remittance_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "remittances",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_remittance_lines"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/remittances/{remittance_id}/settlements",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "settlements",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/run-exceptions/{exception_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_run_exceptions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/run-exceptions/{exception_id}/reject",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reject",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_run_exceptions"
+   ],
    "overridden": false
   },
   {
@@ -14179,6 +14563,45 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/new-zealand/runs/{run_id}/exceptions",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "exceptions",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_nz_run_exceptions"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/runs/{run_id}/exceptions",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "exceptions",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_nz_run_exceptions",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/new-zealand/runs/{run_id}/fingerprint",
    "data_class": "worker",
    "action": "read",
@@ -14192,6 +14615,26 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/new-zealand/runs/{run_id}/journal",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "journal",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
     "payslip_items"
    ],
    "overridden": false
@@ -14214,8 +14657,41 @@
     "payroll_employees",
     "payroll_nz_final_pay_cases",
     "payroll_nz_leave_events",
+    "payroll_nz_run_exceptions",
     "payslip_items"
    ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/settlements/{settlement_id}/match",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "match",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/new-zealand/settlements/{settlement_id}/reverse",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "reverse",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
    "overridden": false
   },
   {
@@ -14235,6 +14711,7 @@
    "scan_worker_tables": [
     "payroll_nz_authority_deductions",
     "payroll_nz_employee_tax_profiles",
+    "payroll_nz_ird_vault",
     "payroll_nz_kiwisaver_elections"
    ],
    "overridden": false
@@ -22701,6 +23178,7 @@
     "payroll_jp_worker_tax_profiles",
     "payroll_nz_authority_deductions",
     "payroll_nz_employee_tax_profiles",
+    "payroll_nz_ird_vault",
     "payroll_nz_kiwisaver_elections",
     "payroll_za_eti_ledger",
     "payroll_za_tax_directives"
@@ -23392,6 +23870,134 @@
    "data_class": "platform",
    "action": "read",
    "resource": "wkr-bands",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/super-admin/compliance/new-zealand/configuration/rows/{kind}/{row_id}",
+   "data_class": "platform",
+   "action": "update",
+   "resource": "rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/super-admin/compliance/new-zealand/configuration/table-rows/{row_id}",
+   "data_class": "platform",
+   "action": "delete",
+   "resource": "table-rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/new-zealand/decisions",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/new-zealand/packs",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "packs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/golden-check",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "golden-check",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/signing-status",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "signing-status",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/tables/{rule_type}/rows",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/new-zealand/seed-draft",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "seed-draft",
    "principals": [
     "super_admin"
    ],

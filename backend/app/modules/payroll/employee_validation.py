@@ -2011,7 +2011,9 @@ def _dormant_strategy(code: str):
     if code == "NZ":
         from app.modules.payroll import nz_dormancy
 
-        return strategy if nz_dormancy.onboarding_enabled() else None
+        # The flag, or any Option 3 canary organisation: only an organisation the
+        # organisation-level gate admitted can hold a New Zealand employee.
+        return strategy if nz_dormancy.onboarding_enabled() or nz_dormancy.canary_organization_ids() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

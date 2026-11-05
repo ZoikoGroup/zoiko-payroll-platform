@@ -2983,3 +2983,139 @@ export const withdrawJpParallelImport = (id) => api.post(`${JP}/parallel-imports
 export const explainJpParallelDifference = (id, reason) =>
   api.post(`${JP}/parallel-differences/${id}/explain`, { reason });
 export const acceptJpParallelDifference = (id) => api.post(`${JP}/parallel-differences/${id}/accept`, {});
+
+// New Zealand (ZP-NZ-ENG-001) — routes in backend/app/modules/payroll/nz_org_router.py,
+// mounted under /api/payroll/new-zealand. Every route acts on the caller's own
+// organisation and answers 404 while NZ_TENANT_ONBOARDING_ENABLED is off.
+// Writes carry a `reason` (NZ-024); four-eyes approvals are enforced
+// server-side. The IRD number is only ever sent on create; responses are
+// masked except the single-use reveal. Payload keys are the backend's
+// snake_case field names.
+const NZ = "/api/payroll/new-zealand";
+const nzList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const nzOne = (res) => res?.data ?? res;
+export const getNzSummary = async () => nzOne(await api.get(`${NZ}/summary`));
+export const getNzReadiness = async () => nzOne(await api.get(`${NZ}/readiness`));
+export const listNzEmployerProfiles = async () => nzList(await api.get(`${NZ}/employer-profiles`));
+export const createNzEmployerProfile = (body) => api.post(`${NZ}/employer-profiles`, body);
+export const approveNzEmployerProfile = (id) => api.post(`${NZ}/employer-profiles/${id}/approve`, {});
+export const verifyNzEmployerProfile = (id, outcome, reason) =>
+  api.post(`${NZ}/employer-profiles/${id}/verify`, { outcome, reason });
+export const setNzEmployerIrdNumber = (id, irdNumber) =>
+  api.post(`${NZ}/employer-profiles/${id}/ird-number`, { irdNumber });
+export const listNzTaxProfiles = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/tax-profiles`));
+export const createNzTaxProfile = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/tax-profiles`, body);
+export const approveNzTaxProfile = (id) => api.post(`${NZ}/tax-profiles/${id}/approve`, {});
+export const listNzKiwiSaver = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/kiwisaver`));
+export const createNzKiwiSaver = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/kiwisaver`, body);
+export const approveNzKiwiSaver = (id) => api.post(`${NZ}/kiwisaver/${id}/approve`, {});
+export const listNzWorkPatterns = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/work-patterns`));
+export const createNzWorkPattern = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/work-patterns`, body);
+export const approveNzWorkPattern = (id) => api.post(`${NZ}/work-patterns/${id}/approve`, {});
+export const listNzNotices = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/authority-deductions`));
+export const importNzNotice = (employeeId, file, meta) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("meta", JSON.stringify(meta));
+  return api.post(`${NZ}/employees/${employeeId}/authority-deductions`, form);
+};
+export const approveNzNotice = (id) => api.post(`${NZ}/authority-deductions/${id}/approve`, {});
+export const revokeNzNotice = (id, reason) => api.post(`${NZ}/authority-deductions/${id}/revoke`, { reason });
+export const listNzOpeningBalances = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/opening-balances`));
+export const requestNzOpeningBalance = (employeeId, body) =>
+  api.post(`${NZ}/employees/${employeeId}/opening-balances`, body);
+export const approveNzOpeningBalance = (requestId) => api.post(`${NZ}/opening-balances/${requestId}/approve`, {});
+export const getNzIrdNumber = async (employeeId) => nzOne(await api.get(`${NZ}/employees/${employeeId}/ird-number`));
+export const setNzIrdNumber = (employeeId, irdNumber) =>
+  api.post(`${NZ}/employees/${employeeId}/ird-number`, { irdNumber });
+export const deleteNzIrdNumber = (vaultId, reason) => api.post(`${NZ}/ird-numbers/${vaultId}/delete`, { reason });
+export const requestNzIrdReveal = (vaultId, reason) =>
+  api.post(`${NZ}/ird-numbers/${vaultId}/reveal-requests`, { reason });
+export const approveNzIrdReveal = (vaultId) => api.post(`${NZ}/ird-numbers/${vaultId}/reveal-approvals`, {});
+export const revealNzIrdNumber = async (vaultId) => nzOne(await api.post(`${NZ}/ird-numbers/${vaultId}/reveal`, {}));
+export const getNzRunPreflight = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/preflight`));
+export const getNzRunFingerprint = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/fingerprint`));
+export const getNzEmployeeSummary = async (employeeId) => nzOne(await api.get(`${NZ}/employees/${employeeId}/summary`));
+// Holidays Act (P5)
+export const listNzEmployments = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/employments`));
+export const createNzEmployment = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/employments`, body);
+export const approveNzEmployment = (id) => api.post(`${NZ}/employments/${id}/approve`, {});
+export const endNzEmployment = (id, body) => api.post(`${NZ}/employments/${id}/end`, body);
+export const vestNzEntitlements = (body) => api.post(`${NZ}/leave/vest`, body);
+export const getNzLeaveEntitlements = async (employeeId) =>
+  nzOne(await api.get(`${NZ}/employees/${employeeId}/leave-entitlements`));
+export const listNzLeaveEvents = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/leave-events`));
+export const cancelNzLeaveEvent = (id, reason) => api.post(`${NZ}/leave-events/${id}/cancel`, { reason });
+export const proposeNzPublicHolidays = (body) => api.post(`${NZ}/public-holidays/propose`, body);
+export const listNzPublicHolidayDecisions = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/public-holiday-decisions`));
+export const updateNzPublicHolidayDecision = (id, body) => api.put(`${NZ}/public-holiday-decisions/${id}`, body);
+export const approveNzPublicHolidayDecision = (id) => api.post(`${NZ}/public-holiday-decisions/${id}/approve`, {});
+export const listNzGrossEarnings = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/gross-earnings`));
+export const listNzFamilyViolenceHolders = async () => nzList(await api.get(`${NZ}/permissions/family-violence`));
+export const grantNzFamilyViolenceView = (userId, reason) =>
+  api.post(`${NZ}/permissions/family-violence`, { userId, reason });
+export const revokeNzFamilyViolenceView = (userId, reason) =>
+  api.delete(`${NZ}/permissions/family-violence/${userId}`, { params: { reason } });
+// Leave pay, final pay and non-standard payments (P6)
+export const calculateNzLeavePay = (eventId, agreement) =>
+  api.post(`${NZ}/leave-events/${eventId}/calculate-pay`, agreement ? { agreement } : {});
+export const calculateNzPublicHolidayPay = (decisionId, agreement) =>
+  api.post(`${NZ}/public-holiday-decisions/${decisionId}/calculate-pay`, agreement ? { agreement } : {});
+export const listNzLeavePayCalculations = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/leave-pay-calculations`));
+export const listNzCashUps = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/cash-ups`));
+export const requestNzCashUp = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/cash-ups`, body);
+export const approveNzCashUp = (id, agreement) =>
+  api.post(`${NZ}/cash-ups/${id}/approve`, agreement ? { agreement } : {});
+export const rejectNzCashUp = (id, reason) => api.post(`${NZ}/cash-ups/${id}/reject`, { reason });
+export const listNzFinalPayCases = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/final-pay-cases`));
+export const openNzFinalPayCase = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/final-pay-cases`, body);
+export const getNzFinalPayCase = async (id) => nzOne(await api.get(`${NZ}/final-pay-cases/${id}`));
+export const calculateNzFinalPay = (id, agreement) =>
+  api.post(`${NZ}/final-pay-cases/${id}/calculate`, agreement ? { agreement } : {});
+export const approveNzFinalPay = (id) => api.post(`${NZ}/final-pay-cases/${id}/approve`, {});
+export const cancelNzFinalPay = (id, reason) => api.post(`${NZ}/final-pay-cases/${id}/cancel`, { reason });
+export const createNzSpecialRun = (body) => api.post(`${NZ}/runs/special`, body);
+export const listNzCorrections = async (employeeId) =>
+  nzList(await api.get(`${NZ}/corrections`, { params: employeeId ? { employee_id: employeeId } : undefined }));
+export const createNzCorrection = (itemId, body) => api.post(`${NZ}/payslips/${itemId}/corrections`, body);
+export const approveNzCorrection = (id) => api.post(`${NZ}/corrections/${id}/approve`, {});
+export const applyNzCorrection = (id, payDate) => api.post(`${NZ}/corrections/${id}/apply`, { payDate });
+export const voidNzCorrection = (id, reason) => api.post(`${NZ}/corrections/${id}/void`, { reason });
+export const rehireNz = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/rehire`, body);
+// Payday filing, remittance, run exceptions and the journal (P8). Submission
+// is refused server-side until gate G3 certifies the filing schema; only the
+// masked JSON preview exists until then.
+export const listNzFilings = async (params) => nzList(await api.get(`${NZ}/filings`, { params }));
+export const getNzFiling = async (id) => nzOne(await api.get(`${NZ}/filings/${id}`));
+export const approveNzFiling = (id) => api.post(`${NZ}/filings/${id}/approve`, {});
+export const submitNzFiling = (id) => api.post(`${NZ}/filings/${id}/submit`, {});
+export const recordNzFilingResponse = (id, body) => api.post(`${NZ}/filings/${id}/response`, body);
+export const listNzRemittances = async (periodStart) =>
+  nzList(await api.get(`${NZ}/remittances`, { params: periodStart ? { periodStart } : undefined }));
+export const getNzRemittance = async (id) => nzOne(await api.get(`${NZ}/remittances/${id}`));
+export const recordNzSettlement = (remittanceId, body) => api.post(`${NZ}/remittances/${remittanceId}/settlements`, body);
+export const matchNzSettlement = (id) => api.post(`${NZ}/settlements/${id}/match`, {});
+export const reverseNzSettlement = (id, reason) => api.post(`${NZ}/settlements/${id}/reverse`, { reason });
+export const listNzRunExceptions = async (runId) => nzList(await api.get(`${NZ}/runs/${runId}/exceptions`));
+export const requestNzRunException = (runId, body) => api.post(`${NZ}/runs/${runId}/exceptions`, body);
+export const approveNzRunException = (id) => api.post(`${NZ}/run-exceptions/${id}/approve`, {});
+export const rejectNzRunException = (id, reason) => api.post(`${NZ}/run-exceptions/${id}/reject`, { reason });
+export const getNzRunJournal = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/journal`));
+export const setNzJournalAccounts = (profileId, accounts, reason) =>
+  api.put(`${NZ}/employer-profiles/${profileId}/journal-accounts`, { accounts, reason });
+// Release gates and parallel cycles (P9). Parallel files carry no identifier:
+// the server refuses any IRD-number or bank-account column or value.
+export const listNzParallelImports = async () => nzList(await api.get(`${NZ}/parallel-imports`));
+export const createNzParallelImport = (body) => api.post(`${NZ}/parallel-imports`, body);
+export const getNzParallelImport = async (id) => nzOne(await api.get(`${NZ}/parallel-imports/${id}`));
+export const acceptNzParallelImport = (id) => api.post(`${NZ}/parallel-imports/${id}/accept`, {});
+export const withdrawNzParallelImport = (id, reason) => api.post(`${NZ}/parallel-imports/${id}/withdraw`, { reason });
+export const explainNzParallelDifference = (id, reason) =>
+  api.post(`${NZ}/parallel-differences/${id}/explain`, { reason });
+export const acceptNzParallelDifference = (id) => api.post(`${NZ}/parallel-differences/${id}/accept`, {});

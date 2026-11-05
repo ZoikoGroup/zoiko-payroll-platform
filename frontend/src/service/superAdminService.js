@@ -287,6 +287,26 @@ export const getZaSummary = () => apiFetch(`${ZA_SA}/summary`);
 // statutory_summary hook (packs, approved-record counts, owner decisions).
 export const getJpStatutorySummary = () =>
   apiFetch("/api/super-admin/compliance/jurisdictions/JP/statutory-summary");
+// New Zealand (ZP-NZ-ENG-001 P7a, decision Option 1): statutory rows change
+// only through the governed signing console — a reason and a source on every
+// change; signing needs a source reviewed by a second Super Admin; every
+// editor is refused as the pack's approver; activation refuses anything pending.
+const NZ_SA = "/api/super-admin/compliance/new-zealand";
+export const getNzStatutorySummary = () =>
+  apiFetch("/api/super-admin/compliance/jurisdictions/NZ/statutory-summary");
+export const listNzPacks = () => apiFetch(`${NZ_SA}/packs`);
+export const getNzSigningStatus = (packRowId) => apiFetch(`${NZ_SA}/packs/${packRowId}/signing-status`);
+export const updateNzRow = (kind, rowId, payload) =>
+  apiFetch(`${NZ_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const addNzTableRow = (packRowId, ruleType, payload) =>
+  apiFetch(`${NZ_SA}/packs/${packRowId}/tables/${ruleType}/rows`, { method: "POST", body: payload });
+export const deleteNzTableRow = (rowId, reason) =>
+  apiFetch(`${NZ_SA}/configuration/table-rows/${rowId}`, { method: "DELETE", params: { reason } });
+export const getNzDecisions = () => apiFetch(`${NZ_SA}/decisions`);
+// Creates the Draft pack from the specification — only while no NZ pack exists (reason; audited).
+// Replays a pack's Inland Revenue examples through the engine (read-only; gate G1).
+export const runNzGoldenCheck = (packRowId) => apiFetch(`${NZ_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
+export const seedNzDraftPack = (reason) => apiFetch(`${NZ_SA}/seed-draft`, { method: "POST", body: { reason } });
 export const getZaReadiness = () => apiFetch(`${ZA_SA}/readiness`);
 export const getZaGateChecklists = () => apiFetch(`${ZA_SA}/readiness/gate-checklists`);
 

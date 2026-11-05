@@ -173,6 +173,84 @@ def seed_nz_pack(db: Session, *, status: str = "Draft") -> "JurisdictionPack":
     return pack
 
 
+def ensure_nz_service_registry_row(db: Session) -> str:
+    """New Zealand's jurisdiction_service_registry row, PLANNED, created only
+    when missing — an existing row is never changed."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    existing = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == NZ).first()
+    if existing is not None:
+        return existing.availability
+    db.add(JurisdictionServiceRegistry(country=NZ, availability="PLANNED",
+                                       payment_execution_responsibility="NOT_OFFERED",
+                                       filing_responsibility="NOT_OFFERED", remittance_responsibility="NOT_OFFERED"))
+    db.flush()
+    return "PLANNED"
+
+
+def _nz_seeded_packs(db: Session) -> list:
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.models import JurisdictionPack
+
+    ids = (content.NZ_2026_27[0], content.NZ_ELA_2028[0])
+    return (db.query(JurisdictionPack).filter(JurisdictionPack.pack_id.in_(ids), JurisdictionPack.version == "1.0")
+            .order_by(JurisdictionPack.effective_from).all())
+
+
+def nz_seed_blockers(db: Session) -> list:
+    """Why seeding now would be wrong. seed_nz_pack replaces a Draft pack's
+    canonical rows wholesale, so a pack that has left Draft — or a Draft a
+    Super Admin has already started signing (any console edit, or any
+    authority-table row) — is never re-seeded: that work would be erased."""
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.models import TaxSlab
+
+    table_types = [t["rule_type"] for t in content.NZ_EMPTY_TABLES.values()]
+    blockers = []
+    for pack in _nz_seeded_packs(db):
+        if pack.status != "Draft":
+            blockers.append(f"{pack.pack_id} is {pack.status}, not Draft — it is never rewritten")
+            continue
+        editors = _nz_statutory_editors(db, pack)
+        table_rows = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                               TaxSlab.organization_id.is_(None),
+                                               TaxSlab.rule_type.in_(table_types)).count())
+        if editors or table_rows:
+            blockers.append(f"{pack.pack_id} is already being signed in the console ({len(editors)} editor(s), "
+                            f"{table_rows} authority-table row(s)) — re-seeding would erase that work")
+    return blockers
+
+
+def nz_seed_summary(db: Session) -> dict:
+    """Read-only: what the seed would write, what exists now, and what still
+    blocks activation. Never writes."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
+    packs = []
+    for pack in _nz_seeded_packs(db):
+        rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                  ContributionRate.organization_id.is_(None))
+        slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None))
+        packs.append({"packId": pack.pack_id, "id": pack.id, "version": pack.version, "status": pack.status,
+                      "rates": rates.count(), "slabs": slabs.count(),
+                      "pending": (rates.filter(ContributionRate.label.like(marker)).count()
+                                  + slabs.filter(TaxSlab.rate_label.like(marker)).count()),
+                      "activationRefusal": nz_pack_activation_refusal(db, pack)})
+    registry = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == NZ).first()
+    return {
+        "content": {"rates": len(content.NZ_SCALAR_CONTENT),
+                    "slabs": (len(content.NZ_PAYE_BANDS) + len(content.NZ_ESCT_BANDS) + len(content.NZ_TAX_CODES)
+                              + len(content.NZ_EARNING_CLASSES)),
+                    "emptyAuthorityTables": sorted(content.NZ_EMPTY_TABLES)},
+        "packs": packs,
+        "registry": None if registry is None else registry.availability,
+        "blockers": nz_seed_blockers(db),
+    }
+
+
 # ── shared validation helpers ───────────────────────────────────────────────
 def nz_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None,
                                today: Optional[date] = None) -> Optional[str]:
@@ -841,6 +919,68 @@ def _nz_vault_event(db: Session, row, action: str, actor_id, reason=None, purpos
     return event
 
 
+def rotate_nz_ird_keys(db: Session, *, dry_run: bool = True) -> dict:
+    """Re-encrypt every ACTIVE vault row not under the newest NZ_IRD_KEYRING
+    version, keeping its owner binding (Phase 9, gate G4). The duplicate
+    fingerprint uses its own never-rotated key, so it must still match. Any
+    row that fails to decrypt or match stops the run: nothing is written.
+    Each rotated row gets a ROTATED access event. Returns counts and row ids
+    only - never a number."""
+    from app.modules.payroll import nz_ird_number as ird
+
+    m = _nz_models()
+    keyring = ird._keyring()
+    if not keyring:
+        raise BadRequestException("NZ_IRD_KEYRING is not configured.")
+    newest = max(keyring)
+    out = {"newestKeyVersion": newest, "examined": 0, "current": 0, "rotated": 0, "failed": [], "dryRun": dry_run}
+    plan = []
+    for row in (db.query(m.PayrollNzIrdVault).filter(m.PayrollNzIrdVault.status == "ACTIVE")
+                .order_by(m.PayrollNzIrdVault.id)):
+        out["examined"] += 1
+        if row.key_version == newest:
+            out["current"] += 1
+            continue
+        owner = _nz_vault_owner(row)
+        try:
+            number = ird.decrypt(row.ciphertext, row.key_version, owner)
+        except ird.IrdNumberError:
+            out["failed"].append({"id": row.id, "reason": "does not decrypt with its owner binding"})
+            continue
+        matches = ird.fingerprint(number) == row.fingerprint
+        number = None
+        if not matches:
+            out["failed"].append({"id": row.id, "reason": "fingerprint mismatch"})
+            continue
+        plan.append((row, owner))
+    out["rotated"] = len(plan)
+    if dry_run or out["failed"]:
+        out["written"] = False
+        return out
+    for row, owner in plan:
+        row.ciphertext, row.key_version = ird.reencrypt(row.ciphertext, row.key_version, owner)
+        _nz_vault_event(db, row, "ROTATED", None, reason=f"re-encrypted under key version {newest}")
+    db.flush()
+    out["written"] = True
+    return out
+
+
+def nz_vault_stale_rows(db: Session) -> Optional[int]:
+    """ACTIVE vault rows not under the newest key version, or None when no
+    keyring is configured (presence only; no key is read into a result)."""
+    from app.modules.payroll import nz_ird_number as ird
+
+    try:
+        keyring = ird._keyring()
+    except ird.IrdNumberError:
+        return None
+    if not keyring:
+        return None
+    m = _nz_models()
+    V = m.PayrollNzIrdVault
+    return db.query(V.id).filter(V.status == "ACTIVE", V.key_version != max(keyring)).count()
+
+
 def nz_ird_view(row) -> dict:
     from app.modules.payroll import nz_ird_number as ird
 
@@ -1258,6 +1398,9 @@ def nz_run_preflight(db: Session, run) -> list:
         problems.append({"code": "NZ_NO_PACK_IN_FORCE", "employeeId": None,
                          "message": "No New Zealand rule pack is in force on the payday."})
     m = _nz_models()
+    from app.modules.payroll import nz_lifecycle, nz_remittance
+
+    approved = nz_lifecycle.approved_exception_keys(db, run)
     for item in _nz_run_items(db, run):
         employee = db.get(PayrollEmployee, item.employee_id)
         snapshot = item.nz_calculation_snapshot
@@ -1266,6 +1409,8 @@ def nz_run_preflight(db: Session, run) -> list:
                              "message": "No frozen New Zealand calculation; recalculate the run."})
         else:
             for exception in snapshot.get("exceptions") or []:
+                if (item.id, exception.get("code")) in approved:      # approved by a second person (Phase 8)
+                    continue
                 problems.append({"code": exception.get("code"), "employeeId": item.employee_id,
                                  "message": "A statutory exception needs resolving before approval."})
         employer = _nz_one_active(db, m.PayrollNzEmployerProfile, run.organization_id, None, run.pay_date,
@@ -1277,6 +1422,11 @@ def nz_run_preflight(db: Session, run) -> list:
         elif employer.verification_state != "VERIFIED":
             problems.append({"code": "NZ_EMPLOYER_NOT_VERIFIED", "employeeId": item.employee_id,
                              "message": "The New Zealand employer profile is not verified."})
+        if employer is not None:
+            mismatch = nz_remittance.class_mismatch(db, employer, run.pay_date)
+            if mismatch:
+                problems.append({"code": "NZ_REMITTANCE_CLASS_MISMATCH", "employeeId": item.employee_id,
+                                 "message": mismatch})
         problems.extend(_nz_phase6_preflight(db, run, item))
     return problems
 
@@ -1371,6 +1521,10 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
 
         nz_leave_pay_service.mark_paid(db, run)
         nz_lifecycle.on_final_run_paid(db, run)
+        from app.modules.payroll import nz_filing, nz_remittance
+
+        nz_remittance.post_run(db, run, actor_id)            # Phase 8: remittance lines (NZ-019: never paid here)
+        nz_filing.build_filings(db, run, actor_id)           # Phase 8: payday filing records / amendments
 
 
 # ── platform hooks ──────────────────────────────────────────────────────────
@@ -1431,7 +1585,11 @@ def _nz_payslip_hold_view(item) -> Optional[dict]:
 
 
 def _nz_statutory_editors(db: Session, pack) -> set:
-    return set()
+    """Super Admins who edited or signed a statutory row of this pack version
+    (Phase 7a signing console): the pack approval refuses every one of them."""
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.statutory_editors(db, pack)
 
 
 NZ_RETENTION_CATEGORIES = (
@@ -1518,9 +1676,19 @@ def _nz_retention_settings():
         has_statutory_profile=_nz_has_statutory_profile, report_matches=_nz_is_report)
 
 
+def _nz_readiness_overview(db: Session) -> dict:
+    from app.modules.payroll import nz_readiness
+
+    state = nz_readiness.nz_readiness(db)
+    return {"allPassed": state["allPassed"], "gates": state["gates"], "decisions": state["decisions"]}
+
+
 def nz_unmet_requirements(db: Session) -> list:
-    """Release gates G1-G7 arrive with Phase 9; until then New Zealand can never open."""
-    return ["New Zealand release gates G1-G7 are not implemented yet (Phase 9)."]
+    """[{key, label, detail}] of every unmet release gate G1-G7 and owner
+    decision, re-derived now (nz_readiness, Phase 9)."""
+    from app.modules.payroll import nz_readiness
+
+    return nz_readiness.nz_unmet_requirements(db)
 
 
 def statutory_summary(db: Session) -> dict:
@@ -1557,8 +1725,8 @@ def statutory_summary(db: Session) -> dict:
         "approvedNotices": db.query(m.PayrollNzAuthorityDeduction).filter(
             m.PayrollNzAuthorityDeduction.status == "APPROVED").count(),
         "decisions": owner_decisions(db),
-        "readiness": {"gatesImplemented": False, "unmet": nz_unmet_requirements(db)},
-        "note": "New Zealand remains PLANNED: no statutory row is signed and the release gates are not built.",
+        "readiness": _nz_readiness_overview(db),
+        "note": "New Zealand stays PLANNED until every release gate G1-G7 and owner decision passes.",
     }
 
 

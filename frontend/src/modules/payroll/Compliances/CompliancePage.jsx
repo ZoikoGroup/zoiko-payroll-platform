@@ -19,6 +19,7 @@ import MXSocialSecurityCenter from "../../../components/jurisdiction/mexico/auth
 import BRComplianceCentreTab from "./BRComplianceCentreTab";
 import ZAComplianceCentreTab from "./ZAComplianceCentreTab";
 import JPComplianceCentreTab from "./JPComplianceCentreTab";
+import NZComplianceCentreTab from "./NZComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -161,9 +162,13 @@ export default function CompliancePage() {
   // separate bases; generic Tax Configuration tab omitted like ZA/NL/MX.
   const JP_TAB = "Japan Compliance Centre";
   const isJapan = normalizeCountryCode(companyDetails.jurisdictionCountry) === "JP";
+  // New Zealand (ZP-NZ-ENG-001): separate bases per obligation, Holidays Act
+  // records; generic Tax Configuration tab omitted like JP/ZA/NL/MX.
+  const NZ_TAB = "New Zealand Compliance Centre";
+  const isNewZealand = normalizeCountryCode(companyDetails.jurisdictionCountry) === "NZ";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico || isSouthAfrica || isJapan
+    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   // Plan country entitlements — every org, every calculation mode.
@@ -181,6 +186,7 @@ export default function CompliancePage() {
     ...(isBrazil ? [BR_TAB] : []),
     ...(isSouthAfrica ? [ZA_TAB] : []),
     ...(isJapan ? [JP_TAB] : []),
+    ...(isNewZealand ? [NZ_TAB] : []),
   ];
   const selectedTab = countriesRequested ? tabs.indexOf(COUNTRIES_TAB) : activeTab;
   const currentTab = tabs[selectedTab];
@@ -425,6 +431,7 @@ export default function CompliancePage() {
       {currentTab === BR_TAB && <BRComplianceCentreTab />}
       {currentTab === ZA_TAB && <ZAComplianceCentreTab />}
       {currentTab === JP_TAB && <JPComplianceCentreTab />}
+      {currentTab === NZ_TAB && <NZComplianceCentreTab />}
 
     </div>
   );

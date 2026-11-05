@@ -296,7 +296,9 @@ def test_alembic_heads_is_single_head():
     # c6ea8c6c35ce (2026-11-04, New Zealand P6): nz_leave_pay; child of ac08988ecd3a.
     # 9f1e2d3c4b5a and 7a3c9e1f2b4d add Google OAuth columns and pending state.
     # 5739c5ccf50c merges the Google OAuth and New Zealand leave-pay heads.
-    assert heads == ["5739c5ccf50c"]
+    # dd8a60634320 (New Zealand P8 nz_filings) is the single child of 5739c5ccf50c;
+    # a8cde2482ef0 (New Zealand P9 nz_parallel_cycles) is its single child.
+    assert heads == ["a8cde2482ef0"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -308,7 +310,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["5739c5ccf50c"]
+    assert list(script.get_heads()) == ["a8cde2482ef0"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -361,7 +363,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 252
+    assert len(revs) == 254   # + a8cde2482ef0 (New Zealand P9 nz_parallel_cycles, child of dd8a60634320)
 
 
 def test_germany_head_chain_wiring_is_intact():

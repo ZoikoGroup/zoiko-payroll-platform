@@ -108,8 +108,20 @@ export default function LeaveBalancesTab({ employees = [], allocations = [] }) {
   const thCls = "px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted select-none whitespace-nowrap";
   const thCenterCls = "px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted select-none whitespace-nowrap cursor-pointer hover:bg-surface-muted transition-all duration-150";
 
+  // New Zealand (ZP-NZ-ENG-001, NZ-016): these balances are a planning view;
+  // the legal Holidays Act entitlement is kept in weeks / days per employee.
+  const hasNewZealand = employees.some((e) => (e.countryCode || e.country) === "NZ");
+
   return (
     <div className="space-y-4">
+      {hasNewZealand && (
+        <p className="rounded-[12px] border border-warning/40 bg-warning/10 px-3.5 py-2.5 text-[12px] text-foreground-secondary"
+          data-testid="nz-planning-view-note">
+          For New Zealand employees these balances are a planning view only — not the legal entitlement. The Holidays
+          Act entitlements (annual holidays in weeks, sick and other leave in days) are in each employee&apos;s New
+          Zealand statutory records.
+        </p>
+      )}
       {/* Search */}
       <div className="relative max-w-sm">
         <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />

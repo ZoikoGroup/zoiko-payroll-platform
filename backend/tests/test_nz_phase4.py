@@ -71,11 +71,12 @@ def test_retention_hook_takes_no_arguments_and_scopes_the_employee(db, organizat
         cfg.validate_employee(db, employee.id, organization.id + 1)
 
 
-def test_template_refusal_pack_holidays_summary_and_registry():
+def test_template_refusal_pack_holidays_summary_and_registry(db):
     assert nz._nz_template_activation_refusal(None, SimpleNamespace(jurisdiction_country="NZ", report_type="X"))
     assert nz._nz_template_activation_refusal(None, SimpleNamespace(jurisdiction_country="US", report_type="W2")) \
         is None
-    assert nz.nz_unmet_requirements(None)
+    unmet = nz.nz_unmet_requirements(db)
+    assert {u["key"] for u in unmet} >= {"G1", "G5", "G7"} and all(u["label"] and u["detail"] for u in unmet)
 
 
 def test_summary_and_holidays_with_no_pack(db):
@@ -357,10 +358,10 @@ def test_router_is_dormant_until_onboarding_is_enabled(db, organization, monkeyp
     from app.modules.payroll import nz_dormancy, nz_org_router, service
 
     user = SimpleNamespace(id=1, organization_id=organization.id)
-    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda: False)
+    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda organization_id=None: False)
     with pytest.raises(NotFoundException):
         nz_org_router.require_nz_tenant(user, db)
-    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda: True)
+    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda organization_id=None: True)
     monkeypatch.setattr(service, "_resolve_org_country", lambda _db, _org: "JP")
     with pytest.raises(NotFoundException):
         nz_org_router.require_nz_tenant(user, db)
@@ -371,7 +372,7 @@ def test_router_is_dormant_until_onboarding_is_enabled(db, organization, monkeyp
 def test_every_nz_route_is_behind_the_dormancy_guard():
     from app.modules.payroll.nz_org_router import require_nz_tenant, router
 
-    assert len(router.routes) == 65           # 32 (P4) + 16 Holidays Act (P5) + 17 leave pay / lifecycle (P6)
+    assert len(router.routes) == 91           # 32 (P4) + 16 (P5) + 17 (P6) + 2 (P7c) + 1 (P7d) + 16 (P8) + 7 parallel (P9)
     assert any(dep.dependency is require_nz_tenant for dep in router.dependencies)
     assert all(route.path.startswith("/new-zealand/") for route in router.routes)
 
@@ -379,9 +380,9 @@ def test_every_nz_route_is_behind_the_dormancy_guard():
 def test_employee_validation_is_dormant_and_refuses_ird_fields(monkeypatch):
     from app.modules.payroll import employee_validation as ev, nz_dormancy
 
-    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda: False)
+    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda organization_id=None: False)
     assert ev.is_supported_employee_country("NZ") is False
-    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda: True)
+    monkeypatch.setattr(nz_dormancy, "onboarding_enabled", lambda organization_id=None: True)
     assert ev.is_supported_employee_country("NZ") is True
     with pytest.raises(BadRequestException, match="IRD vault"):
         ev.NZEmployeeValidation.validate({"ird_number": IRD})

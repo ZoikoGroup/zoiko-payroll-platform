@@ -134,8 +134,12 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) | {"google_pending"}
-    assert columns == {**SHARED, "users": {"auth_provider", "google_id", "avatar_url"}}
+    # Main's Google OAuth chain and P8 (dd8a60634320) are pending on the same head.
+    assert tables == set(NEW_TABLES) | {"google_pending", "payroll_nz_filings", "payroll_nz_remittances",
+                                        "payroll_nz_remittance_lines", "payroll_nz_settlements",
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
+    assert columns == {**SHARED, "users": {"auth_provider", "google_id", "avatar_url"},
+                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
 
 
 def test_single_child_literal_and_manifest():

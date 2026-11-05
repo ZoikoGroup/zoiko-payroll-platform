@@ -141,13 +141,16 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    # P6 (c6ea8c6c35ce) is pending on the same chain.
+    # P6 (c6ea8c6c35ce) and P8 (dd8a60634320) are pending on the same chain.
     assert tables == set(NEW_TABLES) | {"payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
                                         "payroll_nz_cash_up_requests", "payroll_nz_corrections",
-                                        "google_pending"}
+                                        "google_pending", "payroll_nz_filings", "payroll_nz_remittances",
+                                        "payroll_nz_remittance_lines", "payroll_nz_settlements",
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
     assert columns == {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_options"},
                        "payroll_nz_leave_events": {"leave_pay_calculation_id"},
-                       "users": {"auth_provider", "google_id", "avatar_url"}}
+                       "users": {"auth_provider", "google_id", "avatar_url"},
+                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
 
 
 def test_single_child_of_foundation():
