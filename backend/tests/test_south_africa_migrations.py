@@ -73,7 +73,9 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
              "payroll_pl_ppk_participations", "payroll_pl_accumulator_entries",
                                         "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
                                         "payroll_pl_filings", "payroll_pl_settlements",
-                                        "payroll_pl_reconciliation_variances"}  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
 
 
 def _load(prefix):

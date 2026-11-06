@@ -33,9 +33,9 @@ from app.modules.payroll import poland_service as pl
 def require_pl_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     from app.modules.payroll import poland_dormancy, service
 
-    if not poland_dormancy.onboarding_enabled():
-        raise NotFoundException(poland_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
+    if not poland_dormancy.onboarding_enabled(org_id):
+        raise NotFoundException(poland_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
     if not poland_dormancy.is_poland(service._resolve_org_country(db, org_id)):
@@ -455,3 +455,62 @@ def pl_run_journal(run_id: int, current_user=Depends(get_current_payroll_operato
     from app.modules.payroll import poland_journal as plj
 
     return plj.build_pl_journal(db, _org_id(current_user), run_id)
+
+# ── Phase 9: parallel payroll cycles (AC-PL-03, gate G6) ────────────────────
+def _parallel():
+    from app.modules.payroll import poland_parallel
+
+    return poland_parallel
+
+
+@router.get("/parallel-imports", summary="Poland parallel-cycle imports")
+def pl_list_parallel_imports(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _parallel().list_parallel_imports(db, _org_id(current_user))
+
+
+@router.post("/parallel-imports", summary="Compare an incumbent payroll file with a committed Poland run")
+def pl_create_parallel_import(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    result = _parallel().import_parallel(db, _org_id(current_user), body, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.get("/parallel-imports/{import_id}", summary="One parallel import with its differences")
+def pl_get_parallel_import(import_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    return _parallel().parallel_summary(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel-imports/{import_id}/accept", summary="Accept a clean parallel cycle (four-eyes)")
+def pl_accept_parallel_import(import_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    result = _parallel().accept_import(db, _org_id(current_user), import_id, _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-imports/{import_id}/withdraw", summary="Withdraw an open parallel import (reason required)")
+def pl_withdraw_parallel_import(import_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    result = _parallel().withdraw_import(db, _org_id(current_user), import_id, dict(body or {}).get("reason"),
+                                         _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-differences/{difference_id}/explain", summary="Explain a parallel-run difference")
+def pl_explain_parallel_difference(difference_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    result = _parallel().explain_difference(db, _org_id(current_user), difference_id,
+                                            dict(body or {}).get("reason"), _actor(current_user))
+    db.commit()
+    return result
+
+
+@router.post("/parallel-differences/{difference_id}/accept", summary="Accept an explained difference (four-eyes)")
+def pl_accept_parallel_difference(difference_id: int, current_user=Depends(get_current_org_admin),
+                                  db: Session = Depends(get_db)):
+    result = _parallel().accept_difference(db, _org_id(current_user), difference_id, _actor(current_user))
+    db.commit()
+    return result

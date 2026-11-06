@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # organisation can become Polish and the Poland APIs refuse. Leave UNSET in
     # production until the PL release gates G1-G7 are signed.
     PL_TENANT_ONBOARDING_ENABLED: bool = False
+    # Canary (ZP-PL-ENG-001 Phase 9, AC-PL-08): comma-separated organisation ids that may use Poland
+    # while the flag above is off and Poland stays PLANNED for everyone else. Empty by default.
+    PL_CANARY_ORG_IDS: str = ""
     # Poland identifier vault (ZP-PL-ENG-001 Phase 2, pl_identifiers; spec §13):
     # PESEL, employee NIP and the employer's ZUS contribution account (NRS) are
     # encrypted at rest. JSON object mapping key version -> 32-byte key from

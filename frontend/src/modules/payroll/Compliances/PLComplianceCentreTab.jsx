@@ -9,6 +9,7 @@ import { REASON_FIELD, errorText, period } from "../../../components/jurisdictio
 import { ACCIDENT_RATE_SOURCES, ZUS_DEADLINE_CLASSES } from "../../../components/jurisdiction/poland/plOrgOptions";
 import { PolandEmployeeRecords } from "../Payroll_Employees/PolandStatutoryProfilePanel";
 import PLFilingSettlementPanel from "./PLFilingSettlementPanel";
+import PLParallelCyclesSection from "./PLParallelCyclesSection";
 
 // Poland Compliance Centre (ZP-PL-ENG-001 §12 "Poland country setup"). Employer
 // registration per legal employer (NIP / REGON / KRS, tax office, ZUS deadline
@@ -41,6 +42,13 @@ function SetupStatus() {
         ({summary.verifiedEmployerRegistrations ?? 0} verified), {summary.activeWorkerProfiles ?? 0} worker profile(s),{" "}
         {summary.approvedStatements ?? 0} statement(s).
       </p>
+      {(summary.readiness?.gates || []).length > 0 && (
+        <p className="mt-1" data-testid="pl-gates-passed">
+          Release gates: {summary.readiness.gates.filter((g) => g.passed).length} of {summary.readiness.gates.length} pass
+          {summary.readiness.gates.some((g) => !g.passed)
+            ? ` (open: ${summary.readiness.gates.filter((g) => !g.passed).map((g) => g.gate).join(", ")})` : ""}.
+        </p>
+      )}
       {(summary.unmet || []).length > 0 && (
         <p className="mt-1">Not yet met: {summary.unmet.map((u) => u.label).join("; ")}. Poland opens only when all pass.</p>
       )}
@@ -200,6 +208,7 @@ export default function PLComplianceCentreTab() {
       <PpkReenrolment />
       <EmployeeRecords />
       <PLFilingSettlementPanel />
+      <PLParallelCyclesSection />
     </div>
   );
 }

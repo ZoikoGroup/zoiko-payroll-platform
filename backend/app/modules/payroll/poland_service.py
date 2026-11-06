@@ -1009,6 +1009,66 @@ def delete_pl_identifier(db: Session, organization_id: int, vault_id: int, actor
     return row
 
 
+def rotate_pl_identifier_keys(db: Session, *, dry_run: bool = True) -> dict:
+    """Re-encrypt every ACTIVE vault row not under the newest PL_IDENTIFIER_KEYRING
+    version, keeping its owner binding (Phase 9, gate G5). The duplicate
+    fingerprint uses its own never-rotated key, so it must still match. Any
+    row that fails to decrypt or match stops the run: nothing is written.
+    Each rotated row gets a ROTATED access event. Returns counts and row ids
+    only - never an identifier."""
+    from app.modules.payroll import pl_identifiers as pid
+
+    V = _models().PayrollPlIdentifierVault
+    keyring = pid._keyring()
+    if not keyring:
+        raise BadRequestException("PL_IDENTIFIER_KEYRING is not configured.")
+    newest = max(keyring)
+    out = {"newestKeyVersion": newest, "examined": 0, "current": 0, "rotated": 0, "failed": [], "dryRun": dry_run}
+    plan = []
+    for row in db.query(V).filter(V.status == "ACTIVE").order_by(V.id):
+        out["examined"] += 1
+        if row.key_version == newest:
+            out["current"] += 1
+            continue
+        owner = _vault_owner(row)
+        try:
+            plain = pid.decrypt(row.ciphertext, row.key_version, owner)
+            matches = pid.fingerprint(row.identifier_type, plain) == row.fingerprint
+        except pid.PlIdentifierError:
+            out["failed"].append({"id": row.id, "reason": "does not decrypt with its owner binding"})
+            continue
+        plain = None
+        if not matches:
+            out["failed"].append({"id": row.id, "reason": "fingerprint mismatch"})
+            continue
+        plan.append((row, owner))
+    out["rotated"] = len(plan)
+    if dry_run or out["failed"]:
+        out["written"] = False
+        return out
+    for row, owner in plan:
+        row.ciphertext, row.key_version = pid.reencrypt(row.ciphertext, row.key_version, owner)
+        _vault_event(db, row, "ROTATED", None, reason=f"re-encrypted under key version {newest}")
+    db.flush()
+    out["written"] = True
+    return out
+
+
+def pl_vault_stale_rows(db: Session) -> Optional[int]:
+    """ACTIVE vault rows not under the newest key version, or None when no
+    keyring is configured (presence only; no key is read into a result)."""
+    from app.modules.payroll import pl_identifiers as pid
+
+    try:
+        keyring = pid._keyring()
+    except pid.PlIdentifierError:
+        return None
+    if not keyring:
+        return None
+    V = _models().PayrollPlIdentifierVault
+    return db.query(V.id).filter(V.status == "ACTIVE", V.key_version != max(keyring)).count()
+
+
 def set_pl_employer_nrs(db: Session, organization_id: int, registration_id: int, raw, actor_id):
     """Put the employer's ZUS contribution account (NRS) on file and link it to
     a DRAFT registration version (an ACTIVE version is never edited)."""
@@ -1473,13 +1533,18 @@ def _pl_retention_settings():
 
 
 def pl_unmet_requirements(db: Session) -> list:
-    """Every unmet launch requirement. The G1-G7 release-gate evaluation is
-    built in Phase 9; until then Poland can never leave PLANNED."""
-    out = [{"key": "PL-GATES", "label": "Release gates G1-G7",
-            "detail": "The Poland release-gate evaluation is not built yet (Phase 9)."}]
-    out += [{"key": f"PL-DECISION-{d['key']}", "label": d["label"], "detail": d["state"]}
-            for d in owner_decisions(db) if d["blocksLaunch"] and d["state"] != "RECORDED"]
-    return out
+    """[{key, label, detail}] of every unmet release gate G1-G7 and launch-
+    blocking owner decision, re-derived now (poland_readiness, Phase 9)."""
+    from app.modules.payroll import poland_readiness
+
+    return poland_readiness.pl_unmet_requirements(db)
+
+
+def _pl_readiness_overview(db: Session) -> dict:
+    from app.modules.payroll import poland_readiness
+
+    state = poland_readiness.pl_readiness(db)
+    return {"allPassed": state["allPassed"], "gates": state["gates"]}
 
 
 def statutory_summary(db: Session) -> dict:
@@ -1512,6 +1577,7 @@ def statutory_summary(db: Session) -> dict:
         "approvedStatements": db.query(m.PayrollPlDeclaration).filter(
             m.PayrollPlDeclaration.status == "APPROVED").count(),
         "decisions": owner_decisions(db),
+        "readiness": _pl_readiness_overview(db),
         "unmet": pl_unmet_requirements(db),
         "note": "Poland stays PLANNED until every release gate G1-G7 and owner decision passes.",
     }

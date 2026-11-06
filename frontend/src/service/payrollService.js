@@ -3184,3 +3184,12 @@ export const reconcilePlSettlement = async (id) => plOne(await api.post(`${PL}/s
 export const listPlVariances = async (params = {}) => plList(await api.get(`${PL}/variances`, { params }));
 export const resolvePlVariance = (id, reason) => api.post(`${PL}/variances/${id}/resolve`, { reason });
 export const getPlRunJournal = async (runId) => plOne(await api.get(`${PL}/runs/${runId}/journal`));
+// Poland Phase 9 — parallel payroll cycles (gate G6, AC-PL-03).
+export const listPlParallelImports = async () => plList(await api.get(`${PL}/parallel-imports`));
+export const createPlParallelImport = (body) => api.post(`${PL}/parallel-imports`, body);
+export const getPlParallelImport = async (id) => plOne(await api.get(`${PL}/parallel-imports/${id}`));
+export const acceptPlParallelImport = (id) => api.post(`${PL}/parallel-imports/${id}/accept`, {});
+export const withdrawPlParallelImport = (id, reason) => api.post(`${PL}/parallel-imports/${id}/withdraw`, { reason });
+export const explainPlParallelDifference = (id, reason) =>
+  api.post(`${PL}/parallel-differences/${id}/explain`, { reason });
+export const acceptPlParallelDifference = (id) => api.post(`${PL}/parallel-differences/${id}/accept`, {});

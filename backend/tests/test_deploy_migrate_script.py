@@ -147,7 +147,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      "payroll_pl_ppk_participations", "payroll_pl_accumulator_entries",
                                         "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
                                         "payroll_pl_filings", "payroll_pl_settlements",
-                                        "payroll_pl_reconciliation_variances"}  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
                           "pl_approval_fingerprint"}                                        # + Poland P2
         jp_tables |= nz_tables

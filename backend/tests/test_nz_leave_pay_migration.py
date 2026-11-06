@@ -144,7 +144,9 @@ def test_drift_filter_explains():
                                         "payroll_pl_accumulator_entries",
                                         "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
                                         "payroll_pl_filings", "payroll_pl_settlements",
-                                        "payroll_pl_reconciliation_variances"}  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
     pl_shared = {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
     assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}},
                        "users": {"auth_provider", "google_id", "avatar_url"},

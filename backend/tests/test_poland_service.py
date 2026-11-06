@@ -417,7 +417,7 @@ def test_retention_registry_template_and_activation_hooks(world):
     pack = SimpleNamespace(jurisdiction_country="PL", id=0, pack_id="PL-PAYROLL-2026")
     assert "no statutory content" in jurisdiction_hooks.call("PL", "pack_activation_refusal", w.db, pack, None)
     summary = jurisdiction_hooks.call("PL", "statutory_summary", w.db)
-    assert summary["available"] is False and summary["unmet"][0]["key"] == "PL-GATES"
+    assert summary["available"] is False and [u["key"] for u in summary["unmet"]][:2] == ["G1", "G2"]
 
 
 def test_poland_cannot_be_opened_before_the_gates(world):

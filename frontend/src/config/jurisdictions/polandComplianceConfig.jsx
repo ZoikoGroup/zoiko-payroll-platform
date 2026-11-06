@@ -1,8 +1,9 @@
-import { Banknote, Calculator, CalendarDays, FileCheck2, FileText, Gauge, HeartPulse, Landmark, ListChecks, PiggyBank, Settings2 } from "lucide-react";
+import { BadgeCheck, Banknote, Calculator, CalendarDays, FileCheck2, FileText, Gauge, HeartPulse, Landmark, ListChecks, PiggyBank, Settings2 } from "lucide-react";
 import PLOverviewDashboard from "../../components/jurisdiction/poland/PLOverviewDashboard";
 import PLPackRowsTab from "../../components/jurisdiction/poland/PLPackRowsTab";
 import PLEarningClassTab from "../../components/jurisdiction/poland/PLEarningClassTab";
 import PLSigningStatusTab from "../../components/jurisdiction/poland/PLSigningStatusTab";
+import PLReadinessTab from "../../components/jurisdiction/poland/PLReadinessTab";
 import { GROUPS } from "../../components/jurisdiction/poland/plContent";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 
@@ -35,7 +36,8 @@ export function polandExtraTabs() {
     tab("pl-earning", "Earning classification", ListChecks, "pl-policy",
       ({ pack, slabs, onReload }) => <PLEarningClassTab pack={pack} slabs={slabs} onReload={onReload} />),
     tab("pl-signing", "Signing status", Gauge, "pl-earning", ({ pack }) => <PLSigningStatusTab pack={pack} />),
-    tab("sources", "Sources", FileCheck2, "pl-signing", () => <SourceEvidencePanel />),
+    tab("pl-readiness", "Release gates", BadgeCheck, "pl-signing", ({ pack }) => <PLReadinessTab pack={pack} />),
+    tab("sources", "Sources", FileCheck2, "pl-readiness", () => <SourceEvidencePanel />),
   ];
 }
 

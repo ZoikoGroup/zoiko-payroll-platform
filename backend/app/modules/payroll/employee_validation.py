@@ -2122,7 +2122,9 @@ def _dormant_strategy(code: str):
     if code == "PL":
         from app.modules.payroll import poland_dormancy
 
-        return strategy if poland_dormancy.onboarding_enabled() else None
+        # The flag, or any canary organisation: only an organisation the
+        # organisation-level gate admitted can hold a Polish employee.
+        return strategy if poland_dormancy.onboarding_enabled() or poland_dormancy.canary_organization_ids() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

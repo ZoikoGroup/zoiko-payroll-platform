@@ -1109,3 +1109,7 @@ export const updatePlRow = (kind, rowId, payload) =>
   apiFetch(`${PL_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
 export const getPlDecisions = () => apiFetch(`${PL_SA}/decisions`);
 export const seedPlDraftPack = (reason) => apiFetch(`${PL_SA}/seed-draft`, { method: "POST", body: { reason } });
+// Poland Phase 9 — authority examples and the golden check (gate G1, AC-PL-02).
+export const addPlAuthorityExample = (packRowId, payload) =>
+  apiFetch(`${PL_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
+export const runPlGoldenCheck = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/golden-check`, { method: "POST" });

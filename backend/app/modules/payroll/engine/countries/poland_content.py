@@ -126,6 +126,9 @@ SOURCE_URLS = {
 # ── TaxSlab rule_type discriminators (all <= 30 chars) ────────────────────
 PL_PIT_BAND_RULE = "PL_PIT_BAND"
 PL_EARNING_CLASS_RULE = "PL_EARNING_CLASS"
+# Official / independently prepared worked examples (AC-PL-02, gate G1): added
+# only through the governed console with a reviewed source; never seeded here.
+PL_AUTHORITY_EXAMPLE_RULE = "PL_AUTHORITY_EXAMPLE"
 
 # ── Enumerations (vocabulary only — no statutory values) ─────────────────
 PAY_FREQUENCIES_SUPPORTED = ("MONTHLY",)

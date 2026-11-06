@@ -361,7 +361,7 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     # Poland (ZP-PL-ENG-001 Phase 0): dormant until G1-G7 are signed.
     from app.modules.payroll.poland_dormancy import entering_poland_refusal
 
-    pl_refusal = entering_poland_refusal(old_country, new_country)
+    pl_refusal = entering_poland_refusal(old_country, new_country, organization_id)
     if pl_refusal:
         return pl_refusal
 

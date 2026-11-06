@@ -13919,3 +13919,71 @@ class PayrollPlReconciliationVariance(Base):
 
     def __repr__(self):
         return f"<PayrollPlReconciliationVariance settlement={self.settlement_id} {self.difference} {self.status}>"
+
+
+class PayrollPlParallelImport(_PlCommon, Base):
+    """One incumbent-payroll file compared with a committed Poland run at
+    zero tolerance (release gate G6, Phase 9; migration e7ec6c1933b4). Accepted (approved_by_id) by a
+    person other than its importer."""
+    __tablename__ = "payroll_pl_parallel_imports"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    pay_date          = Column(Date, nullable=False)
+    cycle_month       = Column(Date, nullable=False)
+    source_name       = Column(String(100), nullable=False)
+    file_hash         = Column(String(64), nullable=False)
+    row_count         = Column(Integer, nullable=False, default=0, server_default="0")
+    matched_count     = Column(Integer, nullable=False, default=0, server_default="0")
+    unmatched_count   = Column(Integer, nullable=False, default=0, server_default="0")
+    column_map        = Column(_NZ_JSON, nullable=False)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    withdrawn_reason  = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("row_count >= 0 AND matched_count >= 0 AND unmatched_count >= 0",
+                           name="ck_pl_parallel_import_counts"),
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_pl_parallel_import_status"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> created_by_id)",
+                           name="ck_pl_parallel_import_four_eyes"),
+        Index("ix_pl_parallel_import_cycle", "status", "cycle_month"),
+        Index("uq_pl_parallel_import_file", "organization_id", "run_id", "file_hash", unique=True,
+              postgresql_where=text("status <> 'WITHDRAWN'"), sqlite_where=text("status <> 'WITHDRAWN'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlParallelImport run={self.run_id} {self.cycle_month} {self.status}>"
+
+
+class PayrollPlParallelDifference(_PlCommon, Base):
+    """One employee and concept that differs between the incumbent payroll and
+    the frozen Poland payslip; explained, then accepted (approved_by_id) by a person
+    other than the explainer."""
+    __tablename__ = "payroll_pl_parallel_differences"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    import_id         = Column(Integer, ForeignKey("payroll_pl_parallel_imports.id", ondelete="CASCADE"), nullable=False)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    concept           = Column(String(24), nullable=False)
+    incumbent_amount  = Column(Numeric(14, 2), nullable=False)
+    zoiko_amount      = Column(Numeric(14, 2), nullable=False)
+    difference        = Column(Numeric(14, 2), nullable=False)
+    explanation       = Column(String(300), nullable=True)
+    explained_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+
+    __table_args__ = (
+        sa.CheckConstraint("concept IN ('gross', 'pit_advance', 'zus_employee', 'health', 'ppk_employee', "
+                           "'zus_employer', 'employer_funds', 'ppk_employer', 'net_pay')",
+                           name="ck_pl_parallel_difference_concept"),
+        sa.CheckConstraint("status IN ('OPEN', 'EXPLAINED', 'ACCEPTED')", name="ck_pl_parallel_difference_status"),
+        sa.CheckConstraint("status = 'OPEN' OR explanation IS NOT NULL", name="ck_pl_parallel_difference_explained"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> explained_by_id)",
+                           name="ck_pl_parallel_difference_four_eyes"),
+        Index("ix_pl_parallel_difference_import", "import_id"),
+        Index("uq_pl_parallel_difference", "import_id", "employee_id", "concept", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlParallelDifference import={self.import_id} {self.concept} {self.status}>"

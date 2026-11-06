@@ -4808,6 +4808,26 @@ def poland_decisions(current_user=Depends(get_current_super_admin), db: Session 
     return poland_service.owner_decisions(db)
 
 
+@router.post("/compliance/poland/packs/{pack_row_id}/authority-examples",
+             summary="Add an official / independent worked example to a Poland pack (reviewed source; gate G1)")
+def poland_add_authority_example(pack_row_id: int, payload: dict = Body(...),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    result = pl_super_admin.add_golden_example(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return result
+
+
+@router.post("/compliance/poland/packs/{pack_row_id}/golden-check",
+             summary="Replay a Poland pack's authority examples through the engine (read-only; gate G1)")
+def poland_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.golden_check(db, pack_row_id)
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,
