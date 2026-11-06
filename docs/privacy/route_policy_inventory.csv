@@ -1328,6 +1328,12 @@ POST,/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/golden-check,pl
 GET,/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/new-zealand/packs/{pack_row_id}/tables/{rule_type}/rows,platform,create,rows,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/new-zealand/seed-draft,platform,create,seed-draft,super_admin,platform,,,,no,
+PUT,/api/super-admin/compliance/poland/configuration/rows/{kind}/{row_id},platform,update,rows,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/poland/decisions,platform,read,decisions,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/poland/packs,platform,read,packs,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/poland/packs/{pack_row_id}/configuration,platform,read,configuration,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/poland/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/poland/seed-draft,platform,create,seed-draft,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/policies,platform,read,policies,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/policies,platform,update,policies,super_admin,platform,,,payslip_items,yes,"verified config: upserts a jurisdiction pack; returns the pack, no worker rows"
 PUT,/api/super-admin/compliance/policies/{id}/approve,platform,update,approve,super_admin,platform,,,,no,

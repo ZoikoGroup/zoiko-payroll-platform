@@ -36,17 +36,8 @@ SPEC = "ZP-PL-ENG-001 v1.0"
 
 def _ensure_service_registry_row(db) -> str:
     """Poland's jurisdiction_service_registry row, PLANNED, created only when
-    missing — an existing row is never changed."""
-    from app.modules.billing.models import JurisdictionServiceRegistry
-
-    existing = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == CODE).first()
-    if existing is not None:
-        return existing.availability
-    db.add(JurisdictionServiceRegistry(country=CODE, availability="PLANNED",
-                                       payment_execution_responsibility="NOT_OFFERED",
-                                       filing_responsibility="NOT_OFFERED", remittance_responsibility="NOT_OFFERED"))
-    db.flush()
-    return "PLANNED"
+    missing (poland_service.ensure_pl_service_registry_row)."""
+    return poland_service.ensure_pl_service_registry_row(db)
 
 
 def seed_poland(db) -> dict:

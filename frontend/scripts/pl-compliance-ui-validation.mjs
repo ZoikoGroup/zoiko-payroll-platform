@@ -86,6 +86,59 @@ check("PLN currency and IBAN routing are wired", () => {
   assert(/"ZA", "PL"\]/.test(bank) && /PL: \["iban"\]/.test(bank) && /PL: "IBAN"/.test(bank), "bank routing");
 });
 
+// ── Phase 7b: Super Admin Poland page (governed signing console) ──────────
+const BACKEND = resolve(__dirname, "..", "..", "backend", "app", "modules", "payroll");
+const content = readFileSync(resolve(BACKEND, "engine", "countries", "poland_content.py"), "utf-8");
+const paramBlock = content.split("POLAND_PARAMETER_KEYS = {")[1].split("\n}")[0];
+const BACKEND_KINDS = Object.fromEntries([...paramBlock.matchAll(/"(pl_[a-z0-9_]+)": "([a-z_]+)"/g)].map((m) => [m[1], m[2]]));
+const plContent = await import("../src/components/jurisdiction/poland/plContent.js");
+
+check("every backend parameter sits in exactly one tab", () => {
+  const keys = Object.keys(BACKEND_KINDS);
+  assert(keys.length > 60, `parsed only ${keys.length} backend keys`);
+  const seen = Object.values(plContent.GROUPS).flatMap((g) => g.keys);
+  const duplicates = seen.filter((k, i) => seen.indexOf(k) !== i);
+  assert(duplicates.length === 0, `in two tabs: ${duplicates.join(", ")}`);
+  const missing = keys.filter((k) => !seen.includes(k));
+  const unknown = seen.filter((k) => !keys.includes(k));
+  assert(!missing.length && !unknown.length, `missing ${missing.join(", ")} unknown ${unknown.join(", ")}`);
+});
+check("the editor offers exactly the slot each backend kind holds", () => {
+  const expected = { text: "text", pct_pair: "pair", employee_pct: "employee", employer_pct: "employer", amount: "amount" };
+  Object.entries(BACKEND_KINDS).forEach(([key, kind]) =>
+    assert(plContent.valueKind(key) === expected[kind], `${key}: ${plContent.valueKind(key)} vs ${kind}`));
+});
+check("text choices are the backend vocabulary (+ NOT_SUPPORTED)", () => {
+  const rounding = content.split("ROUNDING_MODES = (")[1].split(")")[0].match(/"([A-Z_]+)"/g).map((s) => s.slice(1, -1))
+    .filter((v) => v !== "PENDING_G1");
+  assert(JSON.stringify(plContent.TEXT_ROWS.pl_rounding_pit.choices) === JSON.stringify([...rounding, "NOT_SUPPORTED"]),
+    "rounding choices differ from poland_content.ROUNDING_MODES");
+  ["pl_night_supplement_basis", "pl_leave_pay_reference_rule", "pl_fund_exemption_rules", "pl_pit_remittance_due_rule"]
+    .forEach((key) => assert(JSON.stringify(plContent.TEXT_ROWS[key].choices) === '["NOT_SUPPORTED"]', `${key}`));
+});
+check("Poland UI files carry no statutory value", () => {
+  const files = ["components/jurisdiction/poland/plContent.js", "components/jurisdiction/poland/PLPackRowsTab.jsx",
+    "components/jurisdiction/poland/PLRowEditor.jsx", "components/jurisdiction/poland/PLOverviewDashboard.jsx",
+    "components/jurisdiction/poland/PLSigningStatusTab.jsx", "components/jurisdiction/poland/PLEarningClassTab.jsx",
+    "config/jurisdictions/polandComplianceConfig.jsx"];
+  files.forEach((f) => {
+    const text = read(f);
+    ["4806", "282600", "282,600", "9.76", "120000", "10800", "3600", "31.40", "2.45"].forEach((lit) =>
+      assert(!text.includes(lit), `${f} hard-codes ${lit}`));
+  });
+});
+check("the page hides the generic editors and is routed", () => {
+  const config = read("config/jurisdictions/polandComplianceConfig.jsx");
+  assert(/hiddenTabs: \["rates", "slabs"\]/.test(config), "generic editors visible");
+  const app = read("App.jsx");
+  assert(app.includes('path="/super-admin/compliance/poland"') && app.includes("<PLCompliancePage />"), "route");
+  assert(/PL: "poland"/.test(read("pages/JurisdictionCompliance/index.js")), "slug");
+  assert(/PL: Poland/.test(read("components/jurisdiction/CountryFlag.jsx")), "flag");
+  const service = read("service/superAdminService.js");
+  assert(service.includes('"/api/super-admin/compliance/poland"') && /export const updatePlRow/.test(service), "service");
+  assert(read("components/jurisdiction/poland/PLRowEditor.jsx").includes("updatePlRow("), "editor uses the governed API");
+});
+
 if (failures.length) {
   console.error(`pl-compliance-ui-validation: ${failures.length} failed, ${passed} passed`);
   failures.forEach((f) => console.error(`  - ${f}`));

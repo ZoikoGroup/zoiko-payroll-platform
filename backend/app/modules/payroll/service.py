@@ -8174,6 +8174,12 @@ def _refuse_nz_generic_statutory_edit(pack) -> None:
             "New Zealand statutory rows are edited and signed in Compliance → New Zealand (a source document "
             "and a change reason are required; signing needs a second Super Admin)."
         )
+    # Poland (ZP-PL-ENG-001 Phase 7a): the same governance through pl_super_admin.
+    if pack is not None and pack.jurisdiction_country == "PL":
+        raise BadRequestException(
+            "Poland statutory rows are edited and signed in Compliance → Poland (a source document and a change "
+            "reason are required; signing needs a second Super Admin)."
+        )
 
 
 def _existing_row_pack(db: Session, model, row_id):

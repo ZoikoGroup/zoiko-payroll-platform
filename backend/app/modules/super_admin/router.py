@@ -4750,6 +4750,64 @@ def new_zealand_decisions(current_user=Depends(get_current_super_admin), db: Ses
     return nz_super_admin.decisions(db)
 
 
+# ── Poland signing console (ZP-PL-ENG-001 Phase 7a; spec §12 statutory content console) ──
+# Same governance as New Zealand: governed edit / sign with a source and a
+# reason, a distinct approver (editors refused), activation still refused while
+# any row is pending or empty. Undefined policies may be signed NOT_SUPPORTED.
+@router.get("/compliance/poland/packs", summary="Poland packs with their status")
+def poland_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.list_packs(db)
+
+
+@router.get("/compliance/poland/packs/{pack_row_id}/configuration",
+            summary="Every canonical row of a Poland pack (scalars, PIT bands, earning classes)")
+def poland_configuration(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.configuration(db, pack_row_id)
+
+
+@router.get("/compliance/poland/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a Poland pack (pending, empty, editors)")
+def poland_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/poland/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one Poland statutory row (editable packs; source + reason; audited)")
+def poland_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    result = pl_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/poland/seed-draft",
+             summary="Create the Draft Poland pack from the specification (only while none exists; reason; audited)")
+def poland_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    result = pl_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/poland/decisions", summary="Poland owner decisions D-1 to D-7")
+def poland_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_service
+
+    return poland_service.owner_decisions(db)
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

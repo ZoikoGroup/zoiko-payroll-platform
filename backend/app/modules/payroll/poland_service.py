@@ -1357,8 +1357,26 @@ def _pl_payslip_hold_view(item) -> Optional[dict]:
 
 
 def _pl_statutory_editors(db: Session, pack) -> set:
-    # The governed Poland signing console arrives in Phase 7.
-    return set()
+    """Super Admins who edited or signed a statutory row of this pack version
+    (Phase 7a signing console): the pack approval refuses every one of them."""
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.statutory_editors(db, pack)
+
+
+def ensure_pl_service_registry_row(db: Session) -> str:
+    """Poland's jurisdiction_service_registry row, PLANNED, created only when
+    missing — an existing row is never changed."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    existing = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == PL).first()
+    if existing is not None:
+        return existing.availability
+    db.add(JurisdictionServiceRegistry(country=PL, availability="PLANNED",
+                                       payment_execution_responsibility="NOT_OFFERED",
+                                       filing_responsibility="NOT_OFFERED", remittance_responsibility="NOT_OFFERED"))
+    db.flush()
+    return "PLANNED"
 
 
 PL_RETENTION_CATEGORIES = (

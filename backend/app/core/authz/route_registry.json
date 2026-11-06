@@ -24632,6 +24632,102 @@
    "overridden": false
   },
   {
+   "method": "PUT",
+   "path": "/api/super-admin/compliance/poland/configuration/rows/{kind}/{row_id}",
+   "data_class": "platform",
+   "action": "update",
+   "resource": "rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/poland/decisions",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/poland/packs",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "packs",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/poland/packs/{pack_row_id}/configuration",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "configuration",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/poland/packs/{pack_row_id}/signing-status",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "signing-status",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/poland/seed-draft",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "seed-draft",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/super-admin/compliance/policies",
    "data_class": "platform",

@@ -444,4 +444,6 @@ def test_seed_script_is_guarded_and_never_activates():
     source = (BACKEND / "scripts/seed_poland_canonical_packs.py").read_text(encoding="utf-8")
     assert "assert_local_database(" in source
     assert '"Active"' not in source and "'Active'" not in source
-    assert 'availability="PLANNED"' in source
+    assert "ensure_pl_service_registry_row" in source
+    service = (BACKEND / "app/modules/payroll/poland_service.py").read_text(encoding="utf-8")
+    assert 'availability="PLANNED"' in service
