@@ -227,114 +227,116 @@ export default function OrganizationsPage() {
       )}
 
       <div className="bg-surface rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-background text-left text-xs text-foreground-muted">
-            <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Code</th>
-              <th className="px-4 py-3">Country</th>
-              <th className="px-4 py-3">Workspace</th>
-              <th className="px-4 py-3">Industry</th>
-              <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Billing</th>
-              <th className="px-4 py-3">Created</th>
-              <th className="px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orgs.map((org) => (
-              <tr key={org.id} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
-                <td className="px-4 py-3 font-medium text-foreground-secondary">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
-                      {initialsFor(org.organization_name)}
-                    </span>
-                    <div className="flex flex-col">
-                      <span className="font-medium text-foreground">{org.organization_name}</span>
-                      {org.workspace_type === "EVALUATION" && (
-                        <span className="text-[10px] text-foreground-muted">Evaluation</span>
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-foreground-muted">{org.organization_code}</td>
-                <td className="px-4 py-3 text-foreground-muted">{org.country || "—"}</td>
-                <td className="px-4 py-3">
-                  <StatusPill
-                    status={WORKSPACE_TYPE_BADGE[org.workspace_type] || "inactive"}
-                    label={org.workspace_type || "PRODUCTION"}
-                  />
-                </td>
-                <td className="px-4 py-3 text-foreground-muted">{org.industry || "—"}</td>
-                <td className="px-4 py-3 text-foreground-secondary">{org.email || "—"}</td>
-                <td className="px-4 py-3">
-                  <StatusPill status={org.is_active ? "active" : "suspended"} />
-                </td>
-                <td className="px-4 py-3">
-                  <StatusPill
-                    status={BILLING_CLASSIFICATION_PILL[org.billing_classification] || "inactive"}
-                    label={org.billing_classification || "NON_CHARGEABLE"}
-                  />
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap text-foreground-muted" title={org.created_at ? new Date(org.created_at).toISOString().replace("T", " ").slice(0, 19) + " UTC" : undefined}>
-                  {formatDateTime(org.created_at)}
-                </td>
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-2 whitespace-nowrap">
-                    <button
-                      onClick={() => setDetailId(org.id)}
-                      className="flex items-center gap-1 rounded-lg bg-primary-light px-2.5 py-1 text-xs font-medium text-primary-hover hover:bg-primary/20"
-                    >
-                      <Eye size={12} />
-                      View
-                    </button>
-                    <button
-                      disabled={busy}
-                      title="Edit organization"
-                      onClick={() => openEdit(org)}
-                      className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
-                    >
-                      <Pencil size={12} />
-                      Edit
-                    </button>
-                    <button
-                      disabled={busy}
-                      title="Change billing classification"
-                      onClick={() => openBillingClassification(org)}
-                      className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
-                    >
-                      <Receipt size={12} />
-                      Billing
-                    </button>
-                    <button
-                      disabled={busy}
-                      title={org.is_active ? "Suspend organization" : "Activate organization"}
-                      onClick={() => toggleStatus(org)}
-                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
-                        org.is_active
-                          ? "bg-error-light text-error hover:bg-error/20"
-                          : "bg-success-light text-success hover:bg-success/20"
-                      }`}
-                    >
-                      <Power size={12} />
-                      {org.is_active ? "Suspend" : "Activate"}
-                    </button>
-                    <button
-                      disabled={busy}
-                      title="Delete organization"
-                      onClick={() => setDeleting(org)}
-                      className="flex items-center gap-1 rounded-lg bg-error-light px-2.5 py-1 text-xs font-medium text-error hover:bg-error/20 disabled:opacity-40"
-                    >
-                      <Trash2 size={12} />
-                      Delete
-                    </button>
-                  </div>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Code</th>
+                <th className="px-4 py-3">Country</th>
+                <th className="px-4 py-3">Workspace</th>
+                <th className="px-4 py-3">Industry</th>
+                <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Billing</th>
+                <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {orgs.map((org) => (
+                <tr key={org.id} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
+                  <td className="px-4 py-3 font-medium text-foreground-secondary">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
+                        {initialsFor(org.organization_name)}
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="font-medium text-foreground">{org.organization_name}</span>
+                        {org.workspace_type === "EVALUATION" && (
+                          <span className="text-[10px] text-foreground-muted">Evaluation</span>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-foreground-muted">{org.organization_code}</td>
+                  <td className="px-4 py-3 text-foreground-muted">{org.country || "—"}</td>
+                  <td className="px-4 py-3">
+                    <StatusPill
+                      status={WORKSPACE_TYPE_BADGE[org.workspace_type] || "inactive"}
+                      label={org.workspace_type || "PRODUCTION"}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-foreground-muted">{org.industry || "—"}</td>
+                  <td className="px-4 py-3 text-foreground-secondary">{org.email || "—"}</td>
+                  <td className="px-4 py-3">
+                    <StatusPill status={org.is_active ? "active" : "suspended"} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusPill
+                      status={BILLING_CLASSIFICATION_PILL[org.billing_classification] || "inactive"}
+                      label={org.billing_classification || "NON_CHARGEABLE"}
+                    />
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-foreground-muted" title={org.created_at ? new Date(org.created_at).toISOString().replace("T", " ").slice(0, 19) + " UTC" : undefined}>
+                    {formatDateTime(org.created_at)}
+                  </td>
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <button
+                        onClick={() => setDetailId(org.id)}
+                        className="flex items-center gap-1 rounded-lg bg-primary-light px-2.5 py-1 text-xs font-medium text-primary-hover hover:bg-primary/20"
+                      >
+                        <Eye size={12} />
+                        View
+                      </button>
+                      <button
+                        disabled={busy}
+                        title="Edit organization"
+                        onClick={() => openEdit(org)}
+                        className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
+                      >
+                        <Pencil size={12} />
+                        Edit
+                      </button>
+                      <button
+                        disabled={busy}
+                        title="Change billing classification"
+                        onClick={() => openBillingClassification(org)}
+                        className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
+                      >
+                        <Receipt size={12} />
+                        Billing
+                      </button>
+                      <button
+                        disabled={busy}
+                        title={org.is_active ? "Suspend organization" : "Activate organization"}
+                        onClick={() => toggleStatus(org)}
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
+                          org.is_active
+                            ? "bg-error-light text-error hover:bg-error/20"
+                            : "bg-success-light text-success hover:bg-success/20"
+                        }`}
+                      >
+                        <Power size={12} />
+                        {org.is_active ? "Suspend" : "Activate"}
+                      </button>
+                      <button
+                        disabled={busy}
+                        title="Delete organization"
+                        onClick={() => setDeleting(org)}
+                        className="flex items-center gap-1 rounded-lg bg-error-light px-2.5 py-1 text-xs font-medium text-error hover:bg-error/20 disabled:opacity-40"
+                      >
+                        <Trash2 size={12} />
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {!loading && orgs.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
             <Building2 size={28} className="text-foreground-disabled" />

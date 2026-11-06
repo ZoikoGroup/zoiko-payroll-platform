@@ -31,7 +31,7 @@ export default function TTNisClassPanel({ pack, slabs, onReload }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center flex-wrap justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Landmark size={15} /> NIS Earnings Classes</h3>
           <p className="mt-0.5 text-xs text-foreground-muted">

@@ -57,35 +57,37 @@ export default function AUCoefficientBandsPanel({
             </div>
           ) : (
             <div className="border-t border-border-light">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-foreground-muted">
-                    <th className="px-4 py-2 text-left font-medium">Weekly x — from</th>
-                    <th className="px-4 py-2 text-left font-medium">Weekly x — to</th>
-                    <th className="px-4 py-2 text-left font-medium">a</th>
-                    <th className="px-4 py-2 text-left font-medium">b</th>
-                    <th className="px-4 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.rows.map((row) => (
-                    <tr key={row.id} className="border-t border-border-light">
-                      <td className="px-4 py-2 font-mono tabular-nums text-foreground-secondary">${Number(row.minAmount).toLocaleString()}</td>
-                      <td className="px-4 py-2 font-mono tabular-nums text-foreground-secondary">{row.maxAmount != null ? `$${Number(row.maxAmount).toLocaleString()}` : "and above"}</td>
-                      <td className="px-4 py-2 font-mono tabular-nums text-foreground">{Number(row.ratePct)}</td>
-                      <td className="px-4 py-2 font-mono tabular-nums text-foreground">{row.flatAmount != null ? Number(row.flatAmount) : "0"}</td>
-                      <td className="px-4 py-2 text-right">
-                        <button onClick={() => setEditingSlab(row)} className="mr-2 rounded p-1 text-foreground-disabled hover:text-primary hover:bg-surface-muted">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                        </button>
-                        <button onClick={() => setDeletingSlab(row)} className="rounded p-1 text-foreground-disabled hover:text-error hover:bg-error-light">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                        </button>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-foreground-muted">
+                      <th className="px-4 py-2 text-left font-medium">Weekly x — from</th>
+                      <th className="px-4 py-2 text-left font-medium">Weekly x — to</th>
+                      <th className="px-4 py-2 text-left font-medium">a</th>
+                      <th className="px-4 py-2 text-left font-medium">b</th>
+                      <th className="px-4 py-2"></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {group.rows.map((row) => (
+                      <tr key={row.id} className="border-t border-border-light">
+                        <td className="px-4 py-2 font-mono tabular-nums text-foreground-secondary">${Number(row.minAmount).toLocaleString()}</td>
+                        <td className="px-4 py-2 font-mono tabular-nums text-foreground-secondary">{row.maxAmount != null ? `$${Number(row.maxAmount).toLocaleString()}` : "and above"}</td>
+                        <td className="px-4 py-2 font-mono tabular-nums text-foreground">{Number(row.ratePct)}</td>
+                        <td className="px-4 py-2 font-mono tabular-nums text-foreground">{row.flatAmount != null ? Number(row.flatAmount) : "0"}</td>
+                        <td className="px-4 py-2 text-right">
+                          <button onClick={() => setEditingSlab(row)} className="mr-2 rounded p-1 text-foreground-disabled hover:text-primary hover:bg-surface-muted">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                          </button>
+                          <button onClick={() => setDeletingSlab(row)} className="rounded p-1 text-foreground-disabled hover:text-error hover:bg-error-light">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

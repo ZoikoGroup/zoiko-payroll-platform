@@ -82,7 +82,7 @@ export default function TTNisClassFormModal({ pack, slab, onClose, onSaved }) {
           Fixed dollar amounts per contribution week — not a percentage (NIBTT&apos;s 16-class table, ZP-TT-ENG-001 §5).
         </p>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
           <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. NIBTT 2026 rate table" /></div>
         </div>

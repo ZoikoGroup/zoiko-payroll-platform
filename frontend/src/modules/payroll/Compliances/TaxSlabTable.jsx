@@ -128,26 +128,28 @@ export function PTSlabsTable({ rows, caption }) {
       <div className="px-6 py-3 border-b border-border">
         <p className="text-[13px] text-foreground-muted">{caption}</p>
       </div>
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-border">
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Income From (₹)</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Income To (₹)</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Monthly PT Amount (₹)</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Adjustment Month Amount (₹)</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {sorted.map((s) => (
-            <tr key={s.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
-              <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.minAmount}</td>
-              <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.maxAmount ?? "Above"}</td>
-              <td className="px-5 py-3.5 font-bold text-foreground">₹{s.flatAmount ?? "0"}</td>
-              <td className="px-5 py-3.5 text-foreground-muted">{s.adjustmentAmount != null ? `₹${s.adjustmentAmount}` : "—"}</td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Income From (₹)</th>
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Gross Income To (₹)</th>
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Monthly PT Amount (₹)</th>
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Adjustment Month Amount (₹)</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {sorted.map((s) => (
+              <tr key={s.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.minAmount}</td>
+                <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.maxAmount ?? "Above"}</td>
+                <td className="px-5 py-3.5 font-bold text-foreground">₹{s.flatAmount ?? "0"}</td>
+                <td className="px-5 py-3.5 text-foreground-muted">{s.adjustmentAmount != null ? `₹${s.adjustmentAmount}` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -193,39 +195,41 @@ export function SlabsTable({ rows, caption }) {
       <div className="px-6 py-3 border-b border-border">
         <p className="text-[13px] text-foreground-muted">{caption}</p>
       </div>
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-border">
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Min</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Max</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Rate</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Tax Calculation</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {groups.map((group) => [
-            showRegimeHeadings && (
-              <tr key={`regime-${group.key}`} className="bg-surface-muted">
-                <td colSpan={4} className="px-5 py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
-                  {regimeLabel(group.key, groups)}
-                </td>
-              </tr>
-            ),
-            ...group.rows.map((s, i) => (
-              <tr key={s.id ?? `${group.key}-${i}`} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
-                <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.min}</td>
-                <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.max}</td>
-                <td className="px-5 py-3.5">
-                  <span className="rounded-full px-3 py-1 text-[11px] font-bold bg-warning/10 text-warning">
-                    {s.rate}
-                  </span>
-                </td>
-                <td className="px-5 py-3.5 text-[13px] text-foreground-muted">{s.tax}</td>
-              </tr>
-            )),
-          ])}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Min</th>
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Max</th>
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Rate</th>
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Tax Calculation</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {groups.map((group) => [
+              showRegimeHeadings && (
+                <tr key={`regime-${group.key}`} className="bg-surface-muted">
+                  <td colSpan={4} className="px-5 py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                    {regimeLabel(group.key, groups)}
+                  </td>
+                </tr>
+              ),
+              ...group.rows.map((s, i) => (
+                <tr key={s.id ?? `${group.key}-${i}`} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                  <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.min}</td>
+                  <td className="px-5 py-3.5 font-mono text-[13px] text-foreground-muted">{s.max}</td>
+                  <td className="px-5 py-3.5">
+                    <span className="rounded-full px-3 py-1 text-[11px] font-bold bg-warning/10 text-warning">
+                      {s.rate}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3.5 text-[13px] text-foreground-muted">{s.tax}</td>
+                </tr>
+              )),
+            ])}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

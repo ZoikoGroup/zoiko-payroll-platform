@@ -402,7 +402,7 @@ export default function EmployeeListPage() {
 
         {activeTab === "review-submissions" && (
           <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center flex-wrap justify-between gap-3 mb-5">
               <h2 className="text-[15px] font-bold text-foreground">Review Submissions</h2>
               <button onClick={() => setActiveTab("list")} className="text-[13px] font-semibold text-foreground-muted hover:text-primary transition-colors duration-200">
                 Back to list

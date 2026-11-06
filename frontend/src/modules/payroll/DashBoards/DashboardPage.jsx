@@ -68,7 +68,7 @@ export default function DashboardPage({ onNewPayrollRun }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-[1480px] px-8 py-8 lg:px-10 space-y-8">
+      <div className="mx-auto max-w-[1480px] space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 lg:px-10">
         {/* Header */}
         <div className="flex flex-wrap items-end justify-between gap-5">
           <div>
@@ -87,7 +87,7 @@ export default function DashboardPage({ onNewPayrollRun }) {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {/* Month Navigator */}
             <div className="inline-flex items-center gap-0.5 rounded-[14px] border border-border bg-surface px-1.5 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
               <button

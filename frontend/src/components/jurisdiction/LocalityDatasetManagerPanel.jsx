@@ -287,7 +287,7 @@ function ImportDatasetModal({ state, onClose, onImported }) {
 
   return (
     <Modal title={`Import Locality Dataset — ${state}`} onClose={onClose} maxWidth="max-w-3xl">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div><label className={labelClass}>Version Label</label><input className={inputClass} value={version} onChange={(e) => setVersion(e.target.value)} placeholder="e.g. IN-DN1-2026" /></div>
         <div><label className={labelClass}>Effective From (set before Activate)</label><input type="date" className={inputClass} value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} /></div>
         <div>
@@ -306,9 +306,9 @@ function ImportDatasetModal({ state, onClose, onImported }) {
             <Plus size={12} /> Add Row
           </button>
         </div>
-        <div className="max-h-64 space-y-2 overflow-y-auto">
+        <div className="max-h-64 space-y-2 overflow-auto">
           {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-12 items-center gap-1.5">
+            <div key={i} className="grid min-w-[560px] grid-cols-12 items-center gap-1.5">
               <input className={inputClass + " col-span-3"} placeholder="Locality code" value={r.localityCode} onChange={(e) => updateRow(i, "localityCode", e.target.value)} />
               <select className={inputClass + " col-span-2"} value={r.localityType} onChange={(e) => updateRow(i, "localityType", e.target.value)}>
                 <option value="COUNTY">County</option>

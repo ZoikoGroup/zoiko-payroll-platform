@@ -204,7 +204,7 @@ export default function EngineFallbackDefaultsPage() {
                           <p className="font-mono text-[10px] text-foreground-disabled">{c.constantName} · resolver key: {c.resolverKey}</p>
                         </div>
                         <div className="text-right">
-                          {c.kind === "dict" ? (
+                          {c.kind === "dict" || (c.value !== null && typeof c.value === "object") ? (
                             <pre className="max-w-xs whitespace-pre-wrap text-left font-mono text-[10px] text-foreground-secondary">{JSON.stringify(c.value, null, 1)}</pre>
                           ) : (
                             <span className="font-mono text-sm font-bold tabular-nums text-foreground">{c.value}</span>

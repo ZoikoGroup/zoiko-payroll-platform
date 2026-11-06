@@ -733,7 +733,7 @@ export function PopularQuestions({ questions, onPick, disabled, faqUrl, links, t
   if (!questions.length) return null;
   return (
     <section aria-labelledby="concierge-popular-title">
-      <div className="mb-2.5 flex items-center justify-between gap-3">
+      <div className="mb-2.5 flex items-center flex-wrap justify-between gap-3">
         <h3 id="concierge-popular-title" className="text-[15px] font-bold text-foreground">
           {title}
         </h3>

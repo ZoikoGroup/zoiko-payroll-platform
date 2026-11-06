@@ -269,19 +269,21 @@ function ClassificationSection({ employeeId, recordId }) {
       <ErrorBanner message={error} />
       {segments && segments.length === 0 && <p className="text-[12px] text-foreground-muted">Not yet classified.</p>}
       {segments && segments.length > 0 && (
-        <table className="w-full text-[12px]">
-          <thead><tr><Th>Segment</Th><Th>Hours</Th><Th>Category</Th><Th>Status</Th></tr></thead>
-          <tbody>
-            {segments.map((s) => (
-              <tr key={s.id} className="border-t border-border">
-                <Td>{new Date(s.segmentStart).toLocaleTimeString()} – {new Date(s.segmentEnd).toLocaleTimeString()}</Td>
-                <Td>{s.hours}</Td>
-                <Td>{s.premiumCategory}</Td>
-                <Td><StatusPill value={s.classificationStatus} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead><tr><Th>Segment</Th><Th>Hours</Th><Th>Category</Th><Th>Status</Th></tr></thead>
+            <tbody>
+              {segments.map((s) => (
+                <tr key={s.id} className="border-t border-border">
+                  <Td>{new Date(s.segmentStart).toLocaleTimeString()} – {new Date(s.segmentEnd).toLocaleTimeString()}</Td>
+                  <Td>{s.hours}</Td>
+                  <Td>{s.premiumCategory}</Td>
+                  <Td><StatusPill value={s.classificationStatus} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Section>
   );
@@ -316,20 +318,22 @@ function WageTaxSection({ employeeId, recordId }) {
       <ErrorBanner message={error} />
       {rows && rows.length === 0 && <p className="text-[12px] text-foreground-muted">Not yet calculated — classify this work record first.</p>}
       {rows && rows.length > 0 && (
-        <table className="w-full text-[12px]">
-          <thead><tr><Th>Segment</Th><Th>Gross</Th><Th>Tax-free</Th><Th>Taxable</Th><Th>Status</Th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-border">
-                <Td>{new Date(r.segmentStart).toLocaleTimeString()} – {new Date(r.segmentEnd).toLocaleTimeString()}</Td>
-                <Td>{r.grossQualifyingPremiumAmount ?? "—"}</Td>
-                <Td>{r.taxFreePremiumAmount ?? "—"}</Td>
-                <Td>{r.taxablePremiumAmount ?? "—"}</Td>
-                <Td><StatusPill value={r.calculationStatus} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead><tr><Th>Segment</Th><Th>Gross</Th><Th>Tax-free</Th><Th>Taxable</Th><Th>Status</Th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t border-border">
+                  <Td>{new Date(r.segmentStart).toLocaleTimeString()} – {new Date(r.segmentEnd).toLocaleTimeString()}</Td>
+                  <Td>{r.grossQualifyingPremiumAmount ?? "—"}</Td>
+                  <Td>{r.taxFreePremiumAmount ?? "—"}</Td>
+                  <Td>{r.taxablePremiumAmount ?? "—"}</Td>
+                  <Td><StatusPill value={r.calculationStatus} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Section>
   );
@@ -364,20 +368,22 @@ function SocialInsuranceSection({ employeeId, recordId }) {
       <ErrorBanner message={error} />
       {rows && rows.length === 0 && <p className="text-[12px] text-foreground-muted">Not yet calculated — classify this work record first.</p>}
       {rows && rows.length > 0 && (
-        <table className="w-full text-[12px]">
-          <thead><tr><Th>Segment</Th><Th>Gross</Th><Th>SI-exempt</Th><Th>SI-contributory</Th><Th>Status</Th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-border">
-                <Td>{new Date(r.segmentStart).toLocaleTimeString()} – {new Date(r.segmentEnd).toLocaleTimeString()}</Td>
-                <Td>{r.grossQualifyingPremiumAmount ?? "—"}</Td>
-                <Td>{r.siFreePremiumAmount ?? "—"}</Td>
-                <Td>{r.siContributoryPremiumAmount ?? "—"}</Td>
-                <Td><StatusPill value={r.calculationStatus} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead><tr><Th>Segment</Th><Th>Gross</Th><Th>SI-exempt</Th><Th>SI-contributory</Th><Th>Status</Th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t border-border">
+                  <Td>{new Date(r.segmentStart).toLocaleTimeString()} – {new Date(r.segmentEnd).toLocaleTimeString()}</Td>
+                  <Td>{r.grossQualifyingPremiumAmount ?? "—"}</Td>
+                  <Td>{r.siFreePremiumAmount ?? "—"}</Td>
+                  <Td>{r.siContributoryPremiumAmount ?? "—"}</Td>
+                  <Td><StatusPill value={r.calculationStatus} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Section>
   );

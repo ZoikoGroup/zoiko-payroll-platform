@@ -49,7 +49,7 @@ export default function MXEarningClassificationTab({ orgId }) {
     <div className="flex flex-col gap-4">
       <Messages error={loadError || error} notice={notice} />
       <div className={card}>
-        <div className="mb-1 flex items-center justify-between">
+        <div className="mb-1 flex items-center flex-wrap justify-between gap-3">
           <h3 className="text-[14px] font-semibold text-foreground">
             Earning classifications — {orgId ? "selected organisation" : "platform catalogue"}
           </h3>

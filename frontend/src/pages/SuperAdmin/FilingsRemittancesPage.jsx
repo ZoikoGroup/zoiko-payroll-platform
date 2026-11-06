@@ -119,52 +119,54 @@ export default function FilingsRemittancesPage() {
       <div className="mb-6">
         <h2 className={`${SECTION_LABEL_CLS} mb-3`}>By Jurisdiction ({entries.length})</h2>
         <div className={TABLE_WRAP_CLS}>
-          <table className="w-full text-sm min-w-[760px]">
-            <thead className="bg-background text-left text-xs text-foreground-muted">
-              <tr>
-                <th className="px-4 py-3">Jurisdiction</th>
-                <th className="px-4 py-3 text-right">Organizations</th>
-                <th className="px-4 py-3 text-right">Filing records</th>
-                <th className="px-4 py-3 text-right">Blocked</th>
-                <th className="px-4 py-3 text-right">Orgs blocked</th>
-                <th className="px-4 py-3 text-right">Orgs with no records</th>
-                <th className="px-4 py-3">State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map(([code, s]) => {
-                const blocked = s.blocked_count || 0;
-                return (
-                  <tr
-                    key={code}
-                    className={`border-t border-border-light ${blocked > 0 ? "border-l-4 border-l-error bg-error-light/30" : ""}`}
-                  >
-                    <td className="px-4 py-3 font-medium text-foreground">
-                      {s.label || code}
-                      {s.label && s.label !== code && <span className="ml-1.5 text-xs text-foreground-muted">{code}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right text-foreground-secondary">{s.total_orgs ?? 0}</td>
-                    <td className="px-4 py-3 text-right text-foreground-secondary">{s.total ?? 0}</td>
-                    <td className={`px-4 py-3 text-right ${blocked > 0 ? "font-semibold text-error" : "text-foreground-muted"}`}>{blocked}</td>
-                    <td className="px-4 py-3 text-right text-foreground-muted">{s.orgs_with_blocked_filings ?? 0}</td>
-                    <td className="px-4 py-3 text-right text-foreground-muted">{s.orgs_without_filing_records ?? 0}</td>
-                    <td className="px-4 py-3">
-                      {blocked > 0 ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <AlertTriangle size={13} className="shrink-0 text-error" />
-                          <StatusPill status="rejected" label={`${plural(blocked, "filing")} need attention`} />
-                        </span>
-                      ) : (s.total ?? 0) === 0 ? (
-                        <span className="text-xs italic text-foreground-muted">No filing records yet</span>
-                      ) : (
-                        <StatusPill status="active" label="No blocks" />
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[760px]">
+              <thead className="bg-background text-left text-xs text-foreground-muted">
+                <tr>
+                  <th className="px-4 py-3">Jurisdiction</th>
+                  <th className="px-4 py-3 text-right">Organizations</th>
+                  <th className="px-4 py-3 text-right">Filing records</th>
+                  <th className="px-4 py-3 text-right">Blocked</th>
+                  <th className="px-4 py-3 text-right">Orgs blocked</th>
+                  <th className="px-4 py-3 text-right">Orgs with no records</th>
+                  <th className="px-4 py-3">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map(([code, s]) => {
+                  const blocked = s.blocked_count || 0;
+                  return (
+                    <tr
+                      key={code}
+                      className={`border-t border-border-light ${blocked > 0 ? "border-l-4 border-l-error bg-error-light/30" : ""}`}
+                    >
+                      <td className="px-4 py-3 font-medium text-foreground">
+                        {s.label || code}
+                        {s.label && s.label !== code && <span className="ml-1.5 text-xs text-foreground-muted">{code}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right text-foreground-secondary">{s.total_orgs ?? 0}</td>
+                      <td className="px-4 py-3 text-right text-foreground-secondary">{s.total ?? 0}</td>
+                      <td className={`px-4 py-3 text-right ${blocked > 0 ? "font-semibold text-error" : "text-foreground-muted"}`}>{blocked}</td>
+                      <td className="px-4 py-3 text-right text-foreground-muted">{s.orgs_with_blocked_filings ?? 0}</td>
+                      <td className="px-4 py-3 text-right text-foreground-muted">{s.orgs_without_filing_records ?? 0}</td>
+                      <td className="px-4 py-3">
+                        {blocked > 0 ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <AlertTriangle size={13} className="shrink-0 text-error" />
+                            <StatusPill status="rejected" label={`${plural(blocked, "filing")} need attention`} />
+                          </span>
+                        ) : (s.total ?? 0) === 0 ? (
+                          <span className="text-xs italic text-foreground-muted">No filing records yet</span>
+                        ) : (
+                          <StatusPill status="active" label="No blocks" />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {!loading && entries.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
               <p className="text-sm text-foreground-disabled">No organizations have a compliance jurisdiction yet.</p>

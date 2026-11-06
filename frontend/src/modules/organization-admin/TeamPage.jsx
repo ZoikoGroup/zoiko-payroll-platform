@@ -330,57 +330,59 @@ export default function TeamPage() {
       )}
 
       <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-background text-left text-xs text-foreground-muted">
-            <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Role</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Joined</th>
-              <th className="px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-t border-border-light">
-                <td className="px-4 py-3 font-medium text-foreground">
-                  {u.first_name} {u.last_name}
-                </td>
-                <td className="px-4 py-3 text-foreground-secondary">{u.email}</td>
-                <td className="px-4 py-3 text-foreground-secondary">{ROLE_LABELS[u.role] || u.role}</td>
-                <td className="px-4 py-3">
-                  <StatusPill status={u.is_active ? "active" : "inactive"} />
-                </td>
-                <td className="px-4 py-3 text-xs text-foreground-muted">
-                  {new Date(u.created_at).toLocaleDateString()}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    {u.role === ROLES.PAYROLL_ADMIN && (
-                      <button
-                        onClick={() => handleResend(u)}
-                        title="Resend invite email"
-                        className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-foreground-secondary hover:bg-slate-200 dark:hover:bg-white/20"
-                      >
-                        <Mail size={14} />
-                      </button>
-                    )}
-                    {u.role === ROLES.PAYROLL_ADMIN && u.is_active && (
-                      <button
-                        onClick={() => setDeactivating(u)}
-                        title="Deactivate"
-                        className="rounded-lg bg-red-50 dark:bg-red-950/40 p-1.5 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60"
-                      >
-                        <Ban size={14} />
-                      </button>
-                    )}
-                  </div>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Joined</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-t border-border-light">
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    {u.first_name} {u.last_name}
+                  </td>
+                  <td className="px-4 py-3 text-foreground-secondary">{u.email}</td>
+                  <td className="px-4 py-3 text-foreground-secondary">{ROLE_LABELS[u.role] || u.role}</td>
+                  <td className="px-4 py-3">
+                    <StatusPill status={u.is_active ? "active" : "inactive"} />
+                  </td>
+                  <td className="px-4 py-3 text-xs text-foreground-muted">
+                    {new Date(u.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      {u.role === ROLES.PAYROLL_ADMIN && (
+                        <button
+                          onClick={() => handleResend(u)}
+                          title="Resend invite email"
+                          className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-foreground-secondary hover:bg-slate-200 dark:hover:bg-white/20"
+                        >
+                          <Mail size={14} />
+                        </button>
+                      )}
+                      {u.role === ROLES.PAYROLL_ADMIN && u.is_active && (
+                        <button
+                          onClick={() => setDeactivating(u)}
+                          title="Deactivate"
+                          className="rounded-lg bg-red-50 dark:bg-red-950/40 p-1.5 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60"
+                        >
+                          <Ban size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {!loading && users.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
             <Users size={28} className="text-border-strong" />

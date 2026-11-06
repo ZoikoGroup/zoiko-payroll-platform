@@ -56,14 +56,14 @@ export default function USATaxSlabFormModal({ pack, slab, onClose, onSaved }) {
     <Modal title={slab ? "Edit Tax Bracket" : "Add Tax Bracket"} onClose={onClose} maxWidth="max-w-2xl">
       <div className="space-y-5">
         <FormSection title="General">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="col-span-2"><label className={labelClass}>Label</label><input className={inputClass} value={form.rateLabel} onChange={set("rateLabel")} placeholder="e.g. 22% Bracket" /></div>
             <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
           </div>
         </FormSection>
 
         <FormSection title="Calculation Range">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div><label className={labelClass}>From Amount</label><input className={inputClass} value={form.minAmount} onChange={set("minAmount")} /></div>
             <div><label className={labelClass}>To Amount (blank = and above)</label><input className={inputClass} value={form.maxAmount} onChange={set("maxAmount")} /></div>
             <div><label className={labelClass}>Tax Rate %</label><input className={inputClass} value={form.ratePct} onChange={set("ratePct")} /></div>
@@ -71,7 +71,7 @@ export default function USATaxSlabFormModal({ pack, slab, onClose, onSaved }) {
         </FormSection>
 
         <FormSection title="Applicability">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
               <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
@@ -87,7 +87,7 @@ export default function USATaxSlabFormModal({ pack, slab, onClose, onSaved }) {
             <ChevronDown size={13} className={`transition-transform ${advancedOpen ? "" : "-rotate-90"}`} /> Advanced Settings
           </button>
           {advancedOpen && (
-            <div className="mt-2 grid grid-cols-3 gap-3">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
               <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
             </div>

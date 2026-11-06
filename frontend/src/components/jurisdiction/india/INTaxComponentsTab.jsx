@@ -47,7 +47,7 @@ export default function INTaxComponentsTab({ pack, rates, onReload, onDeleteRate
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center flex-wrap justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Percent size={15} /> Contribution Components</h3>
           <p className="mt-0.5 text-xs text-foreground-muted">Provident Fund, ESI, Professional Tax, and every other scalar rate configured for this pack.</p>
