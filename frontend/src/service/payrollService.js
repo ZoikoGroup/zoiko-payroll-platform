@@ -3119,3 +3119,52 @@ export const withdrawNzParallelImport = (id, reason) => api.post(`${NZ}/parallel
 export const explainNzParallelDifference = (id, reason) =>
   api.post(`${NZ}/parallel-differences/${id}/explain`, { reason });
 export const acceptNzParallelDifference = (id) => api.post(`${NZ}/parallel-differences/${id}/accept`, {});
+
+// Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
+// mounted under /api/payroll/poland. Every route acts on the caller's own
+// organisation and answers 404 while PL_TENANT_ONBOARDING_ENABLED is off.
+// Versioned writes carry a `reason`; four-eyes approvals and the single-use
+// identifier reveal are enforced server-side. PESEL / NIP / NRS are only ever
+// sent on create; responses are masked except the reveal. Payload keys are the
+// backend's snake_case field names.
+const PL = "/api/payroll/poland";
+const plList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const plOne = (res) => res?.data ?? res;
+export const getPlSummary = async () => plOne(await api.get(`${PL}/summary`));
+export const listPlRegistrations = async () => plList(await api.get(`${PL}/employer-registrations`));
+export const createPlRegistration = (body) => api.post(`${PL}/employer-registrations`, body);
+export const approvePlRegistration = (id) => api.post(`${PL}/employer-registrations/${id}/approve`, {});
+export const verifyPlRegistration = (id, outcome, reason) =>
+  api.post(`${PL}/employer-registrations/${id}/verify`, { outcome, reason });
+export const setPlEmployerNrs = (id, nrs) => api.post(`${PL}/employer-registrations/${id}/nrs`, { nrs });
+export const listPlWorkerProfiles = async (employeeId) =>
+  plList(await api.get(`${PL}/employees/${employeeId}/worker-profiles`));
+export const createPlWorkerProfile = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/worker-profiles`, body);
+export const approvePlWorkerProfile = (id) => api.post(`${PL}/worker-profiles/${id}/approve`, {});
+export const listPlStatements = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/statements`));
+export const createPlStatement = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/statements`, body);
+export const approvePlStatement = (id) => api.post(`${PL}/statements/${id}/approve`, {});
+export const withdrawPlStatement = (id, reason, effectiveTo) =>
+  api.post(`${PL}/statements/${id}/withdraw`, { reason, effectiveTo });
+export const listPlPpk = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/ppk`));
+export const createPlPpk = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/ppk`, body);
+export const approvePlPpk = (id) => api.post(`${PL}/ppk/${id}/approve`, {});
+export const listPlPpkReenrolmentDue = async (on) => plList(await api.get(`${PL}/ppk/reenrolment-due`, { params: { on } }));
+export const listPlEpisodes = async (employeeId) =>
+  plList(await api.get(`${PL}/employees/${employeeId}/incapacity-episodes`));
+export const createPlEpisode = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/incapacity-episodes`, body);
+export const approvePlEpisode = (id) => api.post(`${PL}/incapacity-episodes/${id}/approve`, {});
+export const cancelPlEpisode = (id, reason) => api.post(`${PL}/incapacity-episodes/${id}/cancel`, { reason });
+export const listPlIdentifiers = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/identifiers`));
+export const createPlIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${PL}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestPlIdentifierReveal = (vaultId, reason) =>
+  api.post(`${PL}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approvePlIdentifierReveal = (vaultId) => api.post(`${PL}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealPlIdentifier = async (vaultId) => plOne(await api.post(`${PL}/identifiers/${vaultId}/reveal`, {}));
+export const deletePlIdentifier = (vaultId, reason) => api.post(`${PL}/identifiers/${vaultId}/delete`, { reason });
+export const getPlAnnualCap = async (employeeId, year) =>
+  plOne(await api.get(`${PL}/employees/${employeeId}/annual-cap`, { params: { year } }));
+export const getPlLeaveEntitlement = async (employeeId, asOf) =>
+  plOne(await api.get(`${PL}/employees/${employeeId}/leave-entitlement`, { params: { asOf } }));
+export const getPlRunPreflight = async (runId) => plList(await api.get(`${PL}/runs/${runId}/preflight`));

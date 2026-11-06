@@ -139,6 +139,63 @@ check("the page hides the generic editors and is routed", () => {
   assert(read("components/jurisdiction/poland/PLRowEditor.jsx").includes("updatePlRow("), "editor uses the governed API");
 });
 
+// ── Phase 7c: organisation screens ↔ pl_org_router ─────────────────────────
+const orgRouter = readFileSync(resolve(BACKEND, "pl_org_router.py"), "utf-8");
+const orgRoutes = new Set([...orgRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
+  .map(([, method, path]) => `${method.toUpperCase()} /api/payroll/poland${path.replace(/\{[^}]+\}/g, "{}")}`));
+const payrollService = read("service/payrollService.js");
+const plBlock = payrollService.slice(payrollService.indexOf('const PL = "/api/payroll/poland";'));
+const plCalls = [...plBlock.matchAll(/api\.(get|post|put|delete)\(`([^`]+)`/g)]
+  .map(([, method, path]) => `${method.toUpperCase()} ${path.replace("${PL}", "/api/payroll/poland").split("?")[0]
+    .replace(/\$\{[^}]+\}/g, "{}")}`);
+
+check("every Poland organisation client call matches a declared route", () => {
+  assert(plCalls.length >= 25, `found ${plCalls.length} calls`);
+  const unknown = plCalls.filter((c) => !orgRoutes.has(c));
+  assert(unknown.length === 0, `no backend route for: ${unknown.join(" | ")}`);
+});
+check("the identifier vault field never persists or logs a value", () => {
+  const field = read("modules/payroll/Payroll_Employees/PLIdentifierField.jsx");
+  assert(!/localStorage|sessionStorage|console\.[a-z]+\(|searchParams/.test(field), "storage / console use in the vault field");
+  assert(/type="password"/.test(field) && /setValue\(""\)/.test(field), "typed value must be masked and cleared");
+  assert(/REVEAL_SECONDS \* 1000/.test(field), "revealed value must expire");
+  const centre = read("modules/payroll/Compliances/PLComplianceCentreTab.jsx");
+  assert(/type="password"/.test(centre) && /setNrs\(""\)/.test(centre), "NRS must be masked and cleared");
+});
+check("statements are recorded without a change reason (the backend refuses one)", () => {
+  const panel = read("modules/payroll/Payroll_Employees/PolandStatutoryProfilePanel.jsx");
+  const statements = panel.split('testId="pl-statements"')[1].split("<JPRecordSection")[0];
+  assert(!statements.includes("REASON_FIELD") && statements.includes("transform={statementPayload}"), "statement form");
+  assert(!/diagnos/i.test(panel), "no medical field may be captured (PL-017)");
+});
+check("the Poland centre and employee panel are wired in", () => {
+  const compliance = read("modules/payroll/Compliances/CompliancePage.jsx");
+  assert(compliance.includes("<PLComplianceCentreTab />") && /isPoland \? \[PL_TAB\]/.test(compliance), "compliance tab");
+  const detail = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
+  assert(detail.includes('employee.countryCode === "PL"') && detail.includes("<PolandStatutoryProfilePanel"), "employee panel");
+});
+
+// ── Phase 7d: run screens ──────────────────────────────────────────────────
+check("the payslip breakdown and preflight are wired into the run panel", () => {
+  const run = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  assert(/=== "PL" && item\.plCalculationSnapshot && <PLPayslipBreakdown/.test(run), "breakdown");
+  assert(/=== "PL"\) && <PLRunPreflightPanel runId=\{run\.id\} \/>/.test(run), "preflight");
+  const schemas = readFileSync(resolve(BACKEND, "schemas.py"), "utf-8");
+  assert(/plCalculationSnapshot: Optional\[dict\]/.test(schemas), "response schema would strip the snapshot");
+});
+check("the breakdown reads the frozen result and never recalculates", () => {
+  const breakdown = read("modules/payroll/PayRollRuns/PLPayslipBreakdown.jsx");
+  assert(!/\b(Number\([^)]*\)\s*[*+/-]\s*Number|\*\s*0\.\d|\/\s*100)\b/.test(breakdown), "arithmetic on statutory figures");
+  assert(!/pesel|nip|iban|diagnos/i.test(breakdown.replace(/NIP \/ REGON/g, "")), "identifier / medical wording in breakdown");
+  ["pl_pit_advance", "pl_zus_employee", "pl_health", "pl_ppk_employee", "pl_funds", "pl_net"].forEach((key) =>
+    assert(breakdown.includes(key), `breakdown does not show ${key}`));
+});
+check("Poland payslip labels map the platform fields", () => {
+  const labels = read("utils/jurisdictionLabels.js");
+  ["PL: \"PIT Advance (zaliczka)\"", "PL: \"ZUS (Employer", "PL: \"FP/FS, FGŚP, FEP (Employer)\"", "PL: \"PPK (Employer)\""]
+    .forEach((needle) => assert(labels.includes(needle), `missing label ${needle}`));
+});
+
 if (failures.length) {
   console.error(`pl-compliance-ui-validation: ${failures.length} failed, ${passed} passed`);
   failures.forEach((f) => console.error(`  - ${f}`));

@@ -28,6 +28,8 @@ import JPRunExceptionsPanel from "./JPRunExceptionsPanel";
 import NZPayslipBreakdown from "./NZPayslipBreakdown";
 import NZRunPreflightPanel from "./NZRunPreflightPanel";
 import NZRunFilingPanel from "./NZRunFilingPanel";
+import PLPayslipBreakdown from "./PLPayslipBreakdown";
+import PLRunPreflightPanel from "./PLRunPreflightPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -408,6 +410,7 @@ function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCount
             {(item.country || item.countryCode) === "ZA" && item.zaCalculationSnapshot && <ZAPayslipBreakdown snapshot={item.zaCalculationSnapshot} employeeName={item.employee} />}
             {(item.country || item.countryCode) === "JP" && item.jpCalculationSnapshot && <JPPayslipBreakdown snapshot={item.jpCalculationSnapshot} employeeName={item.employee} />}
             {(item.country || item.countryCode) === "NZ" && item.nzCalculationSnapshot && <NZPayslipBreakdown snapshot={item.nzCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "PL" && item.plCalculationSnapshot && <PLPayslipBreakdown snapshot={item.plCalculationSnapshot} employeeName={item.employee} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -629,6 +632,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </>
               )}
               {items.some((i) => (i.country || i.countryCode) === "NZ") && <NZRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "PL") && <PLRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "NZ") && (
                 <NZRunFilingPanel runId={run.id} items={items.filter((i) => (i.country || i.countryCode) === "NZ")}
                   paid={["Paid", "Closed"].includes((detail || run).status)} />

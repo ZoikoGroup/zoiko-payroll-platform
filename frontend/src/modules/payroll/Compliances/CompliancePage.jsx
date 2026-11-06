@@ -20,6 +20,7 @@ import BRComplianceCentreTab from "./BRComplianceCentreTab";
 import ZAComplianceCentreTab from "./ZAComplianceCentreTab";
 import JPComplianceCentreTab from "./JPComplianceCentreTab";
 import NZComplianceCentreTab from "./NZComplianceCentreTab";
+import PLComplianceCentreTab from "./PLComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -166,9 +167,13 @@ export default function CompliancePage() {
   // records; generic Tax Configuration tab omitted like JP/ZA/NL/MX.
   const NZ_TAB = "New Zealand Compliance Centre";
   const isNewZealand = normalizeCountryCode(companyDetails.jurisdictionCountry) === "NZ";
+  // Poland (ZP-PL-ENG-001): separate bases per obligation, versioned statements
+  // and PPK; generic Tax Configuration tab omitted like NZ/JP/ZA/NL/MX.
+  const PL_TAB = "Poland Compliance Centre";
+  const isPoland = normalizeCountryCode(companyDetails.jurisdictionCountry) === "PL";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand
+    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand || isPoland
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   // Plan country entitlements — every org, every calculation mode.
@@ -187,6 +192,7 @@ export default function CompliancePage() {
     ...(isSouthAfrica ? [ZA_TAB] : []),
     ...(isJapan ? [JP_TAB] : []),
     ...(isNewZealand ? [NZ_TAB] : []),
+    ...(isPoland ? [PL_TAB] : []),
   ];
   const selectedTab = countriesRequested ? tabs.indexOf(COUNTRIES_TAB) : activeTab;
   const currentTab = tabs[selectedTab];
@@ -432,6 +438,7 @@ export default function CompliancePage() {
       {currentTab === ZA_TAB && <ZAComplianceCentreTab />}
       {currentTab === JP_TAB && <JPComplianceCentreTab />}
       {currentTab === NZ_TAB && <NZComplianceCentreTab />}
+      {currentTab === PL_TAB && <PLComplianceCentreTab />}
 
     </div>
   );
