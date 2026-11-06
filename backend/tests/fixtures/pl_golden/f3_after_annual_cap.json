@@ -1,0 +1,45 @@
+{
+  "name": "f3_after_annual_cap",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "Cap already reached: pension and disability stop; sickness and accident continue (PL-009).",
+  "inputs": {
+    "gross": "8000",
+    "ytd": {
+      "ZUS_CAP_PENSION_BASE": "282600",
+      "ZUS_CAP_DISABILITY_BASE": "282600"
+    }
+  },
+  "expected": {
+    "pit": "621.00",
+    "pit_base": "7674.00",
+    "zus_employee": {
+      "EMERYTALNE": "0.00",
+      "RENTOWE": "0.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "0.00",
+      "RENTOWE": "0.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "702.36",
+    "ppk_employee": "160.00",
+    "ppk_employer": "120.00",
+    "funds": {
+      "FP_FS": "0.00",
+      "FGSP": "0.00",
+      "FEP": "0.00"
+    },
+    "employee_total": "1058.36",
+    "employer_total": "253.60",
+    "net": "6320.64",
+    "exceptions": []
+  },
+  "hand": [
+    "health (8000-196)=7804 x9% = 702.36",
+    "PIT 8120-196-250=7674; x12%=920.88-300=620.88 -> 621",
+    "TEST fund cap rule CAPPED: capped base 0 -> FP 0 (below minimum wage), FGSP 0"
+  ]
+}

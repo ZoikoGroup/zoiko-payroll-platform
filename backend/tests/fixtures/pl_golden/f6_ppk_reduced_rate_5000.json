@@ -1,0 +1,56 @@
+{
+  "name": "f6_ppk_reduced_rate_5000",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "Gross 5,000 with an approved 0.5% reduced PPK statement: income 5,000 <= 120% x 4,806 = 5,767.20, so 0.5% applies (PL-013).",
+  "inputs": {
+    "gross": "5000",
+    "declarations": [
+      [
+        "PIT2",
+        {
+          "allocation": "FULL"
+        }
+      ],
+      [
+        "PPK_REDUCED_RATE",
+        {
+          "ratePct": "0.5",
+          "otherSourcesIncome": "0"
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "pit": "197.00",
+    "pit_base": "4140.00",
+    "zus_employee": {
+      "EMERYTALNE": "488.00",
+      "RENTOWE": "75.00",
+      "CHOROBOWE": "122.50"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "488.00",
+      "RENTOWE": "325.00",
+      "WYPADKOWE": "83.50"
+    },
+    "health": "388.31",
+    "ppk_employee": "25.00",
+    "ppk_employer": "75.00",
+    "funds": {
+      "FP_FS": "122.50",
+      "FGSP": "5.00",
+      "FEP": "0.00"
+    },
+    "employee_total": "1098.81",
+    "employer_total": "1099.00",
+    "net": "3704.19",
+    "exceptions": []
+  },
+  "hand": [
+    "ZUS ee 488.00+75.00+122.50=685.50",
+    "health (5000-685.50)=4314.50 x9% = 388.305 -> 388.31",
+    "PIT 5000+75-685.50-250=4139.50 -> 4140; x12%=496.80-300=196.80 -> 197"
+  ]
+}

@@ -114,6 +114,17 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "cipc_number", label: "CIPC company registration number", pattern: "^\\d{4}/\\d{6}/\\d{2}$", example: "2026/123456/07", primary: false },
     ],
   },
+  // Poland (ZP-PL-ENG-001 Phase 0) — mirrors backend core/jurisdiction.py
+  // JURISDICTION_TAX_SCHEMAS.PL exactly. Schema only: PL stays out of
+  // registration until its release gates G1–G7 are signed.
+  PL: {
+    label: "NIP / REGON / KRS",
+    fields: [
+      { key: "nip", label: "NIP (tax identification number, 10 digits)", pattern: "^\\d{10}$", example: "1234563218", primary: true },
+      { key: "regon", label: "REGON (statistical number, 9 or 14 digits)", pattern: "^(\\d{9}|\\d{14})$", example: "123456785", primary: false },
+      { key: "krs", label: "KRS (National Court Register number, 10 digits)", pattern: "^\\d{10}$", example: "0000123456", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -135,6 +146,13 @@ const COUNTRY_NAME_TO_CODE = {
   // South Africa — never "sa", which is Saudi Arabia's code here.
   "south africa": "ZA",
   rsa: "ZA",
+  // Poland — never the bare "pl" (that is the paid-leave attendance code);
+  // the code "PL" itself resolves through JURISDICTION_TAX_SCHEMAS above.
+  poland: "PL",
+  polska: "PL",
+  "rzeczpospolita polska": "PL",
+  "republic of poland": "PL",
+  pol: "PL",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -149,6 +167,7 @@ const CODE_TO_COUNTRY_NAME = {
   SA: "Saudi Arabia",
   NL: "Netherlands",
   ZA: "South Africa",
+  PL: "Poland",
 };
 
 export function getJurisdictionCode(country) {

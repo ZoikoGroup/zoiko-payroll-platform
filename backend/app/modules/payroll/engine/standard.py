@@ -81,6 +81,7 @@ from app.modules.payroll.engine.countries import brazil as _brazil
 from app.modules.payroll.engine.countries import south_africa as _south_africa
 from app.modules.payroll.engine.countries import japan as _japan
 from app.modules.payroll.engine.countries import new_zealand as _new_zealand
+from app.modules.payroll.engine.countries import poland as _poland
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -161,6 +162,7 @@ _calc_brazil = _brazil.calculate
 _calc_south_africa = _south_africa.calculate
 _calc_japan = _japan.calculate
 _calc_new_zealand = _new_zealand.calculate
+_calc_poland = _poland.calculate
 
 
 _COUNTRY_CALC = {
@@ -244,6 +246,9 @@ _COUNTRY_CALC = {
     "JP": _calc_japan,
     # New Zealand (ZP-NZ-ENG-001): fail-closed, never the generic calculator.
     "NZ": _calc_new_zealand,
+    # Poland (ZP-PL-ENG-001): fail-closed orchestrator over
+    # engine/jurisdictions/poland/* (Phase 3); never the generic calculator.
+    "PL": _calc_poland,
 }
 
 
@@ -359,6 +364,9 @@ class StandardStrategy(PayrollStrategy):
             # New Zealand: student loan + KiwiSaver employee + child support.
             # PAYE incl. the ACC earner levy arrives as tds above. 0 elsewhere.
             + deductions.get("nz_employee_total", Decimal("0"))
+            # Poland: ZUS employee (pension + disability + sickness) + health +
+            # PPK employee. PIT arrives as tds above. 0 elsewhere.
+            + deductions.get("pl_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -647,6 +655,8 @@ class StandardStrategy(PayrollStrategy):
             jp_result=deductions.get("jp_result"),
             # New Zealand (ZP-NZ-ENG-001). Absent from every non-NZ calculator dict.
             nz_result=deductions.get("nz_result"),
+            # Poland (ZP-PL-ENG-001). Absent from every non-PL calculator dict.
+            pl_result=deductions.get("pl_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

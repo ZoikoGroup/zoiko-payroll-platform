@@ -66,7 +66,16 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
              "payroll_nz_cash_up_requests", "payroll_nz_corrections",
              # New Zealand P5 (ac08988ecd3a).
              "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
-             "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events"}
+             "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events",
+             # Poland P2 (1ee3bbde33bb) is pending on top of New Zealand P9.
+             "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+             "payroll_pl_employer_registrations", "payroll_pl_worker_profiles", "payroll_pl_declarations",
+             "payroll_pl_ppk_participations", "payroll_pl_accumulator_entries",
+                                        "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
+                                        "payroll_pl_filings", "payroll_pl_settlements",
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
 
 
 def _load(prefix):
@@ -240,10 +249,10 @@ def test_deploy_drift_filter_explains_every_za_object():
         assert columns[table] == names, table
     assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot",
-                                        "nz_calculation_snapshot", "nz_correction_of_id"}
+                                        "nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot"}
     assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
                                        "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind",
-                                       "nz_run_options"}
+                                       "nz_run_options", "pl_approval_fingerprint"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

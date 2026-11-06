@@ -1,0 +1,49 @@
+{
+  "name": "f2_annual_cap_crossed_mid_run",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "YTD pension and disability bases 278,000 of the 282,600 cap: only 4,600 assessed; sickness, accident, health and PPK stay on the full 8,000 (PL-009, PL-014).",
+  "inputs": {
+    "gross": "8000",
+    "ytd": {
+      "ZUS_CAP_PENSION_BASE": "278000",
+      "ZUS_CAP_DISABILITY_BASE": "278000"
+    }
+  },
+  "expected": {
+    "pit": "559.00",
+    "pit_base": "7156.00",
+    "zus_employee": {
+      "EMERYTALNE": "448.96",
+      "RENTOWE": "69.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "448.96",
+      "RENTOWE": "299.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "655.74",
+    "ppk_employee": "160.00",
+    "ppk_employer": "120.00",
+    "funds": {
+      "FP_FS": "0.00",
+      "FGSP": "4.60",
+      "FEP": "0.00"
+    },
+    "employee_total": "1529.70",
+    "employer_total": "1006.16",
+    "net": "5911.30",
+    "exceptions": [
+      "ANNUAL_CAP_CROSSED"
+    ]
+  },
+  "hand": [
+    "remaining cap 282600-278000=4600: 4600x9.76%=448.96; x1.5%=69.00; sickness 8000x2.45%=196.00",
+    "employer: 448.96 + 4600x6.5%=299.00 + accident 8000x1.67%=133.60",
+    "health (8000-713.96)=7286.04 x9% = 655.7436 -> 655.74",
+    "PIT 8120-713.96-250=7156.04 -> 7156; x12%=858.72-300=558.72 -> 559",
+    "TEST fund cap rule CAPPED: FP base 4600 < 4806 -> 0; FGSP 4600x0.10%=4.60"
+  ]
+}

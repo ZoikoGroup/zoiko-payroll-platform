@@ -1,0 +1,41 @@
+{
+  "name": "f8_ppk_opted_out_no_pit2",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "PPK opted out and no PIT-2 statement: no PPK, no employer PPK income, no monthly reduction.",
+  "inputs": {
+    "gross": "8000",
+    "ppk_state": "OPTED_OUT",
+    "declarations": []
+  },
+  "expected": {
+    "pit": "798.00",
+    "pit_base": "6653.00",
+    "zus_employee": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "120.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "520.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "621.29",
+    "ppk_employee": "0.00",
+    "ppk_employer": "0.00",
+    "funds": {
+      "FP_FS": "196.00",
+      "FGSP": "8.00",
+      "FEP": "0.00"
+    },
+    "employee_total": "1718.09",
+    "employer_total": "1638.40",
+    "net": "5483.91",
+    "exceptions": []
+  },
+  "hand": [
+    "PIT 8000-1096.80-250=6653.20 -> 6653; x12% = 798.36 -> 798 (no PIT-2)"
+  ]
+}

@@ -692,6 +692,24 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{13}$", "example": "9429041234567", "primary": True},
         ],
     },
+    # Poland (ZP-PL-ENG-001 Phase 0) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live Polish payroll stays disabled until release
+    # gates G1-G7 are signed and the registry row leaves PLANNED (PL-001).
+    # Formats only; the NIP / REGON check digits are verified by
+    # employee_validation.pl_nip_is_valid / pl_regon_is_valid. PESEL is a
+    # personal identifier and never an organisation field.
+    "PL": {
+        "label": "NIP / REGON / KRS",
+        "currency": "PLN",
+        "fields": [
+            {"key": "nip", "label": "NIP (tax identification number, 10 digits)",
+             "pattern": r"^\d{10}$", "example": "1234563218", "primary": True},
+            {"key": "regon", "label": "REGON (statistical number, 9 or 14 digits)",
+             "pattern": r"^(\d{9}|\d{14})$", "example": "123456785", "primary": False},
+            {"key": "krs", "label": "KRS (National Court Register number, 10 digits)",
+             "pattern": r"^\d{10}$", "example": "0000123456", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -755,6 +773,15 @@ COUNTRY_NAME_TO_CODE = {
     "aotearoa": "NZ",
     "aotearoa new zealand": "NZ",
     "nzl": "NZ",
+    # Without these, "Poland" truncates to "PO" in
+    # payroll.service._normalize_country. The bare "pl" is deliberately NOT an
+    # alias here ("PL" resolves through JURISDICTION_TAX_SCHEMAS; "pl" is also
+    # the paid-leave attendance code).
+    "poland": "PL",
+    "polska": "PL",
+    "rzeczpospolita polska": "PL",
+    "republic of poland": "PL",
+    "pol": "PL",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -785,6 +812,7 @@ CODE_TO_COUNTRY_NAME = {
     "ZA": "South Africa",
     "JP": "Japan",
     "NZ": "New Zealand",
+    "PL": "Poland",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

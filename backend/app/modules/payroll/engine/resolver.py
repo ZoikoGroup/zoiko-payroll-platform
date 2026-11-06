@@ -164,6 +164,17 @@ def calculate_payroll(
             "New Zealand payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "PL" and key == "simple":
+        # Poland (ZP-PL-ENG-001): simple mode would silently skip PIT, ZUS,
+        # health, employer funds and PPK — each a separate obligation with its
+        # own base (spec §5-§7). Fail-closed: countries/poland.py.
+        from app.modules.payroll.engine.countries.poland import PLCalculationBlockedError
+
+        raise PLCalculationBlockedError(
+            "PL_SIMPLE_MODE_UNSUPPORTED",
+            "Poland payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -290,6 +301,7 @@ def build_context_from_employee(
     south_africa_inputs: dict | None = None,
     japan_inputs: dict | None = None,
     nz_inputs: dict | None = None,
+    poland_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -498,4 +510,7 @@ def build_context_from_employee(
         # New Zealand (ZP-NZ-ENG-001): nz_* context fields resolved by
         # new_zealand_service.calc_inputs as of the run's payday (NZ-008).
         **(nz_inputs or {}),
+        # Poland (ZP-PL-ENG-001): pl_* context fields resolved by
+        # poland_service.calc_inputs as of the run's pay date (Phase 4).
+        **(poland_inputs or {}),
     )
