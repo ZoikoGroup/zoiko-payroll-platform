@@ -358,7 +358,7 @@ def recibo_view(db: Session, item, run, *, duplicate: bool = False) -> dict:
     return {
         "documentCode": DUPLICATE_CODE if duplicate else DOCUMENT_CODE,
         "rendererVersion": RENDERER_VERSION,
-        "payslipId": item.id, "runId": run.id, "duplicate": duplicate,
+        "payslipId": item.id, "runId": run.id, "employeeId": item.employee_id, "duplicate": duplicate,
         "pilot": pilot,
         "title": "Recibo de nómina / Payslip",
         "subtitle": f"Recibo de nómina en español · nómina {'extraordinaria' if extraordinary else 'ordinaria'} · "

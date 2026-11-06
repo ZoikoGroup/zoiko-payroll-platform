@@ -40,7 +40,7 @@ class _Doc:
         self.c.setTitle(view.get("title", "Recibo de nómina"))
         self.c.setAuthor("Zoiko Payroll")
         self.left, self.right = 14 * mm, self.w - 14 * mm
-        self.top, self.bottom = self.h - 12 * mm, 20 * mm
+        self.top, self.bottom = self.h - 11 * mm, 18 * mm
         self.y = self.top
         self.page = 1
         self.view = view
@@ -61,6 +61,7 @@ class _Doc:
             width = self.c.stringWidth(s, font, size) + char_space * max(len(s) - 1, 0)
             t.setTextOrigin(x - width if align == "right" else x, y)
             t.textOut(s)
+            t.setCharSpace(0)          # Tc persists in the page's text state — reset it for later text
             self.c.drawText(t)
             return
         self.c.setFont(font, size)
@@ -116,7 +117,8 @@ class _Doc:
         self.y -= band + 5 * mm
 
     def section(self, title):
-        self.ensure(16 * self.mm)
+        self.ensure(18 * self.mm)
+        self.y -= 3.5 * self.mm
         self.text(self.left, self.y, title, SERIF_BOLD, 11.5, NAVY)
         self.y -= 1.8 * self.mm
         self.color(TEAL, fill=False)
@@ -133,7 +135,7 @@ class _Doc:
         line_h = 3.3 * mm
         # header
         self.ensure(7 * mm + line_h * 2)
-        hh = 6 * mm
+        hh = 5.6 * mm
         self.color(NAVY)
         self.c.rect(self.left, self.y - hh, total_w, hh, fill=1, stroke=0)
         x = self.left
@@ -146,7 +148,7 @@ class _Doc:
             last = bold_last and r_i == len(rows) - 1
             font = SANS_BOLD if last else SANS
             wrapped = [self.wrap(cell, font, size, cols[i] - 2 * pad) for i, cell in enumerate(row)]
-            rh = max(len(w) for w in wrapped) * line_h + 2.4 * mm
+            rh = max(len(w) for w in wrapped) * line_h + 1.9 * mm
             self.ensure(rh)
             if last:
                 self.color(TEAL_LIGHT)
@@ -156,7 +158,7 @@ class _Doc:
                 self.c.rect(self.left, self.y - rh, total_w, rh, fill=1, stroke=0)
             x = self.left
             for i, lines in enumerate(wrapped):
-                ty = self.y - 3.6 * mm
+                ty = self.y - 3.35 * mm
                 for ln in lines:
                     ax = x + pad if aligns[i] == "left" else x + cols[i] - pad
                     self.text(ax, ty, ln, font, size, NAVY, aligns[i])
@@ -166,7 +168,7 @@ class _Doc:
         self.color(RULE, fill=False)
         self.c.setLineWidth(0.5)
         self.c.line(self.left, self.y, self.right, self.y)
-        self.y -= 4.5 * mm
+        self.y -= 3.2 * mm
 
     def totals_boxes(self, items):
         mm = self.mm

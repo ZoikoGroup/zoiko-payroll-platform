@@ -92,6 +92,9 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/parallel/imports"), ("POST", "/parallel/imports"), ("GET", "/parallel/imports/1"),
     ("POST", "/parallel/imports/1/withdraw"), ("POST", "/parallel/differences/1/explain"),
     ("POST", "/parallel/differences/1/accept"),
+    # Recibo de nómina v2.0 — payslip view, duplicate, pay history
+    ("GET", "/payslips/1/recibo"), ("GET", "/payslips/1/recibo/duplicate"),
+    ("GET", "/employees/1/pay-history?start=2026-01-01&end=2026-12-31"),
 ]
 
 

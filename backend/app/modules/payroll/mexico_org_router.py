@@ -1178,3 +1178,59 @@ def pilot_status(current_user=Depends(get_current_payroll_operator), db: Session
     from app.modules.payroll import mexico_pilot_service
 
     return mexico_pilot_service.pilot_status(db, _org_id(current_user))
+
+
+# ── Recibo de nómina v2.0 (docs/mexico/MEXICO_RECIBO_REPORT.md) ─────────────
+
+def _mx_payslip(db: Session, org_id: int, payslip_id: int):
+    """(item, run) of one of the caller's own Mexican payslips."""
+    from app.modules.payroll import service
+
+    _data, item, run = service.get_payslip_by_id(db, payslip_id, org_id)
+    if (item.country_code or "").upper() != "MX":
+        raise BadRequestException(f"payslip {payslip_id} is not a Mexican payslip")
+    return item, run
+
+
+@router.get("/payslips/{payslip_id}/recibo",
+            summary="The Mexican payslip view (masked) and its mobile summary — the same data the PDF draws")
+def mx_payslip_recibo(payslip_id: int, current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_payslip_service
+
+    item, run = _mx_payslip(db, _org_id(current_user), payslip_id)
+    view = mexico_payslip_service.recibo_view(db, item, run)
+    return {"view": view, "summary": mexico_payslip_service.mobile_summary(view)}
+
+
+@router.get("/payslips/{payslip_id}/recibo/duplicate",
+            summary="MX24-PAY-010: the recibo re-rendered as a PDF marked DUPLICADO (never a new issuance)")
+def mx_payslip_recibo_duplicate(payslip_id: int, current_user=Depends(get_current_payroll_operator),
+                                db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import service
+
+    _mx_payslip(db, _org_id(current_user), payslip_id)
+    pdf = service.generate_mx_payslip_duplicate_pdf_bytes(db, payslip_id, _org_id(current_user))
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Disposition": f'inline; filename="recibo-{payslip_id}-duplicado.pdf"'})
+
+
+@router.get("/employees/{employee_id}/pay-history",
+            summary="MX24-PAY-011: one employee's Mexican payslips in a pay-date range (JSON, or PDF with format=pdf)")
+def mx_employee_pay_history(employee_id: int, start: date = Query(...), end: date = Query(...),
+                            format: str = Query("json", pattern="^(json|pdf)$"),
+                            current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_payslip_pdf, mexico_payslip_service
+
+    history = mexico_payslip_service.pay_history(db, _org_id(current_user), employee_id, start, end)
+    if format == "json":
+        return history
+    from fastapi.responses import Response
+
+    history["issueDate"] = mexico_payslip_service.date_es(date.today())
+    return Response(content=mexico_payslip_pdf.render_history(history), media_type="application/pdf",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Disposition": f'inline; filename="historial-{employee_id}.pdf"'})

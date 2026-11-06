@@ -6065,6 +6065,8 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -10582,6 +10584,29 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/pay-history",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "pay-history",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/employees/{employee_id}/ptu",
    "data_class": "worker",
    "action": "read",
@@ -11313,6 +11338,50 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/payslips/{payslip_id}/recibo",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "recibo",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/payslips/{payslip_id}/recibo/duplicate",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "duplicate",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -13086,6 +13155,8 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_ni_relief_facts",
     "payroll_nz_corrections",
     "payroll_pr_withholding_certificates",
@@ -14833,6 +14904,8 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_personal_data_access_events",
     "payslip_items"
    ],
@@ -15473,6 +15546,8 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -15549,6 +15624,8 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_personal_data_access_events",
     "payslip_items"
    ],

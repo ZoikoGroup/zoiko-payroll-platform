@@ -322,3 +322,38 @@ def test_a_blocked_mexican_payslip_keeps_the_blocked_document(db, monkeypatch, t
     db.commit()
     text = _text(_pdf(db, w, item))
     assert "Recibo de nómina / Payslip" not in text and "HRA" not in text
+
+
+# ── routes ───────────────────────────────────────────────────────────────────
+
+def test_recibo_routes_are_org_scoped_and_masked(db, monkeypatch, tmp_path):
+    from tests._mx_employer_helpers import http, principal
+    from tests.test_mexico_cfdi_builder import GOOD_IDS
+
+    w, item = _draft(db, monkeypatch, tmp_path, "MXRB21")
+    base = "/api/payroll/mexico"
+    with http(db, principal(w.org.id, w.users[0].id)) as c:
+        r = c.get(f"{base}/payslips/{item.id}/recibo")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["view"]["totals"]["net"] == _money(item.net_pay) and body["summary"]["documentCode"] == "MX24-PAY-003"
+        assert all(v not in r.text for v in GOOD_IDS.values())
+        dup = c.get(f"{base}/payslips/{item.id}/recibo/duplicate")
+        assert dup.status_code == 200 and dup.headers["content-type"] == "application/pdf"
+        assert dup.headers["cache-control"] == "no-store" and "DUPLICADO" in _text(dup.content)
+        h = c.get(f"{base}/employees/{item.employee_id}/pay-history", params={"start": "2026-01-01", "end": "2026-12-31"})
+        assert h.status_code == 200 and h.json()["count"] == 1
+        hp = c.get(f"{base}/employees/{item.employee_id}/pay-history",
+                   params={"start": "2026-01-01", "end": "2026-12-31", "format": "pdf"})
+        assert hp.status_code == 200 and "Historial de pagos" in _text(hp.content)
+        assert c.get(f"{base}/payslips/{item.id + 999}/recibo").status_code == 404
+
+
+def test_an_ordinary_recibo_is_one_page_in_every_state(db, monkeypatch, tmp_path):
+    from pypdf import PdfReader
+
+    w, item, doc = _stamped(db, monkeypatch, tmp_path, "MXRB22")
+    assert len(PdfReader(io.BytesIO(_pdf(db, w, item))).pages) == 1
+    doc.status, doc.replaced_by_uuid = "CANCELLED", "SYN00000-0000-4000-8000-00000000RB22"
+    db.commit()
+    assert len(PdfReader(io.BytesIO(_pdf(db, w, item))).pages) == 1
