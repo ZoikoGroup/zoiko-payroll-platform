@@ -314,3 +314,144 @@ def pl_employee_summary(employee_id: int, current_user=Depends(get_current_payro
 @router.get("/runs/{run_id}/preflight", summary="Poland payroll preflight for a run (read-only)")
 def pl_run_preflight(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     return pl.pl_run_preflight(db, _run(db, _org_id(current_user), run_id))
+
+
+# ── Phase 8: filings, settlements, reconciliation, journal (spec §10) ───────
+# Payload generation only; no live ZUS / e-Deklaracje / PPK / bank call (PL-021).
+@router.get("/filings", summary="Poland filing records (canonical payloads; masked identifiers)")
+def pl_list_filings(period: Optional[str] = Query(None), form: Optional[str] = Query(None),
+                    status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                    db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    return plf.list_pl_filings(db, _org_id(current_user), period=period, form_code=form, status=status)
+
+
+@router.get("/filings/{filing_id}", summary="One Poland filing with its canonical payload")
+def pl_get_filing(filing_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    return plf.get_pl_filing(db, _org_id(current_user), filing_id)
+
+
+@router.post("/filings/rebuild/{run_id}", summary="Rebuild the monthly ZUS filings of a PAID run (idempotent)")
+def pl_rebuild_filings(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    run = _run(db, _org_id(current_user), run_id)
+    if str(getattr(run.status, "value", run.status)) not in plf.PAID_STATUSES:
+        from app.core.exceptions import BadRequestException
+
+        raise BadRequestException("Filings are built for a PAID run.")
+    rows = plf.build_pl_run_filings(db, run, _actor(current_user))
+    db.commit()
+    return [plf.filing_view(r) for r in rows]
+
+
+@router.post("/filings/annual", summary="Build PIT-11 / PIT-4R for a closed tax year (idempotent)")
+def pl_build_annual(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    form = str(body.get("form") or "").strip().upper()
+    if form in plf.OUT_OF_SCOPE_FORMS:
+        plf._conflict("PL_FORM_OUT_OF_SCOPE", plf.OUT_OF_SCOPE_FORMS[form])
+    rows = plf.build_pl_annual_filings(db, _org_id(current_user), int(body.get("year") or 0),
+                                       body.get("legalEntityId"), _actor(current_user))
+    db.commit()
+    return [plf.filing_view(r) for r in rows]
+
+
+@router.post("/filings/registration", summary="Build a ZUA / ZZA / ZWUA registration payload (idempotent)")
+def pl_build_registration(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    row = plf.build_pl_registration_filing(db, _org_id(current_user), int(body.get("employeeId") or 0),
+                                           body.get("form"), body.get("eventDate"), _actor(current_user),
+                                           reason_code=body.get("reasonCode"))
+    db.commit()
+    return plf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/approve", summary="Approve a DRAFT filing (four-eyes; archived schema only)")
+def pl_approve_filing(filing_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    row = plf.approve_pl_filing(db, _org_id(current_user), filing_id, _actor(current_user))
+    db.commit()
+    return plf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/submission", summary="Record a manual submission (idempotent by reference)")
+def pl_record_submission(filing_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    row = plf.record_pl_filing_submission(db, _org_id(current_user), filing_id, body.get("submissionRef"),
+                                          _actor(current_user))
+    db.commit()
+    return plf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/response", summary="Record the authority's receipt or rejection")
+def pl_record_response(filing_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_filing as plf
+
+    row = plf.record_pl_filing_response(db, _org_id(current_user), filing_id, body, _actor(current_user))
+    db.commit()
+    return plf.filing_view(row)
+
+
+@router.get("/settlements", summary="Poland ZUS / PIT / PPK liabilities")
+def pl_list_settlements(period: Optional[str] = Query(None), liability: Optional[str] = Query(None),
+                        status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_settlement as pss
+
+    return pss.list_pl_settlements(db, _org_id(current_user), period=period, liability=liability, status=status)
+
+
+@router.post("/settlements/{settlement_id}/payments", summary="Record a payment (idempotent by reference)")
+def pl_record_payment(settlement_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_settlement as pss
+
+    row = pss.record_pl_settlement_payment(db, _org_id(current_user), settlement_id, body, _actor(current_user))
+    db.commit()
+    return pss.settlement_view(row)
+
+
+@router.post("/settlements/{settlement_id}/reconcile", summary="Reconcile a liability (or raise a variance)")
+def pl_reconcile(settlement_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_settlement as pss
+
+    out = pss.reconcile_pl_settlement(db, _org_id(current_user), settlement_id, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.get("/variances", summary="Poland reconciliation variances")
+def pl_list_variances(status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_settlement as pss
+
+    return pss.list_pl_variances(db, _org_id(current_user), status=status)
+
+
+@router.post("/variances/{variance_id}/resolve", summary="Resolve a variance (four-eyes, reason required)")
+def pl_resolve_variance(variance_id: int, body: Dict[str, Any] = Body(...),
+                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_settlement as pss
+
+    row = pss.resolve_pl_variance(db, _org_id(current_user), variance_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return pss.variance_view(row)
+
+
+@router.get("/runs/{run_id}/journal", summary="Accounting journal of a PAID run (balanced or BLOCKED)")
+def pl_run_journal(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_journal as plj
+
+    return plj.build_pl_journal(db, _org_id(current_user), run_id)

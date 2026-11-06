@@ -8,6 +8,7 @@ import JPRecordSection, { btn, isDraft, statusCol } from "../../../components/ju
 import { REASON_FIELD, errorText, period } from "../../../components/jurisdiction/new_zealand/nzOrgOptions";
 import { ACCIDENT_RATE_SOURCES, ZUS_DEADLINE_CLASSES } from "../../../components/jurisdiction/poland/plOrgOptions";
 import { PolandEmployeeRecords } from "../Payroll_Employees/PolandStatutoryProfilePanel";
+import PLFilingSettlementPanel from "./PLFilingSettlementPanel";
 
 // Poland Compliance Centre (ZP-PL-ENG-001 §12 "Poland country setup"). Employer
 // registration per legal employer (NIP / REGON / KRS, tax office, ZUS deadline
@@ -198,6 +199,7 @@ export default function PLComplianceCentreTab() {
       <EmployerRegistrations />
       <PpkReenrolment />
       <EmployeeRecords />
+      <PLFilingSettlementPanel />
     </div>
   );
 }

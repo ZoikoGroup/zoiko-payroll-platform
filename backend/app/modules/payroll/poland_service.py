@@ -472,6 +472,10 @@ def record_pl_employer_registration(db: Session, organization_id: int, payload: 
             raise BadRequestException("REGON must be 9 or 14 digits with valid check digits.")
     if data.get("krs") and not (data["krs"].isdigit() and len(data["krs"]) == 10):
         raise BadRequestException("KRS must be 10 digits.")
+    if data.get("pl_journal_accounts") is not None:
+        from app.modules.payroll.poland_journal import clean_journal_accounts
+
+        data["pl_journal_accounts"] = clean_journal_accounts(data["pl_journal_accounts"])
     if (data.get("accident_rate_pct") is None) != (data.get("accident_rate_source") is None):
         raise BadRequestException("An accident rate needs its source, and a source needs its rate.")
     if data.get("accident_rate_pct") is not None and not (data.get("accident_rate_from")
@@ -1295,7 +1299,8 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
     """Approval needs every PL payslip frozen, a verified employer registration,
     the identifiers ZUS reporting needs and no open statutory exception; later
     steps re-verify the approval fingerprint; PAID posts the year-to-date
-    ledger exactly once."""
+    ledger exactly once and (Phase 8) builds the month's ZUS filing payloads
+    and the ZUS / PIT / PPK liabilities (idempotent)."""
     from fastapi import HTTPException, status as http_status
 
     from app.modules.payroll.models import PayrollStatus
@@ -1315,7 +1320,11 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
             raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
                 "Poland: the approved calculation no longer matches this run - recalculate and approve again."))
     if next_status == PayrollStatus.PAID:
+        from app.modules.payroll import poland_filing, poland_settlement
+
         post_accumulators(db, run, actor_id)
+        poland_filing.build_pl_run_filings(db, run, actor_id)       # Phase 8: DRA / RCA / RSA payloads
+        poland_settlement.build_pl_settlements(db, run, actor_id)   # Phase 8: ZUS / PIT / PPK liabilities
 
 
 # ── platform hooks ──────────────────────────────────────────────────────────

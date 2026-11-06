@@ -15215,6 +15215,151 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/poland/filings",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/filings/annual",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "annual",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_pl_accumulator_entries",
+    "payroll_pl_identifier_vault",
+    "payroll_pl_worker_profiles",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/filings/rebuild/{run_id}",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "rebuild",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_pl_identifier_vault",
+    "payroll_pl_worker_profiles",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/filings/registration",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "registration",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_pl_identifier_vault",
+    "payroll_pl_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/poland/filings/{filing_id}",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/filings/{filing_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/filings/{filing_id}/response",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "response",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/filings/{filing_id}/submission",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "submission",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/poland/identifiers/{vault_id}/delete",
    "data_class": "worker",
@@ -15365,6 +15510,26 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/poland/runs/{run_id}/journal",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "journal",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/poland/runs/{run_id}/preflight",
    "data_class": "worker",
    "action": "read",
@@ -15382,6 +15547,55 @@
     "payroll_pl_worker_profiles",
     "payslip_items"
    ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/poland/settlements",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "settlements",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/settlements/{settlement_id}/payments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "payments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/settlements/{settlement_id}/reconcile",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
    "overridden": false
   },
   {
@@ -15439,6 +15653,39 @@
     "payroll_pl_declarations",
     "payroll_pl_worker_profiles"
    ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/poland/variances",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "variances",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/poland/variances/{variance_id}/resolve",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "resolve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
    "overridden": false
   },
   {

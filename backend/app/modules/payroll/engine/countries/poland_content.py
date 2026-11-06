@@ -188,7 +188,10 @@ COMPLIANCE_STATES = ("DRAFT", "APPROVED", "SUBMITTED", "ACCEPTED", "REJECTED", "
 # Versioned form catalogue the Phase 8 filing adapter reads. DELIBERATELY
 # EMPTY: no official ZUS (KEDU / e-Płatnik) or e-Deklaracje schema is
 # archived yet, and a schema version or field code is never guessed. While a
-# form's `versions` is empty, payload generation BLOCKS.
+# form's `versions` is empty only the canonical (schema-neutral) payload is
+# generated for preview; approval and submission BLOCK (FILING_SCHEMA_MISMATCH).
+# Shape once archived: versions = {"<version>": {"effective_from": "YYYY-MM-DD",
+# "effective_to": None, "evidence": "<archived schema reference>"}}.
 PL_FORM_SCHEMA_CATALOG = {
     "DRA": {"authority": "ZUS", "versions": {}, "evidence": "S8"},
     "RCA": {"authority": "ZUS", "versions": {}, "evidence": "S8"},

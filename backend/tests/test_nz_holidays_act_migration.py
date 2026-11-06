@@ -151,7 +151,9 @@ def test_drift_filter_explains():
                                         "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
                                         "payroll_pl_declarations", "payroll_pl_ppk_participations",
                                         "payroll_pl_accumulator_entries",
-                                        "payroll_pl_incapacity_episodes"}  # + Poland P6 (e11c2c36df17)
+                                        "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
+                                        "payroll_pl_filings", "payroll_pl_settlements",
+                                        "payroll_pl_reconciliation_variances"}  # + Poland P8 (e75b9219e1f8)
     assert columns == {"payslip_items": {"nz_correction_of_id", "pl_calculation_snapshot"},
                        "payroll_runs": {"nz_run_options", "pl_approval_fingerprint"},
                        "payroll_nz_leave_events": {"leave_pay_calculation_id"},

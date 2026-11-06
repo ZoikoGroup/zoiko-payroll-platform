@@ -197,7 +197,8 @@ def test_deploy_drift_filter_explains_every_pl_object():
     finally:
         os.chdir(here)
     # Poland P6 (e11c2c36df17) is pending on the same chain.
-    assert tables == set(NEW_TABLES) | {"payroll_pl_incapacity_episodes"}
+    assert tables == set(NEW_TABLES) | {"payroll_pl_incapacity_episodes", "payroll_pl_filings",  # P6, P8
+                                        "payroll_pl_settlements", "payroll_pl_reconciliation_variances"}
     assert columns == SHARED
 
 

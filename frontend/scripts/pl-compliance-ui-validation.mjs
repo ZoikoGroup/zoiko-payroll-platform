@@ -196,6 +196,25 @@ check("Poland payslip labels map the platform fields", () => {
     .forEach((needle) => assert(labels.includes(needle), `missing label ${needle}`));
 });
 
+// ── Phase 8: filings, settlements, journal (PL-019 / PL-020 / PL-021) ──────
+check("filings, settlements and the run journal are wired in", () => {
+  const centre = read("modules/payroll/Compliances/PLComplianceCentreTab.jsx");
+  assert(centre.includes("<PLFilingSettlementPanel />"), "filing panel not in the centre");
+  const run = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  assert(/=== "PL"\)\s*&& \["Paid", "Closed"\]\.includes\(\(detail \|\| run\)\.status\) && <PLRunJournalPanel/.test(run),
+    "journal must show for a PAID Poland run only");
+  ["listPlFilings", "approvePlFiling", "recordPlFilingSubmission", "recordPlFilingResponse", "listPlSettlements",
+    "recordPlSettlementPayment", "reconcilePlSettlement", "resolvePlVariance", "getPlRunJournal"]
+    .forEach((fn) => assert(new RegExp(`export const ${fn} =`).test(payrollService), `missing ${fn}`));
+});
+check("the filing screen never transmits and never computes", () => {
+  const panel = read("modules/payroll/Compliances/PLFilingSettlementPanel.jsx");
+  assert(!/fetch\(|XMLHttpRequest|zus\.pl|e-deklaracje\.gov|puesc|https?:\/\//i.test(panel), "external transport in UI");
+  assert(/disabled=\{state\.busy \|\| !r\.schemaArchived\}/.test(panel), "approval must wait for an archived schema");
+  assert(!/(Number\([^)]*\)\s*[*+/-]|\*\s*0\.\d|\/\s*100)/.test(panel), "arithmetic on amounts in the UI");
+  assert(!/pesel|iban/i.test(panel.replace(/masked identifiers/g, "")), "identifier wording in the filing screen");
+});
+
 if (failures.length) {
   console.error(`pl-compliance-ui-validation: ${failures.length} failed, ${passed} passed`);
   failures.forEach((f) => console.error(`  - ${f}`));

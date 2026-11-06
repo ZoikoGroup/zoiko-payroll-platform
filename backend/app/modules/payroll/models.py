@@ -13780,3 +13780,142 @@ class PayrollPlIncapacityEpisode(Base):
 
     def __repr__(self):
         return f"<PayrollPlIncapacityEpisode employee={self.employee_id} {self.date_from}..{self.date_to} {self.status}>"
+
+
+_PL_FILING_FORMS = ("DRA", "RCA", "RSA", "RPA", "ZUA", "ZZA", "ZWUA", "PIT11", "PIT4R", "PIT8AR")
+_PL_FILING_STATUSES = ("DRAFT", "APPROVED", "SUPERSEDED", "SUBMITTED", "ACCEPTED", "REJECTED", "CORRECTED")
+
+
+class PayrollPlFiling(Base):
+    """Poland filing record (spec §10, PL-019 / PL-020 / PL-021; migration
+    e75b9219e1f8). A canonical, schema-neutral payload per legal employer, form
+    and period, generated only from frozen PAID payslips, the ledger or approved
+    records (identifiers as vault id + masked form). idempotency_key is unique,
+    so the same payload is never stored twice. Approval needs an archived
+    schema version (schema_version NOT NULL) and a second person; submission
+    and the authority's receipt are recorded by hand (no live transport)."""
+    __tablename__ = "payroll_pl_filings"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    authority            = Column(String(8), nullable=False)
+    form_code            = Column(String(8), nullable=False)
+    period_key           = Column(String(10), nullable=False)
+    subject_key          = Column(String(40), nullable=True)
+    kind                 = Column(String(12), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    version              = Column(Integer, nullable=False, default=1, server_default="1")
+    schema_version       = Column(String(20), nullable=True)
+    run_ids              = Column(_NZ_JSON, nullable=True)
+    payload              = Column(_NZ_JSON, nullable=False)
+    payload_hash         = Column(String(64), nullable=False)
+    idempotency_key      = Column(String(64), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    corrects_id          = Column(Integer, ForeignKey("payroll_pl_filings.id", ondelete="SET NULL"), nullable=True)
+    previous_version_id  = Column(Integer, ForeignKey("payroll_pl_filings.id", ondelete="SET NULL"), nullable=True)
+    submission_ref       = Column(String(100), nullable=True)
+    receipt_ref          = Column(String(100), nullable=True)
+    rejection            = Column(_NZ_JSON, nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    submitted_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at         = Column(DateTime(timezone=True), nullable=True)
+    responded_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("authority IN ('ZUS', 'KAS')", name="ck_pl_filing_authority"),
+        sa.CheckConstraint(f"form_code IN {_nz_in(_PL_FILING_FORMS)}", name="ck_pl_filing_form"),
+        sa.CheckConstraint("kind IN ('ORIGINAL', 'CORRECTION')", name="ck_pl_filing_kind"),
+        sa.CheckConstraint(f"status IN {_nz_in(_PL_FILING_STATUSES)}", name="ck_pl_filing_status"),
+        sa.CheckConstraint("kind <> 'CORRECTION' OR corrects_id IS NOT NULL", name="ck_pl_filing_correction"),
+        sa.CheckConstraint("status IN ('DRAFT', 'SUPERSEDED') OR (approved_by_id IS NOT NULL AND "
+                           "schema_version IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_pl_filing_four_eyes"),
+        sa.CheckConstraint("status NOT IN ('SUBMITTED', 'ACCEPTED', 'REJECTED', 'CORRECTED') OR "
+                           "submission_ref IS NOT NULL", name="ck_pl_filing_submission"),
+        Index("ix_pl_filing_period", "organization_id", "form_code", "period_key"),
+        Index("uq_pl_filing_idempotency", "idempotency_key", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlFiling {self.form_code} {self.period_key} v{self.version} {self.kind} {self.status}>"
+
+
+class PayrollPlSettlement(Base):
+    """Poland liability for one legal employer, liability (ZUS / PIT / PPK) and
+    month (spec §10 Settlement; migration e75b9219e1f8). amount_due comes from
+    the PAID payslips; payments are recorded by hand, each with its own
+    reference (a repeated reference is the same payment, PL-020). A filing's
+    acceptance never marks a liability paid."""
+    __tablename__ = "payroll_pl_settlements"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    liability_type       = Column(String(4), nullable=False)
+    period_key           = Column(String(7), nullable=False)
+    settlement_key       = Column(String(80), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    amount_due           = Column(Numeric(14, 2), nullable=False)
+    paid_amount          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    payments             = Column(_NZ_JSON, nullable=True)
+    run_ids              = Column(_NZ_JSON, nullable=True)
+    components           = Column(_NZ_JSON, nullable=True)
+    status               = Column(String(10), nullable=False, default="DUE", server_default="DUE")
+    reconciled_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reconciled_at        = Column(DateTime(timezone=True), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("liability_type IN ('ZUS', 'PIT', 'PPK')", name="ck_pl_settlement_liability"),
+        sa.CheckConstraint("status IN ('DUE', 'PART_PAID', 'PAID', 'OVERPAID', 'RECONCILED')",
+                           name="ck_pl_settlement_status"),
+        sa.CheckConstraint("amount_due >= 0 AND paid_amount >= 0", name="ck_pl_settlement_amounts"),
+        sa.CheckConstraint("status <> 'RECONCILED' OR reconciled_by_id IS NOT NULL",
+                           name="ck_pl_settlement_reconciled"),
+        Index("uq_pl_settlement_key", "settlement_key", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlSettlement {self.liability_type} {self.period_key} {self.amount_due} {self.status}>"
+
+
+class PayrollPlReconciliationVariance(Base):
+    """An unexplained difference between a Poland liability and what was paid
+    (migration e75b9219e1f8); resolved only by a second person with a reason."""
+    __tablename__ = "payroll_pl_reconciliation_variances"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    settlement_id        = Column(Integer, ForeignKey("payroll_pl_settlements.id", ondelete="CASCADE"), nullable=False,
+                                  index=True)
+    variance_kind        = Column(String(24), nullable=False)
+    expected_amount      = Column(Numeric(14, 2), nullable=False)
+    actual_amount        = Column(Numeric(14, 2), nullable=False)
+    difference           = Column(Numeric(14, 2), nullable=False)
+    status               = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    resolution           = Column(String(300), nullable=True)
+    raised_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("variance_kind IN ('UNDERPAID', 'OVERPAID', 'CHANGED_AFTER_PAYMENT')",
+                           name="ck_pl_variance_kind"),
+        sa.CheckConstraint("status IN ('OPEN', 'RESOLVED')", name="ck_pl_variance_status"),
+        sa.CheckConstraint("status <> 'RESOLVED' OR (resolved_by_id IS NOT NULL AND resolution IS NOT NULL "
+                           "AND (raised_by_id IS NULL OR resolved_by_id <> raised_by_id))",
+                           name="ck_pl_variance_four_eyes"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlReconciliationVariance settlement={self.settlement_id} {self.difference} {self.status}>"

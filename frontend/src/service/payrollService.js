@@ -3168,3 +3168,19 @@ export const getPlAnnualCap = async (employeeId, year) =>
 export const getPlLeaveEntitlement = async (employeeId, asOf) =>
   plOne(await api.get(`${PL}/employees/${employeeId}/leave-entitlement`, { params: { asOf } }));
 export const getPlRunPreflight = async (runId) => plList(await api.get(`${PL}/runs/${runId}/preflight`));
+// Poland Phase 8 — filing payloads (no live transport, PL-021), settlements, journal.
+export const listPlFilings = async (params = {}) => plList(await api.get(`${PL}/filings`, { params }));
+export const getPlFiling = async (id) => plOne(await api.get(`${PL}/filings/${id}`));
+export const rebuildPlRunFilings = async (runId) => plList(await api.post(`${PL}/filings/rebuild/${runId}`, {}));
+export const buildPlAnnualFilings = async (year, legalEntityId) =>
+  plList(await api.post(`${PL}/filings/annual`, { year, legalEntityId }));
+export const buildPlRegistrationFiling = (body) => api.post(`${PL}/filings/registration`, body);
+export const approvePlFiling = (id) => api.post(`${PL}/filings/${id}/approve`, {});
+export const recordPlFilingSubmission = (id, submissionRef) => api.post(`${PL}/filings/${id}/submission`, { submissionRef });
+export const recordPlFilingResponse = (id, body) => api.post(`${PL}/filings/${id}/response`, body);
+export const listPlSettlements = async (params = {}) => plList(await api.get(`${PL}/settlements`, { params }));
+export const recordPlSettlementPayment = (id, body) => api.post(`${PL}/settlements/${id}/payments`, body);
+export const reconcilePlSettlement = async (id) => plOne(await api.post(`${PL}/settlements/${id}/reconcile`, {}));
+export const listPlVariances = async (params = {}) => plList(await api.get(`${PL}/variances`, { params }));
+export const resolvePlVariance = (id, reason) => api.post(`${PL}/variances/${id}/resolve`, { reason });
+export const getPlRunJournal = async (runId) => plOne(await api.get(`${PL}/runs/${runId}/journal`));
