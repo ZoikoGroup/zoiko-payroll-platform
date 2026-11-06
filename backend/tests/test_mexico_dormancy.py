@@ -95,6 +95,9 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     # Recibo de nómina v2.0 — payslip view, duplicate, pay history
     ("GET", "/payslips/1/recibo"), ("GET", "/payslips/1/recibo/duplicate"),
     ("GET", "/employees/1/pay-history?start=2026-01-01&end=2026-12-31"),
+    # CFDI lifecycle L2-L4 — envelope, stamped XML, publish, delivery, access log, lifecycle
+    ("GET", "/cfdi/documents/1/envelope"), ("GET", "/cfdi/documents/1/xml"), ("POST", "/cfdi/documents/1/publish"),
+    ("POST", "/cfdi/documents/1/delivery"), ("GET", "/cfdi/documents/1/access-log"), ("GET", "/payslips/1/lifecycle"),
 ]
 
 

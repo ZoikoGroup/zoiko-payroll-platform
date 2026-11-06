@@ -10293,6 +10293,25 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/access-log",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "access-log",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/mexico/cfdi/documents/{document_id}/cancel",
    "data_class": "worker",
@@ -10329,6 +10348,72 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/delivery",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "delivery",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/envelope",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "envelope",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payroll_mx_run_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/publish",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "publish",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/mexico/cfdi/documents/{document_id}/receipt",
    "data_class": "worker",
@@ -10342,7 +10427,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_mx_cfdi_documents"
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
    ],
    "overridden": false
   },
@@ -10361,6 +10447,25 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/xml",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "xml",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
    ],
    "overridden": false
   },
@@ -10600,6 +10705,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
     "payroll_mx_payment_items",
     "payslip_items"
    ],
@@ -11343,6 +11449,28 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/payslips/{payslip_id}/lifecycle",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "lifecycle",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/payslips/{payslip_id}/recibo",
    "data_class": "worker",
    "action": "read",
@@ -11358,6 +11486,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
     "payroll_mx_payment_items",
     "payslip_items"
    ],
@@ -11380,6 +11509,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
     "payroll_mx_payment_items",
     "payslip_items"
    ],
@@ -11986,6 +12116,7 @@
     "payroll_mx_imss_branch_lines",
     "payroll_mx_imss_movements",
     "payroll_mx_isn_liabilities",
+    "payroll_mx_payment_items",
     "payroll_mx_ptu_allocations",
     "payroll_mx_run_corrections",
     "payroll_mx_sbc_history",
@@ -14905,6 +15036,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
     "payroll_mx_payment_items",
     "payroll_personal_data_access_events",
     "payslip_items"
@@ -15625,6 +15757,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
     "payroll_mx_payment_items",
     "payroll_personal_data_access_events",
     "payslip_items"

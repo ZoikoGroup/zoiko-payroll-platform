@@ -155,7 +155,10 @@ def _stamp_facts(db: Session, doc) -> dict:
     ref = mexico_cfdi_service.stamped_xml_ref(db, doc)
     if not ref:
         return {"uuid": None, "stampedAt": None, "satCertificate": None, "xmlStored": False}
-    cert = mexico_cfdi_receipt.receipt_from_xml(object_storage.read_bytes(ref))["certification"]
+    try:
+        cert = mexico_cfdi_receipt.receipt_from_xml(object_storage.read_bytes(ref))["certification"]
+    except BadRequestException:          # stored, but not a stamped CFDI (no TimbreFiscalDigital)
+        return {"uuid": None, "stampedAt": None, "satCertificate": None, "xmlStored": False}
     return {"uuid": cert.get("UUID"), "stampedAt": cert.get("FechaTimbrado"),
             "satCertificate": cert.get("NoCertificadoSAT"), "xmlStored": True}
 
@@ -332,8 +335,9 @@ def recibo_view(db: Session, item, run, *, duplicate: bool = False) -> dict:
             ribbon += f" · SUSTITUIDO POR {fiscal['replacementUuid']}"
         stamp_word, doc_state = "CFDI cancelado", "CANCELADO"
     elif state == "STAMPED_XML_MISSING":
-        ribbon = "CFDI TIMBRADO · XML TIMBRADO NO DISPONIBLE · DATOS FISCALES NO MOSTRADOS"
-        stamp_word, doc_state = "timbrado (XML no disponible)", "TIMBRADO"
+        # a document row that says STAMPED without a stored, readable stamped XML is never presented as issued
+        ribbon = "ESTADO FISCAL NO VERIFICABLE · SIN XML TIMBRADO ALMACENADO · NO SE PRESENTA COMO EMITIDO"
+        stamp_word, doc_state = "estado fiscal no verificable", "NO VERIFICABLE"
     else:
         ribbon, stamp_word, doc_state = DRAFT_RIBBON, "NO timbrado", "BORRADOR"
     if duplicate:
@@ -365,7 +369,7 @@ def recibo_view(db: Session, item, run, *, duplicate: bool = False) -> dict:
                     f"{stamp_word}",
         "ribbon": ribbon,
         "fiscal": {"state": state, "documentState": doc_state, "label": {"DRAFT": "NO TIMBRADO", "STAMPED": "TIMBRADO",
-                                                                        "STAMPED_XML_MISSING": "TIMBRADO",
+                                                                        "STAMPED_XML_MISSING": "NO VERIFICABLE",
                                                                         "CANCELLED": "CANCELADO"}[state],
                    "cancelRequested": fiscal["cancelRequested"], "replacementUuid": fiscal["replacementUuid"],
                    "current": state != "CANCELLED", "sat": sat},
@@ -433,7 +437,7 @@ def pay_history(db: Session, org_id: int, employee_id: int, start: date, end: da
                     "type": "Extraordinaria" if run_type in EXTRAORDINARY else "Ordinaria", "runType": run_type,
                     "gross": money(item.gross_pay), "deductions": money(item.total_deductions),
                     "net": money(item.net_pay),
-                    "cfdi": {"DRAFT": "NO TIMBRADO", "STAMPED": "TIMBRADO", "STAMPED_XML_MISSING": "TIMBRADO",
+                    "cfdi": {"DRAFT": "NO TIMBRADO", "STAMPED": "TIMBRADO", "STAMPED_XML_MISSING": "NO VERIFICABLE",
                              "CANCELLED": "CANCELADO"}[fiscal["state"]],
                     "payment": payment_state(db, item.id)["label"]})
     employee = db.get(m.PayrollEmployee, employee_id)
