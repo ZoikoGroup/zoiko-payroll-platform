@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronDown, Loader2, RotateCcw, ListTree, Sparkles } from "lucide-react";
+import { X, ArrowLeft, ChevronDown, Loader2, RotateCcw, ListTree, Sparkles } from "lucide-react";
 import { getRunById, getRunItems, getRunLeaveSummary, recalculateEmployeePayslip } from "../../../service/payrollService";
 import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
 import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
-import RunStatusTimeline from "./RunStatusTimeline";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
 import HKRunPreflightPanel from "./HKRunPreflightPanel";
@@ -66,7 +65,7 @@ function fmtDate(v) {
   }
 }
 
-function StatusBadge({ status }) {
+export function StatusBadge({ status }) {
   const map = {
     Draft: "bg-info/10 text-info",
     Review: "bg-warning/10 text-warning",
@@ -423,17 +422,12 @@ function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCount
   );
 }
 
-export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
+export default function RunDetailPanel({ run, onClose, fmtCurrency, onDetailLoaded }) {
   const [detail, setDetail] = useState(null);
   const [items, setItems] = useState([]);
   const [leaveSummary, setLeaveSummary] = useState({});
   const [loading, setLoading] = useState(true);
   const [showAssist, setShowAssist] = useState(false);
-
-  const totalGross = detail?.gross ?? detail?.totalGross ?? run?.gross ?? items.reduce((s, i) => s + (Number(i.salary) || 0), 0);
-  const totalDeductions = detail?.deductions ?? detail?.totalDeductions ?? run?.deductions ?? items.reduce((s, i) => s + (Number(i.totalDeductions) || 0), 0);
-  const totalNet = detail?.net ?? detail?.totalNet ?? run?.net ?? items.reduce((s, i) => s + (Number(i.netPay) || 0), 0);
-  const totalEmployees = detail?.employees ?? run?.employees ?? items.length;
 
   const load = useCallback(async () => {
     if (!run?.id) return;
@@ -447,10 +441,11 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
       setDetail(runDetail);
       setItems(runItems);
       setLeaveSummary(leave || {});
+      onDetailLoaded?.({ runId: run.id, detail: runDetail, items: runItems, leaveSummary: leave || {} });
     } finally {
       setLoading(false);
     }
-  }, [run?.id]);
+  }, [run?.id, onDetailLoaded]);
 
   useEffect(() => {
     load();
@@ -472,13 +467,19 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
   if (!run) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/60" onClick={onClose}>
-      <div
-        className="flex h-full max-h-[96vh] w-full max-w-[96vw] xl:max-w-7xl 2xl:max-w-[1560px] flex-col rounded-2xl bg-surface border border-border shadow-[0_24px_60px_rgba(0,0,0,0.25)] overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-surface">
+    <section className="flex min-h-full flex-col rounded-2xl border border-border bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="flex items-center justify-between border-b border-border bg-surface px-6 py-4">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Back to runs"
+              title="Back to runs"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-foreground-muted hover:bg-surface hover:text-foreground transition-all duration-150 shrink-0"
+            >
+              <ArrowLeft size={14} />
+              <span className="hidden sm:inline">Back</span>
+            </button>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-foreground">
@@ -504,13 +505,6 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               <Sparkles size={14} />
               <span>{showAssist ? "Close Assist" : "Ask Assist"}</span>
             </button>
-            <button
-              onClick={onClose}
-              aria-label="Close panel"
-              className="border border-border bg-surface-muted rounded-[12px] p-2 text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
-            >
-              <X size={16} />
-            </button>
           </div>
         </div>
 
@@ -521,8 +515,6 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
             </div>
           ) : (
             <>
-              <RunStatusTimeline run={detail || run} />
-
               {detail?.attendanceOverrideReason && (
                 <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 mb-5 text-[13px] text-foreground">
                   <strong>Run with incomplete attendance (admin override).</strong> Employees without attendance were paid as present for those days.
@@ -532,25 +524,6 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   </span>
                 </div>
               )}
-
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Employees</p>
-                  <p className="mt-1 text-2xl font-extrabold text-foreground">{totalEmployees}</p>
-                </div>
-                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Gross Earnings</p>
-                  <p className="mt-1 text-2xl font-extrabold text-foreground">{fmtCurrencyLocal(totalGross, fmtCurrency)}</p>
-                </div>
-                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Deductions</p>
-                  <p className="mt-1 text-2xl font-extrabold text-error">{fmtCurrencyLocal(totalDeductions, fmtCurrency)}</p>
-                </div>
-                <div className="rounded-[14px] border border-border bg-surface-muted/60 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Net Salary</p>
-                  <p className="mt-1 text-2xl font-extrabold text-primary">{fmtCurrencyLocal(totalNet, fmtCurrency)}</p>
-                </div>
-              </div>
 
               <div className="bg-surface-muted rounded-[18px] p-5 mb-5">
                 <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-4">Run Information</h4>
@@ -569,6 +542,22 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   <InfoField label="Employees">{detail?.employees ?? items.length}</InfoField>
                 </div>
               </div>
+              <p className="text-[12px] text-foreground-muted mb-2">
+                {run.status === "Draft"
+                  ? "Created. Click the check icon in the Actions column to advance this run to Review when ready."
+                  : run.status === "Review"
+                  ? "Awaiting approval. Click the check icon in the Actions column to open approval (target: Approved)."
+                  : run.status === "Approved"
+                  ? "Approved. Click the check icon in the Actions column to authorize (target: Authorized)."
+                  : run.status === "Authorized"
+                  ? "Authorized. Click the check icon in the Actions column to mark as Paid (target: Paid)."
+                  : run.status === "Paid"
+                  ? "Paid. You can view payroll details and payment information. Click the check icon in the Actions column to close the run when ready (target: Closed)."
+                  : run.status === "Closed"
+                  ? "Completed and closed. No further action needed."
+                  : "No next action available."
+                }
+              </p>
 
               {/* Mixed-country run: the run's own gross/net are a raw sum
                   across currencies, so totals are shown per country only. */}
@@ -710,7 +699,6 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </section>
   );
 }
