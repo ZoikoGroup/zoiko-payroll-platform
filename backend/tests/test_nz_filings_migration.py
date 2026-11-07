@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "dd8a60634320"
@@ -140,7 +141,7 @@ def test_drift_filter_explains():
     finally:
         os.chdir(here)
     # P9 (a8cde2482ef0) is pending on the same chain.
-    assert tables == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} and columns == SHARED
+    assert tables == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} | MX_LIFECYCLE_TABLES and columns == {**SHARED, **MX_LIFECYCLE_COLUMNS}
 
 
 def test_single_child_literal_and_manifest():

@@ -37,6 +37,7 @@ MX_M16_TABLES = {"payroll_mx_onboarding_pauses"}                                
 MX_M17_TABLES = {"payroll_mx_cfdi_system_concepts"}                             # Phase 11a
 MX_M20_TABLES = {"payroll_mx_decisions", "payroll_mx_parallel_imports",           # final mile X1, X4
                  "payroll_mx_parallel_differences"}
+MX_M21_TABLES = {"payroll_mx_document_access_events"}                           # CFDI lifecycle L1-L4 (b5e1c7d9a3f2)
 
 
 def _path(rev):
@@ -75,7 +76,7 @@ def test_models_and_migration_define_the_same_mexico_tables():
     import app.modules.payroll.models  # noqa: F401
 
     model_tables = {t for t in Base.metadata.tables if t.startswith("payroll_mx_")}
-    assert model_tables == MX_TABLES | MX_M2_TABLES | MX_M3_TABLES | MX_M4_TABLES | MX_M5_TABLES | MX_M6_TABLES | MX_M7_TABLES | MX_M8_TABLES | MX_M9_TABLES | MX_M10_TABLES | MX_M11_TABLES | MX_M12_TABLES | MX_M13_TABLES | MX_M14_TABLES | MX_M15_TABLES | MX_M16_TABLES | MX_M17_TABLES | MX_M20_TABLES
+    assert model_tables == MX_TABLES | MX_M2_TABLES | MX_M3_TABLES | MX_M4_TABLES | MX_M5_TABLES | MX_M6_TABLES | MX_M7_TABLES | MX_M8_TABLES | MX_M9_TABLES | MX_M10_TABLES | MX_M11_TABLES | MX_M12_TABLES | MX_M13_TABLES | MX_M14_TABLES | MX_M15_TABLES | MX_M16_TABLES | MX_M17_TABLES | MX_M20_TABLES | MX_M21_TABLES
 
 
 @pytest.fixture()

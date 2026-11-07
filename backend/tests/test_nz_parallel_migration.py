@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "a8cde2482ef0"
@@ -133,7 +134,7 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) and columns == {}
+    assert tables == set(NEW_TABLES) | MX_LIFECYCLE_TABLES and columns == MX_LIFECYCLE_COLUMNS
 
 
 def test_single_child_literal_and_manifest():

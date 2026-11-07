@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "c6ea8c6c35ce"
@@ -137,8 +138,8 @@ def test_drift_filter_explains():
     # Main's Google OAuth chain and P8 (dd8a60634320) are pending on the same head.
     assert tables == set(NEW_TABLES) | {"google_pending", "payroll_nz_filings", "payroll_nz_remittances",
                                         "payroll_nz_remittance_lines", "payroll_nz_settlements",
-                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
-    assert columns == {**SHARED, "users": {"auth_provider", "google_id", "avatar_url"},
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} | MX_LIFECYCLE_TABLES
+    assert columns == {**SHARED, **MX_LIFECYCLE_COLUMNS, "users": {"auth_provider", "google_id", "avatar_url"},
                        "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
 
 

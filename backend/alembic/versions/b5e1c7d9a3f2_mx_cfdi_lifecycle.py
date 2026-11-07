@@ -86,11 +86,29 @@ def upgrade() -> None:
     if _postgres():
         op.execute(sa.text("SET LOCAL lock_timeout = '5s'"))
 
-    for name, type_ in DOC_COLUMNS:
-        if not _has_column(DOCS, name):
-            op.add_column(DOCS, sa.Column(name, type_, nullable=True))
+    # Literal table / column names: scripts/drift_pending_filter reads them from this source.
+    if not _has_column(DOCS, "event_key"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("event_key", sa.String(64), nullable=True))
+    if not _has_column(DOCS, "document_subtype"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("document_subtype", sa.String(40), nullable=True))
+    if not _has_column(DOCS, "state_code"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("state_code", sa.String(10), nullable=True))
+    if not _has_column(DOCS, "snapshot_hash"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("snapshot_hash", sa.String(64), nullable=True))
+    if not _has_column(DOCS, "ruleset_version"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("ruleset_version", sa.String(80), nullable=True))
+    if not _has_column(DOCS, "issuing_cert_token"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("issuing_cert_token", sa.String(64), nullable=True))
+    if not _has_column(DOCS, "document_locale"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("document_locale", sa.String(10), nullable=True))
+    if not _has_column(DOCS, "published_at"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("published_at", sa.DateTime(timezone=True), nullable=True))
+    if not _has_column(DOCS, "delivery_status"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("delivery_status", sa.String(16), nullable=True))
+    if not _has_column(DOCS, "cancel_outcome"):
+        op.add_column("payroll_mx_cfdi_documents", sa.Column("cancel_outcome", sa.String(16), nullable=True))
     if not _has_column(DOCS, "employer_profile_id"):
-        with op.batch_alter_table(DOCS) as batch:          # SQLite: an FK column needs batch mode
+        with op.batch_alter_table("payroll_mx_cfdi_documents") as batch:   # SQLite: an FK column needs batch mode
             batch.add_column(sa.Column("employer_profile_id", sa.Integer(), nullable=True))
             batch.create_foreign_key("fk_mx_cfdi_doc_employer_profile", "payroll_mx_employer_profiles",
                                      ["employer_profile_id"], ["id"], ondelete="RESTRICT")
@@ -106,9 +124,10 @@ def upgrade() -> None:
                         postgresql_where=sa.text(f"event_key IS NOT NULL AND {LIVE}"),
                         sqlite_where=sa.text(f"event_key IS NOT NULL AND {LIVE}"))
 
-    for name in ("effective_from", "effective_to"):
-        if not _has_column(RELEASES, name):
-            op.add_column(RELEASES, sa.Column(name, sa.Date(), nullable=True))
+    if not _has_column(RELEASES, "effective_from"):
+        op.add_column("payroll_mx_cfdi_schema_releases", sa.Column("effective_from", sa.Date(), nullable=True))
+    if not _has_column(RELEASES, "effective_to"):
+        op.add_column("payroll_mx_cfdi_schema_releases", sa.Column("effective_to", sa.Date(), nullable=True))
 
     if not _has_table(ACCESS):
         op.create_table(

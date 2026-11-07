@@ -298,7 +298,8 @@ def test_alembic_heads_is_single_head():
     # 5739c5ccf50c merges the Google OAuth and New Zealand leave-pay heads.
     # dd8a60634320 (New Zealand P8 nz_filings) is the single child of 5739c5ccf50c;
     # a8cde2482ef0 (New Zealand P9 nz_parallel_cycles) is its single child.
-    assert heads == ["a8cde2482ef0"]
+    # b5e1c7d9a3f2 (Mexico CFDI lifecycle) is the single child of a8cde2482ef0.
+    assert heads == ["b5e1c7d9a3f2"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -310,7 +311,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["a8cde2482ef0"]
+    assert list(script.get_heads()) == ["b5e1c7d9a3f2"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -363,7 +364,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 254   # + a8cde2482ef0 (New Zealand P9 nz_parallel_cycles, child of dd8a60634320)
+    assert len(revs) == 255   # + b5e1c7d9a3f2 (Mexico CFDI lifecycle, child of a8cde2482ef0)
 
 
 def test_germany_head_chain_wiring_is_intact():

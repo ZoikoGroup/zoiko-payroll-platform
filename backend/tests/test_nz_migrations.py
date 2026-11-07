@@ -21,6 +21,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "0e697c2388bf"
@@ -206,7 +207,7 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_nz_corrections", "google_pending", "payroll_nz_filings",
                                         "payroll_nz_remittances", "payroll_nz_remittance_lines",
                                         "payroll_nz_settlements", "payroll_nz_run_exceptions",
-                                        "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
+                                        "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} | MX_LIFECYCLE_TABLES
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

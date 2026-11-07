@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "ac08988ecd3a"
@@ -146,8 +147,8 @@ def test_drift_filter_explains():
                                         "payroll_nz_cash_up_requests", "payroll_nz_corrections",
                                         "google_pending", "payroll_nz_filings", "payroll_nz_remittances",
                                         "payroll_nz_remittance_lines", "payroll_nz_settlements",
-                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"}
-    assert columns == {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_options"},
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} | MX_LIFECYCLE_TABLES
+    assert columns == {**MX_LIFECYCLE_COLUMNS, "payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_options"},
                        "payroll_nz_leave_events": {"leave_pay_calculation_id"},
                        "users": {"auth_provider", "google_id", "avatar_url"},
                        "payroll_nz_employer_profiles": {"nz_journal_accounts"}}

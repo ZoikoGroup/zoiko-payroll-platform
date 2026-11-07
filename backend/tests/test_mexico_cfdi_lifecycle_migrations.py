@@ -240,3 +240,17 @@ def test_pg_real_cli_path_and_schema_drift(pg_engine):
     drift = subprocess.run([sys.executable, "-m", "scripts.check_schema_drift"], cwd=BACKEND, env=env,
                            capture_output=True, text=True, timeout=120)
     assert drift.returncode == 0, drift.stdout[-2000:] + drift.stderr[-2000:]
+
+
+def test_deploy_drift_filter_explains_every_object():
+    """scripts/drift_pending_filter reads exactly this migration's table and columns."""
+    from scripts.drift_pending_filter import pending_objects
+    from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES
+
+    here = os.getcwd()
+    os.chdir(BACKEND)
+    try:
+        tables, columns = pending_objects(PARENT)
+    finally:
+        os.chdir(here)
+    assert tables == MX_LIFECYCLE_TABLES and columns == MX_LIFECYCLE_COLUMNS
