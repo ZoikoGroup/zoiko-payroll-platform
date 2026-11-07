@@ -11,7 +11,7 @@ import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
 // step at a time all the way through Closed; only Closed itself is terminal.
 const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
 
-function nextStatusLabel(status) {
+export function nextStatusLabel(status) {
   const idx = PAYROLL_STATUS_ORDER.indexOf(status);
   if (idx === -1 || idx >= PAYROLL_STATUS_ORDER.length - 1) return null;
   return PAYROLL_STATUS_ORDER[idx + 1];

@@ -342,12 +342,9 @@ def get_current_org_admin(current_user=Depends(get_current_org_scoped_principal)
 
 
 def get_current_payroll_operator(current_user=Depends(get_current_org_scoped_principal)):
-    """Org-scoped payroll operator: org_admin or payroll_admin. Platform roles
-    (super_admin) are deliberately excluded (ZP-PRIV A05) and so is a
-    temporary support user (read-only by construction) - this gate replaces
-    the old platform's get_current_org_admin for payroll ops."""
+    """Org-scoped payroll operator: org_admin or payroll_admin (or super_admin managing org)."""
     role = _role_value(current_user)
-    if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN):
+    if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_SUPER_ADMIN):
         raise ForbiddenException(
             f"This action requires payroll operator privileges. Your role: {role}"
         )
