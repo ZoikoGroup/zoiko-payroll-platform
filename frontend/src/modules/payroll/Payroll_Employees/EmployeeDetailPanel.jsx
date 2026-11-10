@@ -1,6 +1,6 @@
 import { MpfAccountReveal } from "../Compliances/HKMpfAccessControls";
 import React, { useEffect, useState } from "react";
-import { X, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
+import { X, ArrowLeft, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
 import { currencyInfoForCountry } from "../../../utils/currency";
 import UKStatutoryPayCalculatorModal from "./UKStatutoryPayCalculatorModal";
@@ -154,9 +154,21 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-border">
-          <h2 className="text-[15px] font-bold text-foreground">
-            {mode === "edit" ? "Edit employee" : employee.name}
-          </h2>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={mode === "edit" ? () => setMode("view") : onClose}
+              aria-label="Back"
+              title="Back"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-foreground-muted hover:bg-surface hover:text-foreground transition-all duration-150 shrink-0"
+            >
+              <ArrowLeft size={13} />
+              <span>Back</span>
+            </button>
+            <h2 className="text-[15px] font-bold text-foreground">
+              {mode === "edit" ? "Edit employee" : employee.name}
+            </h2>
+          </div>
           <button
             onClick={onClose}
             aria-label="Close panel"

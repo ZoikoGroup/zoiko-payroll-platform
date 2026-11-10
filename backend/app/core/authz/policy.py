@@ -308,9 +308,17 @@ def _evaluate(
     ):
         from app.modules.payroll.models import PayrollEmployee
 
+        # Path params are always strings. Convert BEFORE querying: compared
+        # raw, the psycopg 3 dialect binds "139" as ::VARCHAR and PostgreSQL
+        # has no integer = varchar operator, so the query raised and every
+        # {employee_id} route denied with PDP_ERROR (SQLite hid it).
+        try:
+            emp_id = int(path_params["employee_id"])
+        except (TypeError, ValueError):
+            return Decision.deny(OBJECT_NOT_IN_SCOPE, status_code=404, detail="malformed employee_id")
         row = (
             db.query(PayrollEmployee.organization_id)
-            .filter(PayrollEmployee.id == path_params["employee_id"])
+            .filter(PayrollEmployee.id == emp_id)
             .first()
         )
         if row is None or row[0] != principal.organization_id:
@@ -319,10 +327,6 @@ def _evaluate(
         from app.core.authz.scopes import employee_scope
 
         allowed_ids = employee_scope(db, principal)
-        try:
-            emp_id = int(path_params["employee_id"])
-        except (TypeError, ValueError):
-            return Decision.deny(OBJECT_NOT_IN_SCOPE, status_code=404, detail="malformed employee_id")
         if allowed_ids is not None and emp_id not in allowed_ids:
             return Decision.deny(OBJECT_NOT_IN_SCOPE, status_code=404,
                                  detail="employee_id outside principal entity/pay-group scope")

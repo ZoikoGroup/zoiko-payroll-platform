@@ -32585,8 +32585,8 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
         from app.modules.payroll import mexico_run_service as _mx_run
 
         _mx_run.refuse_if_committed(run)
-    if run.status != PayrollStatus.DRAFT:
-        raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft runs can be deleted.")
+    if run.status not in (PayrollStatus.DRAFT, PayrollStatus.REVIEW, "Draft", "Review"):
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft or Review runs can be deleted.")
     if getattr(run, "mx_run_type", None) == "CORRECTION":
         from app.modules.payroll import mexico_correction_service as _mx_corr
 
@@ -32606,6 +32606,11 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     except YtdPostingConflict as exc:
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payroll run: {exc}")
+    # Clean up dependent reports or unlinked foreign references before deleting run
+    try:
+        db.query(GeneratedReport).filter(GeneratedReport.payroll_run_id == run.id).delete(synchronize_session=False)
+    except Exception:
+        pass
     db.delete(run)
     db.commit()
     _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id, run_id=run_id)
