@@ -10431,6 +10431,7 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
+    "payroll_generated_reports",
     "payroll_mx_run_corrections",
     "payroll_ytd_accumulators",
     "payslip_items"
@@ -16414,6 +16415,7 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
+    "payroll_generated_reports",
     "payroll_mx_run_corrections",
     "payroll_ytd_accumulators",
     "payslip_items"
