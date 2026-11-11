@@ -33937,15 +33937,13 @@ def _amount_to_words(amount):
     return result
 
 
-def _register_rupee_font(c):
-    """Attempt to register a Unicode-capable TTF font (regular + bold) so the
-    rupee symbol renders correctly.  Falls back silently to Helvetica if no
-    suitable font is found."""
+def unicode_font_candidates():
+    """(regular, bold) TTF paths that can render the rupee sign and other
+    non-Latin-1 characters, in preference order. Shared by the reportlab
+    payslip PDF and the payslip-template PDF."""
     import os
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
 
-    candidates = [
+    return [
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -33962,7 +33960,17 @@ def _register_rupee_font(c):
          "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
         ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
     ]
-    for regular_path, bold_path in candidates:
+
+
+def _register_rupee_font(c):
+    """Attempt to register a Unicode-capable TTF font (regular + bold) so the
+    rupee symbol renders correctly.  Falls back silently to Helvetica if no
+    suitable font is found."""
+    import os
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    for regular_path, bold_path in unicode_font_candidates():
         if not os.path.isfile(regular_path):
             continue
         try:
@@ -34263,6 +34271,15 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     from reportlab.lib.units import mm
     from reportlab.lib import colors
     from reportlab.pdfgen import canvas
+
+    # Payslip templates: a payslip the organisation shows through its own
+    # template downloads (and is emailed) in that layout. No template, a
+    # payslip a template can't represent, or any template failure -> None,
+    # and the standard statutory PDF below is produced exactly as before.
+    from app.modules.payroll import payslip_template_service as _payslip_templates
+    templated = _payslip_templates.template_pdf_or_none(db, payslip_id, organization_id)
+    if templated is not None:
+        return templated
 
     data, item, run = get_payslip_by_id(db, payslip_id, organization_id)
 

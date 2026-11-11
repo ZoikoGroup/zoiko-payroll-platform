@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, CheckCircle, Code, Copy, Eye, Save, Sliders, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle, Code, Copy, Eye, FileDown, Save, Sliders, X } from "lucide-react";
 import {
+  downloadPayslipTemplateSamplePdf,
   previewPayslipTemplate,
   publishPayslipTemplate,
   updatePayslipTemplate,
@@ -59,6 +60,7 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
   const [dirty, setDirty] = useState(false);
   const [hasDraft, setHasDraft] = useState(initial.status === "Draft");
   const [saving, setSaving] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [doc, setDoc] = useState("");
   const [problem, setProblem] = useState("");
   const [warnings, setWarnings] = useState([]);
@@ -129,6 +131,18 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
     onClose();
   };
 
+  const handleSamplePdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadPayslipTemplateSamplePdf({ htmlContent: html, cssContent: css, configurationJson: config,
+        country: template.country || "IN" });
+    } catch (err) {
+      addToast?.(err.message || "Could not create the sample PDF.", "error");
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
   const copy = (code) => {
     navigator.clipboard?.writeText(code);
     setCopied(code);
@@ -160,6 +174,11 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
               <button type="button" className={tabCls(tab === "html")} onClick={() => setTab("html")}><Code size={13} /> HTML</button>
               <button type="button" className={tabCls(tab === "css")} onClick={() => setTab("css")}># CSS</button>
             </div>
+            <button type="button" onClick={handleSamplePdf} disabled={pdfBusy || !!problem}
+              title="Download this template as a PDF with sample data — what a downloaded payslip will look like"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-border text-[12px] font-semibold text-foreground hover:bg-surface-muted disabled:opacity-50 cursor-pointer">
+              <FileDown size={13} /> {pdfBusy ? "Creating…" : "Sample PDF"}
+            </button>
             <button type="button" onClick={handleSave} disabled={saving || !dirty || !!problem}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-border text-[12px] font-semibold text-foreground hover:bg-surface-muted disabled:opacity-50 cursor-pointer">
               <Save size={13} /> Save draft

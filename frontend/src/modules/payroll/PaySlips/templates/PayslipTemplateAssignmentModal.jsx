@@ -2,11 +2,15 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { assignPayslipTemplate } from "../../../../service/payrollService";
 import { useToast } from "../../ToastContext";
-import { TEMPLATE_COUNTRIES, countryLabel } from "./templateCountries";
+import { countryLabel } from "./templateCountries";
 
-/** Assign a published template to one country or to all countries.
- * `request` is null (closed) or { templateId? }. */
-export default function PayslipTemplateAssignmentModal({ request, templates = [], onClose, onAssigned }) {
+/** Assign a published template to this organisation's payslips — all of them,
+ * or (for an organisation that runs payroll in several countries) one of its
+ * own countries. `request` is null (closed) or { templateId? }; `countries`
+ * are the organisation's own payroll countries from the API. */
+export default function PayslipTemplateAssignmentModal({
+  request, templates = [], countries = [], singleCountry = true, onClose, onAssigned,
+}) {
   const { addToast } = useToast();
   // Remounted per request (key in the dashboard), so props seed the state.
   const [templateId, setTemplateId] = useState(String(request?.templateId || templates[0]?.id || ""));
@@ -15,14 +19,15 @@ export default function PayslipTemplateAssignmentModal({ request, templates = []
 
   if (!request) return null;
   const chosen = templates.find((t) => String(t.id) === templateId);
+  const target = singleCountry ? "all payslips" : countryLabel(country, countries);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!chosen) return;
     setSaving(true);
     try {
-      const res = await assignPayslipTemplate(chosen.id, country);
-      addToast?.(`${countryLabel(country)} now uses "${chosen.name}".`, "success");
+      const res = await assignPayslipTemplate(chosen.id, singleCountry ? "ALL" : country);
+      addToast?.(`"${chosen.name}" is now used for ${target}.`, "success");
       onAssigned?.(res);
       onClose();
     } catch (err) {
@@ -38,7 +43,7 @@ export default function PayslipTemplateAssignmentModal({ request, templates = []
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-surface border border-border rounded-[18px] shadow-2xl w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h3 className="text-[15px] font-bold text-foreground">Assign payslip template</h3>
+          <h3 className="text-[15px] font-bold text-foreground">Use a payslip template</h3>
           <button type="button" onClick={onClose} aria-label="Close"
             className="p-1.5 rounded-[10px] text-foreground-muted hover:bg-surface-muted hover:text-foreground cursor-pointer">
             <X size={18} />
@@ -53,24 +58,36 @@ export default function PayslipTemplateAssignmentModal({ request, templates = []
               ))}
             </select>
           </label>
-          <label className="block">
-            <span className="block text-[11px] font-semibold text-foreground-muted mb-1">Use for</span>
-            <select value={country} onChange={(e) => setCountry(e.target.value)} className={field}>
-              <option value="ALL">All countries (unless a country has its own)</option>
-              {TEMPLATE_COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
-            </select>
-          </label>
+          {singleCountry ? (
+            <p className="text-[12px] text-foreground">
+              This template will be used for <strong>all of your organisation&apos;s payslips</strong>.
+            </p>
+          ) : (
+            <label className="block">
+              <span className="block text-[11px] font-semibold text-foreground-muted mb-1">
+                Use for (your organisation&apos;s payroll countries)
+              </span>
+              <select value={country} onChange={(e) => setCountry(e.target.value)} className={field}>
+                <option value="ALL">All countries (unless a country has its own)</option>
+                {countries.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name} ({c.code}){c.status === "OVER_LIMIT" ? " — paused on current plan" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <p className="text-[11px] text-foreground-muted">
-            Applies to payslips not yet approved; approved payslips keep the layout they were issued with. A country
-            assignment takes priority over &quot;All countries&quot;. Payslips whose breakdown a template can&apos;t show
-            stay in the standard format.
+            Only your own organisation&apos;s payslips are affected. Applies to payslips not yet approved; approved
+            payslips keep the layout they were issued with.{!singleCountry && " A country's own template takes priority over \"All countries\"."}
+            {" "}Payslips whose breakdown a template can&apos;t show stay in the standard format.
           </p>
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
             <button type="button" onClick={onClose} disabled={saving}
               className="px-4 py-2 rounded-[10px] text-[13px] font-semibold text-foreground-muted hover:bg-surface-muted cursor-pointer">Cancel</button>
             <button type="submit" disabled={saving || !chosen}
               className="px-4 py-2 rounded-[10px] bg-primary text-white text-[13px] font-semibold hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
-              {saving ? "Assigning…" : "Assign"}
+              {saving ? "Saving…" : "Use template"}
             </button>
           </div>
         </form>

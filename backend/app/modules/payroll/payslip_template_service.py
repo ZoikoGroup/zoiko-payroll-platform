@@ -59,179 +59,177 @@ _RECONCILE_TOLERANCE = Decimal("0.01")
 
 # ── Built-in starter layouts ─────────────────────────────────────────────────
 # Fragments (no <html>/<head>/<body>): render_document() wraps them. Colours
-# come from the --ps-primary / --ps-accent variables the wrapper sets from the
-# template's configuration.
+# come from the --ps-primary / --ps-accent variables set from the template's
+# configuration. Table layout and plain CSS only (no flexbox / grid /
+# gradients) so a template renders the same in the browser and in the PDF
+# engine (xhtml2pdf).
 
 _CLASSIC_NAVY_HTML = """<div class="payslip">
-  <header class="ps-header">
-    <div class="ps-company">
-      {% if config.showCompanyLogo and company.logo_data_uri %}<img src="{{ company.logo_data_uri }}" alt="" class="ps-logo">{% endif %}
-      <div>
-        <h1>{{ company.name }}</h1>
-        <p>{{ company.address }}</p>
-        {% if company.tax_id %}<p>Tax ID: {{ company.tax_id }}</p>{% endif %}
-      </div>
-    </div>
-    <div class="ps-period">
-      <div class="ps-badge">PAYSLIP</div>
-      <div class="ps-period-label">{{ payroll.period }}</div>
-      <div class="ps-muted">Pay date: {{ payroll.pay_date }}</div>
-    </div>
-  </header>
+  <table class="ps-header" width="100%"><tr>
+    <td width="62%" valign="top">
+      {% if config.showCompanyLogo and company.logo_data_uri %}<img src="{{ company.logo_data_uri }}" alt="" class="ps-logo" height="48"><br>{% endif %}
+      <h1>{{ company.name }}</h1>
+      <p>{{ company.address }}</p>
+      {% if company.tax_id %}<p>Tax ID: {{ company.tax_id }}</p>{% endif %}
+    </td>
+    <td width="38%" valign="top" align="right">
+      <span class="ps-badge">&nbsp;PAYSLIP&nbsp;</span>
+      <p class="ps-period-label">{{ payroll.period }}</p>
+      <p class="ps-muted">Pay date: {{ payroll.pay_date }}</p>
+    </td>
+  </tr></table>
+  <div class="ps-rule"></div>
 
-  <section class="ps-card ps-grid">
-    <div><span>Employee Name</span><strong>{{ employee.name }}</strong></div>
-    <div><span>Employee ID</span><strong>{{ employee.id }}</strong></div>
-    <div><span>Department</span><strong>{{ employee.department or "-" }}</strong></div>
-    <div><span>Designation</span><strong>{{ employee.designation or "-" }}</strong></div>
-    <div><span>Date of Joining</span><strong>{{ employee.date_of_joining or "-" }}</strong></div>
-    <div><span>Payable / Working Days</span><strong>{{ payroll.payable_days or "-" }} / {{ payroll.total_days or "-" }}</strong></div>
-    {% for ident in employee.identifiers %}
-    <div><span>{{ ident.label }}</span><strong>{{ ident.value or "-" }}</strong></div>
-    {% endfor %}
-    {% if config.showEmployeeBank %}
-    <div><span>Bank</span><strong>{{ employee.bank_name or "-" }}</strong></div>
-    <div><span>Account</span><strong>{{ employee.bank_account or "-" }}</strong></div>
-    {% endif %}
-  </section>
+  {% set details = [
+    {"label": "Employee Name", "value": employee.name},
+    {"label": "Employee ID", "value": employee.id},
+    {"label": "Department", "value": employee.department},
+    {"label": "Designation", "value": employee.designation},
+    {"label": "Date of Joining", "value": employee.date_of_joining},
+    {"label": "Payable / Working Days", "value": (payroll.payable_days or "-") ~ " / " ~ (payroll.total_days or "-")}
+  ] + employee.identifiers + ([{"label": "Bank", "value": employee.bank_name},
+                               {"label": "Account", "value": employee.bank_account}] if config.showEmployeeBank else []) %}
+  <table class="ps-details" width="100%">
+    {% for row in details | batch(3, {"label": "", "value": ""}) %}<tr>
+      {% for f in row %}<td width="33%"><span class="ps-label">{{ f.label }}</span><br><strong>{{ f.value or ("-" if f.label else "") }}</strong></td>{% endfor %}
+    </tr>{% endfor %}
+  </table>
 
-  <div class="ps-tables">
-    <section class="ps-table">
-      <div class="ps-table-head"><span>EARNINGS</span><span>{{ currency.code }}</span></div>
-      {% for line in earnings %}<div class="ps-row"><span>{{ line.label }}</span><span>{{ line.amount_formatted }}</span></div>{% endfor %}
-      <div class="ps-table-foot"><span>Gross Earnings</span><span>{{ totals.gross_pay_formatted }}</span></div>
-    </section>
-    <section class="ps-table">
-      <div class="ps-table-head"><span>DEDUCTIONS</span><span>{{ currency.code }}</span></div>
-      {% for line in deductions %}<div class="ps-row"><span>{{ line.label }}</span><span>{{ line.amount_formatted }}</span></div>{% endfor %}
-      <div class="ps-table-foot"><span>Total Deductions</span><span>{{ totals.total_deductions_formatted }}</span></div>
-    </section>
-  </div>
+  <table class="ps-split" width="100%"><tr>
+    <td width="49%" valign="top">
+      <table class="ps-table" width="100%">
+        <tr><th align="left">EARNINGS</th><th align="right">{{ currency.code }}</th></tr>
+        {% for line in earnings %}<tr><td>{{ line.label }}</td><td align="right">{{ line.amount_formatted }}</td></tr>{% endfor %}
+        <tr class="ps-foot"><td>Gross Earnings</td><td align="right">{{ totals.gross_pay_formatted }}</td></tr>
+      </table>
+    </td>
+    <td width="2%"></td>
+    <td width="49%" valign="top">
+      <table class="ps-table" width="100%">
+        <tr><th align="left">DEDUCTIONS</th><th align="right">{{ currency.code }}</th></tr>
+        {% for line in deductions %}<tr><td>{{ line.label }}</td><td align="right">{{ line.amount_formatted }}</td></tr>{% endfor %}
+        <tr class="ps-foot"><td>Total Deductions</td><td align="right">{{ totals.total_deductions_formatted }}</td></tr>
+      </table>
+    </td>
+  </tr></table>
 
-  <section class="ps-net">
-    <div>
-      <div class="ps-net-title">NET PAY</div>
-      {% if config.showNetInWords %}<div class="ps-net-words">{{ totals.net_pay_in_words }}</div>{% endif %}
-    </div>
-    <div class="ps-net-amount">{{ totals.net_pay_formatted }}</div>
-  </section>
+  <table class="ps-net" width="100%"><tr>
+    <td valign="middle"><span class="ps-net-title">NET PAY</span>{% if config.showNetInWords %}<br><span class="ps-net-words">{{ totals.net_pay_in_words }}</span>{% endif %}</td>
+    <td valign="middle" align="right" class="ps-net-amount">{{ totals.net_pay_formatted }}</td>
+  </tr></table>
 
-  <footer class="ps-footer">
-    <p>{{ disclaimer }}</p>
-    <div><span>Payslip {{ payroll.payslip_number or "" }}</span><span>Generated {{ generated_on }}</span></div>
-  </footer>
+  <table class="ps-footer" width="100%">
+    <tr><td colspan="2" align="center">{{ disclaimer }}</td></tr>
+    <tr><td>Payslip {{ payroll.payslip_number }}</td><td align="right">Generated {{ generated_on }}</td></tr>
+  </table>
 </div>"""
 
-_CLASSIC_NAVY_CSS = """* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Arial, Helvetica, sans-serif; color: #1e293b; background: #fff; font-size: 12px; line-height: 1.5; }
-.payslip { max-width: 820px; margin: 0 auto; padding: 28px; }
-.ps-header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 16px; border-bottom: 2px solid var(--ps-primary); margin-bottom: 18px; }
-.ps-company { display: flex; gap: 14px; align-items: center; }
-.ps-company h1 { font-size: 18px; color: var(--ps-primary); }
-.ps-company p, .ps-muted { font-size: 11px; color: #64748b; }
-.ps-logo { max-height: 52px; max-width: 140px; }
-.ps-period { text-align: right; }
-.ps-badge { display: inline-block; background: var(--ps-primary); color: #fff; font-weight: 700; padding: 3px 12px; border-radius: 4px; letter-spacing: .08em; }
-.ps-period-label { font-weight: 700; margin-top: 6px; }
-.ps-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-bottom: 18px; }
-.ps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 18px; }
-.ps-grid span { display: block; font-size: 10px; color: #64748b; }
-.ps-grid strong { font-size: 11px; }
-.ps-tables { display: flex; gap: 18px; margin-bottom: 18px; }
-.ps-table { flex: 1; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; }
-.ps-table-head, .ps-table-foot, .ps-row { display: flex; justify-content: space-between; padding: 6px 12px; }
-.ps-table-head { background: var(--ps-primary); color: #fff; font-weight: 700; font-size: 11px; }
-.ps-table-foot { background: #f1f5f9; border-top: 1px solid #cbd5e1; font-weight: 700; }
-.ps-row:nth-child(even) { background: #f8fafc; }
-.ps-net { display: flex; justify-content: space-between; align-items: center; background: var(--ps-primary); color: #fff; border-radius: 6px; padding: 14px 18px; margin-bottom: 18px; }
-.ps-net-title { font-weight: 700; letter-spacing: .05em; }
-.ps-net-words { font-size: 11px; opacity: .85; font-style: italic; }
-.ps-net-amount { font-size: 22px; font-weight: 800; color: var(--ps-accent); }
-.ps-footer { border-top: 1px solid #e2e8f0; padding-top: 12px; color: #94a3b8; font-size: 10px; text-align: center; }
-.ps-footer div { display: flex; justify-content: space-between; margin-top: 6px; }
-@media print { .payslip { padding: 0; } }"""
+_CLASSIC_NAVY_CSS = """body { font-family: Arial, Helvetica, sans-serif; color: #1e293b; background-color: #ffffff; font-size: 10pt; margin: 0; }
+.payslip { max-width: 820px; margin: 0 auto; padding: 24px; }
+table { border-collapse: collapse; }
+p { margin: 0; }
+h1 { font-size: 16pt; color: var(--ps-primary); margin: 0 0 2px 0; }
+.ps-header p, .ps-muted { font-size: 8.5pt; color: #64748b; }
+.ps-logo { max-height: 48px; }
+.ps-badge { background-color: var(--ps-primary); color: #ffffff; font-weight: bold; font-size: 10pt; padding: 3px 10px; }
+.ps-period-label { font-weight: bold; font-size: 11pt; margin-top: 6px; }
+.ps-rule { border-bottom: 2px solid var(--ps-primary); margin: 10px 0 14px 0; }
+.ps-details { background-color: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 14px; }
+.ps-details td { padding: 6px 10px; vertical-align: top; font-size: 9pt; }
+.ps-label { font-size: 7.5pt; color: #64748b; }
+.ps-split { margin-bottom: 14px; }
+.ps-table { border: 1px solid #cbd5e1; }
+.ps-table th { background-color: var(--ps-primary); color: #ffffff; font-size: 8.5pt; padding: 6px 8px; }
+.ps-table td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #f1f5f9; }
+.ps-foot td { background-color: #f1f5f9; font-weight: bold; border-top: 1px solid #cbd5e1; }
+.ps-net { background-color: var(--ps-primary); color: #ffffff; margin-bottom: 14px; }
+.ps-net td { padding: 10px 14px; }
+.ps-net-title { font-weight: bold; font-size: 10pt; }
+.ps-net-words { font-size: 8.5pt; font-style: italic; }
+.ps-net-amount { font-size: 16pt; font-weight: bold; color: var(--ps-accent); }
+.ps-footer { border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 8pt; }
+.ps-footer td { padding-top: 6px; }"""
 
 _MODERN_EMERALD_HTML = """<div class="payslip">
   <div class="ps-bar"></div>
-  <header class="ps-header">
-    <div class="ps-company">
-      {% if config.showCompanyLogo and company.logo_data_uri %}<img src="{{ company.logo_data_uri }}" alt="" class="ps-logo">{% endif %}
-      <div>
-        <h1>{{ company.name }}</h1>
-        <p>{{ company.address }}{% if company.tax_id %} &middot; Tax ID: {{ company.tax_id }}{% endif %}</p>
-      </div>
-    </div>
-    <div class="ps-period">
-      <span class="ps-tag">PAYSLIP</span>
+  <table class="ps-header" width="100%"><tr>
+    <td width="62%" valign="top">
+      {% if config.showCompanyLogo and company.logo_data_uri %}<img src="{{ company.logo_data_uri }}" alt="" class="ps-logo" height="44"><br>{% endif %}
+      <h1>{{ company.name }}</h1>
+      <p>{{ company.address }}{% if company.tax_id %} &middot; Tax ID: {{ company.tax_id }}{% endif %}</p>
+    </td>
+    <td width="38%" valign="top" align="right">
+      <span class="ps-tag">&nbsp;PAYSLIP&nbsp;</span>
       <h2>{{ payroll.period }}</h2>
       <p>Payment date: {{ payroll.pay_date }}</p>
-    </div>
-  </header>
+    </td>
+  </tr></table>
 
-  <div class="ps-employee">
-    <div><span>EMPLOYEE</span><strong>{{ employee.name }}</strong></div>
-    <div><span>EMPLOYEE ID</span><strong>{{ employee.id }}</strong></div>
-    <div><span>DEPARTMENT</span><strong>{{ employee.department or "-" }}</strong></div>
-    <div><span>DESIGNATION</span><strong>{{ employee.designation or "-" }}</strong></div>
-    {% for ident in employee.identifiers %}
-    <div><span>{{ ident.label | upper }}</span><strong>{{ ident.value or "-" }}</strong></div>
-    {% endfor %}
-    {% if config.showEmployeeBank %}
-    <div><span>BANK ACCOUNT</span><strong>{{ employee.bank_name }} {{ employee.bank_account }}</strong></div>
-    {% endif %}
-  </div>
+  {% set details = [
+    {"label": "Employee", "value": employee.name},
+    {"label": "Employee ID", "value": employee.id},
+    {"label": "Department", "value": employee.department},
+    {"label": "Designation", "value": employee.designation}
+  ] + employee.identifiers + ([{"label": "Bank account", "value": employee.bank_name ~ " " ~ employee.bank_account}]
+                              if config.showEmployeeBank else []) %}
+  <table class="ps-employee" width="100%">
+    {% for row in details | batch(4, {"label": "", "value": ""}) %}<tr>
+      {% for f in row %}<td width="25%"><span class="ps-label">{{ f.label | upper }}</span><br><strong>{{ f.value or ("-" if f.label else "") }}</strong></td>{% endfor %}
+    </tr>{% endfor %}
+  </table>
 
-  <div class="ps-cards">
-    <div class="ps-card">
-      <div class="ps-card-head ps-earn">EARNINGS</div>
-      {% for line in earnings %}<div class="ps-line"><span>{{ line.label }}</span><strong>{{ line.amount_formatted }}</strong></div>{% endfor %}
-      <div class="ps-card-foot"><span>Gross Pay</span><strong>{{ totals.gross_pay_formatted }}</strong></div>
-    </div>
-    <div class="ps-card">
-      <div class="ps-card-head ps-ded">DEDUCTIONS</div>
-      {% for line in deductions %}<div class="ps-line"><span>{{ line.label }}</span><strong>{{ line.amount_formatted }}</strong></div>{% endfor %}
-      <div class="ps-card-foot"><span>Total Deductions</span><strong>{{ totals.total_deductions_formatted }}</strong></div>
-    </div>
-  </div>
+  <table class="ps-split" width="100%"><tr>
+    <td width="49%" valign="top">
+      <table class="ps-table" width="100%">
+        <tr><th class="ps-earn" align="left">EARNINGS</th><th class="ps-earn" align="right">{{ currency.code }}</th></tr>
+        {% for line in earnings %}<tr><td>{{ line.label }}</td><td align="right"><strong>{{ line.amount_formatted }}</strong></td></tr>{% endfor %}
+        <tr class="ps-foot"><td>Gross Pay</td><td align="right">{{ totals.gross_pay_formatted }}</td></tr>
+      </table>
+    </td>
+    <td width="2%"></td>
+    <td width="49%" valign="top">
+      <table class="ps-table" width="100%">
+        <tr><th class="ps-ded" align="left">DEDUCTIONS</th><th class="ps-ded" align="right">{{ currency.code }}</th></tr>
+        {% for line in deductions %}<tr><td>{{ line.label }}</td><td align="right"><strong>{{ line.amount_formatted }}</strong></td></tr>{% endfor %}
+        <tr class="ps-foot"><td>Total Deductions</td><td align="right">{{ totals.total_deductions_formatted }}</td></tr>
+      </table>
+    </td>
+  </tr></table>
 
-  <div class="ps-net">
-    <div>
-      <div class="ps-net-title">NET PAYABLE</div>
-      {% if config.showNetInWords %}<div class="ps-net-words">{{ totals.net_pay_in_words }}</div>{% endif %}
-    </div>
-    <div class="ps-net-amount">{{ totals.net_pay_formatted }}</div>
-  </div>
+  <table class="ps-net" width="100%"><tr>
+    <td valign="middle"><span class="ps-net-title">NET PAYABLE</span>{% if config.showNetInWords %}<br><span class="ps-net-words">{{ totals.net_pay_in_words }}</span>{% endif %}</td>
+    <td valign="middle" align="right" class="ps-net-amount">{{ totals.net_pay_formatted }}</td>
+  </tr></table>
 
-  <footer class="ps-footer">{{ disclaimer }}</footer>
+  <p class="ps-footer">{{ disclaimer }}</p>
 </div>"""
 
-_MODERN_EMERALD_CSS = """* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; background: #fff; font-size: 12px; }
-.payslip { max-width: 820px; margin: 0 auto; padding: 30px; position: relative; }
-.ps-bar { position: absolute; top: 0; left: 0; right: 0; height: 6px; background: linear-gradient(90deg, var(--ps-primary), var(--ps-accent)); }
-.ps-header { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 22px; }
-.ps-company { display: flex; gap: 14px; align-items: center; }
-.ps-company h1 { font-size: 20px; color: var(--ps-primary); }
-.ps-company p, .ps-period p { font-size: 11px; color: #64748b; }
-.ps-logo { max-height: 48px; max-width: 140px; }
-.ps-period { text-align: right; }
-.ps-period h2 { font-size: 15px; margin-top: 4px; }
-.ps-tag { background: #ccfbf1; color: var(--ps-primary); font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
-.ps-employee { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin-bottom: 22px; }
-.ps-employee span { display: block; font-size: 9px; font-weight: 700; color: #94a3b8; letter-spacing: .05em; }
-.ps-employee strong { font-size: 11px; }
-.ps-cards { display: flex; gap: 18px; margin-bottom: 22px; }
-.ps-card { flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
-.ps-card-head { padding: 9px 14px; font-size: 11px; font-weight: 800; letter-spacing: .05em; }
-.ps-earn { background: #f0fdf4; color: #166534; border-bottom: 2px solid #22c55e; }
-.ps-ded { background: #fef2f2; color: #991b1b; border-bottom: 2px solid #ef4444; }
-.ps-line, .ps-card-foot { display: flex; justify-content: space-between; padding: 6px 14px; }
-.ps-card-foot { background: #f8fafc; border-top: 1px solid #e2e8f0; font-weight: 700; }
-.ps-net { display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, var(--ps-primary), var(--ps-accent)); color: #fff; border-radius: 8px; padding: 16px 22px; margin-bottom: 22px; }
-.ps-net-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; }
-.ps-net-words { font-size: 11px; opacity: .85; font-style: italic; margin-top: 4px; }
-.ps-net-amount { font-size: 24px; font-weight: 900; }
-.ps-footer { text-align: center; color: #94a3b8; font-size: 10px; border-top: 1px solid #f1f5f9; padding-top: 12px; }"""
+_MODERN_EMERALD_CSS = """body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; background-color: #ffffff; font-size: 10pt; margin: 0; }
+.payslip { max-width: 820px; margin: 0 auto; padding: 24px; }
+table { border-collapse: collapse; }
+p { margin: 0; }
+.ps-bar { height: 6px; background-color: var(--ps-primary); margin-bottom: 14px; }
+h1 { font-size: 17pt; color: var(--ps-primary); margin: 0 0 2px 0; }
+h2 { font-size: 12pt; margin: 4px 0 0 0; }
+.ps-header p { font-size: 8.5pt; color: #64748b; }
+.ps-logo { max-height: 44px; }
+.ps-tag { background-color: #ccfbf1; color: var(--ps-primary); font-size: 8pt; font-weight: bold; padding: 2px 8px; }
+.ps-employee { background-color: #f8fafc; border: 1px solid #e2e8f0; margin: 14px 0; }
+.ps-employee td { padding: 7px 10px; vertical-align: top; font-size: 9pt; }
+.ps-label { font-size: 7pt; font-weight: bold; color: #94a3b8; }
+.ps-split { margin-bottom: 14px; }
+.ps-table { border: 1px solid #e2e8f0; }
+.ps-table th { padding: 7px 10px; font-size: 8.5pt; }
+.ps-earn { background-color: #f0fdf4; color: #166534; border-bottom: 2px solid #22c55e; }
+.ps-ded { background-color: #fef2f2; color: #991b1b; border-bottom: 2px solid #ef4444; }
+.ps-table td { padding: 5px 10px; font-size: 9pt; }
+.ps-foot td { background-color: #f8fafc; border-top: 1px solid #e2e8f0; font-weight: bold; }
+.ps-net { background-color: var(--ps-primary); color: #ffffff; margin-bottom: 14px; }
+.ps-net td { padding: 12px 16px; }
+.ps-net-title { font-size: 9pt; font-weight: bold; }
+.ps-net-words { font-size: 8.5pt; font-style: italic; }
+.ps-net-amount { font-size: 17pt; font-weight: bold; color: var(--ps-accent); }
+.ps-footer { text-align: center; color: #94a3b8; font-size: 8pt; border-top: 1px solid #f1f5f9; padding-top: 8px; }"""
 
 DEFAULT_CONFIG = {
     "primaryColor": "#1E3A8A",
@@ -252,10 +250,10 @@ STARTERS = {
     },
     "MODERN_EMERALD": {
         "name": "Modern Emerald",
-        "description": "Card-based layout with an emerald accent bar and gradient net pay panel.",
+        "description": "Light layout with an emerald accent bar, four-column employee details and a teal net pay panel.",
         "html": _MODERN_EMERALD_HTML,
         "css": _MODERN_EMERALD_CSS,
-        "configuration": {**DEFAULT_CONFIG, "primaryColor": "#0F766E", "accentColor": "#10B981"},
+        "configuration": {**DEFAULT_CONFIG, "primaryColor": "#0F766E", "accentColor": "#ECFDF5"},
     },
 }
 
@@ -553,16 +551,21 @@ _CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 
         "form-action 'none'; base-uri 'none'")
 
 
-def render_document(fragment: str, css: Optional[str], context: dict, watermark: bool = False) -> str:
-    """Render a template fragment into a complete, self-contained HTML document."""
+def _render_body(fragment: str, context: dict) -> str:
+    """Render a template fragment in the sandbox; 400 on any template error."""
     try:
-        body = _sandbox().from_string(fragment).render(**context)
+        return _sandbox().from_string(fragment).render(**context)
     except SecurityError as exc:
         raise _bad_request(f"Template refused by the sandbox: {exc}")
     except jinja2.TemplateError as exc:
         raise _bad_request(f"Template could not be rendered: {exc}")
     except (TypeError, ValueError, ArithmeticError, AttributeError, KeyError) as exc:
         raise _bad_request(f"Template could not be rendered: {exc}")
+
+
+def render_document(fragment: str, css: Optional[str], context: dict, watermark: bool = False) -> str:
+    """Render a template fragment into a complete, self-contained HTML document."""
+    body = _render_body(fragment, context)
     cfg = context.get("config") or DEFAULT_CONFIG
     variables = f":root {{ --ps-primary: {cfg['primaryColor']}; --ps-accent: {cfg['accentColor']}; }}"
     mark = ""
@@ -578,6 +581,123 @@ def render_document(fragment: str, css: Optional[str], context: dict, watermark:
         f"{'<style>' + mark + '</style>' if mark else ''}"
         f"</head><body>{body}</body></html>"
     )
+
+
+# ── PDF (xhtml2pdf) ──────────────────────────────────────────────────────────
+# xhtml2pdf supports a CSS 2.1 subset: the template's colour variables are
+# substituted, its font-family is replaced by a Unicode TTF (the same files
+# the reportlab payslip uses) so ₹ / Polish letters render, and it may load
+# nothing but those font files and inline data: images — no URL, no file.
+
+_PDF_FONT = "PayslipSans"
+_CSS_VAR = re.compile(r"var\(\s*--ps-(primary|accent)\s*(?:,[^)]*)?\)")
+_FONT_DECL = re.compile(r"font-family\s*:[^;}]*", re.IGNORECASE)
+
+
+class PdfRenderError(Exception):
+    """The PDF engine failed; callers fall back to the standard payslip PDF."""
+
+
+def _font_files() -> Optional[Tuple[str, str]]:
+    import os
+    from app.modules.payroll import service as payroll_service
+    for regular, bold in payroll_service.unicode_font_candidates():
+        if os.path.isfile(regular):
+            return regular, (bold if os.path.isfile(bold) else regular)
+    return None
+
+
+def _pdf_css(css: Optional[str], cfg: dict, has_font: bool) -> str:
+    out = _CSS_VAR.sub(lambda m: cfg["primaryColor"] if m.group(1) == "primary" else cfg["accentColor"], css or "")
+    if has_font:
+        out = _FONT_DECL.sub(f"font-family: {_PDF_FONT}", out)
+    return out.replace("</", "<\\/")
+
+
+def _stamp_evaluation(pdf: bytes) -> bytes:
+    """Overlay the same 'PREVIEW — EVALUATION ONLY' mark the standard PDF uses."""
+    import io
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.pdfgen import canvas
+    from app.modules.payroll import service as payroll_service
+
+    writer = PdfWriter()
+    for page in PdfReader(io.BytesIO(pdf)).pages:
+        width, height = float(page.mediabox.width), float(page.mediabox.height)
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=(width, height))
+        payroll_service._draw_evaluation_watermark(c, width, height)
+        c.save()
+        page.merge_page(PdfReader(io.BytesIO(buf.getvalue())).pages[0])
+        writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _pdf_resource_policy(fonts: Optional[Tuple[str, str]]):
+    """No network at all; local reads confined to the font directory; bounded
+    size, image pixels, element depth and render time."""
+    from pathlib import Path
+    from xhtml2pdf.config.resources import ResourceAccessPolicy
+
+    font_dirs = sorted({str(Path(p).parent) for p in fonts}) if fonts else []
+    return ResourceAccessPolicy(
+        allow_remote=False,
+        allow_private_networks=False,
+        base_dir=Path(font_dirs[0]) if font_dirs else None,
+        extra_roots=tuple(Path(d) for d in font_dirs[1:]),
+        max_local_bytes=4_000_000,          # a 2 MB logo as a data: URI, or a font file
+        max_image_pixels=25_000_000,
+        max_resources=4,
+        max_render_seconds=20,
+        max_document_bytes=2_000_000,
+        max_depth=64,
+    )
+
+
+def html_to_pdf(body_html: str, css: Optional[str], cfg: dict, watermark: bool = False) -> bytes:
+    """A4 PDF of an already-rendered template body."""
+    import io
+    import os
+    from xhtml2pdf import pisa
+
+    fonts = _font_files()
+    allowed = set()
+    face = ""
+    if fonts:
+        regular, bold = (p.replace("\\", "/") for p in fonts)
+        allowed = {os.path.normcase(os.path.normpath(p)) for p in fonts}
+        face = (f'@font-face {{ font-family: {_PDF_FONT}; src: url("{regular}"); }} '
+                f'@font-face {{ font-family: {_PDF_FONT}; src: url("{bold}"); font-weight: bold; }} '
+                f'body {{ font-family: {_PDF_FONT}; }} ')
+    document = (
+        "<html><head><meta charset=\"utf-8\"><style>"
+        "@page { size: A4; margin: 10mm; } " + face + _pdf_css(css, cfg, bool(fonts)) +
+        f"</style></head><body>{body_html}</body></html>"
+    )
+    blocked = []
+
+    def link_callback(uri, rel):
+        if uri.startswith("data:"):
+            return uri
+        if os.path.normcase(os.path.normpath(uri)) in allowed:
+            return uri
+        blocked.append(uri)
+        return ""          # nothing else is ever fetched or read
+
+    buf = io.BytesIO()
+    try:
+        result = pisa.CreatePDF(src=document, dest=buf, encoding="utf-8", link_callback=link_callback,
+                                resource_policy=_pdf_resource_policy(fonts))
+    except Exception as exc:  # noqa: BLE001 — engine failure, never a payroll failure
+        raise PdfRenderError(str(exc)) from exc
+    if result.err or not buf.getvalue():
+        raise PdfRenderError(f"PDF engine reported {result.err} error(s)")
+    if blocked:
+        logger.warning("Payslip template PDF: refused to load %d resource(s)", len(blocked))
+    pdf = buf.getvalue()
+    return _stamp_evaluation(pdf) if watermark else pdf
 
 
 # ── Payslip context ──────────────────────────────────────────────────────────
@@ -828,6 +948,43 @@ def _normalize_scope(country: Optional[str]) -> str:
     return c
 
 
+def org_countries(db: Session, organization_id: int) -> List[dict]:
+    """The countries this organisation runs (or has run) payroll in — its
+    default country first, then its entitled countries, REMOVED ones left
+    out — the same rule the platform uses for country-specific setup
+    (billing.jurisdiction_entitlement.org_payroll_countries). Read-only."""
+    from app.modules.billing import jurisdiction_entitlement as entitlement
+    from app.modules.billing.models import OrganizationJurisdiction
+
+    codes = entitlement.org_payroll_countries(db, organization_id)
+    statuses = dict(db.query(OrganizationJurisdiction.country_code, OrganizationJurisdiction.status).filter(
+        OrganizationJurisdiction.organization_id == organization_id).all())
+    return [{"code": code, "name": entitlement.country_name(code), "status": statuses.get(code, entitlement.ACTIVE)}
+            for code in codes]
+
+
+def _org_scope(db: Session, organization_id: int, country: Optional[str]) -> str:
+    """ALL, or one of the organisation's own countries — never any other."""
+    scope = _normalize_scope(country)
+    if scope == ALL_COUNTRIES:
+        return scope
+    if scope not in {c["code"] for c in org_countries(db, organization_id)}:
+        from app.modules.billing.jurisdiction_entitlement import country_name
+        raise _bad_request(f"Your organisation doesn't run payroll in {country_name(scope)} ({scope}). "
+                           "Choose one of its countries, or All countries.")
+    return scope
+
+
+def _sample_country(db: Optional[Session], organization_id: Optional[int], country: Optional[str]) -> str:
+    """Country for sample-data previews: the requested one if the organisation
+    has it, else its default country, else India."""
+    codes = [c["code"] for c in org_countries(db, organization_id)] if db is not None and organization_id else []
+    wanted = _normalize_scope(country) if country else None
+    if wanted and wanted != ALL_COUNTRIES and (not codes or wanted in codes):
+        return wanted
+    return codes[0] if codes else "IN"
+
+
 def get_template_detail(db: Session, organization_id: int, template_id: int) -> dict:
     t = _get_template(db, organization_id, template_id)
     assigned = sorted(a.jurisdiction_country for a in _assignments(db, organization_id) if a.template_id == t.id)
@@ -842,14 +999,23 @@ def list_templates(db: Session, organization_id: int) -> dict:
     by_template: dict = {}
     for a in assignments:
         by_template.setdefault(a.template_id, []).append(a.jurisdiction_country)
+    countries = org_countries(db, organization_id)
+    codes = {c["code"] for c in countries}
     return {
         "starters": list_starters(),
         "templates": [_template_dict(t, sorted(by_template.get(t.id, []))) for t in templates],
+        # Only this organisation's own countries can be chosen; with one
+        # country there is nothing to choose and the UI hides the picker.
+        "countries": countries,
+        "singleCountry": len(countries) <= 1,
         "assignments": [
             {"country": a.jurisdiction_country, "templateId": a.template_id,
              "templateName": a.template.name if a.template else None,
              "versionId": a.version_id,
-             "versionNumber": a.version.version_number if a.version else None}
+             "versionNumber": a.version.version_number if a.version else None,
+             # A country the organisation no longer runs payroll in: kept so
+             # payslips already issued there keep their layout; can be removed.
+             "countryInactive": a.jurisdiction_country != ALL_COUNTRIES and a.jurisdiction_country not in codes}
             for a in sorted(assignments, key=lambda a: (a.jurisdiction_country != ALL_COUNTRIES, a.jurisdiction_country))
         ],
     }
@@ -888,8 +1054,8 @@ def create_template(db: Session, organization_id: int, actor_id: Optional[int], 
     config = data.get("configurationJson") or (starter or STARTERS["CLASSIC_NAVY"])["configuration"]
     fragment, css, warnings = validate_template(html_content, css_content)
     config = normalize_config(config)
-    country = data.get("country")
-    country = None if not country or _normalize_scope(country) == ALL_COUNTRIES else _normalize_scope(country)
+    country = _org_scope(db, organization_id, data.get("country"))
+    country = None if country == ALL_COUNTRIES else country
 
     t = PayslipTemplate(
         organization_id=organization_id,
@@ -923,8 +1089,8 @@ def update_template(db: Session, organization_id: int, template_id: int, actor_i
     if "description" in data:
         t.description = (data.get("description") or "").strip() or None
     if "country" in data:
-        c = data.get("country")
-        t.jurisdiction_country = None if not c or _normalize_scope(c) == ALL_COUNTRIES else _normalize_scope(c)
+        c = _org_scope(db, organization_id, data.get("country"))
+        t.jurisdiction_country = None if c == ALL_COUNTRIES else c
 
     versions = list(t.versions)
     latest = versions[-1] if versions else None
@@ -999,7 +1165,7 @@ def assign_template(db: Session, organization_id: int, actor_id: Optional[int], 
     active = next((v for v in reversed(list(t.versions)) if v.status == "Active"), None)
     if active is None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Publish the template before assigning it.")
-    scope = _normalize_scope(country)
+    scope = _org_scope(db, organization_id, country)
     a = db.query(PayslipTemplateAssignment).filter(
         PayslipTemplateAssignment.organization_id == organization_id,
         PayslipTemplateAssignment.jurisdiction_country == scope).first()
@@ -1035,10 +1201,24 @@ def archive_template(db: Session, organization_id: int, template_id: int) -> dic
 
 # ── Preview / render ─────────────────────────────────────────────────────────
 
-def preview(html_content: str, css_content: Optional[str], config: Optional[dict], country: Optional[str]) -> dict:
+def preview(html_content: str, css_content: Optional[str], config: Optional[dict], country: Optional[str],
+            db: Optional[Session] = None, organization_id: Optional[int] = None) -> dict:
     fragment, css, warnings = validate_template(html_content, css_content)
-    context = sample_context(country or "IN", config)
+    context = sample_context(_sample_country(db, organization_id, country), config)
     return {"renderedHtml": render_document(fragment, css, context), "warnings": warnings}
+
+
+def preview_pdf(html_content: str, css_content: Optional[str], config: Optional[dict],
+                country: Optional[str], db: Optional[Session] = None,
+                organization_id: Optional[int] = None) -> bytes:
+    """The template as a PDF with sample data — what a downloaded payslip will look like."""
+    fragment, css, _warnings = validate_template(html_content, css_content)
+    context = sample_context(_sample_country(db, organization_id, country), config)
+    try:
+        return html_to_pdf(_render_body(fragment, context), css, context["config"])
+    except PdfRenderError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"This template could not be turned into a PDF: {exc}")
 
 
 def _resolve_version(db: Session, organization_id: int, country: Optional[str]) -> Optional[PayslipTemplateVersion]:
@@ -1055,12 +1235,11 @@ def _resolve_version(db: Session, organization_id: int, country: Optional[str]) 
     return None
 
 
-def render_payslip(db: Session, organization_id: int, payslip_id: int) -> dict:
-    """The payslip rendered through its frozen template version, or (before its
-    run is approved) the org's current assignment. 404 TEMPLATE_NOT_ASSIGNED /
-    409 TEMPLATE_NOT_REPRESENTABLE tell the UI to show the statutory payslip."""
-    from app.modules.payroll import service as payroll_service
-
+def _payslip_template(db: Session, organization_id: int, payslip_id: int):
+    """(item, version, frozen, context) for a payslip shown through a template:
+    its frozen version, or (before its run is approved) the org's current
+    assignment. 404 TEMPLATE_NOT_ASSIGNED / 409 TEMPLATE_NOT_REPRESENTABLE mean
+    the standard statutory payslip is used instead."""
     item = db.query(PayslipItem).filter(
         PayslipItem.id == payslip_id, PayslipItem.organization_id == organization_id).first()
     if item is None:
@@ -1082,6 +1261,14 @@ def render_payslip(db: Session, organization_id: int, payslip_id: int) -> dict:
     except NotRepresentable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             detail={"code": "TEMPLATE_NOT_REPRESENTABLE", "message": str(exc)})
+    return item, version, frozen, context
+
+
+def render_payslip(db: Session, organization_id: int, payslip_id: int) -> dict:
+    """The payslip rendered through its template, for the on-screen view."""
+    from app.modules.payroll import service as payroll_service
+
+    item, version, frozen, context = _payslip_template(db, organization_id, payslip_id)
     watermark = payroll_service._is_evaluation_workspace(db, organization_id)
     return {
         "renderedHtml": render_document(version.html_content, version.css_content, context, watermark=watermark),
@@ -1094,6 +1281,40 @@ def render_payslip(db: Session, organization_id: int, payslip_id: int) -> dict:
             "frozen": frozen,
         },
     }
+
+
+def render_payslip_pdf(db: Session, organization_id: int, payslip_id: int) -> bytes:
+    """The payslip as a PDF in its template's layout (same rules as render_payslip)."""
+    from app.modules.payroll import service as payroll_service
+
+    _item, version, _frozen, context = _payslip_template(db, organization_id, payslip_id)
+    watermark = payroll_service._is_evaluation_workspace(db, organization_id)
+    body = _render_body(version.html_content, context)
+    return html_to_pdf(body, version.css_content, context["config"], watermark=watermark)
+
+
+def template_pdf_or_none(db: Session, payslip_id: int, organization_id: Optional[int]) -> Optional[bytes]:
+    """For service.generate_payslip_pdf_bytes: the template PDF, or None to use
+    the standard PDF. Never raises — a template problem must not stop a payslip
+    being downloaded or emailed — and runs in a savepoint so a failed query
+    cannot poison the caller's transaction."""
+    try:
+        with db.begin_nested():
+            query = db.query(PayslipItem.organization_id).filter(PayslipItem.id == payslip_id)
+            if organization_id is not None:
+                query = query.filter(PayslipItem.organization_id == organization_id)
+            row = query.first()
+            if row is None:
+                return None
+            return render_payslip_pdf(db, row[0], payslip_id)
+    except HTTPException as exc:
+        if exc.status_code not in (status.HTTP_404_NOT_FOUND, status.HTTP_409_CONFLICT):
+            logger.warning("Payslip %s: template PDF unavailable (%s); using the standard PDF",
+                           payslip_id, exc.detail)
+        return None
+    except Exception:  # noqa: BLE001
+        logger.exception("Payslip %s: template PDF failed; using the standard PDF", payslip_id)
+        return None
 
 
 # ── Freezing at approval ─────────────────────────────────────────────────────

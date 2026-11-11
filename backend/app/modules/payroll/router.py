@@ -2274,14 +2274,30 @@ def create_payslip_template(payload: dict = Body(...), db: Session = Depends(get
     "/payslip-templates/preview", summary="Render template HTML/CSS with sample data",
     dependencies=[Depends(get_current_payroll_operator)],
 )
-def preview_payslip_template(payload: dict = Body(...), current_user=Depends(get_current_user)):
+def preview_payslip_template(payload: dict = Body(...), db: Session = Depends(get_db),
+                             current_user=Depends(get_current_user)):
     from app.modules.payroll import payslip_template_service as tpl
     return tpl.preview(payload.get("htmlContent") or "", payload.get("cssContent"),
-                       payload.get("configurationJson"), payload.get("country"))
+                       payload.get("configurationJson"), payload.get("country"),
+                       db=db, organization_id=current_user.organization_id)
 
 
 @payroll_router.post(
-    "/payslip-templates/import", summary="Import an HTML payslip template file",
+    "/payslip-templates/preview-pdf", summary="Template HTML/CSS as a PDF with sample data",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def preview_payslip_template_pdf(payload: dict = Body(...), db: Session = Depends(get_db),
+                                 current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    pdf = tpl.preview_pdf(payload.get("htmlContent") or "", payload.get("cssContent"),
+                          payload.get("configurationJson"), payload.get("country"),
+                          db=db, organization_id=current_user.organization_id)
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": 'attachment; filename="sample-payslip.pdf"'})
+
+
+@payroll_router.post(
+    "/payslip-templates/import", summary="Import an HTML or Word (.docx) payslip template file",
     status_code=status.HTTP_201_CREATED, dependencies=_TPL_WRITE,
 )
 async def import_payslip_template(
@@ -2294,18 +2310,59 @@ async def import_payslip_template(
     current_user=Depends(get_current_user),
 ):
     from fastapi import HTTPException
+    from app.modules.payroll import payslip_template_import as importer
     from app.modules.payroll import payslip_template_service as tpl
-    raw = await file.read(tpl.MAX_HTML_BYTES + 1)
-    if len(raw) > tpl.MAX_HTML_BYTES:
+    filename = (file.filename or "").lower()
+    raw = await file.read(importer.MAX_DOCX_BYTES + 1)
+    data = {"name": name, "code": code, "description": description, "country": country,
+            "changeSummary": f"Imported from {file.filename or 'file'}"}
+    notes = []
+    if filename.endswith(".pdf") or raw[:5] == b"%PDF-":
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            detail=f"The file is larger than {tpl.MAX_HTML_BYTES // 1000} KB.")
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The file must be UTF-8 encoded HTML.")
+                            detail="PDF files are imported with 'Import PDF', which builds a template from the design.")
+    if filename.endswith(".docx") or raw[:2] == b"PK":
+        converted = importer.docx_to_template(raw)
+        data.update(htmlContent=converted["htmlContent"], cssContent=converted["cssContent"])
+        notes = converted["notes"]
+    else:
+        if len(raw) > tpl.MAX_HTML_BYTES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                detail=f"The file is larger than {tpl.MAX_HTML_BYTES // 1000} KB.")
+        try:
+            data.update(htmlContent=raw.decode("utf-8-sig"), cssContent="")
+        except UnicodeDecodeError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The file must be UTF-8 encoded HTML or a .docx.")
+    created = tpl.create_template(db, current_user.organization_id, current_user.id, data)
+    created["warnings"] = notes + created.get("warnings", [])
+    return created
+
+
+@payroll_router.post(
+    "/payslip-templates/import-pdf/analyze",
+    summary="Read a PDF payslip and suggest a template (nothing is stored)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+async def analyze_payslip_pdf(file: UploadFile = File(...), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_import as importer
+    raw = await file.read(importer.MAX_PDF_BYTES + 1)
+    return importer.analyze_pdf(raw)
+
+
+@payroll_router.post(
+    "/payslip-templates/import-pdf/create",
+    summary="Create a draft template from a confirmed PDF analysis",
+    status_code=status.HTTP_201_CREATED, dependencies=_TPL_WRITE,
+)
+def create_payslip_template_from_pdf(payload: dict = Body(...), db: Session = Depends(get_db),
+                                     current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_import as importer
+    from app.modules.payroll import payslip_template_service as tpl
+    built = importer.build_from_analysis(payload.get("analysis") or {})
     return tpl.create_template(db, current_user.organization_id, current_user.id, {
-        "name": name, "code": code, "description": description, "country": country,
-        "htmlContent": text, "cssContent": "", "changeSummary": f"Imported from {file.filename or 'file'}",
+        "name": payload.get("name") or "Imported from PDF",
+        "description": payload.get("description") or "Built from an uploaded PDF payslip design.",
+        "changeSummary": "Built from an uploaded PDF payslip",
+        **built,
     })
 
 

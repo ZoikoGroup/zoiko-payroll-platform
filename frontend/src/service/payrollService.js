@@ -3210,3 +3210,28 @@ export const unassignPayslipTemplate = (country) =>
   api.delete(`${PST}/assignments/${encodeURIComponent(country || "ALL")}`);
 // 404 (no template assigned) / 409 (payslip not representable) -> show the standard payslip.
 export const getPayslipRenderedHtml = (payslipId) => api.get(`/api/payroll/payslips/${payslipId}/rendered`);
+// Sample PDF of a template (sample data): what a downloaded payslip will look like.
+export const downloadPayslipTemplateSamplePdf = async (payload) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${PST}/preview-pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let detail = "Could not create the sample PDF.";
+    try { detail = (await res.json())?.detail || detail; } catch { /* not JSON */ }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "sample-payslip.pdf";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
+// PDF design-match import: analyse (nothing stored), then create a draft from the confirmed analysis.
+export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analyze`, formData);
+export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);

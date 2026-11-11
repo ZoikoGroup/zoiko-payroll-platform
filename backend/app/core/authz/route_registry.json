@@ -14847,10 +14847,61 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/payslip-templates/import-pdf/analyze",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "analyze",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates/import-pdf/create",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "create",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/payslip-templates/preview",
    "data_class": "tenant_config",
    "action": "create",
    "resource": "preview",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates/preview-pdf",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "preview-pdf",
    "principals": [
     "org_admin",
     "payroll_admin"

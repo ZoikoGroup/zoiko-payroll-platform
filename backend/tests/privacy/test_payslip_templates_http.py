@@ -101,3 +101,32 @@ def test_other_tenant_employee_and_super_admin_are_refused(client, world):
         h = _h(world, who)
         assert client.get("/api/payroll/payslip-templates", headers=h).status_code in (401, 403), who
         assert client.get(f"/api/payroll/payslips/{pid}/rendered", headers=h).status_code in (401, 403), who
+
+
+def test_word_and_pdf_imports_over_http(client, world):
+    from tests._payslip_import_fixtures import make_docx, make_payslip_pdf
+    ta = _h(world, "TA")
+    r = client.post("/api/payroll/payslip-templates/import", headers=ta, data={"name": "From Word"},
+                    files={"file": ("slip.docx", make_docx(),
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
+    assert r.status_code == 201, r.text
+    assert "{% for earning in earnings %}" in r.json()["latestVersion"]["htmlContent"]
+
+    r = client.post("/api/payroll/payslip-templates/import", headers=ta, data={"name": "Wrong door"},
+                    files={"file": ("slip.pdf", make_payslip_pdf(), "application/pdf")})
+    assert r.status_code == 400 and "Import PDF" in r.text
+
+    r = client.post("/api/payroll/payslip-templates/import-pdf/analyze", headers=ta,
+                    files={"file": ("slip.pdf", make_payslip_pdf(), "application/pdf")})
+    assert r.status_code == 200, r.text
+    analysis = r.json()
+    r = client.post("/api/payroll/payslip-templates/import-pdf/create", headers=ta,
+                    json={"name": "From PDF", "analysis": {**analysis, "includeLogo": True}})
+    assert r.status_code == 201, r.text
+    assert r.json()["latestVersion"]["status"] == "Draft"
+
+    tb = _h(world, "TB")
+    assert client.get(f"/api/payroll/payslip-templates/{r.json()['id']}", headers=tb).status_code == 404
+    sa = _h(world, "SA")
+    assert client.post("/api/payroll/payslip-templates/import-pdf/analyze", headers=sa,
+                       files={"file": ("slip.pdf", make_payslip_pdf(), "application/pdf")}).status_code in (401, 403)

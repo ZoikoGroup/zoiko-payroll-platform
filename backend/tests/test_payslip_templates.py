@@ -33,8 +33,8 @@ from app.modules.payroll.router import payroll_router
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _org(db, code):
-    org = Organization(organization_name=f"Org {code}", organization_code=code)
+def _org(db, code, country="IN"):
+    org = Organization(organization_name=f"Org {code}", organization_code=code, country=country)
     db.add(org)
     db.commit()
     db.refresh(org)
@@ -490,3 +490,274 @@ def test_external_urls_in_style_attributes_are_refused(html):
 
 def test_data_uri_in_style_attribute_is_allowed():
     tpl.validate_template("<div style=\"background:url(data:image/png;base64,AA)\">x</div>" + _GOOD, "")
+
+
+# ── PDF output (xhtml2pdf) ───────────────────────────────────────────────────
+
+def _pdf_text(pdf: bytes) -> str:
+    import io
+    from pypdf import PdfReader
+    assert pdf[:4] == b"%PDF"
+    return "".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf)).pages)
+
+
+@pytest.mark.parametrize("key", list(tpl.STARTERS))
+def test_every_starter_produces_a_sample_pdf_with_its_amounts(key):
+    s = tpl.STARTERS[key]
+    text = _pdf_text(tpl.preview_pdf(s["html"], s["css"], s["configuration"], "IN"))
+    assert "Sample Employee" in text and "69,600.00" in text and "12,400.00" in text
+
+
+def test_downloaded_payslip_uses_the_template_when_one_applies(db):
+    org = _org(db, "TPL_PDF")
+    item, _run = _payslip(db, org)
+    standard = _pdf_text(service.generate_payslip_pdf_bytes(db, item.id, org.id))
+    assert "Salary Month" in standard                       # the standard reportlab layout
+    _published(db, org)
+    templated = _pdf_text(service.generate_payslip_pdf_bytes(db, item.id, org.id))
+    assert "Salary Month" not in templated
+    assert "Asha Rao" in templated and "73,000.00" in templated and "Gross Earnings" in templated
+
+
+def test_failed_payslip_still_downloads_the_standard_blocked_pdf(db):
+    org = _org(db, "TPL_PDF_FAIL")
+    item, _run = _payslip(db, org, status="Failed")
+    _published(db, org)
+    assert tpl.template_pdf_or_none(db, item.id, org.id) is None
+    assert service.generate_payslip_pdf_bytes(db, item.id, org.id)[:4] == b"%PDF"
+
+
+def test_a_template_engine_failure_falls_back_to_the_standard_pdf(db, monkeypatch):
+    org = _org(db, "TPL_PDF_BOOM")
+    item, _run = _payslip(db, org)
+    _published(db, org)
+
+    def boom(*_a, **_k):
+        raise tpl.PdfRenderError("engine exploded")
+
+    monkeypatch.setattr(tpl, "html_to_pdf", boom)
+    text = _pdf_text(service.generate_payslip_pdf_bytes(db, item.id, org.id))
+    assert "Salary Month" in text
+
+
+def test_another_orgs_payslip_never_gets_a_template_pdf(db):
+    org_a, org_b = _org(db, "TPL_PDF_A"), _org(db, "TPL_PDF_B")
+    item_a, _run = _payslip(db, org_a)
+    _published(db, org_a)
+    assert tpl.template_pdf_or_none(db, item_a.id, org_b.id) is None
+
+
+def test_evaluation_workspace_template_pdf_is_watermarked(db):
+    org = _org(db, "TPL_PDF_EVAL")
+    org.workspace_type = "EVALUATION"
+    db.commit()
+    item, _run = _payslip(db, org)
+    _published(db, org)
+    assert "EVALUATION ONLY" in _pdf_text(tpl.template_pdf_or_none(db, item.id, org.id))
+
+
+def test_pdf_engine_reads_no_local_file_and_no_url(caplog):
+    body = '<p>x</p><img src="file:///etc/passwd"><img src="https://example.com/p.png">' \
+           '<img src="http://127.0.0.1/p.png">'
+    pdf = tpl.html_to_pdf(body, "", tpl.DEFAULT_CONFIG)
+    assert pdf[:4] == b"%PDF"
+    assert "refused to load 3 resource(s)" in caplog.text
+
+
+def test_preview_pdf_route_is_payroll_operator_only():
+    calls = _calls(_route("/payroll/payslip-templates/preview-pdf", "POST").dependant)
+    assert get_current_payroll_operator in calls and get_current_super_admin not in calls
+
+
+# ── countries: only the organisation's own (P1b) ─────────────────────────────
+
+def _add_country(db, org, code, status="ACTIVE"):
+    from app.modules.billing.models import OrganizationJurisdiction
+    db.add(OrganizationJurisdiction(organization_id=org.id, country_code=code, status=status, is_primary=False))
+    db.commit()
+
+
+def test_single_country_org_lists_only_its_country_and_refuses_others(db):
+    org = _org(db, "TPL_C1")
+    data = tpl.list_templates(db, org.id)
+    assert [c["code"] for c in data["countries"]] == ["IN"] and data["singleCountry"] is True
+    t = tpl.create_template(db, org.id, None, {"starter": "CLASSIC_NAVY"})
+    tpl.publish_template(db, org.id, t["id"], None)
+    for country in ("BR", "PL", "JP"):
+        with pytest.raises(HTTPException) as e:
+            tpl.assign_template(db, org.id, None, t["id"], country)
+        assert _status(e) == 400 and "doesn't run payroll" in e.value.detail
+    assert tpl.assign_template(db, org.id, None, t["id"], "ALL")["assignments"][0]["country"] == "ALL"
+    assert tpl.assign_template(db, org.id, None, t["id"], "IN")["assignments"][1]["country"] == "IN"
+
+
+def test_multi_country_org_lists_each_of_its_countries(db):
+    org = _org(db, "TPL_C2")
+    _add_country(db, org, "UK")
+    _add_country(db, org, "DE", status="OVER_LIMIT")     # paused, but payslips exist
+    data = tpl.list_templates(db, org.id)
+    assert [c["code"] for c in data["countries"]] == ["IN", "UK", "DE"] and data["singleCountry"] is False
+    assert {c["code"]: c["status"] for c in data["countries"]}["DE"] == "OVER_LIMIT"
+    t = tpl.create_template(db, org.id, None, {"starter": "CLASSIC_NAVY"})
+    tpl.publish_template(db, org.id, t["id"], None)
+    tpl.assign_template(db, org.id, None, t["id"], "GB")          # GB is the UK
+    assert [a["country"] for a in tpl.list_templates(db, org.id)["assignments"]] == ["UK"]
+
+
+def test_removed_country_is_not_offered_but_its_assignment_still_works_and_can_be_removed(db):
+    from app.modules.billing.models import OrganizationJurisdiction
+    org = _org(db, "TPL_C3")
+    _add_country(db, org, "UK")
+    item, _run = _payslip(db, org, country="UK")
+    t = tpl.create_template(db, org.id, None, {"starter": "CLASSIC_NAVY"})
+    tpl.publish_template(db, org.id, t["id"], None)
+    tpl.assign_template(db, org.id, None, t["id"], "UK")
+    db.query(OrganizationJurisdiction).filter_by(organization_id=org.id, country_code="UK").update({"status": "REMOVED"})
+    db.commit()
+    data = tpl.list_templates(db, org.id)
+    assert "UK" not in [c["code"] for c in data["countries"]]
+    assert data["assignments"][0]["countryInactive"] is True
+    assert tpl.render_payslip(db, org.id, item.id)["metadata"]["templateId"] == t["id"]
+    assert tpl.unassign(db, org.id, "UK")["assignments"] == []
+
+
+def test_template_written_for_country_must_be_the_orgs_own(db):
+    org = _org(db, "TPL_C4")
+    with pytest.raises(HTTPException) as e:
+        tpl.create_template(db, org.id, None, {"starter": "CLASSIC_NAVY", "country": "MX"})
+    assert _status(e) == 400
+    t = tpl.create_template(db, org.id, None, {"starter": "CLASSIC_NAVY", "country": "IN"})
+    with pytest.raises(HTTPException):
+        tpl.update_template(db, org.id, t["id"], None, {"country": "BR"})
+
+
+def test_preview_uses_only_the_orgs_countries_for_sample_data(db):
+    org = _org(db, "TPL_C5")
+    s = tpl.STARTERS["CLASSIC_NAVY"]
+    html = tpl.preview(s["html"], s["css"], None, "JP", db=db, organization_id=org.id)["renderedHtml"]
+    assert "\u20b9" in html and "\u00a5" not in html            # rupee sample, not yen: org is India-only
+
+
+# ── Phase 2: Word (.docx) import ─────────────────────────────────────────────
+
+def test_word_import_repairs_split_placeholders_drops_links_and_repeats_line_rows():
+    from tests._payslip_import_fixtures import make_docx
+    from app.modules.payroll import payslip_template_import as imp
+    out = imp.docx_to_template(make_docx())
+    html = out["htmlContent"]
+    assert "{{ employee.name }}" in html and "href" not in html and "our website" in html
+    assert "{% for earning in earnings %}<tr>" in html and "{% for deduction in deductions %}<tr>" in html
+    assert html.count("{% for earning in earnings %}") == 1
+    rendered = tpl.preview(html, out["cssContent"], None, "IN")["renderedHtml"]
+    for label in ("Basic Salary", "House Rent Allowance", "Special Allowance", "Income Tax", "Provident Fund"):
+        assert label in rendered
+
+
+@pytest.mark.parametrize("data", [b"not a zip at all", b"\xd0\xcf\x11\xe0 old binary .doc"])
+def test_word_import_refuses_files_that_are_not_docx(data):
+    from app.modules.payroll import payslip_template_import as imp
+    with pytest.raises(HTTPException) as e:
+        imp.docx_to_template(data)
+    assert _status(e) == 400
+
+
+def test_word_import_refuses_a_zip_bomb():
+    import io
+    import zipfile
+    from app.modules.payroll import payslip_template_import as imp
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("word/document.xml", "<x/>")
+        z.writestr("word/media/huge.bin", b"\0" * (imp.MAX_DOCX_UNZIPPED_BYTES + 1))
+    with pytest.raises(HTTPException) as e:
+        imp.docx_to_template(buf.getvalue())
+    assert _status(e) == 400 and "too large" in e.value.detail
+
+
+# ── Phase 3: PDF design-match import ─────────────────────────────────────────
+
+def test_pdf_analysis_finds_colour_logo_title_fields_sections_and_footer():
+    from tests._payslip_import_fixtures import make_payslip_pdf
+    from app.modules.payroll import payslip_template_import as imp
+    a = imp.analyze_pdf(make_payslip_pdf())
+    assert a["primaryColor"].startswith("#0F7") and a["logoDataUri"].startswith("data:image/png;base64,")
+    assert a["title"] == "SALARY SLIP" and a["layout"] == "side" and a["pageImage"].startswith("data:image/png")
+    found = {f["placeholder"]: f["label"] for f in a["fields"]}
+    for key in ("employee.name", "employee.id", "employee.department", "employee.designation",
+                "employee.identifiers", "payroll.period", "employee.bank_name", "employee.bank_account"):
+        assert key in found
+    assert a["sections"]["netLabel"] == "Net Salary" and a["sections"]["showNetInWords"] is True
+    assert "system generated" in a["disclaimer"]
+
+
+def test_pdf_built_template_is_valid_publishable_and_uses_the_pdf_wording(db):
+    from tests._payslip_import_fixtures import make_payslip_pdf
+    from app.modules.payroll import payslip_template_import as imp
+    org = _org(db, "TPL_PDFIMP")
+    item, _run = _payslip(db, org)
+    built = imp.build_from_analysis({**imp.analyze_pdf(make_payslip_pdf()), "includeLogo": True})
+    t = tpl.create_template(db, org.id, None, {"name": "From PDF", **built})
+    assert t["warnings"] == []
+    tpl.publish_template(db, org.id, t["id"], None)
+    tpl.assign_template(db, org.id, None, t["id"], None)
+    html = tpl.render_payslip(db, org.id, item.id)["renderedHtml"]
+    assert "SALARY SLIP" in html and "Net Salary" in html and "73,000.00" in html and "Asha Rao" in html
+    assert "Basic Salary" in html                          # lines come from the payslip, not the PDF
+
+
+def test_pdf_text_can_never_become_template_code():
+    from app.modules.payroll import payslip_template_import as imp
+    built = imp.build_from_analysis({
+        "title": "{{ company.__class__ }}<script>",
+        "fields": [{"placeholder": "employee.name", "label": "{% for x in range(10) %}<img src=x onerror=1>",
+                    "include": True}],
+        "sections": {"netLabel": "{{ 7*7 }}"},
+        "logoDataUri": "https://evil.example/logo.png",
+    })
+    fragment, _css, _w = tpl.validate_template(built["htmlContent"], built["cssContent"])
+    assert "<script" not in fragment and "<img src=x" not in fragment and "evil.example" not in fragment
+    rendered = tpl.preview(built["htmlContent"], built["cssContent"], None, "IN")["renderedHtml"]
+    assert "7*7" in rendered and "49" not in rendered.split("ps-net-title")[1][:40] and "for x in range" in rendered
+
+
+@pytest.mark.parametrize("payload, message", [
+    (b"%PDF-1.4 garbage that is not really a pdf", "could not be read"),
+    (b"GIF89a not a pdf", "not a PDF"),
+])
+def test_pdf_analysis_refuses_unreadable_or_non_pdf_files(payload, message):
+    from app.modules.payroll import payslip_template_import as imp
+    with pytest.raises(HTTPException) as e:
+        imp.analyze_pdf(payload)
+    assert _status(e) == 400 and message in e.value.detail
+
+
+def test_pdf_analysis_refuses_a_scanned_pdf_without_text():
+    from tests._payslip_import_fixtures import make_payslip_pdf
+    from app.modules.payroll import payslip_template_import as imp
+    with pytest.raises(HTTPException) as e:
+        imp.analyze_pdf(make_payslip_pdf(with_text=False))
+    assert _status(e) == 400 and "scanned" in e.value.detail
+
+
+def test_pdf_analysis_refuses_long_documents():
+    import io
+    from reportlab.pdfgen import canvas
+    from app.modules.payroll import payslip_template_import as imp
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    for _ in range(imp.MAX_PDF_PAGES + 1):
+        c.drawString(50, 750, "Employee Name: Someone and some more words here")
+        c.showPage()
+    c.save()
+    with pytest.raises(HTTPException) as e:
+        imp.analyze_pdf(buf.getvalue())
+    assert _status(e) == 400 and "pages" in e.value.detail
+
+
+def test_import_routes_are_payroll_operator_only():
+    for path in ("/payroll/payslip-templates/import-pdf/analyze", "/payroll/payslip-templates/import-pdf/create"):
+        calls = _calls(_route(path, "POST").dependant)
+        assert get_current_payroll_operator in calls and get_current_super_admin not in calls
+    names = {getattr(c, "__qualname__", "") for c in
+             _calls(_route("/payroll/payslip-templates/import-pdf/create", "POST").dependant)}
+    assert any("require_writeable_workspace" in n for n in names)

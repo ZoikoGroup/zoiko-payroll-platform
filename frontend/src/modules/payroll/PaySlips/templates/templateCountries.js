@@ -1,12 +1,10 @@
-import { COUNTRY_OPTIONS } from "../../../../utils/currency";
+import { getCountryNameFromCode } from "../../../../utils/currency";
 
-// Payslips store the UK as "UK" (not ISO "GB"); the backend accepts both.
-export const TEMPLATE_COUNTRIES = COUNTRY_OPTIONS
-  .map((c) => ({ code: c.code === "GB" ? "UK" : c.code, name: c.name }))
-  .sort((a, b) => a.name.localeCompare(b.name));
-
-export function countryLabel(code) {
+// Countries come from the backend (GET /payslip-templates -> countries): only
+// the organisation's own payroll countries can be chosen for a template.
+export function countryLabel(code, countries = []) {
   if (!code || code === "ALL") return "All countries";
-  const hit = TEMPLATE_COUNTRIES.find((c) => c.code === code);
-  return hit ? `${hit.name} (${code})` : code;
+  const hit = countries.find((c) => c.code === code);
+  const name = hit?.name || getCountryNameFromCode(code) || code;
+  return name === code ? code : `${name} (${code})`;
 }
