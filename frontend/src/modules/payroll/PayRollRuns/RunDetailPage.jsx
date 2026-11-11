@@ -45,7 +45,7 @@ function MultiCountryTotals({ totalsByCountry, isSimple }) {
   );
 }
 
-function Step1Configure({ config, setConfig, onNext, calculationMode, employees, selectedEmployees, toggleEmployee, setSelectedEmployees, onBackToRuns }) {
+function Step1Configure({ config, setConfig, onNext, calculationMode, employees, selectedEmployees, toggleEmployee, setSelectedEmployees }) {
   const isSimple = calculationMode === "simple";
   const allSelected = employees.length > 0 && selectedEmployees.length === employees.length;
   const [employeeFilterMode, setEmployeeFilterMode] = useState(() => (allSelected ? "all" : "individual"));
@@ -179,16 +179,7 @@ function Step1Configure({ config, setConfig, onNext, calculationMode, employees,
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-0.5 text-[10px] font-bold text-primary">✓ Ready</span>
       </div>
-      <div className="flex items-center justify-between pt-1">
-        {onBackToRuns ? (
-          <button
-            type="button"
-            onClick={onBackToRuns}
-            className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-error hover:text-error"
-          >
-            <ArrowLeft size={14} /> Back to Runs
-          </button>
-        ) : <div />}
+      <div className="flex justify-end">
         <button
           onClick={onNext}
           disabled={selectedEmployees.length === 0}
@@ -394,7 +385,7 @@ function Step3Approve({ config, totals, totalsByCountry = [], onBack, onNext, fm
   );
 }
 
-export default function RunDetailPage({ step, config, setConfig, employees, selectedEmployees, toggleEmployee, toggleAllEmployees, setSelectedEmployees, previewData, totals, loading, onNext, onBack, onBackToRuns, onRecalculate, onLoadPreview, fmtCurrency, runId, calculationMode = "standard", jurisdictionCountry = "IN", attendance }) {
+export default function RunDetailPage({ step, config, setConfig, employees, selectedEmployees, toggleEmployee, toggleAllEmployees, setSelectedEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, runId, calculationMode = "standard", jurisdictionCountry = "IN", attendance }) {
   const previewAttemptedRef = useRef(false);
   const readinessAttemptedRef = useRef(false);
   // Attendance check runs once when the Calculate step opens (Re-check /
@@ -423,7 +414,6 @@ export default function RunDetailPage({ step, config, setConfig, employees, sele
           config={config}
           setConfig={setConfig}
           onNext={onNext}
-          onBackToRuns={onBackToRuns}
           calculationMode={calculationMode}
           employees={employees}
           selectedEmployees={selectedEmployees}
@@ -440,15 +430,6 @@ export default function RunDetailPage({ step, config, setConfig, employees, sele
           </div>
           <h2 className="text-[15px] font-bold text-foreground">Payroll Run Complete</h2>
           <p className="text-[13px] text-foreground-muted mt-1">{totals.count} employees have been processed. Funds will be transferred on the scheduled pay date.</p>
-          {onBackToRuns && (
-            <button
-              type="button"
-              onClick={onBackToRuns}
-              className="mt-6 flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)]"
-            >
-              <ArrowLeft size={15} /> Return to Payroll Runs
-            </button>
-          )}
         </div>
       )}
     </div>
