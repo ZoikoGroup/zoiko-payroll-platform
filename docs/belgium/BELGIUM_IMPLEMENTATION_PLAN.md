@@ -187,3 +187,67 @@ Alembic sequence from the current head: be_foundation (P2) → be_absence_holida
 - No other country's calculation changes.
 - Each phase runs its new tests plus test_registration_jurisdiction_gate.py, test_multi_country_payroll_e2e.py, all test_poland_*.py, and the full backend suite from Phase 5 onward.
 - Single Alembic head after every migration phase.
+
+## Appendix A — Errata and verified locations (Phase 0, commit 1af3d44)
+Path convention: "engine/..." = backend/app/modules/payroll/engine/...; "bank_export/..." = backend/app/modules/payroll/bank_export/...; "service.py", "jurisdiction_hooks.py", "employee_validation.py", "bank_routing.py", "router.py" = backend/app/modules/payroll/...; "core/..." and "config.py" = backend/app/...
+Corrections:
+- Poland's generic-edit refusal is a PL branch inside service._refuse_nz_generic_statutory_edit (no separate function); Belgium adds a BE branch there.
+- _calc_generic is a module variable (standard.py:141); fall-through is _COUNTRY_CALC.get(..., _calc_generic) (standard.py:281).
+- _normalize_country (service.py:142–161) tries core.jurisdiction.get_jurisdiction_code first, then [:2]; "Belgium" currently reaches "BE" only via the [:2] fallback.
+- is_supported_employee_country is in employee_validation.py:2137.
+- Other existing Belgium literals (no collision): frontend utils/currency.js:17 (name map) and :193 (country list), utils/registrationRegions.js:149 and :311. The currency CODE map (lines 1–12) has no BE.
+- Config: Phase 1 mirrors only PL_TENANT_ONBOARDING_ENABLED / PL_CANARY_ORG_IDS; the identifier keyring pair is Phase 4.
+
+Verified line map at 1af3d44:
+
+Backend (paths relative to backend/app/; engine/ = modules/payroll/engine/)
+
+| Point | Location |
+|---|---|
+| `JURISDICTION_TAX_SCHEMAS` | `core/jurisdiction.py:83` |
+| `COUNTRY_NAME_TO_CODE` | `core/jurisdiction.py:718` |
+| `CODE_TO_COUNTRY_NAME` | `core/jurisdiction.py:787` |
+| `REGISTRATION_COUNTRIES` (not to be touched until release) | `core/jurisdiction.py:27` |
+| `_REGISTRY_ROW_REQUIRED_COUNTRIES` | `engine/tax_resolver.py:318` |
+| Simple-mode block (Poland's) | `engine/resolver.py:167` |
+| `build_context_from_employee` | `engine/resolver.py:191`; `poland_inputs` at 304 and 515 |
+| `_COUNTRY_CALC` | `engine/standard.py:168`; `"PL"` at 251 |
+| `pl_employee_total` sum | `engine/standard.py:369` |
+| `pl_result` mapping | `engine/standard.py:659` |
+| `PayrollContext` | `engine/base.py:35`; `pl_*` fields from 1018 |
+| `PayrollResult` | `engine/base.py:1175`; `pl_result` at 1800 |
+| `_CANONICAL_PACK_ONLY_COUNTRIES` | `service.py:1548` |
+| The four governance tuples | `service.py:8622`, `8625`, `8629`, `8636` |
+| Country label map (`_GATED_PACK_COUNTRY_NAMES`) | `service.py:8618` |
+| `preview_payroll_run` calc sites | `service.py:20631`, `20676` |
+| `_compute_payslip_values` calc sites | `service.py:25813`, `25888` |
+| `add_payslip_item` calc sites | `service.py:32940`, `33008` |
+| `_serialize_payslip` | `service.py:33562` |
+| `_MODULES` | `jurisdiction_hooks.py:27` |
+| `_DORMANT_STRATEGIES` | `employee_validation.py:2091` |
+| `_dormant_strategy` | `employee_validation.py:2104` |
+| `ROUTING_COUNTRIES` / `ROUTING_FIELDS` | `bank_routing.py:53` / `59` |
+| Routing labels | `bank_routing.py:128` and `156` |
+| `pl_org_router` mount | `payroll/router.py:79` and `210` |
+| `/compliance/poland` routes | `super_admin/router.py:4757` |
+| `PL_*` config settings to mirror | `config.py:92`, `95`, `101`, `104` |
+
+The other 11 `calculate_payroll`/`build_context` calls in `service.py` are country-specific (France, Germany, UK, Ireland, Sweden, Singapore, Australia) or a comment. None of them need Belgium changes.
+
+Frontend (paths relative to frontend/src/)
+
+| Point | Location |
+|---|---|
+| Poland routes to mirror | `App.jsx:246–247` |
+| `COUNTRY_CODE_TO_ROUTE` | `pages/JurisdictionCompliance/index.js:35` (`PL` at 64) |
+| Poland Compliance Centre tab | `modules/payroll/Compliances/CompliancePage.jsx:172`, `441` |
+| Employee panel / field specs / bank fields | `modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx`, `countryFieldSpecs.js`, `bankFieldsFor.js` |
+| Run detail | `modules/payroll/PayRollRuns/RunDetailPanel.jsx` |
+| Payslip stub | `modules/payroll/PaySlips/PayslipStub.jsx` |
+| Currency code map | `utils/currency.js:1–12` |
+| Labels / tax schemas | `utils/jurisdictionLabels.js`, `utils/jurisdictionTax.js` |
+| Flag | `components/jurisdiction/CountryFlag.jsx` |
+| Services | `service/payrollService.js`, `service/superAdminService.js` |
+| Shared helpers | `components/jurisdiction/japan/jpFormat.js`, `jpShared.jsx`; `components/jurisdiction/new_zealand/nzShared.jsx`, `nzForm.js`, `NZPackRowsTab.jsx`; `components/jurisdiction/EarningClassMatrix.jsx` |
+
+Line numbers drift; re-verify by symbol name before each edit.
