@@ -328,6 +328,16 @@ function Poland() {
   );
 }
 
+function Belgium() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="8" height="16" fill="#000" />
+      <rect x="8" width="8" height="16" fill="#FDDA24" />
+      <rect x="16" width="8" height="16" fill="#EF3340" />
+    </svg>
+  );
+}
+
 function SaudiArabia() {
   return (
     <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
@@ -366,6 +376,7 @@ const FLAGS = {
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
   NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand, PL: Poland, SA: SaudiArabia,
+  BE: Belgium,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

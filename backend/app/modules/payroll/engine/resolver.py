@@ -175,6 +175,17 @@ def calculate_payroll(
             "Poland payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "BE" and key == "simple":
+        # Belgium (ZP-BE-ENG-001 BE-004/BE-007): simple mode would silently skip
+        # professional withholding and ONSS/RSZ, each a separate obligation with
+        # its own base. Fail-closed: countries/belgium.py.
+        from app.modules.payroll.engine.countries.belgium import BECalculationBlockedError
+
+        raise BECalculationBlockedError(
+            "BE_SIMPLE_MODE_UNSUPPORTED",
+            "Belgium payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)

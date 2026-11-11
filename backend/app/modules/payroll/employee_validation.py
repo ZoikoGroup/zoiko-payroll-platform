@@ -2034,6 +2034,41 @@ class PLEmployeeValidation(EmployeeValidationStrategy):
                     "Polish IBAN must be PL followed by 26 digits with a valid check digit.")
 
 
+class BEEmployeeValidation(EmployeeValidationStrategy):
+    """Belgium (ZP-BE-ENG-001 Phase 1) - the only employee field is the IBAN.
+
+    DORMANT: consulted only while BE_TENANT_ONBOARDING_ENABLED is on or a
+    canary organisation exists. NISS/INSZ is never an employee field: it is
+    held ONLY in the encrypted identifier vault (Phase 4, D14, BE-040); a
+    compliance field carrying it is refused, never stored, and the refusal
+    never echoes the value. Worker category, Joint Committee and every other
+    statutory fact live in the effective-dated payroll_be_* records (Phase 4).
+    """
+
+    country_code = "BE"
+    FIELD_SPECS = {
+        "iban": {"required": False, "upper": True, "strip_chars": " "},
+    }
+    _VAULT_ONLY = ("national_id", "niss", "insz", "nn", "rijksregisternummer", "registre_national",
+                   "national_register_number", "tax_number", "tax_id")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("The Belgian NISS/INSZ is held only in the encrypted identifier vault, "
+                                      "never as an employee field.")
+        return super().validate(compliance)
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        iban = cleaned.get("iban")
+        if iban:
+            if not re.fullmatch(r"BE\d{14}", iban) or not iban_checksum_ok(iban):
+                raise BadRequestException(
+                    "Belgian IBAN must be BE followed by 14 digits with a valid check digit.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -2098,6 +2133,8 @@ _DORMANT_STRATEGIES = {
     "NZ": NZEmployeeValidation,
     # Poland (ZP-PL-ENG-001 Phase 0): dormant until PL_TENANT_ONBOARDING_ENABLED.
     "PL": PLEmployeeValidation,
+    # Belgium (ZP-BE-ENG-001 Phase 1): dormant until BE_TENANT_ONBOARDING_ENABLED.
+    "BE": BEEmployeeValidation,
 }
 
 
@@ -2125,6 +2162,12 @@ def _dormant_strategy(code: str):
         # The flag, or any canary organisation: only an organisation the
         # organisation-level gate admitted can hold a Polish employee.
         return strategy if poland_dormancy.onboarding_enabled() or poland_dormancy.canary_organization_ids() else None
+    if code == "BE":
+        from app.modules.payroll import belgium_dormancy
+
+        # The flag, or any canary organisation. Must stay ABOVE the Mexico
+        # fall-through below, which would otherwise apply Mexico's flag to BE.
+        return strategy if belgium_dormancy.onboarding_enabled() or belgium_dormancy.canary_organization_ids() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

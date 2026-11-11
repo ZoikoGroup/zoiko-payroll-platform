@@ -30,6 +30,7 @@ This register is authoritative for open gaps and approved decisions. A gap is cl
 | G-18 | OPEN | (D4) The run lifecycle mapping must show where commit idempotency and four-eyes for high-risk changes are enforced. Acceptance item for Phase 8. If the existing lifecycle lacks either control, stop and report in Phase 8; do not add it silently. |
 | G-19 | OPEN (expected) | (D8) be_rounding_* rows have no published source and stay blocked until a specialist signs them. This is expected. |
 | G-20 | OPEN | The spec §3 figures are Draft seed content only, labelled "[PENDING G1]", and are never used as code constants. |
+| G-21 | OPEN | Belgian statutory retention periods for payroll/social documents not in spec; BE employee deletion blocked until specialist-approved retention rules exist. |
 
 ## Decisions
 
@@ -50,3 +51,10 @@ This register is authoritative for open gaps and approved decisions. A gap is cl
 | D13 | DECIDED | payroll_be_payment_batches / _items mirroring the Netherlands tables, using bank_export/sepa_pain001.py unchanged. |
 | D14 | DECIDED | be_identifiers.py with its own BE_IDENTIFIER_KEYRING / BE_IDENTIFIER_FINGERPRINT_KEY settings. |
 | D15 | DECIDED | Employer substitute holidays stored in payroll_holidays with category "Substitute", audited via payroll_tax_configuration_audit. |
+
+## Notes
+
+- (Phase 1) Lowercase "be" resolves to BE through the shared case-insensitive code match in core.jurisdiction.get_jurisdiction_code (same as every country, e.g. "pl" -> PL). There is no bare "be" name alias.
+- (Phase 1) The BE schema examples ("0123.456.789", "1234567-89") are input-shape examples required by the shared validator (validate_tax_identifiers quotes them in its format message), not verified formats. G-16 stays open.
+- (Phase 1) Frontend production build not verified in Phase 1 (vite build runs out of memory on the development machine). It must be verified before Phase 3.
+- (Phase 1) Backend tests ran on Python 3.11. The project requires 3.12+; the environment must be fixed before Phase 5.

@@ -36,6 +36,8 @@ _MODULES: Dict[str, str] = {
     "NZ": "app.modules.payroll.new_zealand_service",
     # Poland (ZP-PL-ENG-001 Phase 4): all 13 hooks, fail-closed module.
     "PL": "app.modules.payroll.poland_service",
+    # Belgium (ZP-BE-ENG-001 Phase 1): all 13 hooks, fail-closed module.
+    "BE": "app.modules.payroll.belgium_service",
 }
 
 

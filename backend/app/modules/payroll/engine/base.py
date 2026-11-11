@@ -1798,6 +1798,9 @@ class PayrollResult:
     # exceptions, trace and hashes). None for every other country. No PESEL,
     # NIP or bank data is ever placed here.
     pl_result: dict = None
+    # Belgium (ZP-BE-ENG-001): the whole BE dict once the engine exists
+    # (Phase 5). None for every other country. No NISS/INSZ is ever placed here.
+    be_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

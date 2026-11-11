@@ -70,6 +70,11 @@ export const COUNTRIES = [
   // PL IBAN routing. PESEL and NIP are vault-only (spec §13); contract, ZUS
   // title, PIT statements and PPK live on the Poland statutory profile, never here.
   { code: "PL", name: "Poland" },
+  // Belgium (ZP-BE-ENG-001 Phase 1) — mirrors employee_validation.py's
+  // BEEmployeeValidation: the Belgian IBAN only. NISS/INSZ is vault-only
+  // (Phase 4) and is never an employee field; worker category, Joint Committee
+  // and every statutory fact live on the Belgian worker profile, never here.
+  { code: "BE", name: "Belgium" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -530,6 +535,13 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "passport_number", label: "Passport number (if no PESEL)", type: "text", placeholder: "6–20 letters/digits", upper: true, strip: " -", pattern: /^[A-Z0-9]{6,20}$/, error: "Passport number must be 6–20 letters/digits." },
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.PL).
     { key: "iban", label: "IBAN", type: "text", placeholder: "PL + 26 digits", upper: true, strip: " ", pattern: /^PL\d{26}$/, check: ibanPassesMod97, error: "Polish IBAN must be PL followed by 26 digits with a valid check digit." },
+  ],
+  // Belgium — mirrors backend BEEmployeeValidation: IBAN only. NISS/INSZ is
+  // held ONLY in the encrypted identifier vault (Phase 4) and is refused as
+  // an employee field.
+  BE: [
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.BE).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "BE + 14 digits", upper: true, strip: " ", pattern: /^BE\d{14}$/, check: ibanPassesMod97, error: "Belgian IBAN must be BE followed by 14 digits with a valid check digit." },
   ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).

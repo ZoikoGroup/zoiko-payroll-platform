@@ -49,6 +49,9 @@ const INCOME_TAX_LABELS = {
   NZ: "PAYE (incl. ACC earner levy)",
   // Poland — the monthly PIT advance (zaliczka na podatek), ZP-PL-ENG-001 §4.
   PL: "PIT Advance (zaliczka)",
+  // Belgium — professional withholding (Annex III), ZP-BE-ENG-001 §5. Never a
+  // flat rate and never derived from the annual income-tax brackets.
+  BE: "Professional withholding (précompte professionnel / bedrijfsvoorheffing)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -73,7 +76,10 @@ const EMPLOYER_PF_LABELS = { DE: "Employer Pension Insurance" };
 // employerPension. The employee ZUS / health / PPK lines travel in
 // pl_employee_total and are shown by PLPayslipBreakdown from the snapshot.
 const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution", ZA: "UIF (Employer)",
-  PL: "ZUS (Employer: pension, disability, accident)" };
+  PL: "ZUS (Employer: pension, disability, accident)",
+  // Belgium (ZP-BE-ENG-001 BE-019): employer ONSS/RSZ base + special
+  // contributions. Never a single all-in employer rate label.
+  BE: "ONSS/RSZ (Employer)" };
 // Employer-only payroll levies carried on employer_payroll_tax.
 const EMPLOYER_PAYROLL_TAX_LABELS = { AU: "State Payroll Tax (Employer)", ZA: "SDL (Employer)",
   PL: "FP/FS, FGŚP, FEP (Employer)" };

@@ -7,6 +7,7 @@ const JURISDICTION_TO_CURRENCY = {
   SA: "SAR", SE: "SEK", SG: "SGD", TH: "THB", TZ: "TZS", UG: "UGX",
   ZA: "ZAR",
   PL: "PLN",
+  BE: "EUR",
   // Caribbean production jurisdictions (2026-09-21).
   BB: "BBD", KY: "KYD", DO: "DOP", GY: "GYD", JM: "JMD", BS: "BSD", TT: "TTD", PR: "USD",
   India: "INR", "United States": "USD", "United Kingdom": "GBP",
