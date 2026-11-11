@@ -192,7 +192,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                                          "public_holidays_off"}
         assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
                                                          "authority_payment_id"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 10 + 13
+        assert len(columns["payroll_employee_statutory_profiles"]) == 10 + 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         assert "za_calculation_snapshot" in columns["payslip_items"]
         assert {"version", "previous_version_id", "effective_from", "effective_to",
                 "created_by_id"} == columns["payroll_br_employer_profiles"]
@@ -205,7 +205,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
         assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
                                             "pl_calculation_snapshot"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 13
+        assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         # Production since PR #136 (A18): Mexico m20 (d3f8b2a6c1e9) and South Africa
         # (447f57564983 -> c15d5b87d6f5) both grow from it, joined by merge 92c67cab49fc.
         tables, columns = pending_objects("c7d2e9a4f1b6")
@@ -215,11 +215,16 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
         assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
                                             "pl_calculation_snapshot"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 13
+        assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         tables, columns = pending_objects("b9f3d5a1c7e2")
         assert_google_pending(tables, columns)
         assert tables == (za_tables | mx_final_mile | country | jp_tables | google_tables)
         assert "payroll_mx_approved_hours" not in columns
+        # Mexico m21 (efc56f3235e2, sweep S1) is the head: pending from every earlier stamp.
+        mx_m21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
+                  "payroll_mx_labor_policies": {"hourly_rate_daily_hours", "special_pay_withholding_method"},
+                  "payroll_employee_statutory_profiles": {"mx_union_member", "mx_sdi_operator_entered",
+                                                          "mx_sdi_evidence_ref"}}
         # Across merge 92c67cab49fc each side also runs the OTHER side (scripts.drift_pending_filter
         # counts every head ancestor the stamp lacks, not only the stamp -> head path).
         tables, columns = pending_objects("c15d5b87d6f5")      # a database at South Africa P8
@@ -229,7 +234,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                                       "payroll_za_parallel_differences"}
         assert columns == {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
                            "payroll_za_employer_registrations": {"za_journal_accounts"}, **jp_columns,
-                           **tz_columns, **google_columns}
+                           **tz_columns, **google_columns, **mx_m21}
         tables, columns = pending_objects("d3f8b2a6c1e9")      # a database at Mexico m20
         assert_google_pending(tables, columns)
         assert tables == za_tables | country | jp_tables | google_tables
@@ -239,17 +244,20 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert_google_pending(tables, columns)
         assert tables == ({"payroll_za_parallel_imports", "payroll_za_parallel_differences"}
                           | country | jp_tables | google_tables)
-        assert columns == {**jp_columns, **tz_columns, **google_columns}
+        assert columns == {**jp_columns, **tz_columns, **google_columns, **mx_m21}
         # A database already at Japan Phase 2 has the registration timezone and
         # Japan P5/P6 pending.
         tables, columns = pending_objects("f686d5128f8a")
         assert_google_pending(tables, columns)
         assert tables == jp_p6_tables | google_tables
-        assert columns == {**tz_columns, **jp_p6_columns, **google_columns,
+        assert columns == {**tz_columns, **jp_p6_columns, **google_columns, **mx_m21,
                            "payroll_runs": {"jp_payment_kind", *nz_run_columns},
                            "payslip_items": {"nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot"},
                            "payroll_nz_leave_events": {"leave_pay_calculation_id"},
                            "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
+        # A database at Poland P9 (e7ec6c1933b4, main's head before m21): only Mexico m21 is pending.
+        tables, columns = pending_objects("e7ec6c1933b4")
+        assert tables == set() and columns == mx_m21
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
         assert_google_pending(tables, columns)

@@ -47,8 +47,23 @@ def liability_due(db: Session, authority: str, period_key: str, state: Optional[
 
 
 def _holidays(year: int):
-    entry = _content.MX_OFFICIAL_HOLIDAYS.get(year)
+    """The year's non-business days: the list D-16 selects (sweep S1), else the
+    transcribed MX_OFFICIAL_HOLIDAYS. None = not known (the count is unsourced)."""
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+    reading = switch("D-16")
+    if reading is not None:
+        entry = _content.MX_OFFICIAL_HOLIDAY_LISTS.get(reading, {}).get(year)
+    else:
+        entry = _content.MX_OFFICIAL_HOLIDAYS.get(year)
     return None if entry is None else set(entry[0])
+
+
+def holidays_known() -> bool:
+    """Whether any year's non-business days are known (D-16 answered, or transcribed)."""
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+    return bool(_content.MX_OFFICIAL_HOLIDAYS) or switch("D-16") is not None
 
 
 def movement_due(event_date: date) -> Tuple[Optional[date], str]:

@@ -29,8 +29,11 @@ None the case that needs it BLOCKS with its own code — never a guess:
 
 from __future__ import annotations
 
+import calendar as _calendar
 import datetime as _dt
 from decimal import Decimal
+
+from ..jurisdictions.mexico.decisions import switch as _switch
 
 _S24 = "S24/S24_DIP_LISR.pdf"
 _S25 = "S25/S25_DIP_RLISR.pdf"
@@ -40,9 +43,15 @@ _S34 = "S34/S34_DIP_CPEUM_ref226_27ene16.pdf"
 # ── Decision switches (None = undecided: the dependent case BLOCKS) ─────────
 MX_EXEMPTION_WAGE_REFERENCE = None         # D-07: "UMA" | "ZONE_MIN_WAGE"
 MX_SPECIAL_PAY_WITHHOLDING_METHOD = None   # D-08: "RLISR_174"
-MX_MONTHLY_ORDINARY_INCOME_DAYS = None     # D-09: e.g. "30.4"
+MX_MONTHLY_ORDINARY_INCOME_DAYS = None     # D-09: "30" | "30.4" | "CALENDAR_MONTH"
 WAGE_REFERENCES = ("UMA", "ZONE_MIN_WAGE")
-WITHHOLDING_METHODS = ("RLISR_174",)
+WITHHOLDING_METHODS = ("RLISR_174", "ART_96_MONTHLY")    # ART_96_MONTHLY: sweep S1 (D-08 b)
+PER_EMPLOYER = "PER_EMPLOYER"                            # D-08, sweep S1: each employer's labour policy names it
+# D-09 (sweep S1): days per month, or the calendar month of the pay date ("the month's actual ordinary pay").
+MONTHLY_INCOME_BASES = ("30", "30.4", "CALENDAR_MONTH")
+# Every read of a switch below goes through _switch(code, constant): the decision
+# register's APPROVED answer applied to this calculation (sweep S1), else the
+# constant (None in production — the case blocks).
 
 _ZERO, _ONE = Decimal("0"), Decimal("1")
 
@@ -107,7 +116,7 @@ def _date(value, what: str) -> _dt.date:
 
 def reference_wage(facts: dict) -> Decimal:
     """The daily wage Art. 93's caps are counted in (D-07)."""
-    ref = MX_EXEMPTION_WAGE_REFERENCE
+    ref = _switch("D-07", MX_EXEMPTION_WAGE_REFERENCE)
     if ref is None:
         raise _blocked("MX_EXEMPTION_WAGE_REFERENCE_UNDECIDED",
                        "LISR Art. 93 words its exempt limits in the area minimum wage; whether that reads as the UMA "
@@ -169,12 +178,20 @@ def _add_months(d: _dt.date, n: int) -> _dt.date:
 
 def monthly_ordinary_income(facts: dict) -> Decimal:
     """D-09: the monthly ordinary income derived from the daily salary."""
-    days = MX_MONTHLY_ORDINARY_INCOME_DAYS
+    days = _switch("D-09", MX_MONTHLY_ORDINARY_INCOME_DAYS)
     if days is None:
         raise _blocked("MX_MONTHLY_ORDINARY_INCOME_UNDECIDED",
                        "how the monthly ordinary salary (LISR Arts. 95, 96; RLISR Art. 174 II) is derived from the "
                        "daily salary is a G1 decision (DECISIONS_PENDING D-09)")
-    return _d(facts.get("daily_salary"), "the daily salary") * Decimal(str(days))
+    if str(days) == "CALENDAR_MONTH":
+        on = _date(facts.get("pay_date"), "the pay date")
+        days = _calendar.monthrange(on.year, on.month)[1]
+    try:
+        days = Decimal(str(days))
+    except Exception:
+        raise _blocked("MX_RULE_UNRECOGNISED", f"monthly ordinary income basis {days!r} is not one of "
+                                               f"{MONTHLY_INCOME_BASES}")
+    return _d(facts.get("daily_salary"), "the daily salary") * days
 
 
 def monthly_isr(base: Decimal, facts: dict) -> Decimal:
@@ -231,18 +248,35 @@ class Art93SpecialPayRule:
 
     def standalone_isr(self, taxable, facts) -> Decimal:
         """RLISR Art. 174 (D-08): a special payment withheld in its own run."""
-        method = MX_SPECIAL_PAY_WITHHOLDING_METHOD
+        method = _switch("D-08", MX_SPECIAL_PAY_WITHHOLDING_METHOD)
+        if method == PER_EMPLOYER:                       # D-08, sweep S1: the employer's labour policy names it
+            method = (facts or {}).get("employer_special_pay_method")
+            if method is None:
+                raise _blocked("MX_SPECIAL_PAY_METHOD_UNDECIDED",
+                               "D-08 leaves the withholding method of a special payment in its own run to each "
+                               "employer, and this employer's labour policy names none")
         if method is None:
             raise _blocked("MX_SPECIAL_PAY_METHOD_UNDECIDED",
                            "which withholding method applies to a special payment paid in its own run (LISR Art. 96 "
                            "monthly tariff, or the RLISR Art. 174 option) is a decision (DECISIONS_PENDING D-08)")
         if method not in WITHHOLDING_METHODS:
             raise _blocked("MX_RULE_UNRECOGNISED", f"withholding method {method!r} is not one of {WITHHOLDING_METHODS}")
+        taxable = _d(taxable, "the taxable amount")
+        if method == "ART_96_MONTHLY":
+            # D-08 (b), LISR Art. 96 default: the monthly tariff on the month's whole income (the committed
+            # month-to-date taxable income + this payment), less the ISR already withheld in the month.
+            if taxable <= 0:
+                return _ZERO
+            mtd = facts.get("month_to_date")
+            if not mtd or "isr_withheld" not in mtd:
+                raise _blocked("MX_SPECIAL_PAY_FACT_MISSING", "the month-to-date income and withholding are missing")
+            earlier = _d(mtd.get("taxable") or 0, "month-to-date taxable")
+            return max(monthly_isr(earlier + taxable, facts) - _d(mtd.get("isr_withheld") or 0, "month-to-date ISR"),
+                       _ZERO)
         if self.concept not in ("AGUINALDO", "PTU", "VACATION_PREMIUM"):
             raise _blocked("MX_SPECIAL_PAY_METHOD_UNSUPPORTED",
                            f"RLISR Art. 174 covers the annual bonus, PTU and the Sunday and vacation premiums, not "
                            f"{self.concept}")
-        taxable = _d(taxable, "the taxable amount")
         if taxable <= 0:
             return _ZERO
         monthly = taxable / RLISR_174_DIVISOR * RLISR_174_MULTIPLIER            # fr. I
@@ -311,7 +345,9 @@ MX_FINIQUITO_ORDINARY_WITHHOLDING = None
 FINIQUITO_ORDINARY_METHODS = ("MONTHLY_TOTAL_LESS_WITHHELD", "INCREMENTAL_MONTHLY")
 MX_SERVICE_YEARS_COUNT = None                # D-13: "PROPORTIONAL" | "COMPLETED"
 MX_SENIORITY_PREMIUM_WAGE_REFERENCE = None   # D-07b: "ZONE_MIN_WAGE" | "UMA"
-INDEMNITY_SALARY_BASES = ("POLICY_INTEGRATED",)
+# D-12 (sweep S1): (a) the daily salary × the labour policy's integration factor, (b) the IMSS SBC in force
+# on the termination date, (c) a figure an operator entered on the termination record with its evidence.
+INDEMNITY_SALARY_BASES = ("POLICY_INTEGRATED", "IMSS_SBC", "OPERATOR_ENTERED")
 SERVICE_YEARS_COUNTS = ("PROPORTIONAL", "COMPLETED")
 
 # SAT c_TipoContrato (S28 / pinned set sat_2026_08): 01 "tiempo indeterminado", 03 "tiempo determinado".
@@ -367,7 +403,7 @@ def _whole_years(start: _dt.date, end: _dt.date) -> int:
 def service_years(seniority_date, termination_date) -> Decimal:
     """Years of service under D-13: whole years, plus the part year pro rata
     (days since the last anniversary ÷ days to the next one) when PROPORTIONAL."""
-    mode = MX_SERVICE_YEARS_COUNT
+    mode = _switch("D-13", MX_SERVICE_YEARS_COUNT)
     if mode is None:
         raise _blocked("MX_SERVICE_YEARS_COUNT_UNDECIDED",
                        "whether 'por cada año de servicios' (LFT Arts. 50, 54, 162) counts a part year is a decision "
@@ -386,13 +422,26 @@ def service_years(seniority_date, termination_date) -> Decimal:
 
 def indemnity_daily_salary(facts: dict) -> Decimal:
     """LFT Art. 89 (D-12): the daily salary indemnities are counted in."""
-    basis = MX_INDEMNITY_SALARY_BASIS
+    basis = _switch("D-12", MX_INDEMNITY_SALARY_BASIS)
     if basis is None:
         raise _blocked("MX_INDEMNITY_SALARY_UNDECIDED",
                        "LFT Art. 89 counts indemnities on the daily rate plus the proportional Art. 84 benefits; how "
                        "that integrated salary is built is a decision (DECISIONS_PENDING D-12, gap C4)")
     if basis not in INDEMNITY_SALARY_BASES:
         raise _blocked("MX_RULE_UNRECOGNISED", f"indemnity salary basis {basis!r} is not one of {INDEMNITY_SALARY_BASES}")
+    if basis == "IMSS_SBC":
+        value = facts.get("sbc_daily")
+        if value in (None, ""):
+            raise _blocked("MX_INDEMNITY_SALARY_SBC_MISSING",
+                           "no committed IMSS SBC is in force on the termination date (D-12: IMSS SBC)")
+        return _d(value, "the IMSS SBC")
+    if basis == "OPERATOR_ENTERED":
+        value = facts.get("operator_indemnity_daily_salary")
+        if value in (None, "") or not facts.get("operator_indemnity_evidence"):
+            raise _blocked("MX_INDEMNITY_SALARY_NOT_ENTERED",
+                           "the termination record has no indemnity daily salary with its evidence (D-12: operator "
+                           "entered)")
+        return _d(value, "the entered indemnity daily salary")
     from ..jurisdictions.mexico import sbc
 
     policy = facts.get("labor_policy")
@@ -406,7 +455,7 @@ def indemnity_daily_salary(facts: dict) -> Decimal:
 def seniority_premium_daily_salary(facts: dict) -> Decimal:
     """LFT Art. 162 II → Arts. 485–486: the daily salary, no lower than the
     zone minimum wage, no higher than twice the reference wage (D-07b)."""
-    ref = MX_SENIORITY_PREMIUM_WAGE_REFERENCE
+    ref = _switch("D-07b", MX_SENIORITY_PREMIUM_WAGE_REFERENCE)
     if ref is None:
         raise _blocked("MX_SENIORITY_PREMIUM_WAGE_REFERENCE_UNDECIDED",
                        "LFT Art. 486 caps the seniority-premium salary at twice the area minimum wage; whether that "
@@ -553,7 +602,7 @@ class FiniquitoRule:
 
 
 def _ordinary_payout_isr(payout: Decimal, facts) -> Decimal:
-    method = MX_FINIQUITO_ORDINARY_WITHHOLDING
+    method = _switch("D-22", MX_FINIQUITO_ORDINARY_WITHHOLDING)
     if method is None:
         raise _blocked("MX_FINIQUITO_ORDINARY_METHOD_UNDECIDED",
                        "vacation paid out at termination is ordinary income of the month (LISR Art. 96); how it is "
@@ -584,7 +633,7 @@ FINIQUITO_RULE = FiniquitoRule()
 #       "OVER_THREE" (÷ 3) or "OVER_YEARS_RECEIVED".
 MX_PTU_CAP_EXCESS = None
 MX_PTU_HISTORY_AVERAGE = None
-PTU_CAP_EXCESS_RULES = ("UNDISTRIBUTED",)
+PTU_CAP_EXCESS_RULES = ("UNDISTRIBUTED", "REDISTRIBUTED")    # REDISTRIBUTED: sweep S1 (D-14 a)
 PTU_HISTORY_AVERAGES = ("OVER_THREE", "OVER_YEARS_RECEIVED")
 PTU_CAP_SALARY_DAYS = Decimal("90")                     # Art. 127 VIII "tres meses del salario" (as TL-TER-1)
 PTU_DEADLINE_DAYS = 60                                  # Art. 122 "dentro de los sesenta días siguientes"
@@ -644,6 +693,30 @@ PTU_EXCLUSION_REASONS = {r.code: r for r in (
 )}
 
 
+def _redistribute(rows: list, excess: Decimal) -> Decimal:
+    """D-14 (a) REDISTRIBUTED: share the amount above the Art. 127 VIII caps among
+    the eligible workers still under their cap, in proportion to their shares,
+    never lifting anyone above their own cap; repeat until the excess is placed
+    or everyone is capped. Returns what could not be placed (kept as residue)."""
+    for _ in range(len(rows) + 1):
+        open_rows = [w for w in rows if w["eligible"] and not w["cap_applied"]]
+        weight = sum((w["final_amount"] for w in open_rows), _ZERO)
+        if excess <= 0 or not open_rows or weight <= 0:
+            break
+        placed = _ZERO
+        for w in open_rows:
+            cap = Decimal(w["cap_reference"]["cap"])
+            add = min(excess * w["final_amount"] / weight, cap - w["final_amount"])
+            w["final_amount"] += add
+            placed += add
+            if w["final_amount"] >= cap:
+                w["cap_applied"] = True
+        excess -= placed
+        if placed <= 0:
+            break
+    return excess
+
+
 class LftPtuRule:
     """LFT Art. 123: half the pool by days worked, half by salary; Art. 124:
     the salary is the cash daily rate (the classification's PTU flag —
@@ -657,7 +730,7 @@ class LftPtuRule:
         history = {int(y): _d(v, "PTU history") for y, v in (w.get("ptu_history") or {}).items()}
         if not history:
             return salary_cap, {"threeMonths": salary_cap, "historyAverage": _ZERO}
-        rule = MX_PTU_HISTORY_AVERAGE
+        rule = (_switch("D-14", None) or {}).get("AVERAGE") or MX_PTU_HISTORY_AVERAGE
         over_three = sum(history.values(), _ZERO) / 3
         over_years = sum(history.values(), _ZERO) / len(history)
         if len(history) < 3 and over_three != over_years and max(salary_cap, over_years) != max(salary_cap, over_three):
@@ -702,19 +775,27 @@ class LftPtuRule:
                         "days_share": days_share, "salary_share": salary_share,
                         "cap_reference": {k: str(v) for k, v in ref.items()} | {"cap": str(cap)},
                         "cap_applied": capped, "final_amount": cap if capped else share})
+        excess_rule = (_switch("D-14", None) or {}).get("EXCESS") or MX_PTU_CAP_EXCESS
         if excess_total > 0:
-            if MX_PTU_CAP_EXCESS is None:
+            if excess_rule is None:
                 raise _blocked("MX_PTU_CAP_EXCESS_UNDECIDED",
                                "a share exceeds the LFT Art. 127 VIII cap and the law does not say where the excess goes "
                                "(DECISIONS_PENDING D-14)")
-            if MX_PTU_CAP_EXCESS not in PTU_CAP_EXCESS_RULES:
-                raise _blocked("MX_RULE_UNRECOGNISED", f"PTU cap-excess rule {MX_PTU_CAP_EXCESS!r} is not built")
+            if excess_rule not in PTU_CAP_EXCESS_RULES:
+                raise _blocked("MX_RULE_UNRECOGNISED", f"PTU cap-excess rule {excess_rule!r} is not built")
+            if excess_rule == "REDISTRIBUTED":
+                excess_total = _redistribute(out, excess_total)
             residue += excess_total
         if not eligible:
             residue = pool
-        return {"workers": out, "residue": residue,
-                "residue_rule": "LFT Art. 127 VIII excess kept undistributed (D-14)" if excess_total > 0 else
-                "none: shares at full precision; each payment is rounded by the rounding rule (D-01)"}
+        capped = any(w.get("cap_applied") for w in out)
+        if excess_rule == "REDISTRIBUTED" and capped:
+            residue_rule = "LFT Art. 127 VIII excess shared among the uncapped workers (D-14); any remainder kept"
+        elif excess_total > 0:
+            residue_rule = "LFT Art. 127 VIII excess kept undistributed (D-14)"
+        else:
+            residue_rule = "none: shares at full precision; each payment is rounded by the rounding rule (D-01)"
+        return {"workers": out, "residue": residue, "residue_rule": residue_rule}
 
     def payment_deadline(self, fiscal_year, employer):
         """Art. 122: 60 days after the annual tax is due — a company (LISR Art.

@@ -192,7 +192,16 @@ def _cleared_by(db: Session, code: str, message: str) -> list:
 
 
 def run_mx_sandbox(db: Session, data: dict) -> dict:
-    """One sandbox calculation. Reads only; never commits or flushes."""
+    """One sandbox calculation. Reads only; never commits or flushes. The
+    register's APPROVED answers apply (sweep S1); what-if candidates cover the
+    decisions not yet approved."""
+    from app.modules.payroll import mexico_decision_config
+
+    with mexico_decision_config.applying(db):
+        return _run_mx_sandbox(db, data)
+
+
+def _run_mx_sandbox(db: Session, data: dict) -> dict:
     from app.modules.payroll import mexico_decision_service as decisions
     from app.modules.payroll import service
     from app.modules.payroll.engine.countries import mexico, mexico_content as c
@@ -214,6 +223,10 @@ def run_mx_sandbox(db: Session, data: dict) -> dict:
     candidates = [_candidate(db, w, rate_map) for w in wanted]
     if candidates:
         marks.append(CANDIDATE_MARK)
+    from app.modules.payroll import mexico_decision_config
+    from app.modules.payroll.engine.jurisdictions.mexico import decisions as _decisions
+
+    approved = mexico_decision_config.overlay_pack_rows([rate_map], _decisions.in_force())   # sweep S1
     isn = _pack(db, i["on"], i["state"])
     isn_pack = None
     if isn is not None:
@@ -221,7 +234,8 @@ def run_mx_sandbox(db: Session, data: dict) -> dict:
         # A Draft state pack is passed to the engine as in force — for the sandbox only, and labelled.
         isn_pack = {"state": i["state"], "status": "Active", "pack_id": isn.pack_id, "version": isn.version,
                     "rate_map": isn_rates}
-    out = {**base, "candidates": candidates, "isnPack": _pack_label(isn)}
+    out = {**base, "candidates": candidates, "isnPack": _pack_label(isn),
+           "approvedDecisions": mexico_decision_config.trace(_decisions.in_force()), "approvedPackRows": approved}
     period = c.MX_PAY_FREQUENCY_ISR_PERIOD.get(i["frequency"])
     if period is None:
         code = "MX_PAY_FREQUENCY_MAPPING_MISSING"

@@ -97,6 +97,22 @@ def test_a_difference_needs_a_reason_then_a_second_reviewer(db, monkeypatch):
     assert s["clean"] is True and s["states"]["ACCEPTED"] == 1
 
 
+@pytest.mark.parametrize("rule,material", [
+    ("PERCENT:50", 0),                     # 12.50 is far under half of the legacy net
+    ("PERCENT:0.001", 1),
+    ("AMOUNT:100;NET=AMOUNT:5", 1),        # the concept's own rule replaces the default
+    ("NET=PERCENT:50;AMOUNT:0", 0),
+])
+def test_d25_percentage_and_per_concept_rules(db, monkeypatch, rule, material):
+    """Sweep S1: D-25's other options — a percentage of the legacy amount, a rule per concept."""
+    w = ah.committed_world(db, monkeypatch, code="MXPARP")
+    out = _import(db, w, _csv(db, w, net_delta="-12.50"))
+    _approve_d25(db, w, rule)
+    s = _S().parallel_import_view(db, w.org.id, out["id"])["summary"]
+    assert s["materiality"]["threshold"] == rule and s["materiality"]["openMaterial"] == material
+    assert s["clean"] is (material == 0)
+
+
 def test_identifier_columns_and_values_are_refused_without_echoing_them(db, monkeypatch):
     from app.core.exceptions import BadRequestException
 

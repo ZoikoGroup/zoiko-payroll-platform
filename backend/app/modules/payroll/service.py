@@ -8678,6 +8678,10 @@ def set_jurisdiction_pack_status(
     _set_jurisdiction_pack_status for the gates themselves. `reason` (optional,
     every country) is kept on the tax pack's status_change audit row."""
     try:
+        pack = db.get(JurisdictionPack, pack_row_id)
+        # an opted-in country's pre-transition check (Mexico sweep S1: D-27); a country that does not declare it: none
+        if pack is not None and jurisdiction_hooks.declares(pack.jurisdiction_country, "before_pack_status"):
+            jurisdiction_hooks.call(pack.jurisdiction_country, "before_pack_status", db, pack, status, actor_id)
         return _set_jurisdiction_pack_status(db, pack_row_id, status, actor_id=actor_id,
                                              bypass_approver_check=bypass_approver_check, reason=reason)
     except BadRequestException as exc:

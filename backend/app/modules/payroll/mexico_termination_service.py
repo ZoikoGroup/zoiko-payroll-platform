@@ -108,6 +108,20 @@ def record_termination(db: Session, org_id: int, employee_id: int, data: dict, a
     if not evidence:
         raise BadRequestException("A termination needs an evidence reference (the signed letter, resignation, "
                                   "award, ...)")
+    indemnity, indemnity_evidence = data.get("indemnity_daily_salary"),         str(data.get("indemnity_salary_evidence_ref") or "").strip() or None
+    if indemnity not in (None, ""):                      # D-12 (c), sweep S1: read only when D-12 answers it
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            indemnity = Decimal(str(indemnity))
+        except (InvalidOperation, ValueError):
+            raise BadRequestException("indemnityDailySalary must be an amount")
+        if indemnity <= 0:
+            raise BadRequestException("indemnityDailySalary must be more than zero")
+        if not indemnity_evidence:
+            raise BadRequestException("an entered indemnity daily salary needs its evidence reference")
+    else:
+        indemnity = None
     T = m.PayrollMxTermination
     live = db.query(T).filter(T.employee_id == emp.id, T.status.in_(LIVE)).first()
     if live is not None:
@@ -115,7 +129,8 @@ def record_termination(db: Session, org_id: int, employee_id: int, data: dict, a
                                   f"first")
     row = T(organization_id=org_id, employee_id=emp.id, termination_date=when, reason_code=code,
             reason_source=f"{rule.source} {rule.source_ref}"[:200], evidence_ref=evidence[:300],
-            note=(data.get("note") or "").strip()[:300] or None, status="DRAFT", recorded_by_id=actor_id)
+            note=(data.get("note") or "").strip()[:300] or None, status="DRAFT", recorded_by_id=actor_id,
+            indemnity_daily_salary=indemnity, indemnity_salary_evidence_ref=(indemnity_evidence or "")[:300] or None)
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="record_termination", entity_type="mx_termination", entity_id=row.id,
@@ -212,7 +227,9 @@ def termination_view(db: Session, row) -> dict:
             "finiquitoRun": None if run is None else {
                 "id": run.id, "status": run.status, "payDate": run.pay_date.isoformat() if run.pay_date else None,
                 "committed": bool((run.mx_approval_fingerprint or {}).get("committedAt"))},
-            "cancelledReason": row.cancelled_reason}
+            "cancelledReason": row.cancelled_reason,
+            "indemnityDailySalary": None if row.indemnity_daily_salary is None else str(row.indemnity_daily_salary),
+            "indemnitySalaryEvidenceRef": row.indemnity_salary_evidence_ref}
 
 
 def list_terminations(db: Session, org_id: int, employee_id: int) -> list:
